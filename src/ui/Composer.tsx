@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { filterCommands } from "../lib/commands";
 import { useStore } from "../lib/store";
-import { ModelMenu } from "./ModelMenu";
 
 export function Composer() {
   const { send } = useStore();
@@ -55,7 +54,6 @@ export function Composer() {
           else submit();
         }}
       >
-        <ModelMenu />
         <textarea
           ref={field}
           rows={1}

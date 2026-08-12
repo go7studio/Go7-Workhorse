@@ -356,8 +356,9 @@ button {
   justify-content: space-between;
   gap: 16px;
   flex-shrink: 0;
+  flex-wrap: wrap;
   min-height: 52px;
-  padding: 0 32px;
+  padding: 8px 32px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -434,7 +435,7 @@ button {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 8px 8px 8px;
+  padding: 8px 8px 8px 14px;
   background: var(--bg-solid);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -787,6 +788,13 @@ button {
   background: var(--custom);
 }
 
+.chat-bar-ai {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
 .model-menu {
   position: relative;
   flex-shrink: 0;
@@ -795,18 +803,33 @@ button {
 .model-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 8px;
+  padding: 4px 8px 4px 2px;
+  border-radius: 10px;
+}
+
+.model-trigger:hover {
+  background: var(--bg-hover);
+}
+
+.model-trigger strong {
+  font-size: 15px;
+  font-weight: 590;
+}
+
+.caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-tertiary);
 }
 
 .model-pop {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 8px);
-  width: 260px;
+  top: calc(100% + 8px);
+  width: 240px;
   max-height: 360px;
   overflow: auto;
   padding: 8px 0 10px;
@@ -816,6 +839,95 @@ button {
   box-shadow: var(--shadow);
   animation: rise 160ms var(--ease);
   z-index: 8;
+}
+
+.brain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brain-label,
+.brain-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.brain-value {
+  min-width: 3.4em;
+  color: var(--text);
+  font-weight: 510;
+}
+
+.brain-track {
+  position: relative;
+  width: 132px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.brain-dots {
+  position: absolute;
+  inset: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.brain-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  opacity: 0.45;
+}
+
+.brain-dots i.on {
+  opacity: 0;
+}
+
+.brain-track input[type="range"] {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.brain-track input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: var(--line);
+  border-radius: 99px;
+}
+
+.brain-track input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.brain-track input[type="range"]::-moz-range-track {
+  height: 3px;
+  background: var(--line);
+  border-radius: 99px;
+}
+
+.brain-track input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
 }
 
 .model-group {

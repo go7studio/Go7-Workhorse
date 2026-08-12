@@ -3,6 +3,7 @@ import { providerById } from "../lib/providers";
 import { useActiveProject, useActiveSession, useStore } from "../lib/store";
 import type { PermissionMode } from "../lib/types";
 import { Composer } from "./Composer";
+import { ModelMenu } from "./ModelMenu";
 
 const MODES: { id: PermissionMode; label: string }[] = [
   { id: "ask", label: "Ask" },
@@ -21,11 +22,7 @@ export function SessionPane() {
   return (
     <section className="session">
       <header className="session-header">
-        <div className="session-who">
-          <span className={`dot ${session.provider}`} />
-          <strong>{provider.name}</strong>
-          <span className="row-meta">Preview</span>
-        </div>
+        <ModelMenu />
         <div className="mode-seg" role="tablist" aria-label="Permission mode">
           {MODES.map((item) => (
             <button

@@ -59,6 +59,7 @@ export type Session = {
   status: SessionStatus;
   messages: ChatMessage[];
   contextUsed: number;
+  archivedAt?: number | null;
 };
 
 export type PermissionRequest = {

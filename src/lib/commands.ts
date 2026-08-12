@@ -13,6 +13,9 @@ export const COMMANDS: Command[] = [
   { id: "demo", name: "/demo-permission", hint: "Show a permission prompt", run: "demo-permission" },
   { id: "theme", name: "/theme", hint: "Cycle light, dark, system", run: "theme" },
   { id: "settings", name: "/settings", hint: "Profile, connected LLMs, usage", run: "settings" },
+  { id: "rename", name: "/rename", hint: "Rename this chat", run: "rename" },
+  { id: "archive", name: "/archive", hint: "Archive this chat", run: "archive" },
+  { id: "delete", name: "/delete", hint: "Delete this chat", run: "delete" },
   { id: "usage", name: "/usage", hint: "Token usage by vendor and model", run: "usage" },
   { id: "quit", name: "/quit", hint: "Close Workhorse", run: "quit" },
 ];

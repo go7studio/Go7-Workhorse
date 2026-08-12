@@ -711,6 +711,103 @@ button {
   cursor: default;
 }
 
+.chat-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: 10px;
+}
+
+.chat-row.active {
+  background: var(--bg-active);
+}
+
+.chat-row .chat-open {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-more {
+  align-self: center;
+  margin-right: 4px;
+  opacity: 0;
+}
+
+.chat-row:hover .chat-more,
+.chat-row:focus-within .chat-more {
+  opacity: 1;
+}
+
+.chat-menu {
+  position: absolute;
+  right: 8px;
+  top: calc(100% - 4px);
+  z-index: 12;
+  min-width: 160px;
+  padding: 6px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.chat-menu button {
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.chat-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.chat-menu .danger {
+  color: var(--danger);
+}
+
+.chat-move {
+  padding: 6px 10px 4px;
+}
+
+.chat-move span,
+.chat-move em {
+  display: block;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.chat-move button {
+  color: var(--text);
+}
+
+.rename-form {
+  flex: 1;
+  padding: 6px 8px;
+}
+
+.rename-form input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  outline: none;
+}
+
+.row.drop-over {
+  outline: 1px solid var(--accent);
+  background: var(--bg-active);
+}
+
+.archive-toggle {
+  display: block;
+  width: calc(100% - 8px);
+  text-align: left;
+  cursor: pointer;
+}
+
 .usage-link {
   margin-top: 8px;
   flex-shrink: 0;

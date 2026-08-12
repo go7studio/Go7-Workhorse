@@ -10,6 +10,7 @@ import {
 } from "react";
 import { COMMANDS } from "./commands";
 import { uid } from "./id";
+import { archiveChat, deleteChat, moveChat, renameChat } from "./chats";
 import { applyPermissionAnswer } from "./permissions";
 import { DEFAULT_CHOICE, defaultModel, findChoice, modelName, parseEffort, withEffort } from "./models";
 import { emptyProject, folderFromPath, normalizeProject, primaryFolder } from "./project";
@@ -65,6 +66,10 @@ type Store = AppState & {
   setSessionModel: (provider: ProviderId, model: string) => void;
   setSessionEffort: (effort: EffortLevel) => void;
   selectSession: (id: string) => void;
+  renameSession: (id: string, title: string) => void;
+  deleteSession: (id: string) => void;
+  archiveSession: (id: string, archived?: boolean) => void;
+  moveSession: (id: string, projectId: string) => void;
   send: (text: string) => void;
   setMode: (mode: PermissionMode) => void;
   cycleTheme: () => void;
@@ -160,6 +165,7 @@ function normalizeSession(raw: unknown): Session | null {
     status: record.status === "running" || record.status === "needs-input" ? record.status : "idle",
     messages: Array.isArray(record.messages) ? record.messages : [],
     contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
+    archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : null,
   };
 }
 
@@ -381,6 +387,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const renameSession = useCallback((id: string, title: string) => {
+    setState((current) => {
+      const sessions = renameChat(current.sessions, id, title);
+      return sessions ? { ...current, sessions } : current;
+    });
+  }, []);
+
+  const deleteSession = useCallback((id: string) => {
+    setState((current) => {
+      const sessions = deleteChat(current.sessions, id);
+      if (!sessions) return current;
+      return {
+        ...current,
+        sessions,
+        pending: current.pending.filter((item) => item.sessionId !== id),
+        activeSessionId: current.activeSessionId === id ? null : current.activeSessionId,
+      };
+    });
+  }, []);
+
+  const archiveSession = useCallback((id: string, archived = true) => {
+    setState((current) => {
+      const sessions = archiveChat(current.sessions, id, archived);
+      if (!sessions) return current;
+      return {
+        ...current,
+        sessions,
+        activeSessionId: archived && current.activeSessionId === id ? null : current.activeSessionId,
+      };
+    });
+  }, []);
+
+  const moveSession = useCallback((id: string, projectId: string) => {
+    setState((current) => {
+      if (!current.projects.some((project) => project.id === projectId)) return current;
+      const sessions = moveChat(current.sessions, id, projectId);
+      if (!sessions) return current;
+      return {
+        ...current,
+        sessions,
+        activeProjectId: projectId,
+        activeSessionId: id,
+        panel: null,
+      };
+    });
+  }, []);
+
   const setMode = useCallback((mode: PermissionMode) => {
     setState((current) => ({
       ...current,
@@ -482,6 +535,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (level) setSessionEffort(level);
         return;
       }
+      if (match?.run === "rename") {
+        const title = text.replace(/^\/rename\s*/i, "");
+        setState((current) => {
+          if (!current.activeSessionId) return current;
+          const sessions = renameChat(current.sessions, current.activeSessionId, title);
+          return sessions ? { ...current, sessions } : current;
+        });
+        return;
+      }
+      if (match?.run === "delete") {
+        setState((current) => {
+          if (!current.activeSessionId) return current;
+          const sessions = deleteChat(current.sessions, current.activeSessionId);
+          if (!sessions) return current;
+          return {
+            ...current,
+            sessions,
+            pending: current.pending.filter((item) => item.sessionId !== current.activeSessionId),
+            activeSessionId: null,
+          };
+        });
+        return;
+      }
+      if (match?.run === "archive") {
+        setState((current) => {
+          if (!current.activeSessionId) return current;
+          const sessions = archiveChat(current.sessions, current.activeSessionId, true);
+          if (!sessions) return current;
+          return { ...current, sessions, activeSessionId: null };
+        });
+        return;
+      }
       if (match?.run === "quit") {
         void window.workhorse?.quit();
         return;
@@ -496,8 +581,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const assistantId = uid("msg");
         grokAssistantId.current[session.id] = assistantId;
         const cwd = project?.folders[0]?.path ?? "";
-        void window.workhorse
-          ?.grokPrompt({
+        void (async () => {
+          if (!window.workhorse?.grokPrompt) {
+            throw new Error("Grok agent runs in the Workhorse desktop window.");
+          }
+          await window.workhorse.grokPrompt({
             sessionId: session.id,
             projectId: session.projectId,
             text,
@@ -505,8 +593,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             effort: session.effort,
             mode: session.mode,
             cwd,
-          })
-          .catch((error: unknown) => {
+          });
+        })().catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error);
             setState((latest) => ({
               ...latest,
@@ -606,6 +694,93 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!window.workhorse?.onGrokEvent) return;
+    return window.workhorse.onGrokEvent((event) => {
+      if (event.type === "chunk") {
+        const assistantId = grokAssistantId.current[event.sessionId];
+        if (!assistantId) return;
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId
+              ? {
+                  ...session,
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId ? { ...message, text: message.text + event.text } : message,
+                  ),
+                }
+              : session,
+          ),
+        }));
+        return;
+      }
+      if (event.type === "permission") {
+        setState((current) => ({
+          ...current,
+          pending: [
+            {
+              id: event.requestId,
+              sessionId: event.sessionId,
+              provider: "grok",
+              tool: event.tool,
+              detail: event.detail,
+              path: event.path,
+            },
+            ...current.pending.filter((item) => item.sessionId !== event.sessionId),
+          ],
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId ? { ...session, status: "needs-input" } : session,
+          ),
+        }));
+        return;
+      }
+      if (event.type === "usage") {
+        recordUsage({
+          provider: "grok",
+          model: event.model,
+          projectId: event.projectId,
+          sessionId: event.sessionId,
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          cacheReadTokens: event.cacheReadTokens,
+          cacheWriteTokens: event.cacheWriteTokens,
+          costUsd: event.costUsd,
+          contextUsed: event.inputTokens + event.cacheReadTokens,
+        });
+        return;
+      }
+      if (event.type === "done") {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId ? { ...session, status: "idle" } : session,
+          ),
+        }));
+        return;
+      }
+      if (event.type === "error") {
+        const assistantId = grokAssistantId.current[event.sessionId];
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((session) =>
+            session.id === event.sessionId
+              ? {
+                  ...session,
+                  status: "idle",
+                  messages: session.messages.map((message) =>
+                    message.id === assistantId && !message.text
+                      ? { ...message, text: `Grok agent failed: ${event.message}` }
+                      : message,
+                  ),
+                }
+              : session,
+          ),
+        }));
+      }
+    });
+  }, [recordUsage]);
+
   const openSettings = useCallback((section?: SettingsSection) => {
     setState((current) => ({
       ...current,
@@ -697,6 +872,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionEffort,
       selectSession,
+      renameSession,
+      deleteSession,
+      archiveSession,
+      moveSession,
       send,
       setMode,
       cycleTheme,
@@ -730,6 +909,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionModel,
       setSessionEffort,
       selectSession,
+      renameSession,
+      deleteSession,
+      archiveSession,
+      moveSession,
       send,
       setMode,
       cycleTheme,
@@ -769,8 +952,11 @@ export function useActiveSession() {
   return store.sessions.find((session) => session.id === store.activeSessionId) ?? null;
 }
 
-export function useProjectSessions(projectId: string | null) {
+export function useProjectSessions(projectId: string | null, archived = false) {
   const store = useStore();
   if (!projectId) return [];
-  return store.sessions.filter((session) => session.projectId === projectId);
+  return store.sessions.filter((session) => {
+    if (session.projectId !== projectId) return false;
+    return archived ? typeof session.archivedAt === "number" : !session.archivedAt;
+  });
 }

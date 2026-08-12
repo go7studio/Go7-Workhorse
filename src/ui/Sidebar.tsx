@@ -1,13 +1,16 @@
-import { modeLabel } from "../lib/commands";
+import { useState } from "react";
 import { folderSummary } from "../lib/project";
-import { choiceLabel } from "../lib/models";
 import { useActiveProject, useProjectSessions, useStore } from "../lib/store";
 import { formatTokens, inRange, rollup } from "../lib/usage";
+import { ChatRow } from "./ChatRow";
 
 export function Sidebar() {
   const store = useStore();
   const project = useActiveProject();
   const chats = useProjectSessions(store.activeProjectId);
+  const archived = useProjectSessions(store.activeProjectId, true);
+  const [showArchived, setShowArchived] = useState(false);
+  const [dropId, setDropId] = useState<string | null>(null);
   const tokens = rollup((store.usage ?? []).filter((event) => inRange(event, store.usageRange ?? "month"))).totalTokens;
 
   return (
@@ -36,9 +39,27 @@ export function Sidebar() {
         {store.projects.map((item) => (
           <button
             key={item.id}
-            className={item.id === store.activeProjectId ? "row active" : "row"}
+            className={
+              item.id === dropId
+                ? "row drop-over"
+                : item.id === store.activeProjectId
+                  ? "row active"
+                  : "row"
+            }
             type="button"
             onClick={() => store.selectProject(item.id)}
+            onDragOver={(event) => {
+              if (![...event.dataTransfer.types].includes("text/workhorse-chat")) return;
+              event.preventDefault();
+              setDropId(item.id);
+            }}
+            onDragLeave={() => setDropId((current) => (current === item.id ? null : current))}
+            onDrop={(event) => {
+              event.preventDefault();
+              const id = event.dataTransfer.getData("text/workhorse-chat");
+              setDropId(null);
+              if (id) store.moveSession(id, item.id);
+            }}
           >
             <span>
               <span className="row-title">{item.name}</span>
@@ -55,24 +76,17 @@ export function Sidebar() {
                 No chats yet.
               </p>
             )}
-            {chats.map((session) => {
-              return (
-                <button
-                  key={session.id}
-                  className={session.id === store.activeSessionId ? "row active" : "row"}
-                  type="button"
-                  onClick={() => store.selectSession(session.id)}
-                >
-                  <span className={`dot ${session.provider}`} />
-                  <span>
-                    <span className="row-title">{session.title}</span>
-                    <span className="row-meta">
-                      {choiceLabel(session)} · {modeLabel(session.mode)}
-                    </span>
-                  </span>
+            {chats.map((session) => (
+              <ChatRow key={session.id} session={session} />
+            ))}
+            {archived.length > 0 && (
+              <>
+                <button className="section-label archive-toggle" type="button" onClick={() => setShowArchived((value) => !value)}>
+                  Archived ({archived.length})
                 </button>
-              );
-            })}
+                {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} />)}
+              </>
+            )}
           </>
         )}
       </div>
@@ -83,9 +97,7 @@ export function Sidebar() {
       >
         <span>
           <span className="row-title">Settings</span>
-          <span className="row-meta">
-            {formatTokens(tokens)} tokens · profile, LLMs
-          </span>
+          <span className="row-meta">{formatTokens(tokens)} tokens · profile, LLMs</span>
         </span>
       </button>
     </aside>

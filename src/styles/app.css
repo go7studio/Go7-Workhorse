@@ -63,9 +63,11 @@ button {
 
 .sidebar {
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 8px 12px 16px;
+  overflow: hidden;
+  padding: 8px 12px 0;
   background: var(--bg-sidebar);
   backdrop-filter: saturate(180%) blur(22px);
   border-right: 1px solid var(--line);
@@ -171,8 +173,17 @@ button {
 }
 
 .scroll {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+.sidebar-dock {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: 8px 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sidebar);
 }
 
 .row-title {
@@ -808,10 +819,7 @@ button {
   cursor: pointer;
 }
 
-.usage-link {
-  margin-top: 8px;
-  flex-shrink: 0;
-}
+
 
 .usage-hero {
   margin: 4px 0 20px;
@@ -1124,6 +1132,31 @@ button {
 
 .settings .field input:focus {
   border-color: var(--accent);
+}
+
+.avatar-picker {
+  display: flex;
+  gap: 10px;
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 2px solid transparent;
+}
+
+.avatar.on {
+  border-color: var(--accent);
+}
+
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .llm-row strong {

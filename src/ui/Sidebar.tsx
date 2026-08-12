@@ -90,16 +90,18 @@ export function Sidebar() {
           </>
         )}
       </div>
-      <button
-        className={store.panel === "settings" ? "row active usage-link" : "row usage-link"}
-        type="button"
-        onClick={() => (store.panel === "settings" ? store.closeSettings() : store.openSettings())}
-      >
-        <span>
-          <span className="row-title">Settings</span>
-          <span className="row-meta">{formatTokens(tokens)} tokens · profile, LLMs</span>
-        </span>
-      </button>
+      <footer className="sidebar-dock">
+        <button
+          className={store.panel === "settings" ? "row active" : "row"}
+          type="button"
+          onClick={() => (store.panel === "settings" ? store.closeSettings() : store.openSettings())}
+        >
+          <span>
+            <span className="row-title">Settings</span>
+            <span className="row-meta">{formatTokens(tokens)} tokens · profile, LLMs</span>
+          </span>
+        </button>
+      </footer>
     </aside>
   );
 }

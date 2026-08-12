@@ -1,0 +1,30 @@
+{
+  "name": "go7-workhorse",
+  "productName": "Go7 Workhorse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native desktop shell for Grok, Claude, Codex, and custom agents.",
+  "author": "Spikey222",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^37.10.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}

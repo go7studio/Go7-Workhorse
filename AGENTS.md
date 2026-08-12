@@ -9,6 +9,7 @@ A native desktop shell for coding agents. Each vendor stays its own process. Thi
 - **Runtimes** get a chat: Grok, Claude, Codex, or a custom bot.
 - **Tools** (Figma, GitHub, and so on) attach to a runtime. They are not extra tabs.
 - Permissions are one inbox. Each click is translated to that vendor’s own protocol later.
+- **Usage is one ledger.** Adapters call `recordUsage`. Do not invent tokens for preview chats. Show per vendor, per model, and overall.
 - Do not merge subscriptions, context, or sandboxes across vendors.
 
 ## Layout

@@ -36,6 +36,7 @@ npm run dev
 | `/providers` | Back to the project home |
 | `/ask` `/accept-edits` `/always-approve` | Permission mode |
 | `/theme` | Light, dark, or system |
+| `/usage` | Token usage by vendor, model, and overall |
 | `/quit` | Close the app |
 
 ## Layout
@@ -56,4 +57,4 @@ State is saved under Electron `userData` as `workhorse-state.json`.
 - Sign-in status from each vendor’s existing login
 - Real tool-permission forwarding
 
-Each adapter should implement the same small contract: start in a folder, send a prompt, stream events, ask for permission, resume.
+Each adapter should implement the same small contract: start in a folder, send a prompt, stream events, ask for permission, resume, and call `recordUsage` with that vendor’s tokens.

@@ -12,6 +12,7 @@ import { COMMANDS } from "./commands";
 import { uid } from "./id";
 import { emptyProject, folderFromPath, normalizeProject, primaryFolder } from "./project";
 import { providerById } from "./providers";
+import { normalizeUsage } from "./usage";
 import type {
   AppState,
   LinkedReference,
@@ -23,6 +24,8 @@ import type {
   Session,
   Sheet,
   Theme,
+  UsageDraft,
+  UsageRange,
 } from "./types";
 
 const EMPTY: AppState = {
@@ -33,6 +36,9 @@ const EMPTY: AppState = {
   activeSessionId: null,
   pending: [],
   sheet: null,
+  panel: null,
+  usage: [],
+  usageRange: "month",
 };
 
 type Store = AppState & {
@@ -52,6 +58,10 @@ type Store = AppState & {
   cycleTheme: () => void;
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
   demoPermission: () => void;
+  recordUsage: (draft: UsageDraft) => void;
+  openUsage: () => void;
+  closeUsage: () => void;
+  setUsageRange: (range: UsageRange) => void;
   quit: () => void;
 };
 
@@ -70,6 +80,12 @@ function hydrate(value: unknown): AppState {
     sessions: Array.isArray(record.sessions) ? record.sessions : [],
     pending: Array.isArray(record.pending) ? record.pending : [],
     sheet: null,
+    panel: null,
+    usage: normalizeUsage(record.usage),
+    usageRange:
+      record.usageRange === "today" || record.usageRange === "week" || record.usageRange === "all"
+        ? record.usageRange
+        : "month",
   };
 }
 
@@ -115,6 +131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       projects: [project, ...current.projects],
       activeProjectId: project.id,
       activeSessionId: null,
+      panel: null,
     }));
     return project.id;
   }, []);
@@ -130,6 +147,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const selectProject = useCallback((id: string) => {
     setState((current) => ({
       ...current,
+      panel: null,
       activeProjectId: id,
       activeSessionId: null,
       projects: current.projects.map((project) =>
@@ -232,6 +250,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const session = current.sessions.find((item) => item.id === id);
       return {
         ...current,
+        panel: null,
         activeSessionId: id,
         activeProjectId: session?.projectId ?? current.activeProjectId,
       };
@@ -342,6 +361,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cycleTheme();
         return;
       }
+      if (match?.run === "usage") {
+        setState((current) => ({ ...current, panel: "usage" }));
+        return;
+      }
       if (match?.run === "quit") {
         void window.workhorse?.quit();
         return;
@@ -382,6 +405,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, [cycleTheme, demoPermission, linkFolder, setMode]);
 
+  const recordUsage = useCallback((draft: UsageDraft) => {
+    setState((current) => ({
+      ...current,
+      usage: [
+        {
+          id: uid("use"),
+          at: Date.now(),
+          provider: draft.provider,
+          model: draft.model,
+          projectId: draft.projectId ?? current.activeProjectId ?? undefined,
+          sessionId: draft.sessionId ?? current.activeSessionId ?? undefined,
+          inputTokens: Math.max(0, Math.round(draft.inputTokens)),
+          outputTokens: Math.max(0, Math.round(draft.outputTokens)),
+          cacheReadTokens: Math.max(0, Math.round(draft.cacheReadTokens ?? 0)),
+          cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
+          costUsd: draft.costUsd,
+        },
+        ...current.usage,
+      ],
+    }));
+  }, []);
+
+  const openUsage = useCallback(() => {
+    setState((current) => ({ ...current, panel: "usage" }));
+  }, []);
+
+  const closeUsage = useCallback(() => {
+    setState((current) => ({ ...current, panel: null }));
+  }, []);
+
+  const setUsageRange = useCallback((range: UsageRange) => {
+    setState((current) => ({ ...current, usageRange: range }));
+  }, []);
+
   const quit = useCallback(() => {
     void window.workhorse?.quit();
   }, []);
@@ -405,6 +462,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       answerPermission,
       demoPermission,
+      recordUsage,
+      openUsage,
+      closeUsage,
+      setUsageRange,
       quit,
     }),
     [
@@ -425,6 +486,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cycleTheme,
       answerPermission,
       demoPermission,
+      recordUsage,
+      openUsage,
+      closeUsage,
+      setUsageRange,
       quit,
     ],
   );

@@ -6,6 +6,7 @@ import { ProjectHome } from "./ui/ProjectHome";
 import { ReferenceSheet } from "./ui/ReferenceSheet";
 import { SessionPane } from "./ui/SessionPane";
 import { Sidebar } from "./ui/Sidebar";
+import { UsagePane } from "./ui/UsagePane";
 import { Welcome } from "./ui/Welcome";
 
 function resolvedTheme(theme: "system" | "light" | "dark") {
@@ -40,9 +41,10 @@ export function App() {
       <div className="workspace">
         <Sidebar />
         <main className="main">
-          {!project && <Welcome />}
-          {project && !session && <ProjectHome />}
-          {project && session && <SessionPane />}
+          {store.panel === "usage" && <UsagePane />}
+          {store.panel !== "usage" && !project && <Welcome />}
+          {store.panel !== "usage" && project && !session && <ProjectHome />}
+          {store.panel !== "usage" && project && session && <SessionPane />}
         </main>
       </div>
       <PermissionBar />

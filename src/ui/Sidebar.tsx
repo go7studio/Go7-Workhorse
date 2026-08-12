@@ -2,11 +2,13 @@ import { modeLabel } from "../lib/commands";
 import { folderSummary } from "../lib/project";
 import { providerById } from "../lib/providers";
 import { useActiveProject, useProjectSessions, useStore } from "../lib/store";
+import { formatTokens, inRange, rollup } from "../lib/usage";
 
 export function Sidebar() {
   const store = useStore();
   const project = useActiveProject();
   const chats = useProjectSessions(store.activeProjectId);
+  const tokens = rollup((store.usage ?? []).filter((event) => inRange(event, store.usageRange ?? "month"))).totalTokens;
 
   return (
     <aside className="sidebar">
@@ -75,6 +77,18 @@ export function Sidebar() {
           </>
         )}
       </div>
+      <button
+        className={store.panel === "usage" ? "row active usage-link" : "row usage-link"}
+        type="button"
+        onClick={() => (store.panel === "usage" ? store.closeUsage() : store.openUsage())}
+      >
+        <span>
+          <span className="row-title">Usage</span>
+          <span className="row-meta">
+            {formatTokens(tokens)} · {store.usageRange === "all" ? "all time" : store.usageRange}
+          </span>
+        </span>
+      </button>
     </aside>
   );
 }

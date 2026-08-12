@@ -67,6 +67,36 @@ export type PermissionRequest = {
 
 export type Sheet = "project" | "reference" | null;
 
+export type Panel = "usage" | null;
+
+export type UsageRange = "today" | "week" | "month" | "all";
+
+export type UsageEvent = {
+  id: string;
+  at: number;
+  provider: ProviderId;
+  model: string;
+  projectId?: string;
+  sessionId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;
+};
+
+export type UsageDraft = {
+  provider: ProviderId;
+  model: string;
+  projectId?: string;
+  sessionId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  costUsd?: number;
+};
+
 export type AppState = {
   theme: Theme;
   projects: Project[];
@@ -75,6 +105,9 @@ export type AppState = {
   activeSessionId: string | null;
   pending: PermissionRequest[];
   sheet: Sheet;
+  panel: Panel;
+  usage: UsageEvent[];
+  usageRange: UsageRange;
 };
 
 export type Command = {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { filterCommands } from "../lib/commands";
 import { useStore } from "../lib/store";
+import { ModelMenu } from "./ModelMenu";
 
 export function Composer() {
   const { send } = useStore();
@@ -10,6 +11,7 @@ export function Composer() {
 
   const open = value.startsWith("/");
   const matches = useMemo(() => (open ? filterCommands(value) : []), [open, value]);
+  const query = open ? value.replace(/^\//, "") : "";
 
   useEffect(() => {
     setActive(0);
@@ -24,19 +26,25 @@ export function Composer() {
   return (
     <div className="composer-wrap">
       {open && matches.length > 0 && (
-        <div className="palette" role="listbox">
-          {matches.map((command, index) => (
-            <button
-              key={command.id}
-              className={index === active ? "active" : undefined}
-              type="button"
-              onMouseEnter={() => setActive(index)}
-              onClick={() => submit(command.name)}
-            >
-              <code>{command.name}</code>
-              <em>{command.hint}</em>
-            </button>
-          ))}
+        <div className="palette-overlay" role="presentation">
+          <div className="palette" role="listbox">
+            <div className="palette-search">
+              <span>/</span>
+              <em>{query || "commands"}</em>
+            </div>
+            {matches.map((command, index) => (
+              <button
+                key={command.id}
+                className={index === active ? "active" : undefined}
+                type="button"
+                onMouseEnter={() => setActive(index)}
+                onClick={() => submit(command.name)}
+              >
+                <code>{command.name}</code>
+                <em>{command.hint}</em>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <form
@@ -47,6 +55,7 @@ export function Composer() {
           else submit();
         }}
       >
+        <ModelMenu />
         <textarea
           ref={field}
           rows={1}
@@ -67,7 +76,7 @@ export function Composer() {
             if (event.key === "Escape") setValue("");
           }}
         />
-        <button className="tiny" type="submit">
+        <button className="send" type="submit">
           Send
         </button>
       </form>

@@ -10,11 +10,14 @@ import {
 } from "react";
 import { COMMANDS } from "./commands";
 import { uid } from "./id";
+import { applyPermissionAnswer } from "./permissions";
+import { DEFAULT_CHOICE, defaultModel, findChoice, modelName, parseEffort, withEffort } from "./models";
 import { emptyProject, folderFromPath, normalizeProject, primaryFolder } from "./project";
 import { providerById } from "./providers";
 import { normalizeUsage } from "./usage";
 import type {
   AppState,
+  EffortLevel,
   LinkedReference,
   PermissionMode,
   PermissionRequest,
@@ -39,6 +42,7 @@ const EMPTY: AppState = {
   panel: null,
   usage: [],
   usageRange: "month",
+  lastModel: DEFAULT_CHOICE,
 };
 
 type Store = AppState & {
@@ -51,7 +55,9 @@ type Store = AppState & {
   unlinkFolder: (folderId: string) => void;
   addReference: (kind: ReferenceKind, value: string, label?: string) => void;
   removeReference: (referenceId: string) => void;
-  startSession: (provider: ProviderId, projectId?: string) => void;
+  startSession: (projectId?: string) => void;
+  setSessionModel: (provider: ProviderId, model: string) => void;
+  setSessionEffort: (effort: EffortLevel) => void;
   selectSession: (id: string) => void;
   send: (text: string) => void;
   setMode: (mode: PermissionMode) => void;
@@ -77,7 +83,9 @@ function hydrate(value: unknown): AppState {
     ...EMPTY,
     ...record,
     projects,
-    sessions: Array.isArray(record.sessions) ? record.sessions : [],
+    sessions: Array.isArray(record.sessions)
+      ? record.sessions.map(normalizeSession).filter((item): item is Session => item !== null)
+      : [],
     pending: Array.isArray(record.pending) ? record.pending : [],
     sheet: null,
     panel: null,
@@ -86,16 +94,60 @@ function hydrate(value: unknown): AppState {
       record.usageRange === "today" || record.usageRange === "week" || record.usageRange === "all"
         ? record.usageRange
         : "month",
+    lastModel: normalizeChoice(record.lastModel),
   };
 }
 
-function chatIntro(provider: ProviderId, project: Project): string {
-  const brain = providerById(provider).name;
+function normalizeChoice(raw: unknown): AppState["lastModel"] {
+  if (!raw || typeof raw !== "object") return DEFAULT_CHOICE;
+  const record = raw as Partial<AppState["lastModel"]>;
+  const provider =
+    record.provider === "grok" ||
+    record.provider === "claude" ||
+    record.provider === "codex" ||
+    record.provider === "custom"
+      ? record.provider
+      : DEFAULT_CHOICE.provider;
+  const model = typeof record.model === "string" && record.model ? record.model : DEFAULT_CHOICE.model;
+  return {
+    provider,
+    model,
+    effort: withEffort(provider, model, record.effort ?? DEFAULT_CHOICE.effort),
+  };
+}
+
+function normalizeSession(raw: unknown): Session | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<Session>;
+  if (typeof record.id !== "string" || typeof record.projectId !== "string") return null;
+  const provider =
+    record.provider === "grok" ||
+    record.provider === "claude" ||
+    record.provider === "codex" ||
+    record.provider === "custom"
+      ? record.provider
+      : "grok";
+  const model = typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id;
+  return {
+    id: record.id,
+    projectId: record.projectId,
+    provider,
+    model,
+    effort: withEffort(provider, model, record.effort ?? "medium"),
+    title: typeof record.title === "string" ? record.title : "New chat",
+    mode: record.mode === "accept-edits" || record.mode === "always-approve" ? record.mode : "ask",
+    status: record.status === "running" || record.status === "needs-input" ? record.status : "idle",
+    messages: Array.isArray(record.messages) ? record.messages : [],
+  };
+}
+
+function chatIntro(session: Pick<Session, "provider" | "model">, project: Project): string {
+  const label = `${providerById(session.provider).name} · ${modelName(session.provider, session.model)}`;
   if (project.folders.length === 0) {
-    return `${brain} is not connected yet. This is a basic chat in “${project.name}”. Link a folder when you want file work.`;
+    return `${label} is not connected yet. This is a basic chat in “${project.name}”. Switch models from the menu on the composer.`;
   }
   const paths = project.folders.map((folder) => folder.path).join("\n");
-  return `${brain} is not connected yet. This chat belongs to “${project.name}” and can see:\n${paths}`;
+  return `${label} is not connected yet. This chat belongs to “${project.name}” and can see:\n${paths}`;
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -214,16 +266,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const startSession = useCallback((provider: ProviderId, projectId?: string) => {
+  const startSession = useCallback((projectId?: string) => {
     setState((current) => {
       const targetId = projectId ?? current.activeProjectId;
       if (!targetId) return current;
       const project = current.projects.find((item) => item.id === targetId);
       if (!project) return current;
+      const choice = current.lastModel ?? DEFAULT_CHOICE;
       const session: Session = {
         id: uid("sess"),
         projectId: project.id,
-        provider,
+        provider: choice.provider,
+        model: choice.model,
+        effort: withEffort(choice.provider, choice.model, choice.effort),
         title: "New chat",
         mode: "ask",
         status: "idle",
@@ -231,7 +286,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           {
             id: uid("msg"),
             role: "system",
-            text: chatIntro(provider, project),
+            text: chatIntro(choice, project),
             createdAt: Date.now(),
           },
         ],
@@ -241,6 +296,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sessions: [session, ...current.sessions],
         activeProjectId: project.id,
         activeSessionId: session.id,
+      };
+    });
+  }, []);
+
+  const setSessionModel = useCallback((provider: ProviderId, model: string) => {
+    setState((current) => {
+      const session = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!session) return current;
+      const effort = withEffort(provider, model, session.effort);
+      const lastModel = { provider, model, effort };
+      return {
+        ...current,
+        lastModel,
+        sessions: current.sessions.map((item) =>
+          item.id === session.id ? { ...item, provider, model, effort } : item,
+        ),
+      };
+    });
+  }, []);
+
+  const setSessionEffort = useCallback((effort: EffortLevel) => {
+    setState((current) => {
+      const session = current.sessions.find((item) => item.id === current.activeSessionId);
+      if (!session || !withEffort(session.provider, session.model, effort)) return current;
+      return {
+        ...current,
+        lastModel: { provider: session.provider, model: session.model, effort },
+        sessions: current.sessions.map((item) =>
+          item.id === session.id ? { ...item, effort } : item,
+        ),
       };
     });
   }, []);
@@ -276,31 +361,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     setState((current) => {
-      const request = current.pending.find((item) => item.id === id);
-      if (!request) return current;
-      const label =
-        answer === "deny" ? "Denied" : answer === "session" ? "Allowed for this session" : "Allowed once";
-      return {
-        ...current,
-        pending: current.pending.filter((item) => item.id !== id),
-        sessions: current.sessions.map((session) =>
-          session.id === request.sessionId
-            ? {
-                ...session,
-                status: "idle",
-                messages: [
-                  ...session.messages,
-                  {
-                    id: uid("msg"),
-                    role: "system",
-                    text: `${label}: ${request.tool} — ${request.detail}`,
-                    createdAt: Date.now(),
-                  },
-                ],
-              }
-            : session,
-        ),
-      };
+      const next = applyPermissionAnswer(current, id, answer);
+      return next ? { ...current, ...next } : current;
     });
   }, []);
 
@@ -365,6 +427,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setState((current) => ({ ...current, panel: "usage" }));
         return;
       }
+      if (match?.run === "model") {
+        const query = text.replace(/^\/m(odel)?\s*/i, "");
+        const choice = findChoice(query);
+        if (choice) setSessionModel(choice.provider, choice.model);
+        return;
+      }
+      if (match?.run === "effort") {
+        const level = parseEffort(text.replace(/^\/effort\s*/i, ""));
+        if (level) setSessionEffort(level);
+        return;
+      }
       if (match?.run === "quit") {
         void window.workhorse?.quit();
         return;
@@ -403,7 +476,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       };
     });
-  }, [cycleTheme, demoPermission, linkFolder, setMode]);
+  }, [cycleTheme, demoPermission, linkFolder, setMode, setSessionEffort, setSessionModel]);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
     setState((current) => ({
@@ -456,6 +529,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addReference,
       removeReference,
       startSession,
+      setSessionModel,
+      setSessionEffort,
       selectSession,
       send,
       setMode,
@@ -480,6 +555,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addReference,
       removeReference,
       startSession,
+      setSessionModel,
+      setSessionEffort,
       selectSession,
       send,
       setMode,

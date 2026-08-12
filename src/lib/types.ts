@@ -4,6 +4,8 @@ export type PermissionMode = "ask" | "accept-edits" | "always-approve";
 
 export type SessionStatus = "idle" | "running" | "needs-input";
 
+export type EffortLevel = "low" | "medium" | "high" | "xhigh";
+
 export type Theme = "system" | "light" | "dark";
 
 export type ReferenceKind = "file" | "url" | "note";
@@ -50,6 +52,8 @@ export type Session = {
   id: string;
   projectId: string;
   provider: ProviderId;
+  model: string;
+  effort: EffortLevel | null;
   title: string;
   mode: PermissionMode;
   status: SessionStatus;
@@ -108,6 +112,11 @@ export type AppState = {
   panel: Panel;
   usage: UsageEvent[];
   usageRange: UsageRange;
+  lastModel: {
+    provider: ProviderId;
+    model: string;
+    effort: EffortLevel | null;
+  };
 };
 
 export type Command = {

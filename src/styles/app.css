@@ -35,7 +35,7 @@ button {
 .app {
   height: 100%;
   display: grid;
-  grid-template-rows: var(--titlebar) 1fr auto;
+  grid-template-rows: var(--titlebar) 1fr;
 }
 
 .titlebar {
@@ -50,8 +50,8 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
-.titlebar strong {
-  font-weight: 590;
+.titlebar span {
+  font-weight: 510;
   color: var(--text);
 }
 
@@ -217,6 +217,36 @@ button {
   animation: rise 420ms var(--ease);
 }
 
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 620;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 590;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.welcome-hint {
+  margin: 12px 0 0 !important;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 .welcome h2,
 .picker h2 {
   margin: 0;
@@ -249,9 +279,9 @@ button {
 
 .card {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
   padding: 16px;
   text-align: left;
   background: var(--bg-solid);
@@ -265,14 +295,101 @@ button {
   transform: translateY(-1px);
 }
 
+.card .rail {
+  width: 3px;
+  height: 42px;
+  border-radius: 2px;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.card .rail.grok {
+  background: var(--grok);
+}
+
+.card .rail.claude {
+  background: var(--claude);
+}
+
+.card .rail.codex {
+  background: var(--codex);
+}
+
+.card .rail.custom {
+  background: var(--custom);
+}
+
+.card-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .card strong {
   font-size: 15px;
 }
 
-.card span {
+.card-copy > span {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.4;
+}
+
+.chip-preview {
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-hover);
+  border-radius: 980px;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-shrink: 0;
+  min-height: 52px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--line);
+}
+
+.session-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-who strong {
+  font-size: 15px;
+  font-weight: 590;
+}
+
+.mode-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-hover);
+  border-radius: 980px;
+}
+
+.mode-pill {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-radius: 980px;
+}
+
+.mode-pill.on {
+  background: var(--bg-solid);
+  color: var(--text);
 }
 
 .transcript {
@@ -317,7 +434,7 @@ button {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 8px 8px 8px 14px;
+  padding: 8px 8px 8px 8px;
   background: var(--bg-solid);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -335,19 +452,39 @@ button {
   line-height: 1.4;
 }
 
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(29, 29, 31, 0.28);
+}
+
 .palette {
-  position: absolute;
-  left: 24px;
-  right: 24px;
-  bottom: 86px;
-  max-width: 760px;
-  margin: 0 auto;
+  width: min(560px, 100%);
   overflow: hidden;
   background: var(--bg-solid);
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: var(--shadow);
   animation: rise 180ms var(--ease);
+}
+
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 590;
+}
+
+.palette-search em {
+  font-style: normal;
+  color: var(--text-tertiary);
 }
 
 .palette button {
@@ -375,29 +512,49 @@ button {
   color: var(--text-tertiary);
 }
 
-.permission {
+.permission-overlay {
+  z-index: 26;
+}
+
+.permission-card {
+  width: min(440px, 100%);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 20px 12px;
-  background: color-mix(in srgb, var(--warn) 10%, var(--bg-solid));
-  border-top: 1px solid var(--line);
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 24px 20px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
   animation: rise 220ms var(--ease);
 }
 
-.permission strong {
+.permission-card strong {
   display: block;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 620;
+  letter-spacing: -0.03em;
+}
+
+.permission-card > span {
   font-size: 13px;
-}
-
-.permission span {
-  font-size: 12px;
   color: var(--text-secondary);
+  line-height: 1.4;
 }
 
-.permission .actions {
+.permission-card .actions {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.send {
   flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-radius: 980px;
 }
 
 .deny {
@@ -443,8 +600,13 @@ button {
 }
 
 .project-home h2,
-.project-home > p {
+.project-home > p,
+.project-home .eyebrow {
   text-align: left;
+}
+
+.project-home h2 {
+  font-size: 28px;
 }
 
 .link-block {
@@ -623,6 +785,75 @@ button {
 
 .usage-bar i.custom {
   background: var(--custom);
+}
+
+.model-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 260px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 8px 0 10px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  animation: rise 160ms var(--ease);
+  z-index: 8;
+}
+
+.model-group {
+  padding: 2px 8px 8px;
+}
+
+.model-pop button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.model-pop button:hover,
+.model-pop button.active {
+  background: var(--bg-hover);
+}
+
+.effort-scale {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.effort-scale .tiny {
+  flex: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 @keyframes rise {

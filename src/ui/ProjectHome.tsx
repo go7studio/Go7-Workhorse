@@ -1,4 +1,3 @@
-import { PROVIDERS } from "../lib/providers";
 import { useActiveProject, useStore } from "../lib/store";
 
 export function ProjectHome() {
@@ -73,23 +72,14 @@ export function ProjectHome() {
         )}
       </div>
 
-      <div className="section-label" style={{ marginTop: 20 }}>
-        New chat
+      <div className="actions" style={{ marginTop: 20 }}>
+        <button className="primary" type="button" onClick={() => startSession()}>
+          New chat
+        </button>
       </div>
-      <div className="provider-grid">
-        {PROVIDERS.map((provider) => (
-          <button
-            key={provider.id}
-            className="card"
-            type="button"
-            onClick={() => startSession(provider.id)}
-          >
-            <span className={`dot ${provider.id}`} />
-            <strong>{provider.name}</strong>
-            <span>{provider.tagline}</span>
-          </button>
-        ))}
-      </div>
+      <p className="row-meta" style={{ marginTop: 10 }}>
+        Pick the model and brain level from the menu on the chat.
+      </p>
     </section>
   );
 }

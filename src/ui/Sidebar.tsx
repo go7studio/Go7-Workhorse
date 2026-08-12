@@ -1,6 +1,6 @@
 import { modeLabel } from "../lib/commands";
 import { folderSummary } from "../lib/project";
-import { providerById } from "../lib/providers";
+import { choiceLabel } from "../lib/models";
 import { useActiveProject, useProjectSessions, useStore } from "../lib/store";
 import { formatTokens, inRange, rollup } from "../lib/usage";
 
@@ -21,7 +21,7 @@ export function Sidebar() {
         New project
       </button>
       {project && (
-        <button className="ghost open-project" type="button" onClick={() => store.startSession("grok")}>
+        <button className="ghost open-project" type="button" onClick={() => store.startSession()}>
           New chat
         </button>
       )}
@@ -56,7 +56,6 @@ export function Sidebar() {
               </p>
             )}
             {chats.map((session) => {
-              const provider = providerById(session.provider);
               return (
                 <button
                   key={session.id}
@@ -68,7 +67,7 @@ export function Sidebar() {
                   <span>
                     <span className="row-title">{session.title}</span>
                     <span className="row-meta">
-                      {provider.name} · {modeLabel(session.mode)}
+                      {choiceLabel(session)} · {modeLabel(session.mode)}
                     </span>
                   </span>
                 </button>

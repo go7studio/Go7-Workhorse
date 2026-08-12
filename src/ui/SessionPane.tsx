@@ -1,7 +1,14 @@
-import { modeLabel } from "../lib/commands";
+import { modelName } from "../lib/models";
 import { providerById } from "../lib/providers";
 import { useActiveProject, useActiveSession, useStore } from "../lib/store";
+import type { PermissionMode } from "../lib/types";
 import { Composer } from "./Composer";
+
+const MODES: { id: PermissionMode; label: string }[] = [
+  { id: "ask", label: "Ask" },
+  { id: "accept-edits", label: "Accept edits" },
+  { id: "always-approve", label: "Always" },
+];
 
 export function SessionPane() {
   const session = useActiveSession();
@@ -13,6 +20,25 @@ export function SessionPane() {
 
   return (
     <section className="session">
+      <header className="session-header">
+        <div className="session-who">
+          <span className={`dot ${session.provider}`} />
+          <strong>{provider.name}</strong>
+          <span className="row-meta">Preview</span>
+        </div>
+        <div className="mode-seg" role="tablist" aria-label="Permission mode">
+          {MODES.map((item) => (
+            <button
+              key={item.id}
+              className={session.mode === item.id ? "mode-pill on" : "mode-pill"}
+              type="button"
+              onClick={() => setMode(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </header>
       <div className="transcript">
         {session.messages.map((message) => (
           <article key={message.id} className={`bubble ${message.role}`}>
@@ -21,23 +47,11 @@ export function SessionPane() {
                 ? "You"
                 : message.role === "system"
                   ? "Workhorse"
-                  : provider.name}
+                  : `${provider.name} · ${modelName(session.provider, session.model)}`}
             </div>
             <p>{message.text}</p>
           </article>
         ))}
-      </div>
-      <div className="actions" style={{ justifyContent: "center", paddingBottom: 4 }}>
-        <button className="tiny" type="button" onClick={() => setMode("ask")}>
-          {session.mode === "ask" ? "Ask · on" : "Ask"}
-        </button>
-        <button className="tiny" type="button" onClick={() => setMode("accept-edits")}>
-          {session.mode === "accept-edits" ? "Accept edits · on" : "Accept edits"}
-        </button>
-        <button className="tiny" type="button" onClick={() => setMode("always-approve")}>
-          {session.mode === "always-approve" ? "Always approve · on" : "Always approve"}
-        </button>
-        <span className="row-meta">{modeLabel(session.mode)} in {project.name}</span>
       </div>
       <Composer />
     </section>

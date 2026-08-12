@@ -23,7 +23,7 @@ npm run dev
 1. **New project** — give it a name. No folder required.
 2. **Chat** from that project, or **New chat** from the welcome screen (creates an Untitled project).
 3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
-4. **Pick a brain** — Grok, Claude, Codex, or Custom. Each card is a future adapter. None are marked signed-in yet.
+4. **New chat** starts with the last model. Change vendor, model, and brain level from the menu on the composer.
 5. **Talk in preview** — messages stay local so you can learn the layout.
 6. **Type `/`** — command palette.
 7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
@@ -36,6 +36,8 @@ npm run dev
 | `/providers` | Back to the project home |
 | `/ask` `/accept-edits` `/always-approve` | Permission mode |
 | `/theme` | Light, dark, or system |
+| `/model` | Switch model (`/model grok-4.6`) |
+| `/effort` | Brain level (`low` `medium` `high` `extra`) |
 | `/usage` | Token usage by vendor, model, and overall |
 | `/quit` | Close the app |
 

@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function appIconPath() {
+  const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  return path.join(root, "assets", "app-icons", "go7-workhorse.ico");
+}
+
 type Persistable = Record<string, unknown>;
 
 function statePath() {
@@ -33,6 +38,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: dark ? "#1d1d1f" : "#f5f5f7",
+    icon: appIconPath(),
     title: "Go7 Workhorse",
     show: false,
     autoHideMenuBar: true,
@@ -60,6 +66,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.go7studio.workhorse");
+  }
+
   ipcMain.handle("folder:pick", async () => {
     const result = await dialog.showOpenDialog({
       title: "Link a folder",

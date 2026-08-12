@@ -9,15 +9,19 @@ import {
   type ReactNode,
 } from "react";
 import { COMMANDS } from "./commands";
-import { uid, folderName } from "./id";
+import { uid } from "./id";
+import { emptyProject, folderFromPath, normalizeProject, primaryFolder } from "./project";
 import { providerById } from "./providers";
 import type {
   AppState,
+  LinkedReference,
   PermissionMode,
   PermissionRequest,
   Project,
   ProviderId,
+  ReferenceKind,
   Session,
+  Sheet,
   Theme,
 } from "./types";
 
@@ -28,13 +32,20 @@ const EMPTY: AppState = {
   activeProjectId: null,
   activeSessionId: null,
   pending: [],
+  sheet: null,
 };
 
 type Store = AppState & {
   ready: boolean;
-  openProject: (path?: string) => Promise<void>;
+  createProject: (name: string) => string;
+  openSheet: (sheet: Sheet) => void;
+  closeSheet: () => void;
   selectProject: (id: string) => void;
-  startSession: (provider: ProviderId) => void;
+  linkFolder: (path?: string) => Promise<void>;
+  unlinkFolder: (folderId: string) => void;
+  addReference: (kind: ReferenceKind, value: string, label?: string) => void;
+  removeReference: (referenceId: string) => void;
+  startSession: (provider: ProviderId, projectId?: string) => void;
   selectSession: (id: string) => void;
   send: (text: string) => void;
   setMode: (mode: PermissionMode) => void;
@@ -46,10 +57,29 @@ type Store = AppState & {
 
 const StoreContext = createContext<Store | null>(null);
 
-function isState(value: unknown): value is AppState {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Partial<AppState>;
-  return Array.isArray(record.projects) && Array.isArray(record.sessions);
+function hydrate(value: unknown): AppState {
+  if (!value || typeof value !== "object") return EMPTY;
+  const record = value as Partial<AppState> & { projects?: unknown[] };
+  const projects = Array.isArray(record.projects)
+    ? record.projects.map(normalizeProject).filter((item): item is Project => item !== null)
+    : [];
+  return {
+    ...EMPTY,
+    ...record,
+    projects,
+    sessions: Array.isArray(record.sessions) ? record.sessions : [],
+    pending: Array.isArray(record.pending) ? record.pending : [],
+    sheet: null,
+  };
+}
+
+function chatIntro(provider: ProviderId, project: Project): string {
+  const brain = providerById(provider).name;
+  if (project.folders.length === 0) {
+    return `${brain} is not connected yet. This is a basic chat in “${project.name}”. Link a folder when you want file work.`;
+  }
+  const paths = project.folders.map((folder) => folder.path).join("\n");
+  return `${brain} is not connected yet. This chat belongs to “${project.name}” and can see:\n${paths}`;
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -61,7 +91,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const load = async () => {
       const saved = window.workhorse ? await window.workhorse.loadState() : null;
-      if (!cancelled && isState(saved)) setState({ ...EMPTY, ...saved });
+      if (!cancelled) setState(hydrate(saved));
       if (!cancelled) setReady(true);
     };
     void load();
@@ -78,43 +108,112 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, 200);
   }, [ready, state]);
 
-  const openProject = useCallback(async (path?: string) => {
-    const folder = path ?? (window.workhorse ? await window.workhorse.pickProject() : null);
-    if (!folder) return;
+  const createProject = useCallback((name: string) => {
+    const project = emptyProject(name);
+    setState((current) => ({
+      ...current,
+      projects: [project, ...current.projects],
+      activeProjectId: project.id,
+      activeSessionId: null,
+    }));
+    return project.id;
+  }, []);
+
+  const openSheet = useCallback((sheet: Sheet) => {
+    setState((current) => ({ ...current, sheet }));
+  }, []);
+
+  const closeSheet = useCallback(() => {
+    setState((current) => ({ ...current, sheet: null }));
+  }, []);
+
+  const selectProject = useCallback((id: string) => {
+    setState((current) => ({
+      ...current,
+      activeProjectId: id,
+      activeSessionId: null,
+      projects: current.projects.map((project) =>
+        project.id === id ? { ...project, openedAt: Date.now() } : project,
+      ),
+    }));
+  }, []);
+
+  const linkFolder = useCallback(async (path?: string) => {
+    const folderPath = path ?? (window.workhorse ? await window.workhorse.pickFolder() : null);
+    if (!folderPath) return;
     setState((current) => {
-      const existing = current.projects.find((project) => project.path === folder);
-      const project: Project = existing
-        ? { ...existing, openedAt: Date.now() }
-        : { id: uid("proj"), name: folderName(folder), path: folder, openedAt: Date.now() };
-      const projects = [project, ...current.projects.filter((item) => item.id !== project.id)];
+      const projectId = current.activeProjectId;
+      if (!projectId) return current;
       return {
         ...current,
-        projects,
-        activeProjectId: project.id,
-        activeSessionId: null,
+        projects: current.projects.map((project) => {
+          if (project.id !== projectId) return project;
+          if (project.folders.some((folder) => folder.path === folderPath)) return project;
+          return { ...project, folders: [...project.folders, folderFromPath(folderPath)] };
+        }),
       };
     });
   }, []);
 
-  const selectProject = useCallback((id: string) => {
-    setState((current) => ({ ...current, activeProjectId: id, activeSessionId: null }));
+  const unlinkFolder = useCallback((folderId: string) => {
+    setState((current) => ({
+      ...current,
+      projects: current.projects.map((project) =>
+        project.id === current.activeProjectId
+          ? { ...project, folders: project.folders.filter((folder) => folder.id !== folderId) }
+          : project,
+      ),
+    }));
   }, []);
 
-  const startSession = useCallback((provider: ProviderId) => {
+  const addReference = useCallback((kind: ReferenceKind, value: string, label?: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const reference: LinkedReference = {
+      id: uid("ref"),
+      kind,
+      value: trimmed,
+      label: (label ?? trimmed).trim(),
+    };
+    setState((current) => ({
+      ...current,
+      projects: current.projects.map((project) =>
+        project.id === current.activeProjectId
+          ? { ...project, references: [...project.references, reference] }
+          : project,
+      ),
+    }));
+  }, []);
+
+  const removeReference = useCallback((referenceId: string) => {
+    setState((current) => ({
+      ...current,
+      projects: current.projects.map((project) =>
+        project.id === current.activeProjectId
+          ? { ...project, references: project.references.filter((item) => item.id !== referenceId) }
+          : project,
+      ),
+    }));
+  }, []);
+
+  const startSession = useCallback((provider: ProviderId, projectId?: string) => {
     setState((current) => {
-      if (!current.activeProjectId) return current;
+      const targetId = projectId ?? current.activeProjectId;
+      if (!targetId) return current;
+      const project = current.projects.find((item) => item.id === targetId);
+      if (!project) return current;
       const session: Session = {
         id: uid("sess"),
-        projectId: current.activeProjectId,
+        projectId: project.id,
         provider,
-        title: `New ${providerById(provider).name} session`,
+        title: "New chat",
         mode: "ask",
         status: "idle",
         messages: [
           {
             id: uid("msg"),
             role: "system",
-            text: `${providerById(provider).name} is not connected yet. This tab is a local preview so you can learn the shell. The adapter will spawn the real CLI in this project folder.`,
+            text: chatIntro(provider, project),
             createdAt: Date.now(),
           },
         ],
@@ -122,13 +221,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return {
         ...current,
         sessions: [session, ...current.sessions],
+        activeProjectId: project.id,
         activeSessionId: session.id,
       };
     });
   }, []);
 
   const selectSession = useCallback((id: string) => {
-    setState((current) => ({ ...current, activeSessionId: id }));
+    setState((current) => {
+      const session = current.sessions.find((item) => item.id === id);
+      return {
+        ...current,
+        activeSessionId: id,
+        activeProjectId: session?.projectId ?? current.activeProjectId,
+      };
+    });
   }, []);
 
   const setMode = useCallback((mode: PermissionMode) => {
@@ -182,13 +289,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => {
       const session = current.sessions.find((item) => item.id === current.activeSessionId);
       if (!session) return current;
+      const project = current.projects.find((item) => item.id === session.projectId);
       const request: PermissionRequest = {
         id: uid("perm"),
         sessionId: session.id,
         provider: session.provider,
         tool: "run command",
         detail: "git status",
-        path: current.projects.find((project) => project.id === session.projectId)?.path,
+        path: project ? primaryFolder(project)?.path : undefined,
       };
       return {
         ...current,
@@ -211,7 +319,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (match?.run === "project") {
-        void openProject();
+        setState((current) => ({ ...current, sheet: "project" }));
+        return;
+      }
+      if (match?.run === "link") {
+        void linkFolder();
         return;
       }
       if (match?.run === "providers") {
@@ -240,13 +352,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const session = current.sessions.find((item) => item.id === current.activeSessionId);
       if (!session) return current;
       const project = current.projects.find((item) => item.id === session.projectId);
+      const where = project && project.folders.length > 0
+        ? project.folders.map((folder) => folder.path).join("\n")
+        : "(no folder linked — basic chat)";
       const reply = [
-        `Preview only. ${providerById(session.provider).name} would work in:`,
-        project?.path ?? "(no folder)",
+        `Preview only. ${providerById(session.provider).name} would answer in “${project?.name ?? "this project"}”.`,
+        where,
         "",
         `You said: ${text}`,
-        "",
-        "When the adapter is live, this prompt goes to that vendor’s process. Workhorse stays the window.",
       ].join("\n");
       return {
         ...current,
@@ -267,7 +380,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ),
       };
     });
-  }, [cycleTheme, demoPermission, openProject, setMode]);
+  }, [cycleTheme, demoPermission, linkFolder, setMode]);
 
   const quit = useCallback(() => {
     void window.workhorse?.quit();
@@ -277,8 +390,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({
       ...state,
       ready,
-      openProject,
+      createProject,
+      openSheet,
+      closeSheet,
       selectProject,
+      linkFolder,
+      unlinkFolder,
+      addReference,
+      removeReference,
       startSession,
       selectSession,
       send,
@@ -291,8 +410,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       state,
       ready,
-      openProject,
+      createProject,
+      openSheet,
+      closeSheet,
       selectProject,
+      linkFolder,
+      unlinkFolder,
+      addReference,
+      removeReference,
       startSession,
       selectSession,
       send,
@@ -328,5 +453,3 @@ export function useProjectSessions(projectId: string | null) {
   if (!projectId) return [];
   return store.sessions.filter((session) => session.projectId === projectId);
 }
-
-

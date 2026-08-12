@@ -1,28 +1,34 @@
 import { modeLabel } from "../lib/commands";
+import { folderSummary } from "../lib/project";
 import { providerById } from "../lib/providers";
 import { useActiveProject, useProjectSessions, useStore } from "../lib/store";
 
 export function Sidebar() {
   const store = useStore();
   const project = useActiveProject();
-  const sessions = useProjectSessions(store.activeProjectId);
+  const chats = useProjectSessions(store.activeProjectId);
 
   return (
     <aside className="sidebar">
       <div className="brand">
         <h1>Workhorse</h1>
-        <p>One desk, every agent</p>
+        <p>Projects and chats</p>
       </div>
 
-      <button className="ghost open-project" type="button" onClick={() => void store.openProject()}>
-        Open project
+      <button className="ghost open-project" type="button" onClick={() => store.openSheet("project")}>
+        New project
       </button>
+      {project && (
+        <button className="ghost open-project" type="button" onClick={() => store.startSession("grok")}>
+          New chat
+        </button>
+      )}
 
       <div className="section-label">Projects</div>
       <div className="scroll">
         {store.projects.length === 0 && (
           <p className="row-meta" style={{ padding: "0 10px" }}>
-            Choose a folder to work in.
+            Create a project. Folders are optional.
           </p>
         )}
         {store.projects.map((item) => (
@@ -34,20 +40,20 @@ export function Sidebar() {
           >
             <span>
               <span className="row-title">{item.name}</span>
-              <span className="row-meta">{item.path}</span>
+              <span className="row-meta">{folderSummary(item)}</span>
             </span>
           </button>
         ))}
 
         {project && (
           <>
-            <div className="section-label">Sessions</div>
-            {sessions.length === 0 && (
+            <div className="section-label">Chats</div>
+            {chats.length === 0 && (
               <p className="row-meta" style={{ padding: "0 10px" }}>
-                No sessions yet.
+                No chats yet.
               </p>
             )}
-            {sessions.map((session) => {
+            {chats.map((session) => {
               const provider = providerById(session.provider);
               return (
                 <button

@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { useActiveProject, useActiveSession, useStore } from "./lib/store";
+import { NewProjectSheet } from "./ui/NewProjectSheet";
 import { PermissionBar } from "./ui/PermissionBar";
-import { ProviderPicker } from "./ui/ProviderPicker";
+import { ProjectHome } from "./ui/ProjectHome";
+import { ReferenceSheet } from "./ui/ReferenceSheet";
 import { SessionPane } from "./ui/SessionPane";
 import { Sidebar } from "./ui/Sidebar";
 import { Welcome } from "./ui/Welcome";
@@ -39,11 +41,13 @@ export function App() {
         <Sidebar />
         <main className="main">
           {!project && <Welcome />}
-          {project && !session && <ProviderPicker />}
+          {project && !session && <ProjectHome />}
           {project && session && <SessionPane />}
         </main>
       </div>
       <PermissionBar />
+      <NewProjectSheet />
+      <ReferenceSheet />
     </div>
   );
 }

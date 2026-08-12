@@ -6,6 +6,8 @@ export type SessionStatus = "idle" | "running" | "needs-input";
 
 export type Theme = "system" | "light" | "dark";
 
+export type ReferenceKind = "file" | "url" | "note";
+
 export type Provider = {
   id: ProviderId;
   name: string;
@@ -15,11 +17,26 @@ export type Provider = {
   statusNote: string;
 };
 
+export type LinkedFolder = {
+  id: string;
+  path: string;
+  label: string;
+};
+
+export type LinkedReference = {
+  id: string;
+  kind: ReferenceKind;
+  value: string;
+  label: string;
+};
+
 export type Project = {
   id: string;
   name: string;
-  path: string;
+  createdAt: number;
   openedAt: number;
+  folders: LinkedFolder[];
+  references: LinkedReference[];
 };
 
 export type ChatMessage = {
@@ -48,6 +65,8 @@ export type PermissionRequest = {
   path?: string;
 };
 
+export type Sheet = "project" | "reference" | null;
+
 export type AppState = {
   theme: Theme;
   projects: Project[];
@@ -55,6 +74,7 @@ export type AppState = {
   activeProjectId: string | null;
   activeSessionId: string | null;
   pending: PermissionRequest[];
+  sheet: Sheet;
 };
 
 export type Command = {

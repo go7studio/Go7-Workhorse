@@ -1,12 +1,13 @@
 # Go7 Workhorse
 
-A native desktop shell for coding agents. Each vendor stays its own process. This app is the window, the project folder, the `/` palette, and the permission bar.
+A native desktop shell for coding agents. Each vendor stays its own process. This app is the window, the project, the chats, the `/` palette, and the permission bar.
 
 ## Shape
 
-- **Runtimes** get a tab: Grok, Claude, Codex, or a custom bot.
+- **A project is a named container.** Create it with a name only. Folders and other references are optional links, added later.
+- **Chats belong to a project.** Basic chats work with nothing linked. File work uses linked folders when they exist.
+- **Runtimes** get a chat: Grok, Claude, Codex, or a custom bot.
 - **Tools** (Figma, GitHub, and so on) attach to a runtime. They are not extra tabs.
-- A session always has a **project directory**. No homeless chats.
 - Permissions are one inbox. Each click is translated to that vendor’s own protocol later.
 - Do not merge subscriptions, context, or sandboxes across vendors.
 

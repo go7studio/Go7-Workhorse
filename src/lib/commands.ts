@@ -1,8 +1,9 @@
 import type { Command, PermissionMode } from "./types";
 
 export const COMMANDS: Command[] = [
-  { id: "new", name: "/new", hint: "Start a session in this project", run: "new" },
-  { id: "project", name: "/project", hint: "Open a project folder", run: "project" },
+  { id: "new", name: "/new", hint: "Back to this project’s home", run: "new" },
+  { id: "project", name: "/project", hint: "Create a project", run: "project" },
+  { id: "link", name: "/link", hint: "Link a folder to this project", run: "link" },
   { id: "providers", name: "/providers", hint: "Show Grok, Claude, Codex, Custom", run: "providers" },
   { id: "ask", name: "/ask", hint: "Ask before tools run", run: "mode:ask" },
   { id: "accept", name: "/accept-edits", hint: "Allow file edits without asking", run: "mode:accept-edits" },

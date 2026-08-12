@@ -6,7 +6,7 @@ This slice is done when all of the following are true:
 
 1. The GitHub repository lives at `https://github.com/Spikey222/Go7-Workhorse`.
 2. The app launches as its own desktop window (Electron). It does not depend on a browser tab.
-3. A user can choose a project directory (native folder picker). Sessions are bound to that folder.
+3. A user can create a named project with nothing linked, then optionally link folders and other references. Chats belong to a project and work without files.
 4. Provider slots exist for Grok, Claude, Codex, and a custom bot. They are honest stubs: not marked connected until an adapter exists.
 5. `/` opens a command palette. App commands (`/new`, `/project`, `/providers`, permission modes, `/quit`) work in the window.
 6. A unified permission bar can present Allow once / Allow for session / Deny.

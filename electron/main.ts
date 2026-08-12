@@ -60,11 +60,21 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  ipcMain.handle("project:pick", async () => {
+  ipcMain.handle("folder:pick", async () => {
     const result = await dialog.showOpenDialog({
-      title: "Open a project",
-      buttonLabel: "Open",
+      title: "Link a folder",
+      buttonLabel: "Link",
       properties: ["openDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle("file:pick", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Link a file",
+      buttonLabel: "Link",
+      properties: ["openFile"],
     });
     if (result.canceled || !result.filePaths[0]) return null;
     return result.filePaths[0];

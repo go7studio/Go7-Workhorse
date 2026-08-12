@@ -1,6 +1,6 @@
 # Go7 Workhorse
 
-A native desktop shell for Grok, Claude, Codex, and any other bot you add later. One window. One project folder. One permission bar.
+A native desktop shell for Grok, Claude, Codex, and any other bot you add later. One window. Projects and chats. One permission bar.
 
 This repository is the first scaffold. The window is real. The agents are not wired yet.
 
@@ -20,17 +20,20 @@ npm run dev
 
 ## How to use the scaffold
 
-1. **Open a project** — native folder picker. That directory is the workspace, the way Codex binds a thread to a folder.
-2. **Pick a brain** — Grok, Claude, Codex, or Custom. Each card is a future adapter. None are marked signed-in yet.
-3. **Talk in preview** — messages stay local so you can learn the layout.
-4. **Type `/`** — command palette.
-5. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
+1. **New project** — give it a name. No folder required.
+2. **Chat** from that project, or **New chat** from the welcome screen (creates an Untitled project).
+3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
+4. **Pick a brain** — Grok, Claude, Codex, or Custom. Each card is a future adapter. None are marked signed-in yet.
+5. **Talk in preview** — messages stay local so you can learn the layout.
+6. **Type `/`** — command palette.
+7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
 
 | Command | What it does |
 |---|---|
-| `/new` | New session in this project |
-| `/project` | Open another folder |
-| `/providers` | Back to the brain picker |
+| `/new` | Back to this project’s home |
+| `/project` | Create a project |
+| `/link` | Link a folder to this project |
+| `/providers` | Back to the project home |
 | `/ask` `/accept-edits` `/always-approve` | Permission mode |
 | `/theme` | Light, dark, or system |
 | `/quit` | Close the app |
@@ -40,7 +43,7 @@ npm run dev
 ```
 electron/     window, folder dialog, saved state
 src/lib/      types, store, commands, provider list
-src/ui/       sidebar, welcome, picker, session, permissions
+src/ui/       sidebar, welcome, project home, chats, sheets
 src/styles/   tokens and layout
 ```
 

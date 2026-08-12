@@ -1,8 +1,37 @@
 import { useEffect, useRef, useState } from "react";
-import { EFFORTS, MODEL_CATALOG, findModel, modelName } from "../lib/models";
+import {
+  EFFORTS,
+  MODEL_CATALOG,
+  contextWindowFor,
+  findModel,
+  formatWindow,
+  modelName,
+} from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { useActiveSession, useStore } from "../lib/store";
 import type { EffortLevel } from "../lib/types";
+
+function ContextMeter() {
+  const session = useActiveSession();
+  const customWindow = useStore().settings?.llms.custom.contextWindow;
+  if (!session) return null;
+  const windowSize = contextWindowFor(session.provider, session.model, customWindow);
+  const used = session.contextUsed ?? 0;
+  const ratio = Math.min(1, used / Math.max(windowSize, 1));
+
+  return (
+    <div className="context-meter" title={`${used.toLocaleString()} of ${windowSize.toLocaleString()} tokens`}>
+      <span className="brain-label">Context</span>
+      <span className="context-track" aria-hidden="true">
+        <i style={{ width: `${Math.max(ratio * 100, used > 0 ? 4 : 0)}%` }} />
+      </span>
+      <span className="brain-value">
+        {used > 0 ? `${formatWindow(used)} / ` : ""}
+        {formatWindow(windowSize)}
+      </span>
+    </div>
+  );
+}
 
 function BrainSlider() {
   const session = useActiveSession();
@@ -88,7 +117,10 @@ export function ModelMenu() {
                       }}
                     >
                       <span className={`dot ${provider.id}`} />
-                      {model.name}
+                      <span className="model-line">
+                        {model.name}
+                        <em>{formatWindow(model.contextWindow)}</em>
+                      </span>
                     </button>
                   );
                 })}
@@ -98,6 +130,7 @@ export function ModelMenu() {
         )}
       </div>
       <BrainSlider />
+      <ContextMeter />
     </div>
   );
 }

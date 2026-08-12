@@ -139,6 +139,18 @@ export function Settings() {
               />
             </label>
             <label className="field">
+              <span>Context window (tokens)</span>
+              <input
+                type="number"
+                min={1024}
+                step={1024}
+                value={settings.llms.custom.contextWindow}
+                onChange={(event) =>
+                  store.updateCustomLlm({ contextWindow: Number(event.target.value) || 128000 })
+                }
+              />
+            </label>
+            <label className="field">
               <span>API key</span>
               <input
                 type="password"

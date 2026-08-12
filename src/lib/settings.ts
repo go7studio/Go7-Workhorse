@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: Settings = {
     grok: { connected: false },
     claude: { connected: false },
     codex: { connected: false },
-    custom: { connected: false, baseUrl: "", model: "", apiKey: "" },
+    custom: { connected: false, baseUrl: "", model: "", apiKey: "", contextWindow: 128_000 },
   },
 };
 
@@ -32,6 +32,10 @@ function custom(raw: unknown): CustomLlm {
     baseUrl: typeof record.baseUrl === "string" ? record.baseUrl : "",
     model: typeof record.model === "string" ? record.model : "",
     apiKey: typeof record.apiKey === "string" ? record.apiKey : "",
+    contextWindow:
+      typeof record.contextWindow === "number" && record.contextWindow > 0
+        ? Math.round(record.contextWindow)
+        : 128_000,
   };
 }
 

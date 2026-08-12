@@ -930,6 +930,50 @@ button {
   background: var(--text);
 }
 
+.model-line {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-line em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.context-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.context-track {
+  width: 72px;
+  height: 4px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  border-radius: 99px;
+}
+
+.context-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+}
+
+.brain-track input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+}
+
 .model-group {
   padding: 2px 8px 8px;
 }

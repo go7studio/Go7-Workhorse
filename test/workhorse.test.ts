@@ -33,6 +33,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
     mode: "ask",
     status: "needs-input",
     messages: [{ id: "m1", role: "system", text: "preview", createdAt: 1 }],
+    contextUsed: 0,
   };
   const request: PermissionRequest = {
     id: "perm_1",

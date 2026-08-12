@@ -58,6 +58,7 @@ export type Session = {
   mode: PermissionMode;
   status: SessionStatus;
   messages: ChatMessage[];
+  contextUsed: number;
 };
 
 export type PermissionRequest = {
@@ -89,6 +90,7 @@ export type CustomLlm = {
   baseUrl: string;
   model: string;
   apiKey: string;
+  contextWindow: number;
 };
 
 export type Settings = {
@@ -127,6 +129,7 @@ export type UsageDraft = {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   costUsd?: number;
+  contextUsed?: number;
 };
 
 export type AppState = {

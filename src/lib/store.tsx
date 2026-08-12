@@ -159,11 +159,19 @@ function normalizeSession(raw: unknown): Session | null {
     mode: record.mode === "accept-edits" || record.mode === "always-approve" ? record.mode : "ask",
     status: record.status === "running" || record.status === "needs-input" ? record.status : "idle",
     messages: Array.isArray(record.messages) ? record.messages : [],
+    contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
   };
 }
 
 function chatIntro(session: Pick<Session, "provider" | "model">, project: Project): string {
   const label = `${providerById(session.provider).name} · ${modelName(session.provider, session.model)}`;
+  if (session.provider === "grok") {
+    if (project.folders.length === 0) {
+      return `${label} is live via Grok Build. This is a basic chat in “${project.name}”. Switch models from the menu on the composer.`;
+    }
+    const paths = project.folders.map((folder) => folder.path).join("\n");
+    return `${label} is live via Grok Build. This chat belongs to “${project.name}” and can see:\n${paths}`;
+  }
   if (project.folders.length === 0) {
     return `${label} is not connected yet. This is a basic chat in “${project.name}”. Switch models from the menu on the composer.`;
   }
@@ -175,6 +183,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY);
   const [ready, setReady] = useState(false);
   const persistTimer = useRef<number | null>(null);
+  const grokAssistantId = useRef<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -310,6 +319,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         title: "New chat",
         mode: "ask",
         status: "idle",
+        contextUsed: 0,
         messages: [
           {
             id: uid("msg"),
@@ -389,6 +399,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
+    void window.workhorse?.grokAnswerPermission?.(id, answer);
     setState((current) => {
       const next = applyPermissionAnswer(current, id, answer);
       return next ? { ...current, ...next } : current;
@@ -481,6 +492,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const session = current.sessions.find((item) => item.id === current.activeSessionId);
       if (!session) return current;
       const project = current.projects.find((item) => item.id === session.projectId);
+      if (session.provider === "grok") {
+        const assistantId = uid("msg");
+        grokAssistantId.current[session.id] = assistantId;
+        const cwd = project?.folders[0]?.path ?? "";
+        void window.workhorse
+          ?.grokPrompt({
+            sessionId: session.id,
+            projectId: session.projectId,
+            text,
+            model: session.model,
+            effort: session.effort,
+            mode: session.mode,
+            cwd,
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            setState((latest) => ({
+              ...latest,
+              sessions: latest.sessions.map((item) =>
+                item.id === session.id
+                  ? {
+                      ...item,
+                      status: "idle",
+                      messages: item.messages.map((entry) =>
+                        entry.id === assistantId
+                          ? { ...entry, text: entry.text || `Grok agent failed: ${message}` }
+                          : entry,
+                      ),
+                    }
+                  : item,
+              ),
+            }));
+          });
+        return {
+          ...current,
+          sessions: current.sessions.map((item) =>
+            item.id === session.id
+              ? {
+                  ...item,
+                  status: "running",
+                  title: item.messages.some((message) => message.role === "user")
+                    ? item.title
+                    : text.slice(0, 42),
+                  messages: [
+                    ...item.messages,
+                    { id: uid("msg"), role: "user", text, createdAt: Date.now() },
+                    { id: assistantId, role: "assistant", text: "", createdAt: Date.now() },
+                  ],
+                }
+              : item,
+          ),
+        };
+      }
       const where = project && project.folders.length > 0
         ? project.folders.map((folder) => folder.path).join("\n")
         : "(no folder linked — basic chat)";
@@ -512,25 +576,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [cycleTheme, demoPermission, linkFolder, setMode, setSessionEffort, setSessionModel]);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
-    setState((current) => ({
-      ...current,
-      usage: [
-        {
-          id: uid("use"),
-          at: Date.now(),
-          provider: draft.provider,
-          model: draft.model,
-          projectId: draft.projectId ?? current.activeProjectId ?? undefined,
-          sessionId: draft.sessionId ?? current.activeSessionId ?? undefined,
-          inputTokens: Math.max(0, Math.round(draft.inputTokens)),
-          outputTokens: Math.max(0, Math.round(draft.outputTokens)),
-          cacheReadTokens: Math.max(0, Math.round(draft.cacheReadTokens ?? 0)),
-          cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
-          costUsd: draft.costUsd,
-        },
-        ...current.usage,
-      ],
-    }));
+    setState((current) => {
+      const sessionId = draft.sessionId ?? current.activeSessionId ?? undefined;
+      const inputTokens = Math.max(0, Math.round(draft.inputTokens));
+      const cacheReadTokens = Math.max(0, Math.round(draft.cacheReadTokens ?? 0));
+      const used = Math.max(0, Math.round(draft.contextUsed ?? inputTokens + cacheReadTokens));
+      return {
+        ...current,
+        usage: [
+          {
+            id: uid("use"),
+            at: Date.now(),
+            provider: draft.provider,
+            model: draft.model,
+            projectId: draft.projectId ?? current.activeProjectId ?? undefined,
+            sessionId,
+            inputTokens,
+            outputTokens: Math.max(0, Math.round(draft.outputTokens)),
+            cacheReadTokens,
+            cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
+            costUsd: draft.costUsd,
+          },
+          ...current.usage,
+        ],
+        sessions: current.sessions.map((item) =>
+          item.id === sessionId ? { ...item, contextUsed: used } : item,
+        ),
+      };
+    });
   }, []);
 
   const openSettings = useCallback((section?: SettingsSection) => {

@@ -4,6 +4,7 @@ export type ModelInfo = {
   id: string;
   name: string;
   effort: boolean;
+  contextWindow: number;
 };
 
 export type ModelChoice = {
@@ -21,20 +22,20 @@ export const EFFORTS: { id: EffortLevel; label: string }[] = [
 
 export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   grok: [
-    { id: "grok-4.6", name: "Grok 4.6", effort: true },
-    { id: "grok-4.5", name: "Grok 4.5", effort: true },
-    { id: "grok-build", name: "Grok Build", effort: true },
+    { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 },
+    { id: "grok-4.5", name: "Grok 4.5", effort: true, contextWindow: 500_000 },
+    { id: "grok-build", name: "Grok Build", effort: true, contextWindow: 500_000 },
   ],
   claude: [
-    { id: "claude-opus", name: "Opus", effort: true },
-    { id: "claude-sonnet", name: "Sonnet", effort: true },
-    { id: "claude-haiku", name: "Haiku", effort: false },
+    { id: "claude-opus", name: "Opus", effort: true, contextWindow: 200_000 },
+    { id: "claude-sonnet", name: "Sonnet", effort: true, contextWindow: 200_000 },
+    { id: "claude-haiku", name: "Haiku", effort: false, contextWindow: 200_000 },
   ],
   codex: [
-    { id: "gpt-5.4", name: "GPT-5.4", effort: true },
-    { id: "codex", name: "Codex", effort: true },
+    { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 200_000 },
+    { id: "codex", name: "Codex", effort: true, contextWindow: 200_000 },
   ],
-  custom: [{ id: "custom", name: "Custom", effort: false }],
+  custom: [{ id: "custom", name: "Custom", effort: false, contextWindow: 128_000 }],
 };
 
 export const DEFAULT_CHOICE: ModelChoice = {
@@ -89,6 +90,21 @@ export function findChoice(query: string): ModelChoice | null {
 export function effortLabel(effort: EffortLevel | null): string {
   if (!effort) return "";
   return EFFORTS.find((item) => item.id === effort)?.label ?? effort;
+}
+
+export function contextWindowFor(
+  provider: ProviderId,
+  modelId: string,
+  customWindow?: number,
+): number {
+  if (provider === "custom" && customWindow && customWindow > 0) return customWindow;
+  return findModel(provider, modelId)?.contextWindow ?? 128_000;
+}
+
+export function formatWindow(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
+  return String(tokens);
 }
 
 export function choiceLabel(choice: ModelChoice): string {

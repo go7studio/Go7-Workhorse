@@ -71,7 +71,35 @@ export type PermissionRequest = {
 
 export type Sheet = "project" | "reference" | null;
 
-export type Panel = "usage" | null;
+export type Panel = "settings" | null;
+
+export type SettingsSection = "profile" | "llms" | "usage";
+
+export type Profile = {
+  name: string;
+  handle: string;
+};
+
+export type LlmLink = {
+  connected: boolean;
+};
+
+export type CustomLlm = {
+  connected: boolean;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+};
+
+export type Settings = {
+  profile: Profile;
+  llms: {
+    grok: LlmLink;
+    claude: LlmLink;
+    codex: LlmLink;
+    custom: CustomLlm;
+  };
+};
 
 export type UsageRange = "today" | "week" | "month" | "all";
 
@@ -110,6 +138,8 @@ export type AppState = {
   pending: PermissionRequest[];
   sheet: Sheet;
   panel: Panel;
+  settingsSection: SettingsSection;
+  settings: Settings;
   usage: UsageEvent[];
   usageRange: UsageRange;
   lastModel: {

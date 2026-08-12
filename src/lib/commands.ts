@@ -12,6 +12,7 @@ export const COMMANDS: Command[] = [
   { id: "always", name: "/always-approve", hint: "Skip ordinary permission prompts", run: "mode:always-approve" },
   { id: "demo", name: "/demo-permission", hint: "Show a permission prompt", run: "demo-permission" },
   { id: "theme", name: "/theme", hint: "Cycle light, dark, system", run: "theme" },
+  { id: "settings", name: "/settings", hint: "Profile, connected LLMs, usage", run: "settings" },
   { id: "usage", name: "/usage", hint: "Token usage by vendor and model", run: "usage" },
   { id: "quit", name: "/quit", hint: "Close Workhorse", run: "quit" },
 ];

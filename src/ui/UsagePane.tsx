@@ -10,7 +10,7 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
-export function UsagePane() {
+export function UsagePane({ embedded = false }: { embedded?: boolean }) {
   const { usage, usageRange, setUsageRange, closeUsage } = useStore();
   const events = (usage ?? []).filter((event) => inRange(event, usageRange ?? "month"));
   const overall = rollup(events);
@@ -19,13 +19,15 @@ export function UsagePane() {
   const peak = Math.max(1, ...providers.map((row) => row.totalTokens));
 
   return (
-    <section className="picker project-home">
-      <div className="link-head">
-        <h2>Usage</h2>
-        <button className="tiny" type="button" onClick={closeUsage}>
-          Back
-        </button>
-      </div>
+    <section className={embedded ? "usage-embed" : "picker project-home"}>
+      {!embedded && (
+        <div className="link-head">
+          <h2>Usage</h2>
+          <button className="tiny" type="button" onClick={closeUsage}>
+            Back
+          </button>
+        </div>
+      )}
       <p>
         Tokens from every brain in this window. Broken out by vendor and by model,
         then added up. Adapters write the ledger — preview chats do not invent spend.

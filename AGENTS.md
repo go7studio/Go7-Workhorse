@@ -9,7 +9,7 @@ A native desktop shell for coding agents. Each vendor stays its own process. Thi
 - **A chat starts, then you pick the model.** The composer menu holds vendor, model (Grok 4.5 / 4.6 / Build, Claude, Codex), and brain effort. Do not put a brain picker in front of New chat.
 - **Tools** (Figma, GitHub, and so on) attach to a runtime. They are not extra tabs.
 - Permissions are one inbox. Each click is translated to that vendor’s own protocol later.
-- **Usage is one ledger.** Adapters call `recordUsage`. Do not invent tokens for preview chats. Show per vendor, per model, and overall.
+- **Settings holds profile, connected LLMs, custom API, and usage.** Usage is not a top-level sidebar item. Adapters call `recordUsage`. Do not invent tokens for preview chats.
 - Do not merge subscriptions, context, or sandboxes across vendors.
 
 ## Layout

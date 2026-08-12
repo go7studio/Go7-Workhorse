@@ -14,17 +14,21 @@ import { applyPermissionAnswer } from "./permissions";
 import { DEFAULT_CHOICE, defaultModel, findChoice, modelName, parseEffort, withEffort } from "./models";
 import { emptyProject, folderFromPath, normalizeProject, primaryFolder } from "./project";
 import { providerById } from "./providers";
+import { DEFAULT_SETTINGS, isSettingsSection, normalizeSettings } from "./settings";
 import { normalizeUsage } from "./usage";
 import type {
   AppState,
+  CustomLlm,
   EffortLevel,
   LinkedReference,
   PermissionMode,
   PermissionRequest,
+  Profile,
   Project,
   ProviderId,
   ReferenceKind,
   Session,
+  SettingsSection,
   Sheet,
   Theme,
   UsageDraft,
@@ -40,6 +44,8 @@ const EMPTY: AppState = {
   pending: [],
   sheet: null,
   panel: null,
+  settingsSection: "profile",
+  settings: structuredClone(DEFAULT_SETTINGS),
   usage: [],
   usageRange: "month",
   lastModel: DEFAULT_CHOICE,
@@ -55,7 +61,7 @@ type Store = AppState & {
   unlinkFolder: (folderId: string) => void;
   addReference: (kind: ReferenceKind, value: string, label?: string) => void;
   removeReference: (referenceId: string) => void;
-  startSession: (projectId?: string) => void;
+  startSession: (projectId?: string, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string) => void;
   setSessionEffort: (effort: EffortLevel) => void;
   selectSession: (id: string) => void;
@@ -65,6 +71,13 @@ type Store = AppState & {
   answerPermission: (id: string, answer: "once" | "session" | "deny") => void;
   demoPermission: () => void;
   recordUsage: (draft: UsageDraft) => void;
+  openSettings: (section?: SettingsSection) => void;
+  closeSettings: () => void;
+  setSettingsSection: (section: SettingsSection) => void;
+  updateProfile: (patch: Partial<Profile>) => void;
+  setLlmConnected: (id: Exclude<ProviderId, "custom">, connected: boolean) => void;
+  updateCustomLlm: (patch: Partial<CustomLlm>) => void;
+  setTheme: (theme: Theme) => void;
   openUsage: () => void;
   closeUsage: () => void;
   setUsageRange: (range: UsageRange) => void;
@@ -79,6 +92,7 @@ function hydrate(value: unknown): AppState {
   const projects = Array.isArray(record.projects)
     ? record.projects.map(normalizeProject).filter((item): item is Project => item !== null)
     : [];
+  const panel = (record as { panel?: unknown }).panel;
   return {
     ...EMPTY,
     ...record,
@@ -88,7 +102,14 @@ function hydrate(value: unknown): AppState {
       : [],
     pending: Array.isArray(record.pending) ? record.pending : [],
     sheet: null,
-    panel: null,
+    panel: panel === "usage" || panel === "settings" ? "settings" : null,
+    settingsSection:
+      panel === "usage"
+        ? "usage"
+        : isSettingsSection(record.settingsSection)
+          ? record.settingsSection
+          : "profile",
+    settings: normalizeSettings(record.settings),
     usage: normalizeUsage(record.usage),
     usageRange:
       record.usageRange === "today" || record.usageRange === "week" || record.usageRange === "all"
@@ -266,13 +287,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const startSession = useCallback((projectId?: string) => {
+  const startSession = useCallback((projectId?: string, provider?: ProviderId) => {
     setState((current) => {
       const targetId = projectId ?? current.activeProjectId;
       if (!targetId) return current;
       const project = current.projects.find((item) => item.id === targetId);
       if (!project) return current;
-      const choice = current.lastModel ?? DEFAULT_CHOICE;
+      const remembered = current.lastModel ?? DEFAULT_CHOICE;
+      const picked = provider ?? remembered.provider;
+      const model = provider ? defaultModel(provider).id : remembered.model;
+      const choice = {
+        provider: picked,
+        model,
+        effort: withEffort(picked, model, remembered.effort),
+      };
       const session: Session = {
         id: uid("sess"),
         projectId: project.id,
@@ -293,6 +321,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
       return {
         ...current,
+        lastModel: choice,
         sessions: [session, ...current.sessions],
         activeProjectId: project.id,
         activeSessionId: session.id,
@@ -424,7 +453,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (match?.run === "usage") {
-        setState((current) => ({ ...current, panel: "usage" }));
+        setState((current) => ({ ...current, panel: "settings", settingsSection: "usage" }));
+        return;
+      }
+      if (match?.run === "settings") {
+        setState((current) => ({ ...current, panel: "settings" }));
         return;
       }
       if (match?.run === "model") {
@@ -500,8 +533,67 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const openSettings = useCallback((section?: SettingsSection) => {
+    setState((current) => ({
+      ...current,
+      panel: "settings",
+      settingsSection: section ?? current.settingsSection,
+    }));
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setState((current) => ({ ...current, panel: null }));
+  }, []);
+
+  const setSettingsSection = useCallback((section: SettingsSection) => {
+    setState((current) => ({ ...current, settingsSection: section }));
+  }, []);
+
+  const updateProfile = useCallback((patch: Partial<Profile>) => {
+    setState((current) => {
+      const settings = current.settings ?? structuredClone(DEFAULT_SETTINGS);
+      return {
+        ...current,
+        settings: {
+          ...settings,
+          profile: { ...settings.profile, ...patch },
+        },
+      };
+    });
+  }, []);
+
+  const setLlmConnected = useCallback((id: Exclude<ProviderId, "custom">, connected: boolean) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        llms: { ...current.settings.llms, [id]: { connected } },
+      },
+    }));
+  }, []);
+
+  const updateCustomLlm = useCallback((patch: Partial<CustomLlm>) => {
+    setState((current) => {
+      const custom = { ...current.settings.llms.custom, ...patch };
+      if (patch.baseUrl !== undefined || patch.model !== undefined) {
+        custom.connected = Boolean(custom.baseUrl.trim() && custom.model.trim());
+      }
+      return {
+        ...current,
+        settings: {
+          ...current.settings,
+          llms: { ...current.settings.llms, custom },
+        },
+      };
+    });
+  }, []);
+
+  const setTheme = useCallback((theme: Theme) => {
+    setState((current) => ({ ...current, theme }));
+  }, []);
+
   const openUsage = useCallback(() => {
-    setState((current) => ({ ...current, panel: "usage" }));
+    setState((current) => ({ ...current, panel: "settings", settingsSection: "usage" }));
   }, []);
 
   const closeUsage = useCallback(() => {
@@ -538,6 +630,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       answerPermission,
       demoPermission,
       recordUsage,
+      openSettings,
+      closeSettings,
+      setSettingsSection,
+      updateProfile,
+      setLlmConnected,
+      updateCustomLlm,
+      setTheme,
       openUsage,
       closeUsage,
       setUsageRange,
@@ -564,6 +663,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       answerPermission,
       demoPermission,
       recordUsage,
+      openSettings,
+      closeSettings,
+      setSettingsSection,
+      updateProfile,
+      setLlmConnected,
+      updateCustomLlm,
+      setTheme,
       openUsage,
       closeUsage,
       setUsageRange,

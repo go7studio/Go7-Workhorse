@@ -38,7 +38,8 @@ npm run dev
 | `/theme` | Light, dark, or system |
 | `/model` | Switch model (`/model grok-4.6`) |
 | `/effort` | Brain level (`low` `medium` `high` `extra`) |
-| `/usage` | Token usage by vendor, model, and overall |
+| `/settings` | Profile, connected LLMs, custom API, usage |
+| `/usage` | Open Settings → Usage |
 | `/quit` | Close the app |
 
 ## Layout

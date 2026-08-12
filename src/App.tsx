@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { useActiveProject, useActiveSession, useStore } from "./lib/store";
+import { selectSurface, titlebarLabel } from "./lib/surface";
 import { NewProjectSheet } from "./ui/NewProjectSheet";
-import { PermissionBar } from "./ui/PermissionBar";
+import { PermissionCard } from "./ui/PermissionBar";
 import { ProjectHome } from "./ui/ProjectHome";
 import { ReferenceSheet } from "./ui/ReferenceSheet";
 import { SessionPane } from "./ui/SessionPane";
 import { Sidebar } from "./ui/Sidebar";
-import { UsagePane } from "./ui/UsagePane";
+import { Settings } from "./ui/Settings";
 import { Welcome } from "./ui/Welcome";
 
 function resolvedTheme(theme: "system" | "light" | "dark") {
@@ -29,25 +30,28 @@ export function App() {
     return () => media.removeEventListener("change", apply);
   }, [store.theme]);
 
+  const surface = selectSurface({
+    panel: store.panel,
+    hasProject: Boolean(project),
+    hasSession: Boolean(session),
+  });
+  const title = titlebarLabel(project?.name, session?.title, store.panel);
+
   return (
     <div className="app">
       <header className="titlebar">
-        <span>
-          <strong>Go7 Workhorse</strong>
-          {project ? `  ·  ${project.name}` : ""}
-          {session ? `  ·  ${session.title}` : ""}
-        </span>
+        <span>{title}</span>
       </header>
       <div className="workspace">
         <Sidebar />
         <main className="main">
-          {store.panel === "usage" && <UsagePane />}
-          {store.panel !== "usage" && !project && <Welcome />}
-          {store.panel !== "usage" && project && !session && <ProjectHome />}
-          {store.panel !== "usage" && project && session && <SessionPane />}
+          {surface === "settings" && <Settings />}
+          {surface === "welcome" && <Welcome />}
+          {surface === "project-home" && <ProjectHome />}
+          {surface === "session" && <SessionPane />}
         </main>
       </div>
-      <PermissionBar />
+      <PermissionCard />
       <NewProjectSheet />
       <ReferenceSheet />
     </div>

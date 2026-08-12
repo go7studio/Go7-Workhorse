@@ -77,14 +77,14 @@ export function Sidebar() {
         )}
       </div>
       <button
-        className={store.panel === "usage" ? "row active usage-link" : "row usage-link"}
+        className={store.panel === "settings" ? "row active usage-link" : "row usage-link"}
         type="button"
-        onClick={() => (store.panel === "usage" ? store.closeUsage() : store.openUsage())}
+        onClick={() => (store.panel === "settings" ? store.closeSettings() : store.openSettings())}
       >
         <span>
-          <span className="row-title">Usage</span>
+          <span className="row-title">Settings</span>
           <span className="row-meta">
-            {formatTokens(tokens)} · {store.usageRange === "all" ? "all time" : store.usageRange}
+            {formatTokens(tokens)} tokens · profile, LLMs
           </span>
         </span>
       </button>

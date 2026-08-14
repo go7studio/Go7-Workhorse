@@ -1,0 +1,263 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { test } from "node:test";
+import { pickClaudeCodeOauth } from "../electron/claude-desktop-auth";
+import {
+  CLAUDE_ACP_NOT_INSTALLED,
+  detectClaudeLogin,
+  hasClaudeLoginArtifact,
+  resolveClaudeAcpLaunch,
+} from "../electron/claude-login";
+import {
+  buildClaudeLaunchSpec,
+  resolveClaudeEffort,
+  resolveClaudeModel,
+  resolveClaudePermissionMode,
+} from "../electron/claude-launch";
+import { fetchClaudePlanUsage, parseClaudePlanUsage, usedPercentFromUtilization } from "../electron/claude-plan";
+import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("vendorSendTarget routes claude live like grok and codex", () => {
+  assert.equal(vendorSendTarget("claude"), "claude");
+  assert.equal(vendorSendTarget("grok"), "grok");
+  const preview = previewOnlyReply("Claude", "Demo", [], "hi");
+  assert.match(preview, /Preview only/);
+});
+
+test("detectClaudeLogin requires ACP plus a real login artifact", () => {
+  const missing = detectClaudeLogin({
+    env: {},
+    homedir: path.join(ROOT, "does-not-exist"),
+    existsSync: () => false,
+    pathDirs: [],
+    moduleDirs: [],
+  });
+  assert.equal(missing.connected, false);
+  assert.equal(missing.acpBinary, null);
+
+  const acp = path.join(ROOT, "node_modules", "@agentclientprotocol", "claude-agent-acp", "dist", "index.js");
+  const withPackage = detectClaudeLogin({
+    env: {},
+    homedir: path.join(ROOT, "does-not-exist"),
+    existsSync: (file) =>
+      file === acp || file.endsWith(`${path.sep}package.json`) || /node(\.exe)?$/i.test(file),
+    readFile: (file) =>
+      file.endsWith("package.json")
+        ? JSON.stringify({ bin: { "claude-agent-acp": "dist/index.js" } })
+        : "",
+    pathDirs: [],
+    moduleDirs: [ROOT],
+    nodeBinary: process.execPath,
+  });
+  assert.equal(withPackage.connected, false);
+  assert.ok(withPackage.acpBinary);
+
+  assert.equal(
+    hasClaudeLoginArtifact("C:\\claude", "C:\\home", () => false, () => "", { ANTHROPIC_API_KEY: "sk-test" }),
+    true,
+  );
+  assert.equal(
+    hasClaudeLoginArtifact(
+      "C:\\claude",
+      "C:\\home",
+      (file) => file === path.join("C:\\claude", ".credentials.json"),
+      () => JSON.stringify({ claudeAiOauth: { accessToken: "tok-xxxxxxxx" } }),
+      {},
+    ),
+    true,
+  );
+  const picked = pickClaudeCodeOauth({
+    "id:https://api.anthropic.com:user:profile": { token: "short" },
+    "id:https://api.anthropic.com:user:inference user:sessions:claude_code": {
+      token: "claude-code-token-xxxxxxxx",
+      refreshToken: "refresh-xxxxxxxx",
+      expiresAt: Date.now() + 60_000,
+    },
+  });
+  assert.equal(picked?.accessToken, "claude-code-token-xxxxxxxx");
+  assert.equal(picked?.source, "desktop");
+  assert.equal(
+    hasClaudeLoginArtifact(
+      "C:\\claude",
+      "C:\\home",
+      (file) => file === path.join("C:\\claude", ".credentials.json"),
+      () => JSON.stringify({ mcpOAuth: { figma: {} } }),
+      {},
+    ),
+    false,
+  );
+});
+
+test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => {
+  const previous = {
+    url: process.env.WORKHORSE_BRIDGE_URL,
+    token: process.env.WORKHORSE_BRIDGE_TOKEN,
+  };
+  process.env.WORKHORSE_BRIDGE_URL = "http://127.0.0.1:9";
+  process.env.WORKHORSE_BRIDGE_TOKEN = "token";
+  try {
+    assert.equal(resolveClaudeModel(""), "claude-sonnet-5");
+    assert.equal(resolveClaudeModel("opus"), "claude-opus-5");
+    assert.equal(resolveClaudeModel("claude-sonnet"), "claude-sonnet-5");
+    assert.equal(resolveClaudeModel("Fable 5"), "claude-fable-5");
+    assert.equal(resolveClaudeModel("fable"), "claude-fable-5");
+    assert.equal(resolveClaudeModel("claude-fable-5"), "claude-fable-5");
+    assert.equal(resolveClaudeModel("claude-fable-5[1m]"), "claude-fable-5");
+    assert.notEqual(resolveClaudeModel("Fable 5"), "claude-opus-5");
+    assert.notEqual(resolveClaudeModel("Fable 5"), "claude-sonnet-5");
+    assert.equal(resolveClaudeEffort("extra"), "xhigh");
+    assert.equal(resolveClaudeEffort("ultra"), "max");
+    assert.equal(resolveClaudePermissionMode("always-approve"), "bypassPermissions");
+    assert.equal(resolveClaudePermissionMode("accept-edits"), "acceptEdits");
+    assert.equal(resolveClaudePermissionMode("plan"), "plan");
+    assert.equal(resolveClaudePermissionMode("always-approve", "read-only"), "default");
+
+    const spec = buildClaudeLaunchSpec({
+      model: "claude-opus-5",
+      effort: "high",
+      cwd: ROOT,
+      mode: "ask",
+    });
+    assert.ok(!/grok/i.test(spec.command));
+    assert.ok(!spec.argv.some((arg) => /grok/i.test(arg)));
+    assert.ok(!spec.argv.includes("--sandbox"));
+    assert.equal(spec.model, "claude-opus-5");
+    assert.equal(spec.env?.ANTHROPIC_MODEL, "claude-opus-5");
+    assert.equal(spec.effort, "high");
+    assert.equal(spec.sessionParams._meta?.model, "claude-opus-5");
+    assert.equal(spec.sessionParams._meta?.permissionMode, "default");
+    assert.match(spec.argv.join(" ") + spec.command, /claude-agent-acp|index\.js/);
+
+    const fable = buildClaudeLaunchSpec({
+      model: "Fable 5",
+      effort: "high",
+      cwd: ROOT,
+      mode: "always-approve",
+    });
+    assert.equal(fable.model, "claude-fable-5");
+    assert.equal(fable.env?.ANTHROPIC_MODEL, "claude-fable-5");
+    assert.equal(fable.sessionParams._meta?.model, "claude-fable-5");
+    assert.equal(fable.sessionParams._meta?.claudeCode?.options?.thinking?.display, "summarized");
+    assert.equal(fable.sessionParams._meta?.claudeCode?.options?.thinking?.type, "adaptive");
+    assert.equal(fable.sessionParams._meta?.claudeCode?.options?.effort, "high");
+    assert.notEqual(fable.env?.ANTHROPIC_MODEL, "claude-opus-5");
+    assert.notEqual(fable.env?.ANTHROPIC_MODEL, "claude-sonnet-5");
+    assert.match(
+      readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"),
+      /ANTHROPIC_MODEL/,
+    );
+
+    const yolo = buildClaudeLaunchSpec({
+      model: "claude-sonnet-5",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+    });
+    assert.equal(yolo.sessionParams._meta?.yoloMode, true);
+    assert.equal(yolo.permissionMode, "bypassPermissions");
+
+    const boxed = buildClaudeLaunchSpec({
+      model: "claude-sonnet-5",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "read-only",
+    });
+    assert.equal(boxed.sandbox, "read-only");
+    assert.equal(boxed.sessionParams._meta?.sandbox, "read-only");
+    assert.equal(boxed.permissionMode, "default");
+    assert.ok(!boxed.sessionParams._meta?.yoloMode);
+    assert.ok(!boxed.argv.includes("--sandbox"));
+  } finally {
+    if (previous.url === undefined) delete process.env.WORKHORSE_BRIDGE_URL;
+    else process.env.WORKHORSE_BRIDGE_URL = previous.url;
+    if (previous.token === undefined) delete process.env.WORKHORSE_BRIDGE_TOKEN;
+    else process.env.WORKHORSE_BRIDGE_TOKEN = previous.token;
+  }
+});
+
+test("Claude is wired through store IPC and no longer preview", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
+  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
+  const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.match(store, /live === "claude"/);
+  assert.match(store, /claudePrompt/);
+  assert.match(store, /refreshClaudeLogin/);
+  assert.doesNotMatch(store.slice(store.indexOf('live === "claude"'), store.indexOf('live === "codex"')), /Preview only/);
+  assert.match(main, /ipcMain\.handle\("claude:prompt"/);
+  assert.match(main, /detectClaudeLogin/);
+  assert.match(preload, /claude:detect-login/);
+  assert.match(preload, /claudePrompt/);
+  assert.match(settings, /"claude"/);
+  assert.match(settings, /refreshClaudeLogin/);
+  assert.match(addBot, /refreshClaudeLogin/);
+  assert.doesNotMatch(addBot, /Hidden on the desk until the adapter is live/);
+  assert.match(setup, /"claude"/);
+  assert.match(CLAUDE_ACP_NOT_INSTALLED, /claude-agent-acp/);
+  assert.ok(resolveClaudeAcpLaunch({ moduleDirs: [ROOT] }));
+});
+
+test("parseClaudePlanUsage reads weekly leftover the same way as SuperGrok", () => {
+  assert.equal(usedPercentFromUtilization(7), 7);
+  assert.equal(usedPercentFromUtilization(0.61), 61);
+  const plan = parseClaudePlanUsage({
+    five_hour: { utilization: 23, resets_at: "2026-08-13T19:39:59Z" },
+    seven_day: { utilization: 7, resets_at: "2026-08-20T05:59:59Z" },
+  });
+  assert.equal(plan?.usedPercent, 7);
+  assert.equal(plan?.leftPercent, 93);
+  assert.equal(plan?.period, "weekly");
+  assert.equal(plan?.resetsAt, "2026-08-20T05:59:59Z");
+  assert.equal(plan?.products[0]?.label, "Current session");
+  assert.equal(plan?.products[0]?.usagePercent, 23);
+  assert.equal(plan?.products[1]?.label, "All models");
+
+  const desktop = parseClaudePlanUsage({
+    five_hour: { utilization: 23, resets_at: "2026-08-13T19:39:59Z" },
+    seven_day: { utilization: 7, resets_at: "2026-08-20T05:59:59Z" },
+    limits: [
+      { kind: "session", percent: 23, resets_at: "2026-08-13T19:39:59Z" },
+      { kind: "weekly_all", percent: 7, resets_at: "2026-08-20T05:59:59Z" },
+      {
+        kind: "weekly_scoped",
+        percent: 12,
+        resets_at: "2026-08-20T06:00:00Z",
+        scope: { model: { display_name: "Fable" } },
+      },
+    ],
+  });
+  assert.deepEqual(
+    desktop?.products.map((row) => `${row.label}:${row.usagePercent}`),
+    ["Current session:23", "All models:7", "Fable:12"],
+  );
+  assert.equal(desktop?.usedPercent, 7);
+});
+
+test("fetchClaudePlanUsage sends the claude-code User-Agent", async () => {
+  const seen: string[] = [];
+  const plan = await fetchClaudePlanUsage({
+    token: "test-token",
+    fetchImpl: async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      seen.push(headers.get("user-agent") ?? "");
+      return new Response(
+        JSON.stringify({
+          limits: [
+            { kind: "session", percent: 23 },
+            { kind: "weekly_all", percent: 7 },
+          ],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  assert.match(seen[0] ?? "", /^claude-code\//);
+  assert.equal(plan?.usedPercent, 7);
+});

@@ -7,7 +7,7 @@ export const PROVIDERS: Provider[] = [
     short: "G",
     tagline: "Grok Build via ACP",
     connected: false,
-    statusNote: "Adapter next. Uses your existing Grok login when wired.",
+    statusNote: "Adapter ready. Uses your existing Grok login on this machine.",
   },
   {
     id: "claude",
@@ -15,7 +15,7 @@ export const PROVIDERS: Provider[] = [
     short: "C",
     tagline: "Claude Code via ACP",
     connected: false,
-    statusNote: "Adapter next. Uses your existing Claude login when wired.",
+    statusNote: "Live ACP adapter. Uses @agentclientprotocol/claude-agent-acp and your existing Claude login.",
   },
   {
     id: "codex",
@@ -23,7 +23,7 @@ export const PROVIDERS: Provider[] = [
     short: "X",
     tagline: "Codex CLI via ACP",
     connected: false,
-    statusNote: "Adapter next. Uses your existing Codex login when wired.",
+    statusNote: "Live ACP adapter. Uses @agentclientprotocol/codex-acp and your existing Codex login.",
   },
   {
     id: "custom",
@@ -31,7 +31,7 @@ export const PROVIDERS: Provider[] = [
     short: "+",
     tagline: "Any bot you drop in",
     connected: false,
-    statusNote: "Point at a command or URL later. Preview only for now.",
+    statusNote: "Create a bot from an API. Preview first, then Create to add a slot.",
   },
 ];
 

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { modeLabel } from "../lib/commands";
-import { choiceLabel } from "../lib/models";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { formatChatSidebar } from "../lib/session";
+import { deskInk, vendorAttachedForSession } from "../lib/settings";
+import { chatLinksFromSessions } from "../lib/tool-labels";
 import { useStore } from "../lib/store";
 import type { Session } from "../lib/types";
 
@@ -13,6 +14,24 @@ export function ChatRow({ session }: { session: Session }) {
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const archived = typeof session.archivedAt === "number";
+  const bot = session.customBotId
+    ? store.settings.customBots.find((item) => item.id === session.customBotId)
+    : undefined;
+  const stockLink = session.provider !== "custom" ? store.settings.llms[session.provider] : undefined;
+  const ink = deskInk(session, store.settings);
+  const rowLabel = vendorAttachedForSession(session, store.settings)
+    ? formatChatSidebar({
+        provider: session.provider,
+        model: session.model,
+        effort: session.effort,
+        mode: session.mode,
+        botName: bot?.name ?? stockLink?.name,
+      })
+    : "Attach LLM";
+  const link = useMemo(
+    () => chatLinksFromSessions(store.sessions).find((item) => item.sessionId === session.id),
+    [store.sessions, session.id],
+  );
 
   useEffect(() => {
     if (!menu && !confirmDelete) return;
@@ -40,7 +59,7 @@ export function ChatRow({ session }: { session: Session }) {
 
   return (
     <div
-      className={session.id === store.activeSessionId ? "chat-row active" : "chat-row"}
+      className={`chat-row${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -68,11 +87,20 @@ export function ChatRow({ session }: { session: Session }) {
         </form>
       ) : (
         <button className="row chat-open" type="button" onClick={() => store.selectSession(session.id)}>
-          <span className={`dot ${session.provider}`} />
+          <span
+            className={`dot ${session.provider}${session.status === "running" ? " pulse" : ""}`}
+            style={ink ? { background: ink } : undefined}
+          />
           <span>
             <span className="row-title">{session.title}</span>
-            <span className="row-meta">
-              {choiceLabel(session)} · {modeLabel(session.mode)}
+            <span className={`row-meta${link ? " peer" : ""}`}>
+              {link
+                ? link.label
+                : session.status === "running"
+                  ? "Working…"
+                  : session.status === "needs-input"
+                    ? "Needs you"
+                    : rowLabel}
             </span>
           </span>
         </button>
@@ -101,8 +129,20 @@ export function ChatRow({ session }: { session: Session }) {
           >
             Rename
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              const last = [...session.messages]
+                .reverse()
+                .find((message) => message.role === "user" || message.role === "assistant");
+              setMenu(false);
+              if (last) store.forkFrom(last.id, session.id);
+            }}
+          >
+            Fork chat
+          </button>
           <div className="chat-move">
-            <span>Move to</span>
+            <span>{session.projectId ? "Move to" : "Add to"}</span>
             {store.projects
               .filter((project) => project.id !== session.projectId)
               .map((project) => (
@@ -121,6 +161,15 @@ export function ChatRow({ session }: { session: Session }) {
               <em>No other project</em>
             )}
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMenu(false);
+              void store.exportSession(session.id);
+            }}
+          >
+            Export chat
+          </button>
           <button
             type="button"
             onClick={() => {

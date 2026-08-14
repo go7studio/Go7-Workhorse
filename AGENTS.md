@@ -25,5 +25,5 @@ src/styles/   design tokens and layout
 
 - Keep the UI learnable: few files, plain names, no extra frameworks.
 - Adapters live behind `src/lib/providers.ts`. Do not call vendor CLIs from React components.
-- Preview sessions may echo locally. Never pretend a provider is signed in.
+- Grok, Codex, and Claude are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login.
 - Apple-like means space, hairlines, and short motion — not decoration.

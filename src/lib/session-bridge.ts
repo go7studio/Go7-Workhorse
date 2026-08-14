@@ -1,0 +1,181 @@
+import { formatChatSidebar } from "./session";
+
+export type BridgeMessage = {
+  role: string;
+  text: string;
+};
+
+export type SessionSnapshot = {
+  id: string;
+  title: string;
+  projectId: string | null;
+  projectName: string | null;
+  provider: string;
+  model: string;
+  status: string;
+  archived: boolean;
+  preview: string;
+  sidebar: string;
+  messageCount: number;
+};
+
+export type SessionTranscript = {
+  id: string;
+  title: string;
+  projectName: string | null;
+  model: string;
+  messages: BridgeMessage[];
+};
+
+type LooseState = {
+  sessions?: unknown[];
+  projects?: unknown[];
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function previewFrom(messages: unknown): string {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const item = asRecord(messages[i]);
+    if (item.role === "system") continue;
+    const text = typeof item.text === "string" ? item.text.replace(/\s+/g, " ").trim() : "";
+    if (text) return text.slice(0, 160);
+  }
+  return "";
+}
+
+export function chatPreview(messages: unknown): string {
+  return previewFrom(messages);
+}
+
+export function catalogSessions(state: LooseState): SessionSnapshot[] {
+  const projects = new Map<string, string>();
+  if (Array.isArray(state.projects)) {
+    for (const raw of state.projects) {
+      const project = asRecord(raw);
+      if (typeof project.id === "string") {
+        projects.set(project.id, typeof project.name === "string" ? project.name : project.id);
+      }
+    }
+  }
+  const sessions: SessionSnapshot[] = [];
+  if (!Array.isArray(state.sessions)) return sessions;
+  for (const raw of state.sessions) {
+    const session = asRecord(raw);
+    if (typeof session.id !== "string") continue;
+    if (session.hidden === true || (typeof session.parentId === "string" && session.parentId)) continue;
+    if (typeof session.archivedAt === "number") continue;
+    const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
+    const messages = Array.isArray(session.messages) ? session.messages : [];
+    if (!messages.some((item) => asRecord(item).role === "user")) continue;
+    const provider =
+      session.provider === "codex" || session.provider === "claude" || session.provider === "custom"
+        ? session.provider
+        : "grok";
+    const model = typeof session.model === "string" ? session.model : "";
+    sessions.push({
+      id: session.id,
+      title: typeof session.title === "string" ? session.title : "New chat",
+      projectId,
+      projectName: projectId ? projects.get(projectId) ?? null : null,
+      provider,
+      model,
+      status: typeof session.status === "string" ? session.status : "idle",
+      archived: typeof session.archivedAt === "number",
+      preview: previewFrom(messages),
+      sidebar: formatChatSidebar({
+        provider,
+        model,
+        effort: typeof session.effort === "string" ? session.effort : null,
+        mode: typeof session.mode === "string" ? session.mode : "ask",
+      }),
+      messageCount: messages.length,
+    });
+  }
+  return sessions;
+}
+
+export function liveSessions(sessions: SessionSnapshot[]): SessionSnapshot[] {
+  return sessions.filter((session) => !session.archived);
+}
+
+export function findSession(sessions: SessionSnapshot[], query: string): SessionSnapshot | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const listed = liveSessions(sessions);
+  const exact = listed.find((session) => session.id.toLowerCase() === q);
+  if (exact) return exact;
+  const prefix = listed.filter((session) => session.id.toLowerCase().startsWith(q));
+  if (prefix.length === 1) return prefix[0];
+  const titled = listed.filter((session) => session.title.toLowerCase().includes(q));
+  if (titled.length === 1) return titled[0];
+  return titled[0] ?? prefix[0] ?? null;
+}
+
+/** Sidebar peer labels must not attach because a vendor name appears inside a title. */
+export function findSessionForLink(sessions: SessionSnapshot[], query: string): SessionSnapshot | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const listed = liveSessions(sessions);
+  const byId = listed.find((session) => session.id.toLowerCase() === q);
+  if (byId) return byId;
+  const titled = listed.filter((session) => session.title.trim().toLowerCase() === q);
+  return titled.length === 1 ? titled[0] : null;
+}
+
+export function sessionTranscript(state: LooseState, query: string, limit = 40): SessionTranscript | null {
+  const listed = catalogSessions(state);
+  const match = findSession(listed, query);
+  if (!match) return null;
+  const raw = Array.isArray(state.sessions)
+    ? state.sessions.map(asRecord).find((item) => item.id === match.id)
+    : undefined;
+  const messages = Array.isArray(raw?.messages) ? raw.messages : [];
+  const clipped = messages.slice(-Math.max(1, limit)).map((item) => {
+    const message = asRecord(item);
+    return {
+      role: typeof message.role === "string" ? message.role : "system",
+      text: typeof message.text === "string" ? message.text : "",
+    };
+  });
+  return {
+    id: match.id,
+    title: match.title,
+    projectName: match.projectName,
+    model: match.model,
+    messages: clipped,
+  };
+}
+
+export function formatPeerPrompt(fromTitle: string, text: string): string {
+  return `From another Workhorse chat (“${fromTitle}”):\n\n${text.trim()}`;
+}
+
+export function existingPeerReply(sessions: unknown, toSessionId: string, message: string): string | null {
+  if (!Array.isArray(sessions) || !toSessionId || !message.trim()) return null;
+  const needle = message.trim();
+  const session = sessions.map(asRecord).find((item) => item.id === toSessionId);
+  const rows = Array.isArray(session?.messages) ? session.messages.map(asRecord) : [];
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const text = typeof row.text === "string" ? row.text.trim() : "";
+    if (row.role !== "user" || row.kind !== "peer" || text !== needle) continue;
+    const reply = rows.slice(index + 1).find((item) => item.role === "assistant" && typeof item.text === "string" && item.text.trim());
+    return typeof reply?.text === "string" ? reply.text.trim() : null;
+  }
+  return null;
+}
+
+export function peerPromptParts(
+  message: Pick<{ kind?: string; fromTitle?: string; text: string }, "kind" | "fromTitle" | "text">,
+): { fromTitle: string; text: string } | null {
+  if (message.kind === "peer") {
+    return { fromTitle: message.fromTitle?.trim() || "another chat", text: message.text };
+  }
+  const wrapped = message.text.match(/^From another Workhorse chat \([“"](.+?)[”"]\):\s*\n\n([\s\S]+)$/);
+  if (!wrapped) return null;
+  return { fromTitle: wrapped[1], text: wrapped[2] };
+}

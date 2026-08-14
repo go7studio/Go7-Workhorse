@@ -34,6 +34,21 @@ function containedPath(parent: string, child: string): boolean {
   return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+function canonicalPath(value: string): string {
+  const resolved = path.resolve(value);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function sameFilesystemPath(left: string, right: string): boolean {
+  const a = canonicalPath(left);
+  const b = canonicalPath(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 export async function ensureManagedWorktree(
   input: EnsureWorktreeInput,
   managedRoot: string,
@@ -54,7 +69,7 @@ export async function ensureManagedWorktree(
 
     if (fs.existsSync(target)) {
       const existingRoot = path.resolve(await git(["-C", target, "rev-parse", "--show-toplevel"]));
-      if (existingRoot !== path.resolve(target)) {
+      if (!sameFilesystemPath(existingRoot, target)) {
         return { ok: false, message: "The managed worktree path is occupied by another checkout." };
       }
       const head = await git(["-C", target, "rev-parse", "HEAD"]);

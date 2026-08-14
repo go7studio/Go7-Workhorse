@@ -1,48 +1,101 @@
+import { useEffect, useState } from "react";
+import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
+import { formatWindow } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
+import { vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
-import type { ProviderId, SettingsSection, Theme } from "../lib/types";
+import { SETTINGS_THEME_CHOICES } from "../lib/theme";
+import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
+import { BotForm } from "./BotForm";
+import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
+import { WatchPane } from "./WatchPane";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "llms", label: "LLMs" },
+  { id: "skills", label: "Skills" },
   { id: "usage", label: "Usage" },
+  { id: "watch", label: "Watch" },
 ];
 
-const THEMES: { id: Theme; label: string }[] = [
-  { id: "system", label: "System" },
-  { id: "light", label: "Light" },
-  { id: "dark", label: "Dark" },
-];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "claude", "codex"];
+function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
+  if (!vendorEnabled(link)) return "Disabled";
+  if (link.available === false) return "Not found";
+  if (id === "grok" || id === "codex" || id === "claude") return "Local login";
+  return "Marked";
+}
+
+function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
+  if (link.connected && link.enabled === false) {
+    return "Off the picker. Enable to use it in new chats.";
+  }
+  const found = link.available ?? link.connected;
+  if (id === "grok") {
+    return found ? "Detected the local Grok login on this machine" : "Grok binary or login not found";
+  }
+  if (id === "codex") {
+    return found
+      ? "Detected the local Codex login on this machine"
+      : "Codex ACP adapter or login not found";
+  }
+  if (id === "claude") {
+    return found
+      ? "Detected the local Claude Code login on this machine"
+      : "Claude ACP adapter or login not found";
+  }
+  return found ? "Marked for a future adapter" : "Not connected";
+}
+
+type LlmFocus = Exclude<ProviderId, "custom"> | `bot:${string}` | null;
 
 export function Settings() {
   const store = useStore();
   const settings = store.settings;
   const section = store.settingsSection;
+  const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
+  const [usageTick, setUsageTick] = useState(0);
+  const [usageHome, setUsageHome] = useState(0);
+  const [supportNote, setSupportNote] = useState("");
+
+  const openSection = (id: SettingsSection) => {
+    if (id === "usage") {
+      if (section !== "usage") setUsageTick((tick) => tick + 1);
+      else setUsageHome((tick) => tick + 1);
+    }
+    store.setSettingsSection(id);
+  };
+
+  const tabs = (
+    <div className="actions" style={{ marginBottom: 12 }}>
+      {SECTIONS.map((item) => (
+        <button
+          key={item.id}
+          className={section === item.id ? "tiny active-kind" : "tiny"}
+          type="button"
+          onClick={() => openSection(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <section className="picker project-home settings">
-      <div className="link-head">
-        <h2>Settings</h2>
-        <button className="tiny" type="button" onClick={store.closeSettings}>
-          Back
-        </button>
-      </div>
-
-      <div className="actions" style={{ marginBottom: 20 }}>
-        {SECTIONS.map((item) => (
-          <button
-            key={item.id}
-            className={section === item.id ? "tiny active-kind" : "tiny"}
-            type="button"
-            onClick={() => store.setSettingsSection(item.id)}
-          >
-            {item.label}
+    <section className={`picker project-home settings settings-full${section === "usage" ? " usage-section" : ""}`}>
+      {section !== "usage" && (
+        <div className="link-head">
+          <h2>Settings</h2>
+          <button className="tiny" type="button" onClick={store.closeSettings}>
+            Back
           </button>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {section !== "usage" && tabs}
 
       {section === "profile" && (
         <>
@@ -64,9 +117,33 @@ export function Settings() {
             />
           </label>
           <div className="field">
+            <span>Updates</span>
+            <div className="actions">
+              <button className="tiny" type="button" onClick={() => void store.checkAppUpdate()}>
+                Check now
+              </button>
+              <span className="row-meta">Workhorse build v{APP_VERSION}</span>
+            </div>
+          </div>
+          <div className="field">
+            <span>Support information</span>
+            <div className="actions">
+              <button className="tiny" type="button" onClick={() => {
+                void window.workhorse?.exportDiagnostics?.().then((result) => {
+                  if (!result || result.canceled) return;
+                  setSupportNote(result.ok ? `Saved to ${result.path}` : "Could not export support information.");
+                });
+              }}>
+                Export diagnostics
+              </button>
+              <span className="row-meta">Secrets, prompts, and file contents are excluded.</span>
+            </div>
+            {supportNote ? <p className="row-meta">{supportNote}</p> : null}
+          </div>
+          <div className="field">
             <span>Appearance</span>
             <div className="actions">
-              {THEMES.map((item) => (
+              {SETTINGS_THEME_CHOICES.map((item) => (
                 <button
                   key={item.id}
                   className={store.theme === item.id ? "tiny active-kind" : "tiny"}
@@ -83,88 +160,370 @@ export function Settings() {
 
       {section === "llms" && (
         <>
-          <p>
-            Mark the logins this machine already has. Adapters will use them.
-            Custom is an OpenAI-compatible URL for anything else.
-          </p>
-          <ul className="chip-list">
-            {STOCK.map((id) => {
-              const provider = PROVIDERS.find((item) => item.id === id)!;
-              const linked = settings.llms[id].connected;
+          <p>Only bots you add sit on this desk. Add bot opens a full screen for Grok, Codex, Anthropic, or your own.</p>
+          <div className="usage-brains llm-brains">
+            {DESK_STOCK.filter((id) => settings.llms[id].connected).map((id) => {
+              const link = settings.llms[id];
+              const live = vendorEnabled(link);
+              const tint = vendorTint(id, link);
+              const name = vendorLabel(id, link);
               return (
-                <li key={id} className="chip llm-row">
-                  <span>
-                    <strong>
-                      <span className={`dot ${id}`} /> {provider.name}
-                    </strong>
-                    <span className="row-meta">
-                      {linked ? "Using the local login on this machine" : "Not connected"}
-                    </span>
-                  </span>
+                <div
+                  key={id}
+                  className={`usage-brain${llmFocus === id ? " on" : ""}${live ? "" : " off"}`}
+                >
                   <button
-                    className="tiny"
                     type="button"
-                    onClick={() => store.setLlmConnected(id, !linked)}
+                    className={`llm-mark ${id}${live ? " on" : ""}`}
+                    style={live && tint ? { borderColor: tint, color: "var(--text)" } : undefined}
+                    aria-pressed={live}
+                    aria-label={live ? `Disable ${name}` : `Enable ${name}`}
+                    onClick={() => store.setLlmEnabled(id, !live)}
                   >
-                    {linked ? "Disconnect" : "Use local login"}
+                    {live ? "On" : "Off"}
                   </button>
-                </li>
+                  <button
+                    type="button"
+                    className="llm-brain-open"
+                    onClick={() => setLlmFocus((current) => (current === id ? null : id))}
+                  >
+                    <span>{name}</span>
+                    <em>{llmCardHint(id, link)}</em>
+                  </button>
+                </div>
               );
             })}
-          </ul>
-
-          <div className="link-block" style={{ marginTop: 18 }}>
-            <div className="link-head">
-              <span className="section-label" style={{ margin: 0 }}>
-                Custom API
+            {settings.customBots.map((bot) => {
+              const live = customBotEnabled(bot);
+              return (
+                <div
+                  key={bot.id}
+                  className={`usage-brain${llmFocus === `bot:${bot.id}` ? " on" : ""}${live ? "" : " off"}`}
+                >
+                  <button
+                    type="button"
+                    className={`llm-mark${live ? " on" : ""}`}
+                    style={live ? { borderColor: bot.color, color: "var(--text)" } : undefined}
+                    aria-pressed={live}
+                    aria-label={live ? `Disable ${bot.name}` : `Enable ${bot.name}`}
+                    onClick={() => store.setCustomBotEnabled(bot.id, !live)}
+                  >
+                    {live ? "On" : "Off"}
+                  </button>
+                  <button
+                    type="button"
+                    className="llm-brain-open"
+                    onClick={() => setLlmFocus((current) => (current === `bot:${bot.id}` ? null : `bot:${bot.id}`))}
+                  >
+                    <span>{bot.name}</span>
+                    <em>{live ? bot.model : "Disabled"}</em>
+                  </button>
+                </div>
+              );
+            })}
+            <button className="usage-brain add" type="button" onClick={store.openAddBot}>
+              <span className="llm-mark plus" aria-hidden="true">
+                +
               </span>
-              <span className="row-meta">
-                {settings.llms.custom.connected ? "Ready" : "Not set"}
-              </span>
-            </div>
-            <label className="field">
-              <span>Base URL</span>
-              <input
-                value={settings.llms.custom.baseUrl}
-                placeholder="https://api.example.com/v1"
-                onChange={(event) => store.updateCustomLlm({ baseUrl: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Model id</span>
-              <input
-                value={settings.llms.custom.model}
-                placeholder="my-model"
-                onChange={(event) => store.updateCustomLlm({ model: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Context window (tokens)</span>
-              <input
-                type="number"
-                min={1024}
-                step={1024}
-                value={settings.llms.custom.contextWindow}
-                onChange={(event) =>
-                  store.updateCustomLlm({ contextWindow: Number(event.target.value) || 128000 })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>API key</span>
-              <input
-                type="password"
-                value={settings.llms.custom.apiKey}
-                placeholder="Stored only on this computer"
-                autoComplete="off"
-                onChange={(event) => store.updateCustomLlm({ apiKey: event.target.value })}
-              />
-            </label>
+              <span>Add bot</span>
+              <em>Grok, Codex, Anthropic</em>
+            </button>
           </div>
+
+          {llmFocus && !String(llmFocus).startsWith("bot:") && (
+            <StockBotDetail
+              id={llmFocus as Exclude<ProviderId, "custom">}
+              onGone={() => setLlmFocus(null)}
+            />
+          )}
+
+          {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
+            <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
+          )}
         </>
       )}
 
-      {section === "usage" && <UsagePane embedded />}
+      {section === "skills" && <SkillsPane />}
+
+      {section === "usage" && <UsagePane key={usageTick} homeSignal={usageHome} embedded tabs={tabs} />}
+
+      {section === "watch" && <WatchPane />}
     </section>
+  );
+}
+
+function StockBotDetail({
+  id,
+  onGone,
+}: {
+  id: Exclude<ProviderId, "custom">;
+  onGone: () => void;
+}) {
+  const store = useStore();
+  const link = store.settings.llms[id];
+  const live = vendorEnabled(link);
+  const name = vendorLabel(id, link);
+  const tint = vendorTint(id, link);
+  return (
+    <div className="link-block llm-detail bot-edit">
+      <div className="link-head">
+        <strong>{name}</strong>
+        <div className="actions llm-detail-actions">
+          <button
+            className="tiny"
+            type="button"
+            onClick={() =>
+              id === "grok"
+                ? store.refreshGrokLogin()
+                : id === "codex"
+                  ? store.refreshCodexLogin()
+                  : store.refreshClaudeLogin()
+            }
+          >
+            Recheck
+          </button>
+          <button className="tiny" type="button" onClick={() => store.setLlmEnabled(id, link.enabled === false)}>
+            {link.enabled === false ? "Enable" : "Disable"}
+          </button>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
+              store.setLlmConnected(id, false);
+              onGone();
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div className="add-bot-preview" aria-hidden="true">
+        <span
+          className={`llm-mark ${id}${live ? " on" : ""}`}
+          style={live && tint ? { borderColor: tint } : undefined}
+        >
+          {live ? "On" : "Off"}
+        </span>
+        <div>
+          <strong>{name}</strong>
+          <em>{llmCardHint(id, link)}</em>
+        </div>
+      </div>
+
+      <BotForm
+        identityOnly
+        defaultColor={`var(--${id})`}
+        namePlaceholder={PROVIDERS.find((item) => item.id === id)?.name}
+        value={{ name: link.name ?? "", color: tint ?? "" }}
+        onChange={(patch) => store.updateLlmLink(id, patch)}
+      />
+
+      <p className="row-meta">{llmDetailCopy(id, link)}</p>
+      {id === "codex" ? <CodexNativeStatus /> : null}
+      <MassSend vendor={id} />
+    </div>
+  );
+}
+
+function CodexNativeStatus() {
+  const store = useStore();
+  const active = store.sessions.find((session) => session.id === store.activeSessionId);
+  const project = store.projects.find((item) => item.id === active?.projectId);
+  const projectRoot = project?.folders[0]?.path;
+  const [runtime, setRuntime] = useState<import("../../electron/codex-app-server").CodexRuntimeInfo | null>(null);
+  const [threads, setThreads] = useState<import("../../electron/codex-app-server").CodexNativeThread[]>([]);
+  const [capabilities, setCapabilities] = useState<ReturnType<typeof import("../../electron/codex-capabilities").codexCapabilitySummary> | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void Promise.all([
+      window.workhorse?.detectCodexRuntime?.(),
+      window.workhorse?.codexCapabilities?.(projectRoot),
+    ]).then(async ([nextRuntime, nextCapabilities]) => {
+      if (!live) return;
+      setRuntime(nextRuntime ?? null);
+      setCapabilities(nextCapabilities ?? null);
+      if (nextRuntime?.appServer.available && window.workhorse?.listCodexNativeThreads) {
+        const rows = await window.workhorse.listCodexNativeThreads(8).catch(() => []);
+        if (live) setThreads(rows);
+      }
+    });
+    return () => { live = false; };
+  }, [projectRoot]);
+
+  const runtimeLabel = !runtime
+    ? "Checking Codex runtime…"
+    : runtime.preferred === "app-server"
+      ? "App Server · native history and events"
+      : runtime.preferred === "acp"
+        ? "ACP fallback · prompt transport only"
+        : "Codex runtime unavailable";
+  return (
+    <div className="codex-native-status">
+      <div className="link-head">
+        <span className="section-label">Native Codex</span>
+        <span className="row-meta">{runtimeLabel}</span>
+      </div>
+      <div className="codex-capability-grid">
+        <span><strong>Threads</strong>{runtime?.appServer.available ? `${threads.length} recent loaded` : "Needs App Server"}</span>
+        <span><strong>Subagents</strong>{threads.some((thread) => thread.parentThreadId) ? "Child threads found" : capabilities?.nativeSubagents.message ?? "Checking…"}</span>
+        <span><strong>Hooks</strong>{capabilities ? `${capabilities.hooks.length} source${capabilities.hooks.length === 1 ? "" : "s"}` : "Checking…"}</span>
+        <span><strong>Cloud</strong>{capabilities?.cloudEnvironments.available ? "Available" : "Not exposed locally"}</span>
+      </div>
+      {threads.length > 0 ? (
+        <ul className="codex-thread-list">
+          {threads.slice(0, 5).map((thread) => (
+            <li key={thread.id}>
+              <strong>{thread.name || thread.id}</strong>
+              <span>{thread.parentThreadId ? "Subagent" : thread.status || "Thread"}{thread.cwd ? ` · ${thread.cwd}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {capabilities?.hooks.length ? (
+        <p className="row-meta" title={capabilities.hooks.map((hook) => hook.path).join("\n")}>
+          Hooks: {capabilities.hooks.map((hook) => `${hook.scope} ${hook.kind}`).join(" · ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function MassSend({
+  vendor,
+  customBotId,
+  botName,
+}: {
+  vendor: ProviderId;
+  customBotId?: string;
+  botName?: string;
+}) {
+  const store = useStore();
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<DeskExportKind | null>(null);
+
+  const send = (kind: DeskExportKind) => {
+    setBusy(kind);
+    setNote("");
+    void store.massSendVendor(vendor, kind, { customBotId, botName }).then((result) => {
+      setBusy(null);
+      if (result.canceled) {
+        setNote("Canceled.");
+        return;
+      }
+      if (!result.ok) {
+        setNote(result.message || "Could not send.");
+        return;
+      }
+      if (kind === "skills") {
+        setNote(`${result.skills ?? 0} skill${result.skills === 1 ? "" : "s"} sent to Desktop / Workhorse exports.`);
+      } else {
+        setNote(`${result.chats ?? 0} chat${result.chats === 1 ? "" : "s"} sent to Desktop / Workhorse exports.`);
+      }
+    });
+  };
+
+  return (
+    <div className="mass-send">
+      <div className="section-label">Mass send</div>
+      <p className="row-meta">
+        {vendor === "custom"
+          ? "One click sends this bot’s chats and the desk skill catalog to Desktop / Workhorse exports."
+          : "One click sends this vendor’s skills or chats to Desktop / Workhorse exports."}
+      </p>
+      <div className="actions">
+        <button className="tiny" type="button" disabled={busy !== null} onClick={() => send("skills")}>
+          {busy === "skills" ? "Sending…" : "Skills"}
+        </button>
+        <button className="tiny" type="button" disabled={busy !== null} onClick={() => send("chats")}>
+          {busy === "chats" ? "Sending…" : "Projects / chats"}
+        </button>
+      </div>
+      {note ? <p className="row-meta">{note}</p> : null}
+    </div>
+  );
+}
+
+function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void }) {
+  const store = useStore();
+  const bot = store.settings.customBots.find((item) => item.id === botId);
+  const [probeNote, setProbeNote] = useState("");
+  const [probing, setProbing] = useState(false);
+  if (!bot) return null;
+  const live = customBotEnabled(bot);
+  return (
+    <div className="link-block llm-detail bot-edit">
+      <div className="link-head">
+        <strong>{bot.name.trim() || "Untitled"}</strong>
+        <div className="actions llm-detail-actions">
+          <button className="tiny" type="button" onClick={() => store.setCustomBotEnabled(bot.id, !live)}>
+            {live ? "Disable" : "Enable"}
+          </button>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
+              store.deleteCustomBot(bot.id);
+              onGone();
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <div className="add-bot-preview" aria-hidden="true">
+        <span
+          className={`llm-mark${live ? " on" : ""}`}
+          style={live ? { borderColor: bot.color || BOT_COLORS[0].value } : undefined}
+        >
+          {live ? "On" : "Off"}
+        </span>
+        <div>
+          <strong>{bot.name.trim() || "Untitled"}</strong>
+          <em>{bot.model.trim() || "No model yet"}</em>
+        </div>
+      </div>
+
+      <BotForm
+        value={{
+          name: bot.name,
+          color: bot.color || BOT_COLORS[0].value,
+          model: bot.model,
+          baseUrl: bot.baseUrl,
+          apiKey: bot.apiKey,
+          contextWindow: bot.contextWindow,
+        }}
+        onChange={(patch) => {
+          setProbeNote("");
+          store.updateCustomBot(bot.id, patch);
+        }}
+      />
+
+      <p className="row-meta">
+        {probing
+          ? "Testing API…"
+          : probeNote ||
+            `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
+      </p>
+      <div className="actions add-bot-actions">
+        <button
+          className="tiny"
+          type="button"
+          disabled={probing}
+          onClick={() => {
+            setProbing(true);
+            void store.probeCustomBot(bot.id).then((result) => {
+              setProbeNote(result.message);
+              setProbing(false);
+            });
+          }}
+        >
+          Test API
+        </button>
+      </div>
+      <MassSend vendor="custom" customBotId={bot.id} botName={bot.name} />
+    </div>
   );
 }

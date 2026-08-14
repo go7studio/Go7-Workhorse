@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - id: ver
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release and installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.ver.outputs.tag }}"
+          $installer = Get-Item "release/Workhorse-Setup-*.exe"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer.FullName --clobber
+          } else {
+            gh release create $tag $installer.FullName --target "${{ github.sha }}" --title "Go7 Workhorse ${{ steps.ver.outputs.version }}" --generate-notes
+          }

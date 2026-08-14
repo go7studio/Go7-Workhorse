@@ -1,25 +1,61 @@
-import type { EffortLevel, ProviderId } from "./types";
+import type { EffortLevel, ProviderId, SandboxProfile } from "./types";
+
+export type ReasoningLevel = {
+  id: EffortLevel;
+  label: string;
+  hint?: string;
+};
 
 export type ModelInfo = {
   id: string;
   name: string;
   effort: boolean;
   contextWindow: number;
+  reasoningLevels?: ReasoningLevel[];
 };
 
 export type ModelChoice = {
   provider: ProviderId;
   model: string;
   effort: EffortLevel | null;
+  sandbox: SandboxProfile;
+  mode?: import("./types").PermissionMode;
+  customBotId?: string;
 };
 
-export const EFFORTS: { id: EffortLevel; label: string }[] = [
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "Extra" },
+export const EFFORTS: ReasoningLevel[] = [
+  { id: "low", label: "Low", hint: "Faster replies. Lighter reasoning." },
+  { id: "medium", label: "Medium", hint: "Balanced speed and depth." },
+  { id: "high", label: "High", hint: "More time on hard steps." },
+  { id: "xhigh", label: "Extra", hint: "Deepest Grok reasoning." },
 ];
 
+export const CLAUDE_EFFORTS: ReasoningLevel[] = [
+  { id: "low", label: "Low", hint: "Faster replies. Lighter reasoning." },
+  { id: "medium", label: "Medium", hint: "Balanced speed and depth." },
+  { id: "high", label: "High", hint: "More time on hard steps." },
+  { id: "xhigh", label: "Extra", hint: "Extra high reasoning for long agent work." },
+  { id: "max", label: "Max", hint: "Maximum reasoning depth." },
+];
+
+export const MINIMAX_EFFORTS: ReasoningLevel[] = [
+  { id: "off", label: "Off", hint: "Answer directly. No thinking blocks." },
+  { id: "minimal", label: "Minimal", hint: "A short think, then answer." },
+  { id: "low", label: "Low", hint: "Light reasoning for simple steps." },
+  { id: "medium", label: "Medium", hint: "Balanced MiniMax thinking." },
+  { id: "high", label: "High", hint: "Deep thinking for hard work." },
+];
+
+export const CODEX_EFFORTS: ReasoningLevel[] = [
+  { id: "low", label: "Low", hint: "Fast responses with lighter reasoning." },
+  { id: "medium", label: "Medium", hint: "Balances speed and reasoning depth for everyday tasks." },
+  { id: "high", label: "High", hint: "Greater reasoning depth for complex problems." },
+  { id: "xhigh", label: "Extra", hint: "Extra high reasoning depth for complex problems." },
+  { id: "max", label: "Max", hint: "Maximum reasoning depth for the hardest problems." },
+  { id: "ultra", label: "Ultra", hint: "Maximum reasoning with automatic task delegation." },
+];
+
+/** Last-resort list when a vendor cache is missing. Live lists overlay this. */
 export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   grok: [
     { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 },
@@ -27,46 +63,175 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "grok-build", name: "Grok Build", effort: true, contextWindow: 500_000 },
   ],
   claude: [
-    { id: "claude-opus", name: "Opus", effort: true, contextWindow: 200_000 },
-    { id: "claude-sonnet", name: "Sonnet", effort: true, contextWindow: 200_000 },
-    { id: "claude-haiku", name: "Haiku", effort: false, contextWindow: 200_000 },
+    { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-haiku-4-5", name: "Haiku 4.5", effort: true, contextWindow: 200_000 },
+    { id: "claude-opus-4-8", name: "Opus 4.8", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-sonnet-4-6", name: "Sonnet 4.6", effort: true, contextWindow: 1_000_000 },
   ],
   codex: [
-    { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 200_000 },
-    { id: "codex", name: "Codex", effort: true, contextWindow: 200_000 },
+    { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-5.5", name: "GPT-5.5", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-5.4-mini", name: "GPT-5.4-Mini", effort: true, contextWindow: 400_000 },
   ],
-  custom: [{ id: "custom", name: "Custom", effort: false, contextWindow: 128_000 }],
+  custom: [
+    {
+      id: "MiniMax-M3",
+      name: "MiniMax M3",
+      effort: true,
+      contextWindow: 1_000_000,
+      reasoningLevels: MINIMAX_EFFORTS,
+    },
+    {
+      id: "MiniMax-M2.7",
+      name: "MiniMax M2.7",
+      effort: true,
+      contextWindow: 204_800,
+      reasoningLevels: MINIMAX_EFFORTS,
+    },
+  ],
 };
+
+let liveCatalog: Partial<Record<ProviderId, ModelInfo[]>> = {};
+
+export function applyVendorCatalog(lists: Partial<Record<ProviderId, ModelInfo[]>>): void {
+  const next: Partial<Record<ProviderId, ModelInfo[]>> = {};
+  for (const provider of Object.keys(MODEL_CATALOG) as ProviderId[]) {
+    const rows = lists[provider];
+    if (Array.isArray(rows) && rows.length > 0) next[provider] = rows;
+  }
+  liveCatalog = next;
+}
+
+export function resetVendorCatalog(): void {
+  liveCatalog = {};
+}
+
+export function modelsFor(provider: ProviderId): ModelInfo[] {
+  const live = liveCatalog[provider];
+  const rows = live?.length ? live : MODEL_CATALOG[provider];
+  return rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+}
 
 export const DEFAULT_CHOICE: ModelChoice = {
   provider: "grok",
   model: "grok-4.6",
   effort: "medium",
+  sandbox: "off",
+  mode: "ask",
 };
 
-export function modelsFor(provider: ProviderId): ModelInfo[] {
-  return MODEL_CATALOG[provider];
-}
-
 export function findModel(provider: ProviderId, modelId: string): ModelInfo | undefined {
-  return MODEL_CATALOG[provider].find((item) => item.id === modelId);
+  return (
+    modelsFor(provider).find((item) => item.id === modelId) ??
+    MODEL_CATALOG[provider].find((item) => item.id === modelId)
+  );
 }
 
 export function modelName(provider: ProviderId, modelId: string): string {
   return findModel(provider, modelId)?.name ?? modelId;
 }
 
+/** Color/vendor family from the model slug, not which desk bot recorded the spend. */
+export function usageToneForModel(model: string, fallback: ProviderId = "custom"): ProviderId {
+  const id = model.trim().toLowerCase();
+  if (!id) return fallback;
+  if (
+    id.includes("claude") ||
+    id.includes("anthropic") ||
+    id.includes("fable") ||
+    id.includes("sonnet") ||
+    id.includes("opus") ||
+    id.includes("haiku")
+  ) {
+    return "claude";
+  }
+  if (id.includes("grok")) return "grok";
+  if (id.includes("gpt") || id.includes("codex") || /(^|[^a-z])o[1-4]([^a-z]|$)/.test(id)) return "codex";
+  return fallback;
+}
+
+export function usageModelKey(model: string): string {
+  return model.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+export function shortModelName(provider: ProviderId, modelIdOrName: string): string {
+  const found =
+    findModel(provider, modelIdOrName) ??
+    modelsFor(provider).find((model) => model.name === modelIdOrName) ??
+    MODEL_CATALOG[provider].find((model) => model.name === modelIdOrName);
+  const full = found?.name ?? modelIdOrName;
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", custom: "Custom" }[provider];
+  if (vendor && full.toLowerCase().startsWith(vendor.toLowerCase())) {
+    return full.slice(vendor.length).trim() || full;
+  }
+  return full;
+}
+
 export function defaultModel(provider: ProviderId): ModelInfo {
-  return MODEL_CATALOG[provider][0];
+  return modelsFor(provider)[0] ?? MODEL_CATALOG[provider][0];
+}
+
+/** 0–1 along the thinking slider. The last available level sits at the end of the bar. */
+export function effortStopPos(index: number, count: number): number {
+  if (count <= 1) return 1;
+  return Math.min(1, Math.max(0, index / (count - 1)));
+}
+
+export function effortStopAt(pos: number, count: number): number {
+  if (count <= 1) return 0;
+  return Math.min(count - 1, Math.max(0, Math.round(pos * (count - 1))));
+}
+
+export function effortsFor(provider: ProviderId, modelId?: string): ReasoningLevel[] {
+  const model = modelId ? findModel(provider, modelId) : undefined;
+  if (model?.reasoningLevels?.length) return model.reasoningLevels;
+  const fromApi = thinkingLevelsForModel(modelId ?? model?.id);
+  if (fromApi) return fromApi;
+  if (model && !model.effort) return [];
+  if (provider === "codex") return CODEX_EFFORTS;
+  if (provider === "claude") return CLAUDE_EFFORTS;
+  return model?.effort === false ? [] : EFFORTS;
+}
+
+/** Official thinking controls for a known API model. Empty means the model has no user-facing levels. */
+export function thinkingLevelsForModel(modelId?: string): ReasoningLevel[] | undefined {
+  if (!modelId) return undefined;
+  const slug = modelId.trim().toLowerCase();
+  if (!slug.includes("minimax")) return undefined;
+  return MINIMAX_EFFORTS;
 }
 
 export function withEffort(provider: ProviderId, modelId: string, effort: EffortLevel | null): EffortLevel | null {
-  return findModel(provider, modelId)?.effort ? (effort ?? "medium") : null;
+  const levels = effortsFor(provider, modelId);
+  if (levels.length === 0) return null;
+  if (effort && levels.some((item) => item.id === effort)) return effort;
+  return (
+    levels.find((item) => item.id === "adaptive")?.id ??
+    levels.find((item) => item.id === "medium")?.id ??
+    levels[Math.floor(levels.length / 2)].id
+  );
 }
 
 export function parseEffort(value: string): EffortLevel | null {
   if (value === "extra") return "xhigh";
-  if (value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
+  if (
+    value === "off" ||
+    value === "adaptive" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh" ||
+    value === "max" ||
+    value === "ultra"
+  ) {
+    return value;
+  }
   return null;
 }
 
@@ -74,12 +239,16 @@ export function findChoice(query: string): ModelChoice | null {
   const q = query.trim().toLowerCase();
   if (!q) return null;
   for (const provider of Object.keys(MODEL_CATALOG) as ProviderId[]) {
-    for (const model of MODEL_CATALOG[provider]) {
+    const seen = new Set<string>();
+    for (const model of [...modelsFor(provider), ...MODEL_CATALOG[provider]]) {
+      if (seen.has(model.id)) continue;
+      seen.add(model.id);
       if (model.id === q || model.name.toLowerCase() === q) {
         return {
           provider,
           model: model.id,
           effort: model.effort ? "medium" : null,
+          sandbox: "off",
         };
       }
     }
@@ -89,7 +258,58 @@ export function findChoice(query: string): ModelChoice | null {
 
 export function effortLabel(effort: EffortLevel | null): string {
   if (!effort) return "";
-  return EFFORTS.find((item) => item.id === effort)?.label ?? effort;
+  return (
+    MINIMAX_EFFORTS.find((item) => item.id === effort)?.label ??
+    EFFORTS.find((item) => item.id === effort)?.label ??
+    CODEX_EFFORTS.find((item) => item.id === effort)?.label ??
+    CLAUDE_EFFORTS.find((item) => item.id === effort)?.label ??
+    effort
+  );
+}
+
+/** Official Claude API windows. Live caches overlay but cannot shrink below these. */
+const CLAUDE_MODEL_WINDOWS: Record<string, number> = {
+  "claude-fable-5": 1_000_000,
+  "claude-mythos-5": 1_000_000,
+  "claude-opus-5": 1_000_000,
+  "claude-sonnet-5": 1_000_000,
+  "claude-opus-4-8": 1_000_000,
+  "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
+  "claude-haiku-4-5-20251001": 200_000,
+  "claude-sonnet-4-5": 200_000,
+  "claude-sonnet-4-5-20250929": 200_000,
+  "claude-opus-4-5": 200_000,
+  "claude-opus-4-5-20251101": 200_000,
+  "claude-opus": 1_000_000,
+  "claude-sonnet": 1_000_000,
+  "claude-haiku": 200_000,
+};
+
+export function advertisedClaudeWindow(modelId: string, reported?: number): number {
+  const slug = modelId.trim().toLowerCase().replace(/\[1m\]$/i, "");
+  const known = CLAUDE_MODEL_WINDOWS[slug] ?? 0;
+  const seen = typeof reported === "number" && Number.isFinite(reported) && reported > 0 ? Math.round(reported) : 0;
+  return Math.max(known, seen) || 200_000;
+}
+
+/** Official model windows. Codex CLI caches a smaller session cap (272k); do not use that as Sol's size. */
+const CODEX_MODEL_WINDOWS: Record<string, number> = {
+  "gpt-5.6-sol": 1_050_000,
+  "gpt-5.6-terra": 1_050_000,
+  "gpt-5.6-luna": 1_050_000,
+  "gpt-5.5": 1_050_000,
+  "gpt-5.4": 1_050_000,
+  "gpt-5.4-mini": 400_000,
+};
+
+export function advertisedCodexWindow(modelId: string, reported?: number): number {
+  const slug = modelId.trim().toLowerCase().replace(/-wm$/, "");
+  const known = CODEX_MODEL_WINDOWS[slug] ?? 0;
+  const seen = typeof reported === "number" && Number.isFinite(reported) && reported > 0 ? Math.round(reported) : 0;
+  return Math.max(known, seen) || 272_000;
 }
 
 export function contextWindowFor(
@@ -98,6 +318,7 @@ export function contextWindowFor(
   customWindow?: number,
 ): number {
   if (provider === "custom" && customWindow && customWindow > 0) return customWindow;
+  if (provider === "claude") return advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow);
   return findModel(provider, modelId)?.contextWindow ?? 128_000;
 }
 

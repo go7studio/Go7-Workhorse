@@ -1,9 +1,67 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { GrokSessionHost, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
+import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
+import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
+import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
+import { detectGrokLogin } from "./grok-login";
+import { detectCodexLogin } from "./codex-login";
+import { detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
+import { codexCapabilitySummary } from "./codex-capabilities";
+import { detectClaudeLogin } from "./claude-login";
+import { detectCustomLogin } from "./custom-login";
+import { probeCustomHttp } from "./custom-http";
+import { listVendorModels } from "./vendor-models";
+import { fetchGrokPlanUsage } from "./grok-plan";
+import { fetchCodexPlanUsage } from "./codex-plan";
+import { fetchClaudePlanUsage } from "./claude-plan";
+import { fetchCustomPlanUsage } from "./custom-plan";
+import type { PermissionAnswer } from "../src/lib/permissions";
+import { safeExternalUrl } from "../src/lib/open-external";
+import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
+import { watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
+import { existingPeerReply } from "../src/lib/session-bridge";
+import { imageMime } from "../src/lib/images";
+import { listDropFiles } from "./drop-files";
+import { grokSessionDirs, mediaFileCandidates } from "./media-src";
+import { findSourceFile, listGitChanges, readEditStats, readFileDiff } from "./project-diff";
+import { TerminalHost, type TerminalEvent } from "./terminal-host";
+import {
+  deleteDeskSkill,
+  exportChatToFolder,
+  exportVendorBundle,
+  importSkillFromPath,
+  listDeskSkills,
+  pushSkillToVendor,
+  readDeskSkill,
+} from "./desk-export-host";
+import { showDesktopNotice } from "./notify";
+import { applyAppUpdate, checkAppUpdate } from "./app-update";
+import { ensureDeskRipgrep } from "./desk-path";
+import { ensureManagedWorktree, type EnsureWorktreeInput } from "./worktree-host";
+import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
+import { DurableJobEngine } from "./job-engine";
+import { buildSupportReport } from "./diagnostics";
+import { APP_VERSION } from "../src/lib/app-info";
+import { readVersionedState, writeVersionedState } from "./state-persistence";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Stable store folder. productName changes must not orphan chats. */
+export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
+
+function pinUserData() {
+  const dest = path.join(app.getPath("appData"), WORKHORSE_USER_DATA_DIR);
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    app.setPath("userData", dest);
+  } catch {
+    /* keep Electron default */
+  }
+}
+pinUserData();
 
 function appIconPath() {
   const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
@@ -16,17 +74,119 @@ function statePath() {
   return path.join(app.getPath("userData"), "workhorse-state.json");
 }
 
+let credentials: CredentialStore | null = null;
+let jobEngine: DurableJobEngine | null = null;
+function credentialStore(): CredentialStore {
+  credentials ??= new CredentialStore(path.join(app.getPath("userData"), "credentials.json"), safeStorage);
+  return credentials;
+}
+
 function readState(): Persistable {
+  const result = readVersionedState(statePath());
+  const { state } = result;
   try {
-    return JSON.parse(fs.readFileSync(statePath(), "utf8")) as Persistable;
+    const protectedState = protectStateCredentials(state, credentialStore());
+    if (result.recovered || JSON.stringify(protectedState) !== JSON.stringify(state)) {
+      writeVersionedState(statePath(), protectedState, (snapshot) => protectStateCredentials(snapshot, credentialStore()));
+    }
   } catch {
-    return {};
+    // The credential vault may be unavailable while the OS is locked. Keep the
+    // recovered state in memory, but never persist a plaintext replacement.
+  }
+  return hydrateStateCredentials(state, credentialStore());
+}
+
+function fileToDataUrl(file: string): string | null {
+  try {
+    const mime = imageMime({ name: file });
+    if (!mime || !fs.existsSync(file)) return null;
+    const buf = fs.readFileSync(file);
+    if (buf.length <= 0 || buf.length > 12 * 1024 * 1024) return null;
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
   }
 }
 
+function newestImageIn(root: string, since: number, maxDepth = 5): { file: string; at: number } | null {
+  if (!root || !fs.existsSync(root)) return null;
+  let best: { file: string; at: number } | null = null;
+  const visit = (dir: string, depth: number) => {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (name.startsWith(".") && name !== ".grok") continue;
+      const full = path.join(dir, name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        if (depth < maxDepth) visit(full, depth + 1);
+        continue;
+      }
+      if (!imageMime({ name }) || stat.mtimeMs < since) continue;
+      if (!best || stat.mtimeMs > best.at) best = { file: full, at: stat.mtimeMs };
+    }
+  };
+  visit(root, 0);
+  return best;
+}
+
+function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): string | null {
+  const raw = String(href ?? "").trim();
+  if (/^data:image\//i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
+  const opts = { cwd, vendorSessionId };
+  for (const candidate of mediaFileCandidates(raw, opts)) {
+    const local = fileToDataUrl(candidate);
+    if (local) return local;
+  }
+  const since = Date.now() - 20 * 60 * 1000;
+  let newest: { file: string; at: number } | null = null;
+  for (const root of grokSessionDirs(opts)) {
+    const found = newestImageIn(root, since);
+    if (found && (!newest || found.at > newest.at)) newest = found;
+  }
+  return newest ? fileToDataUrl(newest.file) : null;
+}
+
 function writeState(state: Persistable) {
-  fs.mkdirSync(path.dirname(statePath()), { recursive: true });
-  fs.writeFileSync(statePath(), JSON.stringify(state, null, 2), "utf8");
+  try {
+    fs.mkdirSync(path.dirname(statePath()), { recursive: true });
+    const file = statePath();
+    const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
+    const usage = Array.isArray(state.usage) ? state.usage.length : 0;
+    // Never clobber a richer file with an empty snapshot.
+    if (sessions === 0 && usage === 0 && fs.existsSync(file)) {
+      try {
+        const previous = JSON.parse(fs.readFileSync(file, "utf8")) as Persistable;
+        const prevSessions = Array.isArray(previous.sessions) ? previous.sessions.length : 0;
+        const prevUsage = Array.isArray(previous.usage) ? previous.usage.length : 0;
+        if (prevSessions > 0 || prevUsage > 0) {
+          console.error("workhorse refused to overwrite saved chats with an empty state");
+          return;
+        }
+      } catch {
+        // existing file unreadable — write through
+      }
+    }
+    writeVersionedState(file, state, (snapshot) => protectStateCredentials(snapshot, credentialStore()));
+    jobEngine?.sync(state.sessions);
+  } catch (error) {
+    console.error("workhorse state save failed", error);
+  }
+}
+
+function isDeskAppUrl(url: string): boolean {
+  const dev = process.env.VITE_DEV_SERVER_URL?.replace(/\/$/, "");
+  if (dev && (url === dev || url.startsWith(`${dev}/`))) return true;
+  return url.startsWith("file:");
 }
 
 function createWindow() {
@@ -39,8 +199,9 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: dark ? "#1d1d1f" : "#f5f5f7",
     icon: appIconPath(),
-    title: "Go7 Workhorse",
+    title: "Workhorse",
     show: false,
+    frame: false,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     titleBarOverlay: {
@@ -56,19 +217,160 @@ function createWindow() {
     },
   });
 
-  win.once("ready-to-show", () => win.show());
+  win.setMenu(null);
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const external = safeExternalUrl(url);
+    if (external) void shell.openExternal(external);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isDeskAppUrl(url)) return;
+    event.preventDefault();
+    const external = safeExternalUrl(url);
+    if (external) void shell.openExternal(external);
+  });
+  win.once("ready-to-show", () => {
+    win.show();
+  });
 
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
+  return win;
 }
+
+const grokHost = new GrokSessionHost();
+const codexHost = new CodexSessionHost();
+const terminalHost = new TerminalHost();
+const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
+const peerWaiterBySession = new Map<string, string>();
+
+function settlePeerAsk(sessionId: string, result: PeerAskResult): boolean {
+  const id = peerWaiterBySession.get(sessionId);
+  if (!id) return false;
+  const waiter = peerWaiters.get(id);
+  peerWaiterBySession.delete(sessionId);
+  peerWaiters.delete(id);
+  waiter?.(result);
+  return Boolean(waiter);
+}
+
+process.on("uncaughtException", (error) => {
+  console.error("workhorse uncaughtException", error);
+});
+process.on("unhandledRejection", (error) => {
+  console.error("workhorse unhandledRejection", error);
+});
 
 app.whenReady().then(() => {
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }
+  try {
+    ensureDeskRipgrep();
+  } catch {
+    /* rg copy is best-effort */
+  }
+
+  process.env.WORKHORSE_STATE_PATH = statePath();
+  jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.webContents.isDestroyed()) win.webContents.send("jobs:due", events);
+    }
+  });
+  jobEngine.start();
+  const peerBusy = new Set<string>();
+  const handlePeerAsk = async (ask: PeerAsk) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
+    const bots = ask.mode === "bots";
+    const spawn = !bots && ask.mode === "spawn";
+    if (bots && ask.action === "create-project") {
+      const notifyId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      win.webContents.send("grok:peer-ask", {
+        id: notifyId,
+        ...ask,
+        mode: "bots",
+      });
+      return { text: JSON.stringify({ ok: true, notified: true }) };
+    }
+    if (!bots && !spawn && ask.fromSessionId && ask.fromSessionId === ask.toSessionId) {
+      return { error: "a chat cannot ask itself" };
+    }
+    if (!bots && !spawn) {
+      const already = existingPeerReply(readState().sessions, ask.toSessionId, ask.message);
+      if (already) return { text: already };
+      if (peerBusy.has(ask.toSessionId) || (ask.fromSessionId && peerBusy.has(ask.fromSessionId))) {
+        return { error: "that chat is already answering another Workhorse chat" };
+      }
+      peerBusy.add(ask.toSessionId);
+      if (ask.fromSessionId) peerBusy.add(ask.fromSessionId);
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const childSessionId = spawn ? `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` : "";
+    try {
+      return await new Promise<PeerAskResult>((resolve) => {
+        const timer = setTimeout(() => {
+          peerWaiters.delete(id);
+          if (spawn && childSessionId) peerWaiterBySession.delete(childSessionId);
+          if (!bots && !spawn) peerWaiterBySession.delete(ask.toSessionId);
+          if (spawn && childSessionId && !win.webContents.isDestroyed()) {
+            win.webContents.send("grok:peer-cancel", { childSessionId, reason: "timed-out" });
+          }
+          resolve({
+            error: bots
+              ? "Workhorse did not finish setting up that bot in time"
+              : spawn
+                ? "the subagent did not answer in time"
+                : "the other chat did not answer in time",
+          });
+        }, ask.action === "request-permission" || ask.action === "request-vendor"
+          ? 10 * 60 * 1000
+          : bots
+            ? 45_000
+            : spawn && typeof ask.timeoutSeconds === "number"
+              ? Math.max(30, Math.min(3_600, ask.timeoutSeconds)) * 1_000
+              : 10 * 60 * 1000);
+        peerWaiters.set(id, (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        });
+        if (spawn && childSessionId) peerWaiterBySession.set(childSessionId, id);
+        if (!bots && !spawn && ask.toSessionId) peerWaiterBySession.set(ask.toSessionId, id);
+        win.webContents.send("grok:peer-ask", {
+          id,
+          ...ask,
+          mode: bots ? "bots" : spawn ? "spawn" : ask.mode ?? "ask",
+          childSessionId: childSessionId || undefined,
+        });
+      });
+    } finally {
+      if (!bots && !spawn) {
+        peerBusy.delete(ask.toSessionId);
+        if (ask.fromSessionId) peerBusy.delete(ask.fromSessionId);
+      }
+    }
+  };
+  const bridge = startWorkhorseBridge(handlePeerAsk);
+  const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
+  watchPeerInbox(record.inbox, handlePeerAsk);
+  process.env.WORKHORSE_BRIDGE_URL = bridge.url;
+  process.env.WORKHORSE_BRIDGE_TOKEN = bridge.token;
+  process.env.WORKHORSE_MCP_COMMAND = process.execPath;
+  process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");
+
+  ipcMain.handle("grok:peer-result", (_event, payload: { id: string } & PeerAskResult) => {
+    const waiter = peerWaiters.get(payload.id);
+    if (!waiter) return false;
+    peerWaiters.delete(payload.id);
+    for (const [sessionId, waiterId] of peerWaiterBySession) {
+      if (waiterId === payload.id) peerWaiterBySession.delete(sessionId);
+    }
+    waiter("error" in payload && payload.error ? { error: payload.error } : { text: "text" in payload ? payload.text : "" });
+    return true;
+  });
 
   ipcMain.handle("folder:pick", async () => {
     const result = await dialog.showOpenDialog({
@@ -80,6 +382,91 @@ app.whenReady().then(() => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle("folder:pick-export", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Send here",
+      buttonLabel: "Send",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle("desk:list-skills", (_event, projectFolders: unknown) => {
+    const folders = Array.isArray(projectFolders)
+      ? projectFolders.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    return listDeskSkills(folders);
+  });
+
+  ipcMain.handle("desk:export-vendor", (_event, payload: unknown) => {
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const kind = record.kind === "chats" ? "chats" : record.kind === "skills" ? "skills" : null;
+    if (!kind || typeof record.provider !== "string") {
+      return { ok: false, message: "Mass send needs a vendor and a kind." };
+    }
+    return exportVendorBundle({
+      provider: record.provider,
+      dest: typeof record.dest === "string" ? record.dest : undefined,
+      kind,
+      sessions: Array.isArray(record.sessions) ? (record.sessions as never) : [],
+      projects: Array.isArray(record.projects) ? (record.projects as never) : [],
+      projectFolders: Array.isArray(record.projectFolders)
+        ? record.projectFolders.filter((item): item is string => typeof item === "string")
+        : [],
+      customBotId: typeof record.customBotId === "string" ? record.customBotId : undefined,
+      botName: typeof record.botName === "string" ? record.botName : undefined,
+    });
+  });
+
+  ipcMain.handle("desk:export-chat", (_event, payload: unknown) => {
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    if (!record.session || typeof record.session !== "object") {
+      return { ok: false, message: "Export needs a chat." };
+    }
+    return exportChatToFolder({
+      dest: typeof record.dest === "string" ? record.dest : undefined,
+      session: record.session as never,
+      projectName: typeof record.projectName === "string" ? record.projectName : undefined,
+    });
+  });
+
+  ipcMain.handle("desk:import-skill", (_event, from: unknown) => {
+    if (typeof from !== "string" || !from.trim()) return { ok: false, message: "Pick a skill folder." };
+    return importSkillFromPath(from);
+  });
+
+  ipcMain.handle("desk:read-skill", (_event, query: unknown, projectFolders: unknown) => {
+    if (typeof query !== "string" || !query.trim()) return { ok: false, message: "Skill name is required." };
+    const folders = Array.isArray(projectFolders)
+      ? projectFolders.filter((item): item is string => typeof item === "string")
+      : [];
+    try {
+      return { ok: true, skill: readDeskSkill(query, folders) };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle("desk:delete-skill", (_event, dir: unknown) => {
+    if (typeof dir !== "string" || !dir.trim()) return { ok: false, message: "Skill folder is required." };
+    return deleteDeskSkill(dir);
+  });
+
+  ipcMain.handle("desk:push-skill", (_event, payload: unknown) => {
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    if (typeof record.dir !== "string" || (record.target !== "grok" && record.target !== "codex" && record.target !== "claude")) {
+      return { ok: false, message: "Push needs a skill folder and Grok, Codex, or Claude." };
+    }
+    return pushSkillToVendor({
+      dir: record.dir,
+      name: typeof record.name === "string" ? record.name : undefined,
+      target: record.target,
+    });
+  });
+
+  ipcMain.handle("drop:list", (_event, paths: unknown) => listDropFiles(paths));
+
   ipcMain.handle("file:pick", async () => {
     const result = await dialog.showOpenDialog({
       title: "Link a file",
@@ -90,24 +477,332 @@ app.whenReady().then(() => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle("media:src", async (_event, href: string, cwd?: string, vendorSessionId?: string) =>
+    readMediaSrc(href, cwd, vendorSessionId),
+  );
+
   ipcMain.handle("project:reveal", async (_event, folder: string) => {
     if (typeof folder === "string" && fs.existsSync(folder)) {
       shell.openPath(folder);
     }
   });
 
+  ipcMain.handle("shell:open", async (_event, href: unknown) => {
+    const url = typeof href === "string" ? safeExternalUrl(href) : null;
+    if (!url) return false;
+    await shell.openExternal(url);
+    return true;
+  });
+
+  ipcMain.handle("project:file-diff", (_event, filePath: string, roots: string[] = []) => {
+    if (typeof filePath !== "string" || !filePath.trim()) return null;
+    return readFileDiff(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : []);
+  });
+
+  ipcMain.handle("project:git-changes", (_event, cwd: unknown) =>
+    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : process.cwd()),
+  );
+
+  ipcMain.handle("terminal:start", (event, raw: { sessionId?: string; cwd?: string }) =>
+    terminalHost.start(
+      typeof raw?.sessionId === "string" ? raw.sessionId : "",
+      resolveSessionCwd(typeof raw?.cwd === "string" ? raw.cwd : ""),
+      (payload: TerminalEvent) => {
+        if (!event.sender.isDestroyed()) event.sender.send("terminal:event", payload);
+      },
+    ),
+  );
+  ipcMain.handle("terminal:write", (_event, raw: { sessionId?: string; text?: string }) =>
+    terminalHost.write(
+      typeof raw?.sessionId === "string" ? raw.sessionId : "",
+      typeof raw?.text === "string" ? raw.text : "",
+    ),
+  );
+  ipcMain.handle("terminal:stop", (_event, sessionId: unknown) => {
+    if (typeof sessionId === "string") terminalHost.stop(sessionId);
+  });
+
+  ipcMain.handle("project:resolve-file", (_event, filePath: unknown, roots: unknown) => {
+    if (typeof filePath !== "string" || !filePath.trim()) return null;
+    const folders = Array.isArray(roots) ? roots.filter((item): item is string => typeof item === "string") : [];
+    return findSourceFile(filePath, folders);
+  });
+
+  ipcMain.handle("project:edit-stats", (_event, paths: string[] = [], roots: string[] = []) => {
+    const files = Array.isArray(paths) ? paths.filter((item) => typeof item === "string") : [];
+    const folders = Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [];
+    return readEditStats(files, folders);
+  });
+
+  ipcMain.handle("project:ensure-worktree", (_event, raw: unknown) => {
+    if (!raw || typeof raw !== "object") {
+      return { ok: false, message: "Invalid worktree request." };
+    }
+    const record = raw as Partial<EnsureWorktreeInput>;
+    return ensureManagedWorktree(
+      {
+        sessionId: typeof record.sessionId === "string" ? record.sessionId : "",
+        root: typeof record.root === "string" ? record.root : "",
+      },
+      path.join(app.getPath("userData"), "worktrees"),
+    );
+  });
+
   ipcMain.handle("state:load", () => readState());
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (state && typeof state === "object") writeState(state);
   });
+  ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 
   ipcMain.handle("app:quit", () => app.quit());
+  ipcMain.handle("app:check-update", () => checkAppUpdate());
+  ipcMain.handle("app:apply-update", (_event, version: unknown) =>
+    applyAppUpdate(typeof version === "string" ? version : ""),
+  );
+  ipcMain.handle("notify:desktop", (_event, payload: { title?: string; body?: string }) =>
+    showDesktopNotice({
+      title: typeof payload?.title === "string" ? payload.title : "",
+      body: typeof payload?.body === "string" ? payload.body : "",
+    }),
+  );
+  const collectDiagnostics = async () => buildSupportReport({
+    state: readState(),
+    version: APP_VERSION,
+    userData: app.getPath("userData"),
+    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    detections: {
+      grok: await detectGrokLogin(),
+      codex: await detectCodexLogin(),
+      claude: await detectClaudeLogin(),
+    },
+  });
+  ipcMain.handle("diagnostics:collect", () => collectDiagnostics());
+  ipcMain.handle("diagnostics:export", async () => {
+    const result = await dialog.showSaveDialog({
+      title: "Export Workhorse support information",
+      defaultPath: `workhorse-support-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(result.filePath, JSON.stringify(await collectDiagnostics(), null, 2), "utf8");
+    return { ok: true, path: result.filePath };
+  });
+  ipcMain.handle("grok:detect-login", () => detectGrokLogin());
+  ipcMain.handle("codex:detect-login", () => detectCodexLogin());
+  ipcMain.handle("codex:detect-runtime", () => detectCodexRuntime());
+  ipcMain.handle("codex:list-native-threads", (_event, limit: unknown) =>
+    listCodexNativeThreads(typeof limit === "number" ? limit : 12),
+  );
+  ipcMain.handle("codex:capabilities", (_event, projectRoot: unknown) =>
+    codexCapabilitySummary(typeof projectRoot === "string" ? projectRoot : undefined),
+  );
+  ipcMain.handle("claude:detect-login", () => detectClaudeLogin());
+  ipcMain.handle("custom:detect", () => detectCustomLogin());
+  ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
+    return probeCustomHttp(config);
+  });
+  ipcMain.handle("models:list", () => listVendorModels());
+  ipcMain.removeHandler("grok:plan-usage");
+  ipcMain.handle("grok:plan-usage", async () => {
+    try {
+      return (await fetchGrokPlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.removeHandler("codex:plan-usage");
+  ipcMain.handle("codex:plan-usage", async () => {
+    try {
+      return (await fetchCodexPlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.removeHandler("claude:plan-usage");
+  ipcMain.handle("claude:plan-usage", async () => {
+    try {
+      return (await fetchClaudePlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.removeHandler("custom:plan-usage");
+  ipcMain.handle("custom:plan-usage", async (_event, raw: { baseUrl?: string; apiKey?: string; model?: string }) => {
+    try {
+      return (
+        (await fetchCustomPlanUsage({
+          baseUrl: typeof raw?.baseUrl === "string" ? raw.baseUrl : "",
+          apiKey: typeof raw?.apiKey === "string" ? raw.apiKey : "",
+          model: typeof raw?.model === "string" ? raw.model : undefined,
+        })) ?? null
+      );
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle("codex:prompt", async (event, raw: CodexPromptInput) => {
+    const input: CodexPromptInput = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    const result = await codexHost.prompt(input, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("codex:event", payload);
+      } catch (error) {
+        console.error("workhorse codex event send failed", error);
+      }
+    });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    if (text) settlePeerAsk(input.sessionId, { text });
+    return result;
+  });
+
+  ipcMain.handle("codex:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
+    return codexHost.answerPermission(payload.requestId, payload.answer);
+  });
+
+  ipcMain.handle("codex:cancel", (_event, sessionId: string) => {
+    codexHost.cancel(sessionId);
+  });
+
+  const claudeHost = new ClaudeSessionHost();
+  ipcMain.handle("claude:prompt", async (event, raw: ClaudePromptInput) => {
+    const input: ClaudePromptInput = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    const result = await claudeHost.prompt(input, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("claude:event", payload);
+      } catch (error) {
+        console.error("workhorse claude event send failed", error);
+      }
+    });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    if (text) settlePeerAsk(input.sessionId, { text });
+    return result;
+  });
+  ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
+    return claudeHost.answerPermission(payload.requestId, payload.answer);
+  });
+  ipcMain.handle("claude:cancel", (_event, sessionId: string) => {
+    claudeHost.cancel(sessionId);
+  });
+
+  const customHost = new CustomSessionHost();
+  ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
+    const result = await customHost.prompt(raw, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("custom:event", payload);
+      } catch (error) {
+        console.error("workhorse custom event send failed", error);
+      }
+    });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    if (text) settlePeerAsk(raw.sessionId, { text });
+    return result;
+  });
+  ipcMain.handle("custom:cancel", (_event, sessionId: string) => {
+    customHost.cancel(sessionId);
+  });
+  ipcMain.handle("custom:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
+    return customHost.answerPermission(payload.requestId, payload.answer);
+  });
+
+  ipcMain.handle("grok:prompt", async (event, raw: GrokPromptInput) => {
+    const input: GrokPromptInput = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    const result = await grokHost.prompt(input, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+      } catch (error) {
+        console.error("workhorse grok event send failed", error);
+      }
+    });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    if (text) settlePeerAsk(input.sessionId, { text });
+    return result;
+  });
+
+  ipcMain.handle("grok:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
+    return grokHost.answerPermission(payload.requestId, payload.answer);
+  });
+
+  ipcMain.handle("grok:cancel", (_event, sessionId: string) => {
+    grokHost.cancel(sessionId);
+  });
+
+  ipcMain.handle("grok:compact", async (event, raw: GrokCompactInput) => {
+    const input: GrokCompactInput = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    return grokHost.compact(input, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+      } catch (error) {
+        console.error("workhorse grok event send failed", error);
+      }
+    });
+  });
+
+  ipcMain.handle("grok:session-info", async (_event, sessionId: string) => {
+    if (typeof sessionId !== "string" || !sessionId.trim()) return null;
+    try {
+      return await grokHost.sessionInfo(sessionId);
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle("grok:fork", async (event, raw: GrokPromptInput) => {
+    const input = { ...raw, cwd: resolveSessionCwd(raw.cwd) };
+    try {
+      return await grokHost.fork(input, (payload) => {
+        try {
+          if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+        } catch (error) {
+          console.error("workhorse grok event send failed", error);
+        }
+      });
+    } catch {
+      return {};
+    }
+  });
+
+  ipcMain.handle("grok:rewind", async (event, raw: GrokPromptInput & { keepUserIndex: number }) => {
+    const input = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    try {
+      return await grokHost.rewind(input, (payload) => {
+        try {
+          if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+        } catch (error) {
+          console.error("workhorse grok event send failed", error);
+        }
+      });
+    } catch {
+      return { reset: false, rewound: false };
+    }
+  });
 
   createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on("before-quit", () => {
+  grokHost.disposeAll();
+  codexHost.disposeAll();
+  terminalHost.disposeAll();
+  jobEngine?.dispose();
 });
 
 app.on("window-all-closed", () => {

@@ -1,7 +1,30 @@
-import { providerById } from "../lib/providers";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
+import { FuelRing } from "./FuelRing";
+import { modelName, shortModelName } from "../lib/models";
 import { useStore } from "../lib/store";
-import { byModel, byProvider, formatCost, formatTokens, inRange, rollup } from "../lib/usage";
-import type { UsageRange } from "../lib/types";
+import type { ProviderId, UsageRange } from "../lib/types";
+import {
+  byModel,
+  customBotUsageEvents,
+  deskUsageCards,
+  leftoverForCard,
+  planRingView,
+  pickClaudeWindow,
+  claudeWindowTabs,
+  formatPlanReset,
+  formatCost,
+  formatTokens,
+  inRange,
+  modelsForProvider,
+  heatLevel,
+  heatmapPeak,
+  cellDotBackground,
+  stretchHeatmap,
+  type HeatCell,
+  type StretchHeatmap,
+  type UsageGroup,
+} from "../lib/usage";
 
 const RANGES: { id: UsageRange; label: string }[] = [
   { id: "today", label: "Today" },
@@ -10,96 +33,562 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
-export function UsagePane({ embedded = false }: { embedded?: boolean }) {
-  const { usage, usageRange, setUsageRange, closeUsage } = useStore();
-  const events = (usage ?? []).filter((event) => inRange(event, usageRange ?? "month"));
-  const overall = rollup(events);
-  const providers = byProvider(events);
-  const models = byModel(events);
-  const peak = Math.max(1, ...providers.map((row) => row.totalTokens));
+type Focus = ProviderId | `bot:${string}` | "overview";
+
+function SplitBar({
+  label,
+  value,
+  peak,
+  tone,
+  display,
+}: {
+  label: string;
+  value: number;
+  peak: number;
+  tone: ProviderId;
+  display?: string;
+}) {
+  const width = value <= 0 ? 4 : Math.max(4, Math.round((value / Math.max(peak, 1)) * 220));
+  return (
+    <div className="usage-split">
+      <span>{label}</span>
+      <div className="usage-split-track">
+        <i className={tone} style={{ width }} />
+      </div>
+      <em>{display ?? formatTokens(value)}</em>
+    </div>
+  );
+}
+
+function cellSummary(cell: HeatCell): string {
+  if (cell.tokens <= 0) return `${cell.label}: no tokens`;
+  const bots = cell.bots.map((bot) => `${bot.label} ${formatTokens(bot.tokens)}`).join(", ");
+  const io = `${formatTokens(cell.inputTokens)} in · ${formatTokens(cell.outputTokens)} out`;
+  return bots
+    ? `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io} · ${bots}`
+    : `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io}`;
+}
+
+function Stretch({
+  map,
+  range,
+  hideBots = false,
+}: {
+  map: StretchHeatmap;
+  range: UsageRange;
+  hideBots?: boolean;
+}) {
+  const [shown, setShown] = useState(map);
+  const [swap, setSwap] = useState<"out" | "in" | null>(null);
+  const rangeRef = useRef(range);
+  const box = useRef<HTMLDivElement>(null);
+  const peak = heatmapPeak(shown);
+  const max = peak?.tokens ?? 1;
+  const labelSlots = shown.columns.map((_, index) => shown.labels.find((item) => item.column === index)?.text ?? "");
+  const [tip, setTip] = useState<{ cell: HeatCell; left: number; top: number; place: "above" | "below" } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (rangeRef.current === range) {
+      setShown(map);
+      return;
+    }
+    rangeRef.current = range;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const apply = () => {
+      flushSync(() => setShown(map));
+    };
+    const view = document as Document & {
+      startViewTransition?: (update: () => void) => { finished: Promise<void> };
+    };
+    if (!reduce && typeof view.startViewTransition === "function") {
+      const run = view.startViewTransition(apply);
+      void run.finished.catch(() => undefined);
+      return;
+    }
+    if (reduce) {
+      apply();
+      return;
+    }
+    const from = box.current?.offsetHeight ?? 0;
+    setSwap("out");
+    setTip(null);
+    const hide = window.setTimeout(() => {
+      apply();
+      setSwap("in");
+      const el = box.current;
+      if (el && from > 0) {
+        const to = el.offsetHeight;
+        if (Math.abs(to - from) > 1) {
+          el.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+            duration: 480,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          });
+        }
+      }
+      window.setTimeout(() => setSwap(null), 520);
+    }, 150);
+    return () => window.clearTimeout(hide);
+  }, [map, range]);
+
+  const showTip = (cell: HeatCell, node: HTMLElement) => {
+    if (cell.pad) return;
+    const dot = node.getBoundingClientRect();
+    const width = 208;
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, dot.left + dot.width / 2 - width / 2));
+    const place: "above" | "below" = dot.top > window.innerHeight - dot.bottom && dot.top > 88 ? "above" : "below";
+    const top = place === "above" ? dot.top - 8 : dot.bottom + 8;
+    setTip({ cell, left, top, place });
+  };
+
+  const onDot = (cell: HeatCell, node: HTMLElement) => {
+    showTip(cell, node);
+  };
 
   return (
-    <section className={embedded ? "usage-embed" : "picker project-home"}>
-      {!embedded && (
-        <div className="link-head">
-          <h2>Usage</h2>
-          <button className="tiny" type="button" onClick={closeUsage}>
-            Back
-          </button>
+    <div
+      ref={box}
+      className={`usage-stretch${swap ? ` swap-${swap}` : ""}`}
+      onMouseLeave={() => setTip(null)}
+      style={{ ["--stretch-cols" as string]: String(shown.columns.length) }}
+    >
+      <div className="usage-stretch-head">
+        <div className="section-label" style={{ margin: 0 }}>
+          This stretch
+        </div>
+        {peak && (
+          <span className="usage-stretch-peak">
+            Peak {peak.label} · {formatTokens(peak.tokens)}
+          </span>
+        )}
+      </div>
+      <div
+        className={`usage-dots${shown.rows === 1 ? " flat" : ""}${shown.columns.length <= 7 && shown.rows === 1 ? " week" : ""}${shown.columns.length > 12 ? " dense" : ""}`}
+        role="img"
+        aria-label="Usage over this stretch"
+      >
+        {shown.columns.map((column, index) => (
+          <div
+            key={column[0]?.key ?? index}
+            className="usage-dot-col"
+            style={{ ["--i" as string]: String(index) }}
+          >
+            {column.map((cell) => {
+              const fill = cell.pad ? undefined : cellDotBackground(cell, max, range);
+              const multi = !cell.pad && cell.bots.length > 1;
+              return (
+                <button
+                  key={cell.key}
+                  type="button"
+                  className={`usage-dot l${cell.pad ? 0 : heatLevel(cell.tokens, max)}${cell.pad ? " pad" : ""}${fill ? " ink" : ""}${multi ? " pie" : ""}`}
+                  style={!multi && fill ? { background: fill } : undefined}
+                  disabled={cell.pad}
+                  aria-label={cell.pad ? undefined : cellSummary(cell)}
+                  onMouseEnter={(event) => onDot(cell, event.currentTarget)}
+                  onFocus={(event) => onDot(cell, event.currentTarget)}
+                  onBlur={() => setTip(null)}
+                >
+                  {multi && fill ? <span className="usage-dot-fill" style={{ background: fill }} aria-hidden="true" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="usage-dot-labels">
+        {labelSlots.map((text, index) => (
+          <span key={`label-${index}`}>{text}</span>
+        ))}
+      </div>
+      {tip && (
+        <div className={`usage-tip ${tip.place}`} style={{ left: tip.left, top: tip.top }}>
+          <strong>{tip.cell.label}</strong>
+          <span>{formatTokens(tip.cell.tokens)} tokens</span>
+          <span>
+            {formatTokens(tip.cell.inputTokens)} in · {formatTokens(tip.cell.outputTokens)} out
+          </span>
+          {!hideBots && tip.cell.bots.length > 0 ? (
+            <ul>
+              {tip.cell.bots.map((bot) => (
+                <li key={bot.key ?? `${bot.provider}:${bot.label}`}>
+                  <span>
+                    <i
+                      className={`dot ${bot.provider}`}
+                      style={bot.color ? { background: bot.color } : undefined}
+                    />
+                    {bot.label}
+                  </span>
+                  <em>
+                    {formatTokens(bot.tokens)}
+                    <small>
+                      {formatTokens(bot.inputTokens)} in · {formatTokens(bot.outputTokens)} out
+                    </small>
+                  </em>
+                </li>
+              ))}
+            </ul>
+          ) : !hideBots && tip.cell.bots.length === 0 ? (
+            <span>No bot spend in this cell</span>
+          ) : null}
         </div>
       )}
-      <p>
-        Tokens from every brain in this window. Broken out by vendor and by model,
-        then added up. Adapters write the ledger — preview chats do not invent spend.
-      </p>
+    </div>
+  );
+}
 
-      <div className="actions" style={{ marginBottom: 20 }}>
-        {RANGES.map((item) => (
-          <button
-            key={item.id}
-            className={usageRange === item.id ? "tiny active-kind" : "tiny"}
-            type="button"
-            onClick={() => setUsageRange(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+function modelShare(tokens: number, total: number): number {
+  if (tokens <= 0 || total <= 0) return 0;
+  return (tokens / total) * 100;
+}
 
-      <div className="usage-hero">
-        <strong>{formatTokens(overall.totalTokens)}</strong>
-        <span>tokens overall</span>
-        <span className="row-meta">
-          {formatTokens(overall.inputTokens)} in · {formatTokens(overall.outputTokens)} out
-          {overall.cacheReadTokens + overall.cacheWriteTokens > 0
-            ? ` · ${formatTokens(overall.cacheReadTokens + overall.cacheWriteTokens)} cache`
-            : ""}
-          {` · ${formatCost(overall)}`}
+function ModelRow({
+  row,
+  showDot = false,
+  total = 0,
+}: {
+  row: UsageGroup;
+  showDot?: boolean;
+  total?: number;
+}) {
+  const width = modelShare(row.totalTokens, total);
+  return (
+    <li className="usage-model">
+      <div className="usage-model-top">
+        <span>
+          {showDot && (
+            <span
+              className={`dot ${row.provider}`}
+              style={row.color ? { background: row.color } : undefined}
+            />
+          )}
+          {row.label}
+          <em>
+            {formatTokens(row.inputTokens)} in · {formatTokens(row.outputTokens)} out
+          </em>
         </span>
+        <strong>{formatTokens(row.totalTokens)}</strong>
       </div>
+      <div className="usage-split-track wide">
+        <i
+          className={row.provider}
+          style={{
+            width: `${width}%`,
+            minWidth: width > 0 && width < 1.2 ? 3 : undefined,
+            ...(row.color ? { background: row.color } : {}),
+          }}
+        />
+      </div>
+    </li>
+  );
+}
 
-      <div className="section-label">By vendor</div>
-      <ul className="chip-list usage-list">
-        {providers.map((row) => (
-          <li key={row.key} className="usage-row">
-            <div className="usage-row-top">
-              <span>
-                <span className={`dot ${row.provider}`} />
-                {row.label}
-              </span>
-              <strong>{formatTokens(row.totalTokens)}</strong>
-            </div>
-            <div className="usage-bar">
-              <i style={{ width: `${(row.totalTokens / peak) * 100}%` }} className={row.provider} />
-            </div>
-            <span className="row-meta">
-              {formatTokens(row.inputTokens)} in · {formatTokens(row.outputTokens)} out · {formatCost(row)}
-            </span>
-          </li>
-        ))}
-      </ul>
+function formatReset(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
 
-      <div className="section-label">By model</div>
-      {models.length === 0 ? (
-        <p className="row-meta">No model rows yet. They appear when an adapter reports usage.</p>
-      ) : (
-        <ul className="chip-list usage-list">
-          {models.map((row) => (
-            <li key={row.key} className="usage-row">
-              <div className="usage-row-top">
-                <span>
-                  <span className={`dot ${row.provider}`} />
-                  {providerById(row.provider).name} · {row.label}
-                </span>
-                <strong>{formatTokens(row.totalTokens)}</strong>
+function planLoaderFor(row: { provider: ProviderId; focus: string }): boolean {
+  if (row.provider === "grok") return Boolean(window.workhorse?.grokPlanUsage);
+  if (row.provider === "codex") return Boolean(window.workhorse?.codexPlanUsage);
+  if (row.provider === "claude") return Boolean(window.workhorse?.claudePlanUsage);
+  return Boolean(window.workhorse?.customPlanUsage);
+}
+
+export function UsagePane({
+  embedded = false,
+  tabs,
+  homeSignal = 0,
+}: {
+  embedded?: boolean;
+  tabs?: ReactNode;
+  homeSignal?: number;
+}) {
+  const {
+    usage,
+    usageRange,
+    setUsageRange,
+    closeUsage,
+    grokPlan,
+    refreshGrokPlan,
+    codexPlan,
+    refreshCodexPlan,
+    claudePlan,
+    refreshClaudePlan,
+    customPlans,
+    refreshCustomPlans,
+    settings,
+  } = useStore();
+  const [focus, setFocus] = useState<Focus>("overview");
+  const [claudeWindow, setClaudeWindow] = useState("weekly_all");
+  useEffect(() => {
+    if (homeSignal > 0) setFocus("overview");
+  }, [homeSignal]);
+  const range = usageRange ?? "month";
+  const events = (usage ?? []).filter((event) => inRange(event, range));
+  const cards = deskUsageCards(events, settings);
+  const models = byModel(events, settings.customBots).map((row) => ({
+    ...row,
+    label: modelName(row.provider, row.label),
+  }));
+  const modelsTotal = models.reduce((sum, row) => sum + row.totalTokens, 0);
+  const vendorLooks = {
+    grok: settings.llms.grok,
+    claude: settings.llms.claude,
+    codex: settings.llms.codex,
+  };
+  const heatmap = stretchHeatmap(events, range, Date.now(), settings.customBots, vendorLooks);
+  const focused = focus === "overview" ? null : cards.find((row) => row.focus === focus) ?? null;
+  const focusedEvents =
+    focused?.focus.startsWith("bot:") && focused.provider === "custom"
+      ? customBotUsageEvents(
+          events,
+          settings.customBots.find((bot) => `bot:${bot.id}` === focused.focus) ?? {
+            id: focused.key,
+            name: focused.label,
+            model: focused.label,
+          },
+        )
+      : focused
+        ? events.filter((event) => event.provider === focused.provider)
+        : [];
+  const focusedModels =
+    !focused
+      ? []
+      : focused.provider === "custom"
+        ? byModel(focusedEvents, settings.customBots).map((row) => ({
+            ...row,
+            label: shortModelName("custom", row.label),
+          }))
+        : modelsForProvider(events, focused.provider)
+            .filter((row) => row.totalTokens > 0 || row.events > 0)
+            .map((row) => ({
+              ...row,
+              label: shortModelName(focused.provider, row.label),
+            }));
+  const focusedTotal = focusedModels.reduce((sum, row) => sum + row.totalTokens, 0);
+  useEffect(() => {
+    const pull = () => {
+      refreshGrokPlan();
+      refreshCodexPlan();
+      refreshClaudePlan();
+      refreshCustomPlans();
+    };
+    pull();
+    const timer = window.setInterval(pull, 180_000);
+    return () => window.clearInterval(timer);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCustomPlans]);
+
+  const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans };
+  const plan = focused ? leftoverForCard(focused, deskPlans) : undefined;
+  const claudePick = pickClaudeWindow(focused?.provider === "claude" ? plan : claudePlan, claudeWindow);
+  const claudeTabs = claudeWindowTabs(focused?.provider === "claude" ? plan : claudePlan);
+  const planName = focused?.provider === "grok" ? "SuperGrok" : focused?.label ?? "Weekly";
+  const planCopy = plan
+    ? plan.leftPercent <= 0
+      ? plan.resetsAt
+        ? `Weekly allowance is spent. It opens again ${formatReset(plan.resetsAt)}.`
+        : "Weekly allowance is spent. Extra credits or the next reset will open it again."
+      : plan.resetsAt
+        ? `Weekly ${planName} allowance. Resets ${formatReset(plan.resetsAt)}.`
+        : `Weekly ${planName} allowance.`
+    : undefined;
+  const back = () => {
+    if (focus !== "overview") {
+      setFocus("overview");
+      return;
+    }
+    closeUsage();
+  };
+
+  return (
+    <section className={embedded ? "usage-embed" : "picker usage-page"}>
+      <div className="usage-head">
+        <h2>Usage</h2>
+        <button className="tiny" type="button" onClick={back}>
+          Back
+        </button>
+      </div>
+      {tabs}
+
+      {focus === "overview" ? (
+        <>
+          <div className="usage-overview">
+            <div className="actions usage-ranges">
+              {RANGES.map((item) => (
+                <button
+                  key={item.id}
+                  className={usageRange === item.id ? "tiny active-kind" : "tiny"}
+                  type="button"
+                  onClick={() => setUsageRange(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="usage-brains">
+              {cards.map((row, index) => {
+                const ring = planRingView(row, deskPlans, claudeWindow);
+                return (
+                  <button
+                    key={row.key}
+                    className="usage-brain"
+                    type="button"
+                    onClick={() => setFocus(row.focus)}
+                  >
+                    <FuelRing
+                      value={ring ? ring.value : 0}
+                      size={104}
+                      tone={row.provider}
+                      color={row.color}
+                      delay={index * 90}
+                      label={ring ? ring.label : "…"}
+                    />
+                    <span>{row.label}</span>
+                    <em>
+                      {row.provider === "claude" && claudePick
+                        ? `${Math.round(Math.max(0, 100 - claudePick.usagePercent))}% ${claudePick.label.toLowerCase()}`
+                        : `${formatTokens(row.inputTokens)} in  ·  ${formatTokens(row.outputTokens)} out`}
+                    </em>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <Stretch map={heatmap} range={range} />
+          {models.length > 0 && (
+            <ul className="usage-models">
+              {models.map((row) => (
+                <ModelRow key={row.key} row={row} showDot total={modelsTotal} />
+              ))}
+            </ul>
+          )}
+        </>
+      ) : focused ? (
+        <>
+          <div className="actions usage-ranges">
+            {RANGES.map((item) => (
+              <button
+                key={item.id}
+                className={usageRange === item.id ? "tiny active-kind" : "tiny"}
+                type="button"
+                onClick={() => setUsageRange(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {focused.provider === "claude" && plan?.products.length ? (
+            <div className="usage-limits">
+              <div className="usage-limits-head">
+                <span className="sheet-label">Plan usage limits</span>
+                <div className="actions usage-ranges">
+                  {claudeTabs.map((item) => (
+                    <button
+                      key={item.id}
+                      className={claudePick?.product === item.id ? "tiny active-kind" : "tiny"}
+                      type="button"
+                      onClick={() => setClaudeWindow(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <span className="row-meta">
-                {formatTokens(row.inputTokens)} in · {formatTokens(row.outputTokens)} out · {formatCost(row)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+              {plan.products.map((item) => (
+                <button
+                  key={item.product}
+                  className={`usage-limit${claudePick?.product === item.product ? " on" : ""}`}
+                  type="button"
+                  onClick={() => setClaudeWindow(item.product)}
+                >
+                  <div className="usage-limit-top">
+                    <strong>{item.label}</strong>
+                    <em>{Math.round(item.usagePercent)}% used</em>
+                  </div>
+                  <div className="usage-split-track wide">
+                    <i className="claude" style={{ width: `${Math.max(3, Math.round(item.usagePercent))}%` }} />
+                  </div>
+                  {item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="usage-plan">
+              <FuelRing
+                value={plan ? plan.leftPercent / 100 : 0}
+                size={120}
+                tone={focused.provider}
+                color={focused.color}
+                label={plan ? `${Math.round(plan.leftPercent)}% left` : "…"}
+              />
+              <div className="usage-plan-copy">
+                <span className="sheet-label">Weekly allowance</span>
+                <p>
+                  {planCopy ??
+                    (planLoaderFor(focused)
+                      ? "Loading weekly plan usage…"
+                      : `Restart Workhorse to load ${planName} plan usage.`)}
+                </p>
+              </div>
+            </div>
+          )}
+          <div className="usage-facts">
+            <div className="usage-fact">
+              <span>In + out</span>
+              <strong>{formatTokens(focused.inputTokens + focused.outputTokens)}</strong>
+            </div>
+            <div className="usage-fact">
+              <span>{plan ? "Used" : "Cost"}</span>
+              <strong>
+                {plan
+                  ? `${Math.round(focused.provider === "claude" ? (claudePick?.usagePercent ?? plan.usedPercent) : plan.usedPercent)}%`
+                  : formatCost(focused)}
+              </strong>
+            </div>
+            <div className="usage-fact">
+              <span>Turns</span>
+              <strong>{focused.events}</strong>
+            </div>
+            <div className="usage-fact">
+              <span>Chats</span>
+              <strong>
+                {new Set(focusedEvents.filter((event) => event.sessionId).map((event) => event.sessionId)).size}
+              </strong>
+            </div>
+          </div>
+          <div className="usage-detail">
+            <div className="usage-detail-copy">
+              <SplitBar
+                label="In"
+                value={focused.inputTokens}
+                peak={Math.max(focused.inputTokens, focused.outputTokens)}
+                tone={focused.provider}
+              />
+              <SplitBar
+                label="Out"
+                value={focused.outputTokens}
+                peak={Math.max(focused.inputTokens, focused.outputTokens)}
+                tone={focused.provider}
+              />
+            </div>
+          </div>
+          <Stretch
+            map={stretchHeatmap(focusedEvents, range, Date.now(), settings.customBots, vendorLooks)}
+            range={range}
+            hideBots
+          />
+          {focusedModels.length > 0 && (
+            <ul className="usage-models">
+              {focusedModels.map((row) => (
+                <ModelRow key={row.key} row={row} total={focusedTotal} />
+              ))}
+            </ul>
+          )}
+        </>
+      ) : null}
     </section>
   );
 }

@@ -6,7 +6,7 @@ import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
-import { capabilitiesFor, capabilityLabel } from "../lib/provider-capabilities";
+import { capabilitiesFor } from "../lib/provider-capabilities";
 
 const PERMISSIONS: { id: PermissionMode; label: string; hint: string }[] = [
   { id: "ask", label: "Ask", hint: "Pause before tools. You decide each time." },
@@ -29,7 +29,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const {
     setMode,
     setSandbox,
-    setSecurityPolicy,
     setSessionEffort,
     setSessionEnvironment,
     setSessionModel,
@@ -333,50 +332,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           </div>
         </section>
       </div>
-
-      <section className="setup-block">
-        <div className="section-label">Security boundaries</div>
-        <div className="setup-security">
-          <div>
-            <strong>Network</strong>
-            <div className="setup-effort" role="listbox" aria-label="Network access">
-              <button
-                className={(session.securityPolicy?.network ?? "blocked") === "blocked" ? "on" : undefined}
-                type="button"
-                onClick={() => setSecurityPolicy({ network: "blocked" })}
-              >
-                Blocked
-              </button>
-              <button
-                className={session.securityPolicy?.network === "allowed" ? "on" : undefined}
-                type="button"
-                onClick={() => setSecurityPolicy({ network: "allowed" })}
-              >
-                Allowed
-              </button>
-            </div>
-          </div>
-          <div>
-            <strong>Outside workspace / root</strong>
-            <div className="setup-effort" role="listbox" aria-label="Outside workspace access">
-              {(["blocked", "ask", "allowed"] as const).map((rootMode) => (
-                <button
-                  key={rootMode}
-                  className={(session.securityPolicy?.root ?? "ask") === rootMode ? "on" : undefined}
-                  type="button"
-                  disabled={capabilities.security.outsideWorkspace === "unavailable"}
-                  onClick={() => setSecurityPolicy({ root: rootMode })}
-                >
-                  {rootMode === "ask" ? "Ask" : rootMode === "blocked" ? "Blocked" : "Allowed"}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <p className="setup-note">
-          Network: {capabilityLabel(capabilities.security.network)}. Outside workspace: {capabilityLabel(capabilities.security.outsideWorkspace)}.
-        </p>
-      </section>
     </div>
   );
 }

@@ -57,7 +57,7 @@ class McpStdioClient {
     await this.request("initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
-      clientInfo: { name: "go7-workhorse", version: "0.1.0" },
+      clientInfo: { name: "go7-workhorse", version: "0.1.1" },
     });
     this.notify("notifications/initialized", {});
   }

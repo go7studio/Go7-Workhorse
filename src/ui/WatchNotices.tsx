@@ -5,8 +5,8 @@ import {
   isDesktopWatchNotice,
   watchBarDetail,
   watchBarTitle,
+  watchKeyForSession,
   watchLocksKey,
-  watchNoticeKeysForChat,
 } from "../lib/watch";
 
 function vendorAskTitle(vendor: { name: string; status?: string }): string {
@@ -25,7 +25,7 @@ export function WatchBanners({
 } = {}) {
   const store = useStore();
   const session = useActiveSession();
-  const keys = session ? new Set(watchNoticeKeysForChat(session, store.sessions)) : null;
+  const ownKey = session ? watchKeyForSession(session) : null;
   const pending = store.watchHold && session && store.watchHold.sessionId === session.id ? store.watchHold : null;
   const live = useMemo(() => {
     if (!session) return null;
@@ -55,16 +55,21 @@ export function WatchBanners({
         text: "",
       }
     : null);
-  const notices = store.watchNotices.filter((notice) => {
-    if (keys && !keys.has(notice.key)) return false;
-    if (hold && notice.key === hold.key && (notice.kind === "daily" || notice.kind === "spent")) return false;
-    return true;
-  });
+  const notices = setupOpen
+    ? []
+    : store.watchNotices.filter((notice) => {
+        if (ownKey && notice.key !== ownKey) return false;
+        if (hold && notice.key === hold.key && (notice.kind === "daily" || notice.kind === "spent")) return false;
+        return true;
+      });
 
-  const vendorAsk = store.pending.find((item) => item.kind === "vendor" && (!session || item.sessionId === session.id));
+  const vendorAsk =
+    setupOpen
+      ? null
+      : store.pending.find((item) => item.kind === "vendor" && (!session || item.sessionId === session.id));
 
   const showHold = Boolean(hold) && !setupOpen;
-  if (!showHold && notices.length === 0 && !vendorAsk) return null;
+  if (setupOpen || (!showHold && notices.length === 0 && !vendorAsk)) return null;
   return (
     <div className="watch-banners" role="status">
       {vendorAsk?.vendor ? (

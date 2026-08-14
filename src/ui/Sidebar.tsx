@@ -9,7 +9,7 @@ import type { Project } from "../lib/types";
 import { ChatRow } from "./ChatRow";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
-import { attentionInbox, searchChats } from "../lib/search";
+import { searchChats } from "../lib/search";
 
 function LooseChats() {
   const chats = useLooseSessions();
@@ -192,14 +192,12 @@ function UpdateChip() {
 export function Sidebar() {
   const store = useStore();
   const [query, setQuery] = useState("");
-  const [attentionOpen, setAttentionOpen] = useState(false);
   const [openIds, setOpenIds] = useState<string[]>(() => (store.activeProjectId ? [store.activeProjectId] : []));
   const [dropId, setDropId] = useState<string | null>(null);
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
   const liveProjects = store.projects.filter((item) => !item.archivedAt);
   const archivedProjects = store.projects.filter((item) => item.archivedAt);
   const results = searchChats(store.sessions, store.projects, query);
-  const attention = attentionInbox(store);
 
   useEffect(() => {
     if (!store.activeProjectId) return;
@@ -253,15 +251,6 @@ export function Sidebar() {
           placeholder="Search all chats"
           onChange={(event) => setQuery(event.target.value)}
         />
-        <button
-          className={`attention-toggle${attention.length ? " has-items" : ""}`}
-          type="button"
-          aria-label={`${attention.length} attention items`}
-          aria-expanded={attentionOpen}
-          onClick={() => setAttentionOpen((value) => !value)}
-        >
-          {attention.length || "0"}
-        </button>
       </div>
 
       {query.trim() ? (
@@ -277,21 +266,6 @@ export function Sidebar() {
               <em>{result.snippet}</em>
             </button>
           )) : <p className="row-meta">No chat or message matches.</p>}
-        </div>
-      ) : null}
-
-      {attentionOpen ? (
-        <div className="attention-inbox" aria-label="Attention inbox">
-          <div className="section-label">Attention</div>
-          {attention.length ? attention.map((item) => (
-            <div key={item.id} className={`attention-item ${item.severity}`}>
-              <button type="button" onClick={() => store.selectSession(item.sessionId)}>
-                <strong>{item.title}</strong>
-                <span>{item.detail}</span>
-              </button>
-              <button type="button" aria-label="Dismiss attention item" onClick={() => store.dismissAttention(item.id)}>x</button>
-            </div>
-          )) : <p className="row-meta">Nothing needs attention.</p>}
         </div>
       ) : null}
 

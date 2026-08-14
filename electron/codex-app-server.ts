@@ -87,7 +87,7 @@ export class CodexAppServerClient {
 
     try {
       const initialized = await this.request("initialize", {
-        clientInfo: { name: "go7_workhorse", title: "Go7 Workhorse", version: "0.1.0" },
+        clientInfo: { name: "go7_workhorse", title: "Go7 Workhorse", version: "0.1.1" },
       });
       this.notify("initialized", {});
       return initialized && typeof initialized === "object" ? (initialized as JsonObject) : {};

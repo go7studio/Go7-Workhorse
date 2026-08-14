@@ -207,8 +207,6 @@ html.pane-dragging * {
 
 .global-find {
   display: grid;
-  grid-template-columns: 1fr 30px;
-  gap: 5px;
   margin: 3px 0 6px;
 }
 
@@ -223,21 +221,7 @@ html.pane-dragging * {
   font-size: 12px;
 }
 
-.attention-toggle {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text-tertiary);
-  background: var(--bg-hover);
-  font-size: 11px;
-}
-
-.attention-toggle.has-items {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-}
-
-.global-results,
-.attention-inbox {
+.global-results {
   max-height: 44%;
   overflow: auto;
   margin-bottom: 6px;
@@ -256,45 +240,20 @@ html.pane-dragging * {
   border-radius: 7px;
 }
 
-.global-results > button:hover,
-.attention-item:hover {
+.global-results > button:hover {
   background: var(--bg-hover);
 }
 
-.global-results strong,
-.attention-item strong {
+.global-results strong {
   font-size: 12px;
 }
 
 .global-results span,
-.global-results em,
-.attention-item span {
+.global-results em {
   color: var(--text-tertiary);
   font-size: 10px;
   font-style: normal;
 }
-
-.attention-item {
-  display: grid;
-  grid-template-columns: 1fr 24px;
-  align-items: start;
-  border-radius: 7px;
-}
-
-.attention-item > button:first-child {
-  display: grid;
-  gap: 3px;
-  padding: 7px;
-  text-align: left;
-}
-
-.attention-item > button:last-child {
-  padding: 6px;
-  color: var(--text-tertiary);
-}
-
-.attention-item.failed strong { color: var(--danger); }
-.attention-item.warning strong { color: #d99a2b; }
 
 .agent-thread-review {
   display: grid;
@@ -607,6 +566,8 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  container-type: size;
+  container-name: session;
 }
 
 .agent-thread {
@@ -2691,16 +2652,16 @@ html.pane-dragging * {
 .setup-security {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 0.35em;
 }
 
 .setup-security > div {
   display: grid;
-  gap: 7px;
+  gap: 0.25em;
 }
 
 .setup-security strong {
-  font-size: 12px;
+  font-size: 0.92em;
   font-weight: 560;
 }
 
@@ -5060,26 +5021,29 @@ html.pane-dragging * {
   --setup-ink: var(--text);
   --setup-muted: var(--text-secondary);
   --setup-faint: var(--text-tertiary);
-  --setup-paper: color-mix(in srgb, var(--bg-solid) 88%, var(--setup-vendor) 6%);
-  --setup-paper-on: color-mix(in srgb, var(--bg-solid) 78%, var(--setup-vendor) 16%);
+  --setup-paper: color-mix(in srgb, var(--bg-solid) 92%, var(--setup-vendor) 8%);
+  --setup-paper-on: color-mix(in srgb, var(--bg-solid) 84%, var(--setup-vendor) 16%);
   color: var(--setup-ink);
+  font-size: clamp(11.5px, 1.05cqi + 0.22cqh, 13.5px);
   position: absolute;
-  left: 48px;
-  right: 48px;
-  bottom: 92px;
+  left: auto;
+  right: clamp(16px, 4cqi, 48px);
+  bottom: clamp(76px, 12cqh, 100px);
   z-index: 22;
-  width: auto;
-  max-height: calc(100% - 104px);
-  padding: 16px 18px 18px;
+  width: min(760px, 56cqi);
+  height: auto;
+  max-height: min(60cqh, calc(100% - 120px));
+  margin-inline: 0;
+  padding: 0.55em 0.75em 0.6em;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0.4em;
   overflow-x: hidden;
   overflow-y: auto;
   isolation: isolate;
   background: var(--bg-solid);
   border: 1px solid color-mix(in srgb, var(--setup-vendor) 34%, var(--line));
-  border-radius: 16px;
+  border-radius: 12px;
   box-shadow: var(--shadow);
   transition: border-color 1.8s var(--ease), color 1.4s var(--ease);
 }
@@ -5104,7 +5068,7 @@ html.pane-dragging * {
   right: 0;
   bottom: 0;
   height: var(--setup-used);
-  background: color-mix(in srgb, var(--setup-vendor) 22%, var(--bg-solid));
+  background: color-mix(in srgb, var(--setup-vendor) 18%, transparent);
   transition: height 1.8s var(--ease), background-color 1.8s var(--ease);
 }
 
@@ -5115,7 +5079,7 @@ html.pane-dragging * {
   height: 36px;
   bottom: calc(var(--setup-used) - 18px);
   border-radius: 48% 52% 48% 52% / 70% 80% 40% 50%;
-  background: color-mix(in srgb, var(--setup-vendor) 28%, var(--bg-solid));
+  background: color-mix(in srgb, var(--setup-vendor) 16%, transparent);
   animation: setup-swell 9s ease-in-out infinite;
   transition: bottom 1.8s var(--ease), background-color 1.8s var(--ease);
 }
@@ -5123,7 +5087,7 @@ html.pane-dragging * {
 .setup-tide-wave.two {
   height: 28px;
   bottom: calc(var(--setup-used) - 12px);
-  background: color-mix(in srgb, var(--setup-vendor) 34%, transparent);
+  background: color-mix(in srgb, var(--setup-vendor) 12%, transparent);
   animation-duration: 13s;
   animation-direction: reverse;
 }
@@ -5135,7 +5099,7 @@ html.pane-dragging * {
   height: 18px;
   bottom: calc(var(--setup-used) - 6px);
   border-radius: 50%;
-  background: color-mix(in srgb, #fff 22%, transparent);
+  background: color-mix(in srgb, var(--setup-vendor) 20%, transparent);
   filter: blur(8px);
   animation: setup-glint 11s ease-in-out infinite;
   transition: bottom 1.8s var(--ease);
@@ -5172,26 +5136,35 @@ html.pane-dragging * {
 
 .setup-intro strong {
   display: block;
-  font-size: 15px;
+  font-size: 1.08em;
   font-weight: 620;
   letter-spacing: -0.02em;
 }
 
 .setup-intro p {
-  margin: 3px 0 0;
-  font-size: 12px;
+  margin: 0;
+  font-size: 0.92em;
   color: var(--setup-muted);
+  text-shadow: 0 1px 2px var(--bg-solid);
 }
 
 .setup-block .section-label {
-  margin: 0 0 8px;
-  color: var(--setup-faint);
+  margin: 0 0 0.25em;
+  font-size: 0.83em;
+  color: var(--setup-ink);
+  opacity: 0.72;
+  text-shadow: 0 1px 2px var(--bg-solid);
 }
 
 .setup-note {
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--setup-muted);
+  margin: 0.15em 0 0;
+  font-size: 0.92em;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--setup-ink) 78%, transparent);
+  text-shadow: 0 1px 2px var(--bg-solid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-setup.tide-ink-dark {
@@ -5209,16 +5182,16 @@ html.pane-dragging * {
 .setup-effort {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: 0.25em;
 }
 
 .setup-effort button {
   --setup-chip: var(--text-tertiary);
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--setup-paper);
+  padding: 0.33em 0.67em;
+  border-radius: 0.5em;
+  background: color-mix(in srgb, var(--bg-solid) 82%, var(--setup-paper) 18%);
   color: var(--setup-ink);
-  font-size: 13px;
+  font-size: 1em;
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--setup-chip) 75%, transparent);
 }
 
@@ -5249,13 +5222,13 @@ html.pane-dragging * {
   --pos: calc(var(--at) / max(var(--stops) - 1, 1) * 100%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.15em;
 }
 
 .setup-slider-line {
   position: relative;
   width: 100%;
-  height: 28px;
+  height: 1.33em;
   cursor: pointer;
 }
 
@@ -5264,8 +5237,8 @@ html.pane-dragging * {
   position: absolute;
   left: 0;
   right: 0;
-  top: 11px;
-  height: 6px;
+  top: 6px;
+  height: 4px;
   border-radius: 99px;
   background: var(--bg-hover);
 }
@@ -5273,9 +5246,9 @@ html.pane-dragging * {
 .setup-slider-fill {
   position: absolute;
   left: 0;
-  top: 11px;
+  top: 6px;
   width: var(--pos);
-  height: 6px;
+  height: 4px;
   border-radius: 99px;
   background: var(--setup-vendor, var(--accent));
   pointer-events: none;
@@ -5284,10 +5257,10 @@ html.pane-dragging * {
 
 .setup-slider-thumb {
   position: absolute;
-  top: 4px;
+  top: 2px;
   left: var(--pos);
-  width: 20px;
-  height: 20px;
+  width: 12px;
+  height: 12px;
   border: 2px solid var(--setup-paper-on, var(--bg-solid));
   border-radius: 50%;
   background: var(--setup-vendor, var(--accent));
@@ -5314,7 +5287,7 @@ html.pane-dragging * {
 
 .setup-slider-marks {
   position: relative;
-  height: 16px;
+  height: 1em;
 }
 
 .setup-slider-marks button {
@@ -5323,8 +5296,10 @@ html.pane-dragging * {
   left: calc(var(--i) / max(var(--stops) - 1, 1) * 100%);
   transform: translateX(-50%);
   padding: 0;
-  font-size: 11px;
-  color: var(--setup-faint);
+  font-size: 0.83em;
+  color: var(--setup-ink);
+  opacity: 0.7;
+  text-shadow: 0 1px 2px var(--bg-solid);
   text-align: center;
   white-space: nowrap;
 }
@@ -5339,13 +5314,14 @@ html.pane-dragging * {
 
 .setup-slider-marks button.on {
   color: var(--setup-ink);
+  opacity: 1;
   font-weight: 600;
 }
 
 .setup-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 0.4em;
 }
 
 .setup-split:has(.setup-block:only-child) {
@@ -5355,18 +5331,18 @@ html.pane-dragging * {
 .setup-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 0.25em;
 }
 
 .setup-grid button {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  min-height: 68px;
-  padding: 10px;
-  border-radius: 10px;
-  background: var(--setup-paper);
+  gap: 0.08em;
+  min-height: 0;
+  padding: 0.4em 0.55em;
+  border-radius: 0.5em;
+  background: color-mix(in srgb, var(--bg-solid) 88%, var(--setup-paper) 12%);
   border: 1px solid var(--line);
   color: var(--setup-ink);
   text-align: left;
@@ -5378,14 +5354,18 @@ html.pane-dragging * {
 }
 
 .setup-grid button strong {
-  font-size: 13px;
+  font-size: 1em;
   font-weight: 590;
 }
 
 .setup-grid button span {
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--setup-muted);
+  font-size: 0.83em;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--setup-ink) 72%, transparent);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .setup-trigger {

@@ -701,7 +701,7 @@ test("CodexSessionHost new/load/fail/launch-key and missing binary", async () =>
         agentMode: "agent-full-access",
         initializeParams: {
           protocolVersion: 1,
-          clientInfo: { name: "go7-workhorse", title: "Workhorse", version: "0.1.0" },
+          clientInfo: { name: "go7-workhorse", title: "Workhorse", version: "0.1.1" },
           clientCapabilities: { sessionLoad: true, permissionPrompts: true },
         },
         sessionParams: { cwd: ROOT, mcpServers: [] },

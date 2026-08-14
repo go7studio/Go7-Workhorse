@@ -126,34 +126,38 @@ export function SessionPane() {
           {talking ? <span className="peer-live">{talking}</span> : null}
         </div>
         <div className="session-header-tools">
-          <button
-            className="tiny"
-            type="button"
-            disabled={!cwd}
-            onClick={() => {
-              if (!cwd || !window.workhorse?.listGitChanges) return;
-              void window.workhorse.listGitChanges(cwd).then((changes) => {
-                const found = changes.map<ProjectEdit>((change) => ({
-                  path: change.path,
-                  name: fileNameFromPath(change.path),
-                  folder: fileFolderFromPath(change.path, roots),
-                  edits: 1,
-                  at: Date.now(),
-                  provider: session.provider,
-                }));
-                setExtraEdits((current) => mergeEdits(current, found));
-                if (found[0]) {
-                  setOpenSource(false);
-                  setOpen(found[0]);
-                }
-              });
-            }}
-          >
-            Review
-          </button>
-          <button className={`tiny${terminalOpen ? " active-kind" : ""}`} type="button" disabled={!cwd} onClick={() => setTerminalOpen((value) => !value)}>
-            Terminal
-          </button>
+          {project ? (
+            <>
+              <button
+                className="tiny"
+                type="button"
+                disabled={!cwd}
+                onClick={() => {
+                  if (!cwd || !window.workhorse?.listGitChanges) return;
+                  void window.workhorse.listGitChanges(cwd).then((changes) => {
+                    const found = changes.map<ProjectEdit>((change) => ({
+                      path: change.path,
+                      name: fileNameFromPath(change.path),
+                      folder: fileFolderFromPath(change.path, roots),
+                      edits: 1,
+                      at: Date.now(),
+                      provider: session.provider,
+                    }));
+                    setExtraEdits((current) => mergeEdits(current, found));
+                    if (found[0]) {
+                      setOpenSource(false);
+                      setOpen(found[0]);
+                    }
+                  });
+                }}
+              >
+                Review
+              </button>
+              <button className={`tiny${terminalOpen ? " active-kind" : ""}`} type="button" disabled={!cwd} onClick={() => setTerminalOpen((value) => !value)}>
+                Terminal
+              </button>
+            </>
+          ) : null}
           <ContextMeter />
         </div>
       </header>
@@ -263,7 +267,7 @@ export function SessionPane() {
         setupOpen={setupOpen}
         onToggleSetup={() => setSetupOpen((value) => !value)}
       />
-      {terminalOpen && cwd ? <TerminalPane sessionId={session.id} cwd={cwd} onClose={() => setTerminalOpen(false)} /> : null}
+      {project && terminalOpen && cwd ? <TerminalPane sessionId={session.id} cwd={cwd} onClose={() => setTerminalOpen(false)} /> : null}
       {open ? (
         <FileReview
           file={open}

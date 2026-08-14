@@ -294,6 +294,7 @@ export type Store = AppState & {
   setUsageRange: (range: UsageRange) => void;
   setSidebarWidth: (width: number) => void;
   setThreadWidth: (width: number) => void;
+
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   watchNotices: WatchNotice[];
@@ -696,7 +697,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mode: choice.mode,
         sandbox: choice.sandbox,
         environment: { kind: "local" },
-        securityPolicy: { network: "blocked", root: "ask" },
+        securityPolicy: { network: "allowed", root: "allowed" },
         status: "idle",
         contextUsed: 0,
         messages: [],
@@ -933,7 +934,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setSecurityPolicy = useCallback((patch: Partial<SessionSecurityPolicy>) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (!session) return;
-    const current = session.securityPolicy ?? { network: "blocked", root: "ask" };
+    const current = session.securityPolicy ?? { network: "allowed", root: "allowed" };
     const securityPolicy: SessionSecurityPolicy = { ...current, ...patch };
     if (securityPolicy.network === current.network && securityPolicy.root === current.root) return;
     if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);

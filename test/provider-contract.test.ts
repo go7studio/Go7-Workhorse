@@ -55,6 +55,10 @@ test("provider changes clear stale vendor context for portable replay", () => {
 });
 
 test("shared security blocks network and outside-workspace requests before vendor policy", () => {
+  assert.equal(
+    securityPolicyAnswer({ tool: "run_command", detail: "git fetch origin" }).answer,
+    null,
+  );
   assert.deepEqual(
     securityPolicyAnswer({ policy: { network: "blocked", root: "ask" }, tool: "run_command", detail: "git fetch origin" }),
     { answer: "deny", boundary: "network" },

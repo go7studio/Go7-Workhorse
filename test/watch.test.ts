@@ -30,6 +30,7 @@ import {
   watchBarDetail,
   watchBarTitle,
   watchHoldMessage,
+  watchKeyForSession,
   watchLocksKey,
   watchPicksKey,
   watchVendorStatuses,
@@ -300,7 +301,12 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.doesNotMatch(notices, /Allow today/);
   assert.doesNotMatch(notices, /Watch · Safety/);
   assert.doesNotMatch(notices, /permission-overlay/);
-  assert.match(notices, /watchNoticeKeysForChat/);
+  assert.match(notices, /watchKeyForSession/);
+  assert.match(notices, /if \(setupOpen \|\|/);
+  assert.doesNotMatch(notices, /watchNoticeKeysForChat/);
+  assert.equal(watchKeyForSession({ provider: "custom", customBotId: "bot_minimax" }), "bot:bot_minimax");
+  assert.equal(watchKeyForSession({ provider: "codex" }), "codex");
+  assert.notEqual(watchKeyForSession({ provider: "custom", customBotId: "bot_minimax" }), "codex");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /onSwitchModel/);
   assert.match(store, /conversation/);
   const today = dayKey();

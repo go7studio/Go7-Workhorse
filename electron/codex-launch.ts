@@ -153,7 +153,7 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.0",
+        version: "0.1.1",
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

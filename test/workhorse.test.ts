@@ -1946,6 +1946,8 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(setup, /setup-tide/);
   assert.match(setup, /Pause before tools/);
   assert.match(setup, /Tightest box/);
+  assert.doesNotMatch(setup, /Security boundaries/);
+  assert.doesNotMatch(setup, /Outside workspace/);
   assert.match(setup, /aria-label="Vendor"/);
   assert.match(setup, /defaultModel\(id\)/);
   assert.match(setup, /modelsFor\(session\.provider\)/);
@@ -1964,6 +1966,13 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(storeSrc, /applySessionPolicyChange/);
   assert.match(setup, /File edits run/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);
+  const setupCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(setupCss, /container-name:\s*session/);
+  assert.match(setupCss, /56cqi/);
+  assert.match(setupCss, /width:\s*min\(760px/);
+  assert.doesNotMatch(setup, /setup-resize/);
+  assert.doesNotMatch(setup, /setSessionSetupHeight/);
+  assert.doesNotMatch(setupCss, /setup-resize/);
   assert.equal(effortStopPos(4, 5), 1);
   assert.equal(effortStopPos(0, 5), 0);
   assert.equal(effortStopAt(1, 5), 4);
@@ -2376,6 +2385,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /EditedList/);
   assert.match(pane, /FileReview/);
   assert.match(pane, /projectEdits\(\[session\]/);
+  assert.match(pane, /\{project \? \(/);
+  assert.match(pane, /project && terminalOpen && cwd/);
   assert.match(pane, /file-review overlay|overlay/);
   assert.doesNotMatch(pane, /if \(open\) \{\s*return \(/);
   assert.match(pane, /compact/);
@@ -4611,6 +4622,11 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.match(thread, /Resize conversation pane/);
   assert.match(thread, /setThreadWidth/);
   assert.match(thread, /invert/);
+
+  assert.doesNotMatch(store, /sessionSetupHeight/);
+  assert.doesNotMatch(store, /setSessionSetupWidth/);
+  const setupPane = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.doesNotMatch(setupPane, /setup-resize/);
 
   const handle = readFileSync(path.join(ROOT, "src", "ui", "SplitHandle.tsx"), "utf8");
   assert.match(handle, /pane-dragging/);

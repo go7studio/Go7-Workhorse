@@ -49,7 +49,7 @@ export function securityPolicyAnswer(input: {
   path?: string;
   roots?: string[];
 }): { answer: PermissionAnswer | null; boundary?: "network" | "outside-workspace" } {
-  const policy = input.policy ?? { network: "blocked", root: "ask" };
+  const policy = input.policy ?? { network: "allowed", root: "allowed" };
   if (policy.network === "blocked" && looksLikeNetworkTool(input.tool, input.detail)) {
     return { answer: "deny", boundary: "network" };
   }

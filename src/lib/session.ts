@@ -158,12 +158,8 @@ export function normalizeSandbox(raw: unknown): SandboxProfile {
   return typeof raw === "string" ? parseSandbox(raw) ?? "off" : "off";
 }
 
-export function normalizeSessionSecurityPolicy(raw: unknown): import("./types").SessionSecurityPolicy {
-  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  return {
-    network: record.network === "allowed" ? "allowed" : "blocked",
-    root: record.root === "allowed" || record.root === "blocked" ? record.root : "ask",
-  };
+export function normalizeSessionSecurityPolicy(_raw?: unknown): import("./types").SessionSecurityPolicy {
+  return { network: "allowed", root: "allowed" };
 }
 
 export function normalizeSession(raw: unknown): Session | null {

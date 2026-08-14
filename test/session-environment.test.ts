@@ -61,8 +61,9 @@ test("managed worktrees create once and reopen for the same chat", async (t) => 
     fs.writeFileSync(path.join(repo, "README.md"), "changed\n");
     fs.writeFileSync(path.join(repo, "new file.txt"), "untracked\n");
     const changes = listGitChanges(repo);
-    assert.ok(changes.some((item) => item.path === path.join(repo, "README.md")));
-    assert.ok(changes.some((item) => item.path === path.join(repo, "new file.txt")));
+    const changedRelativePaths = changes.map((item) => path.relative(repo, item.path).replaceAll("\\", "/"));
+    assert.ok(changedRelativePaths.includes("README.md"));
+    assert.ok(changedRelativePaths.includes("new file.txt"));
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

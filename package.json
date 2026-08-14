@@ -15,7 +15,8 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "pack:win": "npm run build && electron-builder --win --dir",
-    "dist:win": "npm run build && electron-builder --win nsis",
+    "package:win": "electron-builder --win nsis",
+    "dist:win": "npm run build && npm run package:win",
     "preview": "vite preview",
     "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/watch.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts"
   },

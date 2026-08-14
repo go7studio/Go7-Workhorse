@@ -14,9 +14,9 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -24,11 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build application
+        run: npm run build
+
       - name: Test
         run: npm test
 
       - name: Build Windows installer
-        run: npm run dist:win
+        run: npm run package:win
 
       - id: ver
         shell: pwsh

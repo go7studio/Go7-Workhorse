@@ -1,16 +1,18 @@
+import { isDefaultTitle } from "./titles";
 import type { Panel } from "./types";
 
-export type Surface = "settings" | "welcome" | "project-home" | "session";
+export type Surface = "settings" | "add-bot" | "welcome" | "project-home" | "session";
 
 export function selectSurface(input: {
   panel: Panel;
   hasProject: boolean;
   hasSession: boolean;
 }): Surface {
+  if (input.panel === "add-bot") return "add-bot";
   if (input.panel === "settings") return "settings";
-  if (!input.hasProject) return "welcome";
-  if (!input.hasSession) return "project-home";
-  return "session";
+  if (input.hasSession) return "session";
+  if (input.hasProject) return "project-home";
+  return "welcome";
 }
 
 export function titlebarLabel(
@@ -18,7 +20,10 @@ export function titlebarLabel(
   sessionTitle?: string | null,
   panel?: Panel,
 ): string {
+  const named = sessionTitle && !isDefaultTitle(sessionTitle) ? sessionTitle : null;
+  if (panel === "add-bot") return "Add a bot";
   if (panel === "settings") return "Settings";
-  if (projectName && sessionTitle) return `${projectName}  ·  ${sessionTitle}`;
+  if (projectName && named) return `${projectName}  ·  ${named}`;
+  if (named) return named;
   return projectName ?? "";
 }

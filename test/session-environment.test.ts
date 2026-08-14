@@ -52,7 +52,7 @@ test("managed worktrees create once and reopen for the same chat", async (t) => 
     assert.equal(path.relative(managed, first.path).startsWith(".."), false);
 
     const second = await ensureManagedWorktree({ sessionId: "sess:test", root: repo }, managed);
-    assert.equal(second.ok, true);
+    assert.equal(second.ok, true, second.ok ? undefined : second.message);
     if (!second.ok) return;
     assert.equal(second.reused, true);
     assert.equal(second.path, first.path);

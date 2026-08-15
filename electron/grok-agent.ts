@@ -629,6 +629,10 @@ export function pickPermissionOptionId(
 
 export class GrokAgent {
   readonly spec: GrokLaunchSpec;
+  /** Vendor name for errors this agent raises. */
+  private get who(): string {
+    return this.spec.agentLabel?.trim() || "grok";
+  }
   private readonly spawn: GrokSpawnFn;
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
@@ -659,7 +663,7 @@ export class GrokAgent {
     child.on("error", (error) => this.failAll(error));
     child.on("exit", (code, signal) => {
       if (this.closed) return;
-      this.failAll(new Error(`grok agent exited (${code ?? signal ?? "unknown"})${this.stderr.trim() ? `: ${this.stderr.trim()}` : ""}`));
+      this.failAll(new Error(`${this.who} agent exited (${code ?? signal ?? "unknown"})${this.stderr.trim() ? `: ${this.stderr.trim()}` : ""}`));
     });
 
     const initialize = await this.request("initialize", this.spec.initializeParams);
@@ -689,7 +693,7 @@ export class GrokAgent {
       sessionNew = await this.request("session/new", { ...this.spec.sessionParams, mcpServers: [] });
     }
     const sessionId = typeof sessionNew.sessionId === "string" ? sessionNew.sessionId : "";
-    if (!sessionId) throw new Error("grok agent session/new did not return a sessionId");
+    if (!sessionId) throw new Error(`${this.who} agent session/new did not return a sessionId`);
     this.sessionId = sessionId;
     this.opened = "session/new";
     return { initialize, sessionNew, sessionId, opened: "session/new" };
@@ -780,7 +784,7 @@ export class GrokAgent {
   }
 
   async sessionInfo(): Promise<Record<string, unknown>> {
-    if (!this.sessionId) throw new Error("grok agent has no session");
+    if (!this.sessionId) throw new Error(`${this.who} agent has no session`);
     return this.request("_x.ai/session/info", { sessionId: this.sessionId });
   }
 
@@ -903,7 +907,7 @@ export class GrokAgent {
       waiter("deny");
       this.permissionWaiters.delete(id);
     }
-    this.failAll(new Error("grok agent disposed"));
+    this.failAll(new Error(`${this.who} agent disposed`));
     if (this.child && !this.child.killed) {
       this.child.kill();
     }
@@ -914,7 +918,7 @@ export class GrokAgent {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.child?.stdin.writable) {
-        reject(new Error("grok agent stdin is closed"));
+        reject(new Error(`${this.who} agent stdin is closed`));
         return;
       }
       this.pending.set(id, { resolve, reject });
@@ -962,7 +966,7 @@ export class GrokAgent {
     if (!pending) return;
     this.pending.delete(message.id);
     if (message.error) {
-      pending.reject(new Error(message.error.message || "grok agent request failed"));
+      pending.reject(new Error(message.error.message || `${this.who} agent request failed`));
       return;
     }
     pending.resolve(asRecord(message.result));

@@ -138,6 +138,9 @@ export function workhorseMcpServer(fromSessionId?: string): GrokMcpServer | null
 }
 
 export type GrokLaunchSpec = {
+  /** Vendor name for messages. The ACP agent is shared, so Claude and Codex
+   *  failures would otherwise all report themselves as grok. */
+  agentLabel?: string;
   command: string;
   argv: string[];
   cwd: string;

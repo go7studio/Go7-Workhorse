@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { isInsideAsar, runningInElectron } from "./desk-path";
 
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 
@@ -19,6 +20,8 @@ export type ClaudeLoginDetectInput = {
   readFile?: (filePath: string) => string;
   moduleDirs?: string[];
   nodeBinary?: string;
+  execPath?: string;
+  electron?: boolean;
 };
 
 export type ClaudeLoginDetectResult = {
@@ -84,15 +87,24 @@ function resolveNodeBinary(
   input: ClaudeLoginDetectInput,
   existsSync: (filePath: string) => boolean,
   pathDirs: string[],
+  scriptPath?: string,
 ): string | null {
   const env = input.env ?? process.env;
+  const execPath = input.execPath ?? process.execPath;
   const explicit = input.nodeBinary?.trim() || env.NODE_BINARY?.trim();
   if (explicit && existsSync(explicit)) return explicit;
+  // A packaged script lives inside app.asar, which only Electron can read.
+  // Prefer our own binary over any node on PATH, or the child dies with
+  // MODULE_NOT_FOUND on a machine that happens to have node installed.
+  if (scriptPath && isInsideAsar(scriptPath)) {
+    const electron = input.electron ?? runningInElectron();
+    if (electron && existsSync(execPath)) return execPath;
+  }
   const names = (input.platform ?? process.platform) === "win32" ? ["node.exe", "node"] : ["node"];
   const onPath = lookOnPath(names, pathDirs, existsSync);
   if (onPath) return onPath;
-  if (isNodeBinary(process.execPath) && existsSync(process.execPath)) return process.execPath;
-  if (isElectronBinary(process.execPath) && existsSync(process.execPath)) return process.execPath;
+  if (isNodeBinary(execPath) && existsSync(execPath)) return execPath;
+  if (isElectronBinary(execPath) && existsSync(execPath)) return execPath;
   return null;
 }
 
@@ -140,7 +152,7 @@ function launchForFile(
 ): ClaudeAcpLaunch | null {
   if (!existsSync(filePath)) return null;
   if (isJsEntry(filePath)) {
-    const node = resolveNodeBinary(input, existsSync, pathDirs);
+    const node = resolveNodeBinary(input, existsSync, pathDirs, filePath);
     if (!node) return null;
     return { command: node, argv: [filePath], acpFile: filePath };
   }
@@ -265,6 +277,12 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   return { connected, binary: acpBinary, cliBinary, acpBinary, claudeHome };
 }
 
-export function isElectronAcpCommand(command: string): boolean {
-  return isElectronBinary(command);
+export function isElectronAcpCommand(
+  command: string,
+  execPath: string = process.execPath,
+  electron: boolean = runningInElectron(),
+): boolean {
+  if (isElectronBinary(command)) return true;
+  // A packaged build renames the binary after the product, so compare paths.
+  return electron && command === execPath;
 }

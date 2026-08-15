@@ -4,6 +4,26 @@ import os from "node:os";
 import path from "node:path";
 
 /**
+ * True when a path sits inside an asar archive. Only Electron patches fs to
+ * read these; a system node treats app.asar as a file and reports
+ * MODULE_NOT_FOUND. Files under app.asar.unpacked are real, so they are fine.
+ */
+export function isInsideAsar(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/");
+  if (normalized.includes(".asar.unpacked/")) return false;
+  return /(^|\/)[^/]+\.asar\//.test(normalized);
+}
+
+/**
+ * Whether this process is Electron. Test the runtime, never the executable
+ * name: a packaged build renames it after the product, so a name check is
+ * true in development and false everywhere it matters.
+ */
+export function runningInElectron(versions: NodeJS.ProcessVersions = process.versions): boolean {
+  return typeof (versions as { electron?: string }).electron === "string";
+}
+
+/**
  * Where this machine keeps per-user application data.
  * Windows %LOCALAPPDATA%, macOS ~/Library/Application Support, Linux $XDG_DATA_HOME.
  * Every vendor lookup builds on this, so no caller hand-rolls a Windows path.

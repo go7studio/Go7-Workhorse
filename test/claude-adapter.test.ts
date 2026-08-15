@@ -39,6 +39,7 @@ test("detectClaudeLogin requires ACP plus a real login artifact", () => {
     existsSync: () => false,
     pathDirs: [],
     moduleDirs: [],
+    keychainHasLogin: () => false,
   });
   assert.equal(missing.connected, false);
   assert.equal(missing.acpBinary, null);
@@ -56,6 +57,7 @@ test("detectClaudeLogin requires ACP plus a real login artifact", () => {
     pathDirs: [],
     moduleDirs: [ROOT],
     nodeBinary: process.execPath,
+    keychainHasLogin: () => false,
   });
   assert.equal(withPackage.connected, false);
   assert.ok(withPackage.acpBinary);
@@ -71,6 +73,7 @@ test("detectClaudeLogin requires ACP plus a real login artifact", () => {
       (file) => file === path.join("C:\\claude", ".credentials.json"),
       () => JSON.stringify({ claudeAiOauth: { accessToken: "tok-xxxxxxxx" } }),
       {},
+      "win32",
     ),
     true,
   );
@@ -91,6 +94,7 @@ test("detectClaudeLogin requires ACP plus a real login artifact", () => {
       (file) => file === path.join("C:\\claude", ".credentials.json"),
       () => JSON.stringify({ mcpOAuth: { figma: {} } }),
       {},
+      "win32",
     ),
     false,
   );
@@ -403,23 +407,23 @@ test("an expired or unusable credential is not a login", () => {
 
   // The case that shipped: a token three months dead still read as connected.
   assert.equal(
-    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now - 1 }), {}, "darwin", now),
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now - 1 }), {}, "darwin", now, () => false),
     false,
   );
   assert.equal(
-    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now + 60_000 }), {}, "darwin", now),
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now + 60_000 }), {}, "darwin", now, () => false),
     true,
   );
   // No expiry recorded means unknown, not dead.
   assert.equal(
-    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({}), {}, "darwin", now),
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({}), {}, "darwin", now, () => false),
     true,
   );
   // An explicit key still wins over a dead file.
   assert.equal(
     hasClaudeLoginArtifact(
       claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now - 1 }),
-      { ANTHROPIC_API_KEY: "sk-test" }, "darwin", now,
+      { ANTHROPIC_API_KEY: "sk-test" }, "darwin", now, () => false,
     ),
     true,
   );
@@ -430,7 +434,7 @@ test("an expired or unusable credential is not a login", () => {
   assert.equal(
     hasClaudeLoginArtifact(
       claudeHome, home, (f) => f === macConfig,
-      () => JSON.stringify({ "oauth:tokenCacheV2": "cache-value" }), {}, "darwin", now,
+      () => JSON.stringify({ "oauth:tokenCacheV2": "cache-value" }), {}, "darwin", now, () => false,
     ),
     false,
   );
@@ -439,4 +443,30 @@ test("an expired or unusable credential is not a login", () => {
   assert.equal(oauthNotExpired({ expiresAt: now + 1 }, now), true);
   assert.equal(oauthNotExpired({}, now), true);
   assert.equal(oauthNotExpired(null, now), false);
+});
+
+test("a Mac login lives in the keychain, not in the credentials file", () => {
+  const home = "/Users/me";
+  const claudeHome = "/Users/me/.claude";
+  const credPath = path.join(claudeHome, ".credentials.json");
+  const now = 1_755_000_000_000;
+  // The real shape on a Mac: the CLI writes the keychain and leaves an old
+  // file behind. Reading only the file calls a signed-in user signed out.
+  const staleFile = () => JSON.stringify({ claudeAiOauth: { accessToken: "tok-xxxxxxxx", expiresAt: now - 1 } });
+
+  assert.equal(
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, staleFile, {}, "darwin", now, () => true),
+    true,
+  );
+  assert.equal(
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, staleFile, {}, "darwin", now, () => false),
+    false,
+  );
+  // Windows keeps using the file, so the keychain probe must not be consulted.
+  let asked = false;
+  hasClaudeLoginArtifact(claudeHome, home, () => false, () => "", {}, "win32", now, () => {
+    asked = true;
+    return true;
+  });
+  assert.equal(asked, false);
 });

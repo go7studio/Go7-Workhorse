@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,8 @@ export type ClaudeLoginDetectInput = {
   nodeBinary?: string;
   execPath?: string;
   electron?: boolean;
+  /** Injectable so tests never depend on the machine's own keychain. */
+  keychainHasLogin?: () => boolean;
 };
 
 export type ClaudeLoginDetectResult = {
@@ -240,6 +243,23 @@ function oauthLooksReal(value: unknown): boolean {
   );
 }
 
+/**
+ * macOS keeps Claude Code credentials in the login keychain, so there is no
+ * file to read and any ~/.claude/.credentials.json is a leftover. Ask whether
+ * the item exists; never read the secret, which would need consent.
+ */
+export function macKeychainHasClaudeLogin(): boolean {
+  try {
+    execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 3000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** A credential past its expiry is not a login. Missing expiry means unknown, so allow it. */
 export function oauthNotExpired(value: unknown, now: number): boolean {
   if (!value || typeof value !== "object") return false;
@@ -256,8 +276,13 @@ export function hasClaudeLoginArtifact(
   env: NodeJS.Dict<string>,
   platform: NodeJS.Platform = process.platform,
   now: number = Date.now(),
+  keychainHasLogin: () => boolean = macKeychainHasClaudeLogin,
 ): boolean {
   if (env.ANTHROPIC_API_KEY?.trim() || env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
+  // Check the keychain before the file: on a Mac the file is often a stale
+  // leftover from before the CLI moved its store, and reading it alone
+  // reports a dead login for someone who is signed in.
+  if (platform === "darwin" && keychainHasLogin()) return true;
   const credPath = path.join(claudeHome, ".credentials.json");
   if (existsSync(credPath)) {
     try {
@@ -292,7 +317,16 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   const launch = resolveClaudeAcpLaunch({ ...input, env, homedir, platform, existsSync, pathDirs });
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveClaudeCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
-  const loggedIn = hasClaudeLoginArtifact(claudeHome, homedir, existsSync, readFile, env, platform);
+  const loggedIn = hasClaudeLoginArtifact(
+    claudeHome,
+    homedir,
+    existsSync,
+    readFile,
+    env,
+    platform,
+    Date.now(),
+    input.keychainHasLogin ?? macKeychainHasClaudeLogin,
+  );
   const connected = Boolean(acpBinary && loggedIn);
   return {
     connected,

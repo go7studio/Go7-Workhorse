@@ -306,7 +306,7 @@ test("a packaged ACP script runs on Electron, never a system node", () => {
   // died with MODULE_NOT_FOUND on any machine that had node on PATH.
   const asarScript =
     "/Applications/Workhorse.app/Contents/Resources/app.asar/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
-  const systemNode = "/opt/homebrew/bin/node";
+  const systemNode = path.join("/opt/homebrew/bin", "node");
   const packaged = "/Applications/Workhorse.app/Contents/MacOS/Workhorse";
   const onDisk = (file: string) => file === asarScript || file === systemNode || file === packaged;
 
@@ -316,6 +316,7 @@ test("a packaged ACP script runs on Electron, never a system node", () => {
     existsSync: onDisk,
     execPath: packaged,
     electron: true,
+    platform: "darwin",
   });
   assert.equal(launch?.command, packaged);
   assert.notEqual(launch?.command, systemNode);
@@ -334,6 +335,7 @@ test("a packaged ACP script runs on Electron, never a system node", () => {
     existsSync: (file) => file === devScript || file === systemNode || file === packaged,
     execPath: packaged,
     electron: true,
+    platform: "darwin",
   });
   assert.equal(devLaunch?.command, systemNode);
 });
@@ -365,6 +367,7 @@ test("a packaged build names the missing CLI instead of spawning into the archiv
       existsSync: (file: string) => file === asarAcp || file === packaged,
       execPath: packaged,
       electron: true,
+      platform: "darwin" as NodeJS.Platform,
     };
     assert.throws(
       () => buildClaudeLaunchSpec({ model: "claude-opus-5", effort: "high", cwd: ROOT, mode: "ask", detect }),
@@ -373,7 +376,7 @@ test("a packaged build names the missing CLI instead of spawning into the archiv
 
     // A checkout can still fall back to the CLI inside the package, so it must not throw.
     const devAcp = "/Users/me/proj/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
-    const node = "/opt/homebrew/bin/node";
+    const node = path.join("/opt/homebrew/bin", "node");
     const spec = buildClaudeLaunchSpec({
       model: "claude-opus-5",
       effort: "high",
@@ -387,6 +390,7 @@ test("a packaged build names the missing CLI instead of spawning into the archiv
         existsSync: (file: string) => file === devAcp || file === node,
         execPath: packaged,
         electron: true,
+        platform: "darwin",
       },
     });
     assert.equal(spec.command, node);

@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSessionHost, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
@@ -11,7 +10,8 @@ import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
 import { detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
-import { detectClaudeLogin } from "./claude-login";
+import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
+import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { listVendorModels } from "./vendor-models";
@@ -49,6 +49,10 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { readVersionedState, writeVersionedState } from "./state-persistence";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Workhorse's own Claude token, so signing in here never touches the shared login. */
+export const CLAUDE_TOKEN_ID = "claude-oauth-token";
+const CLAUDE_AUTH_SESSION = "auth:claude";
 
 /** Stable store folder. productName changes must not orphan chats. */
 export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
@@ -100,6 +104,22 @@ let jobEngine: DurableJobEngine | null = null;
 function credentialStore(): CredentialStore {
   credentials ??= new CredentialStore(path.join(app.getPath("userData"), "credentials.json"), safeStorage);
   return credentials;
+}
+
+/**
+ * Put Workhorse's own Claude token on the environment the vendor child
+ * inherits. Detection counts it as a login and the launch spec prefers it, so
+ * the desk stops depending on the shared Claude Code login entirely.
+ */
+function applyStoredClaudeToken(): boolean {
+  try {
+    const token = credentialStore().get(CLAUDE_TOKEN_ID);
+    if (!token) return false;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readState(): Persistable {
@@ -290,6 +310,7 @@ app.whenReady().then(() => {
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }
+  applyStoredClaudeToken();
   try {
     ensureDeskRipgrep();
   } catch {
@@ -619,12 +640,25 @@ app.whenReady().then(() => {
     codexCapabilitySummary(typeof projectRoot === "string" ? projectRoot : undefined),
   );
   ipcMain.handle("claude:detect-login", () => detectClaudeLogin());
-  ipcMain.handle("claude:auth-command", () => {
-    const detected = detectClaudeLogin();
-    const cli = detected.cliBinary;
-    // Quote the path: a CLI under "Application Support" has a space in it.
-    const command = cli ? `"${cli}" auth login` : "claude auth login";
-    return { command, cwd: os.homedir() };
+  ipcMain.handle("claude:setup-token", async (event) => {
+    const cli = resolveClaudeCliBinary();
+    if (!cli) return { ok: false, message: "Claude Code CLI not found." };
+    const result = await runClaudeSetupToken({
+      cli,
+      onOutput: (data) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send("terminal:event", { type: "output", sessionId: CLAUDE_AUTH_SESSION, data });
+        }
+      },
+    });
+    if (!result.ok || !result.token) return { ok: false, message: result.message ?? "Sign-in failed." };
+    try {
+      credentialStore().put(result.token, CLAUDE_TOKEN_ID);
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "Could not store the token." };
+    }
+    applyStoredClaudeToken();
+    return { ok: true };
   });
   ipcMain.handle("custom:detect", () => detectCustomLogin());
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {

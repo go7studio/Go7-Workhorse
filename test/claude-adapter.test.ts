@@ -14,6 +14,7 @@ import {
   resolveClaudeAcpLaunch,
 } from "../electron/claude-login";
 import { isInsideAsar, runningInElectron } from "../electron/desk-path";
+import { findClaudeOauthToken } from "../electron/claude-auth";
 import {
   buildClaudeLaunchSpec,
   resolveClaudeEffort,
@@ -494,4 +495,22 @@ test("the effort a chat picks is sent where the agent reads it", () => {
   const ids = CLAUDE_EFFORTS.map((level) => level.id);
   assert.deepEqual(ids, ["adaptive", "low", "medium", "high", "xhigh", "max"]);
   assert.equal(effortsFor("claude"), CLAUDE_EFFORTS);
+});
+
+test("the desk mints its own token instead of taking over the shared login", () => {
+  // `claude auth login` writes the one credential store that Claude Code
+  // itself reads, so signing in here used to sign the person out there.
+  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  assert.match(settings, /claudeSetupToken/);
+  assert.doesNotMatch(settings, /auth login/);
+
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /claude:setup-token/);
+  // Stored in the desk's own vault and put on the env the child inherits.
+  assert.match(main, /credentialStore\(\)\.put\(result\.token, CLAUDE_TOKEN_ID\)/);
+  assert.match(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN = token/);
+
+  assert.equal(findClaudeOauthToken("token: sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"), "sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
+  assert.equal(findClaudeOauthToken("no token here"), null);
+  assert.equal(findClaudeOauthToken("sk-ant-short"), null);
 });

@@ -9,7 +9,6 @@ import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
 import { BotForm } from "./BotForm";
 import { SkillsPane } from "./SkillsPane";
-import { TerminalPane } from "./TerminalPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 
@@ -61,23 +60,21 @@ export function Settings() {
   const settings = store.settings;
   const section = store.settingsSection;
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
-  const [authTerminal, setAuthTerminal] = useState<{ command: string; cwd: string } | null>(null);
+  const [authMessage, setAuthMessage] = useState("");
 
-  // A login lands in the browser, not in this window, so nothing tells us it
-  // finished. Re-check while the terminal is open instead of waiting for it
-  // to be closed.
-  useEffect(() => {
-    if (!authTerminal) return;
-    const id = window.setInterval(() => store.refreshClaudeLogin(), 3000);
-    return () => window.clearInterval(id);
-  }, [authTerminal, store]);
-
-  /** Run the vendor's own login in a terminal, then re-check when it closes. */
+  /**
+   * Mint a token for this desk with `claude setup-token`. Signing in the
+   * ordinary way writes the one credential store Claude Code itself reads,
+   * which signs the person out there; a token of our own lets both run.
+   */
   const startClaudeAuth = () => {
     void (async () => {
-      const ask = window.workhorse?.claudeAuthCommand;
-      if (!ask) return;
-      setAuthTerminal(await ask());
+      const run = window.workhorse?.claudeSetupToken;
+      if (!run) return;
+      setAuthMessage("Signing in. Finish in your browser.");
+      const result = await run();
+      setAuthMessage(result.ok ? "" : result.message || "Sign-in failed.");
+      store.refreshClaudeLogin();
     })();
   };
 
@@ -267,17 +264,8 @@ export function Settings() {
             />
           )}
 
-          {authTerminal ? (
-            <TerminalPane
-              sessionId="auth:claude"
-              cwd={authTerminal.cwd}
-              initialCommand={authTerminal.command}
-              onClose={() => {
-                setAuthTerminal(null);
-                store.refreshClaudeLogin();
-              }}
-            />
-          ) : null}
+          {authMessage ? <p className="row-meta">{authMessage}</p> : null}
+
 
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />

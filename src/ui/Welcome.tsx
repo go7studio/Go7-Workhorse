@@ -26,35 +26,21 @@ export function Welcome() {
       <p className="welcome-ver">v{APP_VERSION}</p>
       <p>One desk for Grok, Codex, and Claude.</p>
       <div className="welcome-steps">
-        <div className="welcome-step">
-          <button className="primary" type="button" onClick={() => openSheet("project")}>
-            Create a project
+        <button className="primary" type="button" onClick={() => openSheet("project")}>
+          Create a project
+        </button>
+        <button className="ghost" type="button" onClick={() => void openFolder()}>
+          Link an existing folder
+        </button>
+        {connected > 0 ? (
+          <button className="ghost" type="button" onClick={() => startSession(null)}>
+            Start a chat
           </button>
-          <span>A name is enough.</span>
-        </div>
-        <div className="welcome-step">
-          <button className="ghost" type="button" onClick={() => void openFolder()}>
-            Link an existing folder
+        ) : (
+          <button className="ghost" type="button" onClick={() => openSettings("llms")}>
+            Connect an agent
           </button>
-          <span>Opens it as a project, named after the folder.</span>
-        </div>
-        <div className="welcome-step">
-          {connected > 0 ? (
-            <>
-              <button className="ghost" type="button" onClick={() => startSession(null)}>
-                Start a chat
-              </button>
-              <span>{connected === 1 ? "1 agent connected." : `${connected} agents connected.`}</span>
-            </>
-          ) : (
-            <>
-              <button className="ghost" type="button" onClick={() => openSettings("llms")}>
-                Connect an agent
-              </button>
-              <span>A chat cannot answer until one is connected.</span>
-            </>
-          )}
-        </div>
+        )}
       </div>
     </section>
   );

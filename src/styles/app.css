@@ -797,25 +797,12 @@ html.pane-dragging * {
   display: flex;
   width: min(320px, 100%);
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
-.welcome-step {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.welcome-step button {
+.welcome-steps button {
   width: 100%;
   justify-content: center;
-}
-
-.welcome-step span {
-  text-align: center;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--text-tertiary);
 }
 
 .provider-grid {

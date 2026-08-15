@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { findClaudeDesktopRoot, pickClaudeCodeOauth } from "../electron/claude-desktop-auth";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
+  CLAUDE_CLI_NOT_INSTALLED,
   detectClaudeLogin,
   hasClaudeLoginArtifact,
   isElectronAcpCommand,
@@ -338,4 +339,55 @@ test("isInsideAsar spots archives but not the unpacked copy", () => {
   assert.equal(isInsideAsar("/Users/me/proj/node_modules/x/dist/index.js"), false);
   assert.equal(runningInElectron({ node: "22" } as NodeJS.ProcessVersions), false);
   assert.equal(runningInElectron({ electron: "37" } as unknown as NodeJS.ProcessVersions), true);
+});
+
+test("a packaged build names the missing CLI instead of spawning into the archive", () => {
+  const previous = { url: process.env.WORKHORSE_BRIDGE_URL, token: process.env.WORKHORSE_BRIDGE_TOKEN };
+  process.env.WORKHORSE_BRIDGE_URL = "http://127.0.0.1:9";
+  process.env.WORKHORSE_BRIDGE_TOKEN = "token";
+  try {
+    const packaged = "/Applications/Workhorse.app/Contents/MacOS/Workhorse";
+    const asarAcp =
+      "/Applications/Workhorse.app/Contents/Resources/app.asar/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+    // No Claude CLI anywhere on this machine.
+    const detect = {
+      env: { CLAUDE_ACP_BIN: asarAcp, PATH: "" },
+      homedir: "/Users/nobody",
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file: string) => file === asarAcp || file === packaged,
+      execPath: packaged,
+      electron: true,
+    };
+    assert.throws(
+      () => buildClaudeLaunchSpec({ model: "claude-opus-5", effort: "high", cwd: ROOT, mode: "ask", detect }),
+      (error: Error) => error.message === CLAUDE_CLI_NOT_INSTALLED,
+    );
+
+    // A checkout can still fall back to the CLI inside the package, so it must not throw.
+    const devAcp = "/Users/me/proj/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+    const node = "/opt/homebrew/bin/node";
+    const spec = buildClaudeLaunchSpec({
+      model: "claude-opus-5",
+      effort: "high",
+      cwd: ROOT,
+      mode: "ask",
+      detect: {
+        env: { CLAUDE_ACP_BIN: devAcp, PATH: "" },
+        homedir: "/Users/nobody",
+        pathDirs: ["/opt/homebrew/bin"],
+        moduleDirs: [],
+        existsSync: (file: string) => file === devAcp || file === node,
+        execPath: packaged,
+        electron: true,
+      },
+    });
+    assert.equal(spec.command, node);
+    assert.equal(spec.env?.CLAUDE_CODE_EXECUTABLE, undefined);
+  } finally {
+    if (previous.url === undefined) delete process.env.WORKHORSE_BRIDGE_URL;
+    else process.env.WORKHORSE_BRIDGE_URL = previous.url;
+    if (previous.token === undefined) delete process.env.WORKHORSE_BRIDGE_TOKEN;
+    else process.env.WORKHORSE_BRIDGE_TOKEN = previous.token;
+  }
 });

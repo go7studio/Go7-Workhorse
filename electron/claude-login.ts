@@ -10,6 +10,9 @@ const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 export const CLAUDE_ACP_NOT_INSTALLED =
   "Claude ACP is not installed. Add @agentclientprotocol/claude-agent-acp or set CLAUDE_ACP_BIN to a real file.";
 
+export const CLAUDE_CLI_NOT_INSTALLED =
+  "Claude Code CLI not found. Install Claude Code, or set CLAUDE_CODE_EXECUTABLE to the claude binary.";
+
 export type ClaudeLoginDetectInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;

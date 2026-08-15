@@ -10,6 +10,9 @@ const PACKAGE_NAME = "@agentclientprotocol/codex-acp";
 export const CODEX_ACP_NOT_INSTALLED =
   "Codex ACP is not installed. Add @agentclientprotocol/codex-acp or set CODEX_ACP_BIN to a real file.";
 
+export const CODEX_CLI_NOT_INSTALLED =
+  "Codex CLI not found. Install Codex, or set CODEX_PATH to the codex binary.";
+
 export type CodexLoginDetectInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;

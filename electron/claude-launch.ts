@@ -11,12 +11,13 @@ import {
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
+  CLAUDE_CLI_NOT_INSTALLED,
   isElectronAcpCommand,
   resolveClaudeAcpLaunch,
   resolveClaudeCliBinary,
   type ClaudeLoginDetectInput,
 } from "./claude-login";
-import { withDeskToolEnv } from "./desk-path";
+import { isInsideAsar, withDeskToolEnv } from "./desk-path";
 
 export type ClaudeLaunchInput = {
   sessionId?: string;
@@ -150,6 +151,10 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
     ANTHROPIC_MODEL: model,
   };
   if (cli) env.CLAUDE_CODE_EXECUTABLE = cli;
+  // Without this the agent falls back to a CLI inside its own package. Packaged
+  // that path sits in app.asar, and spawn goes to the OS, which cannot read an
+  // archive — the user gets "spawn ENOTDIR" and no idea what is missing.
+  else if (isInsideAsar(launch.acpFile)) throw new Error(CLAUDE_CLI_NOT_INSTALLED);
   if (!env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
     const desktop = readClaudeDesktopOauth(input.detect);
     if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;

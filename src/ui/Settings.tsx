@@ -9,6 +9,7 @@ import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
 import { BotForm } from "./BotForm";
 import { SkillsPane } from "./SkillsPane";
+import { TerminalPane } from "./TerminalPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 
@@ -24,6 +25,9 @@ const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
 
 function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (!vendorEnabled(link)) return "Disabled";
+  // Installed but signed out is a different problem from missing, and the
+  // only one the person can fix from here.
+  if (link.needsAuth) return "Needs auth";
   if (link.available === false) return "Not found";
   if (id === "grok" || id === "codex" || id === "claude") return "Local login";
   return "Marked";
@@ -57,6 +61,17 @@ export function Settings() {
   const settings = store.settings;
   const section = store.settingsSection;
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
+  const [authTerminal, setAuthTerminal] = useState<{ command: string; cwd: string } | null>(null);
+
+  /** Run the vendor's own login in a terminal, then re-check when it closes. */
+  const startClaudeAuth = () => {
+    void (async () => {
+      const ask = window.workhorse?.claudeAuthCommand;
+      if (!ask) return;
+      setAuthTerminal(await ask());
+    })();
+  };
+
   const [usageTick, setUsageTick] = useState(0);
   const [usageHome, setUsageHome] = useState(0);
   const [supportNote, setSupportNote] = useState("");
@@ -190,6 +205,11 @@ export function Settings() {
                     <span>{name}</span>
                     <em>{llmCardHint(id, link)}</em>
                   </button>
+                  {id === "claude" && link.needsAuth ? (
+                    <button type="button" className="tiny" onClick={startClaudeAuth}>
+                      Log in
+                    </button>
+                  ) : null}
                 </div>
               );
             })}
@@ -234,8 +254,21 @@ export function Settings() {
             <StockBotDetail
               id={llmFocus as Exclude<ProviderId, "custom">}
               onGone={() => setLlmFocus(null)}
+              onStartAuth={startClaudeAuth}
             />
           )}
+
+          {authTerminal ? (
+            <TerminalPane
+              sessionId="auth:claude"
+              cwd={authTerminal.cwd}
+              initialCommand={authTerminal.command}
+              onClose={() => {
+                setAuthTerminal(null);
+                store.refreshClaudeLogin();
+              }}
+            />
+          ) : null}
 
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
@@ -255,9 +288,11 @@ export function Settings() {
 function StockBotDetail({
   id,
   onGone,
+  onStartAuth,
 }: {
   id: Exclude<ProviderId, "custom">;
   onGone: () => void;
+  onStartAuth: () => void;
 }) {
   const store = useStore();
   const link = store.settings.llms[id];
@@ -310,6 +345,12 @@ function StockBotDetail({
           <em>{llmCardHint(id, link)}</em>
         </div>
       </div>
+
+      {id === "claude" && link.needsAuth ? (
+        <button type="button" className="ghost" onClick={onStartAuth}>
+          Log in with Claude
+        </button>
+      ) : null}
 
       <BotForm
         identityOnly

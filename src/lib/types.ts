@@ -237,6 +237,8 @@ export type LlmLink = {
   connected: boolean;
   enabled?: boolean;
   available?: boolean;
+  /** Installed, but the login is missing or expired. */
+  needsAuth?: boolean;
   name?: string;
   color?: string;
 };

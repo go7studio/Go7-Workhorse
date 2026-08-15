@@ -515,7 +515,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...current.settings.llms,
                 grok: { ...current.settings.llms.grok, available: Boolean(grok.connected) },
                 codex: { ...current.settings.llms.codex, available: Boolean(codex.connected) },
-                claude: { ...current.settings.llms.claude, available: Boolean(claude.connected) },
+                claude: {
+                  ...current.settings.llms.claude,
+                  available: Boolean(claude.connected),
+                  needsAuth: Boolean((claude as { needsAuth?: boolean }).needsAuth),
+                },
                 custom: { ...current.settings.llms.custom, connected: false },
               },
             },
@@ -1016,7 +1020,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...current.settings,
           llms: {
             ...current.settings.llms,
-            claude: { ...current.settings.llms.claude, available: Boolean(detected.connected) },
+            claude: {
+              ...current.settings.llms.claude,
+              available: Boolean(detected.connected),
+              needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+            },
           },
         },
       }));

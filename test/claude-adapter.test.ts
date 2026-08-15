@@ -477,10 +477,13 @@ test("the effort a chat picks is sent where the agent reads it", () => {
   // session config option and then calls applyFlagSettings.
   const agent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
   assert.match(agent, /session\/set_config_option/);
-  assert.match(agent, /configId: "effort"/);
-  // Only a level the session says the model takes, so Grok and Codex are
+  assert.match(agent, /id: "effort"/);
+  // Fast mode and the agent persona ride the same channel.
+  assert.match(agent, /id: "fast", value: this\.spec\.fastMode \? "on" : "off"/);
+  assert.match(agent, /id: "agent", value: agentName/);
+  // Only a value the session says the model takes, so Grok and Codex are
   // untouched when they advertise no such option.
-  assert.match(agent, /allowed\.includes\(wanted\)/);
+  assert.match(agent, /allowed\.includes\(want\.value\)/);
 
   assert.equal(resolveClaudeEffort("adaptive"), "default");
   assert.equal(resolveClaudeEffort("extra"), "xhigh");

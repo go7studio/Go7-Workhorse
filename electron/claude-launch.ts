@@ -23,6 +23,8 @@ export type ClaudeLaunchInput = {
   sessionId?: string;
   model: string;
   effort: EffortLevel | string | null;
+  fastMode?: boolean;
+  agentName?: string | null;
   cwd: string;
   mode: PermissionMode;
   sandbox?: SandboxProfile;
@@ -166,6 +168,8 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
 
   return {
     agentLabel: "Claude",
+    fastMode: input.fastMode === true,
+    agentName: input.agentName ?? null,
     command,
     argv: launch.argv,
     cwd: input.cwd,

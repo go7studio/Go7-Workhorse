@@ -54,6 +54,7 @@ import {
   toAcpMcpEnv,
   workhorseMcpScript,
   workhorseMcpServer,
+  isElectronAppCommand,
 } from "../electron/grok-launch";
 import { handleWorkhorseRpc } from "../electron/workhorse-mcp";
 import { mediaFileCandidates } from "../electron/media-src";
@@ -1755,6 +1756,11 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.equal(workhorseMcpScript(path.join("C:", "app", "dist-electron", "main.js")), path.join("C:", "app", "dist-electron", "workhorse-mcp.js"));
   assert.match(readFileSync(path.join(ROOT, "vite.config.ts"), "utf8"), /workhorse-mcp/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /workhorse-mcp\.js/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /requestSingleInstanceLock/);
+  assert.equal(isElectronAppCommand("/Applications/Workhorse.app/Contents/MacOS/Workhorse"), true);
+  assert.equal(isElectronAppCommand("C:/Program Files/Workhorse/Workhorse.exe"), true);
+  assert.equal(isElectronAppCommand("/path/to/Electron"), true);
+  assert.equal(isElectronAppCommand(process.execPath), false);
 
   const previous = {
     script: process.env.WORKHORSE_MCP_SCRIPT,
@@ -1775,6 +1781,14 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     const advertised = workhorseMcpServer();
     assert.equal(advertised?.name, "workhorse");
     assert.equal(advertised?.args[0], helper);
+    process.env.WORKHORSE_MCP_COMMAND = "/Applications/Workhorse.app/Contents/MacOS/Workhorse";
+    const packaged = workhorseMcpServer();
+    assert.equal(packaged?.command, "/Applications/Workhorse.app/Contents/MacOS/Workhorse");
+    assert.ok(packaged?.env?.some((row) => row.name === "ELECTRON_RUN_AS_NODE" && row.value === "1"));
+    process.env.WORKHORSE_MCP_COMMAND = process.execPath;
+    const asNode = workhorseMcpServer();
+    assert.equal(asNode?.command, process.execPath);
+    assert.ok(!asNode?.env?.some((row) => row.name === "ELECTRON_RUN_AS_NODE"));
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
     if (previous.script === undefined) delete process.env.WORKHORSE_MCP_SCRIPT;

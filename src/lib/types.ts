@@ -152,6 +152,10 @@ export type Session = {
   model: string;
   customBotId?: string;
   effort: EffortLevel | null;
+  /** Claude Code's Fast mode. Applied as a session config option. */
+  fastMode?: boolean;
+  /** Claude Code main-thread agent persona, or null for the standard one. */
+  agentName?: string | null;
   title: string;
   titleLocked?: boolean;
   mode: PermissionMode;

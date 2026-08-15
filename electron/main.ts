@@ -65,7 +65,13 @@ pinUserData();
 
 function appIconPath() {
   const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
-  return path.join(root, "assets", "app-icons", "go7-workhorse.ico");
+  const name =
+    process.platform === "darwin"
+      ? "go7-workhorse.icns"
+      : process.platform === "linux"
+        ? "go7-workhorse-clean.png"
+        : "go7-workhorse.ico";
+  return path.join(root, "assets", "app-icons", name);
 }
 
 type Persistable = Record<string, unknown>;

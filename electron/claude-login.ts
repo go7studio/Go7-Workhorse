@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
 
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 
@@ -229,6 +229,7 @@ export function hasClaudeLoginArtifact(
   existsSync: (filePath: string) => boolean,
   readFile: (filePath: string) => string,
   env: NodeJS.Dict<string>,
+  platform: NodeJS.Platform = process.platform,
 ): boolean {
   if (env.ANTHROPIC_API_KEY?.trim() || env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
   const credPath = path.join(claudeHome, ".credentials.json");
@@ -240,8 +241,9 @@ export function hasClaudeLoginArtifact(
       /* ignore broken creds */
     }
   }
-  void homedir;
-  return Boolean(readClaudeDesktopOauth({ existsSync, readFile }));
+  if (readClaudeDesktopOauth({ existsSync, readFile, homedir, platform, env })) return true;
+  const root = findClaudeDesktopRoot({ env, homedir, platform, existsSync });
+  return Boolean(root && claudeDesktopConfigLooksLoggedIn(root, readFile));
 }
 
 export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLoginDetectResult {
@@ -258,7 +260,7 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   const launch = resolveClaudeAcpLaunch({ ...input, env, homedir, platform, existsSync, pathDirs });
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveClaudeCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
-  const loggedIn = hasClaudeLoginArtifact(claudeHome, homedir, existsSync, readFile, env);
+  const loggedIn = hasClaudeLoginArtifact(claudeHome, homedir, existsSync, readFile, env, platform);
   const connected = Boolean(acpBinary && loggedIn);
   return { connected, binary: acpBinary, cliBinary, acpBinary, claudeHome };
 }

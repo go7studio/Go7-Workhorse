@@ -238,6 +238,14 @@ function oauthLooksReal(value: unknown): boolean {
   );
 }
 
+/** A credential past its expiry is not a login. Missing expiry means unknown, so allow it. */
+export function oauthNotExpired(value: unknown, now: number): boolean {
+  if (!value || typeof value !== "object") return false;
+  const expiresAt = (value as { expiresAt?: unknown }).expiresAt;
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return true;
+  return expiresAt > now;
+}
+
 export function hasClaudeLoginArtifact(
   claudeHome: string,
   homedir: string,
@@ -245,18 +253,25 @@ export function hasClaudeLoginArtifact(
   readFile: (filePath: string) => string,
   env: NodeJS.Dict<string>,
   platform: NodeJS.Platform = process.platform,
+  now: number = Date.now(),
 ): boolean {
   if (env.ANTHROPIC_API_KEY?.trim() || env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
   const credPath = path.join(claudeHome, ".credentials.json");
   if (existsSync(credPath)) {
     try {
       const raw = JSON.parse(readFile(credPath)) as { claudeAiOauth?: unknown };
-      if (oauthLooksReal(raw.claudeAiOauth)) return true;
+      // An expired credential still looks real. Reporting it as a login is how
+      // the desk claimed Claude was connected while every call returned 401.
+      if (oauthLooksReal(raw.claudeAiOauth) && oauthNotExpired(raw.claudeAiOauth, now)) return true;
     } catch {
       /* ignore broken creds */
     }
   }
   if (readClaudeDesktopOauth({ existsSync, readFile, homedir, platform, env })) return true;
+  // Claude Desktop being logged in only helps if we can read its token, and
+  // that decryption is Windows DPAPI. Elsewhere it is a login we cannot use,
+  // so counting it reports a connection that cannot carry a message.
+  if (platform !== "win32") return false;
   const root = findClaudeDesktopRoot({ env, homedir, platform, existsSync });
   return Boolean(root && claudeDesktopConfigLooksLoggedIn(root, readFile));
 }

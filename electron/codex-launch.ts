@@ -12,10 +12,11 @@ import {
   CODEX_ACP_NOT_INSTALLED,
   isElectronAcpCommand,
   resolveCodexAcpLaunch,
+  CODEX_CLI_NOT_INSTALLED,
   resolveCodexCliBinary,
   type CodexLoginDetectInput,
 } from "./codex-login";
-import { withDeskToolEnv } from "./desk-path";
+import { isInsideAsar, withDeskToolEnv } from "./desk-path";
 
 export type CodexLaunchInput = {
   sessionId?: string;
@@ -134,6 +135,9 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
     }),
   };
   if (cli) env.CODEX_PATH = cli;
+  // See the Claude adapter: a packaged fallback lands inside app.asar and
+  // surfaces as "spawn ENOTDIR" instead of naming the missing CLI.
+  else if (isInsideAsar(launch.acpFile)) throw new Error(CODEX_CLI_NOT_INSTALLED);
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {

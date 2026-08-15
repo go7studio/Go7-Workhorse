@@ -17,6 +17,7 @@ import {
   type CodexLoginDetectInput,
 } from "./codex-login";
 import { isInsideAsar, withDeskToolEnv } from "./desk-path";
+import { APP_VERSION } from "../src/lib/app-info";
 
 export type CodexLaunchInput = {
   sessionId?: string;
@@ -158,7 +159,7 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.1",
+        version: APP_VERSION,
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

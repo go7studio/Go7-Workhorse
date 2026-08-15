@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
+import { APP_VERSION } from "../src/lib/app-info";
 
 export { WORKHORSE_SESSION_RULES };
 
@@ -258,7 +259,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.1",
+        version: APP_VERSION,
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

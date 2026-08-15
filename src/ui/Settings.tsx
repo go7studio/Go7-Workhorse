@@ -63,6 +63,15 @@ export function Settings() {
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
   const [authTerminal, setAuthTerminal] = useState<{ command: string; cwd: string } | null>(null);
 
+  // A login lands in the browser, not in this window, so nothing tells us it
+  // finished. Re-check while the terminal is open instead of waiting for it
+  // to be closed.
+  useEffect(() => {
+    if (!authTerminal) return;
+    const id = window.setInterval(() => store.refreshClaudeLogin(), 3000);
+    return () => window.clearInterval(id);
+  }, [authTerminal, store]);
+
   /** Run the vendor's own login in a terminal, then re-check when it closes. */
   const startClaudeAuth = () => {
     void (async () => {

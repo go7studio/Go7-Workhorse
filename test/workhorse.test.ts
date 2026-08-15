@@ -1997,7 +1997,7 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   assert.equal(autoTitleForSend(named, "thanks"), undefined);
 });
 
-test("session setup matches the Figma This chat card", () => {
+test("session setup is a compact right-side model and access inspector", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
@@ -2010,7 +2010,7 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(setup, /--setup-vendor/);
   assert.match(setup, /setup-tide/);
   assert.match(setup, /Pause before tools/);
-  assert.match(setup, /Tightest box/);
+  assert.match(setup, /Blocks writes and shell commands/);
   assert.doesNotMatch(setup, /Security boundaries/);
   assert.doesNotMatch(setup, /Outside workspace/);
   assert.match(setup, /aria-label="Vendor"/);
@@ -2021,7 +2021,10 @@ test("session setup matches the Figma This chat card", () => {
     /id: "custom", name: "Custom"/,
   );
   assert.match(setup, /"codex"/);
-  assert.match(setup, /section-label\">Sandbox/);
+  assert.match(setup, /Approval behavior/);
+  assert.match(setup, /File access/);
+  assert.match(setup, /Plan mode never edits/);
+  assert.match(setup, /Full access means the sandbox is off/);
   assert.match(setup, /type="range"/);
   assert.match(setup, /setup-slider-line/);
   assert.doesNotMatch(setup, /setup-slider-head/);
@@ -2033,8 +2036,9 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);
   const setupCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(setupCss, /container-name:\s*session/);
-  assert.match(setupCss, /56cqi/);
-  assert.match(setupCss, /width:\s*min\(760px/);
+  assert.match(setupCss, /width:\s*min\(720px/);
+  assert.match(setupCss, /setup-top-grid/);
+  assert.match(setupCss, /right:\s*clamp/);
   assert.doesNotMatch(setup, /setup-resize/);
   assert.doesNotMatch(setup, /setSessionSetupHeight/);
   assert.doesNotMatch(setupCss, /setup-resize/);
@@ -2849,6 +2853,21 @@ test("desk bots keep disable and leave the desk on delete", () => {
   assert.equal(vendorLabel("grok", painted.llms.grok), "Grok");
   assert.equal(applyUpdateStockBot(painted.llms.claude, { name: "  ", color: "" }).name, undefined);
   assert.equal(applyUpdateStockBot(painted.llms.claude, { color: "#30d158" }).color, "#30d158");
+  const nativeCodex = normalizeSettings({
+    llms: {
+      codex: {
+        connected: true,
+        accessDefaults: { mode: "always-approve", sandbox: "off" },
+      },
+    },
+  });
+  assert.deepEqual(firstAttachedChoice(nativeCodex), {
+    provider: "codex",
+    model: defaultModel("codex").id,
+    effort: "medium",
+    sandbox: "off",
+    mode: "always-approve",
+  });
   assert.equal(
     deskInk(
       { provider: "custom", customBotId: "bot_minimax" },

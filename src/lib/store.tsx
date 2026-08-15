@@ -496,7 +496,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : { connected: false };
           const codex = window.workhorse?.detectCodexLogin
             ? await window.workhorse.detectCodexLogin()
-            : { connected: false };
+            : { connected: false, accessDefaults: undefined };
           const claude = window.workhorse?.detectClaudeLogin
             ? await window.workhorse.detectClaudeLogin()
             : { connected: false };
@@ -507,23 +507,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             applyVendorCatalog(catalog);
             setCatalogRev((value) => value + 1);
           }
-          setState((current) => ({
-            ...current,
-            settings: {
-              ...current.settings,
-              llms: {
-                ...current.settings.llms,
-                grok: { ...current.settings.llms.grok, available: Boolean(grok.connected) },
-                codex: { ...current.settings.llms.codex, available: Boolean(codex.connected) },
-                claude: {
-                  ...current.settings.llms.claude,
-                  available: Boolean(claude.connected),
-                  needsAuth: Boolean((claude as { needsAuth?: boolean }).needsAuth),
+          setState((current) => {
+            const firstNativeCodexDefaults = !current.settings.llms.codex.accessDefaults && codex.accessDefaults;
+            return {
+              ...current,
+              settings: {
+                ...current.settings,
+                llms: {
+                  ...current.settings.llms,
+                  grok: { ...current.settings.llms.grok, available: Boolean(grok.connected) },
+                  codex: {
+                    ...current.settings.llms.codex,
+                    available: Boolean(codex.connected),
+                    accessDefaults: codex.accessDefaults,
+                  },
+                  claude: {
+                    ...current.settings.llms.claude,
+                    available: Boolean(claude.connected),
+                    needsAuth: Boolean((claude as { needsAuth?: boolean }).needsAuth),
+                  },
+                  custom: { ...current.settings.llms.custom, connected: false },
                 },
-                custom: { ...current.settings.llms.custom, connected: false },
               },
-            },
-          }));
+              lastModel:
+                firstNativeCodexDefaults && current.lastModel.provider === "codex"
+                  ? { ...current.lastModel, ...firstNativeCodexDefaults }
+                  : current.lastModel,
+            };
+          });
         })();
       }
     };
@@ -682,12 +693,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const picked = provider ?? remembered!.provider;
       const model = provider ? defaultModel(provider).id : remembered!.model;
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
+      const rememberedAccess = remembered?.provider === picked ? remembered : undefined;
+      const nativeAccess = picked === "custom" ? undefined : current.settings.llms[picked].accessDefaults;
       const choice = {
         provider: picked,
         model,
         effort: withEffort(picked, model, remembered?.effort ?? null),
-        sandbox: remembered?.sandbox ?? "off",
-        mode: remembered?.mode ?? "ask",
+        sandbox: rememberedAccess?.sandbox ?? nativeAccess?.sandbox ?? "off",
+        mode: rememberedAccess?.mode ?? nativeAccess?.mode ?? "ask",
         customBotId,
       };
       const opened = openDraft(current.sessions, {
@@ -994,17 +1007,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const detected = window.workhorse?.detectCodexLogin
         ? await window.workhorse.detectCodexLogin()
-        : { connected: false };
-      setState((current) => ({
-        ...current,
-        settings: {
-          ...current.settings,
-          llms: {
-            ...current.settings.llms,
-            codex: { ...current.settings.llms.codex, available: Boolean(detected.connected) },
+        : { connected: false, accessDefaults: undefined };
+      setState((current) => {
+        const firstNativeCodexDefaults = !current.settings.llms.codex.accessDefaults && detected.accessDefaults;
+        return {
+          ...current,
+          settings: {
+            ...current.settings,
+            llms: {
+              ...current.settings.llms,
+              codex: {
+                ...current.settings.llms.codex,
+                available: Boolean(detected.connected),
+                accessDefaults: detected.accessDefaults,
+              },
+            },
           },
-        },
-      }));
+          lastModel:
+            firstNativeCodexDefaults && current.lastModel.provider === "codex"
+              ? { ...current.lastModel, ...firstNativeCodexDefaults }
+              : current.lastModel,
+        };
+      });
       refreshVendorModels();
     })();
   }, [refreshVendorModels]);

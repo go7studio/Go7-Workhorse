@@ -215,9 +215,11 @@ test("custom HTTP sandbox stamps live desk limits", () => {
   assert.equal(already, boxed);
   const opened = customPrefaceForLimits("system", "ask", "off");
   assert.match(opened, /Writes are allowed this turn/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8"), /section-label\">Sandbox/);
+  const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.match(setup, /<strong>File access<\/strong>/);
+  assert.match(setup, /Full access means the sandbox is off/);
   assert.doesNotMatch(
-    readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8"),
+    setup,
     /provider === "grok" \|\| session.provider === "codex"/,
   );
 });

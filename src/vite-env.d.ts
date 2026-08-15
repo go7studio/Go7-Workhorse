@@ -138,7 +138,7 @@ type WorkhorseBridge = {
     opened?: "session/new" | "session/load";
   }>;
   detectGrokLogin: () => Promise<{ connected: boolean; binary: string | null }>;
-  detectCodexLogin: () => Promise<{ connected: boolean; binary: string | null }>;
+  detectCodexLogin: () => Promise<import("../electron/codex-login").CodexLoginDetectResult>;
   detectCodexRuntime?: () => Promise<import("../electron/codex-app-server").CodexRuntimeInfo>;
   listCodexNativeThreads?: (limit?: number) => Promise<import("../electron/codex-app-server").CodexNativeThread[]>;
   codexCapabilities?: (projectRoot?: string) => Promise<ReturnType<typeof import("../electron/codex-capabilities").codexCapabilitySummary>>;

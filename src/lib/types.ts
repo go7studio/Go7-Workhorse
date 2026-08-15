@@ -4,6 +4,11 @@ export type PermissionMode = "ask" | "accept-edits" | "always-approve" | "plan";
 
 export type SandboxProfile = "off" | "workspace" | "read-only" | "strict";
 
+export type BotAccessDefaults = {
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+};
+
 export type SessionSecurityPolicy = {
   network: "blocked" | "allowed";
   root: "ask" | "blocked" | "allowed";
@@ -245,6 +250,8 @@ export type LlmLink = {
   needsAuth?: boolean;
   name?: string;
   color?: string;
+  /** Native vendor defaults used only when seeding a new chat. */
+  accessDefaults?: BotAccessDefaults;
 };
 
 export type CustomLlm = {

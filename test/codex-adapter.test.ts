@@ -27,6 +27,7 @@ import {
   detectCodexLogin,
   resolveCodexAcpCommand,
   resolveCodexAcpLaunch,
+  resolveOpenAiDesktopCodex,
 } from "../electron/codex-login";
 import { defaultModel } from "../src/lib/models";
 import { buildGrokLaunchSpec } from "../electron/grok-launch";
@@ -272,6 +273,62 @@ test("buildCodexLaunchSpec never spawns grok and maps model sandbox mode MCP", (
     if (previous.script === undefined) delete process.env.WORKHORSE_MCP_SCRIPT;
     else process.env.WORKHORSE_MCP_SCRIPT = previous.script;
   }
+});
+
+test("Codex lookups follow the machine, not a hardcoded Windows path", () => {
+  const macHome = "/Users/me";
+  const macOwned = path.join(macHome, "Library", "Application Support", "Go7 Workhorse", "bin", "codex-acp");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: macHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === macOwned,
+      platform: "darwin",
+    })?.command,
+    macOwned,
+  );
+
+  // A Mac must not go looking in a Windows AppData folder.
+  const winShaped = path.join(macHome, "AppData", "Local", "Go7 Workhorse", "bin", "codex-acp");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: macHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === winShaped,
+      platform: "darwin",
+    }),
+    null,
+  );
+
+  const winHome = "C:\\Users\\me";
+  const winOwned = path.join(winHome, "AppData", "Local", "Go7 Workhorse", "bin", "codex-acp.exe");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: winHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === winOwned,
+      platform: "win32",
+    })?.command,
+    winOwned,
+  );
+
+  // The OpenAI Codex desktop install is probed under this machine's own data root.
+  const macDesktop = path.join(macHome, "Library", "Application Support", "OpenAI", "Codex", "bin", "codex");
+  assert.equal(
+    resolveOpenAiDesktopCodex({
+      homedir: macHome,
+      env: {},
+      platform: "darwin",
+      existsSync: (file) => file === macDesktop,
+    }),
+    macDesktop,
+  );
 });
 
 test("Codex ACP resolve never returns a phantom cmd and requires ACP plus login", () => {

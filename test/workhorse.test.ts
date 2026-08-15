@@ -879,26 +879,60 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   const fakeRg = path.join(userBin, "rg.exe");
   const fakeGit = path.join(userBin, "git.exe");
   const electronPath = "C:\\Windows\\system32";
-  const found = resolveRipgrep({ PATH: electronPath }, (file) => file === fakeRg, [userBin], userBin);
+  // A Windows machine: the .exe name resolves and Path mirrors PATH.
+  const found = resolveRipgrep({ PATH: electronPath }, (file) => file === fakeRg, [userBin], userBin, "win32");
   assert.equal(found, fakeRg);
   assert.equal(
     resolveDeskBinary(["git.exe"], { PATH: electronPath }, (file) => file === fakeGit, [userBin], userBin),
     fakeGit,
   );
-  const merged = deskPath(electronPath, { PATH: electronPath }, [userBin], userBin);
+  const merged = deskPath(electronPath, { PATH: electronPath }, [userBin], userBin, "win32");
   assert.ok(merged.toLowerCase().includes(userBin.toLowerCase()));
   assert.ok(merged.toLowerCase().includes("windows\\system32"));
   assert.ok(merged.toLowerCase().indexOf(userBin.toLowerCase()) < merged.toLowerCase().indexOf("windows\\system32"));
   const env = withDeskToolEnv(
     { PATH: electronPath },
-    { extra: [userBin], persistedPath: userBin, existsSync: (file) => file === fakeRg || file === fakeGit },
+    { extra: [userBin], persistedPath: userBin, existsSync: (file) => file === fakeRg || file === fakeGit, platform: "win32" },
   );
   assert.ok((env.PATH ?? "").toLowerCase().includes(userBin.toLowerCase()));
   assert.equal(env.Path, env.PATH);
   assert.equal(env.RIPGREP, fakeRg);
   assert.equal(env.GIT, fakeGit);
+
+  // A Mac machine: the same lookups take the bare name and never mirror Path.
+  const macToolsDir = path.join(os.tmpdir(), "workhorse-user-path", "mac-tools");
+  const macRg = path.join(macToolsDir, "rg");
+  const macGit = path.join(macToolsDir, "git");
+  assert.equal(
+    resolveRipgrep({ PATH: "/usr/bin" }, (file) => file === macRg, [macToolsDir], macToolsDir, "darwin"),
+    macRg,
+  );
+  assert.equal(
+    resolveRipgrep(
+      { PATH: "/usr/bin" },
+      (file) => file === path.join(macToolsDir, "rg.exe"),
+      [macToolsDir],
+      macToolsDir,
+      "darwin",
+    ),
+    null,
+  );
+  const macEnv = withDeskToolEnv(
+    { PATH: "/usr/bin" },
+    {
+      extra: [macToolsDir],
+      persistedPath: macToolsDir,
+      existsSync: (file) => file === macRg || file === macGit,
+      platform: "darwin",
+    },
+  );
+  assert.equal(macEnv.RIPGREP, macRg);
+  assert.equal(macEnv.GIT, macGit);
+  assert.equal(macEnv.Path, undefined);
+
   assert.match(parseRegPathValue("    Path    REG_EXPAND_SZ    C:\\Users\\me\\bin;%USERPROFILE%\\.cargo\\bin"), /C:\\Users\\me\\bin/);
-  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools"), process.platform === "win32" ? "D:\\user-tools" : "");
+  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools", "win32"), "D:\\user-tools");
+  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools", "darwin"), "");
   const bin = workhorseToolBin();
   assert.match(bin, /Go7 Workhorse/);
   assert.match(readFileSync(path.join(ROOT, "electron", "codex-launch.ts"), "utf8"), /withDeskToolEnv/);

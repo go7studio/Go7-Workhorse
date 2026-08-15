@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { localAppDataRoot, workhorseToolBin } from "./desk-path";
 
 const LOGIN_FILES = ["auth.json", "auth.json.bak", "credentials.json"];
 const PACKAGE_NAME = "@agentclientprotocol/codex-acp";
@@ -145,9 +146,8 @@ function workhorseAcpExe(input: CodexLoginDetectInput, existsSync: (filePath: st
   const homedir = input.homedir ?? os.homedir();
   const platform = input.platform ?? process.platform;
   const exe = platform === "win32" ? "codex-acp.exe" : "codex-acp";
-  const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
   const candidates = [
-    path.join(localApp, "Go7 Workhorse", "bin", exe),
+    path.join(workhorseToolBin(homedir, env, platform), exe),
     path.join(homedir, ".workhorse", "bin", exe),
   ];
   return candidates.find((file) => existsSync(file)) ?? null;
@@ -208,8 +208,7 @@ export function resolveOpenAiDesktopCodex(
   const platform = input.platform ?? process.platform;
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const exe = platform === "win32" ? "codex.exe" : "codex";
-  const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
-  const binRoot = path.join(localApp, "OpenAI", "Codex", "bin");
+  const binRoot = path.join(localAppDataRoot(homedir, env, platform), "OpenAI", "Codex", "bin");
   const direct = path.join(binRoot, exe);
   if (existsSync(direct)) return direct;
   if (!existsSync(binRoot)) return null;

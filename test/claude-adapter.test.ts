@@ -263,12 +263,15 @@ test("fetchClaudePlanUsage sends the claude-code User-Agent", async () => {
 });
 
 test("findClaudeDesktopRoot uses Application Support on macOS, not AppData", () => {
+  // Build the expected path the same way the code does, so the assertion
+  // holds on Windows where path.join uses a backslash.
+  const macRoot = path.join("/Users/me", "Library", "Application Support", "Claude");
   const mac = findClaudeDesktopRoot({
     platform: "darwin",
     homedir: "/Users/me",
-    existsSync: (file) => file === "/Users/me/Library/Application Support/Claude/config.json",
+    existsSync: (file) => file === path.join(macRoot, "config.json"),
   });
-  assert.equal(mac, "/Users/me/Library/Application Support/Claude");
+  assert.equal(mac, macRoot);
   const missing = findClaudeDesktopRoot({
     platform: "darwin",
     homedir: "/Users/me",

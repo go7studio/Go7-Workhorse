@@ -967,8 +967,10 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   });
   assert.equal(ensured?.source, fakeRg);
   assert.ok(copied.some((file) => /\\?\.grok\\bin\\rg\.exe$/i.test(file) || file.replace(/\\/g, "/").endsWith(".grok/bin/rg.exe")));
+  // path.join uses the host separator, so compare on a normalised copy.
+  // These must hold when the suite runs on Windows too.
   const macBin = workhorseToolBin("/Users/me", {}, "darwin");
-  assert.match(macBin, /Library\/Application Support\/Go7 Workhorse\/bin$/);
+  assert.match(macBin.replace(/\\/g, "/"), /Library\/Application Support\/Go7 Workhorse\/bin$/);
   assert.doesNotMatch(macBin, /AppData/);
   const macDirs = extraDeskDirs("/Users/me", {}, "darwin").join("\n");
   assert.match(macDirs, /\/opt\/homebrew\/bin/);
@@ -978,7 +980,7 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   assert.doesNotMatch(macDirs, /scoop/);
   assert.doesNotMatch(macDirs, /AppData/);
   const linuxBin = workhorseToolBin("/home/me", {}, "linux");
-  assert.match(linuxBin, /\.local\/share\/Go7 Workhorse\/bin$/);
+  assert.match(linuxBin.replace(/\\/g, "/"), /\.local\/share\/Go7 Workhorse\/bin$/);
 });
 
 test("pickPermissionOptionId maps Workhorse answers onto ACP option kinds", () => {

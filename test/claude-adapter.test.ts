@@ -10,6 +10,7 @@ import {
   detectClaudeLogin,
   hasClaudeLoginArtifact,
   isElectronAcpCommand,
+  oauthNotExpired,
   resolveClaudeAcpLaunch,
 } from "../electron/claude-login";
 import { isInsideAsar, runningInElectron } from "../electron/desk-path";
@@ -390,4 +391,52 @@ test("a packaged build names the missing CLI instead of spawning into the archiv
     if (previous.token === undefined) delete process.env.WORKHORSE_BRIDGE_TOKEN;
     else process.env.WORKHORSE_BRIDGE_TOKEN = previous.token;
   }
+});
+
+test("an expired or unusable credential is not a login", () => {
+  const home = "/Users/me";
+  const claudeHome = "/Users/me/.claude";
+  const credPath = path.join(claudeHome, ".credentials.json");
+  const now = 1_755_000_000_000;
+  const creds = (extra: Record<string, unknown>) =>
+    JSON.stringify({ claudeAiOauth: { accessToken: "tok-xxxxxxxx", ...extra } });
+
+  // The case that shipped: a token three months dead still read as connected.
+  assert.equal(
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now - 1 }), {}, "darwin", now),
+    false,
+  );
+  assert.equal(
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now + 60_000 }), {}, "darwin", now),
+    true,
+  );
+  // No expiry recorded means unknown, not dead.
+  assert.equal(
+    hasClaudeLoginArtifact(claudeHome, home, (f) => f === credPath, () => creds({}), {}, "darwin", now),
+    true,
+  );
+  // An explicit key still wins over a dead file.
+  assert.equal(
+    hasClaudeLoginArtifact(
+      claudeHome, home, (f) => f === credPath, () => creds({ expiresAt: now - 1 }),
+      { ANTHROPIC_API_KEY: "sk-test" }, "darwin", now,
+    ),
+    true,
+  );
+
+  // Claude Desktop logged in, but its token is DPAPI-encrypted. Off Windows we
+  // cannot read it, so it is not a login this desk can use.
+  const macConfig = path.join(home, "Library", "Application Support", "Claude", "config.json");
+  assert.equal(
+    hasClaudeLoginArtifact(
+      claudeHome, home, (f) => f === macConfig,
+      () => JSON.stringify({ "oauth:tokenCacheV2": "cache-value" }), {}, "darwin", now,
+    ),
+    false,
+  );
+
+  assert.equal(oauthNotExpired({ expiresAt: now - 1 }, now), false);
+  assert.equal(oauthNotExpired({ expiresAt: now + 1 }, now), true);
+  assert.equal(oauthNotExpired({}, now), true);
+  assert.equal(oauthNotExpired(null, now), false);
 });

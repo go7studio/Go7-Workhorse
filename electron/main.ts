@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSessionHost, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
@@ -603,6 +604,13 @@ app.whenReady().then(() => {
     codexCapabilitySummary(typeof projectRoot === "string" ? projectRoot : undefined),
   );
   ipcMain.handle("claude:detect-login", () => detectClaudeLogin());
+  ipcMain.handle("claude:auth-command", () => {
+    const detected = detectClaudeLogin();
+    const cli = detected.cliBinary;
+    // Quote the path: a CLI under "Application Support" has a space in it.
+    const command = cli ? `"${cli}" auth login` : "claude auth login";
+    return { command, cwd: os.homedir() };
+  });
   ipcMain.handle("custom:detect", () => detectCustomLogin());
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);

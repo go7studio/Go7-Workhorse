@@ -29,6 +29,8 @@ export type ClaudeLoginDetectInput = {
 
 export type ClaudeLoginDetectResult = {
   connected: boolean;
+  /** ACP is installed but no usable login. A different problem from "not found". */
+  needsAuth: boolean;
   binary: string | null;
   cliBinary: string | null;
   acpBinary: string | null;
@@ -292,7 +294,14 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   const cliBinary = resolveClaudeCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
   const loggedIn = hasClaudeLoginArtifact(claudeHome, homedir, existsSync, readFile, env, platform);
   const connected = Boolean(acpBinary && loggedIn);
-  return { connected, binary: acpBinary, cliBinary, acpBinary, claudeHome };
+  return {
+    connected,
+    needsAuth: Boolean(acpBinary) && !loggedIn,
+    binary: acpBinary,
+    cliBinary,
+    acpBinary,
+    claudeHome,
+  };
 }
 
 export function isElectronAcpCommand(

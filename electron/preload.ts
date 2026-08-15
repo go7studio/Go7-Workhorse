@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("codex:capabilities", projectRoot) as Promise<ReturnType<typeof import("./codex-capabilities").codexCapabilitySummary>>,
   detectClaudeLogin: () =>
     ipcRenderer.invoke("claude:detect-login") as Promise<{ connected: boolean; binary: string | null }>,
+  claudeAuthCommand: () =>
+    ipcRenderer.invoke("claude:auth-command") as Promise<{ command: string; cwd: string }>,
   claudePrompt: (input: GrokPromptInput) => ipcRenderer.invoke("claude:prompt", input),
   claudeAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
     ipcRenderer.invoke("claude:answer-permission", { requestId, answer }),

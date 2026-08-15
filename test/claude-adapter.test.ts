@@ -22,6 +22,7 @@ import {
 } from "../electron/claude-launch";
 import { fetchClaudePlanUsage, parseClaudePlanUsage, usedPercentFromUtilization } from "../electron/claude-plan";
 import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
+import { CLAUDE_EFFORTS, effortsFor } from "../src/lib/models";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -469,4 +470,25 @@ test("a Mac login lives in the keychain, not in the credentials file", () => {
     return true;
   });
   assert.equal(asked, false);
+});
+
+test("the effort a chat picks is sent where the agent reads it", () => {
+  // The agent ignores _meta.claudeCode.options.effort; it takes effort from a
+  // session config option and then calls applyFlagSettings.
+  const agent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
+  assert.match(agent, /session\/set_config_option/);
+  assert.match(agent, /configId: "effort"/);
+  // Only a level the session says the model takes, so Grok and Codex are
+  // untouched when they advertise no such option.
+  assert.match(agent, /allowed\.includes\(wanted\)/);
+
+  assert.equal(resolveClaudeEffort("adaptive"), "default");
+  assert.equal(resolveClaudeEffort("extra"), "xhigh");
+  assert.equal(resolveClaudeEffort("ultra"), "max");
+  assert.equal(resolveClaudeEffort("high"), "high");
+
+  // The scale matches `claude --effort <low|medium|high|xhigh|max>` plus Default.
+  const ids = CLAUDE_EFFORTS.map((level) => level.id);
+  assert.deepEqual(ids, ["adaptive", "low", "medium", "high", "xhigh", "max"]);
+  assert.equal(effortsFor("claude"), CLAUDE_EFFORTS);
 });

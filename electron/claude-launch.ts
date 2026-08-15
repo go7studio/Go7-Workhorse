@@ -81,6 +81,9 @@ export function resolveClaudeModel(model: string | null | undefined): string {
 }
 
 export function resolveClaudeEffort(effort: EffortLevel | string | null | undefined): string {
+  // "Default" is a real level here: the agent starts sessions on it and the
+  // model picks its own thinking budget.
+  if (effort === "adaptive" || effort === "default") return "default";
   if (effort === "extra") return "xhigh";
   if (
     effort === "low" ||

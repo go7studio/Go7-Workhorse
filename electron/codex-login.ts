@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BotAccessDefaults, PermissionMode, SandboxProfile } from "../src/lib/types";
 import { isInsideAsar, localAppDataRoot, runningInElectron, workhorseToolBin } from "./desk-path";
 
 const LOGIN_FILES = ["auth.json", "auth.json.bak", "credentials.json"];
@@ -33,6 +34,7 @@ export type CodexLoginDetectResult = {
   cliBinary: string | null;
   acpBinary: string | null;
   codexHome: string;
+  accessDefaults?: BotAccessDefaults;
 };
 
 export type CodexAcpLaunch = {
@@ -47,6 +49,56 @@ function hasLoginArtifact(codexHome: string, existsSync: (filePath: string) => b
     if (existsSync(path.join(codexHome, name))) return true;
   }
   return false;
+}
+
+function topLevelTomlStrings(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (line.startsWith("[")) break;
+    const match = /^([A-Za-z0-9_-]+)\s*=\s*(["'])(.*?)\2(?:\s*#.*)?$/.exec(line);
+    if (match) values[match[1]] = match[3];
+  }
+  return values;
+}
+
+function codexPermissionMode(value: unknown): PermissionMode | undefined {
+  if (value === "never") return "always-approve";
+  if (value === "on-request" || value === "untrusted" || value === "on-failure") return "ask";
+  return undefined;
+}
+
+function codexSandboxProfile(value: unknown): SandboxProfile | undefined {
+  if (value === "danger-full-access") return "off";
+  if (value === "workspace-write") return "workspace";
+  if (value === "read-only") return "read-only";
+  return undefined;
+}
+
+/** Read explicit native Codex defaults without exposing the rest of config.toml. */
+export function detectCodexAccessDefaults(input: CodexLoginDetectInput = {}): BotAccessDefaults | undefined {
+  const env = input.env ?? process.env;
+  const homedir = input.homedir ?? os.homedir();
+  const codexHome = (env.CODEX_HOME?.trim() || path.join(homedir, ".codex")).replace(/[\\/]+$/, "");
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  let values: Record<string, unknown> = {};
+  try {
+    values = topLevelTomlStrings(readFile(path.join(codexHome, "config.toml")));
+  } catch {
+    // A Codex login can exist without a config file.
+  }
+  if (env.CODEX_CONFIG?.trim()) {
+    try {
+      const override = JSON.parse(env.CODEX_CONFIG) as Record<string, unknown>;
+      if (override && typeof override === "object") values = { ...values, ...override };
+    } catch {
+      // Ignore malformed ambient config and retain readable file defaults.
+    }
+  }
+  const mode = codexPermissionMode(values.approval_policy);
+  const sandbox = codexSandboxProfile(values.sandbox_mode);
+  return mode || sandbox ? { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}) } : undefined;
 }
 
 function lookOnPath(
@@ -273,7 +325,8 @@ export function detectCodexLogin(input: CodexLoginDetectInput = {}): CodexLoginD
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveCodexCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
   const connected = Boolean(acpBinary && hasLoginArtifact(codexHome, existsSync, env));
-  return { connected, binary: acpBinary, cliBinary, acpBinary, codexHome };
+  const accessDefaults = detectCodexAccessDefaults({ ...input, env, homedir, platform, existsSync, pathDirs });
+  return { connected, binary: acpBinary, cliBinary, acpBinary, codexHome, ...(accessDefaults ? { accessDefaults } : {}) };
 }
 
 export function isElectronAcpCommand(

@@ -1,7 +1,7 @@
 import { customBotEnabled, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
-import type { CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, Session, Settings, SettingsSection } from "./types";
+import type { BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, Session, Settings, SettingsSection } from "./types";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -32,11 +32,26 @@ function linkColor(value: unknown): string | undefined {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : undefined;
 }
 
+function accessDefaults(raw: unknown): BotAccessDefaults | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as BotAccessDefaults;
+  const mode =
+    record.mode === "ask" || record.mode === "accept-edits" || record.mode === "always-approve" || record.mode === "plan"
+      ? record.mode
+      : undefined;
+  const sandbox =
+    record.sandbox === "off" || record.sandbox === "workspace" || record.sandbox === "read-only" || record.sandbox === "strict"
+      ? record.sandbox
+      : undefined;
+  return mode || sandbox ? { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}) } : undefined;
+}
+
 function link(raw: unknown): LlmLink {
   if (!raw || typeof raw !== "object") return { connected: false };
   const record = raw as LlmLink;
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const color = linkColor(record.color);
+  const nativeAccess = accessDefaults(record.accessDefaults);
   return {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
@@ -44,6 +59,7 @@ function link(raw: unknown): LlmLink {
     ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
     ...(name ? { name } : {}),
     ...(color ? { color } : {}),
+    ...(nativeAccess ? { accessDefaults: nativeAccess } : {}),
   };
 }
 
@@ -93,7 +109,14 @@ export function firstAttachedChoice(settings: Settings, remembered?: ModelChoice
   const stock = attachedStockVendors(settings)[0];
   if (stock) {
     const model = defaultModel(stock).id;
-    return { provider: stock, model, effort: withEffort(stock, model, "medium"), sandbox: "off", mode: "ask" };
+    const nativeAccess = settings.llms[stock].accessDefaults;
+    return {
+      provider: stock,
+      model,
+      effort: withEffort(stock, model, "medium"),
+      sandbox: nativeAccess?.sandbox ?? "off",
+      mode: nativeAccess?.mode ?? "ask",
+    };
   }
   const bot = attachedCustomBots(settings)[0];
   if (bot) {

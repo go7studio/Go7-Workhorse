@@ -24,6 +24,7 @@ import {
 } from "../electron/codex-launch";
 import {
   CODEX_ACP_NOT_INSTALLED,
+  detectCodexAccessDefaults,
   detectCodexLogin,
   resolveCodexAcpCommand,
   resolveCodexAcpLaunch,
@@ -467,6 +468,32 @@ test("resolveCodex mappings lock documented flags", () => {
   assert.equal(resolveCodexAgentMode("plan", "off"), "read-only");
 });
 
+test("Codex native access defaults map into Workhorse permission and sandbox", () => {
+  const native = detectCodexAccessDefaults({
+    homedir: "/tmp/workhorse-codex-defaults",
+    env: { PATH: "" },
+    readFile: () => [
+      'model = "gpt-5.6-sol"',
+      'approval_policy = "never"',
+      'sandbox_mode = "danger-full-access"',
+      "[profiles.safe]",
+      'approval_policy = "on-request"',
+      'sandbox_mode = "read-only"',
+    ].join("\n"),
+  });
+  assert.deepEqual(native, { mode: "always-approve", sandbox: "off" });
+
+  const overridden = detectCodexAccessDefaults({
+    homedir: "/tmp/workhorse-codex-defaults",
+    env: {
+      PATH: "",
+      CODEX_CONFIG: JSON.stringify({ approval_policy: "on-request", sandbox_mode: "workspace-write" }),
+    },
+    readFile: () => 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n',
+  });
+  assert.deepEqual(overridden, { mode: "ask", sandbox: "workspace" });
+});
+
 test("detectCodexLogin requires binary plus artifact and never marks Grok", () => {
   const home = "/tmp/wh-codex-home";
   const binDir = "/tmp/wh-codex-bin";
@@ -498,9 +525,13 @@ test("detectCodexLogin requires binary plus artifact and never marks Grok", () =
     env: { PATH: binDir },
     existsSync: (file) => file === acp || file === auth,
     platform: "win32",
+    readFile: (file) => file.endsWith("config.toml")
+      ? 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n'
+      : "",
   });
   assert.equal(withAuth.connected, true);
   assert.equal(withAuth.binary, acp);
+  assert.deepEqual(withAuth.accessDefaults, { mode: "always-approve", sandbox: "off" });
 
   const withKey = detectCodexLogin({
     homedir: home,

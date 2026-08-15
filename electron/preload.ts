@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("codex:answer-permission", { requestId, answer }),
   codexCancel: (sessionId: string) => ipcRenderer.invoke("codex:cancel", sessionId),
   detectCodexLogin: () =>
-    ipcRenderer.invoke("codex:detect-login") as Promise<{ connected: boolean; binary: string | null }>,
+    ipcRenderer.invoke("codex:detect-login") as Promise<import("./codex-login").CodexLoginDetectResult>,
   detectCodexRuntime: () =>
     ipcRenderer.invoke("codex:detect-runtime") as Promise<import("./codex-app-server").CodexRuntimeInfo>,
   listCodexNativeThreads: (limit = 12) =>

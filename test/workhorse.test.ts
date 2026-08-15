@@ -2607,17 +2607,35 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /no-optional-locks/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /index\.lock/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /os\.homedir/);
-  const fromHomeWorkspace = findSourceFile("electron/main.ts", []);
-  assert.match(fromHomeWorkspace ?? "", /electron[\\/]+main\.ts$/i);
-  const looseStats = readFileDiff("electron/main.ts", []);
+  const looseStats = readFileDiff("electron/main.ts", [ROOT]);
   assert.ok(looseStats.after.length > 0);
+
+  // With no cwd worth searching, the lookup falls back to the usual project
+  // homes. Stub that tree: asserting against the real one only passes on a
+  // machine that happens to keep its checkouts in ~/workspace.
+  const homeDir = os.homedir();
+  const wsRoot = path.join(homeDir, "workspace");
+  const wsRepo = path.join(wsRoot, "demo-repo");
+  const wsElectron = path.join(wsRepo, "electron");
+  const wsMain = path.join(wsElectron, "main.ts");
+  const known = new Set([wsRoot, wsRepo, wsElectron, wsMain].map((item) => path.normalize(item)));
   const previousCwd = process.cwd();
   try {
     process.chdir(path.parse(previousCwd).root);
-    const fromRoot = findSourceFile("electron/main.ts", []);
+    const fromRoot = findSourceFile("electron/main.ts", [], {
+      existsSync: (file) => known.has(path.normalize(file)),
+      isDir: (file) => path.normalize(file) !== path.normalize(wsMain),
+      readdir: (dir) => {
+        const norm = path.normalize(dir);
+        if (norm === path.normalize(wsRoot)) return ["demo-repo"];
+        if (norm === path.normalize(wsRepo)) return ["electron"];
+        if (norm === path.normalize(wsElectron)) return ["main.ts"];
+        return [];
+      },
+    });
     assert.match(fromRoot ?? "", /electron[\\/]+main\.ts$/i);
-    const rootStats = readFileDiff("electron/main.ts", []);
-    assert.ok(rootStats.added > 0 || rootStats.after.length > 0);
+    // The filesystem root itself is never a search root.
+    assert.equal(findSourceFile("electron/main.ts", [], { existsSync: () => false, isDir: () => true, readdir: () => [] }), null);
   } finally {
     process.chdir(previousCwd);
   }

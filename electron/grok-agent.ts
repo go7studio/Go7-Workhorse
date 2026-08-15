@@ -295,8 +295,7 @@ function locationPath(value: unknown): string {
 function shortLocator(value: string): string {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 180 || trimmed.includes("\n") || trimmed.includes("\\n")) return "";
-  const parts = trimmed.replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts.length > 2 ? parts.slice(-2).join("/") : trimmed;
+  return trimmed;
 }
 
 function shortToolTitle(value: string): string {

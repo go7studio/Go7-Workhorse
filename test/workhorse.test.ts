@@ -96,7 +96,7 @@ import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, cont
 import { safeExternalUrl } from "../src/lib/open-external";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseGrokModelsCache } from "../electron/vendor-models";
-import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
+import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
 import {
   joinChatText,
   parseChatMarkdown,
@@ -1404,6 +1404,19 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(started.tool.title, "Read");
   assert.equal(started.tool.status, "in_progress");
   assert.match(started.tool.detail, /src\/main\.rs/);
+  const absWrite = extractToolEvent({
+    sessionUpdate: "tool_call",
+    toolCallId: "call_abs",
+    title: "Edit",
+    status: "completed",
+    rawInput: { path: "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts" },
+  });
+  assert.equal(absWrite?.detail, "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts");
+  assert.equal(shortDisplayPath(absWrite?.detail ?? ""), "electron/main.ts");
+  assert.match(
+    collapseToolText(`Edit · completed — ${absWrite?.detail ?? ""}`, "completed"),
+    /Edit · completed — electron\/main\.ts/,
+  );
 
   const dumped = extractToolEvent({
     sessionUpdate: "tool_call_update",
@@ -2593,6 +2606,22 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.match(locked.after, /export const n/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /no-optional-locks/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /index\.lock/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /os\.homedir/);
+  const fromHomeWorkspace = findSourceFile("electron/main.ts", []);
+  assert.match(fromHomeWorkspace ?? "", /electron[\\/]+main\.ts$/i);
+  const looseStats = readFileDiff("electron/main.ts", []);
+  assert.ok(looseStats.after.length > 0);
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(path.parse(previousCwd).root);
+    const fromRoot = findSourceFile("electron/main.ts", []);
+    assert.match(fromRoot ?? "", /electron[\\/]+main\.ts$/i);
+    const rootStats = readFileDiff("electron/main.ts", []);
+    assert.ok(rootStats.added > 0 || rootStats.after.length > 0);
+  } finally {
+    process.chdir(previousCwd);
+  }
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /editStats\([\s\S]*fileRoots/);
 });
 
 test("empty chats stay drafts until the first send names them", () => {

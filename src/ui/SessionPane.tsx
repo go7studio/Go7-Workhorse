@@ -67,9 +67,9 @@ export function SessionPane() {
     }
     void window.workhorse.editStats(
       edits.map((item) => item.path),
-      roots,
+      fileRoots,
     ).then((next) => setStats(next ?? {}));
-  }, [editKey, folderKey]);
+  }, [editKey, fileRootKey]);
 
   useEffect(() => {
     const el = scroller.current;

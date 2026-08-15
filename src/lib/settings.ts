@@ -41,6 +41,7 @@ function link(raw: unknown): LlmLink {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
     ...(typeof record.available === "boolean" ? { available: record.available } : {}),
+    ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
     ...(name ? { name } : {}),
     ...(color ? { color } : {}),
   };

@@ -696,7 +696,38 @@ export class GrokAgent {
     if (!sessionId) throw new Error(`${this.who} agent session/new did not return a sessionId`);
     this.sessionId = sessionId;
     this.opened = "session/new";
+    await this.applyEffortOption(sessionId, sessionNew);
     return { initialize, sessionNew, sessionId, opened: "session/new" };
+  }
+
+  /**
+   * Effort rides on a session config option, not on session meta: the agent
+   * reads `_meta.claudeCode.options` for a couple of flags and ignores the
+   * effort in it, so a picked level did nothing. Only send a level the session
+   * says this model takes, which also keeps Grok and Codex out of it when they
+   * advertise no such option.
+   */
+  private async applyEffortOption(sessionId: string, sessionNew: Record<string, unknown>): Promise<void> {
+    const wanted = this.spec.effort?.trim();
+    if (!wanted) return;
+    const raw = sessionNew.configOptions;
+    if (!Array.isArray(raw)) return;
+    const option = raw.find(
+      (item): item is { id?: unknown; currentValue?: unknown; options?: unknown } =>
+        Boolean(item) && typeof item === "object" && (item as { id?: unknown }).id === "effort",
+    );
+    if (!option) return;
+    const allowed = Array.isArray(option.options)
+      ? option.options
+          .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : null))
+          .filter((value): value is string => typeof value === "string")
+      : [];
+    if (!allowed.includes(wanted) || option.currentValue === wanted) return;
+    try {
+      await this.request("session/set_config_option", { sessionId, configId: "effort", value: wanted });
+    } catch {
+      /* the level is a preference, not a reason to lose the session */
+    }
   }
 
   async prompt(text: string, handlers: GrokAgentHandlers = {}, images: ChatImage[] = []): Promise<GrokPromptResult> {

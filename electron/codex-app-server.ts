@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { detectCodexLogin, type CodexLoginDetectInput } from "./codex-login";
+import { APP_VERSION } from "../src/lib/app-info";
 
 type JsonObject = Record<string, unknown>;
 
@@ -87,7 +88,7 @@ export class CodexAppServerClient {
 
     try {
       const initialized = await this.request("initialize", {
-        clientInfo: { name: "go7_workhorse", title: "Go7 Workhorse", version: "0.1.1" },
+        clientInfo: { name: "go7_workhorse", title: "Go7 Workhorse", version: APP_VERSION },
       });
       this.notify("initialized", {});
       return initialized && typeof initialized === "object" ? (initialized as JsonObject) : {};

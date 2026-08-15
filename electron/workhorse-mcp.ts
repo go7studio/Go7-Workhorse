@@ -28,6 +28,7 @@ import {
   type PeerAsk,
 } from "./peer-inbox";
 import { publicDeskSkills, readDeskSkill } from "./desk-export-host";
+import { APP_VERSION } from "../src/lib/app-info";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -829,7 +830,7 @@ export async function handleWorkhorseRpc(
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "go7-workhorse", version: "0.1.1" },
+        serverInfo: { name: "go7-workhorse", version: APP_VERSION },
       },
     };
   }

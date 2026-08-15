@@ -12,7 +12,20 @@ permissions:
 
 jobs:
   release:
-    runs-on: windows-latest
+    strategy:
+      # One at a time: the first machine creates the release, the second
+      # uploads into it. Running together races on `gh release create`.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: package:win
+            installer: Workhorse-Setup-*.exe
+          - os: macos-latest
+            script: package:mac
+            installer: Workhorse-*-mac.dmg
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
@@ -30,8 +43,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build Windows installer
-        run: npm run package:win
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
 
       - id: ver
         shell: pwsh
@@ -46,7 +59,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.ver.outputs.tag }}"
-          $installer = Get-Item "release/Workhorse-Setup-*.exe"
+          $installer = Get-ChildItem -Path "release" -File -Filter "${{ matrix.installer }}" | Select-Object -First 1
+          if (-not $installer) { throw "No installer matched ${{ matrix.installer }}" }
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer.FullName --clobber

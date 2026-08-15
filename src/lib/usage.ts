@@ -287,21 +287,56 @@ export function leftoverForCard(
   return undefined;
 }
 
+const TIME_WINDOW = /^(session|weekly(_all|_scoped)?|primary|interval|five_hour|5h)$/i;
+const SHORT_WINDOW = /^(session|primary|interval|five_hour|5h)$/i;
+
+export function isPlanTimeWindow(product: string): boolean {
+  return TIME_WINDOW.test(product);
+}
+
+export function planTimeWindows(plan: GrokPlanUsage | undefined): GrokPlanProduct[] {
+  return (plan?.products ?? []).filter((item) => isPlanTimeWindow(item.product));
+}
+
+export function weeklyPlanLeftover(plan: GrokPlanUsage | undefined): number | undefined {
+  if (!plan) return undefined;
+  if (plan.products.some((item) => item.unlimited && /weekly/i.test(item.product))) return 100;
+  if (Number.isFinite(plan.leftPercent)) return Math.min(100, Math.max(0, plan.leftPercent));
+  return undefined;
+}
+
+export function pickPlanWindow(
+  plan: GrokPlanUsage | undefined,
+  id?: string,
+  provider?: ProviderId,
+): GrokPlanProduct | undefined {
+  const windows = planTimeWindows(plan);
+  const pool = windows.length > 0 ? windows : (plan?.products ?? []);
+  if (pool.length === 0) return undefined;
+  if (id) {
+    const hit = pool.find((item) => item.product === id);
+    if (hit) return hit;
+  }
+  if (provider === "claude") {
+    return pool.find((item) => item.product === "weekly_all") ?? pool[0];
+  }
+  return (
+    pool.find((item) => !item.unlimited && SHORT_WINDOW.test(item.product)) ??
+    pool.find((item) => !item.unlimited) ??
+    pool[0]
+  );
+}
+
 export function pickClaudeWindow(
   plan: GrokPlanUsage | undefined,
   id?: string,
 ): GrokPlanProduct | undefined {
-  if (!plan?.products.length) return undefined;
-  return (
-    plan.products.find((item) => item.product === id) ??
-    plan.products.find((item) => item.product === "weekly_all") ??
-    plan.products[0]
-  );
+  return pickPlanWindow(plan, id, "claude");
 }
 
 function claudeWindowTab(item: GrokPlanProduct): string {
-  if (item.product === "session") return "Session";
-  if (item.product === "weekly_all") return "Weekly";
+  if (item.product === "session") return item.label === "5h" ? "5h" : "Session";
+  if (item.product === "weekly_all" || item.product === "weekly") return "Weekly";
   return item.label;
 }
 
@@ -309,7 +344,17 @@ export function claudeWindowTabs(plan: GrokPlanUsage | undefined): { id: string;
   return (plan?.products ?? []).map((item) => ({ id: item.product, label: claudeWindowTab(item) }));
 }
 
-/** All desk rings are leftover: 100% means the allowance is still full. */
+export function planWindowChip(plan: GrokPlanUsage | undefined): string | undefined {
+  const windows = planTimeWindows(plan);
+  if (windows.length === 0) return undefined;
+  return windows
+    .map((item) =>
+      item.unlimited ? `${item.label}: ∞` : `${item.label}: ${Math.round(item.usagePercent)}%`,
+    )
+    .join(" · ");
+}
+
+/** All desk rings are leftover: 100% means the allowance is still full. ∞ means no cap. */
 export function planRingView(
   row: Pick<DeskUsageCard, "focus" | "provider" | "key">,
   plans: Parameters<typeof leftoverForCard>[1],
@@ -317,11 +362,14 @@ export function planRingView(
 ): { value: number; label: string; plan: GrokPlanUsage } | undefined {
   const plan = leftoverForCard(row, plans);
   if (!plan) return undefined;
-  if (row.provider === "claude") {
-    const window = pickClaudeWindow(plan, claudeWindow);
-    const used = window?.usagePercent ?? plan.usedPercent;
-    const left = Math.max(0, Math.min(100, 100 - used));
-    return { value: left / 100, label: `${Math.round(left)}%`, plan };
+  const windows = planTimeWindows(plan);
+  if (windows.length > 0) {
+    const window = pickPlanWindow(plan, claudeWindow, row.provider);
+    if (window?.unlimited) return { value: 1, label: "∞", plan };
+    if (window) {
+      const left = Math.max(0, Math.min(100, 100 - window.usagePercent));
+      return { value: left / 100, label: `${Math.round(left)}%`, plan };
+    }
   }
   return { value: plan.leftPercent / 100, label: `${Math.round(plan.leftPercent)}%`, plan };
 }

@@ -331,6 +331,8 @@ export type GrokPlanProduct = {
   label: string;
   usagePercent: number;
   resetsAt?: string;
+  /** No cap on this window (MiniMax weekly on some seats). Do not turn this into 100%. */
+  unlimited?: boolean;
 };
 
 export type GrokPlanUsage = {

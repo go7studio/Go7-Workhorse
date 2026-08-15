@@ -165,7 +165,10 @@ import {
   vendorUsedPercent,
   planRingView,
   pickClaudeWindow,
+  pickPlanWindow,
   claudeWindowTabs,
+  planWindowChip,
+  weeklyPlanLeftover,
   formatPlanReset,
   normalizeUsage,
   rollup,
@@ -2803,6 +2806,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /Remove from desk/);
   assert.match(addBot, /Your own/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Provider/);
   assert.match(addBot, /createCustomBot/);
   assert.match(addBot, /CATALOG/);
   assert.match(addBot, /addBotChoices/);
@@ -3111,10 +3115,13 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   assert.match(pane, /Weekly allowance/);
   assert.match(pane, /leftoverForCard/);
   assert.match(pane, /planRingView/);
+  assert.match(pane, /planWindowChip/);
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
   assert.match(pane, /% used/);
+  assert.match(pane, /Unlimited/);
+  assert.match(pane, /ContextMeter/);
   assert.match(pane, /setInterval\(pull, 180_000\)/);
   assert.match(pane, /codexPlan/);
   assert.doesNotMatch(pane, /row\.totalTokens \/ peak/);
@@ -3291,6 +3298,28 @@ test("Usage rings include every desk LLM even with no spend", () => {
       },
     })?.label,
     "100%",
+  );
+  const miniWindows = {
+    usedPercent: 0,
+    leftPercent: 100,
+    period: "weekly" as const,
+    prepaidBalance: 0,
+    products: [
+      { product: "session", label: "5h", usagePercent: 17 },
+      { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
+    ],
+  };
+  assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
+  assert.equal(weeklyPlanLeftover(miniWindows), 100);
+  assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
+  assert.equal(
+    planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } })?.label,
+    "83%",
+  );
+  assert.equal(
+    planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } }, "weekly")
+      ?.label,
+    "∞",
   );
   assert.match(formatPlanReset("2026-08-20T05:59:59Z", Date.parse("2026-08-13T16:00:00Z")), /Resets/);
   assert.deepEqual(

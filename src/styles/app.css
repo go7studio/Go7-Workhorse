@@ -3379,6 +3379,7 @@ html.pane-dragging * {
   font-style: normal;
   font-size: 11px;
   color: var(--text-tertiary);
+  text-wrap: balance;
 }
 
 .usage-brain.on {
@@ -3681,7 +3682,8 @@ html.pane-dragging * {
   gap: 4px 16px;
 }
 
-.add-bot-form .field:nth-child(n + 3) {
+.add-bot-form .field.wide,
+.add-bot-form .field:nth-child(n + 4) {
   grid-column: 1 / -1;
 }
 
@@ -3936,6 +3938,46 @@ html.pane-dragging * {
 
 .usage-limits-head .usage-ranges {
   margin: 0;
+}
+
+.usage-limits-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.usage-limits-tools .context-meter-wrap {
+  position: relative;
+}
+
+.usage-limit.unlimited .usage-split-track i {
+  opacity: 0.28;
+}
+
+.usage-limit-note {
+  margin: 2px 10px 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+
+.bot-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.bot-context-row .row-meta {
+  margin: 0;
+  flex: 1;
+  min-width: 160px;
+}
+
+.usage-plan-copy .context-meter-wrap {
+  margin-top: 8px;
 }
 
 .usage-limit {
@@ -4856,7 +4898,9 @@ html.pane-dragging * {
 }
 
 .settings .field input,
-.add-bot .field input {
+.settings .field select,
+.add-bot .field input,
+.add-bot .field select {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -4865,8 +4909,16 @@ html.pane-dragging * {
   outline: none;
 }
 
+.add-bot .field select,
+.settings .field select {
+  appearance: none;
+  padding-right: 32px;
+}
+
 .settings .field input:focus,
-.add-bot .field input:focus {
+.settings .field select:focus,
+.add-bot .field input:focus,
+.add-bot .field select:focus {
   border-color: var(--accent);
 }
 

@@ -228,6 +228,23 @@ test("leftover numbers stay visible on cards without a second hold setting", () 
   assert.equal(grok?.holding, false);
   assert.equal(mini?.holding, false);
   assert.equal(leftoverPercentForKey("bot:bot_minimax", { custom: { bot_minimax: plan(9) } }, { customBots: [bot] }), 9);
+  assert.equal(
+    leftoverPercentForKey(
+      "bot:bot_minimax",
+      {
+        custom: {
+          bot_minimax: plan(100, {
+            products: [
+              { product: "session", label: "5h", usagePercent: 81 },
+              { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
+            ],
+          }),
+        },
+      },
+      { customBots: [bot] },
+    ),
+    100,
+  );
 
   const pruned = pruneWatchPermits(
     { grok: { day: "2026-08-12" }, "bot:bot_minimax": { day: dayKey(now) } },

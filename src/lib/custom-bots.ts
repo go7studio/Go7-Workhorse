@@ -3,7 +3,7 @@ import type { CustomBot, CustomLlm } from "./types";
 
 export function inferCustomApi(baseUrl: string): "anthropic-messages" | "openai-completions" {
   const url = baseUrl.toLowerCase();
-  if (url.includes("anthropic") || url.includes("minimax")) return "anthropic-messages";
+  if (url.includes("anthropic")) return "anthropic-messages";
   return "openai-completions";
 }
 

@@ -4693,3 +4693,17 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.match(css, /cursor: col-resize/);
   assert.match(css, /html\.pane-dragging/);
 });
+
+test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
+  // The flag is set by detection after load. Dropping it here is why the
+  // Claude card kept reading "Not found" with the copy fix already shipped.
+  const settings = normalizeSettings({
+    llms: {
+      claude: { connected: true, available: false, needsAuth: true },
+      grok: { connected: true, available: true },
+    },
+  });
+  assert.equal(settings.llms.claude.needsAuth, true);
+  assert.equal(settings.llms.claude.available, false);
+  assert.equal(settings.llms.grok.needsAuth, undefined);
+});

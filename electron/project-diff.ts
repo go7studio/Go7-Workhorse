@@ -15,8 +15,14 @@ export type GitChange = { path: string; status: string };
 
 const SKIP_WALK = new Set(["node_modules", ".git", "dist", "dist-electron", "out", ".next", "coverage", ".cache"]);
 
+/** Host-correct absolute check; also accepts Windows drive/UNC paths on POSIX hosts. */
+export function isAbsolutePath(filePath: string): boolean {
+  if (path.isAbsolute(filePath)) return true;
+  return /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+}
+
 export function listGitChanges(cwd: string): GitChange[] {
-  if (!path.isAbsolute(cwd) || !fs.existsSync(cwd)) return [];
+  if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return [];
   try {
     const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
@@ -69,7 +75,7 @@ export function findSourceFile(
     });
   const trimmed = filePath.trim().replace(/^file:\/\//i, "").replace(/^[`'"]+|[`'"]+$/g, "");
   if (!trimmed) return null;
-  if (path.isAbsolute(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
+  if (isAbsolutePath(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
   const searchRoots = [...roots];
   const cwd = process.cwd();
   if (cwd && !searchRoots.some((root) => path.resolve(root) === path.resolve(cwd))) searchRoots.push(cwd);
@@ -134,7 +140,7 @@ export function resolveExistingFile(
   if (found) return found;
   const trimmed = filePath.trim();
   if (!trimmed) return trimmed;
-  return path.isAbsolute(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
+  return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
 }
 
 function gitIndexLocked(repo: string, existsSync: (filePath: string) => boolean): boolean {

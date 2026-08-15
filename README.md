@@ -27,6 +27,15 @@ npm run dist:win
 
 Run `release/Workhorse-Setup-<version>.exe` to install the branded **Workhorse** desktop application. The installer creates Start-menu and Desktop shortcuts and preserves the existing Workhorse projects and chats when updating or uninstalling.
 
+## Install on macOS
+
+```bash
+npm install
+npm run dist:mac
+```
+
+On a Mac, that writes `release/Workhorse-<version>-mac.dmg`, `release/Workhorse-<version>-mac.zip`, and the unpacked `Workhorse.app`. The build is unsigned (`identity: null`); Gatekeeper may require right-click → Open the first time. Vendor CLIs (Grok, Codex, Claude) are not bundled — they must already be installed on the machine.
+
 ## How to use the scaffold
 
 1. **New project** — give it a name. No folder required.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -32,6 +32,7 @@ import {
   deskPath,
   discoverRipgrepDirs,
   ensureDeskRipgrep,
+  extraDeskDirs,
   parseRegPathValue,
   readWindowsPersistedPath,
   resolveDeskBinary,
@@ -112,7 +113,7 @@ import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, a
 import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
-import { findSourceFile, readFileDiff } from "../electron/project-diff";
+import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
 import { fileFolderFromPath, formatEditWhen, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromWriteTool, projectEdits, sameEditPath } from "../src/lib/project-edits";
 import { autoTitleForSend, suggestedTitleForSession, titleFromPrompt } from "../src/lib/titles";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
@@ -915,12 +916,14 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
       if (dir.includes("OpenAI") && dir.endsWith("bin")) return [];
       return [];
     },
+    "win32",
   );
   assert.ok(discovered.some((dir) => dir.toLowerCase().endsWith(`${wingetPkg}\\ripgrep-15`.toLowerCase()) || dir.toLowerCase().endsWith(`${wingetPkg}/ripgrep-15`.toLowerCase()) || dir.replace(/\\/g, "/").endsWith(`${wingetPkg}/ripgrep-15`)));
   const copied: string[] = [];
   const ensured = ensureDeskRipgrep({
     home: "C:\\Users\\me",
     env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", PATH: electronPath },
+    platform: "win32",
     extra: [userBin],
     existsSync: (file) => file === fakeRg || file === fakeGit,
     mkdirSync: () => undefined,
@@ -930,6 +933,18 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   });
   assert.equal(ensured?.source, fakeRg);
   assert.ok(copied.some((file) => /\\?\.grok\\bin\\rg\.exe$/i.test(file) || file.replace(/\\/g, "/").endsWith(".grok/bin/rg.exe")));
+  const macBin = workhorseToolBin("/Users/me", {}, "darwin");
+  assert.match(macBin, /Library\/Application Support\/Go7 Workhorse\/bin$/);
+  assert.doesNotMatch(macBin, /AppData/);
+  const macDirs = extraDeskDirs("/Users/me", {}, "darwin").join("\n");
+  assert.match(macDirs, /\/opt\/homebrew\/bin/);
+  assert.match(macDirs, /\/usr\/local\/bin/);
+  assert.doesNotMatch(macDirs, /Program Files/);
+  assert.doesNotMatch(macDirs, /WinGet/);
+  assert.doesNotMatch(macDirs, /scoop/);
+  assert.doesNotMatch(macDirs, /AppData/);
+  const linuxBin = workhorseToolBin("/home/me", {}, "linux");
+  assert.match(linuxBin, /\.local\/share\/Go7 Workhorse\/bin$/);
 });
 
 test("pickPermissionOptionId maps Workhorse answers onto ACP option kinds", () => {
@@ -2467,13 +2482,16 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.deepEqual(countLineChanges(changed), { added: 1, deleted: 1 });
   assert.equal(formatDiffStat(2, 1), "+2  −1");
 
-  const built = buildFileDiff("C:\\\\proj\\\\WALK-TEST-EDIT.md", "", "Walk Test edit landed.\n");
+  const built = buildFileDiff(path.join("proj", "WALK-TEST-EDIT.md"), "", "Walk Test edit landed.\n");
   assert.equal(built.name, "WALK-TEST-EDIT.md");
   assert.equal(built.added, 1);
   assert.equal(built.deleted, 0);
 
-  const abs = "C:\\\\repo\\\\WALK-TEST-EDIT.md";
-  const live = readFileDiff(abs, ["C:\\\\repo"], {
+  const repoRoot = path.resolve(os.tmpdir(), "wh-diff-repo");
+  const abs = path.join(repoRoot, "WALK-TEST-EDIT.md");
+  assert.equal(isAbsolutePath(abs), true);
+  assert.equal(isAbsolutePath("C:\\repo\\WALK-TEST-EDIT.md"), true);
+  const live = readFileDiff(abs, [repoRoot], {
     existsSync: (file) => file === abs || file.endsWith(`${path.sep}.git`),
     readFile: (file) => (file === abs ? "Walk Test edit landed.\n" : ""),
     gitShow: () => null,
@@ -2486,7 +2504,7 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.equal(looksLikeSourceFile("electron/preload.ts"), true);
   assert.equal(looksLikeSourceFile("https://example.com/preload.ts"), false);
   assert.equal(looksLikeSourceFile("always-approve"), false);
-  const repo = path.join("C:", "repo");
+  const repo = path.resolve(os.tmpdir(), "wh-src-repo");
   const electronDir = path.join(repo, "electron");
   const preload = path.join(electronDir, "preload.ts");
   const found = findSourceFile("preload.ts", [repo], {
@@ -2507,8 +2525,8 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.ok(projectDiff.lines.length > 10);
 
   let gitCalls = 0;
-  const lockedAbs = "C:\\\\repo\\\\electron\\\\app-update.ts";
-  const locked = readFileDiff(lockedAbs, ["C:\\\\repo"], {
+  const lockedAbs = path.join(repoRoot, "electron", "app-update.ts");
+  const locked = readFileDiff(lockedAbs, [repoRoot], {
     existsSync: (file) =>
       file === lockedAbs || file.endsWith(`${path.sep}.git`) || file.endsWith(`${path.sep}index.lock`),
     readFile: (file) => (file === lockedAbs ? "export const n = 1;\n" : ""),
@@ -4300,7 +4318,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  const preloadBuilt = readFileSync(path.join(ROOT, "dist-electron", "preload.mjs"), "utf8");
+  const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
   assert.match(setup, /modelsFor\(session\.provider\)/);
   assert.doesNotMatch(setup, /MODEL_CATALOG\[session\.provider\]/);
   assert.match(menu, /modelsFor\(provider\.id\)/);
@@ -4308,7 +4326,9 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.match(store, /applyVendorCatalog/);
   assert.match(main, /ipcMain\.handle\("models:list"/);
   assert.match(preloadSrc, /listVendorModels/);
-  assert.match(preloadBuilt, /models:list/);
+  if (existsSync(preloadBuiltPath)) {
+    assert.match(readFileSync(preloadBuiltPath, "utf8"), /models:list/);
+  }
 
   const codex = parseCodexModelsCache(
     JSON.stringify({

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { buildFileDiff, type FileDiff } from "../src/lib/file-diff";
 
@@ -77,8 +78,30 @@ export function findSourceFile(
   if (!trimmed) return null;
   if (isAbsolutePath(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
   const searchRoots = [...roots];
-  const cwd = process.cwd();
-  if (cwd && !searchRoots.some((root) => path.resolve(root) === path.resolve(cwd))) searchRoots.push(cwd);
+  const addRoot = (dir: string) => {
+    if (!dir) return;
+    let resolved = dir;
+    try {
+      resolved = path.resolve(dir);
+    } catch {
+      return;
+    }
+    if (resolved === path.parse(resolved).root) return;
+    if (!existsSync(resolved) || !isDir(resolved)) return;
+    if (searchRoots.some((root) => path.resolve(root) === resolved)) return;
+    searchRoots.push(resolved);
+  };
+  addRoot(process.cwd());
+  try {
+    const home = os.homedir();
+    addRoot(path.join(home, "workspace"));
+    addRoot(path.join(home, "Projects"));
+    addRoot(path.join(home, "Developer"));
+    addRoot(path.join(home, "src"));
+    addRoot(path.join(home, "code"));
+  } catch {
+    /* homedir can throw if $HOME is unset */
+  }
   for (const root of searchRoots) {
     const abs = path.resolve(root, trimmed);
     if (existsSync(abs) && !isDir(abs)) return abs;

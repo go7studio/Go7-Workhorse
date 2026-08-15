@@ -38,11 +38,24 @@ function listNames(dirPath: string, listDir?: (dirPath: string) => string[]): st
 }
 
 export function findClaudeDesktopRoot(
-  input: Pick<ClaudeDesktopAuthInput, "env" | "homedir" | "existsSync" | "listDir"> = {},
+  input: Pick<ClaudeDesktopAuthInput, "env" | "homedir" | "platform" | "existsSync" | "listDir"> = {},
 ): string | null {
   const env = input.env ?? process.env;
   const homedir = input.homedir ?? os.homedir();
+  const platform = input.platform ?? process.platform;
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
+
+  if (platform === "darwin") {
+    const mac = path.join(homedir, "Library", "Application Support", "Claude");
+    return existsSync(path.join(mac, "config.json")) ? mac : null;
+  }
+
+  if (platform === "linux") {
+    const configHome = env.XDG_CONFIG_HOME?.trim() || path.join(homedir, ".config");
+    const linux = path.join(configHome, "Claude");
+    return existsSync(path.join(linux, "config.json")) ? linux : null;
+  }
+
   const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
   const packages = path.join(localApp, "Packages");
   if (!existsSync(packages)) return null;
@@ -52,6 +65,21 @@ export function findClaudeDesktopRoot(
     if (existsSync(path.join(root, "config.json")) && existsSync(path.join(root, "Local State"))) return root;
   }
   return null;
+}
+
+/** True when desktop config holds an oauth cache. Does not decrypt — scan only. */
+export function claudeDesktopConfigLooksLoggedIn(
+  root: string,
+  readFile: (filePath: string) => string,
+): boolean {
+  try {
+    const config = JSON.parse(readFile(path.join(root, "config.json"))) as Record<string, unknown>;
+    const v2 = typeof config["oauth:tokenCacheV2"] === "string" ? config["oauth:tokenCacheV2"] : "";
+    const v1 = typeof config["oauth:tokenCache"] === "string" ? config["oauth:tokenCache"] : "";
+    return Boolean(v2 || v1);
+  } catch {
+    return false;
+  }
 }
 
 function dpapiUnprotect(blob: Buffer): Buffer {
@@ -121,7 +149,8 @@ export function pickClaudeCodeOauth(cache: unknown): ClaudeDesktopOauth | null {
 let cachedOauth: { at: number; value: ClaudeDesktopOauth | null } | null = null;
 
 export function readClaudeDesktopOauth(input: ClaudeDesktopAuthInput = {}): ClaudeDesktopOauth | null {
-  if ((input.platform ?? process.platform) !== "win32") return null;
+  const platform = input.platform ?? process.platform;
+  if (platform !== "win32") return null;
   if (!input.readFile && !input.unprotect && cachedOauth && Date.now() - cachedOauth.at < 60_000) {
     return cachedOauth.value;
   }

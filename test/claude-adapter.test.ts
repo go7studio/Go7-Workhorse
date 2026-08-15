@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { pickClaudeCodeOauth } from "../electron/claude-desktop-auth";
+import { findClaudeDesktopRoot, pickClaudeCodeOauth } from "../electron/claude-desktop-auth";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
   detectClaudeLogin,
@@ -260,4 +260,30 @@ test("fetchClaudePlanUsage sends the claude-code User-Agent", async () => {
   });
   assert.match(seen[0] ?? "", /^claude-code\//);
   assert.equal(plan?.usedPercent, 7);
+});
+
+test("findClaudeDesktopRoot uses Application Support on macOS, not AppData", () => {
+  const mac = findClaudeDesktopRoot({
+    platform: "darwin",
+    homedir: "/Users/me",
+    existsSync: (file) => file === "/Users/me/Library/Application Support/Claude/config.json",
+  });
+  assert.equal(mac, "/Users/me/Library/Application Support/Claude");
+  const missing = findClaudeDesktopRoot({
+    platform: "darwin",
+    homedir: "/Users/me",
+    existsSync: () => false,
+  });
+  assert.equal(missing, null);
+  const store = findClaudeDesktopRoot({
+    platform: "win32",
+    homedir: "C:\\Users\\me",
+    env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" },
+    existsSync: (file) =>
+      file.endsWith("Packages") ||
+      file.replace(/\\/g, "/").endsWith("LocalCache/Roaming/Claude/config.json") ||
+      file.replace(/\\/g, "/").endsWith("LocalCache/Roaming/Claude/Local State"),
+    listDir: (dir) => (dir.replace(/\\/g, "/").endsWith("Packages") ? ["Claude_abc"] : []),
+  });
+  assert.match((store ?? "").replace(/\\/g, "/"), /Claude_abc\/LocalCache\/Roaming\/Claude$/);
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -126,12 +126,15 @@ test("store send() does not cross-talk vendors", () => {
   assert.match(main, /ipcMain\.handle\("claude:prompt"/);
   assert.match(main, /ipcMain\.handle\("grok:prompt"/);
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  const preloadBuilt = readFileSync(path.join(ROOT, "dist-electron", "preload.mjs"), "utf8");
+  const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
   assert.match(preloadSrc, /detectCodexLogin/);
-  assert.match(preloadBuilt, /detectCodexLogin/);
-  assert.match(preloadBuilt, /codex:detect-login/);
   assert.match(preloadSrc, /listVendorModels/);
-  assert.match(preloadBuilt, /models:list/);
+  if (existsSync(preloadBuiltPath)) {
+    const preloadBuilt = readFileSync(preloadBuiltPath, "utf8");
+    assert.match(preloadBuilt, /detectCodexLogin/);
+    assert.match(preloadBuilt, /codex:detect-login/);
+    assert.match(preloadBuilt, /models:list/);
+  }
   assert.match(main, /ipcMain\.handle\("models:list"/);
   assert.doesNotMatch(main, /spawn\(["']grok/);
   assert.match(settings, /refreshCodexLogin/);

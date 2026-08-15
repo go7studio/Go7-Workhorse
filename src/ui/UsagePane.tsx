@@ -4,6 +4,7 @@ import { FuelRing } from "./FuelRing";
 import { modelName, shortModelName } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { ProviderId, UsageRange } from "../lib/types";
+import { ContextMeter } from "./ModelMenu";
 import {
   byModel,
   customBotUsageEvents,
@@ -11,7 +12,10 @@ import {
   leftoverForCard,
   planRingView,
   pickClaudeWindow,
+  pickPlanWindow,
   claudeWindowTabs,
+  planTimeWindows,
+  planWindowChip,
   formatPlanReset,
   formatCost,
   formatTokens,
@@ -383,11 +387,31 @@ export function UsagePane({
 
   const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans };
   const plan = focused ? leftoverForCard(focused, deskPlans) : undefined;
+  const timeWindows = planTimeWindows(plan);
   const claudePick = pickClaudeWindow(focused?.provider === "claude" ? plan : claudePlan, claudeWindow);
-  const claudeTabs = claudeWindowTabs(focused?.provider === "claude" ? plan : claudePlan);
+  const windowPick = focused
+    ? pickPlanWindow(plan, claudeWindow, focused.provider)
+    : undefined;
+  const claudeTabs = claudeWindowTabs(focused?.provider === "claude" ? plan : plan);
+  const windowTabs =
+    focused?.provider === "claude"
+      ? claudeTabs
+      : timeWindows.map((item) => ({ id: item.product, label: item.label }));
   const planName = focused?.provider === "grok" ? "SuperGrok" : focused?.label ?? "Weekly";
+  const focusedBot =
+    focused?.focus.startsWith("bot:")
+      ? settings.customBots.find((bot) => `bot:${bot.id}` === focused.focus)
+      : undefined;
+  const weeklyUnlimited = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
+  const usedFact = windowPick?.unlimited
+    ? "∞"
+    : `${Math.round(windowPick?.usagePercent ?? (focused?.provider === "claude" ? (claudePick?.usagePercent ?? plan?.usedPercent ?? 0) : plan?.usedPercent ?? 0))}%`;
   const planCopy = plan
-    ? plan.leftPercent <= 0
+    ? weeklyUnlimited
+      ? windowPick && !windowPick.unlimited && windowPick.resetsAt
+        ? `Weekly ${planName} allowance is unlimited. The ${windowPick.label} window is the real limit. ${formatPlanReset(windowPick.resetsAt)}.`
+        : `Weekly ${planName} allowance is unlimited. The 5h window is the real limit.`
+    : plan.leftPercent <= 0
       ? plan.resetsAt
         ? `Weekly allowance is spent. It opens again ${formatReset(plan.resetsAt)}.`
         : "Weekly allowance is spent. Extra credits or the next reset will open it again."
@@ -431,6 +455,7 @@ export function UsagePane({
             <div className="usage-brains">
               {cards.map((row, index) => {
                 const ring = planRingView(row, deskPlans, claudeWindow);
+                const chip = planWindowChip(leftoverForCard(row, deskPlans));
                 return (
                   <button
                     key={row.key}
@@ -448,9 +473,11 @@ export function UsagePane({
                     />
                     <span>{row.label}</span>
                     <em>
-                      {row.provider === "claude" && claudePick
-                        ? `${Math.round(Math.max(0, 100 - claudePick.usagePercent))}% ${claudePick.label.toLowerCase()}`
-                        : `${formatTokens(row.inputTokens)} in  ·  ${formatTokens(row.outputTokens)} out`}
+                      {chip
+                        ? chip
+                        : row.provider === "claude" && claudePick
+                          ? `${Math.round(Math.max(0, 100 - claudePick.usagePercent))}% ${claudePick.label.toLowerCase()}`
+                          : `${formatTokens(row.inputTokens)} in  ·  ${formatTokens(row.outputTokens)} out`}
                     </em>
                   </button>
                 );
@@ -480,40 +507,54 @@ export function UsagePane({
               </button>
             ))}
           </div>
-          {focused.provider === "claude" && plan?.products.length ? (
+          {timeWindows.length > 0 ? (
             <div className="usage-limits">
               <div className="usage-limits-head">
                 <span className="sheet-label">Plan usage limits</span>
-                <div className="actions usage-ranges">
-                  {claudeTabs.map((item) => (
-                    <button
-                      key={item.id}
-                      className={claudePick?.product === item.id ? "tiny active-kind" : "tiny"}
-                      type="button"
-                      onClick={() => setClaudeWindow(item.id)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                <div className="usage-limits-tools">
+                  <ContextMeter
+                    fallbackWindow={focusedBot?.contextWindow}
+                    matchProvider={focused.provider}
+                    matchBotId={focusedBot?.id}
+                  />
+                  <div className="actions usage-ranges">
+                    {windowTabs.map((item) => (
+                      <button
+                        key={item.id}
+                        className={windowPick?.product === item.id ? "tiny active-kind" : "tiny"}
+                        type="button"
+                        onClick={() => setClaudeWindow(item.id)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              {plan.products.map((item) => (
+              {timeWindows.map((item) => (
                 <button
                   key={item.product}
-                  className={`usage-limit${claudePick?.product === item.product ? " on" : ""}`}
+                  className={`usage-limit${windowPick?.product === item.product ? " on" : ""}${item.unlimited ? " unlimited" : ""}`}
                   type="button"
                   onClick={() => setClaudeWindow(item.product)}
                 >
                   <div className="usage-limit-top">
                     <strong>{item.label}</strong>
-                    <em>{Math.round(item.usagePercent)}% used</em>
+                    <em>{item.unlimited ? "Unlimited" : `${Math.round(item.usagePercent)}% used`}</em>
                   </div>
                   <div className="usage-split-track wide">
-                    <i className="claude" style={{ width: `${Math.max(3, Math.round(item.usagePercent))}%` }} />
+                    <i
+                      className={focused.provider}
+                      style={{
+                        width: item.unlimited ? "100%" : `${Math.max(3, Math.round(item.usagePercent))}%`,
+                        ...(focused.color ? { background: focused.color } : {}),
+                      }}
+                    />
                   </div>
-                  {item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
+                  {item.unlimited ? <span>No weekly cap on this seat</span> : item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
                 </button>
               ))}
+              {planCopy ? <p className="usage-limit-note">{planCopy}</p> : null}
             </div>
           ) : (
             <div className="usage-plan">
@@ -532,6 +573,11 @@ export function UsagePane({
                       ? "Loading weekly plan usage…"
                       : `Restart Workhorse to load ${planName} plan usage.`)}
                 </p>
+                <ContextMeter
+                  fallbackWindow={focusedBot?.contextWindow}
+                  matchProvider={focused.provider}
+                  matchBotId={focusedBot?.id}
+                />
               </div>
             </div>
           )}
@@ -543,9 +589,7 @@ export function UsagePane({
             <div className="usage-fact">
               <span>{plan ? "Used" : "Cost"}</span>
               <strong>
-                {plan
-                  ? `${Math.round(focused.provider === "claude" ? (claudePick?.usagePercent ?? plan.usedPercent) : plan.usedPercent)}%`
-                  : formatCost(focused)}
+                {plan ? usedFact : formatCost(focused)}
               </strong>
             </div>
             <div className="usage-fact">

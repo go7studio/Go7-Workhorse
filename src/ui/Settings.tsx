@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
-import { formatWindow } from "../lib/models";
+import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { APP_VERSION } from "../lib/app-info";
@@ -8,6 +8,7 @@ import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
 import { BotForm } from "./BotForm";
+import { ContextMeter } from "./ModelMenu";
 import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
@@ -357,7 +358,10 @@ function StockBotDetail({
         onChange={(patch) => store.updateLlmLink(id, patch)}
       />
 
-      <p className="row-meta">{llmDetailCopy(id, link)}</p>
+      <div className="bot-context-row">
+        <ContextMeter fallbackWindow={modelsFor(id)[0]?.contextWindow} matchProvider={id} />
+        <p className="row-meta">{llmDetailCopy(id, link)}</p>
+      </div>
       {id === "codex" ? <CodexNativeStatus /> : null}
       <MassSend vendor={id} />
     </div>
@@ -539,12 +543,15 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
         }}
       />
 
-      <p className="row-meta">
-        {probing
-          ? "Testing API…"
-          : probeNote ||
-            `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
-      </p>
+      <div className="bot-context-row">
+        <ContextMeter fallbackWindow={bot.contextWindow} matchProvider="custom" matchBotId={bot.id} />
+        <p className="row-meta">
+          {probing
+            ? "Testing API…"
+            : probeNote ||
+              `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
+        </p>
+      </div>
       <div className="actions add-bot-actions">
         <button
           className="tiny"

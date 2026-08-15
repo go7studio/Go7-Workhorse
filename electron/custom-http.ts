@@ -1,6 +1,7 @@
 import { peelAskMarkup, peelThinkTags } from "../src/lib/markdown";
 import type { ChatImage, EffortLevel } from "../src/lib/types";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
+import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
 import {
   customHttpTools,
   customHttpToolsOpenAi,
@@ -47,9 +48,6 @@ export type CustomHttpHandlers = {
 export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base URL, model, and API key.";
 
 const KNOWN_WINDOWS: Record<string, number> = {
-  "minimax-m3": 1_000_000,
-  "minimax-m2.7": 204_800,
-  "minimax-m2.5": 204_800,
   "minimax-m2.1": 204_800,
 };
 
@@ -62,8 +60,7 @@ export type CustomProbeResult = {
 };
 
 export function knownContextWindow(model: string): number | undefined {
-  const key = model.trim().toLowerCase();
-  return KNOWN_WINDOWS[key];
+  return catalogContextWindow(model) ?? KNOWN_WINDOWS[model.trim().toLowerCase()];
 }
 
 export function resolveCustomApi(config: CustomHttpConfig): CustomApiKind {
@@ -580,6 +577,36 @@ export async function streamCustomHttp(
   }
 }
 
+function modelsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (/\/models$/i.test(trimmed)) return trimmed;
+  if (/\/v1$/i.test(trimmed)) return `${trimmed}/models`;
+  return `${trimmed}/v1/models`;
+}
+
+async function fetchListedContext(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  fetchImpl: typeof fetch,
+): Promise<number | undefined> {
+  try {
+    const response = await fetchImpl(modelsUrl(baseUrl), {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${apiKey}`,
+        "x-api-key": apiKey,
+      },
+    });
+    if (!response.ok) return undefined;
+    const parsed: unknown = await response.json();
+    return contextFromModelList(parsed, model);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function probeCustomHttp(
   config: CustomHttpConfig,
   fetchImpl: typeof fetch = fetch,
@@ -626,12 +653,15 @@ export async function probeCustomHttp(
       parsed = null;
     }
     const root = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-    const listed =
+    let listed =
       typeof root.context_window === "number"
         ? root.context_window
         : typeof (root.model as { context_window?: number } | undefined)?.context_window === "number"
           ? (root.model as { context_window: number }).context_window
           : knownContextWindow(model);
+    if (!listed) {
+      listed = await fetchListedContext(baseUrl, apiKey, model, fetchImpl);
+    }
     return {
       ok: true,
       message: listed ? `Reached ${model}. Context ${listed.toLocaleString()} tokens.` : `Reached ${model}.`,

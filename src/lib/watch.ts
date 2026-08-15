@@ -14,7 +14,7 @@ import type {
 } from "./types";
 import { customBotEnabled } from "./custom-bots";
 import { defaultModel, modelsFor } from "./models";
-import { customBotUsageEvents, deskUsageCards, eventTotal, formatPlanReset, leftoverForCard, planRingView } from "./usage";
+import { customBotUsageEvents, deskUsageCards, eventTotal, formatPlanReset, leftoverForCard, weeklyPlanLeftover } from "./usage";
 import { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
 export { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
@@ -229,10 +229,7 @@ export function leftoverPercentForKey(
   settings: { customBots: CustomBot[] },
 ): number | undefined {
   const row = deskRowForKey(key, settings);
-  const ring = planRingView(row, plans);
-  if (ring) return Math.max(0, Math.min(100, ring.value * 100));
-  const plan = leftoverForCard(row, plans);
-  return plan && Number.isFinite(plan.leftPercent) ? plan.leftPercent : undefined;
+  return weeklyPlanLeftover(leftoverForCard(row, plans));
 }
 
 export function eventsForWatchKey(

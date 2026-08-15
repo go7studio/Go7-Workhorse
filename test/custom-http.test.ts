@@ -15,9 +15,14 @@ import {
   streamCustomHttp,
 } from "../electron/custom-http";
 import { detectCustomLogin, parseOpenClawMinimax } from "../electron/custom-login";
-import { customPlanRemainsUrl, leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
+import { customPlanRemainsUrl, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
-import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT } from "../src/lib/custom-bots";
+import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "../src/lib/custom-bots";
+import {
+  contextFromModelList,
+  detectProviderFromKey,
+  knownContextWindow as catalogWindow,
+} from "../src/lib/provider-catalog";
 import {
   applyDeleteCustomBot,
   applyInstallCustomBot,
@@ -304,6 +309,65 @@ test("parseCustomPlanUsage reads MiniMax weekly leftover percent", () => {
   assert.equal(plan?.usedPercent, 0);
   assert.equal(plan?.period, "weekly");
   assert.ok(plan?.resetsAt);
+  assert.equal(plan?.products[0]?.label, "5h");
+  assert.equal(plan?.products[0]?.usagePercent, 14);
+  assert.equal(plan?.products[1]?.label, "Weekly");
+  assert.equal(plan?.products[1]?.usagePercent, 0);
+  assert.equal(plan?.products[1]?.unlimited, undefined);
+});
+
+test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
+  assert.equal(
+    weeklyIsUnlimited(
+      { current_weekly_remaining_percent: 0, current_interval_remaining_percent: 83 },
+      {},
+      0,
+      83,
+    ),
+    true,
+  );
+  const unlimited = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        current_interval_remaining_percent: 83,
+        current_weekly_remaining_percent: 0,
+        interval_end_time: Date.now() + 44 * 60 * 1000,
+        weekly_unlimited: true,
+      },
+    ],
+  });
+  assert.equal(unlimited?.leftPercent, 100);
+  assert.equal(unlimited?.usedPercent, 0);
+  assert.equal(unlimited?.products[0]?.label, "5h");
+  assert.equal(unlimited?.products[0]?.usagePercent, 17);
+  assert.equal(unlimited?.products[1]?.unlimited, true);
+  assert.equal(unlimited?.products[1]?.usagePercent, 0);
+
+  const flagged = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        current_interval_remaining_percent: 90,
+        current_weekly_remaining_percent: "Unlimited",
+      },
+    ],
+  });
+  assert.equal(flagged?.products[1]?.unlimited, true);
+  assert.equal(flagged?.leftPercent, 100);
+
+  const inferred = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        current_interval_remaining_percent: 83,
+        current_weekly_remaining_percent: 0,
+      },
+    ],
+  });
+  assert.equal(inferred?.products[1]?.unlimited, true);
+  assert.equal(inferred?.leftPercent, 100);
+  assert.equal(inferred?.products[0]?.usagePercent, 17);
 });
 
 test("MiniMax Anthropic request and stream usage parse", async () => {
@@ -430,6 +494,24 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.match(store, /customBotId: owner\?\.customBotId/);
   assert.equal(defaultModel("custom").id, "MiniMax-M3");
   assert.equal(knownContextWindow("MiniMax-M3"), 1_000_000);
+  assert.equal(catalogWindow("hf:moonshotai/Kimi-K3"), 524_288);
+  assert.equal(detectProviderFromKey("sk-cp-abc")?.id, "minimax");
+  assert.equal(detectProviderFromKey("syn_abc")?.id, "synthetic");
+  assert.equal(detectProviderFromKey("sk-or-v1-abc")?.id, "openrouter");
+  assert.equal(inferCustomApi("https://api.minimax.io/v1"), "openai-completions");
+  assert.equal(inferCustomApi("https://api.minimax.io/anthropic"), "anthropic-messages");
+  assert.equal(
+    contextFromModelList({ data: [{ id: "hf:moonshotai/Kimi-K3", context_length: 524288 }] }, "hf:moonshotai/Kimi-K3"),
+    524288,
+  );
+  const fromKey = assembleCustomBotDraft(
+    { apiKey: "sk-cp-test-key" },
+    { connected: false, source: "none", config: EMPTY_CUSTOM_DRAFT },
+  );
+  assert.equal(fromKey.error, undefined);
+  assert.equal(fromKey.draft.model, "MiniMax-M3");
+  assert.equal(fromKey.draft.baseUrl, "https://api.minimax.io/v1");
+  assert.equal(fromKey.draft.contextWindow, 1_000_000);
   const draft = {
     ...EMPTY_CUSTOM_DRAFT,
     name: "Mini",
@@ -470,6 +552,8 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(settings, /updateCustomBot/);
   assert.match(settings, /BotForm/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /PROVIDER_PRESETS/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /detectProviderFromKey/);
   assert.match(addBot, /Your own/);
   assert.match(addBot, /createCustomBot/);
   assert.match(addBot, /probeCustomDraft/);

@@ -99,7 +99,7 @@ export function AddBot() {
             </div>
             <h2>New bot</h2>
             <p className="lede">
-              Name it, pick a color, then test the API. Create adds a slot you can delete later.
+              Pick a known provider or paste a key. Test the API, then Create.
             </p>
           </header>
 

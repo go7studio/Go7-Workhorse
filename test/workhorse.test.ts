@@ -6,7 +6,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   applyCompactUsage,
   classifyAcpUpdate,
@@ -4786,4 +4786,27 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
   assert.equal(settings.llms.claude.needsAuth, true);
   assert.equal(settings.llms.claude.available, false);
   assert.equal(settings.llms.grok.needsAuth, undefined);
+});
+
+test("the repo tracks no symlinks and states its working rules", () => {
+  // A build worktree with node_modules symlinked into the main checkout got
+  // the link itself committed: .gitignore said "node_modules/", which matches
+  // a directory, not a link of that name. Anyone cloning then had a link
+  // pointing at one machine's disk where their dependencies belong.
+  const tracked = execFileSync("git", ["ls-files", "-s"], { cwd: ROOT, encoding: "utf8" });
+  const links = tracked
+    .split("\n")
+    .filter((line) => line.startsWith("120000"))
+    .map((line) => line.split("\t")[1] ?? line);
+  assert.deepEqual(links, [], `tracked symlinks: ${links.join(", ")}`);
+
+  // Both spellings, so a link named node_modules is ignored as well as a folder.
+  const ignore = readFileSync(path.join(ROOT, ".gitignore"), "utf8");
+  assert.match(ignore, /^node_modules$/m);
+
+  // The rules that keep parallel agents out of each other's way.
+  const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  assert.match(agents, /Never leave work uncommitted/);
+  assert.match(agents, /One tree per agent/);
+  assert.match(agents, /Tests must not read the machine they run on/);
 });

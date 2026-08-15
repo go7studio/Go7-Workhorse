@@ -64,6 +64,20 @@ function pinUserData() {
 }
 pinUserData();
 
+const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
+const isPrimaryInstance = isMcpHelper || app.requestSingleInstanceLock();
+if (!isPrimaryInstance) {
+  app.quit();
+} else if (!isMcpHelper) {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
+
 function appIconPath() {
   const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const name =
@@ -272,6 +286,7 @@ process.on("unhandledRejection", (error) => {
 });
 
 app.whenReady().then(() => {
+  if (!isPrimaryInstance) return;
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }

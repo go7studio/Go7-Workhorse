@@ -157,6 +157,7 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {
+    agentLabel: "Claude",
     command,
     argv: launch.argv,
     cwd: input.cwd,

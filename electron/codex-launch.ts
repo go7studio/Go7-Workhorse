@@ -137,6 +137,7 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {
+    agentLabel: "Codex",
     command,
     argv: launch.argv,
     cwd: input.cwd,

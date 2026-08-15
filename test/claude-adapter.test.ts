@@ -8,8 +8,10 @@ import {
   CLAUDE_ACP_NOT_INSTALLED,
   detectClaudeLogin,
   hasClaudeLoginArtifact,
+  isElectronAcpCommand,
   resolveClaudeAcpLaunch,
 } from "../electron/claude-login";
+import { isInsideAsar, runningInElectron } from "../electron/desk-path";
 import {
   buildClaudeLaunchSpec,
   resolveClaudeEffort,
@@ -289,4 +291,51 @@ test("findClaudeDesktopRoot uses Application Support on macOS, not AppData", () 
     listDir: (dir) => (dir.replace(/\\/g, "/").endsWith("Packages") ? ["Claude_abc"] : []),
   });
   assert.match((store ?? "").replace(/\\/g, "/"), /Claude_abc\/LocalCache\/Roaming\/Claude$/);
+});
+
+test("a packaged ACP script runs on Electron, never a system node", () => {
+  // The installed-app failure: app.asar is a file to a plain node, so it
+  // died with MODULE_NOT_FOUND on any machine that had node on PATH.
+  const asarScript =
+    "/Applications/Workhorse.app/Contents/Resources/app.asar/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+  const systemNode = "/opt/homebrew/bin/node";
+  const packaged = "/Applications/Workhorse.app/Contents/MacOS/Workhorse";
+  const onDisk = (file: string) => file === asarScript || file === systemNode || file === packaged;
+
+  const launch = resolveClaudeAcpLaunch({
+    env: { CLAUDE_ACP_BIN: asarScript, PATH: "" },
+    pathDirs: ["/opt/homebrew/bin"],
+    existsSync: onDisk,
+    execPath: packaged,
+    electron: true,
+  });
+  assert.equal(launch?.command, packaged);
+  assert.notEqual(launch?.command, systemNode);
+  assert.deepEqual(launch?.argv, [asarScript]);
+
+  // The spec must then tell that binary to behave as node. A packaged build
+  // is named after the product, so the check cannot be on the file name.
+  assert.equal(isElectronAcpCommand(packaged, packaged, true), true);
+  assert.equal(isElectronAcpCommand(packaged, packaged, false), false);
+
+  // A checkout on disk is readable by node, so nothing changes there.
+  const devScript = "/Users/me/proj/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+  const devLaunch = resolveClaudeAcpLaunch({
+    env: { CLAUDE_ACP_BIN: devScript, PATH: "" },
+    pathDirs: ["/opt/homebrew/bin"],
+    existsSync: (file) => file === devScript || file === systemNode || file === packaged,
+    execPath: packaged,
+    electron: true,
+  });
+  assert.equal(devLaunch?.command, systemNode);
+});
+
+test("isInsideAsar spots archives but not the unpacked copy", () => {
+  assert.equal(isInsideAsar("/a/Resources/app.asar/node_modules/x/dist/index.js"), true);
+  assert.equal(isInsideAsar("C:\\a\\Resources\\app.asar\\node_modules\\x\\dist\\index.js"), true);
+  // Unpacked files are real on disk, so a plain node can read them.
+  assert.equal(isInsideAsar("/a/Resources/app.asar.unpacked/node_modules/x/dist/index.js"), false);
+  assert.equal(isInsideAsar("/Users/me/proj/node_modules/x/dist/index.js"), false);
+  assert.equal(runningInElectron({ node: "22" } as NodeJS.ProcessVersions), false);
+  assert.equal(runningInElectron({ electron: "37" } as unknown as NodeJS.ProcessVersions), true);
 });

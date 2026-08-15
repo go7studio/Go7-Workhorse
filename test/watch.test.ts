@@ -537,3 +537,18 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     null,
   );
 });
+
+test("the daily-over banner names the pace it is measured against", () => {
+  // The screenshot case: day 5 of 7 with 72% of the week used.
+  // "1% over" is one point above an even pace, which the copy must state.
+  const expected = rollingAllowed(DAY_SHARE_PERCENT, 5);
+  assert.equal(Math.round(expected), 71);
+  assert.equal(Math.round(Math.max(0, 72 - expected)), 1);
+
+  const watchSource = readFileSync(path.join(ROOT, "src", "lib", "watch.ts"), "utf8");
+  assert.match(watchSource, /over the expected pace/);
+  assert.match(watchSource, /% expected by now/);
+  // The old wording gave a bare percentage with nothing to read it against.
+  assert.doesNotMatch(watchSource, /is \$\{over\}% over`/);
+  assert.doesNotMatch(watchSource, /leftover can last the rest of the week/);
+});

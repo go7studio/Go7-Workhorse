@@ -140,9 +140,3 @@ export function capabilitiesFor(provider?: ProviderId | string | null): Provider
   }
   return PROVIDER_CAPABILITIES.grok;
 }
-
-export function capabilityLabel(value: CapabilitySupport): string {
-  if (value === "native") return "Enforced by this provider";
-  if (value === "workhorse") return "Provided by Workhorse";
-  return "Not available for this provider";
-}

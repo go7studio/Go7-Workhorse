@@ -37,10 +37,3 @@ export function sessionExecutionCwd(environment: SessionEnvironment | undefined,
   if (normalized.kind === "cloud" && normalized.cwd) return normalized.cwd;
   return localCwd;
 }
-
-export function sessionEnvironmentLabel(environment: SessionEnvironment | undefined): string {
-  const normalized = normalizeSessionEnvironment(environment);
-  if (normalized.kind === "worktree") return "Worktree";
-  if (normalized.kind === "cloud") return "Cloud";
-  return "Local";
-}

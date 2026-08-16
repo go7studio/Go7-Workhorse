@@ -358,9 +358,3 @@ export function formatWindow(tokens: number): string {
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
   return String(tokens);
 }
-
-export function choiceLabel(choice: ModelChoice): string {
-  const name = modelName(choice.provider, choice.model);
-  const brain = effortLabel(choice.effort);
-  return brain ? `${name} · ${brain}` : name;
-}

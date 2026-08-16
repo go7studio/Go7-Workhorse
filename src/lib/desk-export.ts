@@ -1,8 +1,6 @@
 import path from "node:path";
 import type { ChatMessage, Project, ProviderId, Session } from "./types";
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
-
 export function vendorExportDirName(provider: ProviderId, botName?: string): string {
   if (provider === "custom") return `workhorse-${slugTitle(botName || "custom", "custom")}`;
   return `workhorse-${provider}`;
@@ -13,10 +11,6 @@ export function defaultExportRoot(homedir: string, desktopExists = true): string
   return desktopExists
     ? path.join(homedir, "Desktop", "Workhorse exports")
     : path.join(homedir, "Workhorse exports");
-}
-
-export function isStockVendor(value: string): value is Exclude<ProviderId, "custom"> {
-  return STOCK.includes(value as Exclude<ProviderId, "custom">);
 }
 
 export function exportableSessions(

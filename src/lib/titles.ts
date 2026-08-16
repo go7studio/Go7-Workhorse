@@ -6,10 +6,6 @@ export function isDefaultTitle(title: string | undefined): boolean {
   return !title || DEFAULT_TITLES.has(title.trim().toLowerCase());
 }
 
-export function cleanTitle(raw: string): string {
-  return raw.replace(/\s+/g, " ").replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "").trim();
-}
-
 /** First six words of the player's prompt; "..." if it ran longer. */
 export function titleFromPrompt(text: string): string {
   const words = text.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);

@@ -189,10 +189,6 @@ export function isTextFile(file: { name?: string; type?: string }): boolean {
   return ext ? TEXT_EXT.has(ext) : false;
 }
 
-export function isAttachmentFile(file: { name?: string; type?: string }): boolean {
-  return Boolean(attachmentKind(file));
-}
-
 export function imageSrc(image: Pick<ChatImage, "mimeType" | "data">): string {
   return `data:${image.mimeType};base64,${image.data}`;
 }
@@ -343,10 +339,6 @@ export function fileToBase64(file: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Could not read image"));
     reader.readAsDataURL(file);
   });
-}
-
-export async function readChatImage(file: File): Promise<ChatImage | null> {
-  return readChatAttachment(file);
 }
 
 function mediaEvent(target: HTMLMediaElement, event: string, timeout = 4_000): Promise<boolean> {

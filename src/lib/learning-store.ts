@@ -7,7 +7,7 @@ import {
   matchesForgetTarget,
   rankMemories,
 } from "./learning-policy";
-import { boundStatement, sourceHash } from "./learning-redact";
+import { boundStatement} from "./learning-redact";
 import type {
   CompilerRun,
   EventFilter,
@@ -312,18 +312,10 @@ export function newMemoryId(): string {
   return uid("mem");
 }
 
-export function newEventId(): string {
-  return uid("lev");
-}
-
 export function newRunId(): string {
   return uid("lcr");
 }
 
 export function newAuditId(): string {
   return uid("lra");
-}
-
-export function artifactHash(value: string): string {
-  return sourceHash(value);
 }

@@ -164,14 +164,6 @@ export function commandContinuesToVendor(run?: string): boolean {
   return run === "vendor" || run === "grok" || run === "skill";
 }
 
-/** True when the player sent a Workhorse/vendor slash command (not a normal prompt). */
-export function isChatCommand(text: string, extras: Command[] = []): boolean {
-  const value = text.trim();
-  if (!value.startsWith("/")) return false;
-  if (parseGoalInput(value)) return true;
-  return Boolean(matchCommand(value, extras));
-}
-
 /** Split a /goal line so only the command token is styled. */
 export function splitGoalCommand(text: string): { name: string; rest: string } | null {
   const value = text.trim();

@@ -1,6 +1,6 @@
 import { BOT_COLORS, botFromDraft, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "./custom-bots";
 import { detectProviderFromKey, fillEmptyFromProvider } from "./provider-catalog";
-import type { CustomBot, CustomLlm, Session } from "./types";
+import type { CustomBot, CustomLlm} from "./types";
 
 export type PublicBotCard = {
   id: string;
@@ -245,10 +245,6 @@ export function clearDeletedBotRefs<T extends { customBotId?: string }>(
   botId: string,
 ): T[] {
   return items.map((item) => (item.customBotId === botId ? { ...item, customBotId: undefined } : item));
-}
-
-export function sessionsWithoutBot(sessions: Session[], botId: string): Session[] {
-  return clearDeletedBotRefs(sessions, botId);
 }
 
 export function findListedBot(

@@ -1,4 +1,4 @@
-import { parseGoalInput, type GoalState } from "./goal";
+import { type GoalState } from "./goal";
 
 const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/i;
 
@@ -25,26 +25,6 @@ export function extractGoalBudget(text: string): { objective: string; budgetMs?:
   return { objective, ...(budgetMs ? { budgetMs } : {}) };
 }
 
-export function withGoalBudget(state: GoalState | undefined, text: string, now = Date.now()): GoalState | undefined {
-  const parsed = parseGoalInput(text);
-  if (!state && parsed?.action !== "set") return state;
-  if (parsed?.action === "set") {
-    const budget = extractGoalBudget(parsed.objective);
-    const objective = budget.objective || parsed.objective;
-    return {
-      status: "active",
-      objective,
-      startedAt: now,
-      ...(budget.budgetMs
-        ? { budgetMs: budget.budgetMs, deadlineAt: now + budget.budgetMs }
-        : {}),
-    };
-  }
-  if (!state) return state;
-  if (parsed?.action === "clear") return { ...state, terminal: "cancelled", status: "paused" };
-  return state;
-}
-
 export function settleBoundedGoal(state: GoalState | undefined, now = Date.now()): GoalState | undefined {
   if (!state) return state;
   if (state.terminal) return state;
@@ -52,13 +32,4 @@ export function settleBoundedGoal(state: GoalState | undefined, now = Date.now()
     return { ...state, status: "paused", terminal: "timed-out" };
   }
   return state;
-}
-
-export function completeBoundedGoal(state: GoalState | undefined): GoalState | undefined {
-  if (!state) return state;
-  return { ...state, status: "paused", terminal: "completed" };
-}
-
-export function goalIsTerminal(state: GoalState | undefined): boolean {
-  return Boolean(state?.terminal);
 }

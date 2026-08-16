@@ -210,20 +210,6 @@ export function composeSkillBudget(input: SkillBudgetInput): SkillBudgetResult {
   return { skills, memories };
 }
 
-export function applyForgetTarget<T extends { id: string; projectId?: string; provider?: ProviderId; providerScope?: ProviderId }>(
-  rows: T[],
-  target: ForgetTarget,
-): T[] {
-  if (target.all) return rows;
-  return rows.filter((row) => {
-    if (target.eventId && row.id === target.eventId) return true;
-    if (target.memoryId && row.id === target.memoryId) return true;
-    if (target.projectId && row.projectId === target.projectId) return true;
-    if (target.provider && (row.provider === target.provider || row.providerScope === target.provider)) return true;
-    return false;
-  });
-}
-
 export function matchesForgetTarget(
   row: { id?: string; projectId?: string; provider?: ProviderId; providerScope?: ProviderId },
   target: ForgetTarget,

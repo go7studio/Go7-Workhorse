@@ -493,14 +493,6 @@ export function weekDays(events: UsageEvent[], now = Date.now()): UsageDay[] {
   return stretchBuckets(events, "week", now);
 }
 
-export function stretchPeak(buckets: UsageDay[]): UsageDay | null {
-  let peak: UsageDay | null = null;
-  for (const bucket of buckets) {
-    if (!peak || bucket.totalTokens > peak.totalTokens) peak = bucket;
-  }
-  return peak && peak.totalTokens > 0 ? peak : null;
-}
-
 export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Date.now()): UsageDay[] {
   if (range === "today") {
     const start = startOfDay(now);
@@ -618,17 +610,8 @@ export function heatCellBots(
   return [...rows.values()].filter((row) => row.tokens > 0);
 }
 
-const HEAT_TINT = [0, 42, 62, 80, 100] as const;
-
 export function vendorInk(provider: ProviderId, color?: string): string {
   return color && color.trim() ? color : `var(--${provider})`;
-}
-
-export function heatTint(color: string, level: 0 | 1 | 2 | 3 | 4): string {
-  const mix = HEAT_TINT[level] ?? 0;
-  if (mix <= 0) return "transparent";
-  if (mix >= 100) return color;
-  return `color-mix(in srgb, ${color} ${mix}%, transparent)`;
 }
 
 function pct(value: number): number {
@@ -897,20 +880,6 @@ export type RemainingUsage = {
   usedRatio: number;
   leftRatio: number;
 };
-
-export function remainingUsage(spent: number, budget: number): RemainingUsage | undefined {
-  if (!Number.isFinite(budget) || budget <= 0) return undefined;
-  const cap = Math.round(budget);
-  const used = Math.max(0, Math.round(spent));
-  const left = Math.max(0, cap - used);
-  return {
-    budget: cap,
-    spent: used,
-    left,
-    usedRatio: Math.min(1, used / cap),
-    leftRatio: left / cap,
-  };
-}
 
 export type DeskPulseLine = { id: string; text: string };
 

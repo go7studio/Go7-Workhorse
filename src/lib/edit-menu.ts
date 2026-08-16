@@ -9,8 +9,8 @@ export type EditFieldState = {
 export type EditMenuAction = "cut" | "copy" | "paste" | "selectAll";
 
 export const EDIT_MENU_ITEMS: { id: EditMenuAction; label: string; shortcut: string }[] = [
-  { id: "cut", label: "Cut", shortcut: "Ctrl+X" },
   { id: "copy", label: "Copy", shortcut: "Ctrl+C" },
+  { id: "cut", label: "Cut", shortcut: "Ctrl+X" },
   { id: "paste", label: "Paste", shortcut: "Ctrl+V" },
   { id: "selectAll", label: "Select All", shortcut: "Ctrl+A" },
 ];

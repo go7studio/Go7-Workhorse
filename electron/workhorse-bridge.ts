@@ -4,11 +4,11 @@ import type { PeerAsk, PeerAskResult } from "./peer-inbox";
 
 export type { PeerAsk, PeerAskResult };
 
-export function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<PeerAskResult>): {
+export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<PeerAskResult>): Promise<{
   url: string;
   token: string;
   close: () => void;
-} {
+}> {
   const token = crypto.randomBytes(16).toString("hex");
   const inflight = new Set<string>();
   const server = http.createServer((req, res) => {
@@ -37,13 +37,19 @@ export function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<PeerAskR
             raw.action === "list" ||
             raw.action === "create-project" ||
             raw.action === "list-projects" ||
+            raw.action === "move-chat" ||
+            raw.action === "rename-chat" ||
+            raw.action === "rename-project" ||
+            raw.action === "delete-chat" ||
+            raw.action === "delete-project" ||
             raw.action === "add-reference" ||
             raw.action === "list-references" ||
             raw.action === "delete-reference" ||
             raw.action === "select-project" ||
             raw.action === "record-write" ||
             raw.action === "request-permission" ||
-            raw.action === "request-vendor"
+            raw.action === "request-vendor" ||
+            raw.action === "await-agents"
               ? raw.action
               : bots
                 ? "list"
@@ -110,9 +116,16 @@ export function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<PeerAskR
       })();
     });
   });
-  server.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
   const address = server.address();
   const port = address && typeof address === "object" ? address.port : 0;
+  if (!port) {
+    server.close();
+    throw new Error("Workhorse desk bridge did not bind a local port");
+  }
   return {
     url: `http://127.0.0.1:${port}`,
     token,

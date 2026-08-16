@@ -11,6 +11,12 @@ export type PeerAction =
   | "delete-reference"
   | "select-project"
   | "list-projects"
+  | "move-chat"
+  | "rename-chat"
+  | "rename-project"
+  | "delete-chat"
+  | "delete-project"
+  | "await-agents"
   | "record-write"
   | "request-permission"
   | "request-vendor";
@@ -37,9 +43,45 @@ export type PeerAsk = {
   api?: string;
   contextWindow?: number;
   bot?: string;
+  chats?: "keep" | "remove";
+  onlyThis?: boolean;
+  scope?: string;
+  wait?: boolean;
 };
 
 export type PeerAskResult = { text: string } | { error: string };
+
+export function peerAskTimeoutMs(ask: Pick<PeerAsk, "mode" | "action" | "timeoutSeconds" | "wait">): {
+  timeoutMs: number;
+  timeoutError: string;
+} {
+  if (ask.action === "request-permission" || ask.action === "request-vendor") {
+    return { timeoutMs: 10 * 60 * 1_000, timeoutError: "Workhorse did not finish that desk request in time" };
+  }
+  if (ask.action === "await-agents") {
+    if (ask.wait !== true) {
+      return { timeoutMs: 15_000, timeoutError: "workers are still running" };
+    }
+    const seconds = typeof ask.timeoutSeconds === "number" ? ask.timeoutSeconds : 600;
+    return {
+      timeoutMs: Math.max(30, Math.min(3_600, seconds)) * 1_000,
+      timeoutError: "workers are still running",
+    };
+  }
+  if (ask.mode === "bots") {
+    return { timeoutMs: 45_000, timeoutError: "Workhorse did not finish setting up that bot in time" };
+  }
+  if (ask.mode === "spawn" && typeof ask.timeoutSeconds === "number") {
+    return {
+      timeoutMs: Math.max(30, Math.min(3_600, ask.timeoutSeconds)) * 1_000,
+      timeoutError: "the subagent did not answer in time",
+    };
+  }
+  return {
+    timeoutMs: 10 * 60 * 1_000,
+    timeoutError: ask.mode === "spawn" ? "the subagent did not answer in time" : "the other chat did not answer in time",
+  };
+}
 
 export type PeerAskHttpOutcome =
   | { ok: true; text: string }

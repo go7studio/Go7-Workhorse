@@ -10,6 +10,7 @@ import {
   customMessagesUrl,
   customStreamError,
   decodeSse,
+  mergeCustomUsageSnapshot,
   parseCustomUsage,
   sanitizeCustomReply,
   streamCustomHttp,
@@ -34,9 +35,25 @@ import {
 } from "../src/lib/bot-setup";
 import { defaultModel } from "../src/lib/models";
 import { isBareVendorOrModel, resolveModelHint, resolveSpawnSpec } from "../src/lib/subagents";
-import { CustomSessionHost, customPrefaceForLimits } from "../electron/custom-host";
+import {
+  CUSTOM_TURN_SAFETY_DEFAULTS,
+  CustomSessionHost,
+  compactCustomTurnTranscript,
+  customPrefaceForLimits,
+  looksLikeDispatchCheckBack,
+  looksLikeUnfinishedDeskTurn,
+  looksLikeWaitingOnUser,
+  shouldEndDispatchTurn,
+  spawnDispatchStarted,
+  workerHasDeliverableReport,
+} from "../electron/custom-host";
 import { buildSessionPreface } from "../src/lib/context-preface";
 import { handleWorkhorseRpc } from "../electron/workhorse-mcp";
+import {
+  executeCustomTool,
+  limitCustomToolResult,
+  MAX_CUSTOM_TOOL_RESULT_CHARS,
+} from "../electron/custom-tools";
 import {
   CUSTOM_HTTP_PEER_HINT,
   CUSTOM_HTTP_SESSION_RULES,
@@ -145,6 +162,19 @@ test("MiniMax stream splits thinking from text and keeps a leftover SSE event", 
   assert.equal(leaked.text, "");
   assert.doesNotMatch(sanitizeCustomReply("<think>hide this</think>Visible answer."), /hide this/);
   assert.match(sanitizeCustomReply("<think>hide this</think>Visible answer."), /Visible answer/);
+  const mmReply = sanitizeCustomReply(
+    "Sweeping the D drive now.</mm:think>Searching D:\\\\ for space* folders.</mm:think>Done. Allocated Space Battle.",
+  );
+  assert.doesNotMatch(mmReply, /<\/?mm:think>/i);
+  assert.doesNotMatch(mmReply, /Sweeping the D drive/);
+  assert.match(mmReply, /Done\. Allocated Space Battle/);
+  const { peelThinkTags } = await import("../src/lib/markdown");
+  const streamed = peelThinkTags(
+    "Look at the D drive, should be there. <mm:think>searching D:\\\\Godot</mm:think>\nAllocated Space Battle at D:\\\\Godot\\\\Projects\\\\spaceship-battle.",
+  );
+  assert.match(streamed.thought, /searching D:/);
+  assert.match(streamed.body, /Allocated Space Battle/);
+  assert.doesNotMatch(streamed.body, /mm:think/i);
   const asked = sanitizeCustomReply(
     "Grok is held.\n<Ask><question>How do you want to proceed with Grok?</question><options><item><label>Use native Grok</label><description>Flip it on in Settings.</description></item></options></Ask>",
   );
@@ -210,6 +240,383 @@ test("custom host preface names workspace and live limits", async () => {
   assert.match(seen.preface ?? "", /You cannot write files this turn/);
   assert.match(seen.text ?? "", /workhorse_request_permission/);
   assert.equal(reply.text, "This chat is read-only.");
+});
+
+test("custom host keeps going when MiniMax says it will search more", async () => {
+  assert.ok(CUSTOM_TURN_SAFETY_DEFAULTS.emergencyModelCalls > 32);
+  assert.equal(looksLikeUnfinishedDeskTurn("Let me search more broadly for it."), true);
+  assert.equal(looksLikeUnfinishedDeskTurn("Here is the folder: D:\\godot\\spaceship-battle"), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("ok", "max_tokens"), true);
+  assert.equal(looksLikeWaitingOnUser("Say which and I'll proceed."), true);
+  assert.equal(looksLikeUnfinishedDeskTurn("Say which and I'll proceed."), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("Which direction?"), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("Want me to take a look inside the folder?"), false);
+  assert.equal(
+    looksLikeUnfinishedDeskTurn(
+      "Where to go next — pick one and I'll proceed:\n1. Attach this chat\n2. List the scenes\nWhich direction?",
+    ),
+    false,
+  );
+  assert.equal(looksLikeDispatchCheckBack("I'll check back. Status snapshot in a moment."), true);
+  assert.equal(looksLikeUnfinishedDeskTurn("I'll check back. Status snapshot in a moment."), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("I will wait for the workers."), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("Let me search more broadly for it."), true);
+  const calls: string[] = [];
+  const host = new CustomSessionHost(async (_config, input) => {
+    const last = input.messages.at(-1)?.text ?? "";
+    calls.push(last);
+    if (calls.length === 1) {
+      return { text: "I don't see a godot folder. Let me search more broadly for it." };
+    }
+    return { text: "Found it at D:\\godot\\projects\\spaceship-battle" };
+  });
+  const reply = await host.prompt(
+    {
+      sessionId: "s-search",
+      text: "Can you find the godot folder with the space battles game in it please",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: "C:\\Users\\lgovo",
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(calls.length, 2);
+  assert.match(calls[1] ?? "", /Continue/);
+  assert.match(reply.text, /spaceship-battle/);
+});
+
+test("custom host ends the parent turn after wait=false spawn and does not continue I'll-check-back", async () => {
+  const started = JSON.stringify(
+    {
+      started: true,
+      title: "Scripts scrape",
+      childSessionId: "sess_worker",
+      folder: "D:\\Godot\\Projects\\spaceship-battle",
+    },
+    null,
+    2,
+  );
+  assert.equal(spawnDispatchStarted({ name: "workhorse_spawn_agent", content: started }), true);
+  assert.equal(shouldEndDispatchTurn([{ name: "workhorse_spawn_agent", content: started }]), true);
+  assert.equal(
+    shouldEndDispatchTurn([{ name: "workhorse_spawn_agent", content: "HUD is in battle_hud.gd." }]),
+    false,
+  );
+  assert.equal(shouldEndDispatchTurn([{ name: "workhorse_list_bots", content: "[]" }]), false);
+
+  let spawnCalls = 0;
+  const spawnHost = new CustomSessionHost(
+    async () => {
+      spawnCalls += 1;
+      if (spawnCalls === 1) {
+        return {
+          text: "Four workers are out on the Spaceship battles folder.",
+          toolUses: [
+            {
+              id: "spawn-1",
+              name: "workhorse_spawn_agent",
+              input: { prompt: "Read project.godot", wait: false, description: "Structure" },
+            },
+          ],
+        };
+      }
+      return { text: "I'll check back. Status snapshot in a moment." };
+    },
+    {
+      executeTool: async (use) => ({
+        id: use.id,
+        name: use.name,
+        content: started,
+      }),
+    },
+  );
+  const events: Array<{ type: string; stopReason?: string }> = [];
+  const spawnReply = await spawnHost.prompt(
+    {
+      sessionId: "s-dispatch-end",
+      text: "Please do a deep scrape of this project with subagents",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: "D:\\Godot\\Projects\\spaceship-battle",
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    (event) => events.push({ type: event.type, stopReason: "stopReason" in event ? event.stopReason : undefined }),
+  );
+  assert.equal(spawnCalls, 1);
+  assert.equal(spawnReply.stopReason, "end_turn");
+  assert.match(spawnReply.text ?? "", /Four workers are out/);
+  assert.doesNotMatch(spawnReply.text ?? "", /Status snapshot in a moment/);
+  assert.equal(events.at(-1)?.type, "done");
+  assert.equal(events.at(-1)?.stopReason, "end_turn");
+
+  let checkBackCalls = 0;
+  const checkBackHost = new CustomSessionHost(async () => {
+    checkBackCalls += 1;
+    return { text: "I'll check back. Status snapshot in a moment." };
+  });
+  const checkBackReply = await checkBackHost.prompt(
+    {
+      sessionId: "s-check-back",
+      text: "Please do a deep scrape of this project with subagents",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: "D:\\Godot\\Projects\\spaceship-battle",
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(checkBackCalls, 1);
+  assert.equal(checkBackReply.stopReason, "end_turn");
+  assert.match(checkBackReply.text ?? "", /I'll check back/);
+});
+
+test("custom host does not keep going when MiniMax asks the user to pick", async () => {
+  let calls = 0;
+  const host = new CustomSessionHost(async () => {
+    calls += 1;
+    return {
+      text: "Where to go next — pick one and I'll proceed:\n1. Attach this chat\n2. Run a smoke test\nWhich direction?",
+    };
+  });
+  const reply = await host.prompt(
+    {
+      sessionId: "s-pick",
+      text: "List the scene tree so I can map the codebase",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: "D:\\godot\\Projects\\spaceship-battle",
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(calls, 1);
+  assert.match(reply.text ?? "", /Which direction/);
+});
+
+test("custom host continues productive work beyond the old 32-round ceiling", async () => {
+  let calls = 0;
+  const host = new CustomSessionHost(async () => {
+    calls += 1;
+    if (calls <= 40) {
+      return {
+        text: `Productive step ${calls}.`,
+        toolUses: [{ id: `step-${calls}`, name: "workhorse_list_tools", input: { step: calls } }],
+      };
+    }
+    return { text: "Finished all 40 productive steps." };
+  });
+  const reply = await host.prompt(
+    {
+      sessionId: "s-long-productive",
+      text: "Complete a long desk task",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(calls, 41);
+  assert.equal(reply.stopReason, "end_turn");
+  assert.match(reply.text, /Finished all 40/);
+});
+
+test("custom host safety-pauses an identical tool and result loop", async () => {
+  let calls = 0;
+  const events: Array<{ type: string; stopReason?: string; text?: string }> = [];
+  const host = new CustomSessionHost(
+    async () => {
+      calls += 1;
+      return {
+        text: "Checking the same catalog again.",
+        toolUses: [{ id: `repeat-${calls}`, name: "workhorse_list_tools", input: {} }],
+      };
+    },
+    { repeatedToolRounds: 3 },
+  );
+  const reply = await host.prompt(
+    {
+      sessionId: "s-repeat",
+      text: "Find it",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    (event) => events.push(event),
+  );
+  assert.equal(calls, 3);
+  assert.equal(reply.stopReason, "safety_pause");
+  assert.match(reply.text, /same tool action/i);
+  assert.equal(events.at(-1)?.stopReason, "safety_pause");
+});
+
+test("custom host does not halt a worker that already wrote a report", async () => {
+  const report = `${"res://scenes/main.tscn exists. ".repeat(20)}Let me check one more preload.`;
+  assert.equal(workerHasDeliverableReport(report), true);
+  assert.equal(looksLikeUnfinishedDeskTurn(report, undefined, "worker"), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("Let me search more broadly for it."), true);
+
+  let calls = 0;
+  const host = new CustomSessionHost(
+    async () => {
+      calls += 1;
+      return {
+        text: report,
+        toolUses: [{ id: `miss-${calls}`, name: "read_file", input: { path: `missing-${calls}.txt` } }],
+      };
+    },
+    {
+      failedToolRounds: 3,
+      repeatedToolRounds: 99,
+      executeTool: async (use) => ({ id: use.id, name: use.name, content: "missing", isError: true }),
+    },
+  );
+  const reply = await host.prompt(
+    {
+      sessionId: "s-worker-done",
+      parentId: "orch",
+      hidden: true,
+      role: "worker",
+      text: "ROLE: worker\nFOLDER: D:\\Godot\\Projects\\spaceship-battle\n\nScrape assets.",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(reply.stopReason, "end_turn");
+  assert.doesNotMatch(reply.text ?? "", /Workhorse paused/);
+  assert.match(reply.text ?? "", /res:\/\/scenes\/main.tscn/);
+});
+
+test("custom host safety-pauses sustained distinct tool failures", async () => {
+  let calls = 0;
+  const host = new CustomSessionHost(
+    async () => {
+      calls += 1;
+      return {
+        text: `Trying candidate ${calls}.`,
+        toolUses: [{ id: `fail-${calls}`, name: "read_file", input: { path: `missing-${calls}.txt` } }],
+      };
+    },
+    { failedToolRounds: 3, repeatedToolRounds: 99 },
+  );
+  const reply = await host.prompt(
+    {
+      sessionId: "s-failures",
+      text: "Read candidates",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    () => undefined,
+  );
+  assert.equal(calls, 3);
+  assert.equal(reply.stopReason, "safety_pause");
+  assert.match(reply.text, /repeated tool failures/i);
+});
+
+test("custom host continues changing max-token output but pauses empty promises", async () => {
+  let tokenCalls = 0;
+  const tokenHost = new CustomSessionHost(async () => {
+    tokenCalls += 1;
+    return tokenCalls <= 8
+      ? { text: `Useful answer segment ${tokenCalls}.`, stopReason: "max_tokens" }
+      : { text: "Useful answer complete." };
+  });
+  const common = {
+    text: "Write a long answer",
+    model: "MiniMax-M3",
+    effort: "medium" as const,
+    cwd: ROOT,
+    mode: "always-approve" as const,
+    sandbox: "off" as const,
+    history: [],
+    config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+  };
+  const tokenReply = await tokenHost.prompt({ ...common, sessionId: "s-token-parts" }, () => undefined);
+  assert.equal(tokenCalls, 9);
+  assert.equal(tokenReply.stopReason, "end_turn");
+
+  let promiseCalls = 0;
+  const promiseHost = new CustomSessionHost(
+    async () => {
+      promiseCalls += 1;
+      return { text: "Let me keep looking and try another search." };
+    },
+    { unfulfilledContinuations: 3 },
+  );
+  const promiseReply = await promiseHost.prompt({ ...common, sessionId: "s-empty-promises" }, () => undefined);
+  assert.equal(promiseCalls, 3);
+  assert.equal(promiseReply.stopReason, "safety_pause");
+  assert.match(promiseReply.text, /without calling a tool/i);
+});
+
+test("custom host compacts old tool transcript into a continuation checkpoint", () => {
+  const base = [{ role: "user" as const, text: "Original task" }];
+  const loop = Array.from({ length: 12 }, (_, index) => [
+    {
+      role: "assistant" as const,
+      text: `Step ${index}`,
+      toolUses: [{ id: `tool-${index}`, name: "read_file", input: { path: `file-${index}.txt` } }],
+    },
+    {
+      role: "user" as const,
+      text: "",
+      toolResults: [{ id: `tool-${index}`, name: "read_file", content: "x".repeat(1_000) }],
+    },
+  ]).flat();
+  const compacted = compactCustomTurnTranscript([...base, ...loop], base.length, 3_000);
+  assert.ok(compacted.length < base.length + loop.length);
+  assert.match(compacted[base.length - 1]?.text ?? "", /continuation checkpoint/i);
+  assert.notEqual(compacted[base.length]?.role, "user");
+  assert.ok(compacted.at(-1)?.toolResults?.length);
+});
+
+test("custom shell tools honor the session cancellation signal", async () => {
+  const abort = new AbortController();
+  const started = Date.now();
+  const running = executeCustomTool(
+    {
+      id: "cancel-command",
+      name: "run_command",
+      input: { command: `"${process.execPath}" -e "setTimeout(() => process.exit(0), 5000)"` },
+    },
+    { mode: "always-approve", sandbox: "off", cwd: ROOT, signal: abort.signal },
+  );
+  setTimeout(() => abort.abort(), 50);
+  const result = await running;
+  assert.equal(result.isError, true);
+  assert.match(result.content, /cancel/i);
+  assert.ok(Date.now() - started < 2_000);
 });
 
 test("custom HTTP sandbox stamps live desk limits", () => {
@@ -456,7 +863,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   );
   assert.equal(streamedResult.usage?.inputTokens, 80);
   assert.equal(streamedResult.usage?.outputTokens, 12);
-  assert.ok(streamed.some((item) => item.inputTokens === 80 && item.outputTokens === 12));
+  assert.deepEqual(streamed, [{ inputTokens: 80, outputTokens: 12 }]);
 
   const hostEvents: Array<{ type: string; inputTokens?: number; outputTokens?: number; model?: string }> = [];
   const host = new CustomSessionHost(async (_config, _input, handlers) => {
@@ -488,7 +895,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       }
     },
   );
-  assert.ok(hostEvents.some((event) => event.inputTokens === 80 && event.outputTokens === 12 && event.model === "MiniMax-M3"));
+  assert.deepEqual(hostEvents, [{ type: "usage", inputTokens: 80, outputTokens: 12, model: "MiniMax-M3" }]);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /usageProviderForSession\(owner\)/);
   assert.match(store, /customBotId: owner\?\.customBotId/);
@@ -534,6 +941,37 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   );
   assert.equal(probe.ok, true);
   assert.equal(probe.contextWindow, 1_000_000);
+});
+
+test("custom usage streaming keeps one authoritative request snapshot", () => {
+  const start = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 307_821,
+    cacheWriteTokens: 0,
+  };
+  const finish = {
+    inputTokens: 150_575,
+    outputTokens: 796,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  assert.deepEqual(mergeCustomUsageSnapshot(start, finish), {
+    inputTokens: 150_575,
+    outputTokens: 796,
+    cacheReadTokens: 307_821,
+    cacheWriteTokens: 0,
+  });
+  assert.deepEqual(mergeCustomUsageSnapshot(finish, finish), finish);
+});
+
+test("custom tool results are capped before another model request", () => {
+  const raw = `HEAD:${"x".repeat(90_000)}:TAIL`;
+  const limited = limitCustomToolResult({ id: "large", name: "run_command", content: raw });
+  assert.equal(limited.content.length, MAX_CUSTOM_TOOL_RESULT_CHARS);
+  assert.match(limited.content, /^HEAD:/);
+  assert.match(limited.content, /Workhorse truncated/);
+  assert.match(limited.content, /:TAIL$/);
 });
 
 test("Custom is wired through Settings store and IPC", () => {
@@ -683,22 +1121,64 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   });
   const tools = body.tools as { name: string }[];
   assert.ok(tools.some((tool) => tool.name === "list_dir"));
+  const workerBody = buildAnthropicBody({
+    model: "MiniMax-M3",
+    messages: [{ role: "user", text: "list the folder" }],
+    role: "worker",
+  });
+  const workerToolNames = (workerBody.tools as { name: string }[]).map((tool) => tool.name);
+  assert.ok(!workerToolNames.includes("workhorse_spawn_agent"));
+  assert.ok(!workerToolNames.includes("workhorse_request_vendor"));
+  assert.ok(workerToolNames.includes("list_dir"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_list_skills"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_list_tools"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_ask_chat"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_spawn_agent"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_await_agents"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_create_project"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_move_chat"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_rename_chat"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_rename_project"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_delete_chat"));
+  assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_delete_project"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_request_permission"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_request_vendor"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_list_projects"));
+  const workerCatalog = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
+  assert.ok(!workerCatalog.includes("workhorse_spawn_agent"));
+  assert.ok(!workerCatalog.includes("workhorse_await_agents"));
+  assert.ok(!workerCatalog.includes("workhorse_request_vendor"));
+  assert.ok(!workerCatalog.includes("workhorse_list_bots"));
+  assert.ok(workerCatalog.includes("list_dir"));
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_list_skills/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_ask_chat/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_spawn_agent/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_create_project/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_move_chat/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_rename_chat/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_rename_project/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not delete and recreate/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Visible sidebar names/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /the rename did not take/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /puts THIS chat/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /search likely folders first/i);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /D:\\ and C:\\/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /If they name a drive/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Never delete this chat on a bulk list/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /After you ask the user to pick, stop/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /scope=loose/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not offer A\/B\/C/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /workhorse_request_permission/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /only RAISES access/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /USER DECLINED/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /said no/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not ask which vendor/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /that vendor is a no-go/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not call workhorse_request_vendor/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /API key is on the desk/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /If a vendor is not on the list/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /does not need Allow/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /not limited by this chat’s Permission or Sandbox/);
   assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /pops a card|auto-approve|fetch failed/);
@@ -792,7 +1272,7 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(CUSTOM_HTTP_SESSION_RULES, /list_dir/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Sandbox is Off \(machine-wide/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /exact name/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not wait on another chat/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Only claim it exists if list_projects shows that name/);
   const listDir = customHttpTools().find((tool) => tool.name === "list_dir");
   assert.match(listDir?.description ?? "", /Omit path to list this chat/);
   assert.match(listDir?.description ?? "", /Sandbox is Off \(machine-wide\)/);
@@ -890,6 +1370,7 @@ test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMa
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Hi I’m Sol|Hi I'm Sol|workhorse_spawn_agent returns a real reply/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /Never invent a reply/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCustomPeerHint/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint/);
 
   assert.equal(isBareVendorOrModel("Sol"), true);
   assert.equal(isBareVendorOrModel("Codex Sol"), true);

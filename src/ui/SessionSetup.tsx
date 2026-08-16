@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { customBotEnabled } from "../lib/custom-bots";
 import { defaultModel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelsFor, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
-import { sessionEnvironmentKind } from "../lib/session-environment";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
 import { capabilitiesFor } from "../lib/provider-capabilities";
 

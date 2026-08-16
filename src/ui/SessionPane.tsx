@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { agentThreadsForSession, liveAgentThreadId } from "../lib/agent-thread";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { fileFolderFromPath, fileNameFromPath, mergeEdits, projectEdits, type ProjectEdit } from "../lib/project-edits";
@@ -9,7 +8,6 @@ import { brainCaption, brainStamp, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
 import { groupTranscript, isDeskNotice, lastReplyIndex, thoughtForReply } from "../lib/turns";
 import { useActiveSession, useStore } from "../lib/store";
-import { AgentThreadPane } from "./AgentThreadPane";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { WatchBanners } from "./WatchNotices";
@@ -26,18 +24,23 @@ import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 
+const SCROLL_SLACK = 96;
+
+function pinnedToBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_SLACK;
+}
+
 export function SessionPane() {
   const session = useActiveSession();
   const store = useStore();
   const [setupOpen, setSetupOpen] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [, setDismissedThread] = useState<string | null>(null);
   const [open, setOpen] = useState<ProjectEdit | null>(null);
   const [openSource, setOpenSource] = useState(false);
   const [extraEdits, setExtraEdits] = useState<ProjectEdit[]>([]);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const scroller = useRef<HTMLDivElement>(null);
+  const followBottom = useRef(true);
   const pane = useRef<HTMLElement>(null);
   const working = session?.status === "running";
   const project = store.projects.find((item) => item.id === session?.projectId);
@@ -72,30 +75,20 @@ export function SessionPane() {
   }, [editKey, fileRootKey]);
 
   useEffect(() => {
-    const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [session?.messages, session?.status]);
-
-  const threads = useMemo(
-    () => (session ? agentThreadsForSession(session, store.sessions) : []),
-    [session, store.sessions],
-  );
-  const liveThread = liveAgentThreadId(threads);
+    followBottom.current = true;
+  }, [session?.id]);
 
   useEffect(() => {
-    setThreadId(null);
-    setDismissedThread(null);
+    const el = scroller.current;
+    if (el && followBottom.current) el.scrollTop = el.scrollHeight;
+  }, [session?.messages, session?.status]);
+
+  useEffect(() => {
     setOpen(null);
     setOpenSource(false);
     setExtraEdits([]);
     setTerminalOpen(false);
   }, [session?.id]);
-
-  useEffect(() => {
-    if (threadId && threadId !== liveThread && !threads.some((item) => item.id === threadId)) {
-      setThreadId(null);
-    }
-  }, [threadId, threads, liveThread]);
 
   if (!session) return null;
   const reviewFiles = mergeEdits(open ? [open] : [], edits);
@@ -107,7 +100,6 @@ export function SessionPane() {
   const liveBlock = liveIndex >= 0 ? blocks[liveIndex] : undefined;
   const talking =
     liveBlock && liveBlock.type === "reply" ? talkingToSummary(liveBlock.tools) : "";
-  const shownThread = threads.find((item) => item.id === threadId) ?? (threadId ? threads[0] : undefined);
 
   return (
     <FileOpenProvider
@@ -118,7 +110,7 @@ export function SessionPane() {
         setOpen(file);
       }}
     >
-    <section className={`session${shownThread ? " has-thread" : ""}`} ref={pane}>
+    <section className="session" ref={pane}>
       <div className="session-col">
       <header className="session-header slim">
         <div className="session-status">
@@ -161,7 +153,14 @@ export function SessionPane() {
           <ContextMeter />
         </div>
       </header>
-      <div className="transcript" ref={scroller}>
+      <div
+        className="transcript"
+        ref={scroller}
+        onScroll={() => {
+          const el = scroller.current;
+          if (el) followBottom.current = pinnedToBottom(el);
+        }}
+      >
         {blocks.map((block, index) => {
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
@@ -210,10 +209,7 @@ export function SessionPane() {
                 startedAt={block.assistant.createdAt}
                 workedMs={block.assistant.workedMs}
                 live={live}
-                onOpenThread={(id) => {
-                  setDismissedThread(null);
-                  setThreadId(id);
-                }}
+                onOpenThread={store.selectSession}
               />
               {body ? (
                 <div className={`say final${live ? " streaming" : ""}`}>
@@ -288,20 +284,6 @@ export function SessionPane() {
         />
       ) : null}
       </div>
-      {shownThread ? (
-        <AgentThreadPane
-          thread={shownThread}
-          threads={threads}
-          onSelect={(id) => {
-            setDismissedThread(null);
-            setThreadId(id);
-          }}
-          onClose={() => {
-            setDismissedThread(shownThread.id);
-            setThreadId(null);
-          }}
-        />
-      ) : null}
     </section>
     </FileOpenProvider>
   );

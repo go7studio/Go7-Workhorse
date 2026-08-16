@@ -1,3 +1,4 @@
+import { parseGoalInput } from "./goal";
 import type { Command, DeskSkill, PermissionMode, ProviderId, SandboxProfile, SkillOrigin } from "./types";
 import { capabilitiesFor } from "./provider-capabilities";
 
@@ -38,13 +39,18 @@ export const CLAUDE_SHELL_COMMANDS: Command[] = [
   { id: "claude-skills", name: "/skills", hint: "Ask Claude to use an installed skill", run: "vendor", source: "claude" },
 ];
 
-export function commandsFromSkills(skills: DeskSkill[]): Command[] {
+export function skillSlashName(name: string): string {
+  const trimmed = name.trim().replace(/\s+/g, "-");
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+export function commandsFromSkills(skills: DeskSkill[], run: Command["run"] = "skill"): Command[] {
   return skills.map((skill) => ({
     id: `skill-${skill.origin}-${skill.name}`,
-    name: `/${skill.name.trim().replace(/\s+/g, "-")}`,
+    name: skillSlashName(skill.name),
     hint: skill.description || `${skill.origin} skill`,
-    run: "skill",
-    source: "skill",
+    run,
+    source: run === "grok" ? "grok" : "skill",
   }));
 }
 
@@ -75,7 +81,9 @@ export const GROK_SHELL_COMMANDS: Command[] = [
   { id: "grok-hooks", name: "/hooks", hint: "View and manage hooks", run: "grok", source: "grok" },
   { id: "grok-plugins", name: "/plugins", hint: "Install and manage plugins", run: "grok", source: "grok" },
   { id: "grok-marketplace", name: "/marketplace", hint: "Browse the plugin marketplace", run: "grok", source: "grok" },
+  { id: "grok-goal", name: "/goal", hint: "Set or manage a Grok goal", run: "grok", source: "grok", inputHint: "objective [--budget tokens] | status | pause | resume | clear" },
   { id: "grok-skills", name: "/skills", hint: "View installed skills", run: "grok", source: "grok" },
+  { id: "grok-create-workflow", name: "/create-workflow", hint: "Author a Grok workflow", run: "grok", source: "grok", inputHint: "name" },
   { id: "grok-imagine", name: "/imagine", hint: "Generate an image", run: "grok", source: "grok", inputHint: "description" },
   { id: "grok-imagine-video", name: "/imagine-video", hint: "Generate a video", run: "grok", source: "grok", inputHint: "description" },
   { id: "grok-loop", name: "/loop", hint: "Run a prompt on a schedule", run: "grok", source: "grok", inputHint: "30m check deploy status" },
@@ -120,12 +128,14 @@ export function commandsForSession(
   skills: DeskSkill[] = [],
 ): Command[] {
   const origin = vendorSkillOrigin(session?.provider);
-  const skillCmds = origin ? commandsFromSkills(skills.filter((skill) => skill.origin === origin)) : [];
+  const skillRun = session?.provider === "grok" ? "grok" : "skill";
+  const skillCmds = origin ? commandsFromSkills(skills.filter((skill) => skill.origin === origin), skillRun) : [];
   const common = capabilitiesFor(session?.provider).conversation.compact === "unavailable"
     ? COMMANDS.filter((command) => command.id !== "compact")
     : COMMANDS;
   if (session?.provider === "grok") {
-    return mergeCommands(common, [...GROK_SHELL_COMMANDS, ...(session.grokCommands ?? []), ...skillCmds]);
+    const desk = common.filter((command) => command.id !== "goal");
+    return mergeCommands(desk, [...GROK_SHELL_COMMANDS, ...(session.grokCommands ?? []), ...skillCmds]);
   }
   if (session?.provider === "codex") return mergeCommands(common, [...CODEX_SHELL_COMMANDS, ...skillCmds]);
   if (session?.provider === "claude") return mergeCommands(common, [...CLAUDE_SHELL_COMMANDS, ...skillCmds]);
@@ -133,15 +143,19 @@ export function commandsForSession(
   return common;
 }
 
-export function filterCommands(query: string, extras: Command[] = []): Command[] {
+export function filterPalette(query: string, palette: Command[]): Command[] {
   const q = query.replace(/^\//, "").trim().toLowerCase();
-  if (!q && extras.length === 0) return COMMANDS;
-  const all = mergeCommands(COMMANDS, extras);
-  if (!q) return all;
-  return all.filter((command) => {
+  if (!q) return palette;
+  return palette.filter((command) => {
     const hay = [command.name, command.hint, command.id, ...(command.aliases ?? [])].join(" ").toLowerCase();
     return hay.includes(q) || command.id.startsWith(q);
   });
+}
+
+export function filterCommands(query: string, extras: Command[] = []): Command[] {
+  const q = query.replace(/^\//, "").trim().toLowerCase();
+  if (!q && extras.length === 0) return COMMANDS;
+  return filterPalette(query, mergeCommands(COMMANDS, extras));
 }
 
 /** Workhorse-handled runs return; these continue into the attached vendor prompt. */
@@ -149,16 +163,38 @@ export function commandContinuesToVendor(run?: string): boolean {
   return run === "vendor" || run === "grok" || run === "skill";
 }
 
-export function matchCommand(text: string, extras: Command[] = []): Command | undefined {
-  const all = mergeCommands(COMMANDS, extras);
+/** True when the player sent a Workhorse/vendor slash command (not a normal prompt). */
+export function isChatCommand(text: string, extras: Command[] = []): boolean {
+  const value = text.trim();
+  if (!value.startsWith("/")) return false;
+  if (parseGoalInput(value)) return true;
+  return Boolean(matchCommand(value, extras));
+}
+
+/** Split a /goal line so only the command token is styled. */
+export function splitGoalCommand(text: string): { name: string; rest: string } | null {
+  const value = text.trim();
+  if (!parseGoalInput(value)) return null;
+  if (value === "/goal" || value.startsWith("/goal ")) {
+    return { name: "/goal", rest: value.slice("/goal".length) };
+  }
+  return null;
+}
+
+function firstCommandMatch(text: string, commands: Command[]): Command | undefined {
   const hits: { command: Command; name: string }[] = [];
-  for (const command of all) {
+  for (const command of commands) {
     for (const name of [command.name, ...(command.aliases ?? [])]) {
       if (text === name || text.startsWith(`${name} `)) hits.push({ command, name });
     }
   }
   hits.sort((left, right) => right.name.length - left.name.length);
   return hits[0]?.command;
+}
+
+/** Prefer extras (session palette / Grok rows) so desk `/goal` cannot re-steal a Grok extras list. */
+export function matchCommand(text: string, extras: Command[] = []): Command | undefined {
+  return firstCommandMatch(text, extras) ?? firstCommandMatch(text, COMMANDS);
 }
 
 export function commandNeedsInput(command: Command, typed: string): boolean {

@@ -14,6 +14,11 @@ export type GoalDisplay = {
   actions: Array<"pause" | "resume" | "clear">;
 };
 
+function looksLikeGoalQuestion(rest: string): boolean {
+  if (/\?/.test(rest)) return true;
+  return /^(does|is|was|are|do|can|could|would|should|what|why|how|when|where|who)\b/i.test(rest);
+}
+
 export function parseGoalInput(text: string): { action: GoalAction; objective: string } | null {
   const trimmed = text.trim();
   if (/^\/pause$/i.test(trimmed)) return { action: "pause", objective: "" };
@@ -25,7 +30,39 @@ export function parseGoalInput(text: string): { action: GoalAction; objective: s
   if (key === "resume") return { action: "resume", objective: "" };
   if (key === "clear" || key === "stop") return { action: "clear", objective: "" };
   if (key === "status") return { action: "view", objective: "" };
+  if (looksLikeGoalQuestion(rest)) return null;
   return { action: "set", objective: rest };
+}
+
+/** Grok `/goal` only — never the desk `/pause` alias. Strips `--budget` from the mirrored objective. */
+export function parseGrokGoalLine(text: string): { action: GoalAction; objective: string } | null {
+  const trimmed = text.trim();
+  if (trimmed !== "/goal" && !trimmed.startsWith("/goal ")) return null;
+  const rest = trimmed.slice(5).trim();
+  if (!rest) return { action: "view", objective: "" };
+  const key = rest.toLowerCase();
+  if (key === "pause") return { action: "pause", objective: "" };
+  if (key === "resume") return { action: "resume", objective: "" };
+  if (key === "clear" || key === "stop") return { action: "clear", objective: "" };
+  if (key === "status") return { action: "view", objective: "" };
+  const objective = rest.replace(/--budget\s+\S+\s*/gi, "").trim() || rest;
+  return { action: "set", objective };
+}
+
+export function applyGrokGoalMirror(state: GoalState | undefined, text: string): GoalState | undefined {
+  const parsed = parseGrokGoalLine(text);
+  if (!parsed) return state;
+  if (parsed.action === "set") return { status: "active", objective: parsed.objective };
+  if (parsed.action === "pause") {
+    if (!state?.objective) return state;
+    return { ...state, status: "paused" };
+  }
+  if (parsed.action === "resume") {
+    if (!state?.objective) return state;
+    return { ...state, status: "active" };
+  }
+  if (parsed.action === "clear") return undefined;
+  return state;
 }
 
 /** Pause and clear stop the live turn. They must not start another vendor think. */
@@ -66,6 +103,35 @@ export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
     objective: state.objective,
     actions: ["pause", "clear"],
   };
+}
+
+/** Grok local mirror is not an ongoing desk goal. Hide it once the vendor turn is idle. Paused stays. */
+export function goalDisplayForSession(session?: {
+  provider?: string;
+  status?: string;
+  goal?: GoalState;
+} | null): GoalDisplay | null {
+  const view = goalDisplay(session?.goal);
+  if (!view) return null;
+  if (
+    session?.provider === "grok" &&
+    view.status === "active" &&
+    session.status !== "running" &&
+    session.status !== "needs-input"
+  ) {
+    return null;
+  }
+  return view;
+}
+
+/** Drop a finished Grok-mirrored goal when the turn goes idle. Desk goals and paused Grok goals stay. */
+export function grokGoalAfterTurnIdle(
+  provider: string | undefined,
+  goal: GoalState | undefined,
+): GoalState | undefined {
+  if (provider !== "grok") return goal;
+  if (goal?.status === "paused") return goal;
+  return undefined;
 }
 
 export function goalCommandForAction(action: "pause" | "resume" | "clear"): string {

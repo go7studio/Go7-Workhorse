@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { exportVendorBundle, importSkillFromPath, listDeskSkills, pushSkillToVendor, readDeskSkill, seedWorkhorseSkills } from "../electron/desk-export-host";
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle } from "../src/lib/desk-export";
+import { commandsForSession } from "../src/lib/commands";
 import { catalogSkills, filterDeskSkills, findDeskSkill, parseSkillFrontmatter, sameDeskSkills, skillBodyFromMarkdown, skillHomes } from "../src/lib/skills-catalog";
 import { deleteDeskSkill } from "../electron/desk-export-host";
 import { isSettingsSection } from "../src/lib/settings";
@@ -90,6 +91,42 @@ test("skill catalog labels Grok Codex Claude and Workhorse", () => {
     ["workhorse:desk", "grok:pdf", "codex:plan", "claude:review"],
   );
   assert.equal(skillHomes({ homedir: home }).some((item) => item.origin === "workhorse"), true);
+});
+
+test("Grok palette merges catalog skills from ~/.grok/skills bundled and plugins", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "wh-grok-palette-"));
+  const homes = skillHomes({ homedir: home });
+  assert.equal(
+    homes.some((item) => item.origin === "grok" && item.root.replaceAll("\\", "/").endsWith("/.grok/skills")),
+    true,
+  );
+  assert.equal(
+    homes.some((item) => item.origin === "grok" && item.root.replaceAll("\\", "/").includes("/.grok/bundled/skills")),
+    true,
+  );
+  assert.equal(
+    homes.some((item) => item.origin === "grok" && item.root.replaceAll("\\", "/").endsWith("/.grok/plugins")),
+    true,
+  );
+  writeSkill(path.join(home, ".grok", "skills", "pdf"), "pdf", "Make PDFs");
+  writeSkill(path.join(home, ".grok", "bundled", "skills", "imagine"), "imagine-desk", "Bundled imagine");
+  writeSkill(path.join(home, ".grok", "plugins", "acme", "skills", "commit"), "commit", "Commit staged");
+  const grokSkills = catalogSkills({ homedir: home }).filter((skill) => skill.origin === "grok");
+  assert.deepEqual(
+    grokSkills.map((skill) => skill.name).sort(),
+    ["commit", "imagine-desk", "pdf"],
+  );
+  const palette = commandsForSession({ provider: "grok" }, grokSkills);
+  const pdf = palette.find((command) => command.name === "/pdf");
+  assert.equal(pdf?.run, "grok");
+  assert.notEqual(pdf?.run, "skill");
+  assert.equal(palette.some((command) => command.name === "/commit" && command.run === "grok"), true);
+  assert.equal(palette.some((command) => command.name === "/local:commit"), false);
+  const project = path.join(home, "repo");
+  writeSkill(path.join(project, ".grok", "skills", "review"), "review", "Review diffs");
+  const projectSkills = catalogSkills({ homedir: home, projectFolders: [project] }).filter((skill) => skill.origin === "grok");
+  const projectPalette = commandsForSession({ provider: "grok" }, projectSkills);
+  assert.equal(projectPalette.find((command) => command.name === "/review")?.run, "grok");
 });
 
 test("skill catalog does not walk extras inside a skill folder", () => {

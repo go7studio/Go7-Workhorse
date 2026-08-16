@@ -18,7 +18,7 @@ import {
   vendorTint,
 } from "../lib/settings";
 import { useActiveSession, useStore } from "../lib/store";
-import type { EffortLevel } from "../lib/types";
+import type { EffortLevel, Session } from "../lib/types";
 import { formatTokens } from "../lib/usage";
 
 function categoryShare(tokens: number, total: number): number {
@@ -87,22 +87,27 @@ function ContextRows({ rows }: { rows: ContextCategory[] }) {
 }
 
 export function ContextMeter({
+  session: sessionProp,
+  compact = false,
   fallbackWindow,
   matchProvider,
   matchBotId,
 }: {
+  session?: Session | null;
+  compact?: boolean;
   fallbackWindow?: number;
   matchProvider?: import("../lib/types").ProviderId;
   matchBotId?: string;
 } = {}) {
   const liveSession = useActiveSession();
-  const session =
+  const matchedSession =
     matchProvider &&
     (!liveSession ||
       liveSession.provider !== matchProvider ||
       (matchBotId ? liveSession.customBotId !== matchBotId : false))
       ? undefined
       : liveSession;
+  const session = sessionProp ?? matchedSession;
   const store = useStore();
   const customWindow =
     (session?.customBotId
@@ -192,8 +197,8 @@ export function ContextMeter({
   }
   if (!session || !estimate || !stats) return null;
   const ratio = Math.min(1, animatedUsed / Math.max(shownTotal, 1));
-  const size = 36;
-  const stroke = 3.2;
+  const size = compact ? 24 : 36;
+  const stroke = compact ? 2.4 : 3.2;
   const radius = size / 2 - stroke;
   const length = 2 * Math.PI * radius;
   const shown = animatedUsed > 0 ? Math.max(ratio, 0.045) : 0;
@@ -201,11 +206,11 @@ export function ContextMeter({
   const empty = stats.used === 0 && stats.occupying.length === 0;
 
   return (
-    <div className={`context-meter-wrap ${session.provider}`} ref={root}>
+    <div className={`context-meter-wrap ${session.provider}${compact ? " compact" : ""}`} ref={root}>
       <button
         type="button"
         className={`context-meter ${session.provider}`}
-        title={`${shownUsed.toLocaleString()} of ${shownTotal.toLocaleString()} tokens in this chat`}
+        title={`${shownUsed.toLocaleString()} of ${shownTotal.toLocaleString()} tokens retained for the next request`}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={(event) => {
@@ -240,7 +245,7 @@ export function ContextMeter({
           style={anchor ? { top: anchor.top, right: anchor.right } : { top: 56, right: 22 }}
         >
           <header>
-            <strong>This chat</strong>
+            <strong>Retained context</strong>
             <span>
               {formatTokens(stats.used)} of {formatTokens(stats.total)} · {stats.usagePct}%
             </span>

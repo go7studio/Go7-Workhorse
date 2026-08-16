@@ -107,7 +107,7 @@ import {
   upsertThoughtMessage,
   upsertToolMessage,
 } from "./grok-events";
-import { chatPreview, formatPeerPrompt } from "./session-bridge";
+import { chatPreview, formatPeerPrompt, sameSessionCrew } from "./session-bridge";
 import {
   addLineupRow,
   applyChildIdleSync,
@@ -3464,7 +3464,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
 
           const target = latest.sessions.find((item) => item.id === payload.toSessionId);
-          if (!target || isHiddenSession(target) || target.archivedAt) {
+          const from = parent ?? latest.sessions.find((item) => item.id === payload.fromSessionId);
+          const canReachHiddenTarget = Boolean(
+            target && from && sameSessionCrew(latest.sessions, from.id, target.id),
+          );
+          if (!target || (isHiddenSession(target) && !canReachHiddenTarget) || target.archivedAt) {
             await replyAsk({ error: "that chat is not available" });
             return;
           }
@@ -3472,7 +3476,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             await replyAsk({ error: `${providerById(target.provider).name} is not connected yet` });
             return;
           }
-          const from = parent ?? latest.sessions.find((item) => item.id === payload.fromSessionId);
           const askHold = vendorCallBlocked({
             session: { ...target, parentId: from?.id },
             settings: latest.settings,
@@ -4099,7 +4102,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           const text = (message.text ?? "").trim() || queued.trim();
                           return {
                             ...message,
-                            text: text || (message.thought?.trim() ? "" : EMPTY_GROK_REPLY),
+                            text: text || (message.thought?.trim() ? "" : vendorEmptyReply(session.provider)),
                             workedMs: Math.max(0, Date.now() - message.createdAt),
                           };
                         })

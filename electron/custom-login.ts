@@ -22,6 +22,8 @@ export type CustomLoginDetectResult = {
   models: ModelInfo[];
 };
 
+type LooseState = Record<string, unknown>;
+
 const MINIMAX_DEFAULTS: ModelInfo[] = [
   { id: "MiniMax-M2.7", name: "MiniMax M2.7", effort: true, contextWindow: 204_800 },
   { id: "MiniMax-M3", name: "MiniMax M3", effort: true, contextWindow: 1_000_000 },
@@ -31,11 +33,25 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+function providerHasMiniMaxM3(value: unknown): boolean {
+  const provider = asRecord(value);
+  if (!Array.isArray(provider.models)) return false;
+  return provider.models.some((item) => {
+    const model = asRecord(item);
+    return [model.id, model.name].some((label) => typeof label === "string" && /minimax[- ]?m3/i.test(label));
+  });
+}
+
 export function parseOpenClawMinimax(raw: unknown): { config: CustomLlm; models: ModelInfo[] } | null {
   const root = asRecord(raw);
   const modelsRoot = asRecord(root.models);
   const providers = asRecord(modelsRoot.providers);
-  const minimax = asRecord(providers.minimax);
+  const entries = Object.entries(providers);
+  const picked =
+    entries.find(([id, value]) => /minimax/i.test(id) && providerHasMiniMaxM3(value)) ??
+    entries.find(([, value]) => providerHasMiniMaxM3(value)) ??
+    entries.find(([id]) => /^minimax(?:$|[-_])/i.test(id));
+  const minimax = asRecord(picked?.[1]);
   const apiKey = typeof minimax.apiKey === "string" ? minimax.apiKey.trim() : "";
   const baseUrl = typeof minimax.baseUrl === "string" ? minimax.baseUrl.trim() : "";
   if (!apiKey || !baseUrl) return null;
@@ -115,4 +131,27 @@ export function detectCustomLogin(input: CustomLoginDetectInput = {}): CustomLog
   } catch {
     return { connected: false, source: "none", config: empty, models: [] };
   }
+}
+
+export function hydrateDetectedCustomCredentials<T extends LooseState>(
+  state: T,
+  detected: CustomLoginDetectResult,
+): T {
+  if (!detected.connected || !detected.config.apiKey.trim()) return state;
+  const next = structuredClone(state);
+  const settings = asRecord(next.settings);
+  const llms = asRecord(settings.llms);
+  const rows = [asRecord(llms.custom)];
+  if (Array.isArray(settings.customBots)) {
+    for (const item of settings.customBots) rows.push(asRecord(item));
+  }
+  const detectedUrl = detected.config.baseUrl.replace(/\/+$/, "").toLowerCase();
+  const detectedModel = detected.config.model.trim().toLowerCase();
+  for (const row of rows) {
+    if (!row || (typeof row.apiKey === "string" && row.apiKey.trim())) continue;
+    const baseUrl = typeof row.baseUrl === "string" ? row.baseUrl.replace(/\/+$/, "").toLowerCase() : "";
+    const model = typeof row.model === "string" ? row.model.trim().toLowerCase() : "";
+    if (baseUrl === detectedUrl && model === detectedModel) row.apiKey = detected.config.apiKey;
+  }
+  return next;
 }

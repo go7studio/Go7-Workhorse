@@ -32,6 +32,26 @@ type LooseState = {
   projects?: unknown[];
 };
 
+type CrewSession = { id: string; parentId?: string | null };
+
+function crewRootId(sessions: CrewSession[], sessionId: string): string {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const seen = new Set<string>();
+  let current = sessionId;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const parent = byId.get(current)?.parentId?.trim();
+    if (!parent) return current;
+    current = parent;
+  }
+  return current || sessionId;
+}
+
+export function sameSessionCrew(sessions: CrewSession[], leftId: string, rightId: string): boolean {
+  if (!leftId.trim() || !rightId.trim()) return false;
+  return crewRootId(sessions, leftId) === crewRootId(sessions, rightId);
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
@@ -61,14 +81,21 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
       }
     }
   }
+  if (!Array.isArray(state.sessions)) return [];
+  const crewSessions = state.sessions
+    .map((raw) => asRecord(raw))
+    .filter((session) => typeof session.id === "string")
+    .map((session) => ({
+      id: session.id as string,
+      parentId: typeof session.parentId === "string" ? session.parentId : undefined,
+    }));
   const sessions: SessionSnapshot[] = [];
-  if (!Array.isArray(state.sessions)) return sessions;
   for (const raw of state.sessions) {
     const session = asRecord(raw);
     if (typeof session.id !== "string") continue;
     const parentId = typeof session.parentId === "string" ? session.parentId : "";
     const from = opts?.fromSessionId?.trim() ?? "";
-    const crewChild = Boolean(from && parentId === from);
+    const crewChild = Boolean(from && sameSessionCrew(crewSessions, from, session.id));
     if (!crewChild && (session.hidden === true || parentId)) continue;
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;

@@ -12,7 +12,7 @@ import { detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
 import { runClaudeSetupToken } from "./claude-auth";
-import { detectCustomLogin } from "./custom-login";
+import { detectCustomLogin, hydrateDetectedCustomCredentials } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { listVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
@@ -48,7 +48,7 @@ import { DurableJobEngine } from "./job-engine";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { readVersionedState, writeVersionedState } from "./state-persistence";
-import { workhorseUserDataOverride } from "../src/lib/user-data";
+import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const debugStartup = (stage: string) => {
@@ -109,7 +109,11 @@ function statePath() {
 let credentials: CredentialStore | null = null;
 let jobEngine: DurableJobEngine | null = null;
 function credentialStore(): CredentialStore {
-  credentials ??= new CredentialStore(path.join(app.getPath("userData"), "credentials.json"), safeStorage);
+  credentials ??= new CredentialStore(
+    path.join(app.getPath("userData"), "credentials.json"),
+    safeStorage,
+    workhorseVolatileCredentials(),
+  );
   return credentials;
 }
 
@@ -141,7 +145,10 @@ function readState(): Persistable {
     // The credential vault may be unavailable while the OS is locked. Keep the
     // recovered state in memory, but never persist a plaintext replacement.
   }
-  return hydrateStateCredentials(state, credentialStore());
+  const hydrated = hydrateStateCredentials(state, credentialStore());
+  return workhorseVolatileCredentials()
+    ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
+    : hydrated;
 }
 
 function fileToDataUrl(file: string): string | null {

@@ -62,7 +62,7 @@ test("OpenAI-compatible tool calls wait for all streamed argument fragments", as
     { id: "child-a", name: "workhorse_spawn_agent", input: { prompt: "read only", wait: false } },
   ]);
 });
-import { detectCustomLogin, parseOpenClawMinimax } from "../electron/custom-login";
+import { detectCustomLogin, hydrateDetectedCustomCredentials, parseOpenClawMinimax } from "../electron/custom-login";
 import { customPlanRemainsUrl, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
 import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "../src/lib/custom-bots";
@@ -232,6 +232,38 @@ test("MiniMax stream splits thinking from text and keeps a leftover SSE event", 
     sanitizeCustomReply("<item>label>Use native Grok</label><description>Flip it on.</description></item>"),
     /label>/i,
   );
+});
+
+test("custom streams finish on Anthropic message_stop even when the socket stays open", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(
+          [
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"done"}}\n\n',
+            'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n',
+            'data: {"type":"message_stop"}\n\n',
+          ].join(""),
+        ),
+      );
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  const result = await streamCustomHttp(
+    { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk-test", model: "MiniMax-M3", api: "anthropic-messages" },
+    { messages: [{ role: "user", text: "finish" }] },
+    {},
+    async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }),
+  );
+
+  assert.equal(result.text, "done");
+  assert.equal(result.stopReason, "end_turn");
+  assert.equal(result.usage?.outputTokens, 1);
+  assert.equal(cancelled, true);
 });
 
 test("custom host preface names workspace and live limits", async () => {
@@ -732,6 +764,52 @@ test("OpenClaw MiniMax import fills Custom without a phantom preview", () => {
   assert.equal(fromFile.connected, true);
   assert.equal(fromFile.source, "openclaw");
   assert.equal(fromFile.config.apiKey, "sk-test");
+
+  const currentPortalShape = parseOpenClawMinimax({
+    models: {
+      providers: {
+        "fireworks-kimi": {
+          apiKey: "sk-other",
+          baseUrl: "https://example.invalid/v1",
+          models: [{ id: "Kimi-K3", name: "Kimi K3" }],
+        },
+        "minimax-portal": {
+          apiKey: "sk-portal",
+          baseUrl: "https://api.minimax.io/anthropic/v1",
+          models: [{ id: "MiniMax-M3", name: "MiniMax M3", contextWindow: 1_000_000 }],
+        },
+      },
+    },
+  });
+  assert.equal(currentPortalShape?.config.apiKey, "sk-portal");
+  assert.equal(currentPortalShape?.config.model, "MiniMax-M3");
+  assert.equal(currentPortalShape?.config.api, "anthropic-messages");
+
+  const rehydrated = hydrateDetectedCustomCredentials(
+    {
+      settings: {
+        llms: { custom: { baseUrl: "", model: "", apiKey: "" } },
+        customBots: [
+          {
+            id: "m3",
+            baseUrl: "https://api.minimax.io/anthropic/v1/",
+            model: "MiniMax-M3",
+            apiKey: "",
+            credentialId: "custom-bot-m3",
+          },
+          { id: "other", baseUrl: "https://example.invalid/v1", model: "other", apiKey: "" },
+        ],
+      },
+    },
+    {
+      connected: true,
+      source: "openclaw",
+      config: currentPortalShape!.config,
+      models: currentPortalShape!.models,
+    },
+  );
+  assert.equal(rehydrated.settings.customBots[0].apiKey, "sk-portal");
+  assert.equal(rehydrated.settings.customBots[1].apiKey, "");
 });
 
 test("parseCustomPlanUsage reads MiniMax weekly leftover percent", () => {

@@ -48,6 +48,7 @@ export function AddBot() {
   const pick = (id: (typeof CATALOG)[number]["id"]) => {
     setProbeNote("");
     if (id === "own") {
+      if (!draft.apiKey.trim() && !draft.baseUrl.trim()) store.refreshCustomLogin();
       setStage("own");
       return;
     }
@@ -101,6 +102,11 @@ export function AddBot() {
             <p className="lede">
               Pick a known provider or paste a key. Test the API, then Create.
             </p>
+            {draft.source === "openclaw" ? (
+              <p className="row-meta">Detected MiniMax settings from OpenClaw. The API key stays on this Mac.</p>
+            ) : draft.source === "env" ? (
+              <p className="row-meta">Detected MiniMax settings from this app's environment.</p>
+            ) : null}
           </header>
 
           <div className="add-bot-preview" aria-hidden="true">

@@ -13,7 +13,7 @@ export function Welcome() {
   const harnesses = [
     ...STOCK.map((id) => ({
       id,
-      name: id === "grok" ? "Grok" : id === "codex" ? "Codex" : "Claude",
+      name: id === "grok" ? "Grok" : id === "codex" ? "Codex" : id === "claude" ? "Claude" : "Cursor",
       status: settings.llms[id].available
         ? settings.llms[id].connected
           ? "Ready"

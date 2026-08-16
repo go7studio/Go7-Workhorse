@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { CURSOR_ACP_NOT_INSTALLED } from "../src/lib/cursor-lane";
 
 export { CURSOR_ACP_NOT_INSTALLED };
@@ -11,6 +12,8 @@ export type CursorLoginDetectInput = {
   platform?: NodeJS.Platform;
   existsSync?: (filePath: string) => boolean;
   pathDirs?: string[];
+  probeBinary?: (filePath: string) => boolean;
+  probeAuth?: (filePath: string) => boolean | undefined;
 };
 
 export type CursorLoginDetectResult = {
@@ -48,6 +51,28 @@ function lookOnPath(
   return null;
 }
 
+function probeCursorBinary(filePath: string): boolean {
+  const result = spawnSync(filePath, ["--help"], {
+    encoding: "utf8",
+    timeout: 3_000,
+    windowsHide: true,
+  });
+  return /Cursor Agent/i.test(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+}
+
+function probeCursorAuth(filePath: string): boolean | undefined {
+  const result = spawnSync(filePath, ["about"], {
+    encoding: "utf8",
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  if (result.error) return undefined;
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (/User Email\s+Not logged in/i.test(output)) return false;
+  if (/User Email\s+\S+@\S+/i.test(output)) return true;
+  return undefined;
+}
+
 export function isCursorAppCommand(command: string): boolean {
   const name = path.basename(command).toLowerCase();
   return name === "cursor" || name === "cursor.exe" || name === "cursor.app" || /cursor\.app/i.test(command);
@@ -70,14 +95,18 @@ export function resolveCursorBinary(input: CursorLoginDetectInput = {}): string 
   const override = env.CURSOR_ACP_BIN?.trim();
   if (override) return existsSync(override) ? override : null;
 
-  const names = [`agent${exe}`, `cursor-agent${exe}`];
-  const onPath = lookOnPath(names, pathDirs, existsSync, join);
+  const cursorAgent = `cursor-agent${exe}`;
+  const ambiguousAgent = `agent${exe}`;
+  const onPath = lookOnPath([cursorAgent], pathDirs, existsSync, join);
   if (onPath) return onPath;
+  const probeBinary = input.probeBinary ?? probeCursorBinary;
+  const ambiguousOnPath = lookOnPath([ambiguousAgent], pathDirs, existsSync, join);
+  if (ambiguousOnPath && probeBinary(ambiguousOnPath)) return ambiguousOnPath;
 
-  const homeBin = join(homedir, ".local", "bin", `agent${exe}`);
-  if (existsSync(homeBin)) return homeBin;
-  const homeCursorAgent = join(homedir, ".local", "bin", `cursor-agent${exe}`);
+  const homeCursorAgent = join(homedir, ".local", "bin", cursorAgent);
   if (existsSync(homeCursorAgent)) return homeCursorAgent;
+  const homeBin = join(homedir, ".local", "bin", ambiguousAgent);
+  if (existsSync(homeBin) && probeBinary(homeBin)) return homeBin;
 
   const supportAgent = join(
     homedir,
@@ -121,7 +150,9 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   if (!binary || isCursorAppCommand(binary) || isGrokCommand(binary)) {
     return { connected: false, needsAuth: false, binary: null, cursorHome };
   }
-  const loggedIn = hasCursorLoginArtifact(cursorHome, existsSync, env, join);
+  const envAuth = Boolean(env.CURSOR_API_KEY?.trim() || env.CURSOR_AUTH_TOKEN?.trim());
+  const authProbe = envAuth ? true : (input.probeAuth ?? probeCursorAuth)(binary);
+  const loggedIn = envAuth || authProbe === true || (authProbe === undefined && hasCursorLoginArtifact(cursorHome, existsSync, env, join));
   return {
     connected: loggedIn,
     needsAuth: !loggedIn,

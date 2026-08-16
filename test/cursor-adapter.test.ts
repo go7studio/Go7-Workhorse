@@ -16,7 +16,7 @@ import { parseProviderId, resolveSpawnSpec, toolsForDeskRole, admitSpawn } from 
 import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../src/lib/watch";
 import { normalizeSettings } from "../src/lib/settings";
 import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
-import { detectCursorLogin } from "../electron/cursor-login";
+import { detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
 import { parseCursorPlanUsage } from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
@@ -257,6 +257,36 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
     pathDirs: [],
   });
   assert.equal(withKey.connected, true);
+});
+
+test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binary", () => {
+  const files = new Set(["/bin/agent", "/bin/cursor-agent"]);
+  assert.equal(
+    resolveCursorBinary({ env: { PATH: "/bin" }, homedir: "/no-home", pathDirs: ["/bin"], existsSync: (file) => files.has(file) }),
+    "/bin/cursor-agent",
+  );
+  assert.equal(
+    resolveCursorBinary({
+      env: { PATH: "/bin" },
+      homedir: "/no-home",
+      pathDirs: ["/bin"],
+      existsSync: (file) => file === "/bin/agent",
+      probeBinary: () => false,
+    }),
+    null,
+  );
+});
+
+test("Cursor auth probe overrides a stale config artifact", () => {
+  const detected = detectCursorLogin({
+    env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },
+    homedir: "/no-home",
+    existsSync: (file) => file === "/opt/cursor-agent" || file === "/no-home/.cursor/cli-config.json",
+    pathDirs: [],
+    probeAuth: () => false,
+  });
+  assert.equal(detected.connected, false);
+  assert.equal(detected.needsAuth, true);
 });
 
 test("CursorSessionHost new/load/launch-key", async () => {

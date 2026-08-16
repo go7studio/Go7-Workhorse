@@ -233,19 +233,24 @@ test("import copies a skill into Workhorse and push copies it to Grok", () => {
   assert.equal(findDeskSkill(listed, "grok:pdf"), undefined);
 });
 
-test("Workhorse seeds desk and setup skills into the Workhorse home", () => {
+test("Workhorse seeds its bundled skills into the Workhorse home", () => {
   const home = mkdtempSync(path.join(os.tmpdir(), "wh-seed-"));
   const shipped = path.join(ROOT, "skills");
   assert.equal(existsSync(path.join(shipped, "desk", "SKILL.md")), true);
   const seeded = seedWorkhorseSkills(home, shipped);
-  assert.ok(seeded >= 2);
+  assert.ok(seeded >= 3);
   const again = seedWorkhorseSkills(home, shipped);
   assert.equal(again, 0);
   const rows = listDeskSkills([], home);
   assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "desk"));
   assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "setup"));
+  assert.ok(rows.some((row) => row.origin === "workhorse" && row.name === "ship-go7-godot-play"));
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "desk", "SKILL.md"), "utf8"), /workhorse_ask_chat/);
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "setup", "SKILL.md"), "utf8"), /workhorse_setup_custom_bot/);
+  assert.match(
+    readFileSync(path.join(home, ".workhorse", "skills", "ship-go7-godot-play", "SKILL.md"), "utf8"),
+    /official addon/,
+  );
   const deskDir = path.join(home, ".workhorse", "skills", "desk");
   const vendorDir = path.join(home, ".codex", "skills", "external");
   writeSkill(vendorDir, "external", "Owned by Codex");

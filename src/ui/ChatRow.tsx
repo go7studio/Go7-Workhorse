@@ -1,9 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatChatSidebar } from "../lib/session";
+import { effortLabel, modelName } from "../lib/models";
 import { deskInk, vendorAttachedForSession } from "../lib/settings";
 import { chatLinksFromSessions } from "../lib/tool-labels";
 import { useStore } from "../lib/store";
 import type { Session } from "../lib/types";
+
+export function workerSidebarLabel(session: Session, botName?: string): string {
+  const name = botName?.trim() || modelName(session.provider, session.model);
+  const effort = effortLabel(session.effort ?? null);
+  const run = session.agentRun?.status;
+  let state = "Ready";
+  if (session.status === "running" || run === "running") state = "Working…";
+  else if (run === "completed") state = "Done";
+  else if (run === "failed") state = "Failed";
+  else if (run === "timed-out") state = "Timed out";
+  else if (run === "budget-exceeded") state = "Budget stop";
+  else if (run === "cancelled") state = "Cancelled";
+  else if (session.status === "needs-input") state = "Needs you";
+  return [name, effort, state].filter(Boolean).join(" · ");
+}
 
 export function ChatRow({
   session,
@@ -41,6 +57,7 @@ export function ChatRow({
         botName: bot?.name ?? stockLink?.name,
       })
     : "Attach LLM";
+  const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
   const link = useMemo(
     () => chatLinksFromSessions(store.sessions).find((item) => item.sessionId === session.id),
     [store.sessions, session.id],
@@ -110,9 +127,7 @@ export function ChatRow({
               {link
                 ? link.label
                 : nested
-                  ? session.status === "running"
-                    ? "Worker · Working…"
-                    : "Worker"
+                  ? workerLabel
                   : session.status === "running"
                     ? "Working…"
                     : session.status === "needs-input"

@@ -4,7 +4,6 @@ import { defaultModel, effortStopAt, effortStopPos, effortsFor, modelsFor, withE
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { useActiveSession, useStore } from "../lib/store";
 import { vendorTidePercent } from "../lib/usage";
-import { sessionEnvironmentKind } from "../lib/session-environment";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
 import { capabilitiesFor } from "../lib/provider-capabilities";
 
@@ -30,11 +29,9 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setMode,
     setSandbox,
     setSessionEffort,
-    setSessionEnvironment,
     setSessionModel,
     openSettings,
     settings,
-    projects,
     usage,
     grokPlan,
     codexPlan,
@@ -47,8 +44,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   } = useStore();
   const root = useRef<HTMLDivElement>(null);
   const [slide, setSlide] = useState<number | null>(null);
-  const [environmentBusy, setEnvironmentBusy] = useState<"local" | "worktree" | null>(null);
-  const [environmentNote, setEnvironmentNote] = useState("");
 
   useEffect(() => {
     refreshGrokPlan();
@@ -80,19 +75,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const bot = session.customBotId
     ? settings.customBots.find((item) => item.id === session.customBotId)
     : undefined;
-  const project = projects.find((item) => item.id === session.projectId);
-  const localRoot = project?.folders[0]?.path ?? "";
-  const environmentKind = sessionEnvironmentKind(session.environment);
-  const chooseEnvironment = async (kind: "local" | "worktree") => {
-    setEnvironmentBusy(kind);
-    setEnvironmentNote("");
-    try {
-      const result = await setSessionEnvironment(kind);
-      setEnvironmentNote(result.message);
-    } finally {
-      setEnvironmentBusy(null);
-    }
-  };
   const focus: ProviderId | `bot:${string}` = bot ? `bot:${bot.id}` : session.provider;
   const used = vendorTidePercent(
     { focus, provider: session.provider, key: bot?.id ?? session.provider },
@@ -192,35 +174,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="setup-block">
-        <div className="section-label">Environment</div>
-        <div className="setup-effort" role="listbox" aria-label="Environment">
-          <button
-            className={environmentKind === "local" ? "on" : undefined}
-            type="button"
-            disabled={environmentBusy !== null}
-            onClick={() => void chooseEnvironment("local")}
-          >
-            {environmentBusy === "local" ? "Opening…" : "Local"}
-          </button>
-          <button
-            className={environmentKind === "worktree" ? "on" : undefined}
-            type="button"
-            disabled={!localRoot || environmentBusy !== null}
-            title={localRoot ? "Create an isolated Git worktree for this chat" : "Link a project folder first"}
-            onClick={() => void chooseEnvironment("worktree")}
-          >
-            {environmentBusy === "worktree" ? "Creating…" : "Worktree"}
-          </button>
-        </div>
-        <p className="setup-note">
-          {environmentNote ||
-            (environmentKind === "worktree" && session.environment?.kind === "worktree"
-              ? session.environment.path
-              : localRoot || "Link a project folder to choose an execution environment.")}
-        </p>
       </section>
 
       {thinking.length > 0 && (

@@ -242,6 +242,10 @@ type WorkhorseBridge = {
       api?: string;
       contextWindow?: number;
       bot?: string;
+      chats?: "keep" | "remove";
+      onlyThis?: boolean;
+      scope?: string;
+      wait?: boolean;
     }) => void,
   ) => () => void;
   replyPeerAsk: (payload: { id: string; text?: string; error?: string }) => Promise<boolean>;

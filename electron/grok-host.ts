@@ -19,6 +19,9 @@ export type GrokSessionOpenInput = {
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
   preface?: string;
+  parentId?: string;
+  hidden?: boolean;
+  role?: import("../src/lib/workhorse-rules").DeskRole;
 };
 
 export type GrokPromptInput = GrokSessionOpenInput & {
@@ -127,6 +130,7 @@ export class GrokSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
     });
 
     try {

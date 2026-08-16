@@ -77,8 +77,7 @@ export function EditContextMenu() {
         snapshot,
         pageSelected: field ? selectedText(snapshot) : pageSelected,
       };
-      const firstOn = EDIT_MENU_ITEMS.findIndex((item) => enabledAction(nextMenu, item.id));
-      setActive(firstOn >= 0 ? firstOn : 0);
+      setActive(0);
       setMenu(nextMenu);
     };
     document.addEventListener("contextmenu", open);
@@ -139,21 +138,16 @@ export function EditContextMenu() {
       }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        const enabled = EDIT_MENU_ITEMS.map((item, index) => ({ item, index })).filter(({ item }) =>
-          enabledAction(menu, item.id),
-        );
+        const enabled = visibleMenuItems(menu);
         if (enabled.length === 0) return;
         const delta = event.key === "ArrowDown" ? 1 : -1;
-        const current = Math.max(
-          0,
-          enabled.findIndex(({ index }) => index === active),
-        );
-        setActive(enabled[(current + delta + enabled.length) % enabled.length].index);
+        setActive((active + delta + enabled.length) % enabled.length);
         return;
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        void run(EDIT_MENU_ITEMS[active].id, menu);
+        const item = visibleMenuItems(menu)[active];
+        if (item) void run(item.id, menu);
       }
     };
     window.addEventListener("mousedown", close, true);
@@ -179,28 +173,26 @@ export function EditContextMenu() {
       style={{ left: menu.x, top: menu.y }}
       onContextMenu={(event) => event.preventDefault()}
     >
-      {EDIT_MENU_ITEMS.map((item, index) => {
-        const on = enabledAction(menu, item.id);
-        return (
+      {visibleMenuItems(menu).map((item, index) => (
           <button
             key={item.id}
             type="button"
             role="menuitem"
-            disabled={!on}
             className={index === active ? "active" : undefined}
-            onMouseEnter={() => {
-              if (on) setActive(index);
-            }}
+            onMouseEnter={() => setActive(index)}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => void run(item.id, menu)}
           >
             <span>{item.label}</span>
             <kbd>{item.shortcut}</kbd>
           </button>
-        );
-      })}
+      ))}
     </div>
   );
+}
+
+function visibleMenuItems(menu: MenuState) {
+  return EDIT_MENU_ITEMS.filter((item) => enabledAction(menu, item.id));
 }
 
 function enabledAction(menu: MenuState, action: EditMenuAction): boolean {

@@ -5,7 +5,19 @@ import { chatLinksFromSessions } from "../lib/tool-labels";
 import { useStore } from "../lib/store";
 import type { Session } from "../lib/types";
 
-export function ChatRow({ session }: { session: Session }) {
+export function ChatRow({
+  session,
+  nested = false,
+  workerCount = 0,
+  workersOpen = false,
+  onToggleWorkers,
+}: {
+  session: Session;
+  nested?: boolean;
+  workerCount?: number;
+  workersOpen?: boolean;
+  onToggleWorkers?: () => void;
+}) {
   const store = useStore();
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -18,7 +30,8 @@ export function ChatRow({ session }: { session: Session }) {
     ? store.settings.customBots.find((item) => item.id === session.customBotId)
     : undefined;
   const stockLink = session.provider !== "custom" ? store.settings.llms[session.provider] : undefined;
-  const ink = deskInk(session, store.settings);
+  const parent = session.parentId ? store.sessions.find((item) => item.id === session.parentId) : undefined;
+  const ink = deskInk(session, store.settings) ?? (parent ? deskInk(parent, store.settings) : undefined);
   const rowLabel = vendorAttachedForSession(session, store.settings)
     ? formatChatSidebar({
         provider: session.provider,
@@ -59,7 +72,7 @@ export function ChatRow({ session }: { session: Session }) {
 
   return (
     <div
-      className={`chat-row${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}`}
+      className={`chat-row${nested ? " nested-worker" : ""}${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -89,22 +102,42 @@ export function ChatRow({ session }: { session: Session }) {
         <button className="row chat-open" type="button" onClick={() => store.selectSession(session.id)}>
           <span
             className={`dot ${session.provider}${session.status === "running" ? " pulse" : ""}`}
-            style={ink ? { background: ink } : undefined}
+            style={ink ? { background: ink, color: ink } : undefined}
           />
           <span>
             <span className="row-title">{session.title}</span>
             <span className={`row-meta${link ? " peer" : ""}`}>
               {link
                 ? link.label
-                : session.status === "running"
-                  ? "Working…"
-                  : session.status === "needs-input"
-                    ? "Needs you"
-                    : rowLabel}
+                : nested
+                  ? session.status === "running"
+                    ? "Worker · Working…"
+                    : "Worker"
+                  : session.status === "running"
+                    ? "Working…"
+                    : session.status === "needs-input"
+                      ? "Needs you"
+                      : rowLabel}
             </span>
           </span>
         </button>
       )}
+
+      {workerCount > 0 && onToggleWorkers ? (
+        <button
+          className={`tiny crew-twist${workersOpen ? " open" : ""}`}
+          type="button"
+          aria-expanded={workersOpen}
+          aria-label={workersOpen ? "Hide worker chats" : `Show ${workerCount} worker chats`}
+          title={workersOpen ? "Hide workers" : `${workerCount} workers`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleWorkers();
+          }}
+        >
+          {workerCount}
+        </button>
+      ) : null}
 
       <button
         className="tiny chat-more"
@@ -179,6 +212,18 @@ export function ChatRow({ session }: { session: Session }) {
           >
             {archived ? "Unarchive" : "Archive"}
           </button>
+          {workerCount > 0 ? (
+            <button
+              className="danger"
+              type="button"
+              onClick={() => {
+                store.deleteWorkers(session.id);
+                setMenu(false);
+              }}
+            >
+              Delete workers
+            </button>
+          ) : null}
           {confirmDelete ? (
             <button
               className="danger"

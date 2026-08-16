@@ -1,10 +1,10 @@
-import { goalCommandForAction, goalDisplay } from "../lib/goal";
+import { goalCommandForAction, goalDisplayForSession } from "../lib/goal";
 import { useActiveSession, useStore } from "../lib/store";
 
 export function GoalBar() {
   const session = useActiveSession();
   const store = useStore();
-  const view = goalDisplay(session?.goal);
+  const view = goalDisplayForSession(session);
   if (!view) return null;
   return (
     <div className={`goal-bar ${view.status}`} role="region" aria-label={view.title}>

@@ -6,6 +6,7 @@ import { defaultModel, effortLabel, modelName, withEffort } from "./models";
 import { normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
+import { normalizeLineup } from "./lineup";
 import { normalizeAgentRun } from "./subagents";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
@@ -228,6 +229,7 @@ export function normalizeSession(raw: unknown): Session | null {
     })(),
     goal: normalizeGoal(record.goal),
     agentRun: normalizeAgentRun(record.agentRun),
+    lineup: normalizeLineup(record.lineup),
   };
 }
 

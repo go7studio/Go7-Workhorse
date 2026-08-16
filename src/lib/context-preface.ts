@@ -1,10 +1,16 @@
 import type { LinkedReference, PermissionMode, SandboxProfile } from "./types";
 import {
   CUSTOM_HTTP_SESSION_RULES,
+  CUSTOM_HTTP_WORKER_RULES,
   WORKHORSE_SESSION_RULES,
+  WORKER_SESSION_RULES,
+  type DeskRole,
+  withCrewStatusHint,
   withDeskBotHint,
+  withLooseDeleteHint,
   withPermissionHint,
   withPreviewHint,
+  withSpawnHint,
   withWriteLimitHint,
   writesAreBlocked,
 } from "./workhorse-rules";
@@ -25,6 +31,7 @@ export type PrefaceInput = {
   sandbox?: SandboxProfile;
   /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP with desk tools. */
   surface?: "mcp" | "http";
+  role?: DeskRole;
 };
 
 /** Workspace map for this turn: cwd, extra folders, and project references. */
@@ -121,7 +128,14 @@ export function capabilityFromPreface(preface: string | undefined): string {
 
 /** First-prompt context: desk-slot rules, live limits, extra folders/refs and this-chat map. */
 export function buildSessionPreface(input: PrefaceInput): string {
-  const rules = input.surface === "http" ? CUSTOM_HTTP_SESSION_RULES : WORKHORSE_SESSION_RULES;
+  const worker = input.role === "worker";
+  const rules = worker
+    ? input.surface === "http"
+      ? CUSTOM_HTTP_WORKER_RULES
+      : WORKER_SESSION_RULES
+    : input.surface === "http"
+      ? CUSTOM_HTTP_SESSION_RULES
+      : WORKHORSE_SESSION_RULES;
   const parts = [
     buildPolicyContext(input),
     buildVendorPreface(input),
@@ -135,10 +149,16 @@ export function composeVendorPrompt(
   text: string,
   preface: string | undefined,
   opened: "session/new" | "session/load",
-  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile },
+  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole },
 ): string {
   const hinted = withWriteLimitHint(
-    withPermissionHint(withPreviewHint(withDeskBotHint(text))),
+    withCrewStatusHint(
+      withLooseDeleteHint(
+        withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
+        limits?.role,
+      ),
+      limits?.role,
+    ),
     limits?.mode,
     limits?.sandbox,
   );

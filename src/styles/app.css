@@ -590,6 +590,13 @@ html.pane-dragging * {
   border-bottom: 1px solid var(--line);
 }
 
+.agent-thread-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .agent-thread-who {
   display: flex;
   flex-direction: column;
@@ -616,7 +623,7 @@ html.pane-dragging * {
   margin-left: 14px;
   font-style: normal;
   font-size: 11px;
-  color: var(--peer);
+  color: var(--text-tertiary);
 }
 
 .agent-thread-tabs {
@@ -724,6 +731,70 @@ html.pane-dragging * {
 .agent-bubble.to .md {
   background: var(--bg-solid);
   border: 1px solid var(--line);
+}
+
+.agent-thread.compact-thread .agent-thread-head {
+  padding: 10px 12px 8px;
+}
+
+.agent-thread.compact-thread .agent-thread-scroll {
+  padding: 10px 12px 14px;
+  gap: 10px;
+}
+
+.agent-thread.compact-thread .turn {
+  gap: 4px;
+}
+
+.agent-thread.compact-thread .turn-who {
+  font-size: 11px;
+}
+
+.agent-thread.compact-thread .say,
+.agent-thread.compact-thread .md {
+  font-size: 13px;
+}
+
+.agent-thread.compact-thread .work-pop > summary {
+  font-size: 11px;
+}
+
+.agent-thread.compact-thread .tool-line {
+  font-size: 11px;
+}
+
+.agent-thread.compact-thread .turn.user .say {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.agent-thread.compact-thread.overlay {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  bottom: 12px;
+  z-index: 28;
+  width: min(440px, calc(100% - 20px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.context-meter-wrap.compact .context-ring {
+  width: 24px;
+  height: 24px;
+}
+
+.context-meter-wrap.compact .context-copy {
+  gap: 0;
+}
+
+.context-meter-wrap.compact .context-copy strong {
+  font-size: 11px;
+}
+
+.context-meter-wrap.compact .context-copy em {
+  font-size: 10px;
 }
 
 .peer-open {
@@ -949,7 +1020,7 @@ html.pane-dragging * {
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 70%, transparent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 70%, transparent);
   animation: pulse-ring 1.4s var(--ease) infinite;
 }
 
@@ -988,7 +1059,7 @@ html.pane-dragging * {
 
 @keyframes pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent);
   }
   100% {
     box-shadow: 0 0 0 10px transparent;
@@ -1158,6 +1229,16 @@ html.pane-dragging * {
 .turn.user.peer .say {
   background: color-mix(in srgb, var(--peer) 22%, var(--bg-solid));
   border-color: color-mix(in srgb, var(--peer) 42%, var(--line));
+}
+
+.turn.user .command-line {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.turn.user .chat-command {
+  color: var(--command);
+  font-weight: 600;
 }
 
 .turn.user.peer .peer-from {
@@ -1381,16 +1462,16 @@ html.pane-dragging * {
 .work-fold > summary::before {
   content: "";
   display: inline-block;
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   margin-right: 6px;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  transform: rotate(-45deg) translateY(-1px);
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
 }
 
-.work-fold[open] > summary::before {
-  transform: rotate(45deg) translateY(-1px);
+.work-fold.subagent > summary::before {
+  display: none;
 }
 
 .tool-line.live .tool-name {
@@ -1439,7 +1520,22 @@ html.pane-dragging * {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--peer);
+}
+
+.tool-line.subagent-preview {
+  margin: 2px 0 0;
+}
+
+.subagent-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .subagent-thread {
@@ -2226,18 +2322,22 @@ html.pane-dragging * {
 
 .dot.grok {
   background: var(--grok);
+  color: var(--grok);
 }
 
 .dot.claude {
   background: var(--claude);
+  color: var(--claude);
 }
 
 .dot.codex {
   background: var(--codex);
+  color: var(--codex);
 }
 
 .dot.custom {
   background: var(--custom);
+  color: var(--custom);
 }
 
 .path {
@@ -2975,6 +3075,71 @@ html.pane-dragging * {
   border-radius: 10px;
 }
 
+.chat-row.nested-worker {
+  margin-left: 16px;
+}
+
+.crew-twist {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.crew-twist.open {
+  color: var(--text);
+}
+
+.crew-menu {
+  position: relative;
+}
+
+.crew-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.crew-pop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font-size: 12px;
+}
+
+.crew-pop button:hover,
+.crew-pop button.on {
+  background: var(--bg-hover);
+}
+
+.crew-pop em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 .chat-row:hover {
   background: var(--bg-hover);
 }
@@ -2987,7 +3152,12 @@ html.pane-dragging * {
 .chat-row .chat-open {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   background: transparent;
+}
+
+.chat-row .chat-open > span:last-child {
+  min-width: 0;
 }
 
 .chat-row .chat-open:hover,
@@ -3272,9 +3442,16 @@ html.pane-dragging * {
 
 .usage-facts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   margin: 4px 0 8px;
+}
+
+.usage-traffic-note {
+  margin: 0 0 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .usage-fact {
@@ -4245,6 +4422,13 @@ html.pane-dragging * {
 
 .usage-dot.l4 {
   background: color-mix(in srgb, var(--text) 92%, transparent);
+}
+
+.usage-dot.ink.l1,
+.usage-dot.ink.l2,
+.usage-dot.ink.l3,
+.usage-dot.ink.l4 {
+  background: var(--dot-ink, var(--text));
 }
 
 .usage-dot.ink {

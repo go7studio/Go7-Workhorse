@@ -47,6 +47,8 @@ export type GrokSessionMeta = {
   // ACP session/new documents yoloMode/autoMode only. Plan is Grok permission-mode
   // `plan` / plan-mode; we pass the same shape plus --permission-mode plan.
   planMode?: boolean;
+  /** Ask Grok to enable /goal (writer + evidence review). Ignored if the child has no such switch. */
+  goalMode?: boolean;
   rules?: string;
 };
 
@@ -224,7 +226,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
   if (alwaysApprove) argv.push("--always-approve");
   argv.push("--model", model, "--reasoning-effort", effort, "stdio");
 
-  const meta: GrokSessionMeta = { rules: WORKHORSE_SESSION_RULES };
+  const meta: GrokSessionMeta = { rules: WORKHORSE_SESSION_RULES, goalMode: true };
   if (alwaysApprove) meta.yoloMode = true;
   else if (input.mode === "plan") meta.planMode = true;
   const builtIn = workhorseMcpServer(input.sessionId);

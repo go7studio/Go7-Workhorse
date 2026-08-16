@@ -29,18 +29,35 @@ function displayTarget(raw: string): string {
   return value;
 }
 
+const DESK_SETUP_NOISE = /did not finish setting up that bot|setting up that bot in time/i;
+const SPAWN_FAIL = /watch safety|no leftover|day bank|daily bank|not connected|did not answer in time/i;
+
+function isThisChatWorker(child: Session, parentId: string): boolean {
+  return child.parentId === parentId;
+}
+
+function isDeskSetupNoise(message: Pick<ChatMessage, "fromTitle" | "text">): boolean {
+  return DESK_SETUP_NOISE.test(`${message.fromTitle ?? ""}\n${message.text ?? ""}`);
+}
+
+function isSpawnFailureMarker(message: ChatMessage): boolean {
+  if (isDeskSetupNoise(message)) return false;
+  if (message.toolStatus === "failed") return !/list bots|set up custom/i.test(`${message.fromTitle ?? ""} ${message.text ?? ""}`);
+  return SPAWN_FAIL.test(message.text);
+}
+
 export function agentThreadsForSession(session: Session, sessions: Session[]): AgentThread[] {
   const threads: AgentThread[] = [];
   const seen = new Set<string>();
   const parentTitle = session.title.trim() || "This chat";
 
   const add = (child: Session, marker?: ChatMessage) => {
-    if (seen.has(child.id)) return;
+    if (!isThisChatWorker(child, session.id) || seen.has(child.id)) return;
     seen.add(child.id);
     const toLabel = (marker?.fromTitle || child.title || "the other agent").trim();
     const live =
       child.status === "running" || child.status === "needs-input" || marker?.toolStatus === "running";
-    const failed = marker?.toolStatus === "failed";
+    const failed = marker?.toolStatus === "failed" && !isDeskSetupNoise(marker);
     threads.push({
       id: child.id,
       childId: child.id,
@@ -64,22 +81,21 @@ export function agentThreadsForSession(session: Session, sessions: Session[]): A
       add(child, message);
       continue;
     }
-    if (message.toolStatus !== "failed" && !message.text.trim()) continue;
+    if (!isSpawnFailureMarker(message)) continue;
     const id = message.subagentSessionId || message.id;
     if (seen.has(id)) continue;
     seen.add(id);
     const toLabel = (message.fromTitle || message.text || "the other agent").trim();
-    const failed = message.toolStatus === "failed" || /watch safety|no leftover|day bank|daily bank|not connected/i.test(message.text);
     threads.push({
       id,
       childId: "",
-      title: failed ? toLabel.split(/[.—]/)[0]?.trim() || toLabel : toLabel,
+      title: toLabel.split(/[.—]/)[0]?.trim() || toLabel,
       live: false,
       fromLabel: parentTitle,
       toLabel,
       turns: [],
       provider: parseProviderId(message.fromTitle || "") ?? undefined,
-      error: failed ? message.text.trim() : undefined,
+      error: message.text.trim() || undefined,
     });
   }
 
@@ -90,9 +106,12 @@ export function agentThreadsForSession(session: Session, sessions: Session[]): A
   for (const message of session.messages) {
     if (message.kind !== "tool") continue;
     const peer = peerToolFromMessage(message);
-    if (!peer || (peer.kind !== "ask" && peer.kind !== "call")) continue;
+    if (!peer || peer.kind !== "call") continue;
+    if (isDeskSetupNoise(message)) continue;
     const target = displayTarget(peer.target);
-    const failed = /fail|error|denied/i.test(message.toolStatus ?? "") || toolIsFinished(message.toolStatus) && /watch safety|no leftover|day bank|daily bank|not connected/i.test(message.text);
+    const failed =
+      /fail|error|denied/i.test(message.toolStatus ?? "") ||
+      (toolIsFinished(message.toolStatus) && SPAWN_FAIL.test(message.text));
     const live = !toolIsFinished(message.toolStatus);
     if (!live && !failed) continue;
     if (target && threads.some((thread) => thread.title.toLowerCase() === target.toLowerCase())) continue;

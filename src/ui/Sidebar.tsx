@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
+import { nestProjectChats } from "../lib/lineup";
 import { folderSummary } from "../lib/project";
 import { useLooseSessions, useProjectSessions, useStore } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
@@ -52,11 +53,13 @@ function ProjectFolder({
   const archived = useProjectSessions(project.id, true);
   const [showMore, setShowMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
   const settingsOpen = store.panel === "settings" || store.panel === "add-bot";
   const selected = !settingsOpen && project.id === store.activeProjectId;
-  const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
-  const hidden = hiddenProjectChatCount(chats.length, showMore);
-  const count = chats.length + archived.length;
+  const nested = nestProjectChats(chats);
+  const visible = visibleProjectChats(nested, showMore, store.activeSessionId);
+  const hidden = hiddenProjectChatCount(nested.length, showMore);
+  const count = nested.length + archived.length;
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -115,9 +118,23 @@ function ProjectFolder({
             <p className="row-meta nest-empty">No chats yet.</p>
           )}
           {visible.map((session) => (
-            <ChatRow key={session.id} session={session} />
+            <div key={session.id} className="project-chat-block">
+              <ChatRow
+                session={session}
+                workerCount={session.workers.length}
+                workersOpen={Boolean(openCrew[session.id])}
+                onToggleWorkers={() =>
+                  setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
+                }
+              />
+              {openCrew[session.id]
+                ? session.workers.map((worker) => (
+                    <ChatRow key={worker.id} session={worker} nested />
+                  ))
+                : null}
+            </div>
           ))}
-          {chats.length > PROJECT_CHAT_LIMIT && (
+          {nested.length > PROJECT_CHAT_LIMIT && hidden > 0 && (
             <button className="archive-toggle" type="button" onClick={() => setShowMore((value) => !value)}>
               {showMore ? "Show less" : `Show more (${hidden})`}
             </button>

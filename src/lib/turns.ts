@@ -1,5 +1,5 @@
 import { collapseThoughtDisplay, mergeThoughtText } from "./grok-events";
-import { peelPlanningPreamble } from "./markdown";
+import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
 import type { ChatMessage } from "./types";
 
@@ -97,6 +97,7 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
       continue;
     }
     if (message.role === "assistant") {
+      if (assistant?.text.trim() && message.text.trim()) flush();
       assistant = mergeAssistantMessage(assistant, message);
       continue;
     }
@@ -118,15 +119,16 @@ export function thoughtForReply(input: {
   assistantText?: string;
   live?: boolean;
 }): string {
-  const peeled = peelPlanningPreamble(input.assistantText ?? "", input.live).thought;
+  const peeled = peelPlanningPreamble(input.assistantText ?? "", input.live);
   const parts = [
     ...input.thoughtMessages.map((item) => item.text),
     input.assistantThought ?? "",
-    peeled,
+    peeled.thought,
   ];
   let merged = "";
   for (const part of parts) merged = mergeThoughtText(merged, collapseThoughtDisplay(part));
-  return collapseThoughtDisplay(merged);
+  const visible = peeled.body || (!input.live ? input.assistantText ?? "" : "");
+  return stripOutputFromThought(collapseThoughtDisplay(merged), visible);
 }
 
 export function lastReplyIndex(blocks: TranscriptBlock[]): number {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { commandNeedsInput, commandsForSession, filterCommands, shortModeLabel } from "../lib/commands";
+import { commandNeedsInput, commandsForSession, filterPalette, shortModeLabel } from "../lib/commands";
 import {
   collectDroppedFiles,
   dataTransferLooksLikeFiles,
@@ -54,15 +54,9 @@ export function Composer({
   valueRef.current = value;
   imagesRef.current = images;
 
-  const extras = useMemo(
-    () =>
-      commandsForSession(session, deskSkills).filter((command) =>
-        Boolean(command.source && command.source !== "workhorse"),
-      ),
-    [deskSkills, session],
-  );
+  const extras = useMemo(() => commandsForSession(session, deskSkills), [deskSkills, session]);
   const open = value.startsWith("/") && images.length === 0;
-  const matches = useMemo(() => (open ? filterCommands(value, extras) : []), [extras, open, value]);
+  const matches = useMemo(() => (open ? filterPalette(value, extras) : []), [extras, open, value]);
   const canSend = Boolean(value.trim() || images.length);
 
   useEffect(() => {
@@ -209,9 +203,9 @@ export function Composer({
             ))}
           </div>
         )}
-        {queue.length > 0 && (
+        {queue.filter((item) => item.hideUser !== true).length > 0 && (
           <ul className="prompt-queue">
-            {queue.map((item, index) => (
+            {queue.filter((item) => item.hideUser !== true).map((item, index) => (
               <li key={item.id} className="prompt-queue-item">
                 <span className="prompt-queue-when">{index === 0 ? "Next" : `Then ${index + 1}`}</span>
                 <span className="prompt-queue-text">{item.text.trim() || "(image)"}</span>

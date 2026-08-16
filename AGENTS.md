@@ -25,7 +25,7 @@ src/styles/   design tokens and layout
 
 - Keep the UI learnable: few files, plain names, no extra frameworks.
 - Adapters live behind `src/lib/providers.ts`. Do not call vendor CLIs from React components.
-- Grok, Codex, and Claude are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login.
+- Grok, Codex, Claude, and Cursor are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login. Cursor usage is two pools (Composer/Cursor Grok vs Other Models). Do not fold Cursor into Grok.
 - Apple-like means space, hairlines, and short motion — not decoration.
 
 ## Working rules

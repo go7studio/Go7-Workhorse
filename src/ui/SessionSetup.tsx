@@ -36,7 +36,7 @@ const SANDBOX_ICONS: Record<SandboxProfile, string> = {
   strict: "◆",
 };
 
-const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const SETUP_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function SessionSetup({ onClose }: { onClose: () => void }) {
   const session = useActiveSession();

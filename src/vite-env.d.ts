@@ -155,6 +155,17 @@ type WorkhorseBridge = {
   claudeAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   claudeCancel: (sessionId: string) => Promise<void>;
   onClaudeEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
+  detectCursorLogin?: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null }>;
+  cursorPrompt?: (input: GrokPromptBridgeInput) => Promise<{
+    text?: string;
+    stopReason?: string;
+    vendorSessionId?: string;
+    opened?: "session/new" | "session/load";
+  }>;
+  cursorAnswerPermission?: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
+  cursorCancel?: (sessionId: string) => Promise<void>;
+  onCursorEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
+  cursorPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
   detectCustomLogin: () => Promise<{
     connected: boolean;
     source: "openclaw" | "env" | "none";

@@ -94,6 +94,22 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
       outsideWorkspace: "native",
     },
   },
+  cursor: {
+    ...ACP_SHARED,
+    conversation: {
+      resume: "native",
+      fork: "workhorse",
+      rewind: "workhorse",
+      compact: "workhorse",
+      portableReplay: true,
+    },
+    security: {
+      permissions: true,
+      filesystem: "native",
+      network: "workhorse",
+      outsideWorkspace: "workhorse",
+    },
+  },
   custom: {
     transport: "http",
     conversation: {
@@ -116,7 +132,7 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
 };
 
 export function capabilitiesFor(provider?: ProviderId | string | null): ProviderCapabilities {
-  if (provider === "claude" || provider === "codex" || provider === "custom") {
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "custom") {
     return PROVIDER_CAPABILITIES[provider];
   }
   return PROVIDER_CAPABILITIES.grok;

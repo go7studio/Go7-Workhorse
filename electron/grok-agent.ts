@@ -9,7 +9,14 @@ import type { PermissionAnswer } from "../src/lib/permissions";
 import { buildAcpPrompt } from "../src/lib/images";
 import { describePeerTool, prettyToolTitle } from "../src/lib/tool-labels";
 import type { ChatImage, Command } from "../src/lib/types";
+import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
+
+export function cursorExtensionResult(method: string): { outcome: { outcome: string; reason?: string } } | null {
+  if (method === "cursor/ask_question") return { outcome: { outcome: "skipped" } };
+  if (method === "cursor/create_plan") return { outcome: { outcome: "rejected", reason: "Workhorse shows plans in the transcript" } };
+  return null;
+}
 
 export type GrokUsageDraft = {
   inputTokens: number;
@@ -315,6 +322,8 @@ export function extractToolEvent(update: Record<string, unknown>): GrokToolEvent
   const looksLikeTool =
     name === "tool_call" ||
     name === "tool_call_update" ||
+    name === "cursor/task" ||
+    isCursorInnerTask({ method: name, title: String(update.title ?? nested.title ?? ""), toolName: String(update.toolName ?? nested.toolName ?? "") }) ||
     typeof update.toolCallId === "string" ||
     typeof nested.toolCallId === "string";
   if (!looksLikeTool) return undefined;
@@ -1012,6 +1021,16 @@ export class GrokAgent {
 
   private onNotification(method: string, params: Record<string, unknown>): void {
     if (!isAcpSessionUpdateMethod(method)) {
+      if (method === "cursor/task" || method === "cursor/update_todos" || method === "cursor/generate_image") {
+        const tool = extractToolEvent({
+          ...params,
+          sessionUpdate: "cursor/task",
+          title: method === "cursor/task" ? "Cursor task" : method.replace("cursor/", ""),
+          toolCallId: String(params.toolCallId ?? params.agentId ?? method),
+        });
+        if (tool) this.handlers.onTool?.(tool);
+        return;
+      }
       if (/compact/i.test(method)) {
         const compact = extractCompactEvent({
           ...params,
@@ -1054,6 +1073,17 @@ export class GrokAgent {
   private async onIncomingRequest(message: JsonRpcMessage): Promise<void> {
     const id = message.id;
     if (id === undefined) return;
+    const extension = cursorExtensionResult(message.method ?? "");
+    if (extension) {
+      this.handlers.onTool?.({
+        toolCallId: String(id),
+        title: message.method === "cursor/create_plan" ? "Create plan" : "Ask question",
+        status: extension.outcome.outcome,
+        detail: extension.outcome.reason ?? "",
+      });
+      this.write({ jsonrpc: "2.0", id, result: extension });
+      return;
+    }
     if (message.method !== "session/request_permission") {
       this.write({
         jsonrpc: "2.0",

@@ -51,6 +51,8 @@ const VENDOR_ALIASES: Record<string, ProviderId> = {
   custom: "custom",
   minimax: "custom",
   minipax: "custom",
+  cursor: "cursor",
+  composer: "cursor",
 };
 
 function tokensOf(value: string): string[] {
@@ -64,7 +66,7 @@ function tokensOf(value: string): string[] {
 export function parseProviderId(value?: string): ProviderId | null {
   const raw = value?.trim().toLowerCase();
   if (!raw) return null;
-  if (raw === "grok" || raw === "claude" || raw === "codex" || raw === "custom") return raw;
+  if (raw === "grok" || raw === "claude" || raw === "codex" || raw === "cursor" || raw === "custom") return raw;
   return VENDOR_ALIASES[raw] ?? null;
 }
 
@@ -90,7 +92,7 @@ export function resolveModelHint(query: string): { provider: ProviderId; model: 
   const tokens = tokensOf(trimmed);
   if (tokens.length === 0) return null;
 
-  for (const provider of ["codex", "grok", "claude", "custom"] as ProviderId[]) {
+  for (const provider of ["codex", "grok", "claude", "cursor", "custom"] as ProviderId[]) {
     for (const model of modelsFor(provider)) {
       const hay = `${model.id} ${model.name}`.toLowerCase();
       if (tokens.some((token) => token.length >= 3 && hay.includes(token))) {
@@ -309,7 +311,7 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
 export function subagentLabel(provider: ProviderId, model: string, description?: string): string {
   const named = description?.trim();
   if (named) return named;
-  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", custom: "Custom" }[provider];
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
   const short = model.replace(/^gpt-/, "").replace(/^grok-/, "");
   return short && short !== model ? `${vendor} · ${short}` : vendor;
 }
@@ -414,15 +416,16 @@ export function resolveSpawnSpec(
     };
   }
 
-  const hinted = namedStock ?? named ?? resolveModelHint(hintedQuery);
-  const provider = parseProviderId(input.provider) ?? hinted?.provider ?? parent?.provider ?? "grok";
+  const explicit = parseProviderId(input.provider);
+  const hinted = namedStock ?? named ?? (explicit ? null : resolveModelHint(hintedQuery));
+  const provider = explicit ?? hinted?.provider ?? parent?.provider ?? "grok";
   const rawModel = input.model?.trim() ?? "";
   const mappedModel = rawModel
     ? resolveModelHint(rawModel) ?? resolveModelHint(`${provider} ${rawModel}`)
     : null;
   const model =
     mappedModel?.model ||
-    hinted?.model ||
+    (explicit && !rawModel ? defaultModel(provider).id : hinted?.model) ||
     (rawModel && !isBareVendorOrModel(rawModel) && !parseProviderId(rawModel) ? rawModel : defaultModel(provider).id);
   return {
     provider,

@@ -57,6 +57,8 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     ...(typeof record.finishedAt === "number" ? { finishedAt: record.finishedAt } : {}),
     ...(typeof record.report === "string" && record.report.trim() ? { report: record.report } : {}),
+    ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
+    ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
   };
 }
 

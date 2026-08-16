@@ -284,6 +284,10 @@ export function normalizeMessage(raw: unknown): ChatMessage | null {
     model: typeof record.model === "string" && record.model.trim() ? record.model.trim() : undefined,
     customBotId:
       typeof record.customBotId === "string" && record.customBotId.trim() ? record.customBotId.trim() : undefined,
+    peerFromSessionId:
+      typeof record.peerFromSessionId === "string" && record.peerFromSessionId.trim() ? record.peerFromSessionId.trim() : undefined,
+    correlationId:
+      typeof record.correlationId === "string" && record.correlationId.trim() ? record.correlationId.trim() : undefined,
     text:
       kind === "tool"
         ? collapseToolText(

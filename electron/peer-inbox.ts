@@ -19,7 +19,8 @@ export type PeerAction =
   | "await-agents"
   | "record-write"
   | "request-permission"
-  | "request-vendor";
+  | "request-vendor"
+  | "plan";
 
 export type PeerAsk = {
   fromSessionId: string;
@@ -52,6 +53,13 @@ export type PeerAsk = {
   rationale?: string;
   skills?: string[];
   tools?: string[];
+  planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "status" | "evidence" | "complete" | "block" | "cancel";
+  sourcePath?: string;
+  planRun?: unknown;
+  stepStatus?: string;
+  evidenceKind?: string;
+  evidenceLabel?: string;
+  evidenceValue?: string;
 };
 
 export type PeerAskResult = { text: string } | { error: string };

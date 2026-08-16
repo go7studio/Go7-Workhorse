@@ -196,7 +196,13 @@ export function formatPeerPrompt(fromTitle: string, text: string): string {
   return `From another Workhorse chat (“${fromTitle}”):\n\n${text.trim()}`;
 }
 
-export function existingPeerReply(sessions: unknown, toSessionId: string, message: string): string | null {
+export function existingPeerReply(
+  sessions: unknown,
+  toSessionId: string,
+  message: string,
+  fromSessionId?: string,
+  correlationId?: string,
+): string | null {
   if (!Array.isArray(sessions) || !toSessionId || !message.trim()) return null;
   const needle = message.trim();
   const session = sessions.map(asRecord).find((item) => item.id === toSessionId);
@@ -205,6 +211,8 @@ export function existingPeerReply(sessions: unknown, toSessionId: string, messag
     const row = rows[index];
     const text = typeof row.text === "string" ? row.text.trim() : "";
     if (row.role !== "user" || row.kind !== "peer" || text !== needle) continue;
+    if (fromSessionId && row.peerFromSessionId !== fromSessionId) continue;
+    if (correlationId && row.correlationId !== correlationId) continue;
     const reply = rows.slice(index + 1).find((item) => item.role === "assistant" && typeof item.text === "string" && item.text.trim());
     return typeof reply?.text === "string" ? reply.text.trim() : null;
   }

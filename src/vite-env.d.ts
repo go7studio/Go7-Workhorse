@@ -241,36 +241,7 @@ type WorkhorseBridge = {
   }>;
   grokFork: (input: GrokPromptBridgeInput) => Promise<{ vendorSessionId?: string }>;
   onPeerAsk: (
-    handler: (payload: {
-      id: string;
-      fromSessionId: string;
-      toSessionId: string;
-      message: string;
-      mode?: "ask" | "spawn" | "bots";
-      provider?: string;
-      model?: string;
-      description?: string;
-      chat?: string;
-      effort?: string;
-      timeoutSeconds?: number;
-      tokenBudget?: number;
-      isolation?: "worktree" | "shared";
-      childSessionId?: string;
-      action?: import("../electron/peer-inbox").PeerAction;
-      folder?: string;
-      name?: string;
-      color?: string;
-      baseUrl?: string;
-      apiKey?: string;
-      api?: string;
-      contextWindow?: number;
-      bot?: string;
-      chats?: "keep" | "remove";
-      onlyThis?: boolean;
-      scope?: string;
-      wait?: boolean;
-      route?: "auto" | "quick" | "balanced" | "deep";
-    }) => void,
+    handler: (payload: { id: string; childSessionId?: string } & import("../electron/peer-inbox").PeerAsk) => void,
   ) => () => void;
   replyPeerAsk: (payload: { id: string; text?: string; error?: string }) => Promise<boolean>;
   onPeerCancel?: (handler: (payload: { childSessionId: string; reason: "timed-out" | "cancelled" }) => void) => () => void;

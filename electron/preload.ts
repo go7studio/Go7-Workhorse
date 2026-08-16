@@ -161,69 +161,11 @@ contextBridge.exposeInMainWorld("workhorse", {
   customPlanUsage: (input: { baseUrl: string; apiKey: string; model?: string }) =>
     ipcRenderer.invoke("custom:plan-usage", input),
   onPeerAsk: (
-    handler: (payload: {
-      id: string;
-      fromSessionId: string;
-      toSessionId: string;
-      message: string;
-      mode?: "ask" | "spawn" | "bots";
-      provider?: string;
-      model?: string;
-      description?: string;
-      chat?: string;
-      effort?: string;
-      timeoutSeconds?: number;
-      tokenBudget?: number;
-      isolation?: "worktree" | "shared";
-      childSessionId?: string;
-      action?: import("./peer-inbox").PeerAction;
-      folder?: string;
-      name?: string;
-      color?: string;
-      baseUrl?: string;
-      apiKey?: string;
-      api?: string;
-      contextWindow?: number;
-      bot?: string;
-      chats?: "keep" | "remove";
-      onlyThis?: boolean;
-      scope?: string;
-      wait?: boolean;
-      route?: "auto" | "quick" | "balanced" | "deep";
-    }) => void,
+    handler: (payload: { id: string; childSessionId?: string } & import("./peer-inbox").PeerAsk) => void,
   ) => {
     const listener = (
       _event: IpcRendererEvent,
-      payload: {
-        id: string;
-        fromSessionId: string;
-        toSessionId: string;
-        message: string;
-        mode?: "ask" | "spawn" | "bots";
-        provider?: string;
-        model?: string;
-        description?: string;
-        chat?: string;
-        effort?: string;
-        timeoutSeconds?: number;
-        tokenBudget?: number;
-        isolation?: "worktree" | "shared";
-        childSessionId?: string;
-        action?: import("./peer-inbox").PeerAction;
-        folder?: string;
-        name?: string;
-        color?: string;
-        baseUrl?: string;
-        apiKey?: string;
-        api?: string;
-        contextWindow?: number;
-        bot?: string;
-        chats?: "keep" | "remove";
-        onlyThis?: boolean;
-        scope?: string;
-        wait?: boolean;
-        route?: "auto" | "quick" | "balanced" | "deep";
-      },
+      payload: { id: string; childSessionId?: string } & import("./peer-inbox").PeerAsk,
     ) => handler(payload);
     ipcRenderer.on("grok:peer-ask", listener);
     return () => {

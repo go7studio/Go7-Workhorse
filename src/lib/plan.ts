@@ -1,5 +1,7 @@
 import type {
   PlanConstraints,
+  PlanAssignment,
+  PlanEvent,
   PlanEvidence,
   PlanEvidenceKind,
   PlanRun,
@@ -14,6 +16,8 @@ export type PlanTransition = { ok: true; plan: PlanRun } | { ok: false; error: s
 export type PlanStepPatch = Partial<
   Pick<PlanStep, "title" | "details" | "dependsOn" | "evidenceRequired" | "assignedSessionId">
 >;
+
+export type PlanAssignmentInput = Omit<PlanAssignment, "assignedAt"> & { assignedAt?: number };
 
 export type MarkdownPlanInput = {
   markdown: string;
@@ -172,6 +176,42 @@ export function parseMarkdownPlan(input: MarkdownPlanInput): PlanRun {
             evidenceRequired: true,
             evidence: [],
           }],
+    events: [{ id: `event_${now}_imported`, at: now, type: "plan.imported", detail: hash }],
+  };
+}
+
+function normalizeAssignment(raw: unknown): PlanAssignment | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Partial<PlanAssignment>;
+  const provider = record.provider === "grok" || record.provider === "codex" || record.provider === "claude" || record.provider === "custom"
+    ? record.provider
+    : undefined;
+  if (!provider || !clean(record.sessionId) || !clean(record.model) || !clean(record.rationale)) return undefined;
+  return {
+    sessionId: clean(record.sessionId),
+    assignedAt: finite(record.assignedAt) ?? 0,
+    provider,
+    model: clean(record.model),
+    ...(clean(record.customBotId) ? { customBotId: clean(record.customBotId) } : {}),
+    rationale: clean(record.rationale),
+    skills: uniqueStrings(record.skills),
+    tools: uniqueStrings(record.tools),
+    ...(clean(record.requested) ? { requested: clean(record.requested) } : {}),
+  };
+}
+
+function normalizeEvent(raw: unknown): PlanEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<PlanEvent>;
+  if (!clean(record.id) || !clean(record.type)) return null;
+  return {
+    id: clean(record.id),
+    at: finite(record.at) ?? 0,
+    type: clean(record.type),
+    ...(clean(record.stepId) ? { stepId: clean(record.stepId) } : {}),
+    ...(clean(record.sessionId) ? { sessionId: clean(record.sessionId) } : {}),
+    ...(clean(record.correlationId) ? { correlationId: clean(record.correlationId) } : {}),
+    ...(clean(record.detail) ? { detail: clean(record.detail) } : {}),
   };
 }
 
@@ -215,6 +255,7 @@ function normalizeStep(raw: unknown): PlanStep | null {
     evidenceRequired: record.evidenceRequired !== false,
     evidence,
     ...(clean(record.assignedSessionId) ? { assignedSessionId: clean(record.assignedSessionId) } : {}),
+    ...(normalizeAssignment(record.assignment) ? { assignment: normalizeAssignment(record.assignment) } : {}),
     ...(finite(record.startedAt) !== undefined ? { startedAt: finite(record.startedAt) } : {}),
     ...(finite(record.finishedAt) !== undefined ? { finishedAt: finite(record.finishedAt) } : {}),
     ...(clean(record.error) ? { error: clean(record.error) } : {}),
@@ -273,6 +314,9 @@ export function normalizePlanRun(raw: unknown): PlanRun | undefined {
   const createdAt = finite(record.createdAt) ?? 0;
   const source = normalizeSource(record.source);
   const constraints = normalizeConstraints(record.constraints);
+  const events = (Array.isArray(record.events) ? record.events : [])
+    .map(normalizeEvent)
+    .filter((item): item is PlanEvent => item !== null);
   return {
     id,
     objective,
@@ -285,12 +329,59 @@ export function normalizePlanRun(raw: unknown): PlanRun | undefined {
     ...(source ? { source } : {}),
     ...(constraints ? { constraints } : {}),
     steps: normalizedSteps,
+    events,
     ...(finite(record.approvedAt) !== undefined ? { approvedAt: finite(record.approvedAt) } : {}),
     ...(finite(record.startedAt) !== undefined ? { startedAt: finite(record.startedAt) } : {}),
     ...(finite(record.pausedAt) !== undefined ? { pausedAt: finite(record.pausedAt) } : {}),
     ...(finite(record.completedAt) !== undefined ? { completedAt: finite(record.completedAt) } : {}),
     ...(clean(record.blockedReason) ? { blockedReason: clean(record.blockedReason) } : {}),
   };
+}
+
+function appendEvent(plan: PlanRun, event: Omit<PlanEvent, "id" | "at"> & { id?: string; at?: number }): PlanRun {
+  const at = event.at ?? Date.now();
+  return {
+    ...plan,
+    events: [
+      ...(plan.events ?? []),
+      { ...event, id: event.id ?? `event_${at}_${(plan.events?.length ?? 0) + 1}`, at },
+    ],
+  };
+}
+
+export function assignPlanStep(
+  plan: PlanRun,
+  stepId: string,
+  assignment: PlanAssignmentInput,
+  now = Date.now(),
+): PlanTransition {
+  if (plan.status !== "running") return failed("Agents can be assigned only while the plan is running.");
+  const index = plan.steps.findIndex((step) => step.id === stepId);
+  if (index < 0) return failed(`No plan step matches ${stepId}.`);
+  const step = plan.steps[index]!;
+  if (step.status !== "ready") return failed("Only a ready step can be assigned.");
+  const normalized = normalizeAssignment({ ...assignment, assignedAt: assignment.assignedAt ?? now });
+  if (!normalized) return failed("An assignment needs a session, provider, model, and rationale.");
+  const steps = plan.steps.map((item, offset) => offset === index
+    ? { ...item, assignedSessionId: normalized.sessionId, assignment: normalized }
+    : item);
+  const next = changed(plan, { steps }, now);
+  return succeeded(appendEvent(next, {
+    at: now,
+    type: "agent.assigned",
+    stepId,
+    sessionId: normalized.sessionId,
+    detail: `${normalized.provider}:${normalized.model} · ${normalized.rationale}`,
+  }));
+}
+
+export function recordPlanEvent(
+  plan: PlanRun,
+  event: Omit<PlanEvent, "id" | "at"> & { id?: string; at?: number },
+  now = Date.now(),
+): PlanTransition {
+  const next = appendEvent(changed(plan, {}, now), { ...event, at: event.at ?? now });
+  return succeeded(next);
 }
 
 function changed(plan: PlanRun, patch: Partial<PlanRun>, now: number): PlanRun {

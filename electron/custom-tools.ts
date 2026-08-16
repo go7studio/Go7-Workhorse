@@ -196,6 +196,23 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "workhorse_plan",
+    description: "Import, inspect, approve, run, or update this chat's executable plan.",
+    input_schema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "import, view, approve, start, pause, resume, status, evidence, complete, block, or cancel" },
+        path: { type: "string", description: "Markdown path for import" },
+        stepId: { type: "string", description: "Plan step id" },
+        status: { type: "string", description: "ready, running, completed, failed, blocked, or cancelled" },
+        kind: { type: "string", description: "note, file, test, screenshot, or runtime" },
+        label: { type: "string", description: "Short evidence label" },
+        value: { type: "string", description: "Evidence value or block reason" },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "workhorse_list_projects",
     description: "List Workhorse projects (name + linked folders). Use before and after creating a project. Do not tell the user a project exists unless it appears here.",
     input_schema: { type: "object", properties: {} },

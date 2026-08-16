@@ -11,6 +11,7 @@ import type {
   PlanStepStatus,
   EffortLevel,
 } from "./types";
+import { isProviderId } from "./providers";
 
 export type PlanTransition = { ok: true; plan: PlanRun } | { ok: false; error: string };
 
@@ -184,9 +185,7 @@ export function parseMarkdownPlan(input: MarkdownPlanInput): PlanRun {
 function normalizeAssignment(raw: unknown): PlanAssignment | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<PlanAssignment>;
-  const provider = record.provider === "grok" || record.provider === "codex" || record.provider === "claude" || record.provider === "custom"
-    ? record.provider
-    : undefined;
+  const provider = isProviderId(record.provider) ? record.provider : undefined;
   if (!provider || !clean(record.sessionId) || !clean(record.model) || !clean(record.rationale)) return undefined;
   return {
     sessionId: clean(record.sessionId),

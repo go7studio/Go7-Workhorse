@@ -35,7 +35,7 @@
       "id": "cursor-acp",
       "provider": "cursor",
       "transport": "acp",
-      "discovery": ["unambiguous cursor-agent binary or capability-probed agent binary", "cursor agent CLI authentication", "ACP initialize and session/new"],
+      "discovery": ["unambiguous cursor-agent binary or capability-probed agent binary", "cursor agent CLI authentication", "agent models", "ACP initialize and session/new"],
       "launchBoundary": "electron/cursor-host.ts",
       "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket", "Composer or API usage lane"],
       "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native-plan-pools; per-turn token usage may be unknown", "routing": "workhorse", "inputs": { "images": "native", "documents": "path", "audio": "manifest", "video": "frames" } },

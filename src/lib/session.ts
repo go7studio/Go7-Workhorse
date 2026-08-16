@@ -2,7 +2,8 @@ import { modeLabel } from "./commands";
 import { normalizeQueuedPrompt } from "./chats";
 import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
-import { defaultModel, effortLabel, modelName, withEffort } from "./models";
+import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
+import { isProviderId } from "./providers";
 import { normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
@@ -44,8 +45,7 @@ export function messageBrain(
 }
 
 export function asProviderId(value: string | undefined): ProviderId {
-  if (value === "codex" || value === "claude" || value === "cursor" || value === "custom") return value;
-  return "grok";
+  return isProviderId(value) ? value : "grok";
 }
 
 /** Visible sidebar subtitle: model · effort · mode. Not the last-message preview. */
@@ -169,14 +169,11 @@ export function normalizeSession(raw: unknown): Session | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<Session>;
   if (typeof record.id !== "string") return null;
-  const provider =
-    record.provider === "grok" ||
-    record.provider === "claude" ||
-    record.provider === "codex" ||
-    record.provider === "custom"
-      ? record.provider
-      : "grok";
-  const model = typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id;
+  const provider = isProviderId(record.provider) ? record.provider : "grok";
+  const model = normalizeModelId(
+    provider,
+    typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id,
+  );
   const mode = parsePermissionMode(String(record.mode ?? "")) ?? "ask";
   return {
     id: record.id,
@@ -198,13 +195,7 @@ export function normalizeSession(raw: unknown): Session | null {
       typeof record.vendorSessionId === "string" && record.vendorSessionId.trim()
         ? record.vendorSessionId.trim()
         : undefined,
-    vendorProvider:
-      record.vendorProvider === "grok" ||
-      record.vendorProvider === "claude" ||
-      record.vendorProvider === "codex" ||
-      record.vendorProvider === "custom"
-        ? record.vendorProvider
-        : undefined,
+    vendorProvider: isProviderId(record.vendorProvider) ? record.vendorProvider : undefined,
     status: record.status === "needs-input" ? "needs-input" : "idle",
     messages: Array.isArray(record.messages)
       ? record.messages
@@ -274,14 +265,11 @@ export function normalizeMessage(raw: unknown): ChatMessage | null {
     toolStatus: typeof record.toolStatus === "string" ? record.toolStatus : undefined,
     thought: typeof record.thought === "string" && record.thought ? record.thought : undefined,
     workedMs: typeof record.workedMs === "number" && record.workedMs >= 0 ? Math.round(record.workedMs) : undefined,
-    provider:
-      record.provider === "grok" ||
-      record.provider === "claude" ||
-      record.provider === "codex" ||
-      record.provider === "custom"
-        ? record.provider
+    provider: isProviderId(record.provider) ? record.provider : undefined,
+    model:
+      typeof record.model === "string" && record.model.trim()
+        ? normalizeModelId(isProviderId(record.provider) ? record.provider : "grok", record.model)
         : undefined,
-    model: typeof record.model === "string" && record.model.trim() ? record.model.trim() : undefined,
     customBotId:
       typeof record.customBotId === "string" && record.customBotId.trim() ? record.customBotId.trim() : undefined,
     peerFromSessionId:

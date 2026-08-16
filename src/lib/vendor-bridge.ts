@@ -29,6 +29,10 @@ export function vendorRateLimitNotice(provider: ProviderId): string {
 
 export function vendorFailedMessage(provider: ProviderId, message: string): string {
   if (isVendorRateLimitError(message)) return vendorRateLimitNotice(provider);
+  if (provider === "cursor") {
+    const rejected = message.match(/Cannot use this model:\s*([^\r\n.]+)(?:\.|\s+Available models:)/i)?.[1]?.trim();
+    if (rejected) return `Cursor cannot use “${rejected}”. Choose another model.`;
+  }
   return `${vendorAgentLabel(provider)} agent failed: ${message}`;
 }
 

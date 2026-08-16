@@ -43,6 +43,10 @@ export const PROVIDERS: Provider[] = [
   },
 ];
 
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && PROVIDERS.some((provider) => provider.id === value);
+}
+
 export function providerById(id: ProviderId): Provider {
   const found = PROVIDERS.find((item) => item.id === id);
   if (!found) throw new Error(`Unknown provider: ${id}`);

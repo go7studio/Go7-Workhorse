@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { capabilitiesFor } from "../src/lib/provider-capabilities";
 import { usageProviderForSession, leftoverForCard, byProvider, cursorLaneEvents } from "../src/lib/usage";
 import { cursorUsageLane, cursorWatchLane, isCursorInnerTask } from "../src/lib/cursor-lane";
-import { asProviderId } from "../src/lib/session";
+import { asProviderId, normalizeSession } from "../src/lib/session";
 import { vendorSendTarget, vendorFailedMessage, previewOnlyReply } from "../src/lib/vendor-bridge";
 import { applyVendorCatalog, defaultModel, modelName, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { commandsForSession, vendorSkillOrigin } from "../src/lib/commands";
@@ -150,6 +150,12 @@ test("vendorFailedMessage prefixes Cursor, never Preview only", () => {
   assert.match(vendorFailedMessage("cursor", "no binary"), /^Cursor agent failed:/);
   assert.doesNotMatch(vendorFailedMessage("cursor", "no binary"), /Preview only/);
   assert.match(previewOnlyReply("Cursor", "Demo", [], "hi"), /Preview only/);
+  const rejected = vendorFailedMessage(
+    "cursor",
+    "Cursor agent exited (1): Cannot use this model: retired. Available models: auto, composer-2.5, hundreds-more",
+  );
+  assert.equal(rejected, "Cursor cannot use “retired”. Choose another model.");
+  assert.doesNotMatch(rejected, /Available models|hundreds-more/);
 });
 
 test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
@@ -198,6 +204,19 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   assert.ok(spec.sessionParams.mcpServers.some((item) => item.name === "figma"));
   assert.notEqual(spec.command.toLowerCase(), "grok");
   assert.doesNotMatch(spec.command, /Cursor\.app/i);
+  const legacyAuto = buildCursorLaunchSpec({
+    ...spec,
+    model: "auto-smart",
+    detect: {
+      env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },
+      existsSync: (file) => file === "/opt/cursor-agent",
+      pathDirs: [],
+      homedir: "/no-home",
+      platform: "linux",
+    },
+  });
+  assert.equal(legacyAuto.model, "auto");
+  assert.deepEqual(legacyAuto.argv, ["--model", "auto", "acp"]);
   assert.throws(
     () =>
       spawnCursorProcess({
@@ -567,6 +586,18 @@ test("Cursor session rules and routing hydrate do not treat Cursor as Grok", () 
   assert.equal(kept?.provider, "cursor");
   assert.equal(kept?.model, "composer-2.5");
   assert.equal(normalizeRoutingDecision({ provider: "mystery", model: "x" }), undefined);
+  const persisted = normalizeSession({
+    id: "cursor-old",
+    provider: "cursor",
+    vendorProvider: "cursor",
+    model: "auto-smart",
+    messages: [{ id: "m1", role: "assistant", text: "ok", provider: "cursor", model: "auto-smart" }],
+  });
+  assert.equal(persisted?.provider, "cursor");
+  assert.equal(persisted?.vendorProvider, "cursor");
+  assert.equal(persisted?.model, "auto");
+  assert.equal(persisted?.messages[0]?.provider, "cursor");
+  assert.equal(persisted?.messages[0]?.model, "auto");
 });
 
 test("store and main wire a live cursor path", () => {
@@ -635,23 +666,24 @@ test("Cursor chats catalog and slash Cursor-origin skills from disk homes", () =
 
 test("Cursor Auto is labeled as Cursor Auto; Composer and Cursor Grok stay readable", () => {
   resetVendorCatalog();
-  const auto = modelName("cursor", "auto-smart");
+  const auto = modelName("cursor", "auto");
   assert.notEqual(auto, "Auto");
   assert.match(auto, /Auto/);
   assert.match(auto, /Cursor/);
   assert.match(modelName("cursor", "composer-2.5"), /Composer/);
   assert.match(modelName("cursor", "grok-4.6"), /Grok 4\.6/);
   assert.match(modelName("cursor", "grok-4.5"), /Grok 4\.5/);
-  assert.match(modelsFor("cursor").find((model) => model.id === "auto-smart")?.name ?? "", /Cursor/);
+  assert.match(modelsFor("cursor").find((model) => model.id === "auto")?.name ?? "", /Cursor/);
   applyVendorCatalog({
     cursor: [
-      { id: "auto-smart", name: "Auto", effort: true, contextWindow: 200_000 },
+      { id: "auto", name: "Auto", effort: true, contextWindow: 200_000 },
       { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
       { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 200_000 },
     ],
   });
-  assert.notEqual(modelName("cursor", "auto-smart"), "Auto");
-  assert.match(modelName("cursor", "auto-smart"), /Cursor/);
+  assert.notEqual(modelName("cursor", "auto"), "Auto");
+  assert.match(modelName("cursor", "auto"), /Cursor/);
+  assert.match(modelName("cursor", "auto-smart"), /Auto/);
   assert.match(modelName("cursor", "composer-2.5"), /Composer/);
   assert.match(modelName("cursor", "grok-4.6"), /Cursor Grok 4\.6/);
   resetVendorCatalog();

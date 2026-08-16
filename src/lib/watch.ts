@@ -733,7 +733,7 @@ export function deskCallCatalog(input: {
       const api = byKey.get("cursor:other-models");
       const connected = Boolean(link?.connected);
       const enabled = Boolean(link?.connected && link?.enabled !== false);
-      const composerModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "cursor-models" || item.id === "auto-smart");
+      const composerModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "cursor-models" || item.id === "auto");
       const apiModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "other-models");
       rows.push(
         deskCallRow({

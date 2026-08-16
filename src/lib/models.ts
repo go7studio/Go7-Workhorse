@@ -86,9 +86,9 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
   cursor: [
     { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
-    { id: "auto-smart", name: "Auto (Cursor)", effort: true, contextWindow: 200_000 },
-    { id: "grok-4.6", name: "Cursor Grok 4.6", effort: true, contextWindow: 200_000 },
-    { id: "grok-4.5", name: "Cursor Grok 4.5", effort: true, contextWindow: 200_000 },
+    { id: "auto", name: "Auto (Cursor)", effort: true, contextWindow: 200_000 },
+    { id: "cursor-grok-4.6-high", name: "Cursor Grok 4.6", effort: false, contextWindow: 200_000 },
+    { id: "cursor-grok-4.5-high", name: "Cursor Grok 4.5", effort: false, contextWindow: 200_000 },
   ],
   custom: [
     {
@@ -108,6 +108,19 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
 };
 
+const CURSOR_RETIRED_MODEL_ALIASES: Record<string, string> = {
+  "auto-smart": "auto",
+  "grok-4.6": "cursor-grok-4.6-high",
+  "grok-4.5": "cursor-grok-4.5-high",
+};
+
+/** Canonicalize retired vendor aliases without changing user-selected models. */
+export function normalizeModelId(provider: ProviderId, modelId: string): string {
+  const id = modelId.trim();
+  if (provider === "cursor") return CURSOR_RETIRED_MODEL_ALIASES[id.toLowerCase()] ?? id;
+  return id;
+}
+
 let liveCatalog: Partial<Record<ProviderId, ModelInfo[]>> = {};
 
 export function applyVendorCatalog(lists: Partial<Record<ProviderId, ModelInfo[]>>): void {
@@ -125,8 +138,14 @@ export function resetVendorCatalog(): void {
 
 export function cursorModelDisplayName(modelId: string, name?: string): string {
   const id = modelId.trim().toLowerCase();
-  const stock = MODEL_CATALOG.cursor.find((item) => item.id === id);
-  const raw = (name ?? stock?.name ?? modelId).trim();
+  const canonicalId = normalizeModelId("cursor", id);
+  const stock = MODEL_CATALOG.cursor.find((item) => item.id === canonicalId);
+  const supplied = name?.trim();
+  const raw = (
+    id === "auto-smart" && (!supplied || supplied.toLowerCase() === "auto-smart")
+      ? "Auto"
+      : supplied ?? stock?.name ?? modelId
+  ).trim();
   if (id === "auto-smart" || id === "auto") {
     if (!raw || /^auto$/i.test(raw)) return "Auto (Cursor)";
     if (/\bcursor\b/i.test(raw)) return raw;

@@ -61,8 +61,9 @@
           "steps": [
             "Resolve cursor-agent or capability-probe a generic agent binary before accepting it.",
             "Verify Cursor Agent CLI authentication separately from desktop-app login and stale artifacts.",
-            "Run ACP initialize and session/new; treat authentication-required as not ready.",
-            "Record the selected binary, auth state, launch identity, and concise remediation."
+            "List current Cursor models and verify Auto launches as the advertised auto id, including a migrated legacy auto-smart chat.",
+            "Run bounded Auto and Composer 2.5 ACP turns through initialize, session/new, and prompt.",
+            "Record the selected binary, auth state, requested and launched model, and concise remediation without dumping the full model list."
           ]
         }
       ],
@@ -143,8 +144,8 @@
           "testability": "auto-partial",
           "profiles": ["cursor-acp"],
           "scenarios": ["SET-S4"],
-          "passCriteria": "A different vendor's agent binary, desktop-app login, stale config artifact, or status exit code cannot produce a ready state; ACP session/new must succeed.",
-          "evidence": "Resolved binary identity, auth probe, ACP handshake, readiness row, and failure remediation."
+          "passCriteria": "A different vendor's agent binary, desktop-app login, stale config artifact, or status exit code cannot produce a ready state; current Auto and Composer ACP turns must succeed and legacy Auto must migrate to the advertised id.",
+          "evidence": "Resolved binary identity, auth probe, model list, requested/launched model ids, ACP handshakes, deterministic replies, readiness row, and bounded failure remediation."
         }
       ]
     },

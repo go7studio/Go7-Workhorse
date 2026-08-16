@@ -67,6 +67,7 @@ import {
   contextWindowFor,
   defaultModel,
   findChoice,
+  normalizeModelId,
   parseEffort,
   withEffort,
 } from "./models";
@@ -88,7 +89,7 @@ import {
   primaryFolder,
 } from "./project";
 import { projectEdits } from "./project-edits";
-import { providerById } from "./providers";
+import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
 import {
   applyUpdateStockBot,
@@ -492,14 +493,11 @@ function hydrate(value: unknown): AppState {
 function normalizeChoice(raw: unknown): AppState["lastModel"] {
   if (!raw || typeof raw !== "object") return DEFAULT_CHOICE;
   const record = raw as Partial<AppState["lastModel"]>;
-  const provider =
-    record.provider === "grok" ||
-    record.provider === "claude" ||
-    record.provider === "codex" ||
-    record.provider === "custom"
-      ? record.provider
-      : DEFAULT_CHOICE.provider;
-  const model = typeof record.model === "string" && record.model ? record.model : DEFAULT_CHOICE.model;
+  const provider = isProviderId(record.provider) ? record.provider : DEFAULT_CHOICE.provider;
+  const model = normalizeModelId(
+    provider,
+    typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id,
+  );
   return {
     provider,
     model,

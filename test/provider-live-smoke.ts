@@ -31,7 +31,7 @@ const model =
       ? "gpt-5.6-sol"
       : provider === "claude"
         ? "opus-5"
-        : "composer-2.5";
+        : process.argv[3]?.trim() || "composer-2.5";
 const host =
   provider === "grok"
     ? new GrokSessionHost()

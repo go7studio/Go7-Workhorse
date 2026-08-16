@@ -7,6 +7,7 @@ import {
   type GrokLaunchSpec,
 } from "./grok-launch";
 import { CURSOR_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { normalizeModelId } from "../src/lib/models";
 import {
   detectCursorLogin,
   isCursorAppCommand,
@@ -29,7 +30,7 @@ const DEFAULT_MODEL = "composer-2.5";
 
 export function resolveCursorModel(model: string | null | undefined): string {
   const trimmed = model?.trim();
-  return trimmed || DEFAULT_MODEL;
+  return normalizeModelId("cursor", trimmed || DEFAULT_MODEL);
 }
 
 export function resolveCursorEffort(effort: EffortLevel | string | null | undefined): string {

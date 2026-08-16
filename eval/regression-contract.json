@@ -165,6 +165,15 @@
       "rubric": ["ORC-02", "ORC-15"],
       "sourceFiles": ["electron/codex-host.ts", "electron/codex-app-server.ts", "electron/grok-agent.ts", "src/lib/store.tsx", "test/codex-adapter.test.ts"],
       "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-019",
+      "behavior": "Cursor Auto uses the CLI-advertised auto id, legacy aliases migrate, Composer remains callable, and rejected models do not flood the chat.",
+      "profiles": ["cursor-acp"],
+      "scenarios": ["SET-S4", "MOD-S1"],
+      "rubric": ["SET-07", "MOD-01"],
+      "sourceFiles": ["electron/cursor-launch.ts", "src/lib/models.ts", "src/lib/session.ts", "src/lib/vendor-bridge.ts", "test/cursor-adapter.test.ts"],
+      "verification": ["eval:validate", "eval:smoke"]
     }
   ]
 }

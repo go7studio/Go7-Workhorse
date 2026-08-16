@@ -21,10 +21,10 @@ jobs:
         include:
           - os: windows-latest
             script: package:win
-            installer: Workhorse-Setup-*.exe
+            installer: '*Workhorse-Setup-*.exe'
           - os: macos-latest
             script: package:mac
-            installer: Workhorse-*-mac.dmg
+            installer: '*Workhorse-*-mac.dmg'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

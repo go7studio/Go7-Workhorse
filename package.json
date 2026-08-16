@@ -64,7 +64,6 @@
     "productName": "Workhorse",
     "copyright": "Copyright © 2026 Go7 Studio",
     "asar": true,
-    "electronDist": "node_modules/electron/dist",
     "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "output": "release"

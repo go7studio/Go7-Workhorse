@@ -11,6 +11,7 @@ export type SpawnRequest = {
   description?: string;
   provider?: string;
   model?: string;
+  customBotId?: string;
   chat?: string;
   effort?: string;
   timeoutSeconds?: number;
@@ -352,6 +353,22 @@ export function resolveSpawnSpec(
       provider: session.provider,
     }));
   const chat = input.chat?.trim() ?? "";
+  const assignedCustom = input.customBotId
+    ? customBots?.find((bot) => bot.id === input.customBotId)
+    : undefined;
+  if (assignedCustom) {
+    return {
+      provider: "custom",
+      model: input.model?.trim() || assignedCustom.model,
+      customBotId: assignedCustom.id,
+      effort: withEffort(
+        "custom",
+        input.model?.trim() || assignedCustom.model,
+        parseEffort(input.effort ?? "") ?? parent?.effort ?? "medium",
+      ),
+      title: subagentLabel("custom", input.model?.trim() || assignedCustom.model, input.description || assignedCustom.name),
+    };
+  }
   const hintedQuery = [input.provider, input.model, input.chat, input.description].filter(Boolean).join(" ");
   const named =
     (chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null) ??

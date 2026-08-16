@@ -118,12 +118,12 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_list_chats",
-    description: "List live sidebar chats in this Workhorse window (title, model, preview).",
+    description: "List live sidebar chats with session IDs, titles, models, and previews.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "workhorse_read_chat",
-    description: "Read another sidebar chat’s transcript by title.",
+    description: "Read another sidebar chat by session ID or title.",
     input_schema: {
       type: "object",
       properties: { chat: { type: "string" }, limit: { type: "number" } },
@@ -132,12 +132,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_ask_chat",
-    description:
-      "Ask an existing sidebar chat a question and return its reply. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox. Pass the visible title.",
+    description: "Ask another live chat by session ID or title and return its real reply.",
     input_schema: {
       type: "object",
       properties: {
-        chat: { type: "string", description: "Visible chat title" },
+        chat: { type: "string", description: "Session ID or visible title" },
         message: { type: "string", description: "Question or request for that chat" },
       },
       required: ["chat", "message"],
@@ -154,6 +153,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         description: { type: "string", description: "Short 3–5 word label" },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id" },
+        route: { type: "string", description: "auto, quick, balanced, or deep" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },

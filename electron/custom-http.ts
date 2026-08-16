@@ -1,5 +1,6 @@
 import { peelAskMarkup, peelThinkTags } from "../src/lib/markdown";
-import type { ChatImage, EffortLevel } from "../src/lib/types";
+import type { ChatImage, EffortLevel, ModelInputCapabilities } from "../src/lib/types";
+import { attachmentPromptBlock, isPicture } from "../src/lib/images";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
 import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
 import {
@@ -19,6 +20,7 @@ export type CustomHttpConfig = {
   apiKey: string;
   model: string;
   api?: CustomApiKind;
+  inputs?: Partial<ModelInputCapabilities>;
 };
 
 export type CustomHttpTool = { name: string; description: string; input_schema: Record<string, unknown> };
@@ -165,6 +167,49 @@ function imageBlock(image: ChatImage): Record<string, unknown> {
   };
 }
 
+function anthropicAttachmentBlocks(
+  attachment: ChatImage,
+  inputs?: Partial<ModelInputCapabilities>,
+): Record<string, unknown>[] {
+  if (isPicture(attachment) && attachment.data && inputs?.images !== false) return [imageBlock(attachment)];
+  if (
+    attachment.kind === "document" &&
+    attachment.mimeType === "application/pdf" &&
+    attachment.data &&
+    inputs?.documents !== false
+  ) {
+    return [{
+      type: "document",
+      source: { type: "base64", media_type: "application/pdf", data: attachment.data },
+      title: attachment.name,
+    }];
+  }
+  return [
+    { type: "text", text: attachmentPromptBlock(attachment) },
+    ...(attachment.derivedImages ?? []).filter((frame) => frame.data).map(imageBlock),
+  ];
+}
+
+function openAiAttachmentBlocks(
+  attachment: ChatImage,
+  inputs?: Partial<ModelInputCapabilities>,
+): Record<string, unknown>[] {
+  if (isPicture(attachment) && attachment.data && inputs?.images !== false) {
+    return [{ type: "image_url", image_url: { url: `data:${attachment.mimeType || "image/png"};base64,${attachment.data}` } }];
+  }
+  if (attachment.kind === "audio" && attachment.data && inputs?.audio !== false) {
+    const format = attachment.mimeType.includes("wav") ? "wav" : attachment.mimeType.includes("mpeg") ? "mp3" : "";
+    if (format) return [{ type: "input_audio", input_audio: { data: attachment.data, format } }];
+  }
+  return [
+    { type: "text", text: attachmentPromptBlock(attachment) },
+    ...(attachment.derivedImages ?? []).filter((frame) => frame.data).map((frame) => ({
+      type: "image_url",
+      image_url: { url: `data:${frame.mimeType || "image/jpeg"};base64,${frame.data}` },
+    })),
+  ];
+}
+
 export function buildAnthropicBody(input: {
   model: string;
   messages: CustomChatMessage[];
@@ -173,6 +218,7 @@ export function buildAnthropicBody(input: {
   maxTokens?: number;
   tools?: CustomHttpTool[];
   role?: import("../src/lib/workhorse-rules").DeskRole;
+  inputs?: Partial<ModelInputCapabilities>;
 }): Record<string, unknown> {
   const messages = input.messages
     .filter((item) => item.role === "user" || item.role === "assistant")
@@ -201,7 +247,7 @@ export function buildAnthropicBody(input: {
       }
       const blocks: Record<string, unknown>[] = [];
       if (item.text.trim()) blocks.push({ type: "text", text: item.text });
-      for (const image of item.images ?? []) blocks.push(imageBlock(image));
+      for (const image of item.images ?? []) blocks.push(...anthropicAttachmentBlocks(image, input.inputs));
       return { role: "user", content: blocks.length > 0 ? blocks : [{ type: "text", text: item.text || "" }] };
     });
   const thinking = customThinking(input.model, input.effort);
@@ -224,6 +270,7 @@ export function buildOpenAiBody(input: {
   maxTokens?: number;
   tools?: CustomHttpTool[];
   role?: import("../src/lib/workhorse-rules").DeskRole;
+  inputs?: Partial<ModelInputCapabilities>;
 }): Record<string, unknown> {
   const messages: Record<string, unknown>[] = [];
   if (input.preface?.trim()) messages.push({ role: "system", content: input.preface.trim() });
@@ -248,12 +295,7 @@ export function buildOpenAiBody(input: {
     }
     const parts: Record<string, unknown>[] = [];
     if (item.text.trim()) parts.push({ type: "text", text: item.text });
-    for (const image of item.images ?? []) {
-      parts.push({
-        type: "image_url",
-        image_url: { url: `data:${image.mimeType || "image/png"};base64,${image.data}` },
-      });
-    }
+    for (const image of item.images ?? []) parts.push(...openAiAttachmentBlocks(image, input.inputs));
     messages.push({
       role: "user",
       content: parts.length > 1 || (item.images?.length ?? 0) > 0 ? parts : item.text || "",
@@ -513,8 +555,8 @@ export async function streamCustomHttp(
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, tools: input.tools, role: input.role })
-      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, tools: input.tools, role: input.role });
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, tools: input.tools, role: input.role, inputs: config.inputs })
+      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, tools: input.tools, role: input.role, inputs: config.inputs });
 
   const headers: Record<string, string> = {
     "content-type": "application/json",

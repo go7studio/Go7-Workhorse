@@ -12,6 +12,34 @@ export type CodexPromptInput = GrokPromptInput;
 export type CodexEventSink = GrokEventSink;
 type CodexSpawnFn = (spec: ReturnType<typeof buildCodexLaunchSpec>) => ChildProcessWithoutNullStreams;
 
+const CODEX_SKILL_BUDGET_WARNING =
+  "Warning: Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+
+export function stripCodexRuntimeNotices(text: string): string {
+  return text.replace(`${CODEX_SKILL_BUDGET_WARNING}\n\n`, "").replace(CODEX_SKILL_BUDGET_WARNING, "");
+}
+
+export function createCodexChunkFilter(emit: (text: string) => void) {
+  let pending = "";
+  return {
+    push(chunk: string) {
+      const combined = pending + chunk;
+      if (CODEX_SKILL_BUDGET_WARNING.startsWith(combined.trimEnd())) {
+        pending = combined;
+        return;
+      }
+      pending = "";
+      const clean = stripCodexRuntimeNotices(combined);
+      if (clean) emit(clean);
+    },
+    flush() {
+      const clean = stripCodexRuntimeNotices(pending);
+      pending = "";
+      if (clean) emit(clean);
+    },
+  };
+}
+
 export function codexLaunchKey(
   input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "securityPolicy" | "mcpServers">,
 ): string {
@@ -88,9 +116,12 @@ export class CodexSessionHost {
     });
 
     try {
-      const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);
+      const handlers = this.handlersFor(input, emit);
+      const chunks = createCodexChunkFilter(handlers.onChunk);
+      const result = await slot.agent.prompt(text, { ...handlers, onChunk: chunks.push }, input.images ?? []);
+      chunks.flush();
       emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
-      return result;
+      return { ...result, text: stripCodexRuntimeNotices(result.text).trimStart() };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });

@@ -8,6 +8,7 @@ import {
   groupAttachments,
   imageSrc,
   isPicture,
+  attachmentLabel,
   MAX_IMAGES,
   readChatAttachment,
   type DroppedFile,
@@ -47,6 +48,7 @@ export function Composer({
   const [over, setOver] = useState(false);
   const [active, setActive] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
+  const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const sessionId = session?.id;
   const valueRef = useRef(value);
@@ -103,8 +105,10 @@ export function Composer({
     if (files.length === 0) return;
     const next: ChatImage[] = [];
     for (const item of files) {
-      const dropped = item instanceof File ? { file: item } : item;
-      const image = await readChatAttachment(dropped.file);
+      const dropped = item instanceof File
+        ? { file: item, sourcePath: window.workhorse?.pathForFile(item) || undefined }
+        : item;
+      const image = dropped.attachment ?? (dropped.file ? await readChatAttachment(dropped.file, dropped.sourcePath) : null);
       if (image) next.push(dropped.folder ? { ...image, folder: dropped.folder } : image);
     }
     if (next.length === 0) return;
@@ -262,6 +266,7 @@ export function Composer({
                   ) : (
                     <span className="composer-file" title={image.name}>
                       {image.name}
+                      <em>{attachmentLabel(image)}</em>
                     </span>
                   )}
                   <button
@@ -347,6 +352,26 @@ export function Composer({
             }
           }}
         />
+        <input
+          ref={filePicker}
+          className="composer-file-input"
+          type="file"
+          multiple
+          accept="image/*,.txt,.md,.json,.csv,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.rtf,.odt,audio/*,video/*"
+          onChange={(event) => {
+            void addFiles([...event.target.files ?? []]);
+            event.target.value = "";
+          }}
+        />
+        <button
+          className="composer-attach"
+          type="button"
+          aria-label="Attach files"
+          title="Attach files"
+          onClick={() => filePicker.current?.click()}
+        >
+          +
+        </button>
         {onToggleSetup && session && (
           <button
             className={`setup-trigger${setupOpen ? " on" : ""}`}

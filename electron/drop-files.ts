@@ -2,9 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   imageMime,
+  attachmentKind,
+  attachmentMime,
   isTextFile,
   MAX_FILE_BYTES,
   MAX_IMAGE_BYTES,
+  MAX_DOCUMENT_BYTES,
+  MAX_AUDIO_BYTES,
+  MAX_VIDEO_BYTES,
   MAX_IMAGES,
   shouldSkipDropDir,
 } from "../src/lib/images";
@@ -12,9 +17,11 @@ import {
 export type ListedDropFile = {
   name: string;
   mimeType: string;
-  kind: "image" | "file";
+  kind: import("../src/lib/types").AttachmentKind;
   text?: string;
   data?: string;
+  sourcePath?: string;
+  size?: number;
 };
 
 function walkDropPath(abs: string, rel: string, into: { name: string; path: string }[]): void {
@@ -79,12 +86,27 @@ export function listDropFiles(roots: unknown): ListedDropFile[] {
       });
       continue;
     }
-    if (!isTextFile({ name: item.name }) || stat.size > MAX_FILE_BYTES) continue;
+    if (isTextFile({ name: item.name })) {
+      if (stat.size > MAX_FILE_BYTES) continue;
+      files.push({
+        name: item.name,
+        mimeType: "text/plain",
+        kind: "file",
+        text: fs.readFileSync(item.path, "utf8"),
+        sourcePath: item.path,
+        size: stat.size,
+      });
+      continue;
+    }
+    const kind = attachmentKind({ name: item.name });
+    const limit = kind === "document" ? MAX_DOCUMENT_BYTES : kind === "audio" ? MAX_AUDIO_BYTES : kind === "video" ? MAX_VIDEO_BYTES : 0;
+    if (!kind || !limit || stat.size > limit) continue;
     files.push({
       name: item.name,
-      mimeType: "text/plain",
-      kind: "file",
-      text: fs.readFileSync(item.path, "utf8"),
+      mimeType: attachmentMime({ name: item.name }, kind),
+      kind,
+      sourcePath: item.path,
+      size: stat.size,
     });
   }
   return files;

@@ -20,6 +20,9 @@ export type ProviderCapabilities = {
   input: {
     images: boolean;
     files: boolean;
+    documents: CapabilitySupport;
+    audio: CapabilitySupport;
+    video: CapabilitySupport;
   };
   security: {
     permissions: boolean;
@@ -33,7 +36,7 @@ export type ProviderCapabilities = {
 const ACP_SHARED = {
   transport: "acp" as const,
   tools: { workspace: true, desk: true, mcp: true, subagents: true },
-  input: { images: true, files: true },
+  input: { images: true, files: true, documents: "workhorse" as const, audio: "workhorse" as const, video: "workhorse" as const },
   usage: "native" as const,
 };
 
@@ -101,7 +104,7 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
       portableReplay: true,
     },
     tools: { workspace: true, desk: true, mcp: true, subagents: true },
-    input: { images: true, files: true },
+    input: { images: true, files: true, documents: "workhorse", audio: "workhorse", video: "workhorse" },
     security: {
       permissions: true,
       filesystem: "workhorse",

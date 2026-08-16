@@ -12,11 +12,14 @@ import { ContextMeter } from "./ModelMenu";
 import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
+import { RoutingPane } from "./RoutingPane";
+import { routingProfileForModel } from "../lib/routing";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "llms", label: "LLMs" },
   { id: "skills", label: "Skills" },
+  { id: "routing", label: "Routing" },
   { id: "usage", label: "Usage" },
   { id: "watch", label: "Watch" },
 ];
@@ -274,6 +277,8 @@ export function Settings() {
 
       {section === "skills" && <SkillsPane />}
 
+      {section === "routing" && <RoutingPane />}
+
       {section === "usage" && <UsagePane key={usageTick} homeSignal={usageHome} embedded tabs={tabs} />}
 
       {section === "watch" && <WatchPane />}
@@ -362,6 +367,43 @@ function StockBotDetail({
       </div>
       {id === "codex" ? <CodexNativeStatus /> : null}
       <MassSend vendor={id} />
+    </div>
+  );
+}
+
+function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
+  const store = useStore();
+  const current = routingProfileForModel("custom", bot.model, bot.routingProfile);
+  const setRole = (role: string) => {
+    const values = role === "deep"
+      ? { intelligence: 5, speed: 2, cost: 5 }
+      : role === "quick"
+        ? { intelligence: 3, speed: 5, cost: 1 }
+        : { intelligence: 4, speed: 4, cost: 3 };
+    store.updateCustomBot(bot.id, { routingProfile: { ...current, ...values } });
+  };
+  const role = current.intelligence >= 5 ? "deep" : current.speed >= 5 && current.cost <= 2 ? "quick" : "balanced";
+  const input = (key: keyof typeof current.inputs, value: boolean) =>
+    store.updateCustomBot(bot.id, {
+      routingProfile: { ...current, inputs: { ...current.inputs, [key]: value } },
+    });
+  return (
+    <div className="field">
+      <span>Routing</span>
+      <div className="actions">
+        <select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Routing role">
+          <option value="quick">Quick</option>
+          <option value="balanced">Balanced</option>
+          <option value="deep">Deep</option>
+        </select>
+        <label><input type="checkbox" checked={current.local} onChange={(event) => store.updateCustomBot(bot.id, { routingProfile: { ...current, local: event.target.checked } })} /> Local</label>
+      </div>
+      <div className="actions">
+        <label><input type="checkbox" checked={current.inputs.images} onChange={(event) => input("images", event.target.checked)} /> Images</label>
+        <label><input type="checkbox" checked={current.inputs.documents} onChange={(event) => input("documents", event.target.checked)} /> Docs</label>
+        <label><input type="checkbox" checked={current.inputs.audio} onChange={(event) => input("audio", event.target.checked)} /> Audio</label>
+        <label><input type="checkbox" checked={current.inputs.video} onChange={(event) => input("video", event.target.checked)} /> Video</label>
+      </div>
     </div>
   );
 }
@@ -535,6 +577,8 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           store.updateCustomBot(bot.id, patch);
         }}
       />
+
+      <BotRoutingFields bot={bot} />
 
       <div className="bot-context-row">
         <ContextMeter fallbackWindow={bot.contextWindow} matchProvider="custom" matchBotId={bot.id} />

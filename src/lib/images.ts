@@ -1,8 +1,11 @@
 import { uid } from "./id";
-import type { ChatImage } from "./types";
+import type { AttachmentKind, ChatImage } from "./types";
 
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 export const MAX_FILE_BYTES = 256 * 1024;
+export const MAX_DOCUMENT_BYTES = 12 * 1024 * 1024;
+export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 export const MAX_IMAGES = 24;
 
 const SKIP_DROP_DIRS = new Set([
@@ -37,6 +40,38 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 const ALLOWED = new Set(Object.values(MIME_BY_EXT));
+
+const DOCUMENT_MIME_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  rtf: "application/rtf",
+  odt: "application/vnd.oasis.opendocument.text",
+};
+
+const AUDIO_MIME_BY_EXT: Record<string, string> = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  ogg: "audio/ogg",
+  opus: "audio/opus",
+  webm: "audio/webm",
+};
+
+const VIDEO_MIME_BY_EXT: Record<string, string> = {
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  mkv: "video/x-matroska",
+};
 
 const TEXT_EXT = new Set([
   "txt",
@@ -108,6 +143,29 @@ export function imageMime(file: { name?: string; type?: string }): string | null
   return MIME_BY_EXT[ext] ?? null;
 }
 
+function mappedMime(file: { name?: string; type?: string }, family: "document" | "audio" | "video"): string | null {
+  const type = (file.type ?? "").toLowerCase();
+  const ext = file.name?.split(".").pop()?.toLowerCase() ?? "";
+  const map = family === "document" ? DOCUMENT_MIME_BY_EXT : family === "audio" ? AUDIO_MIME_BY_EXT : VIDEO_MIME_BY_EXT;
+  if (type && (family === "document" ? Object.values(map).includes(type) : type.startsWith(`${family}/`))) return type;
+  return map[ext] ?? null;
+}
+
+export function attachmentKind(file: { name?: string; type?: string }): AttachmentKind | null {
+  if (imageMime(file)) return "image";
+  if (isTextFile(file)) return "file";
+  if (mappedMime(file, "document")) return "document";
+  if (mappedMime(file, "audio")) return "audio";
+  if (mappedMime(file, "video")) return "video";
+  return null;
+}
+
+export function attachmentMime(file: { name?: string; type?: string }, kind = attachmentKind(file)): string {
+  if (kind === "image") return imageMime(file) ?? "image/png";
+  if (kind === "document" || kind === "audio" || kind === "video") return mappedMime(file, kind) ?? file.type ?? "application/octet-stream";
+  return file.type || "text/plain";
+}
+
 export function isPicture(item: Pick<ChatImage, "kind" | "mimeType" | "name">): boolean {
   return item.kind !== "file" && Boolean(imageMime({ type: item.mimeType, name: item.name }));
 }
@@ -131,7 +189,7 @@ export function isTextFile(file: { name?: string; type?: string }): boolean {
 }
 
 export function isAttachmentFile(file: { name?: string; type?: string }): boolean {
-  return Boolean(imageMime(file) || isTextFile(file));
+  return Boolean(attachmentKind(file));
 }
 
 export function imageSrc(image: Pick<ChatImage, "mimeType" | "data">): string {
@@ -159,7 +217,8 @@ export function normalizeImages(raw: unknown): ChatImage[] {
     const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : "file";
     const mimeType = typeof record.mimeType === "string" ? record.mimeType : "";
     const text = typeof record.text === "string" ? record.text : "";
-    if (record.kind === "file" || (text && !imageMime({ type: mimeType, name }))) {
+    const kind = record.kind ?? attachmentKind({ type: mimeType, name });
+    if (kind === "file" || (text && kind !== "image")) {
       if (!text) continue;
       images.push({
         id: typeof record.id === "string" && record.id ? record.id : uid("file"),
@@ -169,8 +228,10 @@ export function normalizeImages(raw: unknown): ChatImage[] {
         kind: "file",
         text,
         ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
+        ...(typeof record.sourcePath === "string" && record.sourcePath.trim() ? { sourcePath: record.sourcePath.trim() } : {}),
+        ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
       });
-    } else {
+    } else if (kind === "image") {
       const imageType = imageMime({ type: mimeType, name: record.name });
       const data = typeof record.data === "string" ? record.data.replace(/^data:[^;]+;base64,/, "") : "";
       if (!imageType || !data) continue;
@@ -181,6 +242,27 @@ export function normalizeImages(raw: unknown): ChatImage[] {
         data,
         kind: "image",
         ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
+        ...(typeof record.sourcePath === "string" && record.sourcePath.trim() ? { sourcePath: record.sourcePath.trim() } : {}),
+        ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
+      });
+    } else if (kind === "document" || kind === "audio" || kind === "video") {
+      const data = typeof record.data === "string" ? record.data.replace(/^data:[^;]+;base64,/, "") : "";
+      const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : "";
+      const derivedImages = record.derivedImages
+        ? normalizeImages(record.derivedImages).filter((row) => row.kind === "image")
+        : [];
+      if (!data && !sourcePath && derivedImages.length === 0) continue;
+      images.push({
+        id: typeof record.id === "string" && record.id ? record.id : uid(kind),
+        name,
+        mimeType: mimeType || attachmentMime({ name }, kind),
+        data,
+        kind,
+        ...(sourcePath ? { sourcePath } : {}),
+        ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
+        ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
+        ...(typeof record.durationMs === "number" && record.durationMs >= 0 ? { durationMs: record.durationMs } : {}),
+        ...(derivedImages.length > 0 ? { derivedImages } : {}),
       });
     }
     if (images.length >= MAX_IMAGES) break;
@@ -205,10 +287,72 @@ export async function readChatImage(file: File): Promise<ChatImage | null> {
   return readChatAttachment(file);
 }
 
-export async function readChatAttachment(file: File): Promise<ChatImage | null> {
+function mediaEvent(target: HTMLMediaElement, event: string, timeout = 4_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const done = (value: boolean) => {
+      window.clearTimeout(timer);
+      target.removeEventListener(event, ready);
+      target.removeEventListener("error", failed);
+      resolve(value);
+    };
+    const ready = () => done(true);
+    const failed = () => done(false);
+    const timer = window.setTimeout(() => done(false), timeout);
+    target.addEventListener(event, ready, { once: true });
+    target.addEventListener("error", failed, { once: true });
+  });
+}
+
+async function inspectMedia(file: File, kind: "audio" | "video"): Promise<{ durationMs?: number; frames?: ChatImage[] }> {
+  if (typeof document === "undefined" || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return {};
+  const element = document.createElement(kind);
+  element.preload = "metadata";
+  element.muted = true;
+  const href = URL.createObjectURL(file);
+  element.src = href;
+  try {
+    if (!(await mediaEvent(element, "loadedmetadata"))) return {};
+    const durationMs = Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : undefined;
+    if (kind !== "video" || !(element instanceof HTMLVideoElement) || !element.videoWidth || !element.videoHeight) {
+      return { durationMs };
+    }
+    const frames: ChatImage[] = [];
+    const canvas = document.createElement("canvas");
+    const ratio = Math.min(1, 1280 / element.videoWidth);
+    canvas.width = Math.max(1, Math.round(element.videoWidth * ratio));
+    canvas.height = Math.max(1, Math.round(element.videoHeight * ratio));
+    const context = canvas.getContext("2d");
+    if (!context) return { durationMs };
+    const duration = Number.isFinite(element.duration) ? element.duration : 0;
+    const samples = duration > 0 ? [0.1, 0.35, 0.65, 0.9] : [0];
+    for (let index = 0; index < samples.length; index += 1) {
+      element.currentTime = Math.max(0, Math.min(duration || 0, duration * samples[index]));
+      if (!(await mediaEvent(element, "seeked", 2_500)) && index > 0) continue;
+      context.drawImage(element, 0, 0, canvas.width, canvas.height);
+      const raw = canvas.toDataURL("image/jpeg", 0.78);
+      const data = raw.slice(raw.indexOf(",") + 1);
+      if (!data) continue;
+      frames.push({
+        id: uid("frame"),
+        name: `${file.name || "video"} · frame ${index + 1}`,
+        mimeType: "image/jpeg",
+        data,
+        kind: "image",
+      });
+    }
+    return { durationMs, frames };
+  } finally {
+    element.removeAttribute("src");
+    URL.revokeObjectURL(href);
+  }
+}
+
+export async function readChatAttachment(file: File, sourcePath?: string): Promise<ChatImage | null> {
   if (file.size <= 0) return null;
-  const mimeType = imageMime(file);
-  if (mimeType) {
+  const kind = attachmentKind(file);
+  const mimeType = attachmentMime(file, kind);
+  const path = sourcePath?.trim() || "";
+  if (kind === "image") {
     if (file.size > MAX_IMAGE_BYTES) return null;
     const data = await fileToBase64(file);
     if (!data) return null;
@@ -218,8 +362,29 @@ export async function readChatAttachment(file: File): Promise<ChatImage | null> 
       mimeType,
       data,
       kind: "image",
+      size: file.size,
+      ...(path ? { sourcePath: path } : {}),
     };
   }
+  if (kind === "document" || kind === "audio" || kind === "video") {
+    const limit = kind === "document" ? MAX_DOCUMENT_BYTES : kind === "audio" ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES;
+    if (file.size > limit) return null;
+    const media = kind === "audio" || kind === "video" ? await inspectMedia(file, kind) : {};
+    const data = kind === "video" ? "" : await fileToBase64(file);
+    if (!data && !path && !media.frames?.length) return null;
+    return {
+      id: uid(kind),
+      name: file.name?.trim() || kind,
+      mimeType,
+      data,
+      kind,
+      size: file.size,
+      ...(path ? { sourcePath: path } : {}),
+      ...(media.durationMs !== undefined ? { durationMs: media.durationMs } : {}),
+      ...(media.frames?.length ? { derivedImages: media.frames } : {}),
+    };
+  }
+  if (kind !== "file") return null;
   if (file.size > MAX_FILE_BYTES) return null;
   if (!isTextFile(file) && file.size > 32 * 1024) return null;
   const text = await file.text();
@@ -231,6 +396,8 @@ export async function readChatAttachment(file: File): Promise<ChatImage | null> 
     data: "",
     kind: "file",
     text,
+    size: file.size,
+    ...(path ? { sourcePath: path } : {}),
   };
 }
 
@@ -280,8 +447,10 @@ function fileWithName(file: File, name: string): File {
 }
 
 export type DroppedFile = {
-  file: File;
+  file?: File;
+  attachment?: ChatImage;
   folder?: string;
+  sourcePath?: string;
 };
 
 export type AttachmentGroup =
@@ -321,6 +490,7 @@ async function collectDropEntry(entry: DropEntry, prefix: string, folder: string
     into.push({
       file: fileWithName(file, prefix ? `${prefix}/${file.name}` : file.name),
       ...(folder ? { folder } : {}),
+      ...(window.workhorse?.pathForFile(file) ? { sourcePath: window.workhorse.pathForFile(file) } : {}),
     });
     return;
   }
@@ -343,9 +513,11 @@ function filesFromListedDrop(
   rows: {
     name: string;
     mimeType: string;
-    kind: "image" | "file";
+    kind: AttachmentKind;
     text?: string;
     data?: string;
+    sourcePath?: string;
+    size?: number;
   }[],
 ): DroppedFile[] {
   const files: DroppedFile[] = [];
@@ -360,7 +532,22 @@ function filesFromListedDrop(
     } else if (row.text) {
       file = new File([row.text], row.name, { type: row.mimeType || "text/plain" });
     }
-    if (file) files.push({ file, ...(folder ? { folder } : {}) });
+    if (file) files.push({ file, ...(folder ? { folder } : {}), ...(row.sourcePath ? { sourcePath: row.sourcePath } : {}) });
+    else if (row.sourcePath) {
+      files.push({
+        attachment: {
+          id: uid(row.kind),
+          name: row.name,
+          mimeType: row.mimeType,
+          data: row.data ?? "",
+          kind: row.kind,
+          sourcePath: row.sourcePath,
+          size: row.size,
+        },
+        ...(folder ? { folder } : {}),
+        sourcePath: row.sourcePath,
+      });
+    }
   }
   return files;
 }
@@ -374,7 +561,7 @@ export async function collectDroppedFiles(transfer: DataTransfer | null): Promis
       if (collected.length >= MAX_IMAGES) break;
       await collectDropEntry(entry, "", entry.isDirectory ? entry.name : undefined, collected);
     }
-    if (collected.some((item) => item.file.size > 0)) return collected;
+    if (collected.some((item) => (item.file?.size ?? 0) > 0 || item.attachment)) return collected;
   }
   const listed = filesFromDataTransfer(transfer);
   const disk = window.workhorse?.listDropFiles
@@ -385,7 +572,7 @@ export async function collectDroppedFiles(transfer: DataTransfer | null): Promis
     const files = filesFromListedDrop(rows);
     if (files.length > 0) return files;
   }
-  return listed.map((file) => ({ file }));
+  return listed.map((file) => ({ file, ...(window.workhorse?.pathForFile(file) ? { sourcePath: window.workhorse.pathForFile(file) } : {}) }));
 }
 
 export function dataTransferLooksLikeFiles(transfer: DataTransfer | null): boolean {
@@ -410,6 +597,30 @@ export function filePromptBlock(file: ChatImage): string {
   return `Attached file \`${file.name}\`:\n\n\`\`\`\n${body}\n\`\`\``;
 }
 
+function mediaLength(durationMs?: number): string {
+  if (!durationMs || durationMs <= 0) return "";
+  const seconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}:${String(seconds % 60).padStart(2, "0")}` : `${seconds}s`;
+}
+
+export function attachmentLabel(file: ChatImage): string {
+  const kind = file.kind === "document" ? "Document" : file.kind === "audio" ? "Audio" : file.kind === "video" ? "Video" : "File";
+  const length = mediaLength(file.durationMs);
+  return length ? `${kind} · ${length}` : kind;
+}
+
+export function attachmentPromptBlock(file: ChatImage): string {
+  if (file.kind === "file" || file.text) return filePromptBlock(file);
+  const kind = file.kind ?? "attachment";
+  const details = [file.mimeType, mediaLength(file.durationMs), file.size ? `${Math.ceil(file.size / 1024)} KB` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const source = file.sourcePath ? `\nSource: \`${file.sourcePath}\`` : "";
+  const frames = file.derivedImages?.length ? `\n${file.derivedImages.length} representative frames follow.` : "";
+  return `Attached ${kind} \`${file.name}\`${details ? ` (${details})` : ""}.${source}${frames}`;
+}
+
 export function buildAcpPrompt(text: string, images: ChatImage[] = []): AcpContentBlock[] {
   const blocks: AcpContentBlock[] = [];
   if (text) blocks.push({ type: "text", text });
@@ -418,8 +629,13 @@ export function buildAcpPrompt(text: string, images: ChatImage[] = []): AcpConte
       if (image.text) blocks.push({ type: "text", text: filePromptBlock(image) });
       continue;
     }
-    if (image.data && image.mimeType) {
+    if (isPicture(image) && image.data && image.mimeType) {
       blocks.push({ type: "image", mimeType: image.mimeType, data: image.data });
+      continue;
+    }
+    blocks.push({ type: "text", text: attachmentPromptBlock(image) });
+    for (const frame of image.derivedImages ?? []) {
+      if (frame.data && frame.mimeType) blocks.push({ type: "image", mimeType: frame.mimeType, data: frame.data });
     }
   }
   if (blocks.length === 0) blocks.push({ type: "text", text: "" });
@@ -428,5 +644,5 @@ export function buildAcpPrompt(text: string, images: ChatImage[] = []): AcpConte
 
 export function hasSendableAttachment(image: ChatImage): boolean {
   if (image.kind === "file" || image.text) return Boolean(image.text);
-  return Boolean(image.data && image.mimeType);
+  return Boolean((image.data && image.mimeType) || image.sourcePath || image.derivedImages?.length);
 }

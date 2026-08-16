@@ -8,7 +8,7 @@
       "discovery": ["binary", "login artifact", "model cache", "runtime command list"],
       "launchBoundary": "electron/grok-host.ts",
       "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "native", "fork": "native", "rewind": "native", "compact": "native", "usage": "native" },
+      "capabilities": { "resume": "native", "fork": "native", "rewind": "native", "compact": "native", "usage": "native", "routing": "workhorse", "inputs": { "images": "native", "documents": "path", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -18,7 +18,7 @@
       "discovery": ["binary", "login artifact", "model cache", "app-server capabilities"],
       "launchBoundary": "electron/codex-host.ts",
       "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native" },
+      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native", "routing": "workhorse", "inputs": { "images": "native", "documents": "path", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -28,7 +28,7 @@
       "discovery": ["binary", "login artifact", "model cache", "ACP launch"],
       "launchBoundary": "electron/claude-host.ts",
       "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native" },
+      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native", "routing": "workhorse", "inputs": { "images": "native", "documents": "path", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -39,7 +39,7 @@
       "discovery": ["provider preset", "base URL", "models endpoint probe"],
       "launchBoundary": "electron/custom-http.ts",
       "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse" },
+      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -50,11 +50,11 @@
       "discovery": ["manual base URL", "models endpoint probe when supported"],
       "launchBoundary": "electron/custom-http.ts",
       "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse" },
+      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "pdf-native", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     }
   ],
-  "settingsSections": ["profile", "llms", "skills", "usage", "watch"],
+  "settingsSections": ["profile", "llms", "skills", "routing", "usage", "watch"],
   "requiredProvenanceChain": [
     "selection",
     "launch-or-request",

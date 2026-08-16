@@ -46,6 +46,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     setSessionEffort,
     setSessionEnvironment,
     setSessionModel,
+    setSessionRoutingMode,
     openSettings,
     settings,
     projects,
@@ -134,6 +135,9 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
   const thinkNow = thinking[hoverIndex] ?? thinking[thinkIndex];
   const selectedPermission = PERMISSIONS.find((item) => item.id === session.mode) ?? PERMISSIONS[0];
   const selectedSandbox = SANDBOXES.find((item) => item.id === session.sandbox) ?? SANDBOXES[0];
+  const routeLabel = session.routingMode === "auto"
+    ? `Auto${session.routingDecision?.reason ? ` · ${session.routingDecision.reason}` : ""}`
+    : "";
 
   return (
     <div
@@ -166,14 +170,23 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div>
             <strong>Model</strong>
           </div>
-          <span className="setup-current">{formatWindow(modelsFor(session.provider).find((model) => model.id === session.model)?.contextWindow ?? 0)} context</span>
+          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(modelsFor(session.provider).find((model) => model.id === session.model)?.contextWindow ?? 0)} context</span>
         </div>
 
         <div className="setup-subgroup">
           <div className="section-label">Provider</div>
           <div className="setup-effort setup-vendors" role="listbox" aria-label="Vendor">
+            <button
+              className={session.routingMode === "auto" ? "on" : undefined}
+              type="button"
+              aria-selected={session.routingMode === "auto"}
+              onClick={() => settings.routing.enabled ? setSessionRoutingMode("auto") : openSettings("routing")}
+            >
+              <span className="setup-provider-dot" aria-hidden="true" />
+              Auto
+            </button>
             {SETUP_VENDORS.filter((id) => vendorEnabled(settings.llms[id])).map((id) => {
-              const on = session.provider === id;
+              const on = session.routingMode !== "auto" && session.provider === id;
               const tint = vendorTint(id, settings.llms[id]);
               return (
                 <button

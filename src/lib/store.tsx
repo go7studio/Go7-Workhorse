@@ -96,8 +96,10 @@ import {
   firstAttachedChoice,
   isSettingsSection,
   normalizeSettings,
+  normalizeRouting,
   vendorAttachedForSession,
 } from "./settings";
+import { chooseRoutingDecision, routingCandidatesForDesk, routingProfileForModel } from "./routing";
 import {
   applyCompactUsage,
   applyFailedPeerAsk,
@@ -153,6 +155,7 @@ import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
 import { withPortableHistory } from "./portable-history";
 import { createPortableCheckpoint, messagesForPortableReplay } from "./portable-compaction";
+import { hasSendableAttachment } from "./images";
 import { buildSessionPreface } from "./context-preface";
 import {
   applyUsageContext,
@@ -219,6 +222,7 @@ import type {
   UsageDraft,
   UsageRange,
   WatchSettings,
+  RoutingSettings,
 } from "./types";
 
 const EMPTY: AppState = {
@@ -258,6 +262,7 @@ export type Store = AppState & {
   deleteProject: (id: string, chats: "keep" | "remove") => void;
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
+  setSessionRoutingMode: (mode: "auto" | "manual") => void;
   createCustomBot: () => string | null;
   installCustomBot: (draft: CustomLlm) => { ok: boolean; created: boolean; bot?: PublicBotCard; error?: string };
   deleteCustomBot: (id: string) => void;
@@ -335,6 +340,7 @@ export type Store = AppState & {
 
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
+  updateRouting: (patch: Partial<RoutingSettings>) => void;
   watchNotices: WatchNotice[];
   watchHold: WatchHold | null;
   watchRestore: { text: string; images?: import("./types").ChatImage[] } | null;
@@ -759,6 +765,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         status: "idle",
         contextUsed: 0,
         messages: [],
+        routingMode: current.settings.routing.enabled ? "auto" : "manual",
       });
       return {
         ...current,
@@ -790,9 +797,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return {
         ...latest,
         lastModel: presetFrom(next),
-        sessions: latest.sessions.map((item) => (item.id === live.id ? next : item)),
+        sessions: latest.sessions.map((item) =>
+          item.id === live.id ? { ...next, routingMode: "manual", routingDecision: undefined } : item,
+        ),
       };
     });
+  }, []);
+
+  const setSessionRoutingMode = useCallback((mode: "auto" | "manual") => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId
+          ? { ...item, routingMode: mode, ...(mode === "manual" ? { routingDecision: undefined } : {}) }
+          : item,
+      ),
+    }));
   }, []);
 
   const setSessionEffort = useCallback((effort: EffortLevel) => {
@@ -1255,9 +1275,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let text = raw.trim();
     const originalText = text;
     let hideUser = options?.hideUser === true;
-    const images = (options?.images ?? []).filter((image) =>
-      image.kind === "file" || image.text ? Boolean(image.text) : Boolean(image.data && image.mimeType),
-    );
+    const images = (options?.images ?? []).filter(hasSendableAttachment);
     if (!text && images.length === 0) return;
 
     const targetSessionId = options?.sessionId ?? stateRef.current.activeSessionId;
@@ -1636,8 +1654,45 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const current = stateRef.current;
-    const session = current.sessions.find((item) => item.id === targetSessionId);
+    let session = current.sessions.find((item) => item.id === targetSessionId);
     if (!session) return;
+    if (current.settings.routing.enabled && session.routingMode !== "manual" && !originalText.startsWith("/")) {
+      const statuses = watchVendorStatuses({
+        settings: current.settings,
+        usage: current.usage,
+        plans: plansRef.current,
+        permits: current.watchPermits,
+        dayMarks: current.watchDayMarks,
+      });
+      const decision = chooseRoutingDecision(
+        routingCandidatesForDesk(current.settings, statuses, plansRef.current),
+        {
+          prompt: originalText,
+          attachments: images,
+          current: {
+            provider: session.provider,
+            model: session.model,
+            customBotId: session.customBotId,
+          },
+        },
+        current.settings.routing,
+      );
+      if (decision) {
+        const routed = applySessionModelChange(session, {
+          provider: decision.provider,
+          model: decision.model,
+          customBotId: decision.customBotId,
+          effort: withEffort(decision.provider, decision.model, session.effort),
+        });
+        session = { ...routed, routingMode: "auto", routingDecision: decision };
+        const routedSession = session;
+        setState((latest) => ({
+          ...latest,
+          lastModel: presetFrom(routedSession),
+          sessions: latest.sessions.map((item) => (item.id === routedSession.id ? routedSession : item)),
+        }));
+      }
+    }
     if (!vendorAttachedForSession(session, current.settings)) {
       setState((latest) => ({ ...latest, panel: "settings", settingsSection: "llms" }));
       return;
@@ -1826,6 +1881,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               apiKey: custom.apiKey,
               model: custom.model,
               api: "api" in custom ? custom.api : undefined,
+              inputs: routingProfileForModel("custom", custom.model, "routingProfile" in custom ? custom.routingProfile : undefined).inputs,
             },
           });
           const reply = typeof result?.text === "string" ? result.text.trim() : "";
@@ -2337,6 +2393,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 apiKey: custom.apiKey,
                 model: custom.model,
                 api: custom.api,
+                inputs: routingProfileForModel(
+                  "custom",
+                  custom.model,
+                  "routingProfile" in custom ? custom.routingProfile : undefined,
+                ).inputs,
               },
             });
             return typeof result?.text === "string" ? result.text.trim() : "";
@@ -3170,9 +3231,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
             }
-            const spawnProvider = isNested ? "custom" : payload.provider;
-            const spawnModel = isNested ? NESTED_AGENT_MODEL : payload.model;
-            const spawnEffort = isNested ? "low" : payload.effort;
+            const routeTier = payload.route === "quick" || payload.route === "balanced" || payload.route === "deep"
+              ? payload.route
+              : undefined;
+            const routeSpawn = latest.settings.routing.enabled && (
+              Boolean(payload.route) || (!payload.provider && !payload.model && !payload.chat)
+            );
+            const routeStatuses = routeSpawn
+              ? watchVendorStatuses({
+                  settings: latest.settings,
+                  usage: latest.usage,
+                  plans: latest.deskPlans ?? plansRef.current,
+                  permits: latest.watchPermits,
+                  dayMarks: latest.watchDayMarks,
+                })
+              : [];
+            const routeDecision = routeSpawn
+              ? chooseRoutingDecision(
+                  routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                  { prompt: payload.message, tier: routeTier ?? (isNested ? "quick" : undefined) },
+                  latest.settings.routing,
+                )
+              : null;
+            const spawnProvider = routeDecision?.provider ?? (isNested ? "custom" : payload.provider);
+            const spawnModel = routeDecision?.model ?? (isNested ? NESTED_AGENT_MODEL : payload.model);
+            const spawnEffort = routeDecision
+              ? withEffort(
+                  routeDecision.provider,
+                  routeDecision.model,
+                  isNested ? "low" : ((payload.effort as EffortLevel | undefined) ?? null),
+                )
+              : isNested ? "low" : payload.effort;
             const spawnTimeoutSeconds = isNested
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;
@@ -3202,8 +3291,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 description: payload.description,
                 provider: spawnProvider,
                 model: spawnModel,
+                customBotId: routeDecision?.customBotId,
                 chat: payload.chat,
-                effort: spawnEffort,
+                effort: spawnEffort ?? undefined,
               },
               latest.sessions.filter((item) => !isHiddenSession(item) && !item.archivedAt),
               parent,
@@ -3314,6 +3404,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(tokenBudget ? { tokenBudget } : {}),
                 isolation,
               },
+              routingMode: routeDecision ? "auto" : "manual",
+              routingDecision: routeDecision ?? undefined,
               messages: [
                 {
                   id: uid("msg"),
@@ -4657,6 +4749,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateRouting = useCallback((patch: Partial<RoutingSettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        routing: normalizeRouting({ ...current.settings.routing, ...patch }),
+      },
+    }));
+  }, []);
+
   const dismissWatchNotice = useCallback((notice: WatchNotice) => {
     setState((current) => ({
       ...current,
@@ -4826,6 +4928,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteProject,
       startSession,
       setSessionModel,
+      setSessionRoutingMode,
       createCustomBot,
       installCustomBot,
       deleteCustomBot,
@@ -4892,6 +4995,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setThreadWidth,
       setUsageBudget,
       updateWatch,
+      updateRouting,
       watchNotices,
       watchHold,
       watchRestore,
@@ -4931,6 +5035,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteProject,
       startSession,
       setSessionModel,
+      setSessionRoutingMode,
       createCustomBot,
       installCustomBot,
       deleteCustomBot,
@@ -4997,6 +5102,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setThreadWidth,
       setUsageBudget,
       updateWatch,
+      updateRouting,
       watchNotices,
       watchHold,
       watchRestore,

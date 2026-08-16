@@ -6590,3 +6590,20 @@ html.pane-dragging * {
     justify-content: flex-start;
   }
 }
+.composer-file-input {
+  display: none;
+}
+
+.composer-attach {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 21px;
+  line-height: 1;
+  padding: 4px 2px;
+}
+
+.composer-attach:hover {
+  color: var(--text);
+}

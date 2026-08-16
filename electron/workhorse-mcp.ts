@@ -746,6 +746,7 @@ async function spawnAgent(
     isolation?: "worktree" | "shared";
     folder?: string;
     wait?: boolean;
+    route?: "auto" | "quick" | "balanced" | "deep";
   },
   from?: string,
 ): Promise<string> {
@@ -771,6 +772,7 @@ async function spawnAgent(
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
         isolation: "shared" as const,
+        route: input.route ?? "quick",
       }
     : input;
   const projectFolder = callerProjectFolder(caller);
@@ -808,6 +810,7 @@ async function spawnAgent(
     isolation: spawnInput.isolation,
     folder: admitted.cwd,
     wait: spawnInput.wait,
+    route: spawnInput.route,
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -827,6 +830,7 @@ async function spawnAgent(
       isolation: spawnInput.isolation,
       folder: admitted.cwd,
       wait: spawnInput.wait,
+      route: spawnInput.route,
     });
   }
   return first;
@@ -883,6 +887,10 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: args.wait === false ? false : args.wait === true ? true : undefined,
+        route:
+          args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
+            ? args.route
+            : undefined,
       },
       from,
     );

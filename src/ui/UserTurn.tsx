@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { splitGoalCommand } from "../lib/commands";
-import { groupAttachments, imageSrc, isPicture } from "../lib/images";
+import { attachmentLabel, groupAttachments, imageSrc, isPicture } from "../lib/images";
 import { peerPromptParts } from "../lib/session-bridge";
 import { useStore } from "../lib/store";
 import type { ChatMessage } from "../lib/types";
@@ -109,6 +109,7 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
               ) : (
                 <span key={group.file.id} className="say-file" title={group.file.name}>
                   {group.file.name}
+                  <em>{attachmentLabel(group.file)}</em>
                 </span>
               ),
             )}

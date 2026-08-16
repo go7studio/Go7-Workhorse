@@ -20,7 +20,10 @@
     "eval:init": "node scripts/workhorse-eval.mjs init",
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
     "eval:smoke": "tsx test/provider-live-smoke.ts",
+    "eval:capability-smoke": "tsx test/capability-live-smoke.ts",
     "eval:fixture": "node scripts/workhorse-eval-fixture.mjs",
+    "eval:fixture-check": "node scripts/workhorse-eval-fixture.mjs --self-test",
+    "eval:media-fixtures": "node scripts/workhorse-eval-media-fixtures.mjs",
     "eval:score": "node scripts/workhorse-eval.mjs score",
     "eval:finalize": "node scripts/workhorse-eval.mjs finalize",
     "pack:win": "npm run build && electron-builder --win --dir",
@@ -30,7 +33,7 @@
     "package:mac": "electron-builder --mac dmg zip --publish never",
     "dist:mac": "npm run build && npm run package:mac",
     "preview": "vite preview",
-    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/watch.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts"
+    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/watch.test.ts test/routing.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",

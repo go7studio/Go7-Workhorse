@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.5.0",
+  "contractVersion": "0.6.0",
   "title": "Multi-agent, cross-chat, and goal orchestration contract",
   "referenceWalk": {
     "product": "Cursor",
@@ -39,6 +39,7 @@
       "electron/workhorse-mcp.ts",
       "electron/peer-inbox.ts",
       "src/lib/session-bridge.ts",
+      "src/lib/skills-catalog.ts",
       "src/lib/subagents.ts",
       "src/lib/agent-thread.ts",
       "src/lib/goal.ts",
@@ -66,8 +67,8 @@
     "resumePlan": "Continue the same plan and task attempts after pause or restart without dispatching completed work again."
   },
   "cascadeLimits": {
-    "model": "MiniMax-M3 fallback; automatic children use the quick routing tier when enabled",
-    "effort": "low",
+    "model": "Automatic children use the capacity-aware quick tier; explicit assignments win",
+    "effort": "Derived from the selected quick route unless explicitly assigned",
     "maxDepth": 2,
     "maxRootConcurrency": 2,
     "maxNestedChildrenPerWorker": 1,
@@ -83,6 +84,7 @@
       "model",
       "effort",
       "skills",
+      "capabilities",
       "tools",
       "chat target",
       "token budget",
@@ -97,7 +99,7 @@
       "cost and concurrency impact",
       "shared versus worktree isolation"
     ],
-    "fallbackRule": "If the requested agent, skill, tool, provider capability, budget, capacity, or isolation is unavailable, ask or downgrade explicitly; never silently substitute identity or authority.",
+    "fallbackRule": "If the requested agent, skill, tool, provider capability, budget, capacity, or isolation is unavailable, stop or downgrade explicitly; never silently substitute identity or authority. Only installed skill references count as skills; free-form expertise is a capability.",
     "precedenceRule": "An explicit child provider or model assignment wins. Automatic nested routing defaults to quick and records its capacity-aware decision.",
     "selfRoutingRule": "A plan task may choose its agent only after recording required capabilities, candidates, Watch state, cost, concurrency, isolation, and a short rationale.",
     "watchRule": "A Watch-held provider receives no request. An approved capable fallback may run with the hold and substitution recorded.",
@@ -136,6 +138,7 @@
     "ORC-10",
     "ORC-11",
     "ORC-12",
-    "ORC-13"
+    "ORC-13",
+    "ORC-14"
   ]
 }

@@ -77,7 +77,6 @@ import {
   isHiddenSession,
   isSpawnOnlyPrompt,
   nestedSpawnError,
-  NESTED_AGENT_MODEL,
   normalizeAgentRun,
   overlappingAgentFiles,
   parentHasRunningChildren,
@@ -6019,11 +6018,16 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     project: "Spaceship battles",
     slice: "Review project identity and docs",
     vendor: "MiniMax",
+    skills: [{ name: "codex:play-release", file: "/skills/play-release/SKILL.md" }],
+    capabilities: ["Godot Android billing"],
   });
   assert.equal(looksLikeWorkerBrief(workerBrief), true);
   assert.match(workerBrief, /ROLE: worker/);
   assert.match(workerBrief, /D:\\Godot\\Projects\\spaceship-battle/);
-  assert.match(workerBrief, /one low-effort MiniMax-M3 helper/);
+  assert.match(workerBrief, /one quick-route helper/);
+  assert.match(workerBrief, /SKILLS: codex:play-release @ \/skills\/play-release\/SKILL\.md/);
+  assert.match(workerBrief, /CAPABILITIES: Godot Android billing/);
+  assert.match(workerBrief, /Read every listed SKILL\.md fully before acting/);
   assert.match(workerBrief, /Read README\.md/);
   assert.doesNotMatch(workerBrief, /From another Workhorse agent/);
   assert.equal(looksLikeSpawnRequest(workerBrief), false);
@@ -6092,7 +6096,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     allowNested: true,
   });
   assert.equal(boundedNested.ok, true);
-  assert.equal(NESTED_AGENT_MODEL, "MiniMax-M3");
+  assert.doesNotMatch(WORKER_SPAWN_ERROR, /MiniMax|M3/);
   assert.equal(nestedSpawnError([
     { id: "root" },
     { id: "worker", parentId: "root" },
@@ -6429,11 +6433,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(store, /formatAwaitAgentsSnapshot/);
   assert.doesNotMatch(store, /formatSubagentPrompt\(/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint\([\s\S]*role/);
-  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /one MiniMax-M3 helper/);
-  assert.match(WORKER_SESSION_RULES, /MiniMax-M3.*5,000 tokens/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /one quick-route helper/);
+  assert.match(WORKER_SESSION_RULES, /capacity-aware quick route.*5,000 tokens/);
   assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
-  assert.match(WORKHORSE_SESSION_RULES, /one bounded MiniMax-M3 helper/);
+  assert.match(WORKHORSE_SESSION_RULES, /one bounded quick-route helper/);
 });
 
 test("desk builds one named join prompt and syncs idle children", () => {

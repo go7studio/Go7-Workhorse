@@ -210,6 +210,28 @@ export function findDeskSkill(skills: DeskSkill[], query: string): DeskSkill | u
   );
 }
 
+export type ResolvedSkillRequest = {
+  resolved: DeskSkill[];
+  unresolved: string[];
+};
+
+/** Resolve only installed skills. Free-form expertise belongs in assignment capabilities. */
+export function resolveRequestedSkills(skills: DeskSkill[], queries: string[] = []): ResolvedSkillRequest {
+  const resolved = new Map<string, DeskSkill>();
+  const unresolved: string[] = [];
+  for (const raw of queries) {
+    const query = raw.trim();
+    if (!query) continue;
+    const skill = findDeskSkill(skills, query);
+    if (!skill) {
+      if (!unresolved.includes(query)) unresolved.push(query);
+      continue;
+    }
+    resolved.set(`${skill.origin}:${skill.name.toLowerCase()}`, skill);
+  }
+  return { resolved: [...resolved.values()], unresolved };
+}
+
 export function publicSkillCard(skill: DeskSkill): { name: string; origin: SkillOrigin; description: string } {
   return { name: skill.name, origin: skill.origin, description: skill.description };
 }

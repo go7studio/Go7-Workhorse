@@ -739,9 +739,11 @@
           "steps": [
             "Create three fixture tasks whose needs differ: repository research, visual UI inspection, and deterministic code verification.",
             "For one task, explicitly assign provider, model, effort, skills, tools, constraints, timeout, token budget, and isolation.",
+            "Resolve every assigned skill against workhorse_list_skills, attach its exact SKILL.md path, and require a full read before work starts.",
             "For one task, allow Workhorse to recommend an agent and require it to show the matched skills/capabilities, cost/concurrency impact, and why delegation helps.",
             "Reject or edit the recommendation and verify the user choice wins without losing the task.",
-            "Remove one required skill or provider capability and verify Workhorse asks or downgrades explicitly instead of silently substituting."
+            "Pass a missing label as a skill and verify dispatch stops before a provider call; pass it as a capability and verify it is never presented as loaded instructions.",
+            "Emit a skill-description compaction warning and verify identity, path, and the full-file read remain intact."
           ]
         },
         {
@@ -777,8 +779,8 @@
           "executor": "provider",
           "profiles": ["custom-openai", "grok-acp", "codex-acp", "claude-acp"],
           "steps": [
-            "Have a MiniMax-M3 root orchestrator spawn one low-effort MiniMax-M3 worker with a 10,000-token ceiling and a task that explicitly requires one independent nested check.",
-            "Have that worker spawn exactly one MiniMax-M3 helper with a 5,000-token ceiling, await its real response, cite the helper session ID, and finish its own bounded report.",
+            "Have a root orchestrator spawn one bounded worker with a 10,000-token ceiling and a task that explicitly requires one independent nested check.",
+            "Have that worker spawn exactly one capacity-aware quick-route helper with a 5,000-token ceiling, await its real response, cite the helper session ID, and finish its own bounded report.",
             "Attempt a second nested child and a great-grandchild; verify both are rejected before a provider call with an explicit depth/concurrency reason.",
             "From a separate visible chat on each enabled smoke provider, send one short peer message to an existing MiniMax-M3 chat and receive a correlated real reply.",
             "Reverse direction once: the MiniMax-M3 chat messages the provider chat, which answers under its assigned runtime without spawning or silently switching models.",
@@ -919,9 +921,9 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4", "ORC-S5"],
-          "passCriteria": "A worker may create exactly one quick-tier helper within depth two and the configured budget; MiniMax-M3 remains the fallback; a second nested child or great-grandchild is rejected before a provider call; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
+          "passCriteria": "A worker may create exactly one quick-tier helper within depth two and the configured budget; selection uses the live callable roster unless explicitly assigned; a second nested child or great-grandchild is rejected before a provider call; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
           "evidence": "Capability discovery, three-level lineage fixture, limit rejection, descendant transcripts, policy snapshots, and usage rollup.",
-          "baseline": { "status": "partial", "basis": "Source includes automatic quick-tier routing, MiniMax-M3 fallback, and depth-two one-helper guards; live proof and aggregate usage reconciliation remain required." }
+          "baseline": { "status": "partial", "basis": "Source includes automatic quick-tier routing and depth-two one-helper guards; live proof and aggregate usage reconciliation remain required." }
         },
         {
           "id": "ORC-11",
@@ -955,6 +957,17 @@
           "scenarios": ["ORC-S6"],
           "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; terminal child runs never remain visibly active or consume a slot; every later worker wave wakes the orchestrator once; completed task dispatch counts remain one after restart; resumed work preserves task, attempt, and child identity or records an explicit retry.",
           "evidence": "Plan event log, concurrency timeline, peer inbox records, restart snapshot, task attempts, child ids, and dispatch counts."
+        },
+        {
+          "id": "ORC-14",
+          "criterion": "Skill-aware assignments resolve installed skills and never present free-form expertise as loaded instructions.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S2"],
+          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker is told to read the full file; unknown skills fail before any provider call; capabilities stay separate; description compaction does not count as skill loss.",
+          "evidence": "Catalog snapshot, resolved skill manifest, worker prompt, missing-skill rejection, provider call ledger, and assignment metadata."
         }
       ]
     },

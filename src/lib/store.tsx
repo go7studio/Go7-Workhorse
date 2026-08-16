@@ -151,7 +151,6 @@ import {
   formatWorkerPrompt,
   isHiddenSession,
   nestedSpawnError,
-  NESTED_AGENT_MODEL,
   overlappingAgentFiles,
   parentHasRunningChildren,
   rootSpawnError,
@@ -3510,8 +3509,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   latest.settings.routing,
                 )
               : null;
-            const spawnProvider = routeDecision?.provider ?? (isNested ? "custom" : payload.provider);
-            const spawnModel = routeDecision?.model ?? (isNested ? NESTED_AGENT_MODEL : payload.model);
+            const spawnProvider = routeDecision?.provider ?? payload.provider;
+            const spawnModel = routeDecision?.model ?? payload.model;
             const selectedTier = routeDecision?.taskTier ?? routeTier ?? inferRoutingTier(payload.message, payload.attachments);
             const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested
@@ -3545,7 +3544,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 model: spawnModel,
                 customBotId: routeDecision?.customBotId,
                 chat: payload.chat,
-                effort: requestedEffort ?? (isNested ? "low" : undefined),
+                effort: requestedEffort ?? routeDecision?.effort ?? undefined,
               },
               latest.sessions.filter((item) => !isHiddenSession(item) && !item.archivedAt),
               parent,
@@ -3557,7 +3556,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 resolvedSpec.provider,
                 resolvedSpec.model,
                 selectedTier,
-                isNested ? "low" : requestedEffort ?? routeDecision?.effort,
+                requestedEffort ?? routeDecision?.effort,
               ),
             };
             if (vendorSendTarget(spec.provider) === "preview") {
@@ -3631,6 +3630,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const planStepId = payload.planStepId?.trim() || "";
             const rationale = payload.rationale?.trim() || "";
             const assignedSkills = Array.isArray(payload.skills) ? payload.skills.filter(Boolean) : [];
+            const assignedSkillFiles = Array.isArray(payload.skillFiles) ? payload.skillFiles.filter(Boolean) : [];
+            const assignedCapabilities = Array.isArray(payload.capabilities) ? payload.capabilities.filter(Boolean) : [];
             const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
             const assignedConstraints = Array.isArray(payload.constraints) ? payload.constraints.filter(Boolean) : [];
             if (planStepId) {
@@ -3712,6 +3713,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(planStepId ? { planStepId } : {}),
                 ...(rationale ? { rationale } : {}),
                 ...(assignedSkills.length > 0 ? { skills: assignedSkills } : {}),
+                ...(assignedSkillFiles.length > 0 ? { skillFiles: assignedSkillFiles } : {}),
+                ...(assignedCapabilities.length > 0 ? { capabilities: assignedCapabilities } : {}),
                 ...(assignedTools.length > 0 ? { tools: assignedTools } : {}),
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(payload.id ? { correlationId: payload.id } : {}),
@@ -3805,6 +3808,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   slice: payload.description,
                   vendor: spec.title,
                   constraints: assignedConstraints,
+                  skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
+                  capabilities: assignedCapabilities,
                 }),
                 latest.settings.mcpServers,
                 spawnImages,

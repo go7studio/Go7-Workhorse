@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { exportVendorBundle, importSkillFromPath, listDeskSkills, pushSkillToVendor, readDeskSkill, seedWorkhorseSkills } from "../electron/desk-export-host";
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle } from "../src/lib/desk-export";
 import { commandsForSession } from "../src/lib/commands";
-import { catalogSkills, filterDeskSkills, findDeskSkill, parseSkillFrontmatter, sameDeskSkills, skillBodyFromMarkdown, skillHomes } from "../src/lib/skills-catalog";
+import { catalogSkills, filterDeskSkills, findDeskSkill, parseSkillFrontmatter, resolveRequestedSkills, sameDeskSkills, skillBodyFromMarkdown, skillHomes } from "../src/lib/skills-catalog";
 import { deleteDeskSkill } from "../electron/desk-export-host";
 import { isSettingsSection } from "../src/lib/settings";
 import type { Session } from "../src/lib/types";
@@ -22,6 +22,21 @@ function writeSkill(dir: string, name: string, description: string): void {
     "utf8",
   );
 }
+
+test("spawn skill requests distinguish installed skills from free-form capabilities", () => {
+  const catalog = [
+    {
+      name: "play-release",
+      description: "Ship Android builds",
+      origin: "codex" as const,
+      dir: "/skills/play-release",
+      skillFile: "/skills/play-release/SKILL.md",
+    },
+  ];
+  const result = resolveRequestedSkills(catalog, ["codex:play-release", "Godot Android billing", "play-release"]);
+  assert.deepEqual(result.resolved.map((skill) => `${skill.origin}:${skill.name}`), ["codex:play-release"]);
+  assert.deepEqual(result.unresolved, ["Godot Android billing"]);
+});
 
 function sampleSession(partial: Partial<Session> = {}): Session {
   return {

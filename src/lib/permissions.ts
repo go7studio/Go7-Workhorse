@@ -115,6 +115,11 @@ export function permissionGrantKey(tool: string): string {
   ) {
     return "workhorse";
   }
+  if (/^(?:bash|shell|powershell|run_command|cd|ls|pwd|cat|sed|rg|grep|find|git|wc|head|tail|echo|mkdir|cp|mv|rm|touch|npm|npx|node|python|godot)(?:_|$)/.test(key)) {
+    return "shell";
+  }
+  if (/^(?:read|read_file|list|list_dir)(?:_|$)/.test(key)) return "read";
+  if (/^(?:write|write_file|edit|str_replace|search_replace)(?:_|$)/.test(key)) return "write";
   return key || tool.trim().toLowerCase();
 }
 
@@ -276,6 +281,7 @@ export function permissionPolicyAnswer(input: {
   const planFile = /plan\.md/i.test(`${input.path ?? ""} ${input.detail}`);
   if ((input.sandbox === "read-only" || input.sandbox === "strict") && write) return "deny";
   if (input.mode === "plan" && write && !planFile) return "deny";
+  if (input.mode === "always-approve") return "session";
   if (looksLikeSearchOnly(input.tool, input.detail, input.path)) return "once";
   if (input.mode === "accept-edits" && write && !looksLikeShellTool(input.tool, input.detail)) return "once";
   return null;

@@ -166,6 +166,7 @@ export type DeskLineupRow = {
   report?: string;
   planStepId?: string;
   rationale?: string;
+  constraints?: string[];
 };
 
 export type DeskLineup = {
@@ -193,6 +194,7 @@ export type AgentRun = {
   rationale?: string;
   skills?: string[];
   tools?: string[];
+  constraints?: string[];
   correlationId?: string;
 };
 
@@ -234,6 +236,7 @@ export type PlanAssignment = {
   rationale: string;
   skills: string[];
   tools: string[];
+  constraints: string[];
   requested?: string;
 };
 

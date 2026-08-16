@@ -65,10 +65,12 @@ const CLAUDE_AUTH_SESSION = "auth:claude";
 
 /** Stable store folder. productName changes must not orphan chats. */
 export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
+export const WORKHORSE_DEV_USER_DATA_DIR = "Go7 Workhorse Dev";
 
 function pinUserData() {
   const isolated = workhorseUserDataOverride();
-  const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), WORKHORSE_USER_DATA_DIR);
+  const directory = app.isPackaged ? WORKHORSE_USER_DATA_DIR : WORKHORSE_DEV_USER_DATA_DIR;
+  const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), directory);
   try {
     fs.mkdirSync(dest, { recursive: true });
     app.setPath("userData", dest);

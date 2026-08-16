@@ -196,6 +196,7 @@ function normalizeAssignment(raw: unknown): PlanAssignment | undefined {
     rationale: clean(record.rationale),
     skills: uniqueStrings(record.skills),
     tools: uniqueStrings(record.tools),
+    constraints: uniqueStrings(record.constraints),
     ...(clean(record.requested) ? { requested: clean(record.requested) } : {}),
   };
 }

@@ -58,6 +58,7 @@ export type PeerAsk = {
   rationale?: string;
   skills?: string[];
   tools?: string[];
+  constraints?: string[];
   files?: string[];
   attachments?: ChatImage[];
   planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "revise" | "status" | "evidence" | "complete" | "block" | "cancel";

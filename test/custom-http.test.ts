@@ -1367,7 +1367,7 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
     { id: "t1", name: "run_command", input: { command: "git status" } },
     { mode: "always-approve", sandbox: "off" },
   );
-  assert.equal(allow, "once");
+  assert.equal(allow, "session");
   const blockedStrict = customToolPolicy(
     { id: "t2", name: "run_command", input: { command: "git status" } },
     { mode: "always-approve", sandbox: "strict" },

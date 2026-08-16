@@ -294,7 +294,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(once.sessions[0].messages.at(-1)?.kind, "tool");
   assert.match(once.sessions[0].messages.at(-1)?.text ?? "", /Allowed once/);
   assert.match(sessionGrant.sessions[0].messages.at(-1)?.text ?? "", /Allowed for this session/);
-  assert.deepEqual(sessionGrant.sessions[0].permissionGrants, ["run_command"]);
+  assert.deepEqual(sessionGrant.sessions[0].permissionGrants, ["shell"]);
   assert.equal(autoAllowPermission({ tool: "workhorse_workhorse_list_chats" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_spawn_agent" }), "once");
@@ -339,6 +339,11 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(permissionPolicyAnswer({ mode: "plan", sandbox: "off", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "deny");
   assert.equal(permissionPolicyAnswer({ mode: "plan", sandbox: "off", tool: "Write", detail: "plan.md", path: "plan.md" }), null);
   assert.equal(permissionPolicyAnswer({ mode: "ask", sandbox: "off", tool: "Write", detail: "notes.md" }), null);
+  assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "off", tool: "shell", detail: "ls docs" }), "session");
+  assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "workspace", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "session");
+  assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "read-only", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "deny");
+  assert.equal(permissionGrantKey('cd /tmp/worktree && ls docs && echo "copy"'), "shell");
+  assert.equal(permissionGrantKey("Read src/app.ts"), "read");
   assert.deepEqual(
     elevationForBlock({ mode: "ask", sandbox: "read-only", tool: "Write", detail: "notes.md", path: "notes.md" }),
     { sandbox: "off" },
@@ -422,6 +427,8 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
   assert.match(main, /WORKHORSE_USER_DATA_DIR = "Go7 Workhorse"/);
+  assert.match(main, /WORKHORSE_DEV_USER_DATA_DIR = "Go7 Workhorse Dev"/);
+  assert.match(main, /app\.isPackaged \? WORKHORSE_USER_DATA_DIR : WORKHORSE_DEV_USER_DATA_DIR/);
   assert.match(main, /app\.setPath\("userData"/);
   assert.equal(selectSurface({ panel: "settings", hasProject: true, hasSession: true }), "settings");
   assert.equal(selectSurface({ panel: "add-bot", hasProject: true, hasSession: true }), "add-bot");
@@ -2245,6 +2252,33 @@ test("desk bridge binds a real local port instead of :0", async () => {
   try {
     assert.match(bridge.url, /^http:\/\/127\.0\.0\.1:[1-9]\d*$/);
     assert.doesNotMatch(bridge.url, /:0$/);
+  } finally {
+    bridge.close();
+  }
+});
+
+test("desk bridge preserves executable plan actions", async () => {
+  let seen: import("../electron/peer-inbox").PeerAsk | undefined;
+  const bridge = await startWorkhorseBridge(async (ask) => {
+    seen = ask;
+    return { text: "ok" };
+  });
+  try {
+    const response = await fetch(`${bridge.url}/bots`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${bridge.token}` },
+      body: JSON.stringify({
+        fromSessionId: "root",
+        toSessionId: "",
+        message: "plan",
+        mode: "bots",
+        action: "plan",
+        planOperation: "view",
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(seen?.action, "plan");
+    assert.equal(seen?.planOperation, "view");
   } finally {
     bridge.close();
   }
@@ -4162,6 +4196,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /className="thinking"/);
   assert.doesNotMatch(pane, /live-pill" aria-live/);
   assert.match(popout, /working ·|Still working|subagent-preview/);
+  assert.match(popout, /subagent-model/);
+  assert.match(popout, /subagent-scope/);
+  assert.match(popout, /planStep\.title/);
   assert.match(popout, /finished/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);
@@ -6437,6 +6474,10 @@ test("desk builds one named join prompt and syncs idle children", () => {
   });
   assert.equal(looksLikeWorkerBrief(workerBrief), true);
   assert.equal(looksLikePermissionQuestion(workerBrief), false);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
+    /formatWorkerPrompt\(\{[\s\S]*?folder: childCwd,/,
+  );
   assert.equal(looksLikePermissionQuestion("what sandbox do you have?"), true);
   assert.equal(
     looksLikePermissionQuestion("Permission / Sandbox are workspace facts on this turn."),

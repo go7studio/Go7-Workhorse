@@ -173,7 +173,7 @@ import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
 import { withPortableHistory } from "./portable-history";
 import { createPortableCheckpoint, messagesForPortableReplay } from "./portable-compaction";
-import { hasSendableAttachment } from "./images";
+import { fitModelImages, hasSendableAttachment } from "./images";
 import { buildSessionPreface } from "./context-preface";
 import {
   applyUsageContext,
@@ -3614,11 +3614,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
+            let spawnImages: import("./types").ChatImage[] = [];
+            try {
+              spawnImages = await fitModelImages(payload.attachments ?? []);
+            } catch (error) {
+              await replyAsk({ error: error instanceof Error ? error.message : String(error) });
+              return;
+            }
             let assignedPlan = parent.planRun;
             const planStepId = payload.planStepId?.trim() || "";
             const rationale = payload.rationale?.trim() || "";
             const assignedSkills = Array.isArray(payload.skills) ? payload.skills.filter(Boolean) : [];
             const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
+            const assignedConstraints = Array.isArray(payload.constraints) ? payload.constraints.filter(Boolean) : [];
             if (planStepId) {
               if (!assignedPlan) {
                 await replyAsk({ error: "this chat has no executable plan" });
@@ -3636,6 +3644,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 rationale,
                 skills: assignedSkills,
                 tools: assignedTools,
+                constraints: assignedConstraints,
                 requested: [payload.provider, payload.model, payload.chat].filter(Boolean).join(":"),
               }, startedAt);
               if (!assigned.ok) {
@@ -3697,6 +3706,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(rationale ? { rationale } : {}),
                 ...(assignedSkills.length > 0 ? { skills: assignedSkills } : {}),
                 ...(assignedTools.length > 0 ? { tools: assignedTools } : {}),
+                ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(payload.id ? { correlationId: payload.id } : {}),
               },
               routingMode: routeDecision ? "auto" : "manual",
@@ -3708,7 +3718,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   kind: "peer",
                   fromTitle: parent.title?.trim() || "another agent",
                   text: payload.message.trim(),
-                  ...(payload.attachments?.length ? { images: payload.attachments } : {}),
+                  ...(spawnImages.length ? { images: spawnImages } : {}),
                   createdAt: startedAt,
                   ...brainStamp(spec),
                 },
@@ -3779,13 +3789,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 formatWorkerPrompt({
                   fromTitle: parent.title?.trim() || "another agent",
                   text: payload.message,
-                  folder: admitted.cwd,
+                  folder: childCwd,
                   project: project?.name,
                   slice: payload.description,
                   vendor: spec.title,
+                  constraints: assignedConstraints,
                 }),
                 latest.settings.mcpServers,
-                payload.attachments,
+                spawnImages,
               );
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {

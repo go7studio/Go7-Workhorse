@@ -7,6 +7,7 @@ export const MAX_DOCUMENT_BYTES = 12 * 1024 * 1024;
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 60 * 1024 * 1024;
 export const MAX_IMAGES = 24;
+export const MAX_MODEL_IMAGE_PAYLOAD_BYTES = 5 * 1024 * 1024;
 
 const SKIP_DROP_DIRS = new Set([
   "node_modules",
@@ -194,6 +195,67 @@ export function isAttachmentFile(file: { name?: string; type?: string }): boolea
 
 export function imageSrc(image: Pick<ChatImage, "mimeType" | "data">): string {
   return `data:${image.mimeType};base64,${image.data}`;
+}
+
+export function base64DecodedBytes(data: string): number {
+  const value = data.replace(/^data:[^;]+;base64,/, "");
+  if (!value) return 0;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+}
+
+export function modelImagePayloadBytes(images: ChatImage[]): number {
+  return images.reduce((total, image) => {
+    if (image.kind === "image") return total + base64DecodedBytes(image.data);
+    return total + modelImagePayloadBytes(image.derivedImages ?? []);
+  }, 0);
+}
+
+function loadImage(image: ChatImage): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error(`Could not resize ${image.name}`));
+    element.src = imageSrc(image);
+  });
+}
+
+async function resizeModelImage(image: ChatImage, maxEdge: number, quality: number): Promise<ChatImage> {
+  if (image.kind !== "image" || !image.data) return image;
+  const element = await loadImage(image);
+  const ratio = Math.min(1, maxEdge / Math.max(element.naturalWidth, element.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(element.naturalWidth * ratio));
+  canvas.height = Math.max(1, Math.round(element.naturalHeight * ratio));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error(`Could not resize ${image.name}`);
+  context.drawImage(element, 0, 0, canvas.width, canvas.height);
+  const encoded = canvas.toDataURL("image/jpeg", quality);
+  const data = encoded.slice(encoded.indexOf(",") + 1);
+  const name = image.name.replace(/\.[^.]+$/, "") || "image";
+  return {
+    ...image,
+    name: `${name}.jpg`,
+    mimeType: "image/jpeg",
+    data,
+    size: base64DecodedBytes(data),
+  };
+}
+
+export async function fitModelImages(
+  attachments: ChatImage[],
+  maxBytes = MAX_MODEL_IMAGE_PAYLOAD_BYTES,
+): Promise<ChatImage[]> {
+  if (modelImagePayloadBytes(attachments) <= maxBytes) return attachments;
+  if (typeof document === "undefined" || typeof Image === "undefined") {
+    throw new Error("Images are too large. Split them into smaller calls.");
+  }
+  let fitted = attachments;
+  for (const [maxEdge, quality] of [[1600, 0.78], [1280, 0.68], [960, 0.58]] as const) {
+    fitted = await Promise.all(fitted.map((image) => resizeModelImage(image, maxEdge, quality)));
+    if (modelImagePayloadBytes(fitted) <= maxBytes) return fitted;
+  }
+  throw new Error("Images are too large. Split them into smaller calls.");
 }
 
 function looksLikeText(text: string): boolean {

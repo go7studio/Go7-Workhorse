@@ -24,6 +24,7 @@ export type SpawnRequest = {
   rationale?: string;
   skills?: string[];
   tools?: string[];
+  constraints?: string[];
 };
 
 export type CustomBotHint = {
@@ -253,6 +254,7 @@ export type WorkerBriefInput = {
   project?: string;
   slice?: string;
   vendor?: string;
+  constraints?: string[];
 };
 
 export function stripSpawnPreamble(text: string): string {
@@ -307,6 +309,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   ];
   if (slice) lines.push(`SLICE: ${slice}`);
   if (vendor) lines.push(`VENDOR: ${vendor}`);
+  if (input.constraints?.length) lines.push(`CONSTRAINTS: ${input.constraints.join("; ")}`);
   lines.push("");
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
   lines.push("For one independent check, you may spawn one low-effort MiniMax-M3 helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");

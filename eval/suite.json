@@ -738,7 +738,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create three fixture tasks whose needs differ: repository research, visual UI inspection, and deterministic code verification.",
-            "For one task, explicitly assign provider, model, effort, skills, tools, timeout, token budget, and isolation.",
+            "For one task, explicitly assign provider, model, effort, skills, tools, constraints, timeout, token budget, and isolation.",
             "For one task, allow Workhorse to recommend an agent and require it to show the matched skills/capabilities, cost/concurrency impact, and why delegation helps.",
             "Reject or edit the recommendation and verify the user choice wins without losing the task.",
             "Remove one required skill or provider capability and verify Workhorse asks or downgrades explicitly instead of silently substituting."
@@ -816,7 +816,7 @@
         },
         {
           "id": "ORC-02",
-          "criterion": "Every child exposes immutable identity, parent lineage, task, provider, actual model, effort, skills/tools, isolation, budget, timeout, status, transcript, usage, and changed files.",
+          "criterion": "Every child exposes immutable identity, parent lineage, task, provider, actual model, effort, skills/tools, user constraints, isolation, budget, timeout, status, transcript, usage, and changed files.",
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",
@@ -1008,7 +1008,8 @@
           "executor": "provider",
           "profiles": ["grok-acp", "custom-openai", "custom-kimi"],
           "steps": [
-            "Route a plan task tagged vision, image, UI, UX, and computer-use; require one bounded Kimi K3 visual call with image evidence.",
+            "Route a plan task tagged vision, image, UI, UX, and computer-use; assign Kimi K3 an explicit audit-only boundary and require image evidence.",
+            "Pass the audit findings to a separate coding worker and verify the audit worker made no file changes.",
             "Override the proposed visual route and verify the override wins or fails explicitly when required image capability is absent.",
             "Place the preferred non-visual provider in a Watch safety hold and verify no request reaches it.",
             "Accept the shown MiniMax-M3 fallback and reconcile selected, requested, observed, transcript, and usage identities."

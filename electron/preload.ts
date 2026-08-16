@@ -175,6 +175,7 @@ contextBridge.exposeInMainWorld("workhorse", {
       onlyThis?: boolean;
       scope?: string;
       wait?: boolean;
+      route?: "auto" | "quick" | "balanced" | "deep";
     }) => void,
   ) => {
     const listener = (
@@ -207,6 +208,7 @@ contextBridge.exposeInMainWorld("workhorse", {
         onlyThis?: boolean;
         scope?: string;
         wait?: boolean;
+        route?: "auto" | "quick" | "balanced" | "deep";
       },
     ) => handler(payload);
     ipcRenderer.on("grok:peer-ask", listener);

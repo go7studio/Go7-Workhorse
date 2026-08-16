@@ -13,7 +13,13 @@ import {
   parseGrokUsage,
   pickPermissionOptionId,
 } from "../electron/grok-agent";
-import { CodexSessionHost, codexLaunchKey, spawnCodexProcess } from "../electron/codex-host";
+import {
+  CodexSessionHost,
+  codexLaunchKey,
+  createCodexChunkFilter,
+  spawnCodexProcess,
+  stripCodexRuntimeNotices,
+} from "../electron/codex-host";
 import {
   buildCodexLaunchSpec,
   resolveCodexAgentMode,
@@ -36,6 +42,18 @@ import { byProvider, finalizeTurnUsage, normalizeUsage, repairInflatedTurn } fro
 import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("Codex skill-budget notices do not become assistant output", () => {
+  const warning = "Warning: Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+  assert.equal(stripCodexRuntimeNotices(`${warning}\n\nADAPTER_OK`), "ADAPTER_OK");
+  const chunks: string[] = [];
+  const filter = createCodexChunkFilter((text) => chunks.push(text));
+  filter.push(warning.slice(0, 80));
+  filter.push(`${warning.slice(80)}\n\n`);
+  filter.push("ADAPTER_OK");
+  filter.flush();
+  assert.deepEqual(chunks, ["ADAPTER_OK"]);
+});
 
 function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: string }) {
   const stdin = new PassThrough();

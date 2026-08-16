@@ -27,6 +27,10 @@ task and immutable session identity → selected skills/tools/runtime → child
 evidence → parent synthesis. Reading a prior chat, delivering a peer message,
 resuming a child, and spawning a new agent are separate operations.
 
+Routing adds a third chain: task tier → input capability → capacity state →
+selected model → runtime identity → usage. Attachments add kind → persisted
+metadata → provider representation → model-visible evidence.
+
 The five profiles remain in the compatibility contract. MiniMax-M3 through
 MiniMax's OpenAI-compatible endpoint is the primary evaluator and the only
 model used for internal tool calling or cascading agents. A provider's
@@ -42,6 +46,9 @@ required provenance chain is selection → launch/request → runtime observatio
     npm run eval:validate
     npm run eval:list
     npm run verify
+    npm run eval:media-fixtures
+    npm run eval:fixture-check
+    npm run eval:capability-smoke
 
 The validator checks:
 
@@ -54,6 +61,8 @@ The validator checks:
 - every orchestration desk tool and source boundary in
   eval/orchestration-contract.json still exists and every ORC rubric item is
   mapped;
+- every routing/media source boundary in eval/capability-contract.json exists
+  and every CAP rubric item is mapped;
 - the Settings section inventory still matches the product.
 
 This makes adding a core command or Settings section without updating the eval
@@ -96,10 +105,12 @@ withheld below 60% coverage.
 7. **Orchestration lane:** parallel child agents, skill-aware/user-assigned
    routing, cross-chat read versus message, session links, worktree/conflict
    safety, and goal-owned iteration.
-8. **Packaged/install lane:** compare source, package, and running build.
-9. **Manual evidence:** credentials, support-report redaction, OS install/update,
+8. **Capability lane:** automatic/manual routing, usage capacity, local models,
+   and image/document/audio/video delivery.
+9. **Packaged/install lane:** compare source, package, and running build.
+10. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
-10. **Score and defect ledger:** retain exact reproductions separately from
+11. **Score and defect ledger:** retain exact reproductions separately from
    rubric verdicts.
 
 ## Spend and safety fences
@@ -144,6 +155,7 @@ verdict.
 - command-contract.json — canonical language and native augmentations.
 - orchestration-contract.json — Cursor reference walk, Workhorse desk tools,
   message/spawn semantics, routing rules, lifecycle, and ORC coverage.
+- capability-contract.json — model routing, capacity, attachments, and CAP coverage.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
 - BASELINE.md — source baseline and activation boundary.

@@ -47,6 +47,7 @@ export type PeerAsk = {
   onlyThis?: boolean;
   scope?: string;
   wait?: boolean;
+  route?: "auto" | "quick" | "balanced" | "deep";
 };
 
 export type PeerAskResult = { text: string } | { error: string };

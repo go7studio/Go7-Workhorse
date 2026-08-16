@@ -1,7 +1,7 @@
 import { customBotEnabled, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
-import type { BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, Session, Settings, SettingsSection } from "./types";
+import type { BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -17,7 +17,27 @@ export const DEFAULT_SETTINGS: Settings = {
   mcpServers: [],
   usageBudgets: { grok: 2_000_000 },
   watch: { ...DEFAULT_WATCH },
+  routing: {
+    enabled: false,
+    capacityAware: true,
+    preferExcess: true,
+    allowLocal: true,
+    reservePercent: 15,
+  },
 };
+
+export function normalizeRouting(raw: unknown): RoutingSettings {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS.routing };
+  const record = raw as Partial<RoutingSettings>;
+  const reserve = Number(record.reservePercent);
+  return {
+    enabled: record.enabled === true,
+    capacityAware: record.capacityAware !== false,
+    preferExcess: record.preferExcess !== false,
+    allowLocal: record.allowLocal !== false,
+    reservePercent: Number.isFinite(reserve) ? Math.min(50, Math.max(0, Math.round(reserve))) : 15,
+  };
+}
 
 export function normalizeProfile(raw: unknown): Profile {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS.profile };
@@ -237,6 +257,7 @@ export function normalizeSettings(raw: unknown): Settings {
     mcpServers: normalizeMcpServers(record.mcpServers),
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),
     watch: normalizeWatch(record.watch),
+    routing: normalizeRouting(record.routing),
   };
 }
 
@@ -252,5 +273,5 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
 }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
-  return value === "profile" || value === "llms" || value === "skills" || value === "usage" || value === "watch";
+  return value === "profile" || value === "llms" || value === "skills" || value === "routing" || value === "usage" || value === "watch";
 }

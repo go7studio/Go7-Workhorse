@@ -68,14 +68,22 @@ export type Project = {
 
 export type ChatMessageKind = "tool" | "compact" | "thought" | "peer" | "subagent";
 
+export type AttachmentKind = "image" | "file" | "document" | "audio" | "video";
+
+/** Legacy name retained for saved-chat compatibility. Represents every composer attachment. */
 export type ChatImage = {
   id: string;
   name: string;
   mimeType: string;
   data: string;
-  kind?: "image" | "file";
+  kind?: AttachmentKind;
   text?: string;
   folder?: string;
+  sourcePath?: string;
+  size?: number;
+  durationMs?: number;
+  /** Representative video frames prepared for vision-only models. */
+  derivedImages?: ChatImage[];
 };
 
 export type ChatMessage = {
@@ -225,6 +233,9 @@ export type Session = {
   lineup?: DeskLineup;
   /** Tool families allowed for the rest of this vendor session. */
   permissionGrants?: string[];
+  /** Manual preserves the selected model. Auto may route before a new turn. */
+  routingMode?: "auto" | "manual";
+  routingDecision?: RoutingDecision;
 };
 
 export type PermissionRequest = {
@@ -247,7 +258,7 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "usage" | "watch";
+export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "usage" | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "workhorse";
 
@@ -317,6 +328,49 @@ export type CustomBot = {
   contextWindow: number;
   createdAt: number;
   enabled?: boolean;
+  routingProfile?: Partial<ModelRoutingProfile>;
+};
+
+export type RoutingTaskTier = "quick" | "balanced" | "deep";
+
+export type ModelInputCapabilities = {
+  text: boolean;
+  images: boolean;
+  documents: boolean;
+  audio: boolean;
+  video: boolean;
+};
+
+export type ModelRoutingProfile = {
+  /** 1 is lightweight; 5 is frontier reasoning. */
+  intelligence: number;
+  /** 1 is slow; 5 is optimized for latency. */
+  speed: number;
+  /** 1 is inexpensive; 5 is expensive. */
+  cost: number;
+  local: boolean;
+  inputs: ModelInputCapabilities;
+};
+
+export type RoutingSettings = {
+  enabled: boolean;
+  capacityAware: boolean;
+  preferExcess: boolean;
+  allowLocal: boolean;
+  /** Keep this percentage of a weekly allowance in reserve. */
+  reservePercent: number;
+};
+
+export type RoutingDecision = {
+  at: number;
+  taskTier: RoutingTaskTier;
+  provider: ProviderId;
+  model: string;
+  customBotId?: string;
+  score: number;
+  reason: string;
+  usedPercent?: number;
+  expectedUsedPercent?: number;
 };
 
 export type WatchSettings = {
@@ -357,6 +411,7 @@ export type Settings = {
   mcpServers: McpServerConfig[];
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
+  routing: RoutingSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

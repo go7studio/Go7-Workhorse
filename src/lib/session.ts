@@ -9,6 +9,7 @@ import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
 import { normalizeAgentRun } from "./subagents";
 import { normalizePortableCheckpoint } from "./portable-compaction";
+import { normalizeRoutingDecision } from "./routing";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
 
 export type BrainStamp = {
@@ -230,6 +231,8 @@ export function normalizeSession(raw: unknown): Session | null {
     goal: normalizeGoal(record.goal),
     agentRun: normalizeAgentRun(record.agentRun),
     lineup: normalizeLineup(record.lineup),
+    routingMode: record.routingMode === "auto" ? "auto" : "manual",
+    routingDecision: normalizeRoutingDecision(record.routingDecision),
   };
 }
 

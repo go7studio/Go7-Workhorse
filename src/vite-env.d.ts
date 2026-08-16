@@ -102,9 +102,11 @@ type WorkhorseBridge = {
     {
       name: string;
       mimeType: string;
-      kind: "image" | "file";
+      kind: import("./lib/types").AttachmentKind;
       text?: string;
       data?: string;
+      sourcePath?: string;
+      size?: number;
     }[]
   >;
   revealProject: (folder: string) => Promise<void>;
@@ -184,7 +186,13 @@ type WorkhorseBridge = {
     parentId?: string;
     hidden?: boolean;
     role?: import("./lib/workhorse-rules").DeskRole;
-    config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" };
+    config: {
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      api?: "anthropic-messages" | "openai-completions";
+      inputs?: Partial<import("./lib/types").ModelInputCapabilities>;
+    };
   }) => Promise<{ text?: string; stopReason?: string }>;
   customCancel: (sessionId: string) => Promise<void>;
   onCustomEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
@@ -250,6 +258,7 @@ type WorkhorseBridge = {
       onlyThis?: boolean;
       scope?: string;
       wait?: boolean;
+      route?: "auto" | "quick" | "balanced" | "deep";
     }) => void,
   ) => () => void;
   replyPeerAsk: (payload: { id: string; text?: string; error?: string }) => Promise<boolean>;

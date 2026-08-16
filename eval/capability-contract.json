@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Intelligent routing and multimodal attachment contract",
+  "routing": {
+    "referenceSource": "https://developers.openai.com/api/docs/guides/latest-model",
+    "tiers": {
+      "quick": "Prefer speed and low cost after capability checks.",
+      "balanced": "Prefer balanced intelligence, speed, and cost.",
+      "deep": "Prefer the highest sufficient intelligence."
+    },
+    "referenceProfiles": {
+      "GPT-5.6-Sol": { "tier": "deep", "intelligence": 5, "speed": 2, "cost": 5 },
+      "GPT-5.6-Terra": { "tier": "balanced", "intelligence": 4, "speed": 4, "cost": 3 },
+      "GPT-5.6-Luna": { "tier": "quick", "intelligence": 3, "speed": 5, "cost": 1 }
+    },
+    "rules": [
+      "Reject routes that lack a required input capability.",
+      "Keep explicit user model selection authoritative.",
+      "Penalize weekly overdraw and protected reserve only when capacity routing is enabled.",
+      "Prefer capable spare capacity only when spare preference is enabled.",
+      "Use local models only when local routing is enabled.",
+      "Record tier, winner, alternatives, capacity state, and reason on every automatic route.",
+      "Never merge credentials, subscriptions, contexts, or sandboxes across providers."
+    ]
+  },
+  "attachments": {
+    "kinds": ["image", "file", "document", "audio", "video"],
+    "delivery": {
+      "image": "Native image block where supported.",
+      "file": "Inline safe text or an auditable source manifest.",
+      "document": "Native PDF where supported; otherwise a source manifest.",
+      "audio": "Native MP3/WAV only for declared compatible models; otherwise a manifest.",
+      "video": "Source manifest plus representative image frames."
+    },
+    "truthRule": "The visible attachment label, persisted metadata, routed capability, and outbound representation must agree."
+  },
+  "evalPolicy": {
+    "internalModel": "MiniMax-M3",
+    "liveProviderCalls": "Use the smallest deterministic call needed to prove launch and identity.",
+    "cascades": "Use fewer low-cost models and stay within the orchestration contract limits."
+  },
+  "smokeCommands": ["eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:media-fixtures"],
+  "sourceFiles": [
+    "src/lib/routing.ts",
+    "src/lib/images.ts",
+    "src/ui/RoutingPane.tsx",
+    "src/ui/Composer.tsx",
+    "electron/custom-http.ts",
+    "electron/drop-files.ts",
+    "scripts/workhorse-eval-fixture.mjs",
+    "scripts/workhorse-eval-media-fixtures.mjs",
+    "test/capability-live-smoke.ts"
+  ],
+  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08"]
+}

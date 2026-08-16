@@ -1,4 +1,4 @@
-import type { ChatImage, ChatMessage, ProviderId } from "./types";
+import type { AttachmentKind, ChatImage, ChatMessage, ProviderId } from "./types";
 
 export const PORTABLE_HISTORY_VERSION = 1;
 export const PORTABLE_HISTORY_MAX_CHARS = 60_000;
@@ -6,7 +6,7 @@ export const PORTABLE_HISTORY_MAX_CHARS = 60_000;
 export type PortableAttachment = {
   name: string;
   mimeType: string;
-  kind: "image" | "file";
+  kind: AttachmentKind;
   text?: string;
 };
 
@@ -29,7 +29,7 @@ function portableAttachment(image: ChatImage): PortableAttachment {
   return {
     name: image.name,
     mimeType: image.mimeType,
-    kind: image.kind === "file" ? "file" : "image",
+    kind: image.kind ?? "image",
     ...(text ? { text: text.slice(0, 8_000) } : {}),
   };
 }

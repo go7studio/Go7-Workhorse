@@ -549,6 +549,41 @@ test("custom host safety-pauses an identical tool and result loop", async () => 
   assert.equal(events.at(-1)?.stopReason, "safety_pause");
 });
 
+test("custom host streams an empty-turn safety pause without duplicate-leading whitespace", async () => {
+  let calls = 0;
+  const events: Array<{ type: string; stopReason?: string; text?: string }> = [];
+  const host = new CustomSessionHost(
+    async () => {
+      calls += 1;
+      return {
+        text: "",
+        toolUses: [{ id: `repeat-empty-${calls}`, name: "workhorse_list_tools", input: {} }],
+      };
+    },
+    { repeatedToolRounds: 2 },
+  );
+  const reply = await host.prompt(
+    {
+      sessionId: "s-repeat-empty",
+      text: "Find it",
+      model: "MiniMax-M3",
+      effort: "medium",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+    },
+    (event) => events.push(event),
+  );
+  const chunks = events.filter((event) => event.type === "chunk" && event.text);
+  assert.equal(calls, 2);
+  assert.equal(reply.stopReason, "safety_pause");
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].text, chunks[0].text?.trimStart());
+  assert.equal(reply.text, chunks[0].text);
+});
+
 test("custom host does not halt a worker that already wrote a report", async () => {
   const report = `${"res://scenes/main.tscn exists. ".repeat(20)}Let me check one more preload.`;
   assert.equal(workerHasDeliverableReport(report), true);

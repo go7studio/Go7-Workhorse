@@ -1,5 +1,33 @@
 import { uid } from "./id";
-import type { CustomBot, CustomLlm } from "./types";
+import type { CustomBot, CustomLlm, ModelRoutingProfile } from "./types";
+
+function normalizeRoutingProfile(raw: unknown): Partial<ModelRoutingProfile> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Partial<ModelRoutingProfile>;
+  const number = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(5, Math.max(1, Math.round(parsed))) : undefined;
+  };
+  const intelligence = number(record.intelligence);
+  const speed = number(record.speed);
+  const cost = number(record.cost);
+  const inputs = record.inputs && typeof record.inputs === "object"
+    ? {
+        text: record.inputs.text !== false,
+        images: record.inputs.images === true,
+        documents: record.inputs.documents === true,
+        audio: record.inputs.audio === true,
+        video: record.inputs.video === true,
+      }
+    : undefined;
+  return {
+    ...(intelligence ? { intelligence } : {}),
+    ...(speed ? { speed } : {}),
+    ...(cost ? { cost } : {}),
+    ...(typeof record.local === "boolean" ? { local: record.local } : {}),
+    ...(inputs ? { inputs } : {}),
+  };
+}
 
 export function inferCustomApi(baseUrl: string): "anthropic-messages" | "openai-completions" {
   const url = baseUrl.toLowerCase();
@@ -41,6 +69,7 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
   const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : model;
   const color =
     typeof record.color === "string" && /^#[0-9a-f]{6}$/i.test(record.color) ? record.color : BOT_COLORS[0].value;
+  const routingProfile = normalizeRoutingProfile(record.routingProfile);
   return {
     id,
     name,
@@ -54,6 +83,7 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
       typeof record.contextWindow === "number" && record.contextWindow > 0 ? Math.round(record.contextWindow) : 128_000,
     createdAt: typeof record.createdAt === "number" ? record.createdAt : Date.now(),
     enabled: record.enabled !== false,
+    ...(routingProfile ? { routingProfile } : {}),
   };
 }
 

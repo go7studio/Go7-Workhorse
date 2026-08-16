@@ -712,7 +712,9 @@ export class CustomSessionHost {
           emit({ type: "done", sessionId: input.sessionId, stopReason: "end_turn" });
           return { text, stopReason: "end_turn" };
         }
-        const notice = `\n\n${safetyPauseMessage(safetyPause)}`;
+        const message = safetyPauseMessage(safetyPause);
+        const separator = text.trim() ? "\n\n" : "";
+        const notice = `${separator}${message}`;
         text = `${text.trimEnd()}${notice}`;
         emit({ type: "chunk", sessionId: input.sessionId, text: notice });
         emit({ type: "done", sessionId: input.sessionId, stopReason: "safety_pause" });

@@ -43,6 +43,7 @@ try {
     ),
   ]);
   const text = result.text.trim();
+  const exactReply = text === "ADAPTER_OK";
   const vendorSession = events.find((event) => event.type === "vendor-session");
   const usage = events.filter((event) => event.type === "usage").at(-1);
   console.log(
@@ -53,8 +54,9 @@ try {
         connected: detection.connected,
         vendorSession: vendorSession?.type === "vendor-session" ? Boolean(vendorSession.vendorSessionId) : false,
         stopReason: result.stopReason ?? null,
-        exactReply: text === "ADAPTER_OK",
+        exactReply,
         replyLength: text.length,
+        replyPreview: exactReply ? null : text.slice(0, 240),
         usage:
           usage?.type === "usage"
             ? { model: usage.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }
@@ -65,6 +67,7 @@ try {
     ),
   );
   if (!text) throw new Error(`${provider} returned an empty smoke reply.`);
+  if (!exactReply) throw new Error(`${provider} did not follow the deterministic reply contract.`);
 } finally {
   host.disposeAll();
 }

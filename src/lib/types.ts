@@ -265,6 +265,7 @@ export type PlanStep = {
   assignment?: PlanAssignment;
   startedAt?: number;
   finishedAt?: number;
+  reopenedAt?: number;
   error?: string;
 };
 

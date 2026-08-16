@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "title": "Imported executable plan contract",
   "formats": ["markdown"],
   "liveSmokeCommand": "eval:real-plan-smoke",
@@ -25,7 +25,8 @@
     "Import never starts a provider, agent, device, or write action.",
     "Start requires explicit approval for the exact source hash and revision.",
     "Pause stops new dispatch; resume continues the same plan id and task ids.",
-    "Completed tasks are never dispatched again after restart or resume.",
+    "Completed tasks are never dispatched again after restart or resume unless an explicit reasoned reopen invalidates them.",
+    "Reopening completed work preserves old evidence, requires fresh evidence, and reopens completed dependents.",
     "Interrupted tasks resume the same child when supported or become an explicit retry attempt.",
     "No more than two root tasks run concurrently; excess ready tasks remain queued.",
     "Every automatic route records candidates, required capabilities, capacity, cost, reasoning effort, rationale, and isolation.",

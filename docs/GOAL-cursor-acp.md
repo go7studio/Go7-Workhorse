@@ -4,7 +4,7 @@ Make **Cursor** a fifth Workhorse vendor. A chat whose provider is `cursor` star
 
 This is **Cursor Agent ACP**. It is not the open Cursor IDE window, not Grok Bot, and not a rewrite of the Grok slot.
 
-Read first: `docs/agent-goal-cursor-acp.md`, `src/lib/vendor-bridge.ts`, `electron/claude-host.ts` / `electron/codex-host.ts` (copy this shape), official [Cursor ACP](https://cursor.com/docs/cli/acp).
+Read first: `docs/GOAL-cursor-process.md` (usage lanes + watch — **ship gate**), `docs/agent-goal-cursor-acp.md`, `src/lib/vendor-bridge.ts`, `electron/claude-host.ts` / `electron/codex-host.ts` (copy this shape), official [Cursor ACP](https://cursor.com/docs/cli/acp).
 
 ## Why this exists
 
@@ -28,7 +28,7 @@ A Cursor chat on the desk behaves like a Codex chat:
 4. `session/request_permission` lands on the one permission bar (`provider: "cursor"`). Allow once / Allow for session / Deny. Do **not** use the SDK’s default auto-approve.
 5. Resume with `session/load` when `vendorSessionId` is set and the launch key is unchanged.
 6. Cancel stops the in-flight prompt.
-7. `recordUsage` writes `provider: "cursor"` plus model, project, session, in / out / cache. Preview chats invent no tokens.
+7. `recordUsage` writes `provider: "cursor"` plus **lane** (`cursor-models` vs `other-models`), model, project, session, in / out / cache. Preview chats invent no tokens. A single Cursor bucket is a fail — see `docs/GOAL-cursor-process.md`.
 8. Settings MCP + the built-in Workhorse MCP are passed on `session/new` and `session/load`, same as Grok.
 9. Settings → LLMs → Cursor is **On** only when a spawnable ACP command **and** a Cursor login exist (`CURSOR_API_KEY`, `--api-key`, or `agent login`). The IDE being open is not a login.
 
@@ -58,7 +58,7 @@ Modes: map Workhorse `ask | accept-edits | always-approve | plan` onto Cursor AC
 1. `ProviderId` includes `"cursor"`. `vendorSendTarget("cursor") === "cursor"`. `capabilitiesFor("cursor")` is Cursor, **not** Grok.
 2. New chat → Vendor Cursor → send a line → a real `agent acp` child starts in the project folder and answers. Failure is `Cursor agent failed: …`, never `Preview only`.
 3. Stream, tools, permission bar, cancel, and `session/load` resume work on that chat.
-4. A completed turn writes a usage event with `provider: "cursor"`. The Usage pane rolls it up next to Grok / Claude / Codex. No invented tokens.
+4. A completed turn writes a usage event with `provider: "cursor"` **and a lane**. Settings shows two Cursor rings (Cursor Models vs Other Models). Watch holds per lane. Plan meters are account-wide when Cursor reports them. No invented tokens. See `docs/GOAL-cursor-process.md`.
 5. Settings → LLMs shows a Cursor row. Recheck detects binary + login. “Cursor.app is open” is not enough.
 6. `workhorse_list_bots` can list Cursor when it is attached and callable. `workhorse_spawn_agent` with `provider: "cursor"` starts a **Workhorse** child session on ACP, in a bound folder — not a tab in the IDE, not a Grok Bot.
 7. Grok, Claude, Codex, and custom paths are unchanged. Grok Bot is still not a provider.

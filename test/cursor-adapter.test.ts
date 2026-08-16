@@ -268,7 +268,13 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
 test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binary", () => {
   const files = new Set(["/bin/agent", "/bin/cursor-agent"]);
   assert.equal(
-    resolveCursorBinary({ env: { PATH: "/bin" }, homedir: "/no-home", pathDirs: ["/bin"], existsSync: (file) => files.has(file) }),
+    resolveCursorBinary({
+      env: { PATH: "/bin" },
+      homedir: "/no-home",
+      platform: "linux",
+      pathDirs: ["/bin"],
+      existsSync: (file) => files.has(file),
+    }),
     "/bin/cursor-agent",
   );
   assert.equal(

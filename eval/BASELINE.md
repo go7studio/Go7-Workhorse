@@ -1,8 +1,10 @@
 # Go7 Workhorse evaluation baseline
 
 **Source frozen for the kit:** d38f449c05a2e14a857c8e2292669c04ca85cda1
-(origin/main, 2026-08-15)  
-**Package version:** 0.1.2  
+(origin/main, 2026-08-15)
+
+**Package version:** 0.1.2
+
 **Baseline activity:** static source/product-surface walk only; no app launch,
 no provider prompt, no direct API request, and no scored eval run.
 
@@ -17,6 +19,8 @@ no provider prompt, no direct API request, and no scored eval run.
   DeepSeek. Presets remain hints; an endpoint/model probe is separate proof.
 - Five Settings sections: Profile, LLMs, Skills, Usage, Watch.
 - Twenty-five core Workhorse commands plus provider-native augmentations.
+- Seven Workhorse desk tools for chat discovery, transcript reading, peer
+  messaging, child spawning, bot discovery, and skill discovery/reading.
 - Canonical portable history and Workhorse fallbacks for cross-provider
   continuity.
 
@@ -103,6 +107,31 @@ baseline does not apply a forced or breaking dependency update. The release
 lane records the exact advisory state; product behavior and supply-chain risk
 remain separate findings.
 
+### 10. Orchestration exists in source but needs product-level proof
+
+Workhorse already has child sessions, a nested agent transcript pane,
+provider/model/effort selection, token and time budgets, shared/worktree
+isolation, changed/conflict file records, chat discovery/read/ask tools, a
+peer inbox, and persistent /goal state.
+
+The source does not yet prove that two children overlap while the parent stays
+responsive, that automatic routing is skill-aware and explainable, or that a
+goal continues iterating through evidence-gated completion. The visible
+language must also keep four operations distinct: attach prior context,
+message an existing chat, resume a child, and spawn a new child.
+
+Cursor 3.16.17 was walked as a reference with a no-repository Multitask goal.
+It launched two named read-only children in parallel, displayed child model,
+effort, status, stop controls, transcripts, UUID links, and let the parent
+synthesize both. Cursor's past-chat references attach context; they do not
+deliver a chat-to-chat message. Workhorse's peer inbox can intentionally go
+beyond that baseline, but only after real delivery, correlation, runtime
+identity, restart, and deduplication are proven.
+
+Baseline: ORC-01 through ORC-09 partial from static source evidence; ORC-10
+not-found because explicit nesting depth/concurrency guards and a root-goal
+aggregate budget view are not established.
+
 ## Deferred until the new version is pushed
 
 - Launch and walk the existing/new packaged app.
@@ -112,6 +141,12 @@ remain separate findings.
 - Test /goal, schedules, plan, compaction, native loops/workflows, and
   provider switching.
 - Reconcile actual model and usage identity.
+- Run two or more child agents concurrently, inspect their linked sessions,
+  exercise user-assigned and automatic routing, and reconcile child evidence.
+- Distinguish prior-context attachment from bidirectional peer messaging;
+  verify immutable session addressing, correlation, failure, and restart.
+- Drive a /goal orchestrator through progress, child failure, pause/restart,
+  resume, evidence-gated completion, blocked, and cancelled terminal states.
 - Interrupt/restart sessions and verify journal/state recovery.
 - Score any rubric item.
 

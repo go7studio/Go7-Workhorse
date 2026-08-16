@@ -8,8 +8,10 @@ const evalDir = path.join(root, "eval");
 const suitePath = path.join(evalDir, "suite.json");
 const commandPath = path.join(evalDir, "command-contract.json");
 const providerPath = path.join(evalDir, "provider-matrix.json");
+const orchestrationPath = path.join(evalDir, "orchestration-contract.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
 const sourceSettingsPath = path.join(root, "src", "lib", "settings.ts");
+const sourceDeskToolsPath = path.join(root, "electron", "workhorse-mcp.ts");
 const validExecutors = new Set(["electron", "provider", "api", "restart", "package", "static", "unit"]);
 const validTestability = new Set(["auto", "auto-partial", "manual"]);
 const validTypes = new Set([
@@ -58,15 +60,22 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, commandSource, settingsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
+    json(orchestrationPath),
     readFile(sourceCommandPath, "utf8"),
     readFile(sourceSettingsPath, "utf8"),
+    readFile(sourceDeskToolsPath, "utf8"),
   ]);
   const problems = [];
-  if (suite.schemaVersion !== 1 || commands.schemaVersion !== 1 || providers.schemaVersion !== 1) {
+  if (
+    suite.schemaVersion !== 1 ||
+    commands.schemaVersion !== 1 ||
+    providers.schemaVersion !== 1 ||
+    orchestration.schemaVersion !== 1
+  ) {
     problems.push("all eval manifests must use schemaVersion 1");
   }
 
@@ -151,6 +160,26 @@ async function validate() {
     }
   }
 
+  const orchestrationRubric = rubricIds.filter((id) => id.startsWith("ORC-"));
+  if (!sameMembers(orchestration.requiredRubric ?? [], orchestrationRubric)) {
+    problems.push(
+      "orchestration requiredRubric does not match the ORC rubric " +
+      `(contract: ${(orchestration.requiredRubric ?? []).join(", ")}; suite: ${orchestrationRubric.join(", ")})`,
+    );
+  }
+  for (const tool of orchestration.workhorseSurfaces?.deskTools ?? []) {
+    if (!deskToolsSource.includes(`name: "${tool}"`)) {
+      problems.push(`orchestration desk tool ${tool} is missing from electron/workhorse-mcp.ts`);
+    }
+  }
+  for (const file of orchestration.workhorseSurfaces?.sourceFiles ?? []) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`orchestration source file is missing: ${file}`);
+    }
+  }
+
   const actualSections = sourceSettingsSections(settingsSource);
   if (!sameMembers(providers.settingsSections, actualSections)) {
     problems.push(
@@ -167,9 +196,10 @@ async function validate() {
   const itemCount = suite.areas.reduce((sum, area) => sum + area.rubric.length, 0);
   console.log(
     `Workhorse eval kit valid: ${suite.areas.length} areas, ${scenarioCount} scenarios, ` +
-      `${itemCount} rubric items, ${commands.commands.length} core commands, ${profileIds.length} runtime profiles.`,
+      `${itemCount} rubric items, ${commands.commands.length} core commands, ` +
+      `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles.`,
   );
-  return { suite, commands, providers };
+  return { suite, commands, providers, orchestration };
 }
 
 function list({ suite, commands, providers }) {

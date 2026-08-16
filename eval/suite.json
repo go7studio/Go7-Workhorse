@@ -6,13 +6,13 @@
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
-  "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "usage", "reliability"],
+  "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "usage", "reliability"],
   "areas": [
     {
       "id": "setup",
       "title": "Getting started, harness discovery, and settings",
       "prefix": "SET",
-      "areaWeight": 12,
+      "areaWeight": 10,
       "scenarios": [
         {
           "id": "SET-S1",
@@ -128,7 +128,7 @@
       "id": "projects",
       "title": "Projects, chats, references, and lifecycle",
       "prefix": "PRJ",
-      "areaWeight": 12,
+      "areaWeight": 10,
       "scenarios": [
         {
           "id": "PRJ-S1",
@@ -240,7 +240,7 @@
       "id": "model-integrity",
       "title": "Provider, model, effort, and runtime identity",
       "prefix": "MOD",
-      "areaWeight": 16,
+      "areaWeight": 14,
       "scenarios": [
         {
           "id": "MOD-S1",
@@ -352,7 +352,7 @@
       "id": "commands",
       "title": "Interoperable language and provider-specific augmentation",
       "prefix": "CMD",
-      "areaWeight": 15,
+      "areaWeight": 12,
       "scenarios": [
         {
           "id": "CMD-S1",
@@ -464,7 +464,7 @@
       "id": "security",
       "title": "Permissions, sandboxing, tools, and trust boundaries",
       "prefix": "SEC",
-      "areaWeight": 14,
+      "areaWeight": 12,
       "scenarios": [
         {
           "id": "SEC-S1",
@@ -576,7 +576,7 @@
       "id": "continuity",
       "title": "Conversation continuity, switching, compaction, and recovery",
       "prefix": "CON",
-      "areaWeight": 13,
+      "areaWeight": 11,
       "scenarios": [
         {
           "id": "CON-S1",
@@ -685,10 +685,193 @@
       ]
     },
     {
+      "id": "orchestration",
+      "title": "Multi-agent delegation, cross-chat messaging, and goal orchestration",
+      "prefix": "ORC",
+      "areaWeight": 14,
+      "scenarios": [
+        {
+          "id": "ORC-S1",
+          "name": "Delegate parallel read-only work and synthesize linked child results",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "steps": [
+            "Create an isolated parent chat with a bounded goal and ask it to delegate two independent read-only investigations in parallel.",
+            "Require distinct child titles, explicit provider/model/effort, a short rationale, and no file changes.",
+            "While both children run, inspect parent and child status, transcript links, identifiers, stop controls, budgets, and usage.",
+            "Open each child, verify its self-contained task and real response, then return to the parent.",
+            "Verify the parent waits for both, cites their immutable session links, resolves disagreement, and produces one synthesis without inventing a child reply."
+          ]
+        },
+        {
+          "id": "ORC-S2",
+          "name": "Choose the right agent by user assignment or explainable skill-aware routing",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Create three fixture tasks whose needs differ: repository research, visual UI inspection, and deterministic code verification.",
+            "For one task, explicitly assign provider, model, effort, skills, tools, timeout, token budget, and isolation.",
+            "For one task, allow Workhorse to recommend an agent and require it to show the matched skills/capabilities, cost/concurrency impact, and why delegation helps.",
+            "Reject or edit the recommendation and verify the user choice wins without losing the task.",
+            "Remove one required skill or provider capability and verify Workhorse asks or downgrades explicitly instead of silently substituting."
+          ]
+        },
+        {
+          "id": "ORC-S3",
+          "name": "Attach prior context, message an existing chat, and address sessions truthfully",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Create two live chats with similar titles but distinct immutable Workhorse session IDs, providers, models, and canary facts.",
+            "From chat A, read or attach chat B as prior context and verify B is not awakened or modified.",
+            "From chat A, message chat B using a visible tag/link resolved to B's immutable ID; verify B receives a peer turn with A's identity, runs B's assigned runtime, and returns a real reply to A.",
+            "Open both transcripts and verify sender, target, provider/model, request/reply linkage, timestamps, and failure state are auditable.",
+            "Try a renamed chat, stale title, archived chat, deleted chat, self-address, nonexistent ID, duplicate delivery, cancellation, and restart.",
+            "Verify the UI and transcript use different language for attached context, delivered peer messages, resumed children, and newly spawned agents."
+          ]
+        },
+        {
+          "id": "ORC-S4",
+          "name": "Run one goal-owning orchestrator through iteration and terminal states",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "steps": [
+            "Set a measurable /goal with an explicit evidence-based completion condition, allowed scope, budget, timeout, and maximum concurrency.",
+            "Verify the parent records a plan or next action, delegates only bounded independent work, and continues useful local work while children run.",
+            "Return one success, one recoverable child failure, and one needs-input result; verify the parent retries or reroutes within limits and surfaces the real question.",
+            "Pause, restart Workhorse, and resume; verify goal, child lineage, checkpoints, budgets, and completed work persist without duplicate dispatch.",
+            "Complete the goal and verify the parent marks complete only after evidence is reconciled; separately prove blocked and cancelled terminal states stop iteration."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "ORC-01",
+          "criterion": "One parent task can run multiple independent child agents concurrently while remaining responsive and preserving a single accountable orchestrator.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "scenarios": ["ORC-S1"],
+          "passCriteria": "At least two children overlap in time, the parent remains addressable, each child has its own context, and the parent produces one evidence-linked synthesis.",
+          "evidence": "Parent/child event timeline, linked transcripts, runtime process/session identifiers, and final synthesis.",
+          "baseline": { "status": "partial", "basis": "Static source walk: child sessions and transcript panes exist, but true overlapping execution and a responsive parent require live proof." }
+        },
+        {
+          "id": "ORC-02",
+          "criterion": "Every child exposes immutable identity, parent lineage, task, provider, actual model, effort, skills/tools, isolation, budget, timeout, status, transcript, usage, and changed files.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S1", "ORC-S2"],
+          "passCriteria": "Requested and observed runtime identity agree, inherited values say they were inherited, and every listed field is inspectable from parent and child views or an evidence export.",
+          "evidence": "Spawn request, runtime observation, child header, transcript, usage row, isolation record, and file diff.",
+          "baseline": { "status": "partial", "basis": "Static source walk: provider/model/effort, description, token budget, timeout, isolation, changed files, and lineage exist; explicit per-child skills/tools and full runtime proof are incomplete." }
+        },
+        {
+          "id": "ORC-03",
+          "criterion": "Users can assign an agent directly, or accept an explainable recommendation based on required skills, tools, provider/model capability, cost, concurrency, and isolation.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S2"],
+          "passCriteria": "A user override always wins; automatic routing names the evidence for its choice; unavailable requirements produce an explicit question or downgrade rather than silent substitution.",
+          "evidence": "Task requirements, candidate capability cards, routing explanation, user override, launch request, and failure/downgrade transcript.",
+          "baseline": { "status": "partial", "basis": "Static source walk: model hints, bot catalogs, skill catalogs, and explicit spawn parameters exist, but there is no proven skill-scored recommendation or user-auditable routing explanation." }
+        },
+        {
+          "id": "ORC-04",
+          "criterion": "A chat can deliver a peer message to one existing live Workhorse session and receive its real response with sender, target, and runtime identity preserved.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S3"],
+          "passCriteria": "The immutable target ID resolves exactly once despite title changes; the target transcript receives a peer turn, its assigned runtime answers, and the correlated reply returns to the sender.",
+          "evidence": "Session catalog, address resolution, peer-inbox record, both transcripts, runtime launch/response, and correlation IDs.",
+          "baseline": { "status": "partial", "basis": "Static source walk: list/read/ask chat, immutable internal IDs, peer inbox, sender labels, and existing-reply deduplication exist; end-to-end multi-provider delivery is unrun." }
+        },
+        {
+          "id": "ORC-05",
+          "criterion": "Prior-context attachment, peer messaging, child resume, and new-agent spawn are visibly different operations and never misrepresented as one another.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S3"],
+          "passCriteria": "Reading context never wakes the source chat; messaging creates a peer turn; resume continues the same child ID; spawn creates a new child ID; labels and audit events use the correct verb.",
+          "evidence": "Before/after session state, operation events, transcripts, child IDs, and UI labels.",
+          "baseline": { "status": "partial", "basis": "Static source walk has distinct read_chat, ask_chat, and spawn_agent tools, but the user-facing language and resume distinction need a live walk." }
+        },
+        {
+          "id": "ORC-06",
+          "criterion": "The parent can inspect, stop, resume, retry, or follow up with each child and see truthful lifecycle state without losing completed evidence.",
+          "weight": 2,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "scenarios": ["ORC-S1", "ORC-S4"],
+          "passCriteria": "Queued, starting, running, needs-input, completed, failed, cancelled, timed-out, and budget-exceeded are distinguishable; controls affect only the selected child; completed transcripts remain inspectable.",
+          "evidence": "Lifecycle event log, parent agent tray, child view, control acknowledgements, and persisted evidence.",
+          "baseline": { "status": "partial", "basis": "Static source walk covers running/completed/failed/cancelled/timed-out/budget-exceeded and child panes; queued, starting, needs-input, resume, and follow-up semantics need closure." }
+        },
+        {
+          "id": "ORC-07",
+          "criterion": "An active /goal has one accountable orchestrator that makes concrete progress, delegates bounded work, reconciles evidence, and iterates until a justified terminal state.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "scenarios": ["ORC-S4"],
+          "passCriteria": "Set and resume trigger useful work rather than acknowledgement; progress/checkpoints persist; complete requires its evidence condition; blocked, paused, cancelled, budget, and timeout states stop further dispatch.",
+          "evidence": "Goal state history, plan/checkpoints, delegation graph, evidence reconciliation, restart state, and terminal-state event.",
+          "baseline": { "status": "partial", "basis": "Static source walk: /goal set/view/pause/resume/clear and persistence exist, but durable autonomous iteration, evidence-gated completion, blocked/cancelled terminals, and orchestration budgets are not proven." }
+        },
+        {
+          "id": "ORC-08",
+          "criterion": "Parallel agents respect permission, sandbox, worktree/shared isolation, concurrency, token, time, provider-plan, and file-conflict boundaries independently.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4"],
+          "passCriteria": "No child inherits broader authority than the parent or user assignment; shared writers are serialized or rejected; worktree results are reviewable; limits stop only intended work and conflicts are explicit.",
+          "evidence": "Per-child policy snapshot, launch/isolation record, overlapping-file probe, conflict list, limit event, and provider-plan decision.",
+          "baseline": { "status": "partial", "basis": "Static source walk includes shared/worktree, changed/conflict files, timeout, token budget, and provider allowance; safe true-parallel enforcement is unrun." }
+        },
+        {
+          "id": "ORC-09",
+          "criterion": "Restart, retry, duplicate delivery, stale addresses, and partial child failure cannot lose, duplicate, cross-wire, or falsely complete orchestration work.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S3", "ORC-S4"],
+          "passCriteria": "Interrupted running children recover as explicit interrupted/failed work, completed work is not re-dispatched, peer requests/replies deduplicate, and stale/archived/deleted targets fail with an actionable reason.",
+          "evidence": "Pre/post restart orchestration graph, inbox records, delivery correlation, duplicate probe, and terminal states.",
+          "baseline": { "status": "partial", "basis": "Static source walk marks interrupted running children failed and has peer reply/inbox records; restart and duplicate-delivery behavior need end-to-end proof." }
+        },
+        {
+          "id": "ORC-10",
+          "criterion": "Nested delegation and cross-provider orchestration are capability-gated, depth/concurrency bounded, provenance-preserving, and never create an unaccountable agent swarm.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4"],
+          "passCriteria": "A supported child may delegate within declared depth/concurrency/budget; unsupported profiles say so; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
+          "evidence": "Capability discovery, three-level lineage fixture, limit rejection, descendant transcripts, policy snapshots, and usage rollup.",
+          "baseline": { "status": "not_found", "basis": "Static source walk does not establish explicit nesting depth/concurrency guards or a root-goal/aggregate-budget view for descendants." }
+        }
+      ]
+    },
+    {
       "id": "usage",
       "title": "Usage, plans, budgets, Watch, and support truthfulness",
       "prefix": "USG",
-      "areaWeight": 10,
+      "areaWeight": 9,
       "scenarios": [
         {
           "id": "USG-S1",

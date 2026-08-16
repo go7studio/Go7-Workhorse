@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { isHollowHref, looksLikeImageHref, parseChatMarkdown, type Inline } from "../lib/markdown";
+import { isHollowHref, looksLikeImageHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
 import { safeExternalUrl } from "../lib/open-external";
 import { copyText } from "../lib/copy-text";
 import { editFromMention, isOpenableSource, useFileOpen } from "./FileOpen";
@@ -219,7 +219,9 @@ export function MessageBody({
               {block.rows.map((row) => (
                 <div key={row.label} className="fact">
                   <dt>{row.label}</dt>
-                  <dd>{row.value}</dd>
+                  <dd>
+                    <Inlines parts={parseInline(row.value)} cwd={cwd} vendorSessionId={vendorSessionId} />
+                  </dd>
                 </div>
               ))}
             </dl>

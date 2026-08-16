@@ -1,6 +1,9 @@
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import type { AgentRun, EffortLevel, ProviderId, Session } from "./types";
+import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
+
+export type { DeskRole };
 
 export type SpawnRequest = {
   fromSessionId: string;
@@ -13,6 +16,8 @@ export type SpawnRequest = {
   timeoutSeconds?: number;
   tokenBudget?: number;
   isolation?: "worktree" | "shared";
+  folder?: string;
+  wait?: boolean;
 };
 
 export type CustomBotHint = {
@@ -104,6 +109,168 @@ export function isHiddenSession(session: Pick<Session, "hidden" | "parentId">): 
   return Boolean(session.hidden || session.parentId);
 }
 
+export function deskRoleOf(
+  session?: Pick<Session, "hidden" | "parentId"> | { hidden?: boolean; parentId?: string | null } | null,
+): DeskRole {
+  if (!session) return "orchestrator";
+  return session.parentId || session.hidden ? "worker" : "orchestrator";
+}
+
+export const WORKER_SPAWN_ERROR = "Workers cannot spawn. Do the assigned slice and return the report.";
+
+export const SPAWN_ONLY_PROMPT_ERROR = "Worker prompt is a spawn request, not a slice. Write the actual job.";
+
+export const UNBOUND_SPAWN_ERROR =
+  "No project folder is bound. Bind a project or pass an existing folder before spawning.";
+
+export const WORKER_OMIT_TOOLS = [
+  "workhorse_spawn_agent",
+  "workhorse_await_agents",
+  "workhorse_request_vendor",
+  "workhorse_list_bots",
+] as const;
+
+export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
+  if (input.wait === false || input.wait === "false" || input.wait === 0 || input.wait === "0") return false;
+  return true;
+}
+
+export function parentHasRunningChildren(
+  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun">>,
+  parentId: string,
+): boolean {
+  return sessions.some(
+    (session) =>
+      session.parentId === parentId && (session.agentRun?.status === "running" || session.status === "running"),
+  );
+}
+
+export function collectChildAgentReports(
+  sessions: Session[],
+  parentId: string,
+): Array<{ title: string; status: string; text: string; childSessionId: string }> {
+  return sessions
+    .filter((session) => session.parentId === parentId)
+    .map((session) => {
+      const reply = [...session.messages]
+        .reverse()
+        .find((message) => message.role === "assistant" && message.text.trim());
+      return {
+        title: session.title,
+        status: session.agentRun?.status ?? session.status,
+        text: reply?.text.trim() ?? "",
+        childSessionId: session.id,
+      };
+    });
+}
+
+export function isWorkerOmittedTool(name: string): boolean {
+  const key = name.trim();
+  return (WORKER_OMIT_TOOLS as readonly string[]).includes(key);
+}
+
+export function workerOmittedToolError(name: string): string {
+  if (name === "workhorse_spawn_agent" || name === "workhorse_request_vendor") return WORKER_SPAWN_ERROR;
+  return "Workers cannot use this desk tool. Do the assigned slice and return the report.";
+}
+
+export function toolsForDeskRole<T extends { name: string }>(tools: T[], role: DeskRole = "orchestrator"): T[] {
+  if (role !== "worker") return tools;
+  return tools.filter((tool) => !isWorkerOmittedTool(tool.name));
+}
+
+export type WorkerBriefInput = {
+  fromTitle: string;
+  text: string;
+  folder: string;
+  project?: string;
+  slice?: string;
+  vendor?: string;
+};
+
+export function stripSpawnPreamble(text: string): string {
+  let value = text.replace(/\r\n/g, "\n").trim();
+  const patterns = [
+    /^from another workhorse agent[^\n]*\n+/i,
+    /^you are a[^\n]{0,160}(sub-?agent|worker)[^\n]*\n+/i,
+    /^the user asked you to (spawn|summon|call)[^\n]*\n+/i,
+    /^(please\s+)?(call|spawn|summon)\s+(sub-?agents?|agents?|bots?)[^\n]*\n+/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pattern of patterns) {
+      const next = value.replace(pattern, "").trim();
+      if (next !== value) {
+        value = next;
+        changed = true;
+      }
+    }
+  }
+  return value;
+}
+
+export function isSpawnOnlyPrompt(text: string): boolean {
+  const trimmed = text.replace(/\r\n/g, "\n").trim();
+  if (!trimmed) return true;
+  if (looksLikeWorkerBrief(trimmed)) return false;
+  const first = trimmed.split("\n")[0]?.trim() ?? "";
+  const spawnLead =
+    /^(please\s+)?(call|spawn|summon)\s+((a|an|the|some)\s+)?(sub-?agents?|agents?|bots?|vendors?|minimax|grok|codex|claude)\b/i;
+  if (spawnLead.test(first) && !/\b(your slice|slice:)\b/i.test(trimmed)) return true;
+  const only =
+    /^(please\s+)?(call|spawn|summon)\s+((a|an|the|some)\s+)?((sub-?agents?|agents?|bots?|vendors?)(\s+and\s+(sub-?agents?|agents?|bots?))?)(\s+(for me|now))?\s*\.?$/i;
+  const vendorOnly =
+    /^(please\s+)?(call|spawn|summon)\s+((a|an|the)\s+)?(minimax|grok|codex|claude|sol|terra|luna)(\s+bot)?\s*\.?$/i;
+  if (only.test(trimmed) || vendorOnly.test(trimmed)) return true;
+  return !stripSpawnPreamble(trimmed);
+}
+
+export function formatWorkerPrompt(input: WorkerBriefInput): string {
+  const folder = input.folder.trim();
+  const project = input.project?.trim();
+  const slice = input.slice?.trim();
+  const vendor = input.vendor?.trim();
+  const task = stripSpawnPreamble(input.text) || input.text.trim();
+  const lines = [
+    "ROLE: worker",
+    `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
+    `PROJECT: ${project || "(none — stop and say so)"}`,
+    `FOLDER: ${folder || "(none — stop and say so)"}`,
+  ];
+  if (slice) lines.push(`SLICE: ${slice}`);
+  if (vendor) lines.push(`VENDOR: ${vendor}`);
+  lines.push("");
+  lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
+  lines.push("Do not spawn. Do not list bots. Do not ask the user. Do not review any other tree.");
+  lines.push("Return the report as plain text.");
+  lines.push("");
+  lines.push("TASK:");
+  lines.push(task);
+  return lines.join("\n");
+}
+
+export type SpawnAdmissionInput = {
+  parent?: { parentId?: string | null; hidden?: boolean; projectId?: string | null } | null;
+  projectFolder?: string;
+  folder?: string;
+  prompt: string;
+  folderExists?: (path: string) => boolean;
+};
+
+export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: string };
+
+export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
+  if (deskRoleOf(input.parent) === "worker") return { ok: false, error: WORKER_SPAWN_ERROR };
+  if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
+  const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
+  if (!cwd) return { ok: false, error: UNBOUND_SPAWN_ERROR };
+  if (input.folderExists && !input.folderExists(cwd)) {
+    return { ok: false, error: `Folder does not exist: ${cwd}` };
+  }
+  return { ok: true, cwd };
+}
+
 export function subagentLabel(provider: ProviderId, model: string, description?: string): string {
   const named = description?.trim();
   if (named) return named;
@@ -133,7 +300,7 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
 export function resolveSpawnSpec(
   input: SpawnRequest,
   sessions: Array<Pick<Session, "id" | "title" | "provider" | "model" | "effort" | "customBotId" | "archivedAt">>,
-  parent?: Pick<Session, "provider" | "effort"> | null,
+  parent?: Pick<Session, "provider" | "effort" | "customBotId" | "model"> | null,
   customBots?: CustomBotHint[],
 ): ResolvedSpawn {
   const listed = sessions
@@ -180,8 +347,24 @@ export function resolveSpawnSpec(
     };
   }
 
+  const parentCustom =
+    !namedStock && parent?.provider === "custom" && (!input.provider || parseProviderId(input.provider) === "custom")
+      ? customBots?.find((bot) => bot.id === parent.customBotId) ??
+        customBots?.find((bot) => bot.model === parent.model) ??
+        customBots?.[0]
+      : undefined;
+  if (parentCustom) {
+    return {
+      provider: "custom",
+      model: input.model?.trim() || parentCustom.model,
+      customBotId: parentCustom.id,
+      effort: withEffort("custom", parentCustom.model, parseEffort(input.effort ?? "") ?? parent?.effort ?? "medium"),
+      title: subagentLabel("custom", parentCustom.model, input.description || parentCustom.name),
+    };
+  }
+
   const hinted = namedStock ?? named ?? resolveModelHint(hintedQuery);
-  const provider = parseProviderId(input.provider) ?? hinted?.provider ?? (parent?.provider === "grok" ? "codex" : "grok");
+  const provider = parseProviderId(input.provider) ?? hinted?.provider ?? parent?.provider ?? "grok";
   const rawModel = input.model?.trim() ?? "";
   const mappedModel = rawModel
     ? resolveModelHint(rawModel) ?? resolveModelHint(`${provider} ${rawModel}`)
@@ -203,8 +386,8 @@ export function shouldSpawnInsteadOfAsk(chat: string, sessions: SessionSnapshot[
   return resolveModelHint(chat) !== null;
 }
 
-export function formatSubagentPrompt(fromTitle: string, text: string): string {
-  return `From another Workhorse agent (“${fromTitle}”):\n\n${text.trim()}`;
+export function formatSubagentPrompt(fromTitle: string, text: string, folder = ""): string {
+  return formatWorkerPrompt({ fromTitle, text, folder });
 }
 
 export function withSubagentStatus(

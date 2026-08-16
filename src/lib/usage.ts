@@ -72,7 +72,8 @@ export function applyUsageContext(sessions: Session[], usage: UsageEvent[]): Ses
     const window = contextWindowFor(session.provider, session.model);
     const occupancy = occupancyFromUsage(
       {
-        contextUsed: session.contextUsed > window && window > 0 ? undefined : session.contextUsed,
+        contextUsed:
+          event.contextUsed ?? (session.contextUsed > window && window > 0 ? undefined : session.contextUsed),
         inputTokens: event.inputTokens,
         cacheReadTokens: event.cacheReadTokens,
       },
@@ -80,6 +81,9 @@ export function applyUsageContext(sessions: Session[], usage: UsageEvent[]): Ses
     );
     if (occupancy === undefined) {
       return window > 0 && session.contextUsed > window ? { ...session, contextUsed: 0 } : session;
+    }
+    if (event.contextUsed !== undefined && session.contextUsed !== occupancy) {
+      return { ...session, contextUsed: occupancy };
     }
     if (session.contextUsed !== occupancy && (session.contextUsed > occupancy * 1.5 || session.contextUsed > window)) {
       return { ...session, contextUsed: occupancy };
@@ -388,7 +392,7 @@ export function formatPlanReset(iso?: string, now = Date.now()): string {
   return `Resets ${date.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
 }
 
-function customBotForEvent(event: UsageEvent, bots: CustomBot[]): CustomBot | undefined {
+function customBotForEvent(event: UsageEvent, bots: HeatBotHint[]): HeatBotHint | undefined {
   if (event.customBotId) {
     const hit = bots.find((bot) => bot.id === event.customBotId);
     if (hit) return hit;
@@ -536,22 +540,6 @@ export type HeatBot = {
 
 type HeatBotHint = Pick<CustomBot, "id" | "name" | "model" | "color">;
 
-function asHeatBot(
-  provider: ProviderId,
-  label: string,
-  totals: UsageTotals,
-  extra: { key?: string; color?: string } = {},
-): HeatBot {
-  return {
-    provider,
-    label,
-    tokens: totals.totalTokens,
-    inputTokens: totals.inputTokens,
-    outputTokens: totals.outputTokens,
-    ...extra,
-  };
-}
-
 export type VendorLooks = Partial<
   Record<Exclude<ProviderId, "custom">, Pick<LlmLink, "name" | "color">>
 >;
@@ -561,39 +549,27 @@ export function heatCellBots(
   customBots: HeatBotHint[] = [],
   looks: VendorLooks = {},
 ): HeatBot[] {
-  const rows: HeatBot[] = [];
-  for (const provider of PROVIDERS) {
-    if (provider.id === "custom") continue;
-    const totals = rollup(events.filter((event) => event.provider === provider.id));
-    if (totals.totalTokens > 0) {
-      const look = looks[provider.id];
-      rows.push(
-        asHeatBot(provider.id, look?.name?.trim() || provider.name, totals, {
-          color: look?.color,
-        }),
-      );
-    }
+  const rows = new Map<string, HeatBot>();
+  for (const event of events) {
+    const bot = customBotForEvent(event, customBots);
+    const provider = bot ? "custom" : usageToneForModel(event.model, event.provider);
+    const look = provider === "custom" ? undefined : looks[provider];
+    const key = bot ? `bot:${bot.id}` : provider;
+    const current = rows.get(key);
+    const tokens = (current?.tokens ?? 0) + eventTotal(event);
+    const inputTokens = (current?.inputTokens ?? 0) + event.inputTokens;
+    const outputTokens = (current?.outputTokens ?? 0) + event.outputTokens;
+    rows.set(key, {
+      provider,
+      key: bot?.id ?? current?.key,
+      label: bot?.name || look?.name?.trim() || (provider === "custom" ? "Custom" : PROVIDERS.find((item) => item.id === provider)?.name || provider),
+      color: bot?.color || look?.color || current?.color,
+      tokens,
+      inputTokens,
+      outputTokens,
+    });
   }
-  const customEvents = events.filter((event) => event.provider === "custom");
-  if (customEvents.length === 0) return rows;
-  if (customBots.length === 0) {
-    const totals = rollup(customEvents);
-    if (totals.totalTokens > 0) rows.push(asHeatBot("custom", "Custom", totals));
-    return rows;
-  }
-  const claimed = new Set<UsageEvent>();
-  for (const bot of customBots) {
-    const slice = customBotUsageEvents(customEvents, bot);
-    for (const event of slice) claimed.add(event);
-    const totals = rollup(slice);
-    if (totals.totalTokens > 0) {
-      rows.push(asHeatBot("custom", bot.name, totals, { key: bot.id, color: bot.color }));
-    }
-  }
-  const leftover = customEvents.filter((event) => !claimed.has(event));
-  const leftoverTotals = rollup(leftover);
-  if (leftoverTotals.totalTokens > 0) rows.push(asHeatBot("custom", "Custom", leftoverTotals));
-  return rows;
+  return [...rows.values()].filter((row) => row.tokens > 0);
 }
 
 const HEAT_TINT = [0, 42, 62, 80, 100] as const;
@@ -617,14 +593,14 @@ export type StretchBlend = UsageRange;
 
 type HeatSlice = { color: string; start: number; end: number };
 
-function heatSlices(bots: HeatBot[], level: 0 | 1 | 2 | 3 | 4): HeatSlice[] {
+function heatSlices(bots: HeatBot[]): HeatSlice[] {
   const total = bots.reduce((sum, bot) => sum + bot.tokens, 0);
   if (total <= 0) return [];
   let at = 0;
   return bots.map((bot) => {
     const start = at;
     at += (bot.tokens / total) * 100;
-    return { color: heatTint(vendorInk(bot.provider, bot.color), level), start, end: at };
+    return { color: vendorInk(bot.provider, bot.color), start, end: at };
   });
 }
 
@@ -640,11 +616,10 @@ export function cellDotBackground(
   _blend: StretchBlend = "today",
 ): string | undefined {
   if (cell.pad || cell.tokens <= 0 || cell.bots.length === 0) return undefined;
-  const level = heatLevel(cell.tokens, _peak);
   if (cell.bots.length === 1) {
-    return heatTint(vendorInk(cell.bots[0].provider, cell.bots[0].color), level);
+    return vendorInk(cell.bots[0].provider, cell.bots[0].color);
   }
-  const slices = heatSlices(cell.bots, level);
+  const slices = heatSlices(cell.bots);
   if (slices.length === 0) return undefined;
   return conicPie(slices);
 }
@@ -1145,6 +1120,10 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       cacheReadTokens,
       cacheWriteTokens,
       costUsd: typeof record.costUsd === "number" ? record.costUsd : undefined,
+      contextUsed:
+        typeof record.contextUsed === "number" && Number.isFinite(record.contextUsed)
+          ? Math.max(0, Math.round(record.contextUsed))
+          : undefined,
     });
   }
   return collapseInflatedUsage(events);

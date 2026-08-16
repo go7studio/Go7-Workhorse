@@ -181,6 +181,9 @@ type WorkhorseBridge = {
     mcpServers?: import("./lib/types").McpServerConfig[];
     securityPolicy?: import("./lib/types").SessionSecurityPolicy;
     folders?: string[];
+    parentId?: string;
+    hidden?: boolean;
+    role?: import("./lib/workhorse-rules").DeskRole;
     config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" };
   }) => Promise<{ text?: string; stopReason?: string }>;
   customCancel: (sessionId: string) => Promise<void>;
@@ -243,6 +246,10 @@ type WorkhorseBridge = {
       api?: string;
       contextWindow?: number;
       bot?: string;
+      chats?: "keep" | "remove";
+      onlyThis?: boolean;
+      scope?: string;
+      wait?: boolean;
     }) => void,
   ) => () => void;
   replyPeerAsk: (payload: { id: string; text?: string; error?: string }) => Promise<boolean>;

@@ -56,28 +56,42 @@ import {
   workhorseMcpServer,
   isElectronAppCommand,
 } from "../electron/grok-launch";
-import { handleWorkhorseRpc } from "../electron/workhorse-mcp";
+import { handleWorkhorseRpc, parseCreateProjectLive, parseRenameProjectLive, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { DESK_BOT_TURN_HINT, looksLikeDeskBotRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withDeskBotHint, withPermissionHint } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
 import { agentThreadsForSession, liveAgentThreadId } from "../src/lib/agent-thread";
 import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sessionTranscript } from "../src/lib/session-bridge";
 import {
+  admitSpawn,
+  collectChildAgentReports,
+  deskRoleOf,
   formatSubagentPrompt,
+  formatWorkerPrompt,
   descendantSessionIds,
   isHiddenSession,
+  isSpawnOnlyPrompt,
   normalizeAgentRun,
   overlappingAgentFiles,
+  parentHasRunningChildren,
   resolveModelHint,
   resolveSpawnSpec,
   shouldSpawnInsteadOfAsk,
+  SPAWN_ONLY_PROMPT_ERROR,
+  spawnWaitsForReply,
   subagentTurns,
+  toolsForDeskRole,
+  UNBOUND_SPAWN_ERROR,
   withSubagentStatus,
+  WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
-import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
+import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, reconcileIdleChildren, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
+import { looksLikeDispatchCheckBack, looksLikeUnfinishedDeskTurn as looksLikeUnfinishedCustomTurn, shouldEndDispatchTurn } from "../electron/custom-host";
+import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, peerAskTimeoutMs, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
 import {
   COMMANDS,
   CODEX_SHELL_COMMANDS,
@@ -90,8 +104,10 @@ import {
   invokeSkillPrompt,
   matchCommand,
   mergeCommands,
+  splitGoalCommand,
 } from "../src/lib/commands";
-import { applyGoalCommand, goalCommandForAction, goalDisplay, goalHaltsVendor, goalVendorPrompt, parseGoalInput } from "../src/lib/goal";
+import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSession, goalHaltsVendor, goalVendorPrompt, grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "../src/lib/goal";
+import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
 import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
@@ -106,17 +122,21 @@ import {
   parseMarkdownTable,
   peelAskMarkup,
   peelPlanningPreamble,
+  peelThinkTags,
+  splitThoughtFromOutput,
+  stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer } from "../src/lib/permissions";
-import { archiveChat, autoRenameChat, canPlaceInProject, deleteChat, dropDrafts, dropQueuedPrompt, enqueuePrompt, forkChat, forkTitle, hasComposerDraft, hiddenProjectChatCount, isDraftChat, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
-import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, emptyProject } from "../src/lib/project";
+import { appendUserMessage, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
 import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
 import { fileFolderFromPath, formatEditWhen, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromWriteTool, projectEdits, sameEditPath } from "../src/lib/project-edits";
 import { autoTitleForSend, suggestedTitleForSession, titleFromPrompt } from "../src/lib/titles";
+import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
@@ -357,7 +377,18 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /request-permission/);
   assert.equal(looksLikePermissionQuestion("what permissions do you have?"), true);
   assert.equal(looksLikePermissionQuestion("list the folder"), false);
+  assert.equal(looksLikePermissionQuestion("ROLE: worker\nFOLDER: D:\\Godot\\Projects\\spaceship-battle\nPermission / Sandbox are workspace facts."), false);
+  assert.equal(
+    looksLikePermissionQuestion(
+      "This chat’s live desk limits for THIS turn (already enforced — do not probe them).\n- Permission: Ask\n- Sandbox: Off",
+    ),
+    false,
+  );
   assert.equal(withPermissionHint("what permissions do you have?").startsWith(PERMISSION_TURN_HINT), true);
+  assert.equal(
+    withPermissionHint("ROLE: worker\nFOLDER: D:\\x\nRead src.", "worker"),
+    "ROLE: worker\nFOLDER: D:\\x\nRead src.",
+  );
   assert.equal(resolveGrokPermissionMode("ask"), "default");
   assert.equal(resolveGrokPermissionMode("accept-edits"), "acceptEdits");
   assert.equal(resolveGrokPermissionMode("always-approve"), "bypassPermissions");
@@ -599,6 +630,38 @@ test("chat rename, move, archive, and delete", () => {
   const child: Session = { ...one, id: "sess_child", parentId: "sess_parent", hidden: true };
   const removed = deleteChat([parent, child, sessions[1]], "sess_parent");
   assert.deepEqual(removed?.map((item) => item.id), ["sess_2"]);
+  const crewParent: Session = {
+    ...parent,
+    messages: [
+      {
+        id: "sub",
+        role: "system",
+        kind: "subagent",
+        text: "Worker",
+        subagentSessionId: "sess_child",
+        toolStatus: "completed",
+        createdAt: 1,
+      },
+    ],
+    lineup: {
+      id: "lineup_x",
+      folder: "D:\\x",
+      startedAt: 1,
+      rows: [{ childId: "sess_child", title: "Worker", slice: "Worker", folder: "D:\\x", vendor: "MiniMax", status: "completed", startedAt: 1 }],
+    },
+  };
+  const workersGone = deleteWorkerChats([crewParent, child, sessions[1]], "sess_parent");
+  assert.ok(workersGone);
+  assert.ok(!workersGone.some((item) => item.id === "sess_child"));
+  assert.ok(workersGone.some((item) => item.id === "sess_parent"));
+  assert.equal(workersGone.find((item) => item.id === "sess_parent")?.lineup?.rows.length, 0);
+  assert.equal(
+    workersGone.find((item) => item.id === "sess_parent")?.messages.find((message) => message.id === "sub")?.toolStatus,
+    "cancelled",
+  );
+  assert.equal(deleteWorkerChats([sessions[0], sessions[1]], "sess_parent"), null);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /Delete workers/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /deleteWorkers/);
 });
 
 test("in-chat subagents resolve vendors and keep a nested transcript", () => {
@@ -613,6 +676,15 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
   );
   assert.notEqual(archivedSpawn.provider, "claude");
   assert.notEqual(archivedSpawn.title, "Old login notes");
+  const selfMini = resolveSpawnSpec(
+    { fromSessionId: "sess_mini", prompt: "review the campaign layer" },
+    [],
+    { provider: "custom", effort: "high", customBotId: "bot_minimax", model: "MiniMax-M3" },
+    [{ id: "bot_minimax", name: "MiniMax", model: "MiniMax-M3" }],
+  );
+  assert.equal(selfMini.provider, "custom");
+  assert.equal(selfMini.customBotId, "bot_minimax");
+  assert.equal(selfMini.model, "MiniMax-M3");
   const spawned = resolveSpawnSpec(
     { fromSessionId: "p", prompt: "ping", chat: "OpenAI Terra", description: "Ask Terra" },
     [],
@@ -826,6 +898,7 @@ for (const model of GROK_MODELS) {
         assert.equal(spec.sessionParams.cwd, ROOT);
         assert.deepEqual(spec.sessionParams.mcpServers, []);
         assert.equal(spec.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
+        assert.equal(spec.sessionParams._meta?.goalMode, true);
         assert.ok(!/claude|codex|custom/i.test([spec.command, ...spec.argv].join(" ")));
         if (mode === "always-approve") {
           assert.equal(spec.alwaysApprove, true);
@@ -1199,6 +1272,15 @@ test("collapseInflatedUsage drops used-as-input snapshots and duplicate finals",
   );
   assert.equal(repaired[0].contextUsed, 113818);
 
+  const authoritative = applyUsageContext(
+    [{ ...repaired[0], contextUsed: 4_000 }],
+    [{ ...hydrated[0], contextUsed: 150_575 }],
+  );
+  assert.equal(authoritative[0].contextUsed, 150_575);
+
+  const normalizedContext = normalizeUsage([{ ...hydrated[0], id: "with_context", contextUsed: 150_575 }]);
+  assert.equal(normalizedContext[0].contextUsed, 150_575);
+
   assert.equal(occupancyFromUsage({ contextUsed: 70_000, inputTokens: 17_050, cacheReadTokens: 510_000 }, 500_000), 70_000);
   assert.equal(occupancyFromUsage({ contextUsed: 527_934, inputTokens: 17_050, cacheReadTokens: 510_000 }, 500_000), undefined);
   assert.equal(occupancyFromUsage({ inputTokens: 17_050, cacheReadTokens: 96_768 }, 500_000), 113_818);
@@ -1266,6 +1348,42 @@ test("parseGrokUsage splits Grok turn_completed inclusive inputTokens", () => {
   if (classified.kind !== "usage") throw new Error("expected usage");
   assert.equal(classified.usage.inputTokens, 28658);
   assert.equal(classified.usage.cacheReadTokens, 67456);
+});
+
+test("MiniMax usage row bills the turn total while the context ring keeps last occupancy", () => {
+  const stored = {
+    id: "use_minimax_harness",
+    at: 1,
+    provider: "custom" as const,
+    model: "MiniMax-M3",
+    inputTokens: 81_929,
+    outputTokens: 8_196,
+    cacheReadTokens: 1_089_280,
+    cacheWriteTokens: 0,
+    contextUsed: 24_141,
+  };
+  assert.equal(eventTotal(stored), stored.inputTokens + stored.outputTokens + stored.cacheWriteTokens);
+  assert.equal(occupancyFromUsage(stored, 1_000_000), 24_141);
+  const ring = estimateChatContext({
+    contextUsed: 24_141,
+    windowSize: 1_000_000,
+    messages: [
+      { text: "a".repeat(8_000) },
+      { text: "b".repeat(8_564) },
+    ],
+  });
+  assert.equal(ring.used, 24_141);
+  assert.ok(ring.used !== eventTotal(stored));
+
+  const firstHttp = { provider: "custom" as const, model: "MiniMax-M3", inputTokens: 2766, outputTokens: 43, cacheReadTokens: 128, cacheWriteTokens: 0 };
+  const secondHttp = { provider: "custom" as const, model: "MiniMax-M3", inputTokens: 211, outputTokens: 445, cacheReadTokens: 2816, cacheWriteTokens: 0 };
+  const folded = finalizeTurnUsage([firstHttp, secondHttp]);
+  assert.equal(folded.inputTokens, firstHttp.inputTokens + secondHttp.inputTokens);
+  assert.equal(folded.outputTokens, firstHttp.outputTokens + secondHttp.outputTokens);
+  const lastOccupancy = occupancyFromUsage(secondHttp, 1_000_000);
+  const billed = eventTotal({ ...folded, id: "fold", at: 1, cacheWriteTokens: folded.cacheWriteTokens ?? 0 });
+  assert.ok(lastOccupancy !== undefined);
+  assert.ok(billed !== lastOccupancy);
 });
 
 test("mergeUsageDraft prefers a running turn total over summing it", () => {
@@ -1506,6 +1624,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.doesNotMatch(pane, /Grok · /);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.turn\.user \.say/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /part\.type === "em"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /parseInline\(row\.value\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /followBottom/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /CodeBlock/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-pre-copy/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8"), /wrapMarkdown/);
@@ -1648,6 +1768,60 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(tagged.thought, /scan the folders first/);
   assert.match(tagged.body, /Here is the project shape/);
   assert.doesNotMatch(tagged.body, /<think/);
+  const mmLeak = [
+    "Sweeping the D drive for Space Battle folders now.</mm:think>Searching D:\\ for space* folders. Let me also list the root to see what's on D. Got it — found two candidate folders on D:\\. Let me peek inside both to see which is the real one.</mm:think>Both folders exist. Let me check what's inside each so I know which to allocate. Got it — D:\\Godot\\Projects\\spaceship-battle\\ is the canonical Space Battle project (full code, scenes, project.godot with the SpaceBattle autoload). The space folder is just an empty scratch directory.",
+    "",
+    "Allocating now.</mm:think>Done. Allocated “Space Battle” as a Workhorse project linked to D:\\Godot\\Projects\\spaceship-battle\\. This chat has been moved into it.",
+  ].join("\n");
+  const mm = peelThinkTags(mmLeak);
+  assert.match(mm.thought, /Sweeping the D drive/);
+  assert.match(mm.thought, /Searching D:\\ for space/);
+  assert.doesNotMatch(mm.body, /<\/?mm:think>/i);
+  assert.doesNotMatch(mm.body, /Sweeping the D drive/);
+  assert.match(mm.body, /Done\. Allocated/);
+  assert.match(mm.body, /D:\\Godot\\Projects\\spaceship-battle/);
+  const mmShown = peelPlanningPreamble(mmLeak);
+  assert.doesNotMatch(mmShown.body, /<\/?mm:think>/i);
+  assert.doesNotMatch(mmShown.body, /Sweeping the D drive/);
+  assert.match(mmShown.body, /Done\. Allocated/);
+  const drafted = [
+    "The user is asking if I can see the chats. I should call workhorse_list_chats to show the chats in the sidebar. Let me count: 29 entries total. Let me list them in a clean way, grouped by provider/model since that's what shows what bots are on the desk. Provider breakdown:",
+    "- custom (MiniMax-M3): many chats",
+    "- grok (grok-4.6): several chats",
+    "By vendor:",
+    "- Mini Max (M3, custom) — 14 chats",
+    "- Grok 4.6 — 8 chats",
+    "Status: 28 idle, 1 running",
+    "Want me to read the full transcript of any specific chat?",
+  ].join("\n");
+  const reply = [
+    "Yes — I can see all 29 sidebar chats in this Workhorse window. Here's the breakdown:",
+    "",
+    "By vendor:",
+    "- Mini Max (M3, custom) — 14 chats",
+    "- Grok 4.6 — 8 chats",
+    "",
+    "Status: 28 idle, 1 running (this chat).",
+  ].join("\n");
+  const split = splitThoughtFromOutput(drafted);
+  assert.match(split.thought, /I should call workhorse_list_chats/);
+  assert.doesNotMatch(split.thought, /Mini Max \(M3, custom\)/);
+  assert.doesNotMatch(split.thought, /By vendor/);
+  assert.doesNotMatch(split.thought, /Provider breakdown/);
+  assert.match(split.leaked, /custom \(MiniMax-M3\)|Provider breakdown|By vendor/);
+  const cleaned = stripOutputFromThought(drafted, reply);
+  assert.match(cleaned, /The user is asking/);
+  assert.doesNotMatch(cleaned, /14 chats/);
+  assert.doesNotMatch(cleaned, /Yes — I can see/);
+  assert.doesNotMatch(cleaned, /By vendor/);
+  const shown = thoughtForReply({
+    thoughtMessages: [{ text: drafted }],
+    assistantText: reply,
+  });
+  assert.match(shown, /I should call workhorse_list_chats/);
+  assert.doesNotMatch(shown, /14 chats/);
+  assert.doesNotMatch(shown, /Yes — I can see/);
+  assert.doesNotMatch(shown, /By vendor/);
   const include = parseChatMarkdown("#include <stdio.h>\n##### Deep\n#\nHello");
   assert.ok(include.length >= 3);
   assert.ok(include.some((block) => block.type === "p"));
@@ -1826,6 +2000,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_read_chat",
     "workhorse_ask_chat",
     "workhorse_spawn_agent",
+    "workhorse_await_agents",
     "workhorse_list_bots",
     "workhorse_detect_custom",
     "workhorse_setup_custom_bot",
@@ -1833,6 +2008,11 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_request_vendor",
     "workhorse_request_permission",
     "workhorse_create_project",
+    "workhorse_move_chat",
+    "workhorse_rename_chat",
+    "workhorse_rename_project",
+    "workhorse_delete_chat",
+    "workhorse_delete_project",
     "workhorse_list_references",
     "workhorse_add_reference",
     "workhorse_delete_reference",
@@ -1846,8 +2026,32 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /OpenClaw/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_add_reference/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_create_project/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_move_chat/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_rename_chat/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_rename_project/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not delete and recreate/);
+  assert.match(WORKHORSE_SESSION_RULES, /Visible sidebar names/);
+  assert.match(WORKHORSE_SESSION_RULES, /the rename did not take/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_delete_chat/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_delete_project/);
+  assert.match(WORKHORSE_SESSION_RULES, /puts THIS chat/);
+  assert.match(WORKHORSE_SESSION_RULES, /After you ask the user to pick, stop/);
+  assert.match(WORKHORSE_SESSION_RULES, /search likely folders first/i);
+  assert.match(WORKHORSE_SESSION_RULES, /D:\\ and C:\\/);
+  assert.match(WORKHORSE_SESSION_RULES, /If they name a drive/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
+  assert.match(WORKHORSE_SESSION_RULES, /Never delete this chat on a bulk list/);
+  assert.match(WORKHORSE_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);
+  assert.match(WORKHORSE_SESSION_RULES, /not a file on disk/);
+  assert.match(WORKHORSE_SESSION_RULES, /Only tell the user it exists if that list shows/);
+  assert.doesNotMatch(WORKHORSE_SESSION_RULES, /sidebar project/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not call it a sidebar anything/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /sidebar project/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /sidebar project/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /workhorse_create_project/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "permissions.ts"), "utf8"), /create_project/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "permissions.ts"), "utf8"), /move_chat/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "permissions.ts"), "utf8"), /delete_project/);
   assert.match(WORKHORSE_SESSION_RULES, /desk slots/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not read AGENTS\.md/);
   assert.match(WORKHORSE_SESSION_RULES, /do not fall back to reading source/);
@@ -1857,6 +2061,13 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /do not try a write to see if it fails/);
   assert.match(WORKHORSE_SESSION_RULES, /USER DECLINED/);
   assert.match(WORKHORSE_SESSION_RULES, /user said no for this chat/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not ask which vendor/);
+  assert.match(WORKHORSE_SESSION_RULES, /that vendor is a no-go/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not call workhorse_request_vendor/);
+  assert.match(WORKHORSE_SESSION_RULES, /API key is already on the desk|this chat’s own slot/);
+  assert.match(WORKHORSE_SESSION_RULES, /zero canCall rows/);
+  assert.match(WORKHORSE_SESSION_RULES, /never say no custom bot is attached/);
+  assert.match(WORKHORSE_SESSION_RULES, /Turned-off vendors are omitted/);
   assert.match(WORKHORSE_SESSION_RULES, /Talking to an existing sidebar chat is always allowed/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /pops a card|guess about the card/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /!item\.archivedAt/);
@@ -1868,7 +2079,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     mcp.slice(mcp.indexOf("async function askChat"), mcp.indexOf("async function spawnAgent")),
     /requestVendorAccess/,
   );
-  assert.doesNotMatch(
+  assert.match(
     mcp.slice(mcp.indexOf("async function listBots"), mcp.indexOf("function setupInput")),
     /postBridge/,
   );
@@ -1878,15 +2089,28 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /mode === "spawn"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /mode === "bots"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "create-project"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "move-chat"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "rename-chat"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "rename-project"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "delete-chat"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "delete-project"/);
+  assert.match(mcp, /setWorkhorseDeskAsk/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWorkhorseDeskAsk\(handlePeerAsk\)/);
   assert.match(mcp, /createWorkhorseProjectLocal/);
-  assert.match(mcp, /timeoutMs: 4_000/);
+  assert.match(mcp, /timeoutMs: 12_000/);
   assert.match(mcp, /inbox: false/);
-  assert.match(mcp, /Do not wait on another chat/);
+  assert.match(mcp, /action: "list-projects"/);
+  assert.match(mcp, /parsed\.source \?\? "live"/);
+  assert.match(mcp, /Do not tell the user a project exists unless it appears here/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /source: "live"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /saveState/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "add-reference"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "list-references"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "delete-reference"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "select-project"/);
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /create-project/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /move-chat/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /delete-project/);
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /add-reference/);
 
   const envRows = toAcpMcpEnv({ FOO: "bar", BAZ: "1" });
@@ -1944,12 +2168,14 @@ test("create-project writes the exact name locally and fails fast without a rend
     assert.equal(parsed.folder, appFolder);
     assert.ok(elapsed < 5_000);
     const saved = JSON.parse(readFileSync(stateFile, "utf8")) as {
-      projects: Array<{ name: string; folders: Array<{ path: string }> }>;
+      projects: Array<{ id: string; name: string; folders: Array<{ path: string }> }>;
+      sessions: Array<{ id: string; projectId?: string | null }>;
     };
     const named = saved.projects.find((item) => item.name === "Workhorse Dev");
     assert.ok(named);
     assert.ok(named?.folders.some((folder) => folder.path === appFolder));
     assert.ok(saved.projects.some((item) => item.name === "Go7-Workhorse"));
+    assert.equal(saved.sessions.find((item) => item.id === "sess_mini")?.projectId, named?.id);
 
     delete process.env.WORKHORSE_STATE_PATH;
     process.env.WORKHORSE_BRIDGE_URL = "http://127.0.0.1:9";
@@ -1963,7 +2189,7 @@ test("create-project writes the exact name locally and fails fast without a rend
     });
     const failElapsed = Date.now() - failStart;
     const message = (failed as { error?: { message?: string } })?.error?.message ?? "";
-    assert.match(message, /failed fast|bridge is not running|Do not wait/i);
+    assert.match(message, /failed|bridge is not running|Do not tell the user the project exists/i);
     assert.ok(failElapsed < 8_000);
   } finally {
     if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
@@ -1973,6 +2199,82 @@ test("create-project writes the exact name locally and fails fast without a rend
     if (previous.token === undefined) delete process.env.WORKHORSE_BRIDGE_TOKEN;
     else process.env.WORKHORSE_BRIDGE_TOKEN = previous.token;
     rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("desk bridge binds a real local port instead of :0", async () => {
+  const bridge = await startWorkhorseBridge(async () => ({ text: "ok" }));
+  try {
+    assert.match(bridge.url, /^http:\/\/127\.0\.0\.1:[1-9]\d*$/);
+    assert.doesNotMatch(bridge.url, /:0$/);
+  } finally {
+    bridge.close();
+  }
+});
+
+test("create-project uses the live desk hook instead of a silent disk write", async () => {
+  const seen: string[] = [];
+  let fromSeen = "";
+  const folder = mkdtempSync(path.join(os.tmpdir(), "wh-space-"));
+  setWorkhorseDeskAsk(async (ask) => {
+    seen.push(ask.action ?? "");
+    if (ask.action === "create-project") fromSeen = ask.fromSessionId;
+    if (ask.action === "list-projects") {
+      return {
+        text: JSON.stringify({
+          source: "live",
+          projects: [{ id: "proj_live", name: "Spaceship Battle", folders: [folder], chats: 1 }],
+        }),
+      };
+    }
+    return {
+      text: JSON.stringify({
+        ok: true,
+        source: "live",
+        name: ask.name,
+        folder: ask.folder,
+        projectId: "proj_live",
+        projects: [{ id: "proj_live", name: ask.name, folders: [ask.folder] }],
+      }),
+    };
+  });
+  try {
+    const created = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "workhorse_create_project",
+          arguments: { name: "Spaceship Battle", folder },
+        },
+      },
+      { fromSessionId: "sess_mini" },
+    );
+    const text =
+      (created as { result?: { content?: Array<{ text?: string }> } })?.result?.content
+        ?.map((item) => item.text ?? "")
+        .join("\n") ?? "";
+    assert.match(text, /proj_live/);
+    assert.match(text, /Spaceship Battle/);
+    assert.match(text, /"ok": true/);
+    const listed = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { name: "workhorse_list_projects", arguments: {} },
+    });
+    const listText =
+      (listed as { result?: { content?: Array<{ text?: string }> } })?.result?.content
+        ?.map((item) => item.text ?? "")
+        .join("\n") ?? "";
+    assert.match(listText, /Spaceship Battle/);
+    assert.ok(seen.includes("create-project"));
+    assert.ok(seen.includes("list-projects"));
+    assert.equal(fromSeen, "sess_mini");
+  } finally {
+    setWorkhorseDeskAsk(null);
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 
@@ -2153,6 +2455,8 @@ test("context ring opens this-chat stats instead of the Usage page", () => {
   assert.doesNotMatch(meter, /Estimated from this chat/);
   assert.doesNotMatch(meter, /until a Grok turn is live/);
   assert.doesNotMatch(meter, /Live breakdown from this Grok session/);
+  assert.doesNotMatch(meter, /Latest request only/);
+  assert.doesNotMatch(meter, /Usage counts every API/);
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /grok:session-info/);
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
@@ -2292,11 +2596,304 @@ test("create-project binds the exact name and does not attach the folder to anot
     name: "Workhorse Dev",
     folder: appFolder,
   });
+  assert.equal(parseCreateProjectLive(JSON.stringify({ ok: true, notified: true })), null);
+  assert.equal(parseCreateProjectLive(JSON.stringify({ ok: true, name: "Spaceship Battle", folder: "D:\\\\godot" }))?.name, "Spaceship Battle");
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /notified: true/);
   assert.equal(again.result.alreadyExists, true);
   assert.equal(again.result.name, "Workhorse Dev");
   assert.equal(again.projects.filter((item) => item.name === "Workhorse Dev").length, 1);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /applyCreateWorkhorseProject/);
+  const named = emptyProject("Spaceship Battles", ["D:\\\\godot\\\\Projects\\\\spaceship-battle"]);
+  assert.equal(findProjectByQuery([named, other], "spaceship battles")?.id, named.id);
+  const loose = {
+    id: "sess_loose",
+    projectId: null as string | null,
+    provider: "custom" as const,
+    model: "MiniMax-M3",
+    title: "Can you create me a project…",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    status: "idle" as const,
+    messages: [],
+    contextUsed: 0,
+  };
+  assert.equal(findListedChat([loose], "Can you create me a project…")?.id, "sess_loose");
+  assert.equal(findListedChat([loose], "create me a project"), undefined);
+  const moved = moveChat([loose], "sess_loose", named.id);
+  assert.equal(moved?.find((item) => item.id === "sess_loose")?.projectId, named.id);
+});
+
+test("delete-chat refuses the calling chat and fails closed on ambiguous titles", () => {
+  const caller: Session = {
+    id: "sess_this",
+    projectId: null,
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "hwat chats can you see?",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages: [{ id: "u", role: "user", text: "kill these", createdAt: 1 }],
+    contextUsed: 0,
+  };
+  const other: Session = {
+    ...caller,
+    id: "sess_other",
+    title: "Can you see the chats?",
+    provider: "custom",
+  };
+  const miniTest: Session = { ...caller, id: "sess_mini_test", title: "Test", provider: "custom" };
+  const codexTest: Session = { ...caller, id: "sess_codex_test", title: "test", provider: "codex", model: "gpt-5.6-sol" };
+  const listed = [caller, other, miniTest, codexTest];
+
+  const omitted = applyDeleteDeskChat(listed, { fromSessionId: caller.id });
+  assert.equal(omitted.ok, false);
+  if (!omitted.ok) assert.match(omitted.error, /onlyThis=true|chat title or id is required/i);
+  assert.equal(omitted.sessions.some((item) => item.id === caller.id), true);
+
+  const byOwnTitle = applyDeleteDeskChat(listed, { chat: caller.title, fromSessionId: caller.id });
+  assert.equal(byOwnTitle.ok, false);
+  if (!byOwnTitle.ok) assert.match(byOwnTitle.error, /Refused to delete this chat/);
+  assert.equal(byOwnTitle.sessions.some((item) => item.id === caller.id), true);
+  assert.equal(deleteChatGuard({ targetId: caller.id, fromSessionId: caller.id }).allow, false);
+
+  const thisOnly = applyDeleteDeskChat(listed, { chat: caller.title, fromSessionId: caller.id, onlyThis: true });
+  assert.equal(thisOnly.ok, true);
+  if (thisOnly.ok) {
+    assert.equal(thisOnly.deleted.id, caller.id);
+    assert.equal(thisOnly.sessions.some((item) => item.id === caller.id), false);
+    assert.equal(thisOnly.sessions.some((item) => item.id === other.id), true);
+  }
+
+  const otherGone = applyDeleteDeskChat(listed, { chat: other.title, fromSessionId: caller.id });
+  assert.equal(otherGone.ok, true);
+  if (otherGone.ok) {
+    assert.equal(otherGone.deleted.id, other.id);
+    assert.equal(otherGone.sessions.some((item) => item.id === caller.id), true);
+  }
+
+  const ambiguous = resolveListedChat(listed, "test");
+  assert.equal(ambiguous.ok, false);
+  if (!ambiguous.ok) {
+    assert.match(ambiguous.error, /Ambiguous chat title/);
+    assert.equal(ambiguous.candidates?.length, 2);
+    assert.ok(ambiguous.candidates?.some((item) => item.id === "sess_mini_test"));
+    assert.ok(ambiguous.candidates?.some((item) => item.id === "sess_codex_test"));
+  }
+  const ambDelete = applyDeleteDeskChat(listed, { chat: "test", fromSessionId: caller.id });
+  assert.equal(ambDelete.ok, false);
+  if (!ambDelete.ok) assert.match(ambDelete.error, /Ambiguous/);
+  assert.equal(ambDelete.sessions.some((item) => item.id === "sess_mini_test"), true);
+  assert.equal(ambDelete.sessions.some((item) => item.id === "sess_codex_test"), true);
+
+  const byId = applyDeleteDeskChat(listed, { chat: "sess_codex_test", fromSessionId: caller.id });
+  assert.equal(byId.ok, true);
+  if (byId.ok) assert.equal(byId.deleted.id, "sess_codex_test");
+  assert.equal(findListedChat(listed, "see the chats"), undefined);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyDeleteDeskChat/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /onlyThis/);
+
+  const looseCaller: Session = { ...caller, id: "sess_loose_main", title: "Can you remove allt he chats...", projectId: null };
+  const looseA: Session = { ...caller, id: "sess_loose_a", title: "What do you have access to", projectId: null };
+  const looseB: Session = { ...caller, id: "sess_loose_b", title: "Test", projectId: null };
+  const inProject: Session = { ...caller, id: "sess_proj", title: "Please summon subagents", projectId: "proj_ships" };
+  const hiddenKid: Session = {
+    ...caller,
+    id: "sess_kid",
+    title: "src tree review",
+    projectId: null,
+    parentId: "sess_loose_a",
+    hidden: true,
+  };
+  const looseListed = [looseCaller, looseA, looseB, inProject, hiddenKid];
+  const missingFrom = applyDeleteLooseDeskChats(looseListed, {});
+  assert.equal(missingFrom.ok, false);
+  const swept = applyDeleteLooseDeskChats(looseListed, { fromSessionId: looseCaller.id });
+  assert.equal(swept.ok, true);
+  if (swept.ok) {
+    assert.deepEqual(swept.deleted.map((item) => item.id).sort(), ["sess_loose_a", "sess_loose_b"]);
+    assert.equal(swept.kept?.id, looseCaller.id);
+    assert.equal(swept.sessions.some((item) => item.id === looseCaller.id), true);
+    assert.equal(swept.sessions.some((item) => item.id === inProject.id), true);
+    assert.equal(swept.sessions.some((item) => item.id === looseA.id), false);
+    assert.equal(swept.sessions.some((item) => item.id === hiddenKid.id), false);
+  }
+  assert.equal(isLooseDeleteScope({ scope: "loose" }), true);
+  assert.equal(isLooseDeleteScope({ chat: "not in a project" }), true);
+  assert.equal(isLooseDeleteScope({ chat: "What do you have access to" }), false);
+  assert.equal(looksLikeLooseDeleteRequest("Can you remove allt he chats not in a project please?"), true);
+  assert.equal(looksLikeLooseDeleteRequest("delete all loose chats"), true);
+  assert.equal(looksLikeLooseDeleteRequest("rename the project"), false);
+  assert.equal(withLooseDeleteHint("remove all the chats not in a project").startsWith(LOOSE_DELETE_HINT), true);
+  const looseAsk = composeVendorPrompt("Can you remove all the chats not in a project please?", WORKHORSE_SESSION_RULES, "session/load");
+  assert.match(looseAsk, /scope=loose/);
+  assert.match(looseAsk, /Do not offer A\/B\/C/);
+  assert.match(WORKHORSE_SESSION_RULES, /scope=loose/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /scope=loose/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyDeleteLooseDeskChats/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /scope=loose|scope: loose/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withLooseDeleteHint/);
+});
+
+test("rename chat and project in place without delete", () => {
+  const chat: Session = {
+    id: "sess_space",
+    projectId: "proj_godot",
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "PLease look at the D drive",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages: [{ id: "u", role: "user", text: "Rename to Spaceship game please", createdAt: 1 }],
+    contextUsed: 0,
+  };
+  const renamedChat = applyRenameDeskChat([chat], { name: "Spaceship game", fromSessionId: chat.id });
+  assert.equal(renamedChat.ok, true);
+  if (renamedChat.ok) {
+    assert.equal(renamedChat.previous, "PLease look at the D drive");
+    assert.equal(renamedChat.renamed.title, "Spaceship game");
+    assert.equal(renamedChat.renamed.id, chat.id);
+    assert.equal(renamedChat.sessions.some((item) => item.id === chat.id && item.title === "Spaceship game"), true);
+  }
+  const missingName = applyRenameDeskChat([chat], { fromSessionId: chat.id, name: "  " });
+  assert.equal(missingName.ok, false);
+
+  const project = emptyProject("Godot Spaceships", ["D:\\\\Godot\\\\Projects\\\\spaceship-battle"]);
+  const other = emptyProject("Workhorse Dev", ["C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse"]);
+  const renamedProject = applyRenameDeskProject([project, other], {
+    name: "Spaceship game",
+    fromProjectId: project.id,
+  });
+  assert.equal(renamedProject.ok, true);
+  if (renamedProject.ok) {
+    assert.equal(renamedProject.previous, "Godot Spaceships");
+    assert.equal(renamedProject.renamed.name, "Spaceship game");
+    assert.equal(renamedProject.renamed.id, project.id);
+    assert.equal(renamedProject.projects.find((item) => item.id === other.id)?.name, "Workhorse Dev");
+  }
+  const byName = applyRenameDeskProject([project, other], { name: "Spaceship game", project: "Godot Spaceships" });
+  assert.equal(byName.ok, true);
+  if (byName.ok) assert.equal(byName.renamed.id, project.id);
+  assert.equal(renameTookOnDesk([project, other], "Spaceship game"), false);
+  assert.equal(renameTookOnDesk([{ name: "Spaceship game" }, other], "Spaceship game"), true);
+  assert.deepEqual(visibleProjectNames([project, other]), ["Godot Spaceships", "Workhorse Dev"]);
+  assert.equal(parseRenameProjectLive(JSON.stringify({ ok: true, name: "Spaceship game", notified: true })), null);
+  assert.equal(
+    parseRenameProjectLive(
+      JSON.stringify({
+        ok: true,
+        name: "Spaceship game",
+        requested: "Spaceship game",
+        visibleOnDesk: true,
+        projects: [{ name: "Godot Spaceships" }, { name: "Workhorse Dev" }],
+      }),
+    ),
+    null,
+  );
+  const confirmed = parseRenameProjectLive(
+    JSON.stringify({
+      ok: true,
+      name: "Spaceship game",
+      requested: "Spaceship game",
+      visibleOnDesk: true,
+      projects: [{ name: "Spaceship game" }, { name: "Workhorse Dev" }],
+    }),
+  );
+  assert.equal(confirmed?.name, "Spaceship game");
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /Visible sidebar names/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyRenameDeskChat/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyRenameDeskProject/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /workhorse_rename_chat/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /workhorse_rename_project/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /workhorse_rename_project/);
+});
+
+test("move-chat and delete desk tools hit the live hook", async () => {
+  const seen: string[] = [];
+  setWorkhorseDeskAsk(async (ask) => {
+    seen.push(`${ask.action}:${ask.fromSessionId}:${ask.name ?? ""}:${ask.chat ?? ""}:${ask.chats ?? ""}`);
+    if (ask.action === "rename-project") {
+      return {
+        text: JSON.stringify({
+          ok: true,
+          name: ask.name,
+          requested: ask.name,
+          visibleOnDesk: true,
+          projects: [{ name: "Godot Spaceships" }, { name: "Workhorse Dev" }],
+        }),
+      };
+    }
+    return { text: JSON.stringify({ ok: true, action: ask.action, fromSessionId: ask.fromSessionId }) };
+  });
+  try {
+    const moved = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "workhorse_move_chat", arguments: { project: "Spaceship Battles" } },
+      },
+      { fromSessionId: "sess_mini" },
+    );
+    const deleted = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/call",
+        params: { name: "workhorse_delete_project", arguments: { project: "Spaceship Battles", chats: "keep" } },
+      },
+      { fromSessionId: "sess_mini" },
+    );
+    const movedText =
+      (moved as { result?: { content?: Array<{ text?: string }> } })?.result?.content
+        ?.map((item) => item.text ?? "")
+        .join("\n") ?? "";
+    const deletedText =
+      (deleted as { result?: { content?: Array<{ text?: string }> } })?.result?.content
+        ?.map((item) => item.text ?? "")
+        .join("\n") ?? "";
+    assert.match(movedText, /sess_mini/);
+    assert.match(deletedText, /sess_mini/);
+    assert.ok(seen.some((row) => row.startsWith("move-chat:sess_mini:Spaceship Battles")));
+    assert.ok(seen.some((row) => row.startsWith("delete-project:sess_mini:Spaceship Battles")));
+    const self = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: { name: "workhorse_delete_chat", arguments: {} },
+      },
+      { fromSessionId: "sess_mini" },
+    );
+    const selfMessage = (self as { error?: { message?: string } })?.error?.message ?? "";
+    assert.match(selfMessage, /onlyThis=true|chat title or id is required/i);
+    const lied = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 10,
+        method: "tools/call",
+        params: { name: "workhorse_rename_project", arguments: { name: "Spaceship game" } },
+      },
+      { fromSessionId: "sess_mini" },
+    );
+    const liedMessage = (lied as { error?: { message?: string } })?.error?.message ?? "";
+    assert.match(liedMessage, /did not take/i);
+    assert.match(liedMessage, /Do not tell the user it is named/);
+    const listedBots = await handleWorkhorseRpc(
+      { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "workhorse_list_bots", arguments: {} } },
+      { fromSessionId: "sess_mini" },
+    );
+    const listedText =
+      (listedBots as { result?: { content?: Array<{ text?: string }> } })?.result?.content
+        ?.map((item) => item.text ?? "")
+        .join("\n") ?? "";
+    assert.match(listedText, /ok|MiniMax|Callable|bots/i);
+    assert.ok(seen.some((row) => row.startsWith("list:")));
+  } finally {
+    setWorkhorseDeskAsk(null);
+  }
 });
 
 test("project home lists edited files from write tools, not Choose a brain", () => {
@@ -2676,10 +3273,15 @@ test("empty chats stay drafts until the first send names them", () => {
   const queued = enqueuePrompt([named], "live_1", { text: "then add the bot" });
   assert.equal(queued?.[0].queue?.length, 1);
   assert.equal(queued?.[0].queue?.[0]?.text, "then add the bot");
+  assert.ok(queued?.[0].messages.some((message) => message.role === "user" && message.text === "then add the bot"));
+  assert.ok(queued?.[0].queue?.[0]?.userMessageId);
+  const hiddenJoin = enqueuePrompt([named], "live_1", { text: "ORCHESTRATION CALL\n- User: hi", hideUser: true });
+  assert.ok(!hiddenJoin?.[0].messages.some((message) => message.text.includes("ORCHESTRATION CALL")));
   const shifted = shiftQueuedPrompt(queued!, "live_1");
   assert.equal(shifted?.item.text, "then add the bot");
   assert.equal(shifted?.sessions[0]?.queue?.length ?? 0, 0);
   assert.equal(dropQueuedPrompt(queued!, "live_1", queued![0].queue![0].id)?.[0].queue?.length ?? 0, 0);
+  assert.ok(!dropQueuedPrompt(queued!, "live_1", queued![0].queue![0].id)?.[0].messages.some((message) => message.text === "then add the bot"));
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
   assert.match(composer, /Queue for next/);
@@ -2838,6 +3440,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(css, /\.project-chats/);
   assert.match(css, /\.place-project/);
   assert.match(sidebar, /Show more/);
+  assert.match(sidebar, /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(sidebar, /settingsOpen/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /panel !== "settings"/);
   assert.equal(PROJECT_CHAT_LIMIT, 5);
@@ -3059,6 +3662,38 @@ test("stretchBuckets follows today week month and all", () => {
   );
   assert.equal(mini.columns[12][0].bots[0]?.color, "#ff375f");
   assert.match(cellDotBackground(mini.columns[12][0], 100) ?? "", /#ff375f/);
+  const remappedMini = stretchHeatmap(
+    [
+      {
+        id: "u_mini_grok",
+        at: noon,
+        provider: "grok",
+        model: "MiniMax-M3",
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u_mini_custom",
+        at: noon + 3 * 60 * 60 * 1000,
+        provider: "custom",
+        model: "MiniMax-M3",
+        inputTokens: 80,
+        outputTokens: 20,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    "today",
+    noon,
+    [{ id: "bot_minimax", name: "MiniMax", model: "MiniMax-M3", color: "#ff375f" }],
+  );
+  assert.equal(remappedMini.columns[12][0].bots.length, 1);
+  assert.equal(remappedMini.columns[12][0].bots[0]?.label, "MiniMax");
+  assert.equal(remappedMini.columns[15][0].bots[0]?.label, "MiniMax");
+  assert.equal(cellDotBackground(remappedMini.columns[12][0], 100), "#ff375f");
+  assert.equal(cellDotBackground(remappedMini.columns[15][0], 100), "#ff375f");
 
   const weekDots = stretchHeatmap([sample(noon)], "week", noon);
   assert.deepEqual(
@@ -3459,7 +4094,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /thought-live/);
   assert.doesNotMatch(pane, /className="thinking"/);
   assert.doesNotMatch(pane, /live-pill" aria-live/);
-  assert.match(popout, /Still working/);
+  assert.match(popout, /working ·|Still working|subagent-preview/);
   assert.match(popout, /finished/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);
@@ -3515,6 +4150,26 @@ test("transcript groups tools and thoughts above the final reply", () => {
     { id: "a2", role: "assistant", text: "", createdAt: 6 },
   ]);
   assert.equal(split.filter((block) => block.type === "reply").length, 1);
+  const synthesis = groupTranscript([
+    { id: "u", role: "user", text: "call subagents", createdAt: 1 },
+    { id: "a1", role: "assistant", text: "Started three slices.", createdAt: 2 },
+    { id: "note", role: "system", text: "All workers finished.", createdAt: 3 },
+    { id: "a2", role: "assistant", text: "HUD is in battle_hud.gd.", createdAt: 4 },
+  ]);
+  assert.equal(synthesis.filter((block) => block.type === "reply").length, 2);
+  assert.equal(
+    synthesis.some((block) => block.type === "system" && block.message.text === "All workers finished."),
+    true,
+  );
+  const replies = synthesis.filter((block) => block.type === "reply");
+  if (replies[0]?.type === "reply") assert.equal(replies[0].assistant.text, "Started three slices.");
+  if (replies[1]?.type === "reply") assert.equal(replies[1].assistant.text, "HUD is in battle_hud.gd.");
+  const twoAssistants = groupTranscript([
+    { id: "u", role: "user", text: "go", createdAt: 1 },
+    { id: "a1", role: "assistant", text: "Workers are running.", createdAt: 2 },
+    { id: "a2", role: "assistant", text: "Here is the combined review.", createdAt: 3 },
+  ]);
+  assert.equal(twoAssistants.filter((block) => block.type === "reply").length, 2);
   const work = split.find((block) => block.type === "reply");
   if (work?.type === "reply") {
     assert.equal(work.assistant.text, "Spawning now.");
@@ -3534,14 +4189,46 @@ test("transcript groups tools and thoughts above the final reply", () => {
     assert.equal(deniedSplit[1].assistant.text, "I'll spawn Grok.");
     assert.ok(deniedSplit[1].tools.length >= 2);
   }
-  assert.match(popout, /subagent-thread/);
+  assert.match(popout, /subagent-preview/);
+  assert.match(popout, /subagent-open/);
   assert.match(popout, /subagents/);
   assert.match(popout, /onOpenThread/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.subagent-thread/);
+  assert.match(popout, /working · \$\{formatWorked/);
+  assert.match(popout, /anyChildLive/);
+  assert.match(popout, /deskInk/);
+  assert.doesNotMatch(popout, /subagentTurns/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.subagent-open/);
+  const workCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const foldAt = workCss.indexOf(".work-fold > summary::before");
+  const foldBlock = foldAt >= 0 ? workCss.slice(foldAt, foldAt + 280) : "";
+  assert.match(foldBlock, /border-radius:\s*50%/);
+  assert.doesNotMatch(foldBlock, /rotate\(-45deg\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread/);
-  assert.match(pane, /AgentThreadPane/);
-  assert.match(pane, /has-thread/);
+  assert.doesNotMatch(pane, /AgentThreadPane/);
+  assert.doesNotMatch(pane, /has-thread/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /Talking now/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /deskInk/);
+  const threadPane = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
+  assert.match(threadPane, /compact-thread overlay/);
+  assert.match(threadPane, /groupTranscript\(child\.messages\)/);
+  assert.match(threadPane, /WorkPopout/);
+  assert.match(threadPane, /ContextMeter session=\{child\}/);
+  assert.match(threadPane, /compact/);
+  assert.match(threadPane, /readOnly/);
+  assert.match(threadPane, /id: "copy"/);
+  assert.doesNotMatch(threadPane, /Composer/);
+  assert.doesNotMatch(threadPane, /SessionSetup/);
+  assert.doesNotMatch(threadPane, /GoalBar/);
+  assert.doesNotMatch(threadPane, /WatchBanners/);
+  assert.doesNotMatch(threadPane, /TerminalPane/);
+  assert.doesNotMatch(threadPane, /FileReview/);
+  assert.doesNotMatch(threadPane, /agent-bubble/);
+  assert.doesNotMatch(threadPane, /id: "fork"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread\.compact-thread/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread\.compact-thread\.overlay/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-twist[\s\S]*z-index:\s*2/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8"), /session: sessionProp/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /readOnly/);
 
   const parent: Session = {
     id: "parent",
@@ -3687,8 +4374,52 @@ test("transcript groups tools and thoughts above the final reply", () => {
     },
     [{ ...parent, status: "idle" }],
   );
-  assert.equal(stillLive[0]?.live, false);
-  assert.ok(stillLive[0]?.error);
+  assert.equal(stillLive.length, 0);
+  const setupTimeout = agentThreadsForSession(
+    {
+      ...parent,
+      status: "idle",
+      messages: [
+        {
+          id: "bots",
+          role: "system",
+          kind: "subagent",
+          fromTitle: "Workhorse did not finish setting up that bot in time",
+          toolStatus: "failed",
+          text: "Workhorse did not finish setting up that bot in time",
+          createdAt: 5,
+        },
+      ],
+    },
+    [parent],
+  );
+  assert.equal(setupTimeout.length, 0);
+  const otherChat = {
+    ...parent,
+    id: "other",
+    title: "Campaign, sectors, workshop surface",
+    parentId: "someone-else",
+    hidden: true,
+  };
+  const leaked = agentThreadsForSession(
+    {
+      ...parent,
+      messages: [
+        {
+          id: "mark-other",
+          role: "system",
+          kind: "subagent",
+          fromTitle: otherChat.title,
+          subagentSessionId: otherChat.id,
+          toolStatus: "completed",
+          text: otherChat.title,
+          createdAt: 6,
+        },
+      ],
+    },
+    [parent, otherChat],
+  );
+  assert.equal(leaked.length, 0);
   assert.equal(interpretPeerAskHttp(400, { error: "Grok is over its day bank" }).retryable, false);
   assert.equal(interpretPeerAskHttp(200, { text: "hi" }).ok, true);
   assert.equal(interpretPeerAskHttp(500, { error: "bridge down" }).retryable, true);
@@ -3710,6 +4441,131 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(stripped?.messages[0].id, "u");
   assert.doesNotMatch(store, /chatIntro/);
   assert.doesNotMatch(store, /is live via Grok Build/);
+});
+
+test("subagent pane groups child thought tools and usage like the usual chat", () => {
+  const childMessages = [
+    { id: "u1", role: "user" as const, kind: "peer" as const, fromTitle: "Orchestrator", text: "Scrape the HUD.", createdAt: 1 },
+    { id: "th1", role: "assistant" as const, kind: "thought" as const, text: "I will list the scene files first.", createdAt: 2 },
+    { id: "tl1", role: "system" as const, kind: "tool" as const, text: "Read · completed — scenes/ui/damagecam.tscn", toolStatus: "completed", createdAt: 3 },
+    { id: "c1", role: "system" as const, kind: "compact" as const, text: "Kept HUD notes.", createdAt: 4 },
+    { id: "a1", role: "assistant" as const, text: "The HUD script wires damage numbers to the bar.", createdAt: 5 },
+  ];
+  const blocks = groupTranscript(childMessages);
+  const reply = blocks.find((block) => block.type === "reply");
+  assert.ok(reply && reply.type === "reply");
+  if (reply?.type !== "reply") return;
+  assert.equal(reply.thoughts.length, 1);
+  assert.equal(reply.tools.length, 1);
+  assert.equal(reply.compacts.length, 1);
+  assert.match(reply.assistant.text, /HUD script/);
+  assert.equal(reply.thoughts[0]?.text.includes("scene files"), true);
+  assert.match(reply.tools[0]?.text ?? "", /damagecam/);
+
+  const parentCtx = estimateChatContext({
+    contextUsed: 80_000,
+    windowSize: 1_000_000,
+    messages: [{ text: "parent only", kind: undefined }],
+  });
+  const childCtx = estimateChatContext({
+    contextUsed: 22_000,
+    windowSize: 1_000_000,
+    messages: childMessages,
+  });
+  assert.equal(parentCtx.used, 80_000);
+  assert.equal(childCtx.used, 22_000);
+  assert.notEqual(childCtx.used, parentCtx.used);
+  assert.ok((childCtx.messageCount ?? 0) > (parentCtx.messageCount ?? 0));
+
+  const bot = {
+    id: "bot_minimax",
+    name: "MiniMax",
+    model: "MiniMax-M3",
+    color: "#3dff7a",
+    enabled: true,
+    baseUrl: "https://api.example",
+    apiKey: "k",
+    api: "openai-completions" as const,
+    contextWindow: 1_000_000,
+    createdAt: 1,
+  };
+  const who = brainCaption(
+    { provider: "custom", model: "MiniMax-M3", customBotId: "bot_minimax" },
+    [bot],
+  );
+  assert.equal(who.color, "#3dff7a");
+  const ink = deskInk(
+    { provider: "custom", customBotId: "bot_minimax" },
+    { customBots: [bot], llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } } },
+  );
+  assert.equal(ink, "#3dff7a");
+  assert.notEqual(who.color, undefined);
+});
+
+test("agent thread pane only lists this chat’s workers", () => {
+  const parent: Session = {
+    id: "parent",
+    projectId: null,
+    provider: "custom",
+    model: "MiniMax-M3",
+    effort: "medium",
+    title: "Please summon subagents",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: [
+      {
+        id: "mine",
+        role: "system",
+        kind: "subagent",
+        fromTitle: "Battle HUD",
+        subagentSessionId: "kid",
+        toolStatus: "completed",
+        text: "Battle HUD",
+        createdAt: 1,
+      },
+      {
+        id: "setup",
+        role: "system",
+        kind: "subagent",
+        fromTitle: "Workhorse did not finish setting up that bot in time",
+        toolStatus: "failed",
+        text: "Workhorse did not finish setting up that bot in time",
+        createdAt: 2,
+      },
+      {
+        id: "foreign",
+        role: "system",
+        kind: "subagent",
+        fromTitle: "Campaign, sectors, workshop surface",
+        subagentSessionId: "other-kid",
+        toolStatus: "completed",
+        text: "Campaign, sectors, workshop surface",
+        createdAt: 3,
+      },
+    ],
+  };
+  const mine: Session = {
+    ...parent,
+    id: "kid",
+    parentId: "parent",
+    hidden: true,
+    title: "Battle HUD",
+    messages: [{ id: "u", role: "user", kind: "peer", text: "do hud", createdAt: 1 }],
+  };
+  const other: Session = {
+    ...parent,
+    id: "other-kid",
+    parentId: "other-parent",
+    hidden: true,
+    title: "Campaign, sectors, workshop surface",
+    messages: [],
+  };
+  const found = agentThreadsForSession(parent, [parent, mine, other]);
+  assert.equal(found.length, 1);
+  assert.equal(found[0]?.title, "Battle HUD");
+  assert.equal(found[0]?.childId, "kid");
 });
 
 test("shipped launch spec maps sandbox and plan without yolo", () => {
@@ -3861,8 +4717,10 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "skills-catalog.ts"), "utf8"), /\.codex., .plugins./);
   const storeSend = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSend, /commandContinuesToVendor\(match\.run\)/);
-  assert.match(storeSend, /applyGoalCommand\(item\.goal, text\)/);
-  assert.match(storeSend, /goalHaltsVendor\(text\)/);
+  assert.match(storeSend, /prepareVendorSend\(/);
+  assert.match(storeSend, /nextGoalForSend\(/);
+  assert.doesNotMatch(storeSend, /vendorText = goalVendorPrompt/);
+  assert.doesNotMatch(storeSend, /hideUser = true/);
   assert.match(storeSend, /goal\?\.status === "paused"/);
   const extras = (provider: "codex" | "grok") =>
     commandsForSession({ provider }).filter((command) => command.source && command.source !== "workhorse");
@@ -3870,10 +4728,17 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
     const codex = matchCommand(line, commandsForSession({ provider: "codex" }));
     const grok = matchCommand(line, commandsForSession({ provider: "grok" }));
     assert.equal(codex?.run, "goal", line);
-    assert.equal(grok?.run, "goal", line);
+    assert.equal(grok?.run, "grok", line);
     assert.equal(commandContinuesToVendor(codex?.run), false, line);
-    assert.equal(commandContinuesToVendor(grok?.run), false, line);
+    assert.equal(commandContinuesToVendor(grok?.run), true, line);
   }
+  assert.deepEqual(splitGoalCommand("/goal"), { name: "/goal", rest: "" });
+  assert.deepEqual(splitGoalCommand("/goal ship the backlog"), { name: "/goal", rest: " ship the backlog" });
+  assert.equal(splitGoalCommand("/plan"), null);
+  assert.equal(splitGoalCommand("please /goal later"), null);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /chat-command/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.chat-command/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "tokens.css"), "utf8"), /--command:/);
   assert.equal(matchCommand("/skills", extras("codex"))?.run, "vendor");
   assert.equal(matchCommand("/review", extras("codex"))?.run, "vendor");
   assert.equal(matchCommand("/skills", extras("grok"))?.run, "grok");
@@ -3883,6 +4748,8 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
 
 test("Goal state set pause resume clear maps to display actions", () => {
   assert.equal(parseGoalInput("/new"), null);
+  assert.equal(parseGoalInput("/goal does that goal act as a grok goal or a workhorse goal?"), null);
+  assert.equal(parseGoalInput("/goal is this a grok goal"), null);
   assert.deepEqual(parseGoalInput("/goal"), { action: "view", objective: "" });
   assert.deepEqual(parseGoalInput("/goal pause"), { action: "pause", objective: "" });
   assert.deepEqual(parseGoalInput("/pause"), { action: "pause", objective: "" });
@@ -3894,6 +4761,28 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.equal(goalHaltsVendor("/goal stop"), true);
   assert.equal(goalHaltsVendor("/goal resume"), false);
   assert.equal(goalHaltsVendor("/goal ship the backlog"), false);
+  const goalChat: Session = {
+    id: "goal_live",
+    projectId: null,
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "medium",
+    title: "Goal chat",
+    mode: "ask",
+    sandbox: "off",
+    status: "running",
+    messages: [{ id: "u", role: "user", text: "start", createdAt: 1 }],
+    contextUsed: 0,
+  };
+  const withGoalLine = appendUserMessage([goalChat], "goal_live", "/goal");
+  assert.ok(withGoalLine[0]?.messages.some((message) => message.role === "user" && message.text === "/goal"));
+  const queuedGoal = enqueuePrompt([goalChat], "goal_live", {
+    text: "/goal ship the backlog",
+    vendorText: goalVendorPrompt({ status: "active", objective: "ship the backlog" }, "set"),
+  });
+  assert.ok(queuedGoal?.[0].messages.some((message) => message.text === "/goal ship the backlog"));
+  assert.match(queuedGoal?.[0].queue?.[0]?.vendorText ?? "", /ongoing Workhorse goal/);
+  assert.notEqual(queuedGoal?.[0].queue?.[0]?.hideUser, true);
   const set = applyGoalCommand(undefined, "/goal ship the 18 features in BACKLOG.md");
   assert.deepEqual(set, { status: "active", objective: "ship the 18 features in BACKLOG.md" });
   const viewed = applyGoalCommand(set, "/goal");
@@ -3904,6 +4793,7 @@ test("Goal state set pause resume clear maps to display actions", () => {
   const resumed = applyGoalCommand(paused, "/goal resume");
   assert.equal(resumed?.status, "active");
   assert.equal(applyGoalCommand(resumed, "/goal clear"), undefined);
+  assert.equal(applyGoalCommand(set, "/goal clear"), undefined);
   const activeView = goalDisplay(set);
   assert.equal(activeView?.title, "Goal");
   assert.deepEqual(activeView?.actions, ["pause", "clear"]);
@@ -3930,7 +4820,26 @@ test("Goal state set pause resume clear maps to display actions", () => {
   });
   assert.deepEqual(persisted?.goal, { status: "paused", objective: "keep going" });
   const bar = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
-  assert.match(bar, /goalDisplay/);
+  assert.match(bar, /goalDisplayForSession/);
+  const grokIdleActive = {
+    provider: "grok" as const,
+    status: "idle" as const,
+    goal: { status: "active" as const, objective: "prove native /goal" },
+  };
+  assert.equal(goalDisplayForSession(grokIdleActive), null);
+  assert.ok(goalDisplayForSession({ ...grokIdleActive, status: "running" }));
+  assert.equal(goalDisplayForSession({ ...grokIdleActive, goal: { status: "paused", objective: "prove native /goal" } })?.status, "paused");
+  assert.ok(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }));
+  assert.equal(grokGoalAfterTurnIdle("grok", { status: "active", objective: "prove native /goal" }), undefined);
+  assert.deepEqual(grokGoalAfterTurnIdle("grok", { status: "paused", objective: "prove native /goal" }), {
+    status: "paused",
+    objective: "prove native /goal",
+  });
+  assert.deepEqual(grokGoalAfterTurnIdle("custom", { status: "active", objective: "desk" }), {
+    status: "active",
+    objective: "desk",
+  });
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /grokGoalAfterTurnIdle/);
   assert.match(bar, /Pause/);
   assert.match(bar, /Resume/);
   assert.match(bar, /Clear/);
@@ -3938,10 +4847,247 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /GoalBar/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.goal-bar/);
   const haltStore = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(haltStore, /goalHaltsVendor\(text\)/);
-  const haltAt = haltStore.indexOf("goalHaltsVendor(text)");
-  const queueAt = haltStore.indexOf('status === "running" && !options?.steer');
+  assert.match(haltStore, /planHaltForward\(/);
+  assert.match(haltStore, /prepareVendorSend\(/);
+  assert.match(haltStore, /appendUserMessage\(/);
+  const haltAt = haltStore.indexOf("planHaltForward(");
+  const queueAt = haltStore.indexOf("!skipQueue && !options?.afterGoalHalt && !options?.steer");
   assert.ok(haltAt >= 0 && queueAt >= 0 && haltAt < queueAt, "pause must halt before a live turn can queue it");
+  assert.match(haltStore, /haltPlan === "defer-until-cancelled-done"/);
+  assert.match(haltStore, /afterGoalHalt: true/);
+  assert.match(haltStore, /!options\?\.afterGoalHalt && !options\?\.steer/);
+  assert.match(haltStore, /vendorTerminalAction\(/);
+  assert.match(haltStore, /consume-halt-then-forward/);
+  const consumeAt = haltStore.indexOf('terminal === "consume-halt-then-forward"');
+  const consumeReturn = haltStore.indexOf("return;", consumeAt);
+  const finalizeAfter = haltStore.indexOf("EMPTY_GROK_REPLY", consumeAt);
+  assert.ok(consumeAt >= 0 && consumeReturn >= 0, "cancelled done must return from apply");
+  assert.ok(finalizeAfter < 0 || consumeReturn < finalizeAfter, "cancelled done must return before EMPTY_GROK_REPLY can stamp the live assistant");
+});
+
+test("Grok chats send native /goal and skill slashes; desk wrap stays off Grok", () => {
+  const grokPalette = commandsForSession({ provider: "grok" });
+  const customPalette = commandsForSession({ provider: "custom" });
+  const codexPalette = commandsForSession({ provider: "codex" });
+  const grokGoal = grokPalette.find((command) => command.name === "/goal");
+  assert.equal(grokGoal?.run, "grok");
+  assert.equal(commandContinuesToVendor(grokGoal?.run), true);
+  assert.match(grokGoal?.inputHint ?? "", /budget/);
+  assert.equal(customPalette.find((command) => command.name === "/goal")?.run, "goal");
+  assert.equal(codexPalette.find((command) => command.name === "/goal")?.run, "goal");
+  assert.equal(commandContinuesToVendor("goal"), false);
+
+  const grokPdfSkill = {
+    name: "pdf",
+    description: "Make PDFs",
+    origin: "grok" as const,
+    dir: "x",
+    skillFile: "x",
+  };
+  const grokWithPdf = commandsForSession({ provider: "grok" }, [grokPdfSkill]);
+  const customWithPdf = commandsForSession({ provider: "custom" }, [{ ...grokPdfSkill, origin: "workhorse" }]);
+  assert.equal(grokWithPdf.find((command) => command.name === "/pdf")?.run, "grok");
+  assert.equal(customWithPdf.find((command) => command.name === "/pdf")?.run, "skill");
+
+  for (const name of ["/usage", "/theme", "/settings", "/schedule", "/watch", "/new", "/compact"]) {
+    const row = grokPalette.find((command) => command.name === name);
+    assert.ok(row, name);
+    assert.notEqual(row?.run, "grok", name);
+    assert.equal(commandContinuesToVendor(row?.run), false, name);
+  }
+  const acceptEdits = grokPalette.find((command) => command.name === "/accept-edits" || command.aliases?.includes("/auto"));
+  assert.equal(acceptEdits?.run, "mode:accept-edits");
+  assert.ok(acceptEdits?.aliases?.includes("/auto"));
+  assert.equal(grokPalette.find((command) => command.name === "/skills")?.run, "grok");
+  assert.equal(grokPalette.find((command) => command.name === "/workflow")?.run, "grok");
+  assert.equal(grokPalette.find((command) => command.name === "/workflows")?.run, "grok");
+  assert.equal(grokPalette.find((command) => command.name === "/create-workflow")?.run, "grok");
+
+  const qualified = commandsForSession(
+    { provider: "grok", grokCommands: [{ id: "local-pdf", name: "/local:pdf", hint: "Local pdf", run: "grok", source: "grok" }] },
+    [grokPdfSkill],
+  );
+  const localHit = matchCommand("/local:pdf foo", qualified);
+  assert.equal(localHit?.name, "/local:pdf");
+  assert.equal(localHit?.run, "grok");
+  assert.notEqual(localHit?.name, "/pdf");
+
+  const advertised = extractAvailableCommands({
+    availableCommands: [
+      { name: "goal", description: "Grok goal" },
+      { name: "local:commit", source: "skill", description: "Commit" },
+    ],
+  });
+  assert.equal(advertised?.find((command) => command.name === "/goal")?.run, "grok");
+  assert.equal(advertised?.find((command) => command.name === "/local:commit")?.run, "grok");
+  const withAcp = commandsForSession({ provider: "grok", grokCommands: advertised });
+  assert.equal(withAcp.find((command) => command.name === "/goal")?.run, "grok");
+  assert.ok(withAcp.some((command) => command.name === "/local:commit"));
+
+  const grokSet = prepareVendorSend({ provider: "grok", text: "/goal ship the backlog" });
+  assert.equal(grokSet.vendorText, "/goal ship the backlog");
+  assert.equal(grokSet.skipVendor, false);
+  assert.doesNotMatch(grokSet.vendorText, /ongoing Workhorse goal/);
+  const grokBudget = prepareVendorSend({ provider: "grok", text: "/goal --budget 80000 migrate auth" });
+  assert.equal(grokBudget.vendorText, "/goal --budget 80000 migrate auth");
+  assert.equal(parseGrokGoalLine("/goal --budget 80000 migrate auth")?.objective, "migrate auth");
+
+  const deskSet = prepareVendorSend({ provider: "custom", text: "/goal ship the backlog" });
+  assert.match(deskSet.vendorText, /ongoing Workhorse goal/);
+  assert.equal(deskSet.skipVendor, false);
+  const codexSet = prepareVendorSend({ provider: "codex", text: "/goal ship the backlog" });
+  assert.match(codexSet.vendorText, /ongoing Workhorse goal/);
+
+  const grokPause = prepareVendorSend({ provider: "grok", text: "/goal pause" });
+  assert.equal(grokPause.haltVendor, true);
+  assert.equal(grokPause.vendorText, "/goal pause");
+  assert.equal(grokPause.skipVendor, false);
+  assert.equal(
+    planHaltForward({ haltVendor: grokPause.haltVendor, skipVendor: grokPause.skipVendor, sessionStatus: "running" }),
+    "defer-until-cancelled-done",
+  );
+  assert.equal(
+    planHaltForward({ haltVendor: grokPause.haltVendor, skipVendor: grokPause.skipVendor, sessionStatus: "idle" }),
+    "send-now",
+  );
+  const grokClear = prepareVendorSend({ provider: "grok", text: "/goal clear" });
+  assert.equal(grokClear.haltVendor, true);
+  assert.equal(grokClear.vendorText, "/goal clear");
+  assert.equal(grokClear.skipVendor, false);
+  assert.equal(
+    planHaltForward({ haltVendor: grokClear.haltVendor, skipVendor: grokClear.skipVendor, sessionStatus: "needs-input" }),
+    "defer-until-cancelled-done",
+  );
+
+  const deskPause = prepareVendorSend({ provider: "custom", text: "/goal pause" });
+  assert.equal(deskPause.haltVendor, true);
+  assert.equal(deskPause.skipVendor, true);
+  assert.equal(
+    planHaltForward({ haltVendor: deskPause.haltVendor, skipVendor: deskPause.skipVendor, sessionStatus: "running" }),
+    "desk-halt-only",
+  );
+  const codexPause = prepareVendorSend({ provider: "codex", text: "/goal pause" });
+  assert.equal(codexPause.haltVendor, true);
+  assert.equal(codexPause.skipVendor, true);
+
+  const grokBare = prepareVendorSend({ provider: "grok", text: "/goal" });
+  assert.equal(grokBare.vendorText, "/goal");
+  assert.equal(grokBare.skipVendor, false);
+  const grokStatus = prepareVendorSend({ provider: "grok", text: "/goal status" });
+  assert.equal(grokStatus.vendorText, "/goal status");
+  assert.equal(grokStatus.skipVendor, false);
+
+  const grokBarePause = prepareVendorSend({ provider: "grok", text: "/pause" });
+  assert.equal(grokBarePause.haltVendor, false);
+  assert.equal(grokBarePause.vendorText, "/pause");
+  assert.equal(parseGrokGoalLine("/pause"), null);
+
+  assert.equal(goalCommandForAction("pause"), "/goal pause");
+  const barPause = prepareVendorSend({ provider: "grok", text: goalCommandForAction("pause") });
+  assert.equal(barPause.vendorText, "/goal pause");
+  assert.equal(barPause.haltVendor, true);
+  assert.equal(barPause.skipVendor, false);
+
+  const grokPdfMatch = grokWithPdf.find((command) => command.name === "/pdf");
+  const grokPdfSend = prepareVendorSend({
+    provider: "grok",
+    text: "/pdf make a one-pager",
+    match: grokPdfMatch,
+  });
+  assert.equal(grokPdfSend.vendorText, "/pdf make a one-pager");
+  assert.doesNotMatch(grokPdfSend.vendorText, /Use the installed skill/);
+  assert.equal(grokPdfMatch?.run, "grok");
+
+  const customPdfMatch = customWithPdf.find((command) => command.name === "/pdf");
+  const customPdfSend = prepareVendorSend({
+    provider: "custom",
+    text: "/pdf make a one-pager",
+    match: customPdfMatch,
+  });
+  assert.match(customPdfSend.vendorText, /Use the installed skill "pdf"/);
+
+  const merged = mergeCommands(COMMANDS, GROK_SHELL_COMMANDS);
+  assert.equal(merged.find((command) => command.name === "/theme")?.run, "theme");
+  assert.equal(merged.find((command) => command.name === "/usage")?.run, "usage");
+  assert.equal(merged.find((command) => command.aliases?.includes("/auto"))?.run, "mode:accept-edits");
+  assert.equal(matchCommand("/skills", extrasFor("codex"))?.run, "vendor");
+  assert.equal(matchCommand("/skills", extrasFor("grok"))?.run, "grok");
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /prepareVendorSend\(/);
+  assert.match(store, /vendorText = prep\.vendorText/);
+  assert.doesNotMatch(store, /vendorText = goalVendorPrompt/);
+  assert.match(store, /planHaltForward\(/);
+  assert.match(store, /vendorTerminalAction\(/);
+  assert.equal(vendorTerminalAction({ halted: true, eventType: "chunk" }), "ignore");
+  assert.equal(vendorTerminalAction({ halted: true, eventType: "done" }), "consume-halt-then-forward");
+  assert.equal(vendorTerminalAction({ halted: true, eventType: "error" }), "consume-halt-then-forward");
+  assert.equal(
+    vendorTerminalAction({ halted: false, eventType: "done", eventAssistantId: "asst_old", liveAssistantId: "asst_new" }),
+    "ignore",
+  );
+  assert.equal(
+    vendorTerminalAction({ halted: false, eventType: "done", eventAssistantId: "asst_new", liveAssistantId: "asst_new" }),
+    "apply",
+  );
+  assert.notEqual(
+    vendorTerminalAction({ halted: true, eventType: "done" }),
+    vendorTerminalAction({ halted: false, eventType: "done", eventAssistantId: "asst_new", liveAssistantId: "asst_new" }),
+  );
+  const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  assert.match(composer, /filterPalette\(value, extras\)/);
+  const bar = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
+  assert.match(bar, /store\.send\(goalCommandForAction\(action\)\)/);
+
+  const mirrored = nextGoalForSend("grok", undefined, "/goal migrate auth", true);
+  assert.deepEqual(mirrored, { status: "active", objective: "migrate auth" });
+  assert.equal(nextGoalForSend("grok", mirrored, "/goal pause", true)?.status, "paused");
+  assert.equal(nextGoalForSend("grok", mirrored, "/goal clear", true), undefined);
+  assert.equal(goalHaltsVendor("/goal pause"), true);
+
+  function extrasFor(provider: "codex" | "grok") {
+    return commandsForSession({ provider }).filter((command) => command.source && command.source !== "workhorse");
+  }
+});
+
+test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
+  assert.equal(looksLikeSpawnRequest("please spawn subagents"), true);
+  assert.equal(looksLikeSpawnRequest("Summon multiple subagents"), true);
+  assert.equal(looksLikeSpawnRequest("/goal ship the backlog"), false);
+  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), false);
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents"), "/goal assign skeptic and spawn subagents");
+  assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
+
+  const composed = composeVendorPrompt("/goal prove native /goal", WORKHORSE_SESSION_RULES, "session/load");
+  assert.doesNotMatch(composed, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(composed, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(composed, /workhorse_spawn_agent/);
+  assert.match(composed, /^\/goal prove native \/goal/m);
+
+  assert.equal(prepareVendorSend({ provider: "grok", text: "/goal assign skeptic verifier" }).vendorText, "/goal assign skeptic verifier");
+  assert.equal(prepareVendorSend({ provider: "grok", text: "/goal migrate auth" }).vendorText, "/goal migrate auth");
+  assert.doesNotMatch(prepareVendorSend({ provider: "grok", text: "/goal migrate auth" }).vendorText, /ongoing Workhorse goal/);
+  assert.match(prepareVendorSend({ provider: "custom", text: "/goal migrate auth" }).vendorText, /ongoing Workhorse goal/);
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /prepareVendorSend\(/);
+  assert.doesNotMatch(store, /if \(looksLikeSpawnRequest\(originalText\)\)/);
+  assert.match(store, /grokGoalAfterTurnIdle/);
+  assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal is Grok Build/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not call workhorse_spawn_agent for \/goal/);
+  assert.equal(buildGrokLaunchSpec({ model: "grok-4.6", effort: "medium", cwd: ROOT, mode: "ask" }).sessionParams._meta?.goalMode, true);
+
+  assert.equal(
+    goalDisplayForSession({ provider: "grok", status: "idle", goal: { status: "active", objective: "x" } }),
+    null,
+  );
+  assert.ok(goalDisplayForSession({ provider: "grok", status: "running", goal: { status: "active", objective: "x" } }));
+  assert.equal(
+    goalDisplayForSession({ provider: "grok", status: "idle", goal: { status: "paused", objective: "x" } })?.status,
+    "paused",
+  );
+  assert.ok(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }));
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8"), /goalDisplayForSession/);
 });
 
 test("COMMANDS include /plan and /sandbox; Claude is a live ACP adapter", () => {
@@ -4067,7 +5213,7 @@ test("turns keep the bot that ran them after a switch", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(pane, /turn-who/);
   assert.match(pane, /brainCaption/);
-  assert.match(row, /ink \? \{ background: ink \}/);
+  assert.match(row, /ink \? \{ background: ink/);
   assert.match(store, /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "session.ts"), "utf8"), /stampUnstampedMessages\(session\.messages, brainStamp\(session\)\)/);
 });
@@ -4416,13 +5562,13 @@ test("thought snapshots replace instead of stacking the same draft", () => {
   assert.equal(stacked.at(-1)?.text, grown);
   const doubled = `${first}\n\n${grown}\n\n${grown}`;
   assert.equal(collapseThoughtDisplay(doubled), grown);
-  const shown = thoughtForReply({
+  const shownTools = thoughtForReply({
     assistantThought: grown,
     thoughtMessages: [{ text: grown }],
     assistantText: `${first}\n\n### Tools\n- github`,
   });
-  assert.equal(shown, grown);
-  assert.doesNotMatch(shown, /asking what tools I have[\s\S]*asking what tools I have/);
+  assert.equal(shownTools, grown);
+  assert.doesNotMatch(shownTools, /asking what tools I have[\s\S]*asking what tools I have/);
 });
 
 test("thought rows stay distinct from assistant text", () => {
@@ -4716,6 +5862,18 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.equal(looksLikeDeskBotRequest("implement the MiniMax adapter"), false);
   assert.equal(looksLikeDeskBotRequest("read workhorse-mcp and fix setup"), false);
   assert.equal(withDeskBotHint("Set up MiniMax").startsWith(DESK_BOT_TURN_HINT), true);
+  assert.equal(looksLikeSpawnRequest("Summon multiple subagents to scrape all these systems"), true);
+  assert.equal(looksLikeSpawnRequest("please spawn subagents"), true);
+  assert.equal(looksLikeSpawnRequest("rename the project"), false);
+  assert.equal(looksLikeGoalCommand("/goal ship the backlog"), true);
+  assert.equal(looksLikeSpawnRequest("/goal ship the backlog"), false);
+  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), false);
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents"), "/goal assign skeptic and spawn subagents");
+  assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
+  const spawnAsk = composeVendorPrompt("Summon multiple subagents", WORKHORSE_SESSION_RULES, "session/load");
+  assert.match(spawnAsk, /canCall/);
+  assert.match(spawnAsk, /do not name it/);
+  assert.match(spawnAsk, /API key is already on the desk/);
   const loaded = composeVendorPrompt("Set up MiniMax", WORKHORSE_SESSION_RULES, "session/load");
   assert.match(loaded, /workhorse_list_bots/);
   assert.match(loaded, /Set up MiniMax/);
@@ -4728,10 +5886,693 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.match(previewAsk, new RegExp(PREVIEW_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("desk-enforced orchestrator vs worker lineup", async () => {
+  assert.equal(looksLikeSpawnRequest("Summon multiple subagents to scrape all these systems"), true);
+  assert.equal(looksLikeSpawnRequest("PLease call subagents to strip threw the project"), true);
+
+  const workerBrief = formatWorkerPrompt({
+    fromTitle: "PLease call subagents to strip threw...",
+    text: "You are a MiniMax sub-agent spawned by the Workhorse MiniMax chat.\n\nYour slice: PROJECT IDENTITY & BUILD CONFIG.\n\nRead README.md",
+    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    project: "Spaceship battles",
+    slice: "Review project identity and docs",
+    vendor: "MiniMax",
+  });
+  assert.equal(looksLikeWorkerBrief(workerBrief), true);
+  assert.match(workerBrief, /ROLE: worker/);
+  assert.match(workerBrief, /D:\\Godot\\Projects\\spaceship-battle/);
+  assert.match(workerBrief, /Do not spawn/);
+  assert.match(workerBrief, /Read README\.md/);
+  assert.doesNotMatch(workerBrief, /From another Workhorse agent/);
+  assert.equal(looksLikeSpawnRequest(workerBrief), false);
+  assert.equal(withSpawnHint(workerBrief), workerBrief);
+  assert.equal(withSpawnHint(workerBrief, "worker"), workerBrief);
+  assert.equal(withCustomPeerHint(workerBrief), workerBrief);
+  assert.doesNotMatch(composeVendorPrompt(workerBrief, WORKHORSE_SESSION_RULES, "session/load"), new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const workerTurn = composeVendorPrompt(
+    "You are a MiniMax sub-agent spawned — call workhorse_spawn_agent",
+    WORKER_SESSION_RULES,
+    "session/load",
+    { role: "worker" },
+  );
+  assert.doesNotMatch(workerTurn, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(workerTurn, new RegExp(CUSTOM_HTTP_PEER_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  assert.equal(isSpawnOnlyPrompt("please spawn MiniMax"), true);
+  assert.equal(isSpawnOnlyPrompt("call subagents"), true);
+  assert.equal(isSpawnOnlyPrompt("PLease call subagents to strip threw the project and give an indepth review on what it is"), true);
+  assert.equal(isSpawnOnlyPrompt("Read project.godot and say what this game is."), false);
+  assert.equal(isSpawnOnlyPrompt(workerBrief), false);
+
+  const catalog = [
+    { name: "list_dir" },
+    { name: "workhorse_spawn_agent" },
+    { name: "workhorse_request_vendor" },
+    { name: "workhorse_list_bots" },
+    { name: "workhorse_read_chat" },
+  ];
+  assert.deepEqual(
+    toolsForDeskRole(catalog, "orchestrator").map((tool) => tool.name),
+    catalog.map((tool) => tool.name),
+  );
+  assert.deepEqual(
+    toolsForDeskRole(catalog, "worker").map((tool) => tool.name),
+    ["list_dir", "workhorse_read_chat"],
+  );
+
+  const bound = admitSpawn({
+    parent: { parentId: null },
+    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    prompt: "Read project.godot and say what this game is.",
+  });
+  assert.equal(bound.ok, true);
+  if (bound.ok) assert.equal(bound.cwd, "D:\\Godot\\Projects\\spaceship-battle");
+
+  const unbound = admitSpawn({
+    parent: { parentId: null },
+    prompt: "Read project.godot and say what this game is.",
+  });
+  assert.equal(unbound.ok, false);
+  if (!unbound.ok) assert.equal(unbound.error, UNBOUND_SPAWN_ERROR);
+
+  const nested = admitSpawn({
+    parent: { parentId: "sess_orch", hidden: true },
+    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    prompt: "Read project.godot and say what this game is.",
+  });
+  assert.equal(nested.ok, false);
+  if (!nested.ok) assert.equal(nested.error, WORKER_SPAWN_ERROR);
+
+  const spawnOnly = admitSpawn({
+    parent: { parentId: null },
+    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    prompt: "please spawn MiniMax",
+  });
+  assert.equal(spawnOnly.ok, false);
+  if (!spawnOnly.ok) assert.equal(spawnOnly.error, SPAWN_ONLY_PROMPT_ERROR);
+
+  const explicit = admitSpawn({
+    parent: { parentId: null },
+    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    prompt: "Read project.godot and say what this game is.",
+    folderExists: (value) => value === "D:\\Godot\\Projects\\spaceship-battle",
+  });
+  assert.equal(explicit.ok, true);
+  if (explicit.ok) assert.equal(explicit.cwd, "D:\\Godot\\Projects\\spaceship-battle");
+
+  assert.equal(deskRoleOf({ parentId: "p", hidden: true }), "worker");
+  assert.equal(deskRoleOf({ parentId: null }), "orchestrator");
+
+  const { customHttpTools } = await import("../electron/custom-tools");
+  const orchTools = customHttpTools().map((tool) => tool.name);
+  const workerTools = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
+  assert.ok(orchTools.includes("workhorse_spawn_agent"));
+  assert.ok(orchTools.includes("workhorse_request_vendor"));
+  assert.ok(!workerTools.includes("workhorse_spawn_agent"));
+  assert.ok(!workerTools.includes("workhorse_await_agents"));
+  assert.ok(!workerTools.includes("workhorse_request_vendor"));
+  assert.ok(!workerTools.includes("workhorse_list_bots"));
+  assert.ok(workerTools.includes("list_dir"));
+  assert.ok(workerTools.includes("read_file"));
+
+  assert.equal(spawnWaitsForReply({}), true);
+  assert.equal(spawnWaitsForReply({ wait: true }), true);
+  assert.equal(spawnWaitsForReply({ wait: false }), false);
+  assert.equal(spawnWaitsForReply({ wait: "false" }), false);
+  const kidRunning: Session = {
+    id: "kid_run",
+    parentId: "orch",
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "src tree",
+    mode: "ask",
+    sandbox: "off",
+    status: "running",
+    messages: [{ id: "a", role: "assistant", text: "", createdAt: 1 }],
+    contextUsed: 0,
+    agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+  };
+  const kidDone: Session = {
+    ...kidRunning,
+    id: "kid_done",
+    title: "docs",
+    status: "idle",
+    agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
+    messages: [{ id: "a", role: "assistant", text: "It is a Godot game.", createdAt: 1 }],
+  };
+  assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch"), true);
+  assert.equal(parentHasRunningChildren([kidDone], "orch"), false);
+  assert.equal(collectChildAgentReports([kidDone], "orch")[0]?.text, "It is a Godot game.");
+  const { groupFanOutToolUses } = await import("../electron/custom-tools");
+  assert.deepEqual(
+    groupFanOutToolUses([
+      { name: "workhorse_list_bots" },
+      { name: "workhorse_spawn_agent" },
+      { name: "workhorse_spawn_agent" },
+      { name: "workhorse_await_agents" },
+    ]).map((group) => group.length),
+    [1, 2, 1],
+  );
+  assert.match(WORKHORSE_SESSION_RULES, /wait=false/);
+  assert.match(WORKHORSE_SESSION_RULES, /workhorse_await_agents/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not sit on workhorse_await_agents|do not ask 1\/2\/3/i);
+  assert.equal(looksLikeCrewImpatience("timed out twice. pick one: re-await or scrape myself"), true);
+  assert.equal(withCrewStatusHint("workers are still running").startsWith(CREW_STATUS_HINT), true);
+  const awaitNow = peerAskTimeoutMs({ mode: "bots", action: "await-agents", timeoutSeconds: 600 });
+  assert.ok(awaitNow.timeoutMs <= 15_000);
+  const awaitTimer = peerAskTimeoutMs({ mode: "bots", action: "await-agents", wait: true, timeoutSeconds: 600 });
+  assert.ok(awaitTimer.timeoutMs > 45_000);
+  assert.doesNotMatch(awaitTimer.timeoutError, /setting up that bot/);
+  assert.equal(peerAskTimeoutMs({ mode: "bots", action: "create" }).timeoutMs, 45_000);
+  const crew = addLineupRow(emptyLineup("D:\\Godot\\Projects\\spaceship-battle", 1), {
+    childId: "sess_a",
+    title: "HUD",
+    slice: "HUD",
+    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    vendor: "MiniMax",
+    status: "running",
+    startedAt: 1,
+  });
+  const two = addLineupRow(crew, {
+    childId: "sess_b",
+    title: "Ships",
+    slice: "Ships",
+    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    vendor: "MiniMax",
+    status: "running",
+    startedAt: 2,
+  });
+  assert.equal(lineupIsTerminal(two), false);
+  const oneDone = setLineupRowStatus(two, "sess_a", "completed", { report: "HUD report", finishedAt: 3 });
+  const done = setLineupRowStatus(oneDone, "sess_b", "completed", { report: "Ships report", finishedAt: 4 });
+  assert.equal(lineupIsTerminal(done), true);
+  assert.equal(lineupSnapshot(done).finished.length, 2);
+  const parentSess: Session = {
+    id: "orch",
+    projectId: "proj",
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "Parent",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages: [],
+    contextUsed: 0,
+    lineup: two,
+  };
+  const childSess: Session = {
+    ...parentSess,
+    id: "sess_a",
+    parentId: "orch",
+    hidden: true,
+    title: "HUD",
+    lineup: undefined,
+  };
+  const finished = applyLineupChildFinish([parentSess, childSess], "sess_a", "HUD done", "completed", 9);
+  const parentAfter = finished.find((item) => item.id === "orch");
+  assert.equal(parentAfter?.lineup?.rows.find((row) => row.childId === "sess_a")?.report, "HUD done");
+  const broken = applyLineupTurnBreak(finished, "orch");
+  assert.ok(broken.find((item) => item.id === "orch")?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
+  assert.match(lineupSynthesizePrompt(done), /HUD report/);
+  assert.match(lineupSynthesizePrompt(done), /own words|combined review/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /maybeEnqueueLineupJoin/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /lineupJoinPrompt|maybeEnqueueLineupJoin/);
+  const nestedTree = nestProjectChats([
+    { id: "orch" },
+    { id: "sess_a", parentId: "orch" },
+    { id: "sess_b", parentId: "orch" },
+  ]);
+  assert.equal(nestedTree.length, 1);
+  assert.equal(nestedTree[0]?.workers.length, 2);
+  const crewCatalog = catalogSessions(
+    {
+      projects: [{ id: "proj", name: "Ships" }],
+      sessions: [
+        { id: "orch", title: "Parent", provider: "custom", projectId: "proj", messages: [{ role: "user", text: "go" }] },
+        {
+          id: "sess_a",
+          title: "HUD",
+          provider: "custom",
+          parentId: "orch",
+          hidden: true,
+          projectId: "proj",
+          messages: [{ role: "user", text: "slice" }],
+        },
+      ],
+    },
+    { fromSessionId: "orch" },
+  );
+  assert.ok(crewCatalog.some((item) => item.id === "sess_a"));
+  const publicCatalog = catalogSessions({
+    projects: [{ id: "proj", name: "Ships" }],
+    sessions: [
+      { id: "orch", title: "Parent", provider: "custom", projectId: "proj", messages: [{ role: "user", text: "go" }] },
+      {
+        id: "sess_a",
+        title: "HUD",
+        provider: "custom",
+        parentId: "orch",
+        hidden: true,
+        projectId: "proj",
+        messages: [{ role: "user", text: "slice" }],
+      },
+    ],
+  });
+  assert.ok(!publicCatalog.some((item) => item.id === "sess_a"));
+  const persisted = normalizeSession({
+    id: "orch",
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "Parent",
+    lineup: done,
+  });
+  assert.equal(persisted?.lineup?.rows.length, 2);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /addLineupRow/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nestProjectChats/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /openCrew/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /workersOpen=\{Boolean\(openCrew/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /currentColor 70%/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /crew-twist/);
+
+  const stateDir = path.join(ROOT, "dist-electron", ".orch-test");
+  const previousState = process.env.WORKHORSE_STATE_PATH;
+  const previousFrom = process.env.WORKHORSE_FROM_SESSION;
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    const stateFile = path.join(stateDir, "workhorse-state.json");
+    writeFileSync(
+      stateFile,
+      JSON.stringify({
+        projects: [
+          {
+            id: "proj_ships",
+            name: "Spaceship battles",
+            folders: [{ id: "f", path: "D:\\Godot\\Projects\\spaceship-battle" }],
+          },
+        ],
+        sessions: [
+          { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships" },
+          { id: "sess_worker", title: "src tree review", provider: "custom", parentId: "sess_orch", hidden: true, projectId: "proj_ships" },
+          { id: "sess_loose", title: "Loose", provider: "custom", projectId: null },
+        ],
+      }),
+    );
+    process.env.WORKHORSE_STATE_PATH = stateFile;
+
+    const workerList = await handleWorkhorseRpc(
+      { jsonrpc: "2.0", id: 21, method: "tools/list" },
+      { fromSessionId: "sess_worker" },
+    );
+    const workerNames = ((workerList as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
+    assert.ok(!workerNames.includes("workhorse_spawn_agent"));
+    assert.ok(!workerNames.includes("workhorse_await_agents"));
+    assert.ok(!workerNames.includes("workhorse_request_vendor"));
+    assert.ok(!workerNames.includes("workhorse_list_bots"));
+
+    const orchList = await handleWorkhorseRpc(
+      { jsonrpc: "2.0", id: 22, method: "tools/list" },
+      { fromSessionId: "sess_orch" },
+    );
+    const orchNames = ((orchList as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
+    assert.ok(orchNames.includes("workhorse_spawn_agent"));
+
+    const leaked = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 23,
+        method: "tools/call",
+        params: { name: "workhorse_spawn_agent", arguments: { prompt: "Read project.godot and say what this game is." } },
+      },
+      { fromSessionId: "sess_worker" },
+    );
+    const leakedMessage = (leaked as { error?: { message?: string } })?.error?.message ?? "";
+    assert.equal(leakedMessage, WORKER_SPAWN_ERROR);
+
+    const only = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 24,
+        method: "tools/call",
+        params: { name: "workhorse_spawn_agent", arguments: { prompt: "please spawn MiniMax" } },
+      },
+      { fromSessionId: "sess_orch" },
+    );
+    assert.equal((only as { error?: { message?: string } })?.error?.message, SPAWN_ONLY_PROMPT_ERROR);
+
+    const loose = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 25,
+        method: "tools/call",
+        params: { name: "workhorse_spawn_agent", arguments: { prompt: "Read project.godot and say what this game is." } },
+      },
+      { fromSessionId: "sess_loose" },
+    );
+    assert.equal((loose as { error?: { message?: string } })?.error?.message, UNBOUND_SPAWN_ERROR);
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
+    if (previousState === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previousState;
+    if (previousFrom === undefined) delete process.env.WORKHORSE_FROM_SESSION;
+    else process.env.WORKHORSE_FROM_SESSION = previousFrom;
+  }
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /admitSpawn/);
+  assert.match(store, /formatWorkerPrompt/);
+  assert.match(store, /spawnWaitsForReply/);
+  assert.match(store, /await-agents/);
+  assert.match(store, /awaitAgentsWaits/);
+  assert.match(store, /applyChildIdleSync/);
+  assert.match(store, /stampLineupUserText/);
+  assert.match(store, /formatAwaitAgentsSnapshot/);
+  assert.doesNotMatch(store, /formatSubagentPrompt\(/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint\([\s\S]*role/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Workers cannot spawn/);
+  assert.match(WORKER_SESSION_RULES, /Do not spawn/);
+  assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
+  assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
+  assert.match(WORKHORSE_SESSION_RULES, /Workers cannot spawn/);
+  const leakedExecute = await import("../electron/custom-tools");
+  const blocked = await leakedExecute.executeCustomTool(
+    { id: "t1", name: "workhorse_spawn_agent", input: { prompt: "Read README" } },
+    { role: "worker" },
+  );
+  assert.equal(blocked.isError, true);
+  assert.equal(blocked.content, WORKER_SPAWN_ERROR);
+});
+
+test("desk builds one named join prompt and syncs idle children", () => {
+  const userSentence = "Please do a deep scrape of this project with subagents";
+  const folder = "D:\\Godot\\Projects\\spaceship-battle";
+  let wave = emptyLineup(folder, Date.parse("2026-08-14T12:00:00.000Z"), userSentence);
+  wave = { ...wave, id: "lineup_join_test" };
+  const slices = [
+    { childId: "sess_struct", title: "Structure", status: "completed" as const, report: "project.godot is a Godot 4 game." },
+    { childId: "sess_scripts", title: "Scripts scrape", status: "failed" as const, report: "" },
+    { childId: "sess_scenes", title: "Scenes scrape", status: "failed" as const, report: undefined },
+    { childId: "sess_assets", title: "Assets", status: "completed" as const, report: "Ships live under crafts/." },
+  ];
+  for (const slice of slices) {
+    wave = addLineupRow(wave, {
+      childId: slice.childId,
+      title: slice.title,
+      slice: slice.title,
+      folder,
+      vendor: "MiniMax",
+      status: slice.status,
+      startedAt: 1,
+      ...(slice.report ? { report: slice.report } : {}),
+    });
+  }
+  const joined = lineupJoinPrompt(wave);
+  assert.match(joined, /ORCHESTRATION CALL/);
+  assert.match(joined, /Please do a deep scrape of this project with subagents/);
+  assert.match(joined, /lineup_join_test/);
+  assert.match(joined, /D:\\Godot\\Projects\\spaceship-battle/);
+  assert.match(joined, /sess_struct/);
+  assert.match(joined, /sess_scripts/);
+  assert.match(joined, /sess_scenes/);
+  assert.match(joined, /sess_assets/);
+  assert.match(joined, /Structure/);
+  assert.match(joined, /Scripts scrape/);
+  assert.match(joined, /Scenes scrape/);
+  assert.match(joined, /Assets/);
+  assert.match(joined, /status=completed/);
+  assert.match(joined, /status=failed/);
+  assert.match(joined, /\(no report\)/);
+  assert.match(joined, /project\.godot is a Godot 4 game/);
+  assert.equal(lineupIsTerminal(wave), true);
+
+  const persisted = stampLineupUserText(emptyLineup(folder, 1), userSentence);
+  assert.equal(persisted.userText, userSentence);
+  assert.equal(stampLineupUserText(persisted, "later paraphrase").userText, userSentence);
+
+  const workerBrief = formatWorkerPrompt({
+    fromTitle: "Orchestrator",
+    text: "Read project.godot. Permission / Sandbox are already enforced.",
+    folder,
+    project: "Spaceship battles",
+    slice: "Scenes scrape",
+    vendor: "MiniMax",
+  });
+  assert.equal(looksLikeWorkerBrief(workerBrief), true);
+  assert.equal(looksLikePermissionQuestion(workerBrief), false);
+  assert.equal(looksLikePermissionQuestion("what sandbox do you have?"), true);
+  assert.equal(
+    looksLikePermissionQuestion("Permission / Sandbox are workspace facts on this turn."),
+    false,
+  );
+
+  assert.equal(awaitAgentsWaits({ wait: true, parentStatus: "running" }), false);
+  assert.equal(awaitAgentsWaits({ wait: true, parentStatus: "idle" }), true);
+  assert.equal(awaitAgentsWaits({ wait: false }), false);
+  assert.equal(awaitAgentsWaits({}), false);
+  const snap = formatAwaitAgentsSnapshot({ lineup: wave, wait: false });
+  assert.match(snap, /"wait": false/);
+  assert.doesNotMatch(snap, /sit on this tool/);
+
+  const parent: Session = {
+    id: "orch",
+    projectId: "proj",
+    provider: "custom",
+    model: "MiniMax-M3",
+    title: "Parent",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: [
+      {
+        id: "m1",
+        role: "system",
+        kind: "subagent",
+        text: "Scripts scrape",
+        subagentSessionId: "sess_idle",
+        toolStatus: "running",
+        createdAt: 1,
+      },
+    ],
+    lineup: addLineupRow(emptyLineup(folder, 1, userSentence), {
+      childId: "sess_idle",
+      title: "Scripts scrape",
+      slice: "Scripts scrape",
+      folder,
+      vendor: "MiniMax",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const idleChild: Session = {
+    ...parent,
+    id: "sess_idle",
+    parentId: "orch",
+    hidden: true,
+    title: "Scripts scrape",
+    status: "idle",
+    lineup: undefined,
+    messages: [{ id: "a", role: "assistant", text: "Stopped mid-scrape at scripts/.", createdAt: 2 }],
+    agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+  };
+  const synced = applyChildIdleSync([parent, idleChild], "sess_idle", "completed", {
+    report: "Stopped mid-scrape at scripts/.",
+    now: 9,
+  });
+  const syncedChild = synced.find((item) => item.id === "sess_idle");
+  const syncedParent = synced.find((item) => item.id === "orch");
+  assert.equal(syncedChild?.status, "idle");
+  assert.notEqual(syncedChild?.agentRun?.status, "running");
+  assert.equal(syncedChild?.agentRun?.status, "completed");
+  assert.equal(syncedParent?.messages.find((message) => message.subagentSessionId === "sess_idle")?.toolStatus, "completed");
+  assert.equal(syncedParent?.lineup?.rows[0]?.status, "completed");
+
+  const stuckParent: Session = {
+    ...parent,
+    lineup: addLineupRow(
+      addLineupRow(
+        addLineupRow(
+          addLineupRow(emptyLineup(folder, 1, userSentence), {
+            childId: "c1",
+            title: "One",
+            slice: "One",
+            folder,
+            vendor: "MiniMax",
+            status: "completed",
+            startedAt: 1,
+            report: "ok",
+          }),
+          {
+            childId: "c2",
+            title: "Two",
+            slice: "Two",
+            folder,
+            vendor: "MiniMax",
+            status: "running",
+            startedAt: 1,
+          },
+        ),
+        {
+          childId: "c3",
+          title: "Three",
+          slice: "Three",
+          folder,
+          vendor: "MiniMax",
+          status: "running",
+          startedAt: 1,
+        },
+      ),
+      {
+        childId: "c4",
+        title: "Four",
+        slice: "Four",
+        folder,
+        vendor: "MiniMax",
+        status: "completed",
+        startedAt: 1,
+        report: "ok",
+      },
+    ),
+  };
+  const stuckKids: Session[] = [
+    {
+      ...idleChild,
+      id: "c1",
+      title: "One",
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
+      messages: [{ id: "a", role: "assistant", text: "ok", createdAt: 2 }],
+    },
+    {
+      ...idleChild,
+      id: "c2",
+      title: "Two",
+      status: "idle",
+      agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+      messages: [{ id: "a", role: "assistant", text: "", createdAt: 2 }],
+    },
+    {
+      ...idleChild,
+      id: "c3",
+      title: "Three",
+      status: "idle",
+      agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+      messages: [{ id: "a", role: "assistant", text: "Permission / Sandbox lecture", createdAt: 2 }],
+    },
+    {
+      ...idleChild,
+      id: "c4",
+      title: "Four",
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
+      messages: [{ id: "a", role: "assistant", text: "ok", createdAt: 2 }],
+    },
+  ];
+  const reconciled = reconcileIdleChildren([stuckParent, ...stuckKids], "orch", 11);
+  const reconParent = reconciled.find((item) => item.id === "orch");
+  assert.equal(lineupIsTerminal(reconParent?.lineup), true);
+  assert.ok(reconciled.every((item) => item.id === "orch" || item.agentRun?.status !== "running"));
+  const mixed = reconParent?.lineup;
+  assert.ok(mixed);
+  const joinedAfter = maybeEnqueueLineupJoin(reconciled, "orch", 12);
+  const afterParent = joinedAfter.find((item) => item.id === "orch");
+  assert.ok(afterParent?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
+  const joinItem = afterParent?.queue?.find((item) => item.hideUser && item.text.includes("ORCHESTRATION CALL"));
+  assert.ok(joinItem);
+  assert.match(joinItem?.text ?? "", /own words/);
+  assert.match(joinItem?.text ?? "", /Do not paste/);
+  assert.ok((joinItem?.notBefore ?? 0) > 12);
+  assert.ok(joinDelayMs(afterParent?.lineup) >= 8_000);
+  assert.ok(afterParent?.lineup?.notifiedAt);
+  const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
+  assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);
+  const withFollowUp = enqueuePrompt(joinedAfter, "orch", { text: "also check the HUD scripts" });
+  const followParent = withFollowUp?.find((item) => item.id === "orch");
+  assert.ok(followParent?.messages.some((message) => message.role === "user" && message.text === "also check the HUD scripts"));
+  assert.ok(!followParent?.messages.some((message) => message.role === "user" && message.text.includes("ORCHESTRATION CALL")));
+  const followBlocks = groupTranscript(followParent?.messages ?? []);
+  assert.ok(followBlocks.some((block) => block.type === "user" && block.message.text === "also check the HUD scripts"));
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8"), /hideUser !== true/);
+
+  const rateJson =
+    'Custom model HTTP 429: {"type":"error","error":{"type":"rate_limit_error","message":"Token Plan rate limit reached"}}';
+  assert.equal(isVendorRateLimitError(rateJson), true);
+  assert.equal(vendorFailedMessage("custom", rateJson), "Custom hit a request rate limit — too many calls at once, not the weekly leftover.");
+  assert.doesNotMatch(vendorFailedMessage("custom", rateJson), /request_id|06cf11/);
+  const limitedLineup = {
+    ...wave,
+    rows: wave.rows.map((row, index) =>
+      index === 0
+        ? row
+        : { ...row, status: "failed" as const, report: rateJson },
+    ),
+  };
+  assert.ok(joinDelayMs(limitedLineup) >= 8_000);
+  const fallback = lineupJoinFallback(limitedLineup);
+  assert.match(fallback, /Combined scrape for/);
+  assert.match(fallback, /Please do a deep scrape of this project with subagents/);
+  assert.match(fallback, /rate-limited/);
+  assert.doesNotMatch(fallback, /request_id/);
+  const joinPrompt = lineupJoinPrompt(limitedLineup);
+  assert.match(joinPrompt, /own words/);
+  assert.match(joinPrompt, /Do not paste/);
+  const retried = applyJoinRateLimitRetry(
+    [
+      {
+        ...parent,
+        messages: [
+          { id: "note", role: "system", text: LINEUP_FINISHED_NOTICE, createdAt: 1 },
+          { id: "join-asst", role: "assistant", text: "", createdAt: 2 },
+        ],
+      },
+    ],
+    "orch",
+    { prompt: joinPrompt, attempt: 1, assistantId: "join-asst", now: 100 },
+  );
+  const retryRow = retried.find((item) => item.id === "orch");
+  assert.ok(retryRow?.queue?.some((item) => item.joinAttempt === 2 && (item.notBefore ?? 0) > 100));
+  assert.ok(!retryRow?.messages.some((message) => message.id === "join-asst"));
+  const lastTry = applyJoinRateLimitRetry(retried, "orch", {
+    prompt: joinPrompt,
+    attempt: JOIN_MAX_ATTEMPTS,
+    now: 200,
+  });
+  assert.equal(lastTry.find((item) => item.id === "orch")?.queue?.length, retryRow?.queue?.length);
+
+  const two = groupTranscript([
+    { id: "u", role: "user", text: userSentence, createdAt: 1 },
+    { id: "a1", role: "assistant", text: "Four workers are out.", createdAt: 2 },
+    { id: "note", role: "system", text: LINEUP_FINISHED_NOTICE, createdAt: 3 },
+    { id: "a2", role: "assistant", text: "Combined scrape from the four slices.", createdAt: 4 },
+  ]);
+  assert.equal(two.filter((block) => block.type === "reply").length, 2);
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /maybeEnqueueLineupJoin/);
+  assert.match(store, /applyJoinRateLimitRetry/);
+  assert.match(store, /reconcileIdleChildren/);
+  assert.match(store, /hideUser\s*\n\s*\? item\.title/);
+  assert.match(store, /userMessageId/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "lineup.ts"), "utf8"), /ORCHESTRATION CALL/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "lineup.ts"), "utf8"), /userText/);
+  assert.equal(
+    shouldEndDispatchTurn([
+      {
+        name: "workhorse_spawn_agent",
+        content: JSON.stringify({ started: true, childSessionId: "sess_a" }),
+      },
+    ]),
+    true,
+  );
+  assert.equal(looksLikeDispatchCheckBack("I'll check back. Status snapshot in a moment."), true);
+  assert.equal(looksLikeUnfinishedCustomTurn("I'll check back. Status snapshot in a moment."), false);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /shouldEndDispatchTurn\(results\)/);
+});
+
 test("composer edit menu matches Codex cut copy paste select all", () => {
   assert.deepEqual(
     EDIT_MENU_ITEMS.map((item) => item.label),
-    ["Cut", "Copy", "Paste", "Select All"],
+    ["Copy", "Cut", "Paste", "Select All"],
   );
   const empty = { value: "", selectionStart: 0, selectionEnd: 0 };
   assert.equal(canCut(empty), false);
@@ -4784,9 +6625,9 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.match(sidebar, /setSidebarWidth/);
 
   const thread = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
-  assert.match(thread, /Resize conversation pane/);
-  assert.match(thread, /setThreadWidth/);
-  assert.match(thread, /invert/);
+  assert.match(thread, /compact-thread overlay/);
+  assert.doesNotMatch(thread, /Resize conversation pane/);
+  assert.doesNotMatch(thread, /setThreadWidth/);
 
   assert.doesNotMatch(store, /sessionSetupHeight/);
   assert.doesNotMatch(store, /setSessionSetupWidth/);

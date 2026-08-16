@@ -87,12 +87,18 @@ const QUIET_DESK_TOOLS = new Set([
   "read_chat",
   "ask_chat",
   "spawn_agent",
+  "await_agents",
   "request_vendor",
   "detect_custom",
   "list_skills",
   "read_skill",
   "list_projects",
   "create_project",
+  "move_chat",
+  "rename_chat",
+  "rename_project",
+  "delete_chat",
+  "delete_project",
 ]);
 
 export function isQuietDeskTool(tool: string): boolean {
@@ -103,7 +109,7 @@ export function permissionGrantKey(tool: string): string {
   const key = toolNameKey(tool);
   if (
     QUIET_DESK_TOOLS.has(key) ||
-    /^(ask_chat|spawn_agent|add_reference|delete_reference|setup_custom_bot|delete_bot|create_project|list_projects)$/.test(
+    /^(ask_chat|spawn_agent|await_agents|add_reference|delete_reference|setup_custom_bot|delete_bot|create_project|list_projects|move_chat|rename_chat|rename_project|delete_chat|delete_project)$/.test(
       key,
     )
   ) {

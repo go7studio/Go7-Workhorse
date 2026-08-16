@@ -1,10 +1,16 @@
-import { useEffect, useRef } from "react";
-import { unsquashSentences } from "../lib/markdown";
+import { useEffect, useMemo, useRef } from "react";
+import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import type { AgentThread } from "../lib/agent-thread";
-import { THREAD_PANE } from "../lib/pane";
+import { deskInk } from "../lib/settings";
+import { brainCaption, brainStamp, messageBrain } from "../lib/session";
+import { groupTranscript, isDeskNotice, lastReplyIndex, thoughtForReply } from "../lib/turns";
 import { useStore } from "../lib/store";
+import { copyText } from "../lib/copy-text";
+import { ContextMeter } from "./ModelMenu";
 import { MessageBody } from "./MessageBody";
-import { SplitHandle } from "./SplitHandle";
+import { TurnActions } from "./TurnActions";
+import { UserTurn } from "./UserTurn";
+import { WorkPopout } from "./WorkPopout";
 
 export function AgentThreadPane({
   thread,
@@ -19,43 +25,49 @@ export function AgentThreadPane({
 }) {
   const store = useStore();
   const scroller = useRef<HTMLDivElement>(null);
+  const followBottom = useRef(true);
+  const threadInk = (item: AgentThread) => {
+    const child = store.sessions.find((session) => session.id === item.childId);
+    return child ? deskInk(child, store.settings) : undefined;
+  };
+  const openInk = threadInk(thread);
+  const child = store.sessions.find((session) => session.id === thread.childId);
+  const blocks = useMemo(() => (child ? groupTranscript(child.messages) : []), [child]);
+  const working = child?.status === "running";
+  const liveIndex = working ? lastReplyIndex(blocks) : -1;
+
+  useEffect(() => {
+    followBottom.current = true;
+  }, [thread.id]);
 
   useEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [thread.id, thread.turns.length, thread.turns.at(-1)?.text, thread.live]);
+    if (el && followBottom.current) el.scrollTop = el.scrollHeight;
+  }, [thread.id, child?.messages, child?.status, thread.live]);
 
   return (
     <aside
-      className="agent-thread"
+      className="agent-thread compact-thread overlay"
       aria-label={`Conversation with ${thread.title}`}
-      style={{
-        flexBasis: store.threadWidth,
-        width: store.threadWidth,
-        maxWidth: THREAD_PANE.max,
-        minWidth: THREAD_PANE.min,
-      }}
     >
-      <SplitHandle
-        value={store.threadWidth}
-        onChange={store.setThreadWidth}
-        min={THREAD_PANE.min}
-        max={THREAD_PANE.max}
-        reset={THREAD_PANE.fallback}
-        invert
-        label="Resize conversation pane"
-      />
       <header className="agent-thread-head">
         <div className="agent-thread-who">
           <div className="agent-thread-name">
-            <span className={`dot ${thread.provider ?? "grok"}`} aria-hidden="true" />
+            <span
+              className={`dot ${thread.provider ?? "grok"}`}
+              style={openInk ? { background: openInk, color: openInk } : undefined}
+              aria-hidden="true"
+            />
             <strong>{thread.title}</strong>
           </div>
           <em>{thread.live ? "Talking now" : "Earlier this chat"}</em>
         </div>
-        <button type="button" className="tiny" aria-label="Close agent conversation" onClick={onClose}>
-          ×
-        </button>
+        <div className="agent-thread-tools">
+          {child ? <ContextMeter session={child} compact /> : null}
+          <button type="button" className="tiny" aria-label="Close agent conversation" onClick={onClose}>
+            ×
+          </button>
+        </div>
       </header>
       {threads.length > 1 ? (
         <div className="agent-thread-tabs" role="tablist">
@@ -68,13 +80,25 @@ export function AgentThreadPane({
               className={item.id === thread.id ? "on" : undefined}
               onClick={() => onSelect(item.id)}
             >
-              <span className={`dot ${item.provider ?? "grok"}${item.live ? " pulse" : ""}`} aria-hidden="true" />
+              <span
+                className={`dot ${item.provider ?? "grok"}${item.live ? " pulse" : ""}`}
+                style={threadInk(item) ? { background: threadInk(item), color: threadInk(item) } : undefined}
+                aria-hidden="true"
+              />
               {item.title}
             </button>
           ))}
         </div>
       ) : null}
-      <div className="agent-thread-scroll" ref={scroller}>
+      <div
+        className="agent-thread-scroll"
+        ref={scroller}
+        onScroll={() => {
+          const el = scroller.current;
+          if (!el) return;
+          followBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 96;
+        }}
+      >
         {thread.run ? (
           <div className={`agent-thread-review${thread.run.conflictFiles?.length ? " conflict" : ""}`}>
             <strong>{thread.run.status} / {thread.run.isolation}</strong>
@@ -91,26 +115,69 @@ export function AgentThreadPane({
             <span>{thread.error}</span>
           </div>
         ) : null}
-        {thread.turns.length === 0 && !thread.error ? (
+        {!child && !thread.error ? (
           <p className="agent-thread-wait">{thread.live ? `Waiting for ${thread.toLabel}…` : "No messages yet."}</p>
-        ) : thread.turns.length === 0 ? null : (
-          thread.turns.map((turn) =>
-            turn.role === "user" ? (
-              <article key={turn.id} className="agent-bubble from">
-                <span className="agent-bubble-who">{turn.fromTitle || thread.fromLabel}</span>
-                {turn.text.trim() ? <MessageBody text={turn.text} /> : null}
+        ) : !child ? null : blocks.length === 0 ? (
+          <p className="agent-thread-wait">{thread.live ? `Waiting for ${thread.toLabel}…` : "No messages yet."}</p>
+        ) : (
+          blocks.map((block, index) => {
+            if (block.type === "user") {
+              return <UserTurn key={block.message.id} message={block.message} readOnly />;
+            }
+            if (block.type === "system") {
+              if (isDeskNotice(block.message)) return null;
+              return (
+                <article key={block.message.id} className="turn system chat">
+                  <div className="say">
+                    <MessageBody text={block.message.text} />
+                  </div>
+                </article>
+              );
+            }
+            const live = working && index === liveIndex;
+            const assistantText = block.assistant.text ?? "";
+            const peeled = peelPlanningPreamble(assistantText, live);
+            const thought = thoughtForReply({
+              assistantThought: block.assistant.thought,
+              thoughtMessages: block.thoughts,
+              assistantText,
+              live,
+            });
+            const body = unsquashSentences(peeled.body || (!live ? assistantText : ""));
+            const who = brainCaption(
+              messageBrain(block.assistant, brainStamp(child)),
+              store.settings.customBots,
+              store.settings.llms,
+            );
+            return (
+              <article key={block.assistant.id} className={`turn assistant reply${live ? " live" : ""}`}>
+                <div className="turn-who">
+                  <span
+                    className={`dot ${who.provider}`}
+                    style={who.color ? { background: who.color } : undefined}
+                    aria-hidden="true"
+                  />
+                  {who.name}
+                </div>
+                <WorkPopout
+                  thought={thought}
+                  tools={block.tools}
+                  compacts={block.compacts}
+                  startedAt={block.assistant.createdAt}
+                  workedMs={block.assistant.workedMs}
+                  live={live}
+                />
+                {body ? (
+                  <div className={`say final${live ? " streaming" : ""}`}>
+                    <MessageBody text={body} vendorSessionId={child.vendorSessionId} />
+                    {!live ? (
+                      <TurnActions actions={[{ id: "copy", label: "Copy", run: async () => { await copyText(body); } }]} />
+                    ) : null}
+                  </div>
+                ) : null}
               </article>
-            ) : (
-              <article key={turn.id} className={`agent-bubble to${thread.live && !turn.text.trim() ? " live" : ""}`}>
-                <span className="agent-bubble-who">{thread.toLabel}</span>
-                {turn.text.trim() ? (
-                  <MessageBody text={unsquashSentences(turn.text)} />
-                ) : (
-                  <p className="agent-thread-wait">Still working</p>
-                )}
-              </article>
-            ),
-          )
+            );
+          })
         )}
       </div>
     </aside>

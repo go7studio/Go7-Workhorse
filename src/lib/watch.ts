@@ -702,6 +702,7 @@ export function deskCallCatalog(input: {
   const rows: DeskCallRow[] = [];
   for (const id of DESK_STOCK) {
     const link = input.settings.llms[id];
+    if (link?.connected && link.enabled === false) continue;
     const status = byKey.get(id);
     rows.push(
       deskCallRow({
@@ -723,6 +724,7 @@ export function deskCallCatalog(input: {
     );
   }
   for (const bot of input.settings.customBots) {
+    if (!customBotEnabled(bot)) continue;
     const status = byKey.get(`bot:${bot.id}`);
     rows.push(
       deskCallRow({
@@ -765,13 +767,12 @@ export function vendorCallBlocked(
     const bot =
       input.settings.customBots.find((item) => item.id === input.session.customBotId) ??
       input.settings.customBots.find((item) => item.model === (input.session as { model?: string }).model);
-    if (bot && !customBotEnabled(bot)) return `${bot.name} is turned off in Settings → LLMs.`;
+    if (bot && !customBotEnabled(bot)) return `${bot.name} is not on this desk.`;
     return null;
   }
   const link = input.settings.llms?.[input.session.provider];
   if (link?.connected && link.enabled === false) {
-    const name = providerById(input.session.provider).name;
-    return `${name} is turned off in Settings → LLMs.`;
+    return `${providerById(input.session.provider).name} is not on this desk.`;
   }
   return null;
 }
@@ -800,6 +801,21 @@ export function deskCallPromptable(row: DeskCallRow | undefined): row is DeskCal
 /** Spawn/ask only waits on Allow when that vendor used its daily bank. */
 export function vendorOverrideNeeded(row: DeskCallRow | undefined): boolean {
   return row?.status === "day_bank";
+}
+
+/** Spawn skips this vendor — do not pop Allow or ask the user. */
+export function spawnIsNoGo(row: DeskCallRow | undefined): string | null {
+  if (!row) return "That vendor is not on this desk. Skip it.";
+  if (row.canCall) return null;
+  if (row.status === "disabled") return "That vendor is not on this desk. Skip it.";
+  if (row.status === "day_bank") {
+    return `${row.name} is a no-go — daily bank spent. Skip it. Do not ask the user to Allow.`;
+  }
+  return `${row.reason || `${row.name} is not callable right now.`} Skip it. Do not ask the user to Allow.`;
+}
+
+export function spawnAllowed(row: DeskCallRow | undefined): boolean {
+  return spawnIsNoGo(row) === null && Boolean(row?.canCall);
 }
 
 export function vendorGrantedForChat(
@@ -832,16 +848,25 @@ export function formatWeeklyPlanLine(row: Pick<DeskCallRow, "leftoverPercent" | 
   return `${left}% leftover of this week's plan overall (${used}% used this week so far — the whole week pool, not this prompt)`;
 }
 
+export function callableDeskRows(rows: DeskCallRow[]): DeskCallRow[] {
+  return rows.filter((row) => row.canCall);
+}
+
 export function formatDeskRoster(rows: DeskCallRow[]): string {
-  const attached = rows.filter((row) => row.status !== "not_connected");
+  const attached = rows.filter((row) => row.status !== "not_connected" && row.status !== "disabled");
   const held = attached.filter((row) => !row.canCall);
+  const callable = callableDeskRows(attached);
   const lines = [
     "Desk bots on this Workhorse window:",
     "Leftover and used percents are that vendor’s weekly plan total across every chat and tool, not the cost of one spawn or prompt.",
   ];
   for (const row of attached) {
     const leftover = formatWeeklyPlanLine(row);
-    const flag = row.canCall ? "you can call this" : row.reason || "not callable right now";
+    const flag = row.canCall
+      ? row.kind === "custom"
+        ? "you can call this (API key is on the desk)"
+        : "you can call this"
+      : row.reason || "not callable right now";
     const models =
       row.models && row.models.length > 0
         ? row.models.map((item) => item.name).join(", ")
@@ -849,6 +874,19 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
     lines.push(`- ${row.name} — models: ${models} — ${leftover} — ${flag}`);
   }
   if (attached.length === 0) lines.push("- None attached yet.");
+  const customCallable = callable.filter((row) => row.kind === "custom");
+  if (customCallable.length > 0) {
+    lines.push(
+      `Custom API bots on this desk: ${customCallable.map((row) => row.name).join(", ")}. A key is attached — spawn them (provider custom). Do not claim a keyed custom slot is missing.`,
+    );
+  }
+  if (callable.length > 0) {
+    lines.push(
+      `Callable now: ${callable.map((row) => row.name).join(", ")}. Spawn these, including custom bots with a key. Only say nothing to spawn if this list is empty.`,
+    );
+  } else {
+    lines.push("Nothing is callable right now.");
+  }
   if (held.length === 0) lines.push("None of these are on Watch hold.");
   lines.push("Name every attached bot when asked. Only refuse to spawn or ask one if it says not callable.");
   lines.push("If you mention leftover or used %, say it is the weekly plan overall, never this one shot.");

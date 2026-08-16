@@ -1,7 +1,7 @@
 {
   "name": "go7-workhorse",
   "productName": "Workhorse",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "private": true,
   "description": "Native desktop shell for Grok, Claude, Codex, and custom agents.",
   "author": "Spikey222",

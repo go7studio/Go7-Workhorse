@@ -186,7 +186,14 @@ function Stretch({
                   key={cell.key}
                   type="button"
                   className={`usage-dot l${cell.pad ? 0 : heatLevel(cell.tokens, max)}${cell.pad ? " pad" : ""}${fill ? " ink" : ""}${multi ? " pie" : ""}`}
-                  style={!multi && fill ? { background: fill } : undefined}
+                  style={
+                    fill
+                      ? {
+                          ["--dot-ink" as string]: fill,
+                          ...(!multi ? { background: fill } : {}),
+                        }
+                      : undefined
+                  }
                   disabled={cell.pad}
                   aria-label={cell.pad ? undefined : cellSummary(cell)}
                   onMouseEnter={(event) => onDot(cell, event.currentTarget)}
@@ -373,6 +380,11 @@ export function UsagePane({
               label: shortModelName(focused.provider, row.label),
             }));
   const focusedTotal = focusedModels.reduce((sum, row) => sum + row.totalTokens, 0);
+  const latestFocusedContext = focusedEvents.reduce<{ at: number; used: number } | null>((latest, event) => {
+    if (event.contextUsed === undefined) return latest;
+    if (!latest || event.at > latest.at) return { at: event.at, used: event.contextUsed };
+    return latest;
+  }, null);
   useEffect(() => {
     const pull = () => {
       refreshGrokPlan();
@@ -583,7 +595,7 @@ export function UsagePane({
           )}
           <div className="usage-facts">
             <div className="usage-fact">
-              <span>In + out</span>
+              <span>API traffic</span>
               <strong>{formatTokens(focused.inputTokens + focused.outputTokens)}</strong>
             </div>
             <div className="usage-fact">
@@ -593,7 +605,11 @@ export function UsagePane({
               </strong>
             </div>
             <div className="usage-fact">
-              <span>Turns</span>
+              <span>Latest context</span>
+              <strong>{latestFocusedContext ? formatTokens(latestFocusedContext.used) : "-"}</strong>
+            </div>
+            <div className="usage-fact">
+              <span>Requests</span>
               <strong>{focused.events}</strong>
             </div>
             <div className="usage-fact">

@@ -51,7 +51,7 @@ export function chatPreview(messages: unknown): string {
   return previewFrom(messages);
 }
 
-export function catalogSessions(state: LooseState): SessionSnapshot[] {
+export function catalogSessions(state: LooseState, opts?: { fromSessionId?: string }): SessionSnapshot[] {
   const projects = new Map<string, string>();
   if (Array.isArray(state.projects)) {
     for (const raw of state.projects) {
@@ -66,7 +66,10 @@ export function catalogSessions(state: LooseState): SessionSnapshot[] {
   for (const raw of state.sessions) {
     const session = asRecord(raw);
     if (typeof session.id !== "string") continue;
-    if (session.hidden === true || (typeof session.parentId === "string" && session.parentId)) continue;
+    const parentId = typeof session.parentId === "string" ? session.parentId : "";
+    const from = opts?.fromSessionId?.trim() ?? "";
+    const crewChild = Boolean(from && parentId === from);
+    if (!crewChild && (session.hidden === true || parentId)) continue;
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
     const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -126,13 +129,25 @@ export function findSessionForLink(sessions: SessionSnapshot[], query: string): 
   return titled.length === 1 ? titled[0] : null;
 }
 
-export function sessionTranscript(state: LooseState, query: string, limit = 40): SessionTranscript | null {
-  const listed = catalogSessions(state);
-  const match = findSession(listed, query);
+export function sessionTranscript(
+  state: LooseState,
+  query: string,
+  limit = 40,
+  fromSessionId?: string,
+): SessionTranscript | null {
+  const listed = catalogSessions(state, { fromSessionId });
+  const rawSessions = Array.isArray(state.sessions) ? state.sessions.map(asRecord) : [];
+  const exact = rawSessions.find((item) => typeof item.id === "string" && item.id === query.trim());
+  const match = exact
+    ? {
+        id: exact.id as string,
+        title: typeof exact.title === "string" ? exact.title : "Worker",
+        projectName: null,
+        model: typeof exact.model === "string" ? exact.model : "",
+      }
+    : findSession(listed, query);
   if (!match) return null;
-  const raw = Array.isArray(state.sessions)
-    ? state.sessions.map(asRecord).find((item) => item.id === match.id)
-    : undefined;
+  const raw = rawSessions.find((item) => item.id === match.id);
   const messages = Array.isArray(raw?.messages) ? raw.messages : [];
   const clipped = messages.slice(-Math.max(1, limit)).map((item) => {
     const message = asRecord(item);

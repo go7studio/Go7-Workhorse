@@ -1,7 +1,14 @@
-import { spawnSync } from "node:child_process";
+import { exec } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
+import {
+  deskRoleOf,
+  isWorkerOmittedTool,
+  toolsForDeskRole,
+  workerOmittedToolError,
+  type DeskRole,
+} from "../src/lib/subagents";
 import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 import type { CustomHttpTool } from "./custom-http";
 import { handleWorkhorseRpc } from "./workhorse-mcp";
@@ -19,6 +26,23 @@ export type CustomToolResult = {
   isError?: boolean;
 };
 
+export const MAX_CUSTOM_TOOL_RESULT_CHARS = 64_000;
+
+export function limitCustomToolResult(
+  result: CustomToolResult,
+  maxChars = MAX_CUSTOM_TOOL_RESULT_CHARS,
+): CustomToolResult {
+  if (result.content.length <= maxChars) return result;
+  const marker = `\n\n[Workhorse truncated ${result.content.length - maxChars} characters. Narrow the search or request a smaller range.]\n\n`;
+  const available = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(available * 0.75);
+  const tail = available - head;
+  return {
+    ...result,
+    content: `${result.content.slice(0, head)}${marker}${tail > 0 ? result.content.slice(-tail) : ""}`,
+  };
+}
+
 export type CustomToolPolicy = {
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
@@ -26,6 +50,10 @@ export type CustomToolPolicy = {
   cwd?: string;
   folders?: string[];
   sessionId?: string;
+  parentId?: string;
+  hidden?: boolean;
+  role?: DeskRole;
+  signal?: AbortSignal;
 };
 
 const WORKSPACE_TOOLS: { name: string; description: string; input_schema: Record<string, unknown> }[] = [
@@ -118,7 +146,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   {
     name: "workhorse_spawn_agent",
     description:
-      "Spawn Grok, Codex, Claude, or another desk bot as an in-chat subagent and return its real reply. Sol and Terra are Codex models — pass provider codex and chat or model Sol/Terra. Never invent a reply; only return what this tool outputs.",
+      "Spawn Grok, Codex, Claude, or another desk bot as an in-chat subagent. To run several at once, call this once per slice with wait=false, then stop. The desk joins reports later. wait=true blocks until that one worker finishes. Sol and Terra are Codex models. Never invent a reply.",
     input_schema: {
       type: "object",
       properties: {
@@ -131,8 +159,25 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },
+        folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
+        wait: {
+          type: "boolean",
+          description: "true (default) wait for this worker’s report. false start it and return immediately so you can spawn more.",
+        },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "workhorse_await_agents",
+    description:
+      "Status of this chat’s worker lineup. Default returns immediately (who is running, finished reports). Pass wait=true only if the user asked you to sit until they finish. Never treat a timeout as a bot-setup failure. Do not ask the user to pick 1/2/3.",
+    input_schema: {
+      type: "object",
+      properties: {
+        wait: { type: "boolean", description: "false (default) status now. true wait until terminal or timeoutSeconds." },
+        timeoutSeconds: { type: "number", description: "Only with wait=true. 30-3600 seconds. Default 600." },
+      },
     },
   },
   {
@@ -143,26 +188,96 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_list_projects",
-    description: "List Workhorse sidebar projects. Use before creating a project.",
+    description: "List Workhorse projects (name + linked folders). Use before and after creating a project. Do not tell the user a project exists unless it appears here.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "workhorse_create_project",
     description:
-      "Create a Workhorse sidebar project with this exact name. The optional folder is linked under that project only, never under a different existing name. Returns immediately — do not wait on another chat.",
+      "Create a Workhorse project (a named desk entry under Projects, not a file). Pass the exact name and an existing absolute folder. This chat is placed in the new project. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
     input_schema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Sidebar project name" },
+        name: { type: "string", description: "Project name" },
         folder: { type: "string", description: "Optional folder to link" },
       },
       required: ["name"],
     },
   },
   {
+    name: "workhorse_move_chat",
+    description:
+      "Move a chat into a project. Omit chat to move this chat. Pass the visible project name.",
+    input_schema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project name or id" },
+        chat: { type: "string", description: "Optional chat title. Defaults to this chat." },
+      },
+      required: ["project"],
+    },
+  },
+  {
+    name: "workhorse_rename_chat",
+    description: "Rename a live chat. Omit chat to rename this chat. Pass the new title in name. Do not delete and recreate.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "New chat title" },
+        chat: { type: "string", description: "Optional exact title or id. Defaults to this chat." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "workhorse_rename_project",
+    description:
+      "Rename a Workhorse project in place. Omit project to rename this chat’s project. Pass the new name. Do not delete and recreate. Then call workhorse_list_projects. Only say the new name if Visible sidebar names include it.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "New project name" },
+        project: { type: "string", description: "Optional project name or id. Defaults to this chat’s project." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "workhorse_delete_chat",
+    description:
+      "Delete another live chat by exact title or id, or delete every loose chat (not in a project) with scope=loose. Never omit chat to delete yourself. A bulk list that includes this title or “this one” must not delete this chat. scope=loose never deletes this chat. onlyThis=true only when the user asked to delete this chat alone.",
+    input_schema: {
+      type: "object",
+      properties: {
+        chat: { type: "string", description: "Exact chat title or id of another chat." },
+        scope: {
+          type: "string",
+          description: "loose — delete every chat that is not in a project, except this chat. Do not ask which ones.",
+        },
+        onlyThis: {
+          type: "boolean",
+          description: "true only if the user asked to delete this chat alone.",
+        },
+      },
+    },
+  },
+  {
+    name: "workhorse_delete_project",
+    description:
+      "Delete a Workhorse project. chats=keep leaves its chats loose; chats=remove deletes those chats too.",
+    input_schema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project name or id" },
+        chats: { type: "string", description: "keep (default) or remove" },
+      },
+      required: ["project"],
+    },
+  },
+  {
     name: "workhorse_request_vendor",
     description:
-      "Ask the user to allow Grok, Codex, or Claude for THIS chat only when that vendor used its daily bank (today's share is spent; leftover remains for later days). Wait for Allow or Deny. A USER DECLINED result means they said no — tell them that and stop.",
+      "Do not use this to unlock a spawn. If the daily bank is spent or canCall is false, that vendor is a no-go — skip it. Never ask the user to Allow a spawn.",
     input_schema: {
       type: "object",
       properties: {
@@ -200,14 +315,34 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
 ];
 
-export function customHttpTools(extra: CustomHttpTool[] = []): CustomHttpTool[] {
-  const base = [...WORKSPACE_TOOLS, ...DESK_TOOLS];
-  const names = new Set(base.map((tool) => tool.name));
-  return [...base, ...extra.filter((tool) => !names.has(tool.name))];
+export function isFanOutDeskTool(name: string): boolean {
+  const key = normalizeCustomToolName(name);
+  return key === "workhorse_spawn_agent";
 }
 
-export function customHttpToolsOpenAi(extra: CustomHttpTool[] = []): Record<string, unknown>[] {
-  return customHttpTools(extra).map((tool) => ({
+/** Consecutive spawn_agent calls in one model turn run as one parallel group. */
+export function groupFanOutToolUses<T extends { name: string }>(uses: T[]): T[][] {
+  const groups: T[][] = [];
+  for (const use of uses) {
+    const last = groups[groups.length - 1];
+    if (isFanOutDeskTool(use.name) && last && last.every((item) => isFanOutDeskTool(item.name))) {
+      last.push(use);
+    } else {
+      groups.push([use]);
+    }
+  }
+  return groups;
+}
+
+export function customHttpTools(extra: CustomHttpTool[] = [], opts?: { role?: DeskRole }): CustomHttpTool[] {
+  const base = [...WORKSPACE_TOOLS, ...DESK_TOOLS];
+  const names = new Set(base.map((tool) => tool.name));
+  const merged = [...base, ...extra.filter((tool) => !names.has(tool.name))];
+  return toolsForDeskRole(merged, opts?.role ?? "orchestrator");
+}
+
+export function customHttpToolsOpenAi(extra: CustomHttpTool[] = [], opts?: { role?: DeskRole }): Record<string, unknown>[] {
+  return customHttpTools(extra, opts).map((tool) => ({
     type: "function",
     function: { name: tool.name, description: tool.description, parameters: tool.input_schema },
   }));
@@ -224,8 +359,14 @@ export function normalizeCustomToolName(name: string): string {
   if (lower === "workhorselisttools" || lower === "workhorse_listtools") return "workhorse_list_tools";
   if (lower === "workhorseaskchat" || lower === "workhorse_askchat") return "workhorse_ask_chat";
   if (lower === "workhorsespawnagent" || lower === "workhorse_spawnagent") return "workhorse_spawn_agent";
+  if (lower === "workhorseawaitagents" || lower === "workhorse_awaitagents") return "workhorse_await_agents";
   if (lower === "workhorsereadchat" || lower === "workhorse_readchat") return "workhorse_read_chat";
   if (lower === "workhorsecreateproject" || lower === "workhorse_createproject") return "workhorse_create_project";
+  if (lower === "workhorsemovechat" || lower === "workhorse_movechat") return "workhorse_move_chat";
+  if (lower === "workhorserenamechat" || lower === "workhorse_renamechat") return "workhorse_rename_chat";
+  if (lower === "workhorserenameproject" || lower === "workhorse_renameproject") return "workhorse_rename_project";
+  if (lower === "workhorsedeletechat" || lower === "workhorse_deletechat") return "workhorse_delete_chat";
+  if (lower === "workhorsedeleteproject" || lower === "workhorse_deleteproject") return "workhorse_delete_project";
   if (
     lower === "workhorserequestpermission" ||
     lower === "workhorse_requestpermission" ||
@@ -390,13 +531,17 @@ export async function executeCustomTool(
   const cwd = policy.cwd?.trim() || process.cwd();
   const folders = policy.folders ?? [];
   const sandbox = policy.sandbox ?? "off";
+  const role = policy.role ?? deskRoleOf({ parentId: policy.parentId, hidden: policy.hidden });
   try {
+    if (role === "worker" && isWorkerOmittedTool(name)) {
+      return { id: use.id, name, content: workerOmittedToolError(name), isError: true };
+    }
     if (name === "workhorse_list_tools") {
       return {
         id: use.id,
         name,
         content: JSON.stringify(
-          customHttpTools().map((tool) => ({ name: tool.name, description: tool.description })),
+          customHttpTools([], { role }).map((tool) => ({ name: tool.name, description: tool.description })),
           null,
           2,
         ),
@@ -440,22 +585,30 @@ export async function executeCustomTool(
       const command = typeof use.input.command === "string" ? use.input.command : "";
       if (!command.trim()) throw new Error("command is required");
       const runCwd = resolveWorkspacePath(typeof use.input.cwd === "string" ? use.input.cwd : cwd, cwd, folders, sandbox);
-      const result = spawnSync(command, {
-        cwd: runCwd,
-        shell: true,
-        encoding: "utf8",
-        timeout: 30_000,
-        maxBuffer: 1024 * 1024,
-        windowsHide: true,
+      return await new Promise<CustomToolResult>((resolve) => {
+        exec(
+          command,
+          {
+            cwd: runCwd,
+            encoding: "utf8",
+            timeout: 30_000,
+            maxBuffer: 1024 * 1024,
+            windowsHide: true,
+            signal: policy.signal,
+          },
+          (error, stdout, stderr) => {
+            const out = `${stdout ?? ""}${stderr ?? ""}`.trim();
+            const code = error && "code" in error && typeof error.code === "number" ? error.code : 0;
+            const failure = error instanceof Error ? error.message.slice(0, 1_000) : "Command failed";
+            resolve({
+              id: use.id,
+              name,
+              content: out || (policy.signal?.aborted ? "Command cancelled" : error ? failure : `(exit ${code})`),
+              ...(error ? { isError: true } : {}),
+            });
+          },
+        );
       });
-      const out = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-      if (result.error) throw result.error;
-      return {
-        id: use.id,
-        name,
-        content: out || `(exit ${result.status ?? 0})`,
-        isError: typeof result.status === "number" && result.status !== 0,
-      };
     }
     throw new Error(`Unknown tool ${name}`);
   } catch (error) {

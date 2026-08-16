@@ -17,7 +17,16 @@ export function vendorAgentLabel(provider: ProviderId): string {
   return "Grok";
 }
 
+export function isVendorRateLimitError(message: string): boolean {
+  return /\b(429|rate[_\s-]?limit|ratelimiterror|token plan rate limit)\b/i.test(message);
+}
+
+export function vendorRateLimitNotice(provider: ProviderId): string {
+  return `${vendorAgentLabel(provider)} hit a request rate limit — too many calls at once, not the weekly leftover.`;
+}
+
 export function vendorFailedMessage(provider: ProviderId, message: string): string {
+  if (isVendorRateLimitError(message)) return vendorRateLimitNotice(provider);
   return `${vendorAgentLabel(provider)} agent failed: ${message}`;
 }
 

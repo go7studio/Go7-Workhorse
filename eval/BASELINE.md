@@ -1,9 +1,9 @@
 # Go7 Workhorse evaluation baseline
 
-**Source frozen for the kit:** d38f449c05a2e14a857c8e2292669c04ca85cda1
+**Source frozen for the kit:** 5d02f78e79a688b316aba9d4f6575df909b2a52b
 (origin/main, 2026-08-15)
 
-**Package version:** 0.1.2
+**Package version:** 0.1.4
 
 **Baseline activity:** static source/product-surface walk only; no app launch,
 no provider prompt, no direct API request, and no scored eval run.
@@ -94,9 +94,10 @@ Baseline: USG-01 through USG-06 unrun.
 
 ### 8. Source, tagged version, package, and installed app can diverge
 
-The approved source is newer than tag v0.1.2 while package.json still says
-0.1.2. The packaged/install lane must record commit, artifact hash, package
-version, platform, and running version before results are considered valid.
+The approved source and package now agree on v0.1.4. The packaged/install lane
+must still record commit, artifact hash, package version, platform, and running
+version before results are considered valid; the user's prior installed build
+may be older than the source target.
 
 Baseline: REL-01 unrun.
 
@@ -132,7 +133,7 @@ Baseline: ORC-01 through ORC-09 partial from static source evidence; ORC-10
 not-found because explicit nesting depth/concurrency guards and a root-goal
 aggregate budget view are not established.
 
-## Deferred until the new version is pushed
+## Activated for the v0.1.4 full run
 
 - Launch and walk the existing/new packaged app.
 - Use the user's installed vendor harnesses or approved fresh installs.
@@ -150,6 +151,8 @@ aggregate budget view are not established.
 - Interrupt/restart sessions and verify journal/state recovery.
 - Score any rubric item.
 
-The next run starts by rebasing baselineRef, reviewing suite drift, and
-recording the new exact build identity. Static existence alone never upgrades
-an item to pass.
+The run starts from the exact v0.1.4 source identity above. The eval branch
+adds only the eval kit and an opt-in WORKHORSE_USER_DATA_PATH launch boundary
+so the desktop walk cannot touch the user's normal profile. That deviation is
+recorded in run provenance and receives its own release finding. Static
+existence alone never upgrades an item to pass.

@@ -59,7 +59,8 @@ const CLAUDE_AUTH_SESSION = "auth:claude";
 export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
 
 function pinUserData() {
-  const dest = path.join(app.getPath("appData"), WORKHORSE_USER_DATA_DIR);
+  const isolated = process.env.WORKHORSE_USER_DATA_PATH?.trim();
+  const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), WORKHORSE_USER_DATA_DIR);
   try {
     fs.mkdirSync(dest, { recursive: true });
     app.setPath("userData", dest);

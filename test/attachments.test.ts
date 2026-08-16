@@ -1,14 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
 import { attachmentKind, buildAcpPrompt, normalizeImages } from "../src/lib/images";
 import type { ChatImage } from "../src/lib/types";
+import { spawnAttachments } from "../electron/workhorse-mcp";
 
 test("attachment classifier recognizes documents, audio, and video", () => {
   assert.equal(attachmentKind({ name: "brief.pdf" }), "document");
   assert.equal(attachmentKind({ name: "interview.mp3" }), "audio");
   assert.equal(attachmentKind({ name: "demo.mov" }), "video");
   assert.equal(attachmentKind({ name: "main.ts" }), "file");
+});
+
+test("spawned visual agents receive bounded workspace attachments", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-files."));
+  const imagePath = path.join(root, "screen.png");
+  writeFileSync(imagePath, Buffer.from("image"));
+  try {
+    const attachments = spawnAttachments(["screen.png"], root);
+    assert.equal(attachments[0]?.kind, "image");
+    assert.equal(attachments[0]?.sourcePath, imagePath);
+    assert.equal(Buffer.from(attachments[0]?.data ?? "", "base64").toString(), "image");
+    assert.throws(() => spawnAttachments(["../outside.png"], root), /outside the project/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("ACP media falls back to an auditable manifest and video frames", () => {

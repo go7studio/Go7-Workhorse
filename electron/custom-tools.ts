@@ -158,6 +158,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         rationale: { type: "string", description: "Why this agent fits this step" },
         skills: { type: "array", items: { type: "string" }, description: "Required skills" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
+        files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },

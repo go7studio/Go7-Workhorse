@@ -63,6 +63,7 @@ import { estimateChatContext, parseSessionContext } from "../src/lib/context-sta
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
 import { CREW_STATUS_HINT, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
+import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
 import { agentThreadsForSession, liveAgentThreadId } from "../src/lib/agent-thread";
 import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
@@ -5940,6 +5941,23 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(boxed.sandbox, "read-only");
   assert.equal(boxed.vendorSessionId, undefined);
   assert.equal(formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "medium", mode: "ask" }), "Grok 4.6 · Medium · Ask");
+  assert.equal(
+    workerSidebarLabel({
+      id: "worker_terra",
+      parentId: "orchestrator",
+      provider: "codex",
+      model: "gpt-5.6-terra",
+      effort: "medium",
+      title: "Certify Saga candidate",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "idle",
+      contextUsed: 0,
+      messages: [],
+      agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
+    }),
+    "GPT-5.6-Terra · Medium · Done",
+  );
   const listed = catalogSessions({
     sessions: [
       {

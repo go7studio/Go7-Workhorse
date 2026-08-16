@@ -55,7 +55,7 @@ export function commandsFromSkills(skills: DeskSkill[], run: Command["run"] = "s
 }
 
 export function vendorSkillOrigin(provider?: ProviderId | string | null): SkillOrigin | undefined {
-  if (provider === "grok" || provider === "codex" || provider === "claude") return provider;
+  if (provider === "grok" || provider === "codex" || provider === "claude" || provider === "cursor") return provider;
   if (provider === "custom") return "workhorse";
   return undefined;
 }
@@ -139,6 +139,7 @@ export function commandsForSession(
   }
   if (session?.provider === "codex") return mergeCommands(common, [...CODEX_SHELL_COMMANDS, ...skillCmds]);
   if (session?.provider === "claude") return mergeCommands(common, [...CLAUDE_SHELL_COMMANDS, ...skillCmds]);
+  if (session?.provider === "cursor") return mergeCommands(common, skillCmds);
   if (session?.provider === "custom") return mergeCommands(common, skillCmds);
   return common;
 }

@@ -40,7 +40,7 @@ export function NewProjectSheet() {
 
   const pickFolder = async () => {
     const picked = window.workhorse ? await window.workhorse.pickFolder() : null;
-    if (picked) addFolders([picked]);
+    if (picked) addFolders([picked.path]);
   };
 
   const submit = () => {

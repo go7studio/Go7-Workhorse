@@ -346,7 +346,7 @@ export type Store = AppState & {
     query: string,
   ) => Promise<{ ok: boolean; skill?: { name: string; origin: import("./types").SkillOrigin; dir: string; text: string }; message?: string }>;
   deleteDeskSkill: (dir: string) => Promise<DeskExportResult>;
-  pushDeskSkill: (dir: string, target: "grok" | "codex" | "claude", name?: string) => Promise<DeskExportResult>;
+  pushDeskSkill: (dir: string, target: "grok" | "codex" | "claude" | "cursor", name?: string) => Promise<DeskExportResult>;
   updateProfile: (patch: Partial<Profile>) => void;
   setLlmConnected: (id: Exclude<ProviderId, "custom">, connected: boolean) => void;
   setLlmEnabled: (id: Exclude<ProviderId, "custom">, enabled: boolean) => void;
@@ -718,7 +718,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const linkFolder = useCallback(async (path?: string) => {
-    const folderPath = path ?? (window.workhorse ? await window.workhorse.pickFolder() : null);
+    const picked = path
+      ? { path }
+      : window.workhorse
+        ? await window.workhorse.pickFolder()
+        : null;
+    const folderPath = picked?.path;
     if (!folderPath) return;
     setState((current) => {
       const projectId = current.activeProjectId;
@@ -728,7 +733,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         projects: current.projects.map((project) => {
           if (project.id !== projectId) return project;
           if (project.folders.some((folder) => folder.path === folderPath)) return project;
-          return { ...project, folders: [...project.folders, folderFromPath(folderPath)] };
+          return { ...project, folders: [...project.folders, folderFromPath(folderPath, picked.bookmark)] };
         }),
       };
     });
@@ -4752,7 +4757,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     const from = await window.workhorse.pickFolder();
     if (!from) return { ok: false, canceled: true };
-    return window.workhorse.importSkill(from);
+    return window.workhorse.importSkill(from.path);
   }, []);
 
   const readDeskSkill = useCallback(async (query: string) => {
@@ -4766,7 +4771,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const pushDeskSkill = useCallback(
-    async (dir: string, target: "grok" | "codex" | "claude", name?: string): Promise<DeskExportResult> => {
+    async (dir: string, target: "grok" | "codex" | "claude" | "cursor", name?: string): Promise<DeskExportResult> => {
       if (!window.workhorse?.pushSkill) return { ok: false, message: "Push runs in the Workhorse desktop window." };
       return window.workhorse.pushSkill({ dir, target, name });
     },

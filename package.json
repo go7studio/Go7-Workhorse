@@ -38,7 +38,7 @@
     "package:mac": "electron-builder --mac dmg zip --publish never",
     "dist:mac": "npm run build && npm run package:mac",
     "preview": "vite preview",
-    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/cursor-adapter.test.ts test/watch.test.ts test/routing.test.ts test/plan.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts test/eval-kit.test.ts"
+    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/cursor-adapter.test.ts test/watch.test.ts test/routing.test.ts test/plan.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts test/eval-kit.test.ts test/folder-access.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",
@@ -106,6 +106,13 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSDocumentsFolderUsageDescription": "Workhorse and the agents in this chat read and write the project folders you link.",
+        "NSDesktopFolderUsageDescription": "Workhorse uses Desktop folders you link as a project workspace.",
+        "NSDownloadsFolderUsageDescription": "Workhorse uses Downloads folders you link as a project workspace.",
+        "NSRemovableVolumesUsageDescription": "Workhorse uses external disks you link as a project workspace.",
+        "NSNetworkVolumesUsageDescription": "Workhorse uses network folders you link as a project workspace."
+      },
       "artifactName": "Go7-Workhorse-${version}-mac.${ext}"
     }
   }

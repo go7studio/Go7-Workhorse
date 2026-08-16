@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -11,7 +12,9 @@ import { usageProviderForSession, leftoverForCard, byProvider, cursorLaneEvents 
 import { cursorUsageLane, cursorWatchLane, isCursorInnerTask } from "../src/lib/cursor-lane";
 import { asProviderId } from "../src/lib/session";
 import { vendorSendTarget, vendorFailedMessage, previewOnlyReply } from "../src/lib/vendor-bridge";
-import { defaultModel } from "../src/lib/models";
+import { applyVendorCatalog, defaultModel, modelName, modelsFor, resetVendorCatalog } from "../src/lib/models";
+import { commandsForSession, vendorSkillOrigin } from "../src/lib/commands";
+import { catalogSkills, skillHomes } from "../src/lib/skills-catalog";
 import { parseProviderId, resolveSpawnSpec, toolsForDeskRole, admitSpawn } from "../src/lib/subagents";
 import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../src/lib/watch";
 import { normalizeSettings } from "../src/lib/settings";
@@ -555,4 +558,93 @@ test("store and main wire a live cursor path", () => {
   if (existsSync(path.join(ROOT, "docs", "GOAL-cursor.md"))) {
     assert.match(readFileSync(path.join(ROOT, "docs", "GOAL-cursor.md"), "utf8"), /Cursor Agent/);
   }
+});
+
+function writeCursorSkill(dir: string, name: string, description: string): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
+    "utf8",
+  );
+}
+
+test("Cursor chats catalog and slash Cursor-origin skills from disk homes", () => {
+  assert.equal(vendorSkillOrigin("cursor"), "cursor");
+  assert.notEqual(vendorSkillOrigin("cursor"), undefined);
+  const home = mkdtempSync(path.join(os.tmpdir(), "wh-cursor-skills-"));
+  const project = path.join(home, "repo");
+  writeCursorSkill(path.join(home, ".cursor", "skills", "review-pr"), "review-pr", "Review pull requests");
+  writeCursorSkill(path.join(project, ".cursor", "skills", "ship-app"), "ship-app", "Ship the app");
+  writeCursorSkill(path.join(project, ".agents", "skills", "agents-note"), "agents-note", "Shared agent skill");
+  const homes = skillHomes({ homedir: home, projectFolders: [project] });
+  assert.equal(
+    homes.some((item) => item.origin === "cursor" && item.root.replaceAll("\\", "/").endsWith("/.cursor/skills")),
+    true,
+  );
+  assert.equal(
+    homes.some((item) => item.origin === "cursor" && item.root.replaceAll("\\", "/").endsWith("/repo/.cursor/skills")),
+    true,
+  );
+  const rows = catalogSkills({ homedir: home, projectFolders: [project] });
+  const cursorRows = rows.filter((skill) => skill.origin === "cursor");
+  assert.ok(cursorRows.some((skill) => skill.name === "review-pr"));
+  assert.ok(cursorRows.some((skill) => skill.name === "ship-app"));
+  assert.ok(cursorRows.some((skill) => skill.name === "agents-note"));
+  assert.equal(
+    cursorRows.every((skill) => skill.origin === "cursor"),
+    true,
+  );
+  assert.equal(
+    rows.some((skill) => skill.name === "review-pr" && skill.origin !== "cursor"),
+    false,
+  );
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SkillsPane.tsx"), "utf8");
+  assert.match(pane, /id: "cursor", label: "Cursor"/);
+  assert.match(pane, /if \(origin === "cursor"\) return "Cursor"/);
+  const palette = commandsForSession({ provider: "cursor" }, cursorRows);
+  assert.ok(palette.some((command) => command.name === "/review-pr" && command.run === "skill"));
+  assert.ok(palette.some((command) => command.name === "/ship-app" && command.run === "skill"));
+  assert.equal(commandsForSession({ provider: "grok" }, cursorRows).some((command) => command.name === "/review-pr"), false);
+});
+
+test("Cursor Auto is labeled as Cursor Auto; Composer and Cursor Grok stay readable", () => {
+  resetVendorCatalog();
+  const auto = modelName("cursor", "auto-smart");
+  assert.notEqual(auto, "Auto");
+  assert.match(auto, /Auto/);
+  assert.match(auto, /Cursor/);
+  assert.match(modelName("cursor", "composer-2.5"), /Composer/);
+  assert.match(modelName("cursor", "grok-4.6"), /Grok 4\.6/);
+  assert.match(modelName("cursor", "grok-4.5"), /Grok 4\.5/);
+  assert.match(modelsFor("cursor").find((model) => model.id === "auto-smart")?.name ?? "", /Cursor/);
+  applyVendorCatalog({
+    cursor: [
+      { id: "auto-smart", name: "Auto", effort: true, contextWindow: 200_000 },
+      { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
+      { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 200_000 },
+    ],
+  });
+  assert.notEqual(modelName("cursor", "auto-smart"), "Auto");
+  assert.match(modelName("cursor", "auto-smart"), /Cursor/);
+  assert.match(modelName("cursor", "composer-2.5"), /Composer/);
+  assert.match(modelName("cursor", "grok-4.6"), /Cursor Grok 4\.6/);
+  resetVendorCatalog();
+  const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
+  assert.match(setup, /modelName\(session\.provider, model\.id\)/);
+  const menu = readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8");
+  assert.match(menu, /modelName\(provider\.id, model\.id\)/);
+});
+
+test("Available models chips do not ellipsis-clip Cursor Grok names", () => {
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const start = css.indexOf(".setup-models button strong");
+  assert.ok(start >= 0);
+  const block = css.slice(start, css.indexOf("}", start) + 1);
+  assert.match(block, /white-space:\s*normal/);
+  assert.doesNotMatch(block, /text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(block, /overflow:\s*hidden/);
+  const modelsGrid = css.slice(css.indexOf(".session-setup .setup-models"), css.indexOf(".session-setup .setup-models") + 160);
+  assert.match(modelsGrid, /repeat\(2,/);
+  assert.doesNotMatch(modelsGrid.split("}")[0] ?? "", /repeat\(3,/);
 });

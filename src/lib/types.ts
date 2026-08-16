@@ -47,6 +47,8 @@ export type LinkedFolder = {
   id: string;
   path: string;
   label: string;
+  /** macOS security-scoped bookmark so a later launch can reopen this folder. */
+  bookmark?: string;
 };
 
 export type LinkedReference = {
@@ -376,7 +378,7 @@ export type Panel = "settings" | "add-bot" | null;
 
 export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "usage" | "watch";
 
-export type SkillOrigin = "grok" | "codex" | "claude" | "workhorse";
+export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
 
 export type DeskSkill = {
   name: string;

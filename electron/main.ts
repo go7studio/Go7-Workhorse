@@ -52,6 +52,13 @@ import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { readVersionedState, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
+import {
+  bookmarksFromProjects,
+  claimFolderBookmarks,
+  loadFolderBookmarks,
+  mergeFolderBookmarks,
+  rememberFolderBookmark,
+} from "./folder-access";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const debugStartup = (stage: string) => {
@@ -138,6 +145,51 @@ function applyStoredClaudeToken(): boolean {
   }
 }
 
+function folderAccessIo() {
+  return {
+    userData: app.getPath("userData"),
+    startAccessing: (bookmark: string) => {
+      try {
+        return Boolean(app.startAccessingSecurityScopedResource(bookmark));
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+function claimLinkedFolders(state?: Persistable): void {
+  if (process.platform !== "darwin") return;
+  const io = folderAccessIo();
+  const remembered = loadFolderBookmarks(io);
+  const fromState = bookmarksFromProjects(state);
+  claimFolderBookmarks(mergeFolderBookmarks(remembered, fromState), io.startAccessing);
+}
+
+function pickLinkedFolder(title: string, buttonLabel: string, extra: Array<"createDirectory"> = []) {
+  return dialog
+    .showOpenDialog({
+      title,
+      buttonLabel,
+      properties: ["openDirectory", ...extra],
+      securityScopedBookmarks: process.platform === "darwin",
+    })
+    .then((result) => {
+      if (result.canceled || !result.filePaths[0]) return null;
+      const folderPath = result.filePaths[0];
+      const bookmark = result.bookmarks?.[0];
+      rememberFolderBookmark(folderPath, bookmark, folderAccessIo());
+      if (bookmark) {
+        try {
+          app.startAccessingSecurityScopedResource(bookmark);
+        } catch {
+          /* picker grant is still valid for this session */
+        }
+      }
+      return bookmark ? { path: folderPath, bookmark } : { path: folderPath };
+    });
+}
+
 function readState(): Persistable {
   const result = readVersionedState(statePath());
   const { state } = result;
@@ -151,9 +203,11 @@ function readState(): Persistable {
     // recovered state in memory, but never persist a plaintext replacement.
   }
   const hydrated = hydrateStateCredentials(state, credentialStore());
-  return workhorseVolatileCredentials()
+  const ready = workhorseVolatileCredentials()
     ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
     : hydrated;
+  claimLinkedFolders(ready);
+  return ready;
 }
 
 function fileToDataUrl(file: string): string | null {
@@ -237,6 +291,10 @@ function writeState(state: Persistable) {
       }
     }
     writeVersionedState(file, state, (snapshot) => protectStateCredentials(snapshot, credentialStore()));
+    const io = folderAccessIo();
+    for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {
+      rememberFolderBookmark(folder, bookmark, io);
+    }
     jobEngine?.sync(state.sessions);
   } catch (error) {
     console.error("workhorse state save failed", error);
@@ -327,6 +385,7 @@ process.on("unhandledRejection", (error) => {
 app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
+  claimLinkedFolders();
   void archiveWorkhorseWorkerThreads()
     .then((result) => {
       if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
@@ -432,25 +491,9 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle("folder:pick", async () => {
-    const result = await dialog.showOpenDialog({
-      title: "Link a folder",
-      buttonLabel: "Link",
-      properties: ["openDirectory"],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    return result.filePaths[0];
-  });
+  ipcMain.handle("folder:pick", () => pickLinkedFolder("Link a folder", "Link"));
 
-  ipcMain.handle("folder:pick-export", async () => {
-    const result = await dialog.showOpenDialog({
-      title: "Send here",
-      buttonLabel: "Send",
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    return result.filePaths[0];
-  });
+  ipcMain.handle("folder:pick-export", () => pickLinkedFolder("Send here", "Send", ["createDirectory"]));
 
   ipcMain.handle("desk:list-skills", (_event, projectFolders: unknown) => {
     const folders = Array.isArray(projectFolders)
@@ -515,8 +558,11 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("desk:push-skill", (_event, payload: unknown) => {
     const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-    if (typeof record.dir !== "string" || (record.target !== "grok" && record.target !== "codex" && record.target !== "claude")) {
-      return { ok: false, message: "Push needs a skill folder and Grok, Codex, or Claude." };
+    if (
+      typeof record.dir !== "string" ||
+      (record.target !== "grok" && record.target !== "codex" && record.target !== "claude" && record.target !== "cursor")
+    ) {
+      return { ok: false, message: "Push needs a skill folder and Grok, Codex, Claude, or Cursor." };
     }
     return pushSkillToVendor({
       dir: record.dir,

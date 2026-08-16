@@ -196,6 +196,7 @@ export function pushSkillToVendor(input: {
 function vendorSkillHome(target: Exclude<SkillOrigin, "workhorse">, homedir = os.homedir()): string {
   if (target === "codex") return path.join(homedir, ".codex", "skills");
   if (target === "claude") return path.join(homedir, ".claude", "skills");
+  if (target === "cursor") return path.join(homedir, ".cursor", "skills");
   return path.join(homedir, ".grok", "skills");
 }
 

@@ -48,10 +48,12 @@ export function skillHomes(
     { origin: "grok", root: path.join(home, ".grok", "bundled", "skills") },
     { origin: "codex", root: path.join(home, ".codex", "skills") },
     { origin: "claude", root: path.join(home, ".claude", "skills") },
+    { origin: "cursor", root: path.join(home, ".cursor", "skills") },
     { origin: "workhorse", root: workhorseSkillsHome(home), managed: true },
     { origin: "codex", root: path.join(home, ".codex", "plugins") },
     { origin: "grok", root: path.join(home, ".grok", "plugins") },
     { origin: "claude", root: path.join(home, ".claude", "plugins") },
+    { origin: "cursor", root: path.join(home, ".cursor", "plugins") },
     { origin: "workhorse", root: path.join(home, ".agents", "skills") },
   ];
   for (const root of input.bundled ?? []) {
@@ -64,7 +66,9 @@ export function skillHomes(
       { origin: "grok", root: path.join(root, ".grok", "skills") },
       { origin: "codex", root: path.join(root, ".codex", "skills") },
       { origin: "claude", root: path.join(root, ".claude", "skills") },
+      { origin: "cursor", root: path.join(root, ".cursor", "skills") },
       { origin: "workhorse", root: path.join(root, ".workhorse", "skills") },
+      { origin: "cursor", root: path.join(root, ".agents", "skills") },
     );
   }
   return homes;
@@ -202,6 +206,7 @@ export function findDeskSkill(skills: DeskSkill[], query: string): DeskSkill | u
     return (
       exact.find((skill) => skill.origin === "workhorse") ??
       exact.find((skill) => skill.origin === "grok") ??
+      exact.find((skill) => skill.origin === "cursor") ??
       exact[0]
     );
   }

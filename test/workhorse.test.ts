@@ -6902,14 +6902,16 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
 
 test("packages use platform Electron and mac builds receive an ad-hoc signature", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
-    build?: { afterPack?: string; electronDist?: string };
+    build?: { afterPack?: string; electronDist?: string; mac?: { extendInfo?: Record<string, string> } };
   };
   assert.equal(pkg.build?.electronDist, undefined);
   assert.equal(pkg.build?.afterPack, "scripts/after-pack.cjs");
   const hook = readFileSync(path.join(ROOT, "scripts", "after-pack.cjs"), "utf8");
   assert.match(hook, /electronPlatformName !== "darwin"/);
   assert.match(hook, /codesign/);
+  assert.match(hook, /shouldAdHocSign/);
   assert.match(hook, /"--deep", "--sign", "-"/);
+  assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);
 });
 
 test("custom bot setup imports a detected MiniMax configuration without overwriting a draft", () => {

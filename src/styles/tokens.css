@@ -30,6 +30,7 @@
   --sidebar: 268px;
   --grok: #1d1d1f;
   --claude: #c96442;
+  --cursor: #f54e00;
   --codex: #0f9d73;
   --custom: #0071e3;
   --peer: #6d5efc;
@@ -51,6 +52,7 @@
   --glow: rgba(10, 132, 255, 0.08);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 40px rgba(0, 0, 0, 0.45);
   --grok: #f5f5f7;
+  --cursor: #ff6a2b;
   --peer: #8b7cff;
   --command: #4ea3ff;
   --scroll-track: rgba(255, 255, 255, 0.06);

@@ -401,7 +401,7 @@ export function ModelMenu() {
                         style={tint ? { background: tint } : undefined}
                       />
                       <span className="model-line">
-                        {model.name}
+                        {modelName(provider.id, model.id)}
                         <em>{formatWindow(model.contextWindow)}</em>
                       </span>
                     </button>

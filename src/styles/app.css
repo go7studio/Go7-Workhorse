@@ -3803,6 +3803,10 @@ html.pane-dragging * {
   background: color-mix(in srgb, var(--claude) 22%, transparent);
 }
 
+.skill-origin.cursor {
+  background: color-mix(in srgb, var(--cursor) 22%, transparent);
+}
+
 .skill-origin.workhorse {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -4744,7 +4748,7 @@ html.pane-dragging * {
   position: absolute;
   left: 0;
   top: calc(100% + 8px);
-  width: 240px;
+  width: 280px;
   max-height: 360px;
   overflow: auto;
   padding: 8px 0 10px;
@@ -4848,9 +4852,12 @@ html.pane-dragging * {
 .model-line {
   display: flex;
   flex: 1;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 4px 12px;
+  min-width: 0;
+  white-space: normal;
 }
 
 .model-line em {
@@ -5913,24 +5920,27 @@ html.pane-dragging * {
 }
 
 .session-setup .setup-models {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .setup-models button {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
   text-align: left;
 }
 
 .setup-models button strong {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   font-size: 11px;
   font-weight: 570;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  text-overflow: unset;
+  white-space: normal;
 }
 
 .setup-models button > span {

@@ -4,8 +4,10 @@ import type { GrokCompactInput, GrokIpcEvent, GrokPromptInput } from "./grok-hos
 import type { CodexPromptInput } from "./codex-host";
 
 contextBridge.exposeInMainWorld("workhorse", {
-  pickFolder: () => ipcRenderer.invoke("folder:pick") as Promise<string | null>,
-  pickExportFolder: () => ipcRenderer.invoke("folder:pick-export") as Promise<string | null>,
+  pickFolder: () =>
+    ipcRenderer.invoke("folder:pick") as Promise<import("../src/lib/project").PickedFolder | null>,
+  pickExportFolder: () =>
+    ipcRenderer.invoke("folder:pick-export") as Promise<import("../src/lib/project").PickedFolder | null>,
   listDeskSkills: (projectFolders: string[] = []) =>
     ipcRenderer.invoke("desk:list-skills", projectFolders) as Promise<import("../src/lib/types").DeskSkill[]>,
   exportVendor: (input: {
@@ -33,7 +35,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     }>,
   deleteSkill: (dir: string) =>
     ipcRenderer.invoke("desk:delete-skill", dir) as Promise<import("../src/lib/types").DeskExportResult>,
-  pushSkill: (input: { dir: string; name?: string; target: "grok" | "codex" | "claude" }) =>
+  pushSkill: (input: { dir: string; name?: string; target: "grok" | "codex" | "claude" | "cursor" }) =>
     ipcRenderer.invoke("desk:push-skill", input) as Promise<import("../src/lib/types").DeskExportResult>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>

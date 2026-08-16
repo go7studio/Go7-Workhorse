@@ -64,6 +64,8 @@ npm run dist:mac
 
 On a Mac, that writes `release/Go7-Workhorse-<version>-mac.dmg`, `release/Go7-Workhorse-<version>-mac.zip`, and the unpacked `Go7 Workhorse.app`. Local packages receive a complete ad-hoc signature so they launch and use secure storage consistently; they remain development artifacts and should not be distributed. Release machines replace it with an Apple Developer ID signature automatically, and notarization credentials should be supplied through the standard electron-builder environment variables. Vendor CLIs (Grok, Codex, Claude) are not bundled; they must already be installed on the machine.
 
+macOS Files and Folders access is granted to this signed app identity (bundle id + Team ID), not to Cursor. A one-time allow should stick across updates that keep the same Team ID. Ad-hoc local rebuilds look like a new app and will ask again. After you link a folder, Workhorse stores a security-scoped bookmark and reclaims it on launch so later Cursor/Grok/Codex turns in that folder do not need a new prompt.
+
 ## How to use the scaffold
 
 1. **New project** — give it a name. No folder required.

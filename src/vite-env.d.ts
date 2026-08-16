@@ -62,8 +62,8 @@ type GrokBridgeEvent =
   | { type: "commands"; sessionId: string; commands: import("./lib/types").Command[] };
 
 type WorkhorseBridge = {
-  pickFolder: () => Promise<string | null>;
-  pickExportFolder: () => Promise<string | null>;
+  pickFolder: () => Promise<import("./lib/project").PickedFolder | null>;
+  pickExportFolder: () => Promise<import("./lib/project").PickedFolder | null>;
   listDeskSkills: (projectFolders?: string[]) => Promise<import("./lib/types").DeskSkill[]>;
   exportVendor: (input: {
     provider: string;
@@ -93,7 +93,7 @@ type WorkhorseBridge = {
   pushSkill: (input: {
     dir: string;
     name?: string;
-    target: "grok" | "codex" | "claude";
+    target: "grok" | "codex" | "claude" | "cursor";
   }) => Promise<import("./lib/types").DeskExportResult>;
   pickFile: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;

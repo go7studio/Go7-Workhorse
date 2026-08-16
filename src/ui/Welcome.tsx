@@ -35,8 +35,8 @@ export function Welcome() {
   const openFolder = async () => {
     const picked = window.workhorse ? await window.workhorse.pickFolder() : null;
     if (!picked) return;
-    const name = picked.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
-    createProject(name, [picked]);
+    const name = picked.path.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
+    createProject(name, [picked.path]);
   };
 
   return (

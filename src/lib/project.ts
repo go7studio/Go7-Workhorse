@@ -96,14 +96,27 @@ export function uniqueFolders(folderPaths: string[]): LinkedFolder[] {
 }
 
 /** Keep existing folder ids; append a new path only if it is not already linked. */
-export function appendProjectFolder(folders: LinkedFolder[], folderPath: string): LinkedFolder[] {
+export function appendProjectFolder(folders: LinkedFolder[], folderPath: string, bookmark?: string): LinkedFolder[] {
   const next = folderPath.trim();
   if (!next || folders.some((item) => item.path === next)) return folders;
-  return [...folders, folderFromPath(next)];
+  return [...folders, folderFromPath(next, bookmark)];
 }
 
-export function folderFromPath(path: string): LinkedFolder {
-  return { id: uid("fold"), path, label: folderName(path) };
+export type PickedFolder = { path: string; bookmark?: string };
+
+export function asPickedFolder(raw: unknown): PickedFolder | null {
+  if (typeof raw === "string" && raw.trim()) return { path: raw.trim() };
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as { path?: unknown; bookmark?: unknown };
+  const folderPath = typeof record.path === "string" ? record.path.trim() : "";
+  if (!folderPath) return null;
+  const bookmark = typeof record.bookmark === "string" ? record.bookmark.trim() : "";
+  return { path: folderPath, ...(bookmark ? { bookmark } : {}) };
+}
+
+export function folderFromPath(path: string, bookmark?: string): LinkedFolder {
+  const token = bookmark?.trim();
+  return { id: uid("fold"), path, label: folderName(path), ...(token ? { bookmark: token } : {}) };
 }
 
 export function primaryFolder(project: Project): LinkedFolder | null {
@@ -129,10 +142,12 @@ export function normalizeProject(raw: unknown): Project | null {
       if (!item || typeof item !== "object") continue;
       const folder = item as Record<string, unknown>;
       if (typeof folder.path !== "string" || !folder.path) continue;
+      const bookmark = typeof folder.bookmark === "string" ? folder.bookmark.trim() : "";
       folders.push({
         id: typeof folder.id === "string" ? folder.id : uid("fold"),
         path: folder.path,
         label: typeof folder.label === "string" ? folder.label : folderName(folder.path),
+        ...(bookmark ? { bookmark } : {}),
       });
     }
   } else if (typeof record.path === "string" && record.path) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { customBotEnabled } from "../lib/custom-bots";
-import { defaultModel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelsFor, withEffort } from "../lib/models";
+import { defaultModel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsFor, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
@@ -237,7 +237,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                   aria-selected={on}
                   onClick={() => setSessionModel(session.provider, model.id)}
                 >
-                  <strong>{model.name}</strong>
+                  <strong>{modelName(session.provider, model.id)}</strong>
                   <span>{formatWindow(model.contextWindow)}</span>
                 </button>
               );

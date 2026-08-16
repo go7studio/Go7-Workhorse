@@ -86,7 +86,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
   cursor: [
     { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
-    { id: "auto-smart", name: "Auto", effort: true, contextWindow: 200_000 },
+    { id: "auto-smart", name: "Auto (Cursor)", effort: true, contextWindow: 200_000 },
     { id: "grok-4.6", name: "Cursor Grok 4.6", effort: true, contextWindow: 200_000 },
     { id: "grok-4.5", name: "Cursor Grok 4.5", effort: true, contextWindow: 200_000 },
   ],
@@ -123,10 +123,28 @@ export function resetVendorCatalog(): void {
   liveCatalog = {};
 }
 
+export function cursorModelDisplayName(modelId: string, name?: string): string {
+  const id = modelId.trim().toLowerCase();
+  const stock = MODEL_CATALOG.cursor.find((item) => item.id === id);
+  const raw = (name ?? stock?.name ?? modelId).trim();
+  if (id === "auto-smart" || id === "auto") {
+    if (!raw || /^auto$/i.test(raw)) return "Auto (Cursor)";
+    if (/\bcursor\b/i.test(raw)) return raw;
+    return `${raw} (Cursor)`;
+  }
+  if (stock?.name && (id === "grok-4.6" || id === "grok-4.5") && !/cursor/i.test(raw)) return stock.name;
+  return raw || modelId;
+}
+
 export function modelsFor(provider: ProviderId): ModelInfo[] {
   const live = liveCatalog[provider];
   const rows = live?.length ? live : MODEL_CATALOG[provider];
-  return rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+  const filtered = rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+  if (provider !== "cursor") return filtered;
+  return filtered.map((model) => {
+    const name = cursorModelDisplayName(model.id, model.name);
+    return name === model.name ? model : { ...model, name };
+  });
 }
 
 export const DEFAULT_CHOICE: ModelChoice = {
@@ -145,7 +163,8 @@ export function findModel(provider: ProviderId, modelId: string): ModelInfo | un
 }
 
 export function modelName(provider: ProviderId, modelId: string): string {
-  return findModel(provider, modelId)?.name ?? modelId;
+  const name = findModel(provider, modelId)?.name ?? modelId;
+  return provider === "cursor" ? cursorModelDisplayName(modelId, name) : name;
 }
 
 /** Color/vendor family from the model slug, not which desk bot recorded the spend. */

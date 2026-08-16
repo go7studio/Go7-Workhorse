@@ -9,6 +9,7 @@ const FILTERS: { id: "all" | SkillOrigin; label: string }[] = [
   { id: "grok", label: "Grok" },
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude" },
+  { id: "cursor", label: "Cursor" },
   { id: "workhorse", label: "Workhorse" },
 ];
 
@@ -16,6 +17,7 @@ const PUSH: { id: Exclude<SkillOrigin, "workhorse">; label: string }[] = [
   { id: "grok", label: "Grok" },
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude" },
+  { id: "cursor", label: "Cursor" },
 ];
 
 const SKILL_PAGE_SIZE = 75;
@@ -212,5 +214,6 @@ function labelFor(origin: SkillOrigin): string {
   if (origin === "workhorse") return "Workhorse";
   if (origin === "codex") return "Codex";
   if (origin === "claude") return "Claude";
+  if (origin === "cursor") return "Cursor";
   return "Grok";
 }

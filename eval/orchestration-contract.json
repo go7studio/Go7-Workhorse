@@ -30,6 +30,8 @@
       "workhorse_ask_chat",
       "workhorse_spawn_agent",
       "workhorse_list_bots",
+      "workhorse_plan",
+      "workhorse_probe_runtime",
       "workhorse_list_skills",
       "workhorse_read_skill"
     ],
@@ -40,6 +42,7 @@
       "src/lib/subagents.ts",
       "src/lib/agent-thread.ts",
       "src/lib/goal.ts",
+      "src/lib/plan.ts",
       "src/ui/AgentThreadPane.tsx",
       "src/ui/GoalBar.tsx"
     ],

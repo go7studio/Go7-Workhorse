@@ -213,10 +213,127 @@ export type CodexNativeThread = {
   status?: string;
   parentThreadId?: string;
   updatedAt?: number;
+  preview?: string;
+  sourceKind?: string;
 };
+
+export type CodexWorkerArchiveResult = {
+  scanned: number;
+  matched: number;
+  archived: number;
+  failed: number;
+};
+
+type CodexThreadClient = Pick<CodexAppServerClient, "start" | "request" | "close">;
+
+export const WORKHORSE_WORKER_PREVIEW = "You are a worker on the Workhorse desk";
 
 function stringField(record: JsonObject, key: string): string | undefined {
   return typeof record[key] === "string" && record[key] ? (record[key] as string) : undefined;
+}
+
+function threadSourceKind(row: JsonObject): string | undefined {
+  const source = row.source;
+  if (typeof source === "string") return source;
+  if (source && typeof source === "object" && !Array.isArray(source)) {
+    return stringField(source as JsonObject, "kind") ?? stringField(source as JsonObject, "type");
+  }
+  return stringField(row, "sourceKind") ?? stringField(row, "source_kind");
+}
+
+function parseCodexNativeThread(item: unknown): CodexNativeThread | null {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const row = item as JsonObject;
+  const id = stringField(row, "id");
+  if (!id) return null;
+  const statusValue = row.status;
+  const status = typeof statusValue === "string"
+    ? statusValue
+    : statusValue && typeof statusValue === "object"
+      ? stringField(statusValue as JsonObject, "type")
+      : undefined;
+  const updatedAt = typeof row.updatedAt === "number"
+    ? row.updatedAt
+    : typeof row.updated_at === "number"
+      ? row.updated_at
+      : undefined;
+  return {
+    id,
+    name: stringField(row, "name") ?? stringField(row, "title"),
+    cwd: stringField(row, "cwd"),
+    parentThreadId: stringField(row, "parentThreadId") ?? stringField(row, "parent_thread_id"),
+    status,
+    updatedAt,
+    preview: stringField(row, "preview"),
+    sourceKind: threadSourceKind(row),
+  };
+}
+
+function listedThreads(result: unknown): { threads: CodexNativeThread[]; nextCursor?: string } {
+  const envelope = result && typeof result === "object" && !Array.isArray(result) ? (result as JsonObject) : {};
+  const rows = Array.isArray(envelope.data) ? envelope.data : Array.isArray(envelope.threads) ? envelope.threads : [];
+  return {
+    threads: rows.flatMap((item) => {
+      const thread = parseCodexNativeThread(item);
+      return thread ? [thread] : [];
+    }),
+    nextCursor: stringField(envelope, "nextCursor") ?? stringField(envelope, "next_cursor"),
+  };
+}
+
+export function isWorkhorseWorkerThread(
+  thread: Pick<CodexNativeThread, "preview" | "sourceKind">,
+): boolean {
+  const preview = thread.preview?.trim() ?? "";
+  return preview.startsWith(WORKHORSE_WORKER_PREVIEW);
+}
+
+export async function archiveWorkhorseWorkerThreads(input: {
+  client?: CodexThreadClient;
+  pageSize?: number;
+  maxThreads?: number;
+} = {}): Promise<CodexWorkerArchiveResult> {
+  const login = input.client ? null : detectCodexLogin();
+  if (!input.client && !login?.cliBinary) throw new Error("Codex CLI not found.");
+  const client = input.client ?? new CodexAppServerClient({ command: login!.cliBinary!, requestTimeoutMs: 20_000 });
+  const pageSize = Math.max(1, Math.min(50, input.pageSize ?? 50));
+  const maxThreads = Math.max(1, Math.min(2_000, input.maxThreads ?? 500));
+  const matchedIds = new Set<string>();
+  let scanned = 0;
+  let cursor: string | undefined;
+  try {
+    await client.start();
+    do {
+      const result = await client.request("thread/list", {
+        limit: Math.min(pageSize, maxThreads - scanned),
+        archived: false,
+        ...(cursor ? { cursor } : {}),
+      });
+      const page = listedThreads(result);
+      for (const thread of page.threads) {
+        if (scanned >= maxThreads) break;
+        scanned += 1;
+        if (isWorkhorseWorkerThread(thread)) matchedIds.add(thread.id);
+      }
+      const next = page.nextCursor;
+      if (!next || next === cursor || page.threads.length === 0 || scanned >= maxThreads) break;
+      cursor = next;
+    } while (true);
+
+    let archived = 0;
+    let failed = 0;
+    for (const threadId of matchedIds) {
+      try {
+        await client.request("thread/archive", { threadId });
+        archived += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { scanned, matched: matchedIds.size, archived, failed };
+  } finally {
+    client.close();
+  }
 }
 
 export async function listCodexNativeThreads(limit = 12): Promise<CodexNativeThread[]> {
@@ -226,25 +343,7 @@ export async function listCodexNativeThreads(limit = 12): Promise<CodexNativeThr
   try {
     await client.start();
     const result = await client.request("thread/list", { limit: Math.max(1, Math.min(50, limit)), archived: false });
-    const envelope = result && typeof result === "object" ? (result as JsonObject) : {};
-    const rows = Array.isArray(envelope.data) ? envelope.data : Array.isArray(envelope.threads) ? envelope.threads : [];
-    return rows.flatMap((item): CodexNativeThread[] => {
-      if (!item || typeof item !== "object") return [];
-      const row = item as JsonObject;
-      const id = stringField(row, "id");
-      if (!id) return [];
-      const statusValue = row.status;
-      const status = typeof statusValue === "string" ? statusValue : statusValue && typeof statusValue === "object" ? stringField(statusValue as JsonObject, "type") : undefined;
-      const updatedAt = typeof row.updatedAt === "number" ? row.updatedAt : typeof row.updated_at === "number" ? row.updated_at : undefined;
-      return [{
-        id,
-        name: stringField(row, "name") ?? stringField(row, "title"),
-        cwd: stringField(row, "cwd"),
-        parentThreadId: stringField(row, "parentThreadId") ?? stringField(row, "parent_thread_id"),
-        status,
-        updatedAt,
-      }];
-    });
+    return listedThreads(result).threads;
   } finally {
     client.close();
   }

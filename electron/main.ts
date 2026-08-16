@@ -9,7 +9,7 @@ import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
-import { detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
+import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
 import { detectCursorLogin } from "./cursor-login";
@@ -327,6 +327,11 @@ process.on("unhandledRejection", (error) => {
 app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
+  void archiveWorkhorseWorkerThreads()
+    .then((result) => {
+      if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
+    })
+    .catch((error) => console.warn("Workhorse Codex worker cleanup failed", error));
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }

@@ -120,8 +120,24 @@ export class CodexSessionHost {
       const chunks = createCodexChunkFilter(handlers.onChunk);
       const result = await slot.agent.prompt(text, { ...handlers, onChunk: chunks.push }, input.images ?? []);
       chunks.flush();
+      let nativeSessionArchived = false;
+      if (input.parentId || input.hidden || input.role === "worker") {
+        try {
+          nativeSessionArchived = await slot.agent.archiveSession();
+        } catch (error) {
+          console.warn("workhorse Codex worker archive failed", error);
+        }
+        if (nativeSessionArchived) {
+          slot.agent.dispose();
+          if (this.slots.get(input.sessionId) === slot) this.slots.delete(input.sessionId);
+        }
+      }
       emit({ type: "done", sessionId: input.sessionId, stopReason: result.stopReason });
-      return { ...result, text: stripCodexRuntimeNotices(result.text).trimStart() };
+      return {
+        ...result,
+        ...(nativeSessionArchived ? { vendorSessionId: undefined, nativeSessionArchived: true } : {}),
+        text: stripCodexRuntimeNotices(result.text).trimStart(),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });

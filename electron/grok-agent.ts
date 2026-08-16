@@ -66,6 +66,7 @@ export type GrokPromptResult = {
   usage?: GrokUsageDraft;
   vendorSessionId?: string;
   opened?: "session/new" | "session/load";
+  nativeSessionArchived?: boolean;
 };
 
 export type GrokStartResult = {
@@ -856,6 +857,13 @@ export class GrokAgent {
   async sessionInfo(): Promise<Record<string, unknown>> {
     if (!this.sessionId) throw new Error(`${this.who} agent has no session`);
     return this.request("_x.ai/session/info", { sessionId: this.sessionId });
+  }
+
+  /** ACP session/delete is recoverable archival for Codex, not permanent deletion. */
+  async archiveSession(): Promise<boolean> {
+    if (!this.sessionId) return false;
+    await this.request("session/delete", { sessionId: this.sessionId });
+    return true;
   }
 
   async forkSession(): Promise<string | undefined> {

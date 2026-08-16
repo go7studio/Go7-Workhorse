@@ -861,6 +861,7 @@
             "Verify each active row has visible activity, provider color, model, effort, task, status, and elapsed time.",
             "Interrupt one worker and restart while another completes; reconcile stale running records before dispatching more work.",
             "Verify recovered and completed calls retain truthful duration and terminal workers stop animating or consuming slots.",
+            "Complete an internal Codex worker and verify its native thread is archived while the Workhorse transcript remains inspectable and user-facing Codex chats remain listed.",
             "Resume the plan and verify it continues through later waves to a real terminal state."
           ]
         }
@@ -1032,14 +1033,14 @@
         },
         {
           "id": "ORC-15",
-          "criterion": "Worker monitoring shows live identity and activity, reconciles stale runs, preserves duration, and lets the plan continue to a truthful terminal state.",
+          "criterion": "Worker monitoring shows live identity and activity, reconciles stale runs, preserves duration, contains native worker logs, and lets the plan continue to a truthful terminal state.",
           "weight": 3,
           "type": "reliability",
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
           "scenarios": ["ORC-S7"],
-          "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; later plan waves dispatch.",
-          "evidence": "Sidebar and child screenshots, activity animation state, runtime identities, effort values, timestamps, restart reconciliation, slot counts, and terminal plan record."
+          "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; internal Codex worker threads are archived without hiding user-facing chats or Workhorse transcripts; later plan waves dispatch.",
+          "evidence": "Sidebar and child screenshots, activity animation state, runtime identities, effort values, timestamps, native thread listings, Workhorse transcripts, restart reconciliation, slot counts, and terminal plan record."
         }
       ]
     },

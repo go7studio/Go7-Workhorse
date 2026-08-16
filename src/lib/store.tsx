@@ -2069,8 +2069,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (options?.replaceUserId) vendorSessionId = undefined;
           const result = await window.workhorse.codexPrompt({ ...promptInput, vendorSessionId });
           const reply = typeof result?.text === "string" ? result.text.trim() : "";
-          vendorSessionId =
-            typeof result?.vendorSessionId === "string" && result.vendorSessionId
+          vendorSessionId = result?.nativeSessionArchived
+            ? undefined
+            : typeof result?.vendorSessionId === "string" && result.vendorSessionId
               ? result.vendorSessionId
               : vendorSessionId;
           setState((latest) => ({

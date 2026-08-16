@@ -36,6 +36,7 @@ import {
   resolveCodexAcpLaunch,
   resolveOpenAiDesktopCodex,
 } from "../electron/codex-login";
+import { archiveWorkhorseWorkerThreads, isWorkhorseWorkerThread } from "../electron/codex-app-server";
 import { defaultModel } from "../src/lib/models";
 import { buildGrokLaunchSpec } from "../electron/grok-launch";
 import { byProvider, finalizeTurnUsage, normalizeUsage, repairInflatedTurn } from "../src/lib/usage";
@@ -53,6 +54,68 @@ test("Codex skill-budget notices do not become assistant output", () => {
   filter.push("ADAPTER_OK");
   filter.flush();
   assert.deepEqual(chunks, ["ADAPTER_OK"]);
+});
+
+test("Workhorse worker detection excludes user-facing Codex threads", () => {
+  assert.equal(
+    isWorkhorseWorkerThread({ preview: "You are a worker on the Workhorse desk. Complete this task.", sourceKind: "appServer" }),
+    true,
+  );
+  assert.equal(
+    isWorkhorseWorkerThread({ preview: "You are inside Workhorse, a desktop multi-agent app.", sourceKind: "appServer" }),
+    false,
+  );
+  assert.equal(
+    isWorkhorseWorkerThread({ preview: "You are working in the Workhorse repository.", sourceKind: "vscode" }),
+    false,
+  );
+  assert.equal(
+    isWorkhorseWorkerThread({ preview: "You are a worker on the Workhorse desk. Fix tests.", sourceKind: "vscode" }),
+    true,
+  );
+});
+
+test("legacy Workhorse worker cleanup archives exact matches across pages", async () => {
+  const requests: { method: string; params: unknown }[] = [];
+  let page = 0;
+  const result = await archiveWorkhorseWorkerThreads({
+    pageSize: 2,
+    client: {
+      async start() {
+        return {};
+      },
+      async request(method, params) {
+        requests.push({ method, params });
+        if (method === "thread/list") {
+          page += 1;
+          return page === 1
+            ? {
+                data: [
+                  { id: "worker-1", preview: "You are a worker on the Workhorse desk. Audit UI.", sourceKind: "appServer" },
+                  { id: "root-1", preview: "You are inside Workhorse, a desktop multi-agent app.", sourceKind: "appServer" },
+                ],
+                nextCursor: "page-2",
+              }
+            : {
+                data: [
+                  { id: "worker-2", preview: "You are a worker on the Workhorse desk. Repair tests.", sourceKind: "appServer" },
+                ],
+              };
+        }
+        return {};
+      },
+      close() {},
+    },
+  });
+  assert.deepEqual(result, { scanned: 3, matched: 2, archived: 2, failed: 0 });
+  assert.deepEqual(
+    requests.filter((item) => item.method === "thread/archive").map((item) => item.params),
+    [{ threadId: "worker-1" }, { threadId: "worker-2" }],
+  );
+  assert.deepEqual(requests[0], {
+    method: "thread/list",
+    params: { limit: 2, archived: false },
+  });
 });
 
 function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: string }) {
@@ -817,6 +880,67 @@ test("CodexSessionHost new/load/fail/launch-key and missing binary", async () =>
       }),
     new RegExp(CODEX_ACP_NOT_INSTALLED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
+});
+
+test("CodexSessionHost archives internal workers but retains root chats", async () => {
+  const workerMethods: string[] = [];
+  let workerSpawns = 0;
+  const workerHost = new CodexSessionHost(() => {
+    workerSpawns += 1;
+    return fakeAcp({ methods: workerMethods, nextId: `worker-native-${workerSpawns}` });
+  });
+  const first = await workerHost.prompt(
+    {
+      sessionId: "work-worker",
+      parentId: "work-root",
+      role: "worker",
+      text: "audit",
+      model: "gpt-5.4",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  const second = await workerHost.prompt(
+    {
+      sessionId: "work-worker",
+      parentId: "work-root",
+      role: "worker",
+      text: "follow up",
+      model: "gpt-5.4",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  workerHost.disposeAll();
+  assert.equal(first.nativeSessionArchived, true);
+  assert.equal(first.vendorSessionId, undefined);
+  assert.equal(second.nativeSessionArchived, true);
+  assert.equal(workerSpawns, 2);
+  assert.equal(workerMethods.filter((method) => method === "session/new").length, 2);
+  assert.equal(workerMethods.filter((method) => method === "session/delete").length, 2);
+
+  const rootMethods: string[] = [];
+  const rootHost = new CodexSessionHost(() => fakeAcp({ methods: rootMethods, nextId: "root-native" }));
+  const root = await rootHost.prompt(
+    {
+      sessionId: "work-root",
+      role: "orchestrator",
+      text: "plan",
+      model: "gpt-5.4",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  rootHost.disposeAll();
+  assert.equal(root.nativeSessionArchived, undefined);
+  assert.equal(root.vendorSessionId, "root-native");
+  assert.equal(rootMethods.includes("session/delete"), false);
 });
 
 test("shared ACP usage parser and finalize do not double-count Codex turns", () => {

@@ -65,7 +65,7 @@ import { CREW_STATUS_HINT, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
 import { agentThreadsForSession, liveAgentThreadId } from "../src/lib/agent-thread";
-import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sessionTranscript } from "../src/lib/session-bridge";
+import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
   collectChildAgentReports,
@@ -112,7 +112,7 @@ import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSess
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
 import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
-import { workhorseUserDataOverride } from "../src/lib/user-data";
+import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseGrokModelsCache } from "../electron/vendor-models";
 import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
@@ -227,6 +227,9 @@ test("isolated user data accepts an env or explicit launch flag", () => {
     "/tmp/flag-profile",
   );
   assert.equal(workhorseUserDataOverride([], {}), undefined);
+  assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
+  assert.equal(workhorseVolatileCredentials([], { WORKHORSE_VOLATILE_CREDENTIALS: "true" }), true);
+  assert.equal(workhorseVolatileCredentials([], {}), false);
 });
 
 test("filterCommands returns the shipped command list and filters it", () => {
@@ -6181,6 +6184,29 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     { fromSessionId: "orch" },
   );
   assert.ok(crewCatalog.some((item) => item.id === "sess_a"));
+  const nestedCrew = [
+    { id: "orch" },
+    { id: "sess_a", parentId: "orch" },
+    { id: "helper", parentId: "sess_a" },
+    { id: "other" },
+  ];
+  assert.equal(sameSessionCrew(nestedCrew, "orch", "helper"), true);
+  assert.equal(sameSessionCrew(nestedCrew, "sess_a", "helper"), true);
+  assert.equal(sameSessionCrew(nestedCrew, "other", "helper"), false);
+  const nestedCatalog = catalogSessions(
+    {
+      projects: [],
+      sessions: nestedCrew.map((session) => ({
+        ...session,
+        title: session.id,
+        provider: "custom",
+        hidden: Boolean(session.parentId),
+        messages: [{ role: "user", text: "crew" }],
+      })),
+    },
+    { fromSessionId: "helper" },
+  );
+  assert.deepEqual(nestedCatalog.map((item) => item.id), ["orch", "sess_a", "helper", "other"]);
   const publicCatalog = catalogSessions({
     projects: [{ id: "proj", name: "Ships" }],
     sessions: [
@@ -6719,6 +6745,14 @@ test("local mac packages receive a complete ad-hoc signature before release sign
   assert.match(hook, /electronPlatformName !== "darwin"/);
   assert.match(hook, /codesign/);
   assert.match(hook, /"--deep", "--sign", "-"/);
+});
+
+test("custom bot setup imports a detected MiniMax configuration without overwriting a draft", () => {
+  const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
+  assert.match(addBot, /!draft\.apiKey\.trim\(\) && !draft\.baseUrl\.trim\(\)/);
+  assert.match(addBot, /store\.refreshCustomLogin\(\)/);
+  assert.match(addBot, /Detected MiniMax settings from OpenClaw/);
+  assert.match(addBot, /The API key stays on this Mac/);
 });
 
 test("the repo tracks no symlinks and states its working rules", () => {

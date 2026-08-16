@@ -45,6 +45,20 @@ test("credential protection refuses plaintext persistence when OS encryption is 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("volatile credential mode keeps secrets in memory and never creates a vault file", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-credentials-volatile-"));
+  const file = path.join(root, "credentials.json");
+  const vault = new CredentialStore(file, cipher, true);
+  const protectedState = protectStateCredentials(
+    { settings: { llms: { custom: { apiKey: "session-secret" } }, customBots: [] } },
+    vault,
+  );
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(hydrateStateCredentials(protectedState, vault).settings.llms.custom.apiKey, "session-secret");
+  assert.equal(hydrateStateCredentials(protectedState, new CredentialStore(file, cipher, true)).settings.llms.custom.apiKey, "");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("credential vault recovers its last encrypted generation after corruption", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-credentials-recover-"));
   const file = path.join(root, "credentials.json");

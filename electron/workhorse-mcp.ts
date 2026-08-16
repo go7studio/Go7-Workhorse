@@ -683,7 +683,7 @@ function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boole
 
 async function askChat(chat: string, message: string, from?: string): Promise<string> {
   const state = readState();
-  const listed = catalogSessions(state);
+  const listed = catalogSessions(state, { fromSessionId: fromSessionId(from) });
   const match = findSession(listed, chat);
   if (!match) {
     if (shouldSpawnInsteadOfAsk(chat, listed)) {

@@ -18,21 +18,27 @@ function emptyFile(): CredentialFile {
 
 export class CredentialStore {
   private loaded: CredentialFile | null = null;
+  private readonly memory = new Map<string, string>();
 
   constructor(
     private readonly file: string,
     private readonly cipher: SecretCipher,
+    private readonly memoryOnly = false,
   ) {}
 
   available(): boolean {
-    return this.cipher.isEncryptionAvailable();
+    return this.memoryOnly || this.cipher.isEncryptionAvailable();
   }
 
   put(secret: string, preferredId?: string): string {
     const value = secret.trim();
     if (!value) throw new Error("Cannot store an empty credential.");
-    if (!this.available()) throw new Error("OS credential encryption is unavailable.");
     const id = preferredId?.trim() || `credential-${crypto.randomUUID()}`;
+    if (this.memoryOnly) {
+      this.memory.set(id, value);
+      return id;
+    }
+    if (!this.available()) throw new Error("OS credential encryption is unavailable.");
     const state = this.read();
     state.credentials[id] = {
       ciphertext: this.cipher.encryptString(value).toString("base64"),
@@ -45,6 +51,7 @@ export class CredentialStore {
   get(id: string | undefined): string {
     const key = id?.trim();
     if (!key) return "";
+    if (this.memoryOnly) return this.memory.get(key) ?? "";
     const row = this.read().credentials[key];
     if (!row?.ciphertext) return "";
     // Avoid touching the OS keychain on ordinary startup when no matching
@@ -60,6 +67,10 @@ export class CredentialStore {
   remove(id: string | undefined): void {
     const key = id?.trim();
     if (!key) return;
+    if (this.memoryOnly) {
+      this.memory.delete(key);
+      return;
+    }
     const state = this.read();
     if (!state.credentials[key]) return;
     delete state.credentials[key];

@@ -8,3 +8,12 @@ export function workhorseUserDataOverride(
   const fromFlag = flag?.slice("--workhorse-user-data=".length).trim();
   return fromFlag || undefined;
 }
+
+export function workhorseVolatileCredentials(
+  argv: string[] = process.argv,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const fromEnv = env.WORKHORSE_VOLATILE_CREDENTIALS?.trim().toLowerCase();
+  if (fromEnv === "1" || fromEnv === "true") return true;
+  return argv.includes("--workhorse-volatile-credentials");
+}

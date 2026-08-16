@@ -585,7 +585,7 @@ export async function streamCustomHttp(
       },
       onToolUse: remember,
     };
-    const ingest = (parsed: unknown) => {
+    const ingest = (parsed: unknown): boolean => {
       const failed = customStreamError(parsed);
       if (failed) throw new Error(failed);
       const next =
@@ -595,30 +595,39 @@ export async function streamCustomHttp(
       if (next.usage) usage = mergeCustomUsageSnapshot(usage, next.usage);
       if (next.tool) remember(next.tool);
       if (next.stopReason) stopReason = next.stopReason;
+      return api === "anthropic-messages" && "stop" in next && next.stop === true;
     };
-    while (true) {
+    let streamComplete = false;
+    readStream: while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       rest += decoder.decode(value, { stream: true });
       const decoded = decodeSse(rest);
       rest = decoded.rest;
       for (const data of decoded.events) {
-        if (data === "[DONE]") continue;
+        if (data === "[DONE]") {
+          streamComplete = true;
+          break readStream;
+        }
         try {
-          ingest(JSON.parse(data));
+          if (ingest(JSON.parse(data))) {
+            streamComplete = true;
+            break readStream;
+          }
         } catch (error) {
           if (error instanceof SyntaxError) continue;
           throw error;
         }
       }
     }
+    if (streamComplete) await reader.cancel().catch(() => undefined);
     rest += decoder.decode();
-    if (rest.trim()) {
+    if (!streamComplete && rest.trim()) {
       const tail = decodeSse(rest.endsWith("\n\n") || rest.endsWith("\r\n\r\n") ? rest : `${rest}\n\n`);
       for (const data of tail.events) {
-        if (data === "[DONE]") continue;
+        if (data === "[DONE]") break;
         try {
-          ingest(JSON.parse(data));
+          if (ingest(JSON.parse(data))) break;
         } catch (error) {
           if (error instanceof SyntaxError) continue;
           throw error;

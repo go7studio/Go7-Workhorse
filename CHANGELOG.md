@@ -8,6 +8,25 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac.dmg` for macOS.
 
+## [0.1.7] — 2026-08-16
+
+Cut so that Windows has an installer again: 0.1.6 published only a dmg,
+because its Windows job failed on the Cursor tests before packaging.
+
+- Cursor discovery tests declare the platform they mean, so they pass on
+  Windows as well as here. The adapter was always right; the tests inherited
+  whichever machine ran them.
+- Repository moved to the Go7 Studio organization. The update checker pointed
+  at the old owner, so an installed build asked a personal account about
+  releases the organization publishes.
+- CI runs build, test and a secret scan on Linux, Windows and macOS for every
+  push and pull request, instead of only when the version changes.
+- Release artifact matching survives the rename to Go7 Workhorse.
+- MIT licence, CODEOWNERS, a launch checklist, an architecture diagram, and a
+  README that leads with what the desk is for.
+- A macOS install script that reads the releases API.
+- Mac folder grants are kept, and Cursor skills are listed on the desk.
+
 ## [0.1.6] — 2026-08-16
 
 - Cursor ACP detection and its smoke test hardened.
@@ -59,6 +78,7 @@ First release built for both platforms from one commit.
 - Windows desktop shell with Grok, Codex and Claude adapters, projects and
   chats, the permission bar, and the NSIS installer.
 
+[0.1.7]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.7
 [0.1.6]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.6
 [0.1.5]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.5
 [0.1.4]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.4

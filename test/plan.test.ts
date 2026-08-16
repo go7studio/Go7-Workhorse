@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   approvePlanRun,
+  assignPlanStep,
   completePlanRun,
   hashPlanSource,
   normalizePlanRun,
@@ -102,6 +103,25 @@ test("plan lifecycle follows dependencies and requires evidence", () => {
   assert.equal(plan.status, "completed");
   assert.equal(plan.completedAt, 12);
   assert.equal(plan.revision, 11);
+});
+
+test("plan assignments preserve model fit and agent identity", () => {
+  let plan = parseMarkdownPlan({ markdown: "### Task 1: Audit visuals\nInspect UI.", now: 1 });
+  plan = planFrom(approvePlanRun(plan, 2));
+  plan = planFrom(startPlanRun(plan, 3));
+  const stepId = plan.steps[0]!.id;
+  plan = planFrom(assignPlanStep(plan, stepId, {
+    sessionId: "session_kimi",
+    provider: "custom",
+    model: "hf:moonshotai/Kimi-K3",
+    customBotId: "bot_kimi",
+    rationale: "Visual audit and image input",
+    skills: ["UI/UX"],
+    tools: ["screenshots"],
+  }, 4));
+  assert.equal(plan.steps[0]?.assignment?.sessionId, "session_kimi");
+  assert.equal(plan.steps[0]?.assignment?.rationale, "Visual audit and image input");
+  assert.equal(plan.events?.at(-1)?.type, "agent.assigned");
 });
 
 test("plan validation rejects cycles and supports pause and resume", () => {

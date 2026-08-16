@@ -1943,6 +1943,15 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "pong from B",
   );
   assert.equal(existingPeerReply([{ id: "sess_b", messages: [] }], "sess_b", "ping"), null);
+  assert.equal(
+    existingPeerReply(
+      [{ id: "sess_b", messages: [{ role: "user", kind: "peer", text: "ping", peerFromSessionId: "sess_a" }, { role: "assistant", text: "pong" }] }],
+      "sess_b",
+      "ping",
+      "sess_c",
+    ),
+    null,
+  );
   const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(userTurn, /peer \? " peer"/);
   assert.match(userTurn, /from \"\.\/TurnActions\"/);
@@ -2025,6 +2034,8 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_spawn_agent",
     "workhorse_await_agents",
     "workhorse_list_bots",
+    "workhorse_probe_runtime",
+    "workhorse_plan",
     "workhorse_detect_custom",
     "workhorse_setup_custom_bot",
     "workhorse_list_projects",
@@ -6062,11 +6073,14 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const orchTools = customHttpTools().map((tool) => tool.name);
   const workerTools = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
   assert.ok(orchTools.includes("workhorse_spawn_agent"));
+  assert.ok(orchTools.includes("workhorse_plan"));
+  assert.ok(orchTools.includes("workhorse_probe_runtime"));
   assert.ok(orchTools.includes("workhorse_request_vendor"));
   assert.ok(workerTools.includes("workhorse_spawn_agent"));
   assert.ok(workerTools.includes("workhorse_await_agents"));
   assert.ok(!workerTools.includes("workhorse_request_vendor"));
   assert.ok(!workerTools.includes("workhorse_list_bots"));
+  assert.ok(!workerTools.includes("workhorse_plan"));
   assert.ok(workerTools.includes("list_dir"));
   assert.ok(workerTools.includes("read_file"));
 

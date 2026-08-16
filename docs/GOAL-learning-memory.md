@@ -161,7 +161,7 @@ Each active memory shows one statement, scope, source count, last confirmed date
 - Permanent purge closes the store, rewrites or rebuilds it without the target records, removes WAL/SHM remnants, reopens it, and verifies absence.
 - Backups obey the same deletion and retention policy.
 - Credential storage remains in the existing credential service; no keys enter learning events or exports.
-- Memory never crosses OS installations unless the user explicitly exports and imports it.
+- Workhorse does not sync memory between installations. OS-managed profile backup or roaming follows the user's platform policy; document it and support an administrator-selected local store path.
 
 ## Implementation plan
 

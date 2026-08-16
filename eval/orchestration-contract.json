@@ -44,7 +44,9 @@
       "src/lib/agent-thread.ts",
       "src/lib/goal.ts",
       "src/lib/plan.ts",
+      "src/lib/turns.ts",
       "src/ui/AgentThreadPane.tsx",
+      "src/ui/ChatRow.tsx",
       "src/ui/GoalBar.tsx"
     ],
     "goalCommands": [
@@ -103,7 +105,10 @@
     "precedenceRule": "An explicit child provider or model assignment wins. Automatic nested routing defaults to quick and records its capacity-aware decision.",
     "selfRoutingRule": "A plan task may choose its agent only after recording required capabilities, candidates, Watch state, cost, concurrency, isolation, and a short rationale.",
     "watchRule": "A Watch-held provider receives no request. An approved capable fallback may run with the hold and substitution recorded.",
-    "visualRule": "Tasks tagged visual, UI, UX, image, or computer-use require the configured Kimi K3 visual profile unless the user overrides or accepts unavailability."
+    "visualRule": "Tasks tagged visual, UI, UX, image, or computer-use require the configured Kimi K3 visual profile unless the user overrides or accepts unavailability. Kimi is audit-only and hands implementation to a coding worker.",
+    "effortRule": "Choose the lowest sufficient supported reasoning effort for the task and record the rationale. Do not default every worker to high; explicit effort wins.",
+    "skillRule": "Critical installed skill identity, path, and required instructions survive context compaction. Play Billing work requires ship-go7-godot-play before implementation.",
+    "recoveryRule": "On restart, reconcile orphaned running work to an explicit interrupted state, preserve elapsed time, release capacity, and continue eligible plan waves."
   },
   "planExecution": {
     "contract": "eval/execution-plan-contract.json",
@@ -139,6 +144,7 @@
     "ORC-11",
     "ORC-12",
     "ORC-13",
-    "ORC-14"
+    "ORC-14",
+    "ORC-15"
   ]
 }

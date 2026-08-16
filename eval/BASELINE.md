@@ -1,5 +1,8 @@
 # Go7 Workhorse evaluation baseline
 
+The v0.1.4 findings remain historical. Current observed regressions and their
+future-run coverage live in `regression-contract.json`.
+
 **Source frozen for the kit:** 5d02f78e79a688b316aba9d4f6575df909b2a52b
 (origin/main, 2026-08-15)
 

@@ -69,3 +69,32 @@ test("plan and device contracts map to suite rubrics and commands", () => {
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(suite.profiles.includes("custom-kimi"));
 });
+
+test("observed regressions stay mapped to live suite coverage", () => {
+  const suite = json("eval/suite.json");
+  const regressions = json("eval/regression-contract.json");
+  const manifest = json("package.json");
+  const scenarios = new Set(suite.areas.flatMap((area: any) => area.scenarios.map((scenario: any) => scenario.id)));
+  const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
+  assert.equal(new Set(regressions.regressions.map((item: any) => item.id)).size, regressions.regressions.length);
+  for (const regression of regressions.regressions) {
+    for (const id of regression.scenarios) assert.ok(scenarios.has(id), `${regression.id}:${id}`);
+    for (const id of regression.rubric) assert.ok(rubric.has(id), `${regression.id}:${id}`);
+    for (const command of regression.verification) assert.ok(manifest.scripts[command], `${regression.id}:${command}`);
+  }
+});
+
+test("Cursor eval config covers authenticated ACP smoke and both usage pools", () => {
+  const config = json("eval/config.example.json");
+  const providers = json("eval/provider-matrix.json");
+  const commands = json("eval/command-contract.json");
+  const regressions = json("eval/regression-contract.json");
+  const cursor = providers.profiles.find((profile: any) => profile.id === "cursor-acp");
+  assert.ok(config.profiles["cursor-acp"]);
+  assert.ok(config.modelPolicy.providerSmokeExceptions.profiles.includes("cursor-acp"));
+  assert.ok(commands.providerNative["cursor-acp"]);
+  assert.match(cursor.discovery.join(" "), /CLI authentication/);
+  assert.match(cursor.expectedModelEvidence.join(" "), /Composer or API usage lane/);
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-001"));
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-002"));
+});

@@ -18,6 +18,8 @@ const PUSH: { id: Exclude<SkillOrigin, "workhorse">; label: string }[] = [
   { id: "claude", label: "Claude" },
 ];
 
+const SKILL_PAGE_SIZE = 75;
+
 export function SkillsPane() {
   const store = useStore();
   const skills = store.deskSkills;
@@ -29,6 +31,7 @@ export function SkillsPane() {
   const [openDir, setOpenDir] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const [confirmDir, setConfirmDir] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(SKILL_PAGE_SIZE);
 
   const reload = useCallback(() => {
     void listDeskSkills().then((rows) => {
@@ -46,6 +49,11 @@ export function SkillsPane() {
   }, [origin, query, skills]);
 
   const selected = openDir ? skills.find((skill) => skill.dir === openDir) : undefined;
+  const selectedManaged = selected?.managed === true;
+
+  useEffect(() => {
+    setVisibleCount(SKILL_PAGE_SIZE);
+  }, [origin, query]);
 
   useEffect(() => {
     if (!openDir) {
@@ -96,15 +104,15 @@ export function SkillsPane() {
                 Add to {item.label}
               </button>
             ))}
-            {confirmDir === selected.dir ? (
+            {selectedManaged && confirmDir === selected.dir ? (
               <button className="tiny danger" type="button" onClick={() => remove(selected.dir)}>
                 Delete for good
               </button>
-            ) : (
+            ) : selectedManaged ? (
               <button className="tiny" type="button" onClick={() => setConfirmDir(selected.dir)}>
                 Delete
               </button>
-            )}
+            ) : null}
           </div>
         </div>
         <div className="skill-detail">
@@ -116,6 +124,11 @@ export function SkillsPane() {
             <span className={`skill-origin ${selected.origin}`}>{labelFor(selected.origin)}</span>
           </div>
           {selected.description ? <p className="skill-detail-lead">{selected.description}</p> : null}
+          <p className="row-meta">
+            {selectedManaged
+              ? "Managed by Workhorse. You can copy it to another agent or delete this Workhorse copy."
+              : `Managed by ${labelFor(selected.origin)}. Workhorse can read or copy it, but cannot delete the original.`}
+          </p>
           {note ? <p className="row-meta">{note}</p> : null}
           <div className="skill-detail-body">
             <MessageBody text={skillBodyFromMarkdown(body) || "No write-up in this skill yet."} />
@@ -167,7 +180,7 @@ export function SkillsPane() {
       {note && <p className="row-meta">{note}</p>}
       {rows.length === 0 && !note ? <p className="row-meta">No skills match that search.</p> : null}
       <ul className="skills-list">
-        {rows.map((skill) => (
+        {rows.slice(0, visibleCount).map((skill) => (
           <li key={`${skill.origin}:${skill.dir}`} className="skill-row">
             <button className="skill-open" type="button" onClick={() => setOpenDir(skill.dir)}>
               <strong>{skill.name}</strong>
@@ -176,19 +189,30 @@ export function SkillsPane() {
             </button>
             <span className="skill-row-side">
               <span className={`skill-origin ${skill.origin}`}>{labelFor(skill.origin)}</span>
-              {confirmDir === skill.dir ? (
+              {skill.managed === true && confirmDir === skill.dir ? (
                 <button className="tiny danger" type="button" onClick={() => remove(skill.dir)}>
                   Delete for good
                 </button>
-              ) : (
+              ) : skill.managed === true ? (
                 <button className="tiny" type="button" onClick={() => setConfirmDir(skill.dir)}>
                   Delete
                 </button>
+              ) : (
+                <span className="row-meta">Read-only here</span>
               )}
             </span>
           </li>
         ))}
       </ul>
+      {rows.length > visibleCount ? (
+        <button
+          className="tiny"
+          type="button"
+          onClick={() => setVisibleCount((count) => count + SKILL_PAGE_SIZE)}
+        >
+          Show more skills ({rows.length - visibleCount} remaining)
+        </button>
+      ) : null}
     </>
   );
 }

@@ -68,7 +68,7 @@ function asLinkedMedia(label: string, href: string, forcedImage: boolean): Inlin
 
 export function parseInline(source: string): Inline[] {
   const out: Inline[] = [];
-  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\]]*\]\([^)]*\)|\*[^*\n]+?\*|_[^_\n]+_)/g;
+  const re = /(\*\*[^*]+?\*\*|`[^`]+`|!?\[[^\]]*\]\([^)]*\)|\*[^*\n]+?\*)/g;
   let last = 0;
   for (const match of source.matchAll(re)) {
     const at = match.index ?? 0;
@@ -84,7 +84,7 @@ export function parseInline(source: string): Inline[] {
       const link = token.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
       if (link) out.push(asLinkedMedia(link[1], link[2], false));
       else out.push({ type: "text", text: token });
-    } else if (token.startsWith("*") || token.startsWith("_")) {
+    } else if (token.startsWith("*")) {
       out.push({ type: "em", text: token.slice(1, -1) });
     } else out.push({ type: "text", text: token });
     last = at + token.length;
@@ -112,6 +112,18 @@ export function joinChatText(left: string, right: string): string {
   if (/[.!?:]$/.test(left) && /^[A-Z([{]/.test(right)) return `${left} ${right}`;
   if (/[a-z0-9)]$/.test(left) && /^[A-Z]/.test(right)) return `${left} ${right}`;
   return left + right;
+}
+
+/** Merge a streamed fragment while tolerating providers that replay cumulative or overlapping text. */
+export function mergeStreamedText(left: string, right: string): string {
+  if (!left) return right;
+  if (!right || left.endsWith(right)) return left;
+  if (right.startsWith(left)) return right;
+  const limit = Math.min(left.length, right.length);
+  for (let overlap = limit; overlap > 0; overlap -= 1) {
+    if (left.slice(-overlap) === right.slice(0, overlap)) return left + right.slice(overlap);
+  }
+  return joinChatText(left, right);
 }
 
 export function unsquashSentences(text: string): string {

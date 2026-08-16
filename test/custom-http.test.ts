@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   applyAnthropicEvent,
+  applyOpenAiChunk,
   buildAnthropicBody,
   customMaxTokens,
   customMessagesUrl,
@@ -15,6 +16,52 @@ import {
   sanitizeCustomReply,
   streamCustomHttp,
 } from "../electron/custom-http";
+
+test("OpenAI-compatible tool calls wait for all streamed argument fragments", async () => {
+  const seen: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+  const pending = new Map();
+  const first = applyOpenAiChunk(
+    {
+      choices: [{ delta: { tool_calls: [{ index: 0, id: "spawn-1", function: { name: "workhorse_spawn_agent", arguments: "{\"pro" } }] } }],
+    },
+    { onToolUse: (tool) => seen.push(tool) },
+    pending,
+  );
+  assert.equal(first.tool, undefined);
+  assert.deepEqual(seen, []);
+  applyOpenAiChunk(
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "mpt\":\"inspect safely\",\"wait\":false}" } }] } }] },
+    { onToolUse: (tool) => seen.push(tool) },
+    pending,
+  );
+  assert.deepEqual(seen, []);
+  const finished = applyOpenAiChunk(
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    { onToolUse: (tool) => seen.push(tool) },
+    pending,
+  );
+  assert.equal(finished.tool?.name, "workhorse_spawn_agent");
+  assert.deepEqual(seen, [{ id: "spawn-1", name: "workhorse_spawn_agent", input: { prompt: "inspect safely", wait: false } }]);
+
+  const streamed = await streamCustomHttp(
+    { baseUrl: "https://api.minimax.io/v1", apiKey: "sk-test", model: "MiniMax-M3", api: "openai-completions" },
+    { messages: [{ role: "user", text: "delegate" }] },
+    {},
+    async () =>
+      new Response(
+        [
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"child-a","function":{"name":"workhorse_spawn_agent","arguments":"{\\"pro"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"mpt\\":\\"read only\\",\\"wait\\":false}"}}]}}]}\n\n',
+          'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  assert.deepEqual(streamed.toolUses, [
+    { id: "child-a", name: "workhorse_spawn_agent", input: { prompt: "read only", wait: false } },
+  ]);
+});
 import { detectCustomLogin, parseOpenClawMinimax } from "../electron/custom-login";
 import { customPlanRemainsUrl, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
@@ -1127,7 +1174,8 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
     role: "worker",
   });
   const workerToolNames = (workerBody.tools as { name: string }[]).map((tool) => tool.name);
-  assert.ok(!workerToolNames.includes("workhorse_spawn_agent"));
+  assert.ok(workerToolNames.includes("workhorse_spawn_agent"));
+  assert.ok(workerToolNames.includes("workhorse_await_agents"));
   assert.ok(!workerToolNames.includes("workhorse_request_vendor"));
   assert.ok(workerToolNames.includes("list_dir"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_list_skills"));
@@ -1145,8 +1193,8 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_request_vendor"));
   assert.ok(customHttpTools().some((tool) => tool.name === "workhorse_list_projects"));
   const workerCatalog = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
-  assert.ok(!workerCatalog.includes("workhorse_spawn_agent"));
-  assert.ok(!workerCatalog.includes("workhorse_await_agents"));
+  assert.ok(workerCatalog.includes("workhorse_spawn_agent"));
+  assert.ok(workerCatalog.includes("workhorse_await_agents"));
   assert.ok(!workerCatalog.includes("workhorse_request_vendor"));
   assert.ok(!workerCatalog.includes("workhorse_list_bots"));
   assert.ok(workerCatalog.includes("list_dir"));

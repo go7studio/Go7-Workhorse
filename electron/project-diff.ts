@@ -14,7 +14,35 @@ export type FileDiffInput = {
 
 export type GitChange = { path: string; status: string };
 
-const SKIP_WALK = new Set(["node_modules", ".git", "dist", "dist-electron", "out", ".next", "coverage", ".cache"]);
+const SKIP_WALK = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "dist-electron",
+  "release",
+  "out",
+  ".next",
+  "coverage",
+  ".cache",
+]);
+const MAX_SOURCE_SCAN_ENTRIES = 25_000;
+const SOURCE_DIR_PRIORITY = new Map([
+  ["src", 0],
+  ["app", 1],
+  ["electron", 2],
+  ["packages", 3],
+  ["lib", 4],
+  ["test", 5],
+  ["tests", 5],
+  ["eval", 20],
+  ["assets", 30],
+]);
+
+function sourceWalkOrder(left: string, right: string): number {
+  const leftPriority = SOURCE_DIR_PRIORITY.get(left.toLowerCase()) ?? 10;
+  const rightPriority = SOURCE_DIR_PRIORITY.get(right.toLowerCase()) ?? 10;
+  return leftPriority - rightPriority || left.localeCompare(right);
+}
 
 /** Host-correct absolute check; also accepts Windows drive/UNC paths on POSIX hosts. */
 export function isAbsolutePath(filePath: string): boolean {
@@ -112,10 +140,10 @@ export function findSourceFile(
   let scanned = 0;
   let loose: string | null = null;
   const walk = (dir: string, depth: number): string | null => {
-    if (depth > 8 || scanned > 800) return null;
+    if (depth > 12 || scanned >= MAX_SOURCE_SCAN_ENTRIES) return null;
     let names: string[] = [];
     try {
-      names = readdir(dir);
+      names = [...readdir(dir)].sort(sourceWalkOrder);
     } catch {
       return null;
     }
@@ -123,6 +151,7 @@ export function findSourceFile(
       if (SKIP_WALK.has(name) || name.startsWith(".")) continue;
       const full = path.join(dir, name);
       scanned += 1;
+      if (scanned > MAX_SOURCE_SCAN_ENTRIES) return null;
       if (isDir(full)) {
         const hit = walk(full, depth + 1);
         if (hit) return hit;

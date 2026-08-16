@@ -26,7 +26,7 @@ Then:
 2. Write a lineup (name · vendor · folder · slice).
 3. `workhorse_spawn_agent` on **every** row whose `canCall` is true (`provider` + the **slice** as `prompt`) — including this chat’s own custom bot (`provider` custom, `chat` this bot’s name). The API key is already on the desk.
 
-Each spawn prompt is the job the worker will do — never “please call subagents” or “spawn MiniMax to review src/”. Workers cannot spawn.
+Each root spawn prompt is the job the worker will do — never a bare “please call subagents.” A worker may create one MiniMax-M3 helper only when its assigned slice explicitly requires a second independent check. Workhorse forces that nested call to low effort, at most 500 tokens, shared isolation, and depth two; the helper cannot spawn again.
 
 To run several workers at once: `workhorse_spawn_agent` with `wait=false` for each slice, then **stop**. One short line of who is out is enough. Workers fill their own nested chats. The desk joins every report into one orchestration call when they finish. `workhorse_await_agents` (default) is a status snapshot — do not sit on it, and do not ask the user 1/2/3 if it is still running.
 

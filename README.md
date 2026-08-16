@@ -34,7 +34,7 @@ npm install
 npm run dist:mac
 ```
 
-On a Mac, that writes `release/Workhorse-<version>-mac.dmg`, `release/Workhorse-<version>-mac.zip`, and the unpacked `Workhorse.app`. The build is unsigned (`identity: null`); Gatekeeper may require right-click → Open the first time. Vendor CLIs (Grok, Codex, Claude) are not bundled — they must already be installed on the machine.
+On a Mac, that writes `release/Workhorse-<version>-mac.dmg`, `release/Workhorse-<version>-mac.zip`, and the unpacked `Workhorse.app`. Local packages receive a complete ad-hoc signature so they launch and use secure storage consistently; they remain development artifacts and should not be distributed. Release machines replace it with an Apple Developer ID signature automatically, and notarization credentials should be supplied through the standard electron-builder environment variables. Vendor CLIs (Grok, Codex, Claude) are not bundled — they must already be installed on the machine.
 
 ## How to use the scaffold
 

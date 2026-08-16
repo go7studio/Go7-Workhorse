@@ -70,7 +70,7 @@ import {
   parseEffort,
   withEffort,
 } from "./models";
-import { joinChatText } from "./markdown";
+import { joinChatText, mergeStreamedText } from "./markdown";
 import { APP_VERSION } from "./app-info";
 import type { AppUpdateOffer } from "./app-update";
 import {
@@ -131,6 +131,8 @@ import {
   descendantSessionIds,
   formatWorkerPrompt,
   isHiddenSession,
+  nestedSpawnError,
+  NESTED_AGENT_MODEL,
   overlappingAgentFiles,
   parentHasRunningChildren,
   resolveSpawnSpec,
@@ -3151,18 +3153,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const caller =
             latest.sessions.find((item) => item.id === payload.fromSessionId) ??
             latest.sessions.find((item) => item.status === "running" && !isHiddenSession(item));
-          const parent = caller && !isHiddenSession(caller) ? caller : undefined;
+          const parent = caller;
           if (payload.mode === "spawn") {
             if (!caller) {
               await replyAsk({ error: "no parent chat to attach this subagent to" });
               return;
             }
             const boundProject = latest.projects.find((item) => item.id === caller.projectId);
+            const isNested = deskRoleOf(caller) === "worker";
+            if (isNested) {
+              const blocked = nestedSpawnError(latest.sessions, caller.id);
+              if (blocked) {
+                await replyAsk({ error: blocked });
+                return;
+              }
+            }
+            const spawnProvider = isNested ? "custom" : payload.provider;
+            const spawnModel = isNested ? NESTED_AGENT_MODEL : payload.model;
+            const spawnEffort = isNested ? "low" : payload.effort;
+            const spawnTimeoutSeconds = isNested
+              ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
+              : payload.timeoutSeconds;
+            const spawnTokenBudget = isNested
+              ? Math.min(500, Math.max(1, payload.tokenBudget ?? 500))
+              : payload.tokenBudget;
+            const spawnIsolation = isNested ? "shared" : payload.isolation;
             const admitted = admitSpawn({
               parent: caller,
               projectFolder: boundProject?.folders[0]?.path ?? "",
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
+              allowNested: isNested,
             });
             if (!admitted.ok) {
               await replyAsk({ error: admitted.error });
@@ -3177,10 +3198,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 fromSessionId: parent.id,
                 prompt: payload.message,
                 description: payload.description,
-                provider: payload.provider,
-                model: payload.model,
+                provider: spawnProvider,
+                model: spawnModel,
                 chat: payload.chat,
-                effort: payload.effort,
+                effort: spawnEffort,
               },
               latest.sessions.filter((item) => !isHiddenSession(item) && !item.archivedAt),
               parent,
@@ -3246,16 +3267,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
-            const timeoutMs = typeof payload.timeoutSeconds === "number"
-              ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
+            const timeoutMs = typeof spawnTimeoutSeconds === "number"
+              ? Math.max(30, Math.min(3_600, spawnTimeoutSeconds)) * 1_000
               : 10 * 60 * 1_000;
-            const tokenBudget = typeof payload.tokenBudget === "number" && payload.tokenBudget > 0
-              ? Math.floor(payload.tokenBudget)
+            const tokenBudget = typeof spawnTokenBudget === "number" && spawnTokenBudget > 0
+              ? Math.floor(spawnTokenBudget)
               : undefined;
             const project = boundProject ?? latest.projects.find((item) => item.id === parent.projectId);
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
-            let isolation: "worktree" | "shared" = payload.isolation === "worktree" ? "worktree" : "shared";
+            let isolation: "worktree" | "shared" = spawnIsolation === "worktree" ? "worktree" : "shared";
             if (isolation === "worktree" && root && window.workhorse?.ensureWorktree) {
               const isolated = await window.workhorse.ensureWorktree({ sessionId: childId, root });
               if (isolated.ok && isolated.path && isolated.gitRoot && isolated.head) {
@@ -3690,7 +3711,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             [...(session?.messages ?? [])].reverse().find((message) => message.role === "assistant")?.id;
           const hasMessage = Boolean(assistantId && session?.messages.some((message) => message.id === assistantId));
           if (!session || !assistantId || !hasMessage) {
-            grokChunkQueue.current[event.sessionId] = joinChatText(
+            grokChunkQueue.current[event.sessionId] = mergeStreamedText(
               grokChunkQueue.current[event.sessionId] ?? "",
               event.text,
             );
@@ -3707,7 +3728,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? {
                     ...item,
                     messages: item.messages.map((message) =>
-                      message.id === assistantId ? { ...message, text: joinChatText(message.text, add) } : message,
+                      message.id === assistantId ? { ...message, text: mergeStreamedText(message.text, add) } : message,
                     ),
                   }
                 : item,
@@ -4038,6 +4059,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "done") {
+        const safetyPaused = event.stopReason === "safety_pause";
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         if (pending?.length) {
@@ -4060,9 +4082,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return {
                 ...session,
                 status: "idle" as const,
-                goal: grokGoalAfterTurnIdle(session.provider, session.goal),
+                goal:
+                  safetyPaused && session.goal
+                    ? { ...session.goal, status: "paused" as const }
+                    : grokGoalAfterTurnIdle(session.provider, session.goal),
                 scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
-                  run.status === "running" ? { ...run, status: "completed" as const } : run,
+                  run.status === "running"
+                    ? { ...run, status: safetyPaused ? ("failed" as const) : ("completed" as const) }
+                    : run,
                 ),
                 messages: finishOpenToolMessages(
                   failPeerAskMessages(
@@ -4079,17 +4106,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       : session.messages,
                     { error: "the other chat did not answer" },
                   ),
-                  "completed",
+                  safetyPaused ? "failed" : "completed",
                 ),
               };
             }),
             event.sessionId,
-            "completed",
+            safetyPaused ? "failed" : "completed",
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, "completed", {
+            sessions = applyChildIdleSync(sessions, event.sessionId, safetyPaused ? "failed" : "completed", {
               report: childReportText(finished),
+              ...(safetyPaused ? { error: "Agent paused before completing its goal." } : {}),
             });
             sessions = maybeEnqueueLineupJoin(sessions, finished.parentId);
           }

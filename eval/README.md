@@ -7,9 +7,9 @@ floor, but changes the subject from a browser SaaS clone to a native
 multi-provider agent shell.
 
 The baseline is now activated. The first full v0.1.4 run used MiniMax-M3 for
-every live model call; stock harnesses were inspected only through redacted
-readiness detection. See `FINDINGS-v0.1.4.md` for durable findings and the
-ignored run directory for complete evidence.
+the live evaluation lane; the v0.1.5 repair run adds one bounded adapter smoke
+call for each installed stock harness. See `FINDINGS-v0.1.4.md` for the initial
+findings and the ignored run directories for complete evidence.
 
 ## What is different for Workhorse
 
@@ -110,8 +110,8 @@ withheld below 60% coverage.
   calling, and all child-agent cascades.
 - Existing provider/API or OAuth profiles may be enabled for a minimal adapter
   smoke call with a per-profile ceiling; those calls cannot spawn children.
-- Cascades default to MiniMax-M3, low effort, depth one, two concurrent
-  children, and 500 tokens per child.
+- Cascades default to MiniMax-M3, low effort, depth two, two concurrent root
+  children, one nested helper per worker, and 500 tokens per child.
 - liveApiAllowed defaults to false and the approved budget defaults to zero.
 - Direct API keys are environment-variable references, never JSON values.
 - All file/tool probes stay inside the fixture workspace unless a boundary

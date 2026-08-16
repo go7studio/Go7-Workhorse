@@ -182,7 +182,7 @@ export function Settings() {
 
       {section === "llms" && (
         <>
-          <p>Only bots you add sit on this desk. Add bot opens a full screen for Grok, Codex, Anthropic, or your own.</p>
+          <p>Only bots you add sit on this desk. Add bot opens a full screen for Grok, Codex, Claude, or your own.</p>
           <div className="usage-brains llm-brains">
             {DESK_STOCK.filter((id) => settings.llms[id].connected).map((id) => {
               const link = settings.llms[id];
@@ -253,7 +253,7 @@ export function Settings() {
                 +
               </span>
               <span>Add bot</span>
-              <em>Grok, Codex, Anthropic</em>
+              <em>Grok, Codex, Claude</em>
             </button>
           </div>
 

@@ -278,6 +278,19 @@
             "Return a mismatched model id, then an unsupported-model error.",
             "Verify Workhorse surfaces the mismatch/error rather than labeling the reply as the requested model."
           ]
+        },
+        {
+          "id": "MOD-S4",
+          "name": "Run bounded live adapter smoke calls without broad fan-out",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Keep MiniMax-M3 as the primary evaluator and call each explicitly enabled stock/API or OAuth profile at most once with a short deterministic identity response.",
+            "Capture selected provider/model, launch or request evidence, exact reply, duration, and usage without exposing credentials or hidden context.",
+            "Do not let a provider smoke call invoke tools, message another chat, spawn an agent, or continue automatically.",
+            "Record unavailable, unauthenticated, declined, rate-limited, or unsupported profiles as explicit outcomes rather than silently substituting MiniMax-M3.",
+            "Reconcile the smoke-call count against the configured per-profile ceiling."
+          ]
         }
       ],
       "rubric": [
@@ -346,6 +359,17 @@
           "scenarios": ["MOD-S2", "MOD-S3"],
           "passCriteria": "Fallback is either refused or visibly recorded with actual identity; manual titles stay locked; every assistant turn retains its brain stamp.",
           "evidence": "Fallback probe, message records, title timeline, and final sidebar/composer labels."
+        },
+        {
+          "id": "MOD-07",
+          "criterion": "Every enabled non-primary provider receives a minimal auditable smoke call that proves its real adapter without enabling fan-out or unbounded spend.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-anthropic"],
+          "scenarios": ["MOD-S4"],
+          "passCriteria": "Each enabled exception runs no more than the configured call ceiling, returns or fails under its own identity, invokes no tools/agents/chats, and records sanitized launch/request, reply, usage, and failure evidence.",
+          "evidence": "Smoke-call ledger, provider launch/request trace, response stamp, usage event, and secret scan."
         }
       ]
     },
@@ -745,6 +769,20 @@
             "Pause, restart Workhorse, and resume; verify goal, child lineage, checkpoints, budgets, and completed work persist without duplicate dispatch.",
             "Complete the goal and verify the parent marks complete only after evidence is reconciled; separately prove blocked and cancelled terminal states stop iteration."
           ]
+        },
+        {
+          "id": "ORC-S5",
+          "name": "Prove bounded agent-to-agent and provider-to-provider communication",
+          "executor": "provider",
+          "profiles": ["custom-openai", "grok-acp", "codex-acp", "claude-acp"],
+          "steps": [
+            "Have a MiniMax-M3 root orchestrator spawn one low-effort MiniMax-M3 worker with a 500-token ceiling and a task that explicitly requires one independent nested check.",
+            "Have that worker spawn exactly one MiniMax-M3 helper, await its real response, cite the helper session ID, and finish its own bounded report.",
+            "Attempt a second nested child and a great-grandchild; verify both are rejected before a provider call with an explicit depth/concurrency reason.",
+            "From a separate visible chat on each enabled smoke provider, send one short peer message to an existing MiniMax-M3 chat and receive a correlated real reply.",
+            "Reverse direction once: the MiniMax-M3 chat messages the provider chat, which answers under its assigned runtime without spawning or silently switching models.",
+            "Verify lineage, sender/target IDs, selected and observed models, budgets, usage, duplicate protection, and restart persistence across every hop."
+          ]
         }
       ],
       "rubric": [
@@ -863,10 +901,10 @@
           "type": "rule",
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
-          "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4"],
-          "passCriteria": "A supported child may delegate within declared depth/concurrency/budget; unsupported profiles say so; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
+          "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4", "ORC-S5"],
+          "passCriteria": "A worker may create exactly one MiniMax-M3 helper within depth two and the configured budget; a second nested child or great-grandchild is rejected before a provider call; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
           "evidence": "Capability discovery, three-level lineage fixture, limit rejection, descendant transcripts, policy snapshots, and usage rollup.",
-          "baseline": { "status": "not_found", "basis": "Static source walk does not establish explicit nesting depth/concurrency guards or a root-goal/aggregate-budget view for descendants." }
+          "baseline": { "status": "partial", "basis": "Repair branch adds explicit MiniMax-M3 depth-two and one-helper guards; live agent-to-agent proof and aggregate usage reconciliation remain required." }
         }
       ]
     },

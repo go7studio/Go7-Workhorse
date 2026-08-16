@@ -257,6 +257,8 @@ export type DeskSkill = {
   origin: SkillOrigin;
   dir: string;
   skillFile: string;
+  /** True only for copies stored in Workhorse's own skills home. */
+  managed?: boolean;
 };
 
 export type DeskExportKind = "skills" | "chats";

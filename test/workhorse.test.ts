@@ -75,6 +75,8 @@ import {
   descendantSessionIds,
   isHiddenSession,
   isSpawnOnlyPrompt,
+  nestedSpawnError,
+  NESTED_AGENT_MODEL,
   normalizeAgentRun,
   overlappingAgentFiles,
   parentHasRunningChildren,
@@ -110,6 +112,7 @@ import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSess
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
 import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
+import { workhorseUserDataOverride } from "../src/lib/user-data";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseGrokModelsCache } from "../electron/vendor-models";
 import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
@@ -118,6 +121,7 @@ import {
   parseChatMarkdown,
   parseFactLine,
   parseInline,
+  mergeStreamedText,
   unsquashSentences,
   parseMarkdownTable,
   peelAskMarkup,
@@ -215,6 +219,15 @@ for (const key of [
 ]) {
   delete process.env[key];
 }
+
+test("isolated user data accepts an env or explicit launch flag", () => {
+  assert.equal(workhorseUserDataOverride([], { WORKHORSE_USER_DATA_PATH: "/tmp/env-profile" }), "/tmp/env-profile");
+  assert.equal(
+    workhorseUserDataOverride(["electron", ".", "--workhorse-user-data=/tmp/flag-profile"], {}),
+    "/tmp/flag-profile",
+  );
+  assert.equal(workhorseUserDataOverride([], {}), undefined);
+});
 
 test("filterCommands returns the shipped command list and filters it", () => {
   const all = filterCommands("/");
@@ -1652,6 +1665,11 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
 
   const italic = parseInline("say *hello* now");
   assert.deepEqual(italic.map((part) => part.type), ["text", "em", "text"]);
+  const exactIdentifier = parseInline("MINIMAX_M3_LIVE_OK");
+  assert.deepEqual(exactIdentifier, [{ type: "text", text: "MINIMAX_M3_LIVE_OK" }]);
+  assert.equal(mergeStreamedText("MiniMax is ready.", "MiniMax is ready."), "MiniMax is ready.");
+  assert.equal(mergeStreamedText("MiniMax is", "MiniMax is ready."), "MiniMax is ready.");
+  assert.equal(mergeStreamedText("agent-to-", "to-agent"), "agent-to-agent");
   const link = parseInline("see [Workhorse](https://example.com)");
   assert.equal(link[1]?.type, "link");
   if (link[1].type !== "link") throw new Error("expected link");
@@ -3185,6 +3203,20 @@ test("file diffs count added and deleted lines from real before/after text", () 
     },
   });
   assert.equal(path.normalize(found ?? ""), path.normalize(preload));
+  const crowdedRepo = path.join(os.tmpdir(), "wh-crowded-source-repo");
+  const crowdedProject = path.join(crowdedRepo, "src", "lib", "project.ts");
+  const decoys = Array.from({ length: 900 }, (_, index) => `decoy-${String(index).padStart(4, "0")}.txt`);
+  const crowded = findSourceFile("project.ts", [crowdedRepo], {
+    existsSync: (file) => file === crowdedRepo || file === crowdedProject || file === path.dirname(crowdedProject) || file === path.join(crowdedRepo, "src"),
+    isDir: (file) => file === crowdedRepo || file === path.dirname(crowdedProject) || file === path.join(crowdedRepo, "src"),
+    readdir: (dir) => {
+      if (dir === crowdedRepo) return [...decoys, "src"];
+      if (dir === path.join(crowdedRepo, "src")) return ["lib"];
+      if (dir === path.dirname(crowdedProject)) return ["project.ts"];
+      return [];
+    },
+  });
+  assert.equal(crowded, crowdedProject);
   const realProject = findSourceFile("project.ts", [ROOT]);
   assert.match(realProject ?? "", /src[\\/]+lib[\\/]+project\.ts$/i);
   const projectDiff = readFileDiff("project.ts", [ROOT]);
@@ -3344,6 +3376,9 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   const welcome = readFileSync(path.join(ROOT, "src", "ui", "Welcome.tsx"), "utf8");
   assert.match(welcome, /go7-workhorse-transparent/);
   assert.match(welcome, /APP_VERSION/);
+  assert.match(welcome, /Getting started/);
+  assert.match(welcome, /Recognized harnesses/);
+  assert.match(welcome, /Manage harnesses/);
   assert.doesNotMatch(welcome, />\s*7\s*</);
   assert.doesNotMatch(welcome, /Type \/ for commands/);
   assert.doesNotMatch(welcome, /—/);
@@ -5901,7 +5936,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(looksLikeWorkerBrief(workerBrief), true);
   assert.match(workerBrief, /ROLE: worker/);
   assert.match(workerBrief, /D:\\Godot\\Projects\\spaceship-battle/);
-  assert.match(workerBrief, /Do not spawn/);
+  assert.match(workerBrief, /one MiniMax-M3 helper/);
   assert.match(workerBrief, /Read README\.md/);
   assert.doesNotMatch(workerBrief, /From another Workhorse agent/);
   assert.equal(looksLikeSpawnRequest(workerBrief), false);
@@ -5927,6 +5962,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const catalog = [
     { name: "list_dir" },
     { name: "workhorse_spawn_agent" },
+    { name: "workhorse_await_agents" },
     { name: "workhorse_request_vendor" },
     { name: "workhorse_list_bots" },
     { name: "workhorse_read_chat" },
@@ -5937,7 +5973,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   );
   assert.deepEqual(
     toolsForDeskRole(catalog, "worker").map((tool) => tool.name),
-    ["list_dir", "workhorse_read_chat"],
+    ["list_dir", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_read_chat"],
   );
 
   const bound = admitSpawn({
@@ -5962,6 +5998,28 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   });
   assert.equal(nested.ok, false);
   if (!nested.ok) assert.equal(nested.error, WORKER_SPAWN_ERROR);
+  const boundedNested = admitSpawn({
+    parent: { parentId: "sess_orch", hidden: true },
+    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    prompt: "Independently verify project.godot.",
+    allowNested: true,
+  });
+  assert.equal(boundedNested.ok, true);
+  assert.equal(NESTED_AGENT_MODEL, "MiniMax-M3");
+  assert.equal(nestedSpawnError([
+    { id: "root" },
+    { id: "worker", parentId: "root" },
+  ], "worker"), null);
+  assert.equal(nestedSpawnError([
+    { id: "root" },
+    { id: "worker", parentId: "root" },
+    { id: "helper", parentId: "worker" },
+  ], "worker"), WORKER_SPAWN_ERROR);
+  assert.equal(nestedSpawnError([
+    { id: "root" },
+    { id: "worker", parentId: "root" },
+    { id: "helper", parentId: "worker" },
+  ], "helper"), WORKER_SPAWN_ERROR);
 
   const spawnOnly = admitSpawn({
     parent: { parentId: null },
@@ -5988,8 +6046,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const workerTools = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
   assert.ok(orchTools.includes("workhorse_spawn_agent"));
   assert.ok(orchTools.includes("workhorse_request_vendor"));
-  assert.ok(!workerTools.includes("workhorse_spawn_agent"));
-  assert.ok(!workerTools.includes("workhorse_await_agents"));
+  assert.ok(workerTools.includes("workhorse_spawn_agent"));
+  assert.ok(workerTools.includes("workhorse_await_agents"));
   assert.ok(!workerTools.includes("workhorse_request_vendor"));
   assert.ok(!workerTools.includes("workhorse_list_bots"));
   assert.ok(workerTools.includes("list_dir"));
@@ -6174,6 +6232,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
         sessions: [
           { id: "sess_orch", title: "Main", provider: "custom", projectId: "proj_ships" },
           { id: "sess_worker", title: "src tree review", provider: "custom", parentId: "sess_orch", hidden: true, projectId: "proj_ships" },
+          { id: "sess_helper", title: "nested check", provider: "custom", parentId: "sess_worker", hidden: true, projectId: "proj_ships" },
           { id: "sess_loose", title: "Loose", provider: "custom", projectId: null },
         ],
       }),
@@ -6185,8 +6244,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
       { fromSessionId: "sess_worker" },
     );
     const workerNames = ((workerList as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
-    assert.ok(!workerNames.includes("workhorse_spawn_agent"));
-    assert.ok(!workerNames.includes("workhorse_await_agents"));
+    assert.ok(workerNames.includes("workhorse_spawn_agent"));
+    assert.ok(workerNames.includes("workhorse_await_agents"));
     assert.ok(!workerNames.includes("workhorse_request_vendor"));
     assert.ok(!workerNames.includes("workhorse_list_bots"));
 
@@ -6249,18 +6308,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(store, /formatAwaitAgentsSnapshot/);
   assert.doesNotMatch(store, /formatSubagentPrompt\(/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint\([\s\S]*role/);
-  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Workers cannot spawn/);
-  assert.match(WORKER_SESSION_RULES, /Do not spawn/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /one MiniMax-M3 helper/);
+  assert.match(WORKER_SESSION_RULES, /MiniMax-M3.*500 tokens/);
   assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
-  assert.match(WORKHORSE_SESSION_RULES, /Workers cannot spawn/);
-  const leakedExecute = await import("../electron/custom-tools");
-  const blocked = await leakedExecute.executeCustomTool(
-    { id: "t1", name: "workhorse_spawn_agent", input: { prompt: "Read README" } },
-    { role: "worker" },
-  );
-  assert.equal(blocked.isError, true);
-  assert.equal(blocked.content, WORKER_SPAWN_ERROR);
+  assert.match(WORKHORSE_SESSION_RULES, /one bounded MiniMax-M3 helper/);
 });
 
 test("desk builds one named join prompt and syncs idle children", () => {
@@ -6656,6 +6708,17 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
   assert.equal(settings.llms.claude.needsAuth, true);
   assert.equal(settings.llms.claude.available, false);
   assert.equal(settings.llms.grok.needsAuth, undefined);
+});
+
+test("local mac packages receive a complete ad-hoc signature before release signing", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    build?: { afterPack?: string };
+  };
+  assert.equal(pkg.build?.afterPack, "scripts/after-pack.cjs");
+  const hook = readFileSync(path.join(ROOT, "scripts", "after-pack.cjs"), "utf8");
+  assert.match(hook, /electronPlatformName !== "darwin"/);
+  assert.match(hook, /codesign/);
+  assert.match(hook, /"--deep", "--sign", "-"/);
 });
 
 test("the repo tracks no symlinks and states its working rules", () => {

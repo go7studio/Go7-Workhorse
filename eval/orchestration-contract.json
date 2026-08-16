@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.2.0",
+  "contractVersion": "0.3.0",
   "title": "Multi-agent, cross-chat, and goal orchestration contract",
   "referenceWalk": {
     "product": "Cursor",
@@ -58,6 +58,15 @@
     "orchestrateGoal": "Keep one parent responsible for an active goal, choose useful next work, delegate where justified, reconcile child evidence, and stop only at a real terminal state.",
     "identityRule": "Visible titles are convenient selectors; immutable Workhorse session IDs are the durable address and must be copyable, linkable, and never guessed.",
     "truthRule": "A context attachment is not a message, a resumed child is not a new agent, and a catalog or requested model is not runtime proof."
+  },
+  "cascadeLimits": {
+    "model": "MiniMax-M3",
+    "effort": "low",
+    "maxDepth": 2,
+    "maxRootConcurrency": 2,
+    "maxNestedChildrenPerWorker": 1,
+    "perChildTokenBudget": 500,
+    "smokeProvidersMayCascade": false
   },
   "routingContract": {
     "userAssigned": [

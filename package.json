@@ -1,7 +1,7 @@
 {
   "name": "go7-workhorse",
   "productName": "Workhorse",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Native desktop shell for Grok, Claude, Codex, and custom agents.",
   "author": "Spikey222",
@@ -19,6 +19,7 @@
     "eval:list": "node scripts/workhorse-eval.mjs list",
     "eval:init": "node scripts/workhorse-eval.mjs init",
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
+    "eval:smoke": "tsx test/provider-live-smoke.ts",
     "eval:fixture": "node scripts/workhorse-eval-fixture.mjs",
     "eval:score": "node scripts/workhorse-eval.mjs score",
     "eval:finalize": "node scripts/workhorse-eval.mjs finalize",
@@ -29,7 +30,7 @@
     "package:mac": "electron-builder --mac dmg zip --publish never",
     "dist:mac": "npm run build && npm run package:mac",
     "preview": "vite preview",
-    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/watch.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts"
+    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/watch.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.66.0",
@@ -42,8 +43,9 @@
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
-    "electron": "^37.10.3",
+    "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
+    "playwright": "^1.62.1",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
@@ -56,6 +58,7 @@
     "copyright": "Copyright © 2026 Go7 Studio",
     "asar": true,
     "electronDist": "node_modules/electron/dist",
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "output": "release"
     },
@@ -94,7 +97,6 @@
       "icon": "assets/app-icons/go7-workhorse.icns",
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
-      "identity": null,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "artifactName": "Workhorse-${version}-mac.${ext}"

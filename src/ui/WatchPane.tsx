@@ -51,18 +51,18 @@ export function WatchPane() {
         </button>
         <div className="watch-option link-block">
           <div className="watch-option-head">
-            <strong>Windows notification</strong>
+            <strong>Desktop notification</strong>
             <button
               className={`watch-toggle${watch.desktopNotify ? " on" : ""}`}
               type="button"
               role="switch"
               aria-checked={watch.desktopNotify}
-              aria-label="Windows notification"
+              aria-label="Desktop notification"
               onClick={() => store.updateWatch({ desktopNotify: !watch.desktopNotify })}
             />
           </div>
           <p className="watch-copy">
-            On by default. If Workhorse is in the background, Windows tells you when a bot needs Allow or used its daily
+            On by default. If Workhorse is in the background, your desktop tells you when a bot needs Allow or used its daily
             bank. The in-app banner still shows either way.
           </p>
         </div>

@@ -53,6 +53,17 @@
       "baselineStatus": "unrun"
     },
     {
+      "id": "custom-kimi",
+      "provider": "custom",
+      "transport": "http",
+      "apiShape": "openai-completions",
+      "discovery": ["configured visual bot", "base URL", "models endpoint probe"],
+      "launchBoundary": "electron/custom-http.ts",
+      "expectedModelEvidence": ["configured Kimi K3 model id", "outbound image request", "response model when supplied", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "manifest", "video": "frames" } },
+      "baselineStatus": "unrun"
+    },
+    {
       "id": "custom-anthropic",
       "provider": "custom",
       "transport": "http",

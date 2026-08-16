@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "platform": "darwin",
+  "workspace": {
+    "projectGodot": true,
+    "exportPresets": true
+  },
+  "godot": {
+    "found": true,
+    "binary": "godot",
+    "version": "4.7.1.stable"
+  },
+  "android": {
+    "found": true,
+    "binary": "adb",
+    "version": "1.0.41",
+    "devices": [
+      { "serial": "fixture-saga", "state": "device", "model": "Saga", "product": "ingot" },
+      { "serial": "fixture-offline", "state": "offline", "model": "Pixel_7", "product": "panther" }
+    ]
+  },
+  "ios": {
+    "found": true,
+    "binary": "xcrun",
+    "devices": [
+      { "udid": "fixture-ios", "name": "iPhone 17 Pro", "state": "Shutdown", "runtime": "iOS 20.0" }
+    ]
+  }
+}

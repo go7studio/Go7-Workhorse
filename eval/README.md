@@ -48,6 +48,8 @@ required provenance chain is selection → launch/request → runtime observatio
     npm run verify
     npm run eval:media-fixtures
     npm run eval:fixture-check
+    npm run eval:plan-fixture-check
+    npm run eval:device-probes -- --fixture eval/fixtures/device-capabilities.json
     npm run eval:capability-smoke
 
 The validator checks:
@@ -102,11 +104,10 @@ withheld below 60% coverage.
    sanitized launch/runtime evidence.
 6. **Cross-provider journeys:** goal, schedule, plan, compact, switching,
    permissions, continuity, usage, and recovery.
-7. **Orchestration lane:** parallel child agents, skill-aware/user-assigned
-   routing, cross-chat read versus message, session links, worktree/conflict
-   safety, and goal-owned iteration.
-8. **Capability lane:** automatic/manual routing, usage capacity, local models,
-   and image/document/audio/video delivery.
+7. **Orchestration lane:** import and approve the plan, then test routing,
+   concurrency, peer correlation, restart, and resume.
+8. **Capability lane:** test Watch fallback, Kimi visual work, media, Godot,
+   adb/Saga, and iOS simulator readiness.
 9. **Packaged/install lane:** compare source, package, and running build.
 10. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
@@ -156,6 +157,8 @@ verdict.
 - orchestration-contract.json — Cursor reference walk, Workhorse desk tools,
   message/spawn semantics, routing rules, lifecycle, and ORC coverage.
 - capability-contract.json — model routing, capacity, attachments, and CAP coverage.
+- execution-plan-contract.json — plan import, approval, routing, and resume rules.
+- device-capability-contract.json — read-only Godot, adb, and iOS probes.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
 - BASELINE.md — source baseline and activation boundary.

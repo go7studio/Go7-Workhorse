@@ -34,6 +34,13 @@
       "model": "MiniMax-M3",
       "notes": "The only live model-call profile allowed by this variant. Use MiniMax's OpenAI-compatible endpoint, never Anthropic's API."
     },
+    "custom-kimi": {
+      "enabled": false,
+      "baseUrlEnv": "WORKHORSE_EVAL_KIMI_BASE_URL",
+      "apiKeyEnv": "WORKHORSE_EVAL_KIMI_API_KEY",
+      "model": "Kimi-K3",
+      "notes": "One bounded visual audit call only; no cascading agents."
+    },
     "custom-anthropic": {
       "enabled": false,
       "notes": "Disabled by default; may be enabled for one bounded API-shape smoke call when required."
@@ -45,7 +52,7 @@
     "primaryModel": "MiniMax-M3",
     "internalToolCallingModel": "MiniMax-M3",
     "providerSmokeExceptions": {
-      "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-anthropic"],
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-kimi", "custom-anthropic"],
       "maxCallsPerProfile": 1,
       "requireAdapterEvidence": true,
       "allowCascading": false
@@ -72,6 +79,19 @@
     "allowOutsideWorkspace": false,
     "allowDestructiveProductActions": false,
     "fixtureWorkspaceOnly": true
+  },
+  "planExecution": {
+    "fixture": "eval/fixtures/plans/production-go-time.fixture.md",
+    "requireApproval": true,
+    "maxRootConcurrency": 2,
+    "resumeCompletedTasks": false
+  },
+  "deviceProbes": {
+    "workspace": "eval/fixtures/workspace",
+    "readOnly": true,
+    "allowInstall": false,
+    "allowLaunch": false,
+    "allowBoot": false
   },
   "evidence": {
     "screenshots": true,

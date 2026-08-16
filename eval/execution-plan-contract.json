@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Imported executable plan contract",
+  "formats": ["markdown", "json"],
+  "fixture": {
+    "source": "eval/fixtures/plans/production-go-time.fixture.md",
+    "oracle": "scripts/workhorse-eval-plan-fixture.mjs"
+  },
+  "states": [
+    "imported",
+    "awaiting-approval",
+    "approved",
+    "running",
+    "paused",
+    "needs-input",
+    "blocked",
+    "completed",
+    "cancelled"
+  ],
+  "rules": [
+    "Import preserves the source path, source hash, title, ordered tasks, dependencies, and acceptance checks.",
+    "Missing task ids are generated deterministically from the plan id and heading order.",
+    "Import never starts a provider, agent, device, or write action.",
+    "Start requires explicit approval for the exact source hash and revision.",
+    "Pause stops new dispatch; resume continues the same plan id and task ids.",
+    "Completed tasks are never dispatched again after restart or resume.",
+    "Interrupted tasks resume the same child when supported or become an explicit retry attempt.",
+    "No more than two root tasks run concurrently; excess ready tasks remain queued.",
+    "Every automatic route records candidates, required capabilities, capacity, cost, rationale, and isolation.",
+    "A user provider, model, agent, skill, tool, or isolation override is authoritative.",
+    "A Watch-held route is never called; fallback requires a recorded reason and remains within the approved plan.",
+    "Visual UI and UX tasks require a bounded Kimi K3 visual route unless the user overrides or accepts an explicit unavailable result.",
+    "Peer requests and replies carry plan id, task id, immutable sender and target ids, correlation id, reply id, and attempt."
+  ],
+  "eventFields": [
+    "eventId",
+    "event",
+    "planId",
+    "revision",
+    "sourceHash",
+    "taskId",
+    "attempt",
+    "createdAt"
+  ],
+  "routingEvidence": [
+    "mode",
+    "selectedProfile",
+    "selectedModel",
+    "requiredCapabilities",
+    "alternatives",
+    "watchState",
+    "reason",
+    "userOverride"
+  ],
+  "requiredRubric": ["ORC-11", "ORC-12", "ORC-13", "CAP-09", "CAP-10"]
+}

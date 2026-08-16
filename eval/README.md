@@ -20,6 +20,11 @@ surfaces:
 4. what the harness/runtime reports back;
 5. what the transcript and usage ledger attribute.
 
+Multi-agent work adds a second chain: root goal → parent orchestrator → child
+task and immutable session identity → selected skills/tools/runtime → child
+evidence → parent synthesis. Reading a prior chat, delivering a peer message,
+resuming a child, and spawning a new agent are separate operations.
+
 The five runtime profiles are grok-acp, codex-acp, claude-acp,
 custom-openai (OpenAI Chat Completions shape), and custom-anthropic
 (Anthropic Messages shape).
@@ -42,6 +47,9 @@ The validator checks:
 - every runtime profile is covered;
 - every core command in src/lib/commands.ts appears exactly in
   eval/command-contract.json;
+- every orchestration desk tool and source boundary in
+  eval/orchestration-contract.json still exists and every ORC rubric item is
+  mapped;
 - the Settings section inventory still matches the product.
 
 This makes adding a core command or Settings section without updating the eval
@@ -80,10 +88,13 @@ withheld below 60% coverage.
    sanitized launch/runtime evidence.
 6. **Cross-provider journeys:** goal, schedule, plan, compact, switching,
    permissions, continuity, usage, and recovery.
-7. **Packaged/install lane:** compare source, package, and running build.
-8. **Manual evidence:** credentials, support-report redaction, OS install/update,
+7. **Orchestration lane:** parallel child agents, skill-aware/user-assigned
+   routing, cross-chat read versus message, session links, worktree/conflict
+   safety, and goal-owned iteration.
+8. **Packaged/install lane:** compare source, package, and running build.
+9. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
-9. **Score and defect ledger:** retain exact reproductions separately from
+10. **Score and defect ledger:** retain exact reproductions separately from
    rubric verdicts.
 
 ## Spend and safety fences
@@ -107,6 +118,8 @@ The same change must update this kit when it:
 - changes model/effort selection, title behavior, usage attribution, security,
   persistence, recovery, or packaging;
 - introduces a new standard user journey.
+- changes subagent, peer-chat, session-link, skill/tool routing, isolation,
+  concurrency, budget, or goal-orchestrator behavior.
 
 Add the smallest scenario/rubric delta that proves the behavior. Do not mark
 the baseline pass because code exists; only recorded runtime evidence earns a
@@ -117,6 +130,8 @@ verdict.
 - suite.json — weighted areas, journeys, and requirements.
 - provider-matrix.json — runtime profiles and identity evidence.
 - command-contract.json — canonical language and native augmentations.
+- orchestration-contract.json — Cursor reference walk, Workhorse desk tools,
+  message/spawn semantics, routing rules, lifecycle, and ORC coverage.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
 - BASELINE.md — static walk findings and deferred live checks.

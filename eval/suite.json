@@ -776,8 +776,8 @@
           "executor": "provider",
           "profiles": ["custom-openai", "grok-acp", "codex-acp", "claude-acp"],
           "steps": [
-            "Have a MiniMax-M3 root orchestrator spawn one low-effort MiniMax-M3 worker with a 500-token ceiling and a task that explicitly requires one independent nested check.",
-            "Have that worker spawn exactly one MiniMax-M3 helper, await its real response, cite the helper session ID, and finish its own bounded report.",
+            "Have a MiniMax-M3 root orchestrator spawn one low-effort MiniMax-M3 worker with a 10,000-token ceiling and a task that explicitly requires one independent nested check.",
+            "Have that worker spawn exactly one MiniMax-M3 helper with a 5,000-token ceiling, await its real response, cite the helper session ID, and finish its own bounded report.",
             "Attempt a second nested child and a great-grandchild; verify both are rejected before a provider call with an explicit depth/concurrency reason.",
             "From a separate visible chat on each enabled smoke provider, send one short peer message to an existing MiniMax-M3 chat and receive a correlated real reply.",
             "Reverse direction once: the MiniMax-M3 chat messages the provider chat, which answers under its assigned runtime without spawning or silently switching models.",

@@ -110,8 +110,8 @@ withheld below 60% coverage.
   calling, and all child-agent cascades.
 - Existing provider/API or OAuth profiles may be enabled for a minimal adapter
   smoke call with a per-profile ceiling; those calls cannot spawn children.
-- Cascades default to MiniMax-M3, low effort, depth two, two concurrent root
-  children, one nested helper per worker, and 500 tokens per child.
+- Cascades use MiniMax-M3, low effort, depth two, two root children, a
+  10,000-token worker ceiling, and a 5,000-token helper ceiling.
 - liveApiAllowed defaults to false and the approved budget defaults to zero.
 - Direct API keys are environment-variable references, never JSON values.
 - All file/tool probes stay inside the fixture workspace unless a boundary

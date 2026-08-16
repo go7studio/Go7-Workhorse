@@ -5939,7 +5939,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(looksLikeWorkerBrief(workerBrief), true);
   assert.match(workerBrief, /ROLE: worker/);
   assert.match(workerBrief, /D:\\Godot\\Projects\\spaceship-battle/);
-  assert.match(workerBrief, /one MiniMax-M3 helper/);
+  assert.match(workerBrief, /one low-effort MiniMax-M3 helper/);
   assert.match(workerBrief, /Read README\.md/);
   assert.doesNotMatch(workerBrief, /From another Workhorse agent/);
   assert.equal(looksLikeSpawnRequest(workerBrief), false);
@@ -6335,7 +6335,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.doesNotMatch(store, /formatSubagentPrompt\(/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint\([\s\S]*role/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /one MiniMax-M3 helper/);
-  assert.match(WORKER_SESSION_RULES, /MiniMax-M3.*500 tokens/);
+  assert.match(WORKER_SESSION_RULES, /MiniMax-M3.*5,000 tokens/);
   assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
   assert.match(WORKHORSE_SESSION_RULES, /one bounded MiniMax-M3 helper/);
@@ -6751,8 +6751,8 @@ test("custom bot setup imports a detected MiniMax configuration without overwrit
   const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
   assert.match(addBot, /!draft\.apiKey\.trim\(\) && !draft\.baseUrl\.trim\(\)/);
   assert.match(addBot, /store\.refreshCustomLogin\(\)/);
-  assert.match(addBot, /Detected MiniMax settings from OpenClaw/);
-  assert.match(addBot, /The API key stays on this Mac/);
+  assert.match(addBot, /Imported MiniMax from OpenClaw/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Stored only on this computer/);
 });
 
 test("the repo tracks no symlinks and states its working rules", () => {

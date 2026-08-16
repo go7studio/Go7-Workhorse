@@ -124,11 +124,6 @@ export function SkillsPane() {
             <span className={`skill-origin ${selected.origin}`}>{labelFor(selected.origin)}</span>
           </div>
           {selected.description ? <p className="skill-detail-lead">{selected.description}</p> : null}
-          <p className="row-meta">
-            {selectedManaged
-              ? "Managed by Workhorse. You can copy it to another agent or delete this Workhorse copy."
-              : `Managed by ${labelFor(selected.origin)}. Workhorse can read or copy it, but cannot delete the original.`}
-          </p>
           {note ? <p className="row-meta">{note}</p> : null}
           <div className="skill-detail-body">
             <MessageBody text={skillBodyFromMarkdown(body) || "No write-up in this skill yet."} />

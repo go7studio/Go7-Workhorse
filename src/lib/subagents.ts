@@ -274,7 +274,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (vendor) lines.push(`VENDOR: ${vendor}`);
   lines.push("");
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
-  lines.push("Only when this slice explicitly requires a second independent check, you may spawn one MiniMax-M3 helper at low effort with at most 500 tokens, then await it. That helper cannot spawn again.");
+  lines.push("For one independent check, you may spawn one low-effort MiniMax-M3 helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
   lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
   lines.push("Return the report as plain text.");
   lines.push("");

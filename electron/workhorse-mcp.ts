@@ -769,7 +769,7 @@ async function spawnAgent(
         model: NESTED_AGENT_MODEL,
         effort: "low",
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
-        tokenBudget: Math.min(500, Math.max(1, input.tokenBudget ?? 500)),
+        tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
         isolation: "shared" as const,
       }
     : input;

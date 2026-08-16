@@ -7,6 +7,7 @@ import { normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
+import { normalizePlanRun } from "./plan";
 import { normalizeAgentRun } from "./subagents";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
@@ -231,6 +232,7 @@ export function normalizeSession(raw: unknown): Session | null {
     goal: normalizeGoal(record.goal),
     agentRun: normalizeAgentRun(record.agentRun),
     lineup: normalizeLineup(record.lineup),
+    planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",
     routingDecision: normalizeRoutingDecision(record.routingDecision),
   };

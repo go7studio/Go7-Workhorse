@@ -1864,7 +1864,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
-            surface: session.provider === "custom" ? "http" : "mcp",
+            surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role: deskRoleOf(session),
             desk: {
               title: session.title,
@@ -2414,7 +2414,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
-            surface: session.provider === "custom" ? "http" : "mcp",
+            surface: session.provider === "custom" ? "http" : session.provider === "cursor" ? "cursor" : "mcp",
             role,
           });
           const promptInput = {

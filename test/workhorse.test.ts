@@ -166,7 +166,7 @@ import {
   prettyToolTitle,
   talkingToSummary,
 } from "../src/lib/tool-labels";
-import { formatWorked, groupTranscript, lastReplyIndex, thoughtForReply } from "../src/lib/turns";
+import { formatWorked, groupTranscript, lastReplyIndex, resolveWorkedMs, thoughtForReply } from "../src/lib/turns";
 import type { ChatMessage, PermissionMode, PermissionRequest, Session } from "../src/lib/types";
 import {
   addUsageDraft,
@@ -4140,6 +4140,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(formatWorked(900), "1s");
   assert.equal(formatWorked(12_000), "12s");
   assert.equal(formatWorked(75_000), "1m 15s");
+  assert.equal(resolveWorkedMs(1_000, 14_000, [2_000, 20_000]), 14_000);
+  assert.equal(resolveWorkedMs(1_000, undefined, [2_000, 20_000]), 19_000);
+  assert.equal(resolveWorkedMs(1_000, undefined, [1_000]), undefined);
 
   const messages: ChatMessage[] = [
     { id: "u", role: "user", text: "hi", createdAt: 1 },

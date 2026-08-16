@@ -30,12 +30,14 @@ export function normalizeLineup(raw: unknown): DeskLineup | undefined {
   const rows = Array.isArray(record.rows)
     ? record.rows.map(normalizeLineupRow).filter((item): item is DeskLineupRow => item !== null)
     : [];
+  const notifiedAt = typeof record.notifiedAt === "number" ? record.notifiedAt : undefined;
+  const hasNewerWave = notifiedAt !== undefined && rows.some((row) => row.startedAt > notifiedAt);
   return {
     id: record.id.trim(),
     folder: typeof record.folder === "string" ? record.folder : "",
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     rows,
-    ...(typeof record.notifiedAt === "number" ? { notifiedAt: record.notifiedAt } : {}),
+    ...(notifiedAt !== undefined && !hasNewerWave ? { notifiedAt } : {}),
     ...(typeof record.userText === "string" && record.userText.trim() ? { userText: record.userText.trim() } : {}),
   };
 }
@@ -65,7 +67,8 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
 export function addLineupRow(lineup: DeskLineup | undefined, row: DeskLineupRow): DeskLineup {
   const base = lineup ?? emptyLineup(row.folder, row.startedAt);
   if (base.rows.some((item) => item.childId === row.childId)) return base;
-  return { ...base, folder: row.folder || base.folder, rows: [...base.rows, row] };
+  const { notifiedAt: _previousNotification, ...openWave } = base;
+  return { ...openWave, folder: row.folder || base.folder, rows: [...base.rows, row] };
 }
 
 export function setLineupRowStatus(
@@ -261,6 +264,32 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
       report,
       now,
     });
+  }
+  return next;
+}
+
+/** Repair interrupted persisted workers before any new runtime calls can start. */
+export function reconcilePersistedLineups(sessions: Session[], now = Date.now()): Session[] {
+  let next = sessions;
+  for (const child of sessions) {
+    if (!child.parentId || !child.agentRun || child.agentRun.status === "running") continue;
+    const parent = next.find((session) => session.id === child.parentId);
+    const row = parent?.lineup?.rows.find((item) => item.childId === child.id);
+    if (!row || (row.status !== "queued" && row.status !== "running")) continue;
+    const rowStatus = child.agentRun.status === "completed"
+      ? "completed" as const
+      : child.agentRun.status === "timed-out"
+        ? "timed-out" as const
+        : "failed" as const;
+    next = applyChildIdleSync(next, child.id, rowStatus, {
+      report: childReportText(child),
+      error: child.agentRun.error,
+      now,
+    });
+  }
+  for (const parent of next) {
+    if (!parent.lineup) continue;
+    next = maybeEnqueueLineupJoin(next, parent.id, now);
   }
   return next;
 }

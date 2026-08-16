@@ -93,7 +93,7 @@ import {
   withSubagentStatus,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, reconcileIdleChildren, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
 import { looksLikeDispatchCheckBack, looksLikeUnfinishedDeskTurn as looksLikeUnfinishedCustomTurn, shouldEndDispatchTurn } from "../electron/custom-host";
 import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, peerAskTimeoutMs, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
 import {
@@ -6645,6 +6645,57 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.ok(afterParent?.lineup?.notifiedAt);
   const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
   assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);
+  const nextWave = addLineupRow(
+    { ...afterParent!.lineup!, notifiedAt: 12 },
+    {
+      childId: "c5",
+      title: "Five",
+      slice: "Five",
+      folder,
+      vendor: "Claude",
+      status: "running",
+      startedAt: 20,
+    },
+  );
+  assert.equal(nextWave.notifiedAt, undefined);
+
+  const persistedLineup = normalizeLineup({
+    id: "persisted-wave",
+    folder,
+    startedAt: 1,
+    notifiedAt: 2,
+    rows: [{
+      childId: "persisted-child",
+      title: "Interrupted worker",
+      slice: "Interrupted worker",
+      folder,
+      vendor: "Claude",
+      status: "running",
+      startedAt: 3,
+    }],
+  });
+  assert.equal(persistedLineup?.notifiedAt, undefined);
+  const persistedParent: Session = { ...parent, lineup: persistedLineup };
+  const persistedChild: Session = {
+    ...idleChild,
+    id: "persisted-child",
+    parentId: "orch",
+    status: "running",
+    agentRun: {
+      status: "failed",
+      startedAt: 3,
+      finishedAt: 4,
+      isolation: "worktree",
+      error: "Subagent was interrupted when Workhorse exited.",
+    },
+    messages: [{ id: "failed", role: "assistant", text: "", createdAt: 4 }],
+  };
+  const repairedPersisted = reconcilePersistedLineups([persistedParent, persistedChild], 30);
+  const repairedParent = repairedPersisted.find((item) => item.id === "orch");
+  const repairedChild = repairedPersisted.find((item) => item.id === "persisted-child");
+  assert.equal(repairedChild?.status, "idle");
+  assert.equal(repairedParent?.lineup?.rows[0]?.status, "failed");
+  assert.ok(repairedParent?.queue?.some((item) => item.hideUser && item.text.includes("ORCHESTRATION CALL")));
   const withFollowUp = enqueuePrompt(joinedAfter, "orch", { text: "also check the HUD scripts" });
   const followParent = withFollowUp?.find((item) => item.id === "orch");
   assert.ok(followParent?.messages.some((message) => message.role === "user" && message.text === "also check the HUD scripts"));

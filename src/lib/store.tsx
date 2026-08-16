@@ -140,6 +140,7 @@ import {
   looksLikeJoinPrompt,
   maybeEnqueueLineupJoin,
   reconcileIdleChildren,
+  reconcilePersistedLineups,
   stampLineupUserText,
 } from "./lineup";
 import {
@@ -406,9 +407,10 @@ function hydrate(value: unknown): AppState {
     : [];
   const panel = (record as { panel?: unknown }).panel;
   const settings = normalizeSettings(record.settings);
-  const rawSessions = Array.isArray(record.sessions)
+  const normalizedSessions = Array.isArray(record.sessions)
     ? record.sessions.map(normalizeSession).filter((item): item is Session => item !== null)
     : [];
+  const rawSessions = reconcilePersistedLineups(normalizedSessions);
   const usage = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {

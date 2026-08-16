@@ -8,6 +8,10 @@
 **Baseline activity:** static source/product-surface walk only; no app launch,
 no provider prompt, no direct API request, and no scored eval run.
 
+This describes the pre-run baseline. It was subsequently activated in run
+`2026-08-15-v0.1.4-minimax-m3-01`; all live model calls used MiniMax-M3 and
+the durable outcome is recorded in `FINDINGS-v0.1.4.md`.
+
 ## Product inventory frozen into the suite
 
 - Native Electron shell with persisted projects, chats, permissions, Settings,

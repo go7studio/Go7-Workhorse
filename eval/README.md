@@ -6,8 +6,10 @@ evidence, cannot-judge versus real failure, manual follow-up, and a coverage
 floor, but changes the subject from a browser SaaS clone to a native
 multi-provider agent shell.
 
-**No Workhorse or provider evaluation was run while establishing this
-baseline.** The committed files define what the later run must prove.
+The baseline is now activated. The first full v0.1.4 run used MiniMax-M3 for
+every live model call; stock harnesses were inspected only through redacted
+readiness detection. See `FINDINGS-v0.1.4.md` for durable findings and the
+ignored run directory for complete evidence.
 
 ## What is different for Workhorse
 
@@ -25,9 +27,11 @@ task and immutable session identity → selected skills/tools/runtime → child
 evidence → parent synthesis. Reading a prior chat, delivering a peer message,
 resuming a child, and spawning a new agent are separate operations.
 
-The five runtime profiles are grok-acp, codex-acp, claude-acp,
-custom-openai (OpenAI Chat Completions shape), and custom-anthropic
-(Anthropic Messages shape).
+The five profiles remain in the compatibility contract, but this eval variant
+permits live prompts only through custom-openai using MiniMax-M3 and MiniMax's
+own OpenAI-compatible endpoint. Grok, Codex, Claude, and custom-anthropic are
+static/detection-only unless a future explicitly approved variant changes the
+policy. Anthropic's API is prohibited here.
 
 Catalog names and model caches are discovery hints, not runtime proof. The
 required provenance chain is selection → launch/request → runtime observation
@@ -69,6 +73,7 @@ The later evaluator records scenario evidence under that run and fills
 results.json. Then:
 
     npm run eval:score -- --run eval/runs/<timestamp>
+    npm run eval:finalize -- --run eval/runs/<timestamp>
 
 Verdicts are pass, partial, fail, not-found, cannot-judge, and not-run. Only
 real judged verdicts enter the score denominator. Cannot-judge and not-run
@@ -99,7 +104,12 @@ withheld below 60% coverage.
 
 ## Spend and safety fences
 
-- Live profiles default to disabled.
+- Live execution remains blocked by the baseline-only mode and zero-spend
+  default until an evaluator explicitly activates the run.
+- The example config enforces MiniMax-M3 as the sole live model and rejects any
+  other enabled profile during run initialization.
+- Anthropic API calls are prohibited; local Claude readiness detection is not
+  a model call.
 - liveApiAllowed defaults to false and the approved budget defaults to zero.
 - Direct API keys are environment-variable references, never JSON values.
 - All file/tool probes stay inside the fixture workspace unless a boundary
@@ -134,6 +144,7 @@ verdict.
   message/spawn semantics, routing rules, lifecycle, and ORC coverage.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
-- BASELINE.md — static walk findings and deferred live checks.
+- BASELINE.md — source baseline and activation boundary.
+- FINDINGS-v0.1.4.md — durable findings from the first full run.
 - scripts/workhorse-eval.mjs — validation, inventory, run initialization,
   and evidence scoring.

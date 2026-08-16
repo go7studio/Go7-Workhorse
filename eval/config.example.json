@@ -17,15 +17,15 @@
   "profiles": {
     "grok-acp": {
       "enabled": false,
-      "notes": "Detection-only. Do not send model prompts from this eval variant."
+      "notes": "Disabled by default; may be enabled for one bounded adapter smoke call."
     },
     "codex-acp": {
       "enabled": false,
-      "notes": "Detection-only. Do not send model prompts from this eval variant."
+      "notes": "Disabled by default; may be enabled for one bounded adapter smoke call."
     },
     "claude-acp": {
       "enabled": false,
-      "notes": "Detection-only. Do not send model prompts from this eval variant."
+      "notes": "Disabled by default; may be enabled for one bounded adapter smoke call."
     },
     "custom-openai": {
       "enabled": true,
@@ -36,15 +36,29 @@
     },
     "custom-anthropic": {
       "enabled": false,
-      "notes": "Contract/static coverage only. Live Anthropic API calls are prohibited in this variant."
+      "notes": "Disabled by default; may be enabled for one bounded API-shape smoke call when required."
     }
   },
   "modelPolicy": {
     "enforce": true,
-    "allowedLiveProfiles": ["custom-openai"],
-    "allowedModels": ["MiniMax-M3"],
-    "forbidAnthropicApi": true,
-    "notes": "Harness discovery may inspect redacted local readiness, but every model prompt must run as MiniMax-M3."
+    "primaryLiveProfile": "custom-openai",
+    "primaryModel": "MiniMax-M3",
+    "internalToolCallingModel": "MiniMax-M3",
+    "providerSmokeExceptions": {
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-anthropic"],
+      "maxCallsPerProfile": 1,
+      "requireAdapterEvidence": true,
+      "allowCascading": false
+    },
+    "cascade": {
+      "profiles": ["custom-openai"],
+      "models": ["MiniMax-M3"],
+      "effort": "low",
+      "maxDepth": 1,
+      "maxConcurrentChildren": 2,
+      "perChildTokenBudget": 500
+    },
+    "notes": "MiniMax-M3 runs the eval and internal tools. Minimal provider/API or OAuth smoke calls are allowed only to prove an adapter; they may not cascade."
   },
   "spend": {
     "liveApiAllowed": false,

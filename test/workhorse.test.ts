@@ -2371,6 +2371,11 @@ test("session setup is a compact right-side model and access inspector", () => {
   const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSrc, /mode: choice\.mode/);
   assert.match(storeSrc, /applySessionPolicyChange/);
+  assert.match(storeSrc, /sessionId: session\.id/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "context-preface.ts"), "utf8"),
+    /immutable Workhorse session ID/,
+  );
   assert.match(setup, /Accept edits/);
   assert.doesNotMatch(setup, /Choose the brain|Approval behavior and file containment|When should Workhorse pause/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);

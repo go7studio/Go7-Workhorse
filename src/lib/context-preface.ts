@@ -23,6 +23,7 @@ export type DeskContext = {
 };
 
 export type PrefaceInput = {
+  sessionId?: string;
   cwd: string;
   folders: string[];
   references: Array<Pick<LinkedReference, "kind" | "value" | "label">>;
@@ -137,6 +138,9 @@ export function buildSessionPreface(input: PrefaceInput): string {
       ? CUSTOM_HTTP_SESSION_RULES
       : WORKHORSE_SESSION_RULES;
   const parts = [
+    input.sessionId
+      ? `This chat's immutable Workhorse session ID is ${input.sessionId}. Use it exactly; never invent or alter a session ID.`
+      : "",
     buildPolicyContext(input),
     buildVendorPreface(input),
     input.desk ? buildDeskContext(input.desk) : "",

@@ -1764,6 +1764,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           role: deskRoleOf(session),
           mcpServers: stateRef.current.settings.mcpServers,
           preface: withPortableHistory(buildSessionPreface({
+            sessionId: session.id,
             cwd,
             folders: project?.folders.map((folder) => folder.path) ?? [],
             references: project?.references ?? [],
@@ -2281,6 +2282,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const live = vendorSendTarget(session.provider);
           const role = deskRoleOf(session);
           const preface = buildSessionPreface({
+            sessionId: session.id,
             cwd,
             folders: project?.folders.map((folder) => folder.path) ?? [],
             references: project?.references ?? [],

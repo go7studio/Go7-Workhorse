@@ -15,8 +15,6 @@ Current shipped baseline:
 9. Settings surfaces native Codex thread/child-thread history and discovered user/project hooks when App Server and local configuration expose them; unsupported cloud selection stays explicitly unavailable.
 10. The production build and automated adapter/shell suite must remain green.
 
-Historical slice documents under `docs/GOAL-*.md` describe how individual adapters landed; they are not the current product boundary.
-
-**Current work:** `docs/GOAL-join-turn.md` — send the crew and stop; stay talkable; when every worker is done the desk builds one join prompt (the original ask, the lineup id, each child report) and the orchestrator answers in a **new** message. Prior slice: `docs/GOAL-orchestration.md`.
-
-**Next adapter:** `docs/GOAL-cursor.md` — Cursor Agent ACP as a fifth vendor, with Cursor Models vs Other Models watch as a ship gate. Implementer plan: `docs/agent-goal-cursor.md`. Not the open Cursor IDE window, and not Grok Bot.
+What ships is listed in [docs/FEATURES.md](docs/FEATURES.md). Slice plans and
+implementer notes are working papers, not product documentation, and are kept
+outside this repository.

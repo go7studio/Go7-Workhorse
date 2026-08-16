@@ -46,6 +46,10 @@ flowchart TD
 
 Each adapter runs the vendor's own CLI, under the login you already hold.
 
+## What it does
+
+Every ability is listed in [docs/FEATURES.md](docs/FEATURES.md).
+
 ## Goal
 
 See [GOAL.md](GOAL.md). In short: a learnable Apple-like desktop shell, not a website, not a new model.

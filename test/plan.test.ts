@@ -10,6 +10,7 @@ import {
   pausePlanRun,
   readyPlanStepIds,
   recordPlanEvidence,
+  reopenPlanStep,
   resumePlanRun,
   revisePlanStep,
   setPlanStepStatus,
@@ -143,6 +144,30 @@ test("plan validation rejects cycles and supports pause and resume", () => {
   plan = planFrom(resumePlanRun(plan, 7));
   assert.equal(plan.status, "running");
   assert.equal(plan.pausedAt, undefined);
+});
+
+test("completed work can reopen with fresh evidence and dependent invalidation", () => {
+  let plan = parseMarkdownPlan({ markdown: "- [ ] Build adapter\n- [ ] Package plugin", now: 1 });
+  const firstId = plan.steps[0]!.id;
+  const secondId = plan.steps[1]!.id;
+  plan = planFrom(revisePlanStep(plan, secondId, { dependsOn: [firstId] }, 2));
+  plan = planFrom(approvePlanRun(plan, 3));
+  plan = planFrom(startPlanRun(plan, 4));
+  plan = planFrom(setPlanStepStatus(plan, firstId, "running", { now: 5 }));
+  plan = planFrom(recordPlanEvidence(plan, firstId, { id: "old_1", kind: "test", label: "Old", value: "pass", recordedAt: 6 }, 6));
+  plan = planFrom(setPlanStepStatus(plan, firstId, "completed", { now: 7 }));
+  plan = planFrom(setPlanStepStatus(plan, secondId, "running", { now: 8 }));
+  plan = planFrom(recordPlanEvidence(plan, secondId, { id: "old_2", kind: "test", label: "Old", value: "pass", recordedAt: 9 }, 9));
+  plan = planFrom(setPlanStepStatus(plan, secondId, "completed", { now: 10 }));
+  plan = planFrom(completePlanRun(plan, 11));
+
+  plan = planFrom(reopenPlanStep(plan, firstId, "Packaged plugin was missing", 12));
+  assert.equal(plan.status, "running");
+  assert.equal(plan.completedAt, undefined);
+  assert.equal(plan.steps[0]?.status, "ready");
+  assert.equal(plan.steps[1]?.status, "pending");
+  assert.equal(plan.steps[0]?.reopenedAt, 12);
+  assert.equal(setPlanStepStatus(planFrom(setPlanStepStatus(plan, firstId, "running", { now: 13 })), firstId, "completed", { now: 14 }).ok, false);
 });
 
 test("normalization removes malformed records and persists through sessions", () => {

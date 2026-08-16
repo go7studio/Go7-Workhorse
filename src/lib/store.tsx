@@ -111,6 +111,7 @@ import {
   readyPlanStepIds,
   recordPlanEvidence,
   recordPlanEvent,
+  reopenPlanStep,
   revisePlanStep,
   resumePlanRun,
   setPlanStepStatus,
@@ -2605,6 +2606,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               ...(payload.planDependsOn !== undefined ? { dependsOn: payload.planDependsOn } : {}),
                               ...(payload.planEvidenceRequired !== undefined ? { evidenceRequired: payload.planEvidenceRequired } : {}),
                             }, now)
+                        : operation === "reopen"
+                          ? reopenPlanStep(nextPlan, payload.planStepId ?? "", payload.evidenceValue ?? "", now)
                         : operation === "complete"
                           ? completePlanRun(nextPlan, now)
                           : operation === "block"

@@ -800,6 +800,7 @@
             "Send one plan-task peer request and reply with immutable session ids, correlation id, reply id, and attempt.",
             "Restart with completed, running, queued, and interrupted work; terminal child runs clear stale Working rows, completed tasks stay completed, and every queued task dispatches once.",
             "Finish a second worker wave after the first join; verify its completion wakes the same orchestrator exactly once without a manual prompt.",
+            "Discover a missing packaged dependency after completion, explicitly reopen its step with a reason, and verify completed dependents require fresh evidence before the plan can complete again.",
             "Reconcile task evidence against acceptance checks before completing the plan."
           ]
         }
@@ -955,7 +956,7 @@
           "testability": "auto",
           "profiles": ["custom-openai", "custom-kimi"],
           "scenarios": ["ORC-S6"],
-          "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; terminal child runs never remain visibly active or consume a slot; every later worker wave wakes the orchestrator once; completed task dispatch counts remain one after restart; resumed work preserves task, attempt, and child identity or records an explicit retry.",
+          "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; terminal child runs never remain visibly active or consume a slot; every later worker wave wakes the orchestrator once; completed task dispatch counts remain one after restart unless explicitly reopened with a reason; reopened work and completed dependents require fresh evidence.",
           "evidence": "Plan event log, concurrency timeline, peer inbox records, restart snapshot, task attempts, child ids, and dispatch counts."
         },
         {

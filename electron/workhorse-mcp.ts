@@ -227,7 +227,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", description: "import, view, approve, start, pause, resume, revise, status, evidence, complete, block, or cancel" },
+        action: { type: "string", description: "import, view, approve, start, pause, resume, revise, reopen, status, evidence, complete, block, or cancel" },
         path: { type: "string", description: "Markdown path for import" },
         stepId: { type: "string", description: "Plan step id" },
         title: { type: "string", description: "Revised step title" },
@@ -740,7 +740,7 @@ function probeRuntime(): string {
 }
 
 async function runPlanOperation(args: Record<string, unknown>, from?: string): Promise<string> {
-  const allowed = new Set(["import", "view", "approve", "start", "pause", "resume", "revise", "status", "evidence", "complete", "block", "cancel"]);
+  const allowed = new Set(["import", "view", "approve", "start", "pause", "resume", "revise", "reopen", "status", "evidence", "complete", "block", "cancel"]);
   const operation = typeof args.action === "string" ? args.action.trim().toLowerCase() : "";
   if (!allowed.has(operation)) throw new Error("Unknown plan action");
   let planRun: unknown;

@@ -204,7 +204,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     input_schema: {
       type: "object",
       properties: {
-        action: { type: "string", description: "import, view, approve, start, pause, resume, revise, status, evidence, complete, block, or cancel" },
+        action: { type: "string", description: "import, view, approve, start, pause, resume, revise, reopen, status, evidence, complete, block, or cancel" },
         path: { type: "string", description: "Markdown path for import" },
         stepId: { type: "string", description: "Plan step id" },
         title: { type: "string", description: "Revised step title" },

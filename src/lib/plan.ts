@@ -263,6 +263,7 @@ function normalizeStep(raw: unknown): PlanStep | null {
     ...(normalizeAssignment(record.assignment) ? { assignment: normalizeAssignment(record.assignment) } : {}),
     ...(finite(record.startedAt) !== undefined ? { startedAt: finite(record.startedAt) } : {}),
     ...(finite(record.finishedAt) !== undefined ? { finishedAt: finite(record.finishedAt) } : {}),
+    ...(finite(record.reopenedAt) !== undefined ? { reopenedAt: finite(record.reopenedAt) } : {}),
     ...(clean(record.error) ? { error: clean(record.error) } : {}),
   };
 }
@@ -491,6 +492,58 @@ export function revisePlanStep(plan: PlanRun, stepId: string, patch: PlanStepPat
   return succeeded(changed(plan, { steps }, now));
 }
 
+function dependsOnStep(step: PlanStep, targetId: string, byId: Map<string, PlanStep>, seen = new Set<string>()): boolean {
+  if (seen.has(step.id)) return false;
+  seen.add(step.id);
+  return step.dependsOn.some((dependencyId) => {
+    if (dependencyId === targetId) return true;
+    const dependency = byId.get(dependencyId);
+    return dependency ? dependsOnStep(dependency, targetId, byId, new Set(seen)) : false;
+  });
+}
+
+/** Reopen verified work when later evidence invalidates it, preserving the prior audit trail. */
+export function reopenPlanStep(plan: PlanRun, stepId: string, reason: string, now = Date.now()): PlanTransition {
+  if (plan.status === "draft" || plan.status === "approved" || plan.status === "cancelled") {
+    return failed("Only an active, blocked, or completed plan can reopen work.");
+  }
+  const target = plan.steps.find((step) => step.id === stepId);
+  if (!target) return failed(`No plan step matches ${stepId}.`);
+  if (target.status !== "completed") return failed("Only a completed step can be reopened.");
+  const reopenReason = clean(reason);
+  if (!reopenReason) return failed("Reopening a completed step needs a reason.");
+  const byId = new Map(plan.steps.map((step) => [step.id, step]));
+  const affected = new Set([stepId]);
+  for (const step of plan.steps) {
+    if (dependsOnStep(step, stepId, byId)) affected.add(step.id);
+  }
+  if (plan.steps.some((step) => affected.has(step.id) && step.status === "running")) {
+    return failed("Stop running dependent work before reopening this step.");
+  }
+  const reset = (step: PlanStep, status: PlanStepStatus): PlanStep => ({
+    ...step,
+    status,
+    assignedSessionId: undefined,
+    assignment: undefined,
+    startedAt: undefined,
+    finishedAt: undefined,
+    reopenedAt: now,
+    error: undefined,
+  });
+  let steps = plan.steps.map((step) => {
+    if (!affected.has(step.id)) return step;
+    return reset(step, step.id === stepId && dependenciesComplete(step, plan.steps) ? "ready" : "pending");
+  });
+  steps = promoteReadySteps(steps);
+  return succeeded(changed(plan, {
+    status: "running",
+    steps,
+    completedAt: undefined,
+    pausedAt: undefined,
+    blockedReason: undefined,
+  }, now));
+}
+
 export function recordPlanEvidence(
   plan: PlanRun,
   stepId: string,
@@ -527,7 +580,10 @@ export function setPlanStepStatus(
   if ((status === "ready" || status === "running") && !dependenciesComplete(step, plan.steps)) {
     return failed("Plan step dependencies are not complete.");
   }
-  if (status === "completed" && step.evidenceRequired && step.evidence.length === 0) {
+  const qualifyingEvidence = step.reopenedAt === undefined
+    ? step.evidence
+    : step.evidence.filter((evidence) => evidence.recordedAt >= step.reopenedAt!);
+  if (status === "completed" && step.evidenceRequired && qualifyingEvidence.length === 0) {
     return failed("Plan step needs evidence before completion.");
   }
   const updated: PlanStep = {

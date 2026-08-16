@@ -63,7 +63,7 @@ export type PeerAsk = {
   constraints?: string[];
   files?: string[];
   attachments?: ChatImage[];
-  planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "revise" | "status" | "evidence" | "complete" | "block" | "cancel";
+  planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "revise" | "reopen" | "status" | "evidence" | "complete" | "block" | "cancel";
   sourcePath?: string;
   planRun?: unknown;
   stepStatus?: string;

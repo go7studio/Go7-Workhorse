@@ -139,6 +139,7 @@ export const UNBOUND_SPAWN_ERROR =
 export const WORKER_OMIT_TOOLS = [
   "workhorse_request_vendor",
   "workhorse_list_bots",
+  "workhorse_plan",
 ] as const;
 
 export function agentDepth(
@@ -532,6 +533,11 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
       : interrupted
         ? { error: "Subagent was interrupted when Workhorse exited." }
         : {}),
+    ...(typeof row.planStepId === "string" && row.planStepId.trim() ? { planStepId: row.planStepId.trim() } : {}),
+    ...(typeof row.rationale === "string" && row.rationale.trim() ? { rationale: row.rationale.trim() } : {}),
+    ...(Array.isArray(row.skills) ? { skills: row.skills.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
   };
 }
 

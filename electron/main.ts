@@ -355,7 +355,7 @@ app.whenReady().then(async () => {
       return { error: "a chat cannot ask itself" };
     }
     if (!bots && !spawn) {
-      const already = existingPeerReply(readState().sessions, ask.toSessionId, ask.message);
+      const already = existingPeerReply(readState().sessions, ask.toSessionId, ask.message, ask.fromSessionId);
       if (already) return { text: already };
       if (peerBusy.has(ask.toSessionId) || (ask.fromSessionId && peerBusy.has(ask.fromSessionId))) {
         return { error: "that chat is already answering another Workhorse chat" };

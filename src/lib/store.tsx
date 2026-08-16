@@ -101,6 +101,21 @@ import {
 } from "./settings";
 import { chooseRoutingDecision, routingCandidatesForDesk, routingProfileForModel } from "./routing";
 import {
+  approvePlanRun,
+  assignPlanStep,
+  blockPlanRun,
+  cancelPlanRun,
+  completePlanRun,
+  normalizePlanRun,
+  pausePlanRun,
+  readyPlanStepIds,
+  recordPlanEvidence,
+  recordPlanEvent,
+  resumePlanRun,
+  setPlanStepStatus,
+  startPlanRun,
+} from "./plan";
+import {
   applyCompactUsage,
   applyFailedPeerAsk,
   failPeerAskMessages,
@@ -500,6 +515,46 @@ function occupancyForSession(
 ): number | undefined {
   if (seen !== undefined) return seen;
   return occupancyFromUsage(draft, session ? contextWindowFor(session.provider, session.model) : 0);
+}
+
+function settlePlanAssignment(
+  sessions: Session[],
+  parentId: string,
+  childId: string,
+  outcome: "completed" | "failed",
+  report: string,
+): Session[] {
+  const child = sessions.find((item) => item.id === childId);
+  const stepId = child?.agentRun?.planStepId;
+  if (!stepId) return sessions;
+  return sessions.map((session) => {
+    if (session.id !== parentId || !session.planRun || session.planRun.status !== "running") return session;
+    let plan = session.planRun;
+    const now = Date.now();
+    if (outcome === "completed") {
+      const evidence = recordPlanEvidence(plan, stepId, {
+        id: uid("evidence"),
+        kind: "runtime",
+        label: child?.title || "Agent report",
+        value: report.trim().slice(0, 4_000) || "Completed",
+        recordedAt: now,
+        sessionId: childId,
+      }, now);
+      if (evidence.ok) plan = evidence.plan;
+    }
+    const settled = setPlanStepStatus(plan, stepId, outcome, {
+      ...(outcome === "failed" ? { error: report.trim().slice(0, 1_000) || "Agent failed" } : {}),
+      now,
+    });
+    if (!settled.ok) return session;
+    const logged = recordPlanEvent(settled.plan, {
+      type: `agent.${outcome}`,
+      stepId,
+      sessionId: childId,
+      correlationId: child?.agentRun?.correlationId,
+    }, now);
+    return { ...session, planRun: logged.ok ? logged.plan : settled.plan };
+  });
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -2509,6 +2564,102 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ text: formatDeskRoster(catalog) });
               return;
             }
+            if (action === "plan") {
+              const fromId = payload.fromSessionId?.trim() || "";
+              const session = latest.sessions.find((item) => item.id === fromId);
+              if (!session) {
+                await replyAsk({ error: "no chat to attach this plan to" });
+                return;
+              }
+              const operation = payload.planOperation ?? "view";
+              let nextPlan = session.planRun;
+              let error = "";
+              if (operation === "import") {
+                nextPlan = normalizePlanRun(payload.planRun);
+                if (!nextPlan) error = "invalid plan";
+              } else if (!nextPlan) {
+                error = "this chat has no executable plan";
+              } else {
+                const now = Date.now();
+                const transition = operation === "approve"
+                  ? approvePlanRun(nextPlan, now)
+                  : operation === "start"
+                    ? startPlanRun(nextPlan, now)
+                    : operation === "pause"
+                      ? pausePlanRun(nextPlan, now)
+                      : operation === "resume"
+                        ? resumePlanRun(nextPlan, now)
+                        : operation === "complete"
+                          ? completePlanRun(nextPlan, now)
+                          : operation === "block"
+                            ? blockPlanRun(nextPlan, payload.evidenceValue ?? "", now)
+                            : operation === "cancel"
+                              ? cancelPlanRun(nextPlan, now)
+                              : operation === "status"
+                                ? setPlanStepStatus(
+                                    nextPlan,
+                                    payload.planStepId ?? "",
+                                    payload.stepStatus as import("./types").PlanStepStatus,
+                                    { error: payload.evidenceValue, now },
+                                  )
+                                : operation === "evidence"
+                                  ? recordPlanEvidence(
+                                      nextPlan,
+                                      payload.planStepId ?? "",
+                                      {
+                                        id: uid("evidence"),
+                                        kind: (payload.evidenceKind ?? "note") as import("./types").PlanEvidenceKind,
+                                        label: payload.evidenceLabel ?? "Evidence",
+                                        value: payload.evidenceValue ?? "",
+                                        recordedAt: now,
+                                        sessionId: fromId,
+                                      },
+                                      now,
+                                    )
+                                  : { ok: true as const, plan: nextPlan };
+                if (transition.ok) {
+                  const logged = operation === "view"
+                    ? transition
+                    : recordPlanEvent(transition.plan, {
+                        type: `plan.${operation}`,
+                        ...(payload.planStepId ? { stepId: payload.planStepId } : {}),
+                        sessionId: fromId,
+                      }, now);
+                  nextPlan = logged.ok ? logged.plan : transition.plan;
+                } else {
+                  error = transition.error;
+                }
+              }
+              if (error || !nextPlan) {
+                await replyAsk({ error: error || "plan failed" });
+                return;
+              }
+              if (operation !== "view") {
+                setState((current) => ({
+                  ...current,
+                  sessions: current.sessions.map((item) => item.id === fromId ? { ...item, planRun: nextPlan } : item),
+                }));
+              }
+              await replyAsk({
+                text: JSON.stringify({
+                  id: nextPlan.id,
+                  objective: nextPlan.objective,
+                  status: nextPlan.status,
+                  revision: nextPlan.revision,
+                  source: nextPlan.source,
+                  constraints: nextPlan.constraints,
+                  ready: readyPlanStepIds(nextPlan),
+                  steps: nextPlan.steps.map((step) => ({
+                    id: step.id,
+                    title: step.title,
+                    status: step.status,
+                    assignedSessionId: step.assignedSessionId,
+                    evidence: step.evidence.length,
+                  })),
+                }, null, 2),
+              });
+              return;
+            }
             if (action === "list-projects") {
               const projects = latest.projects.map((item) => ({
                 id: item.id,
@@ -3445,6 +3596,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
+            let assignedPlan = parent.planRun;
+            const planStepId = payload.planStepId?.trim() || "";
+            const rationale = payload.rationale?.trim() || "";
+            const assignedSkills = Array.isArray(payload.skills) ? payload.skills.filter(Boolean) : [];
+            const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
+            if (planStepId) {
+              if (!assignedPlan) {
+                await replyAsk({ error: "this chat has no executable plan" });
+                return;
+              }
+              if (!rationale) {
+                await replyAsk({ error: "plan assignments need a routing rationale" });
+                return;
+              }
+              const assigned = assignPlanStep(assignedPlan, planStepId, {
+                sessionId: childId,
+                provider: spec.provider,
+                model: spec.model,
+                ...(spec.customBotId ? { customBotId: spec.customBotId } : {}),
+                rationale,
+                skills: assignedSkills,
+                tools: assignedTools,
+                requested: [payload.provider, payload.model, payload.chat].filter(Boolean).join(":"),
+              }, startedAt);
+              if (!assigned.ok) {
+                await replyAsk({ error: assigned.error });
+                return;
+              }
+              const running = setPlanStepStatus(assigned.plan, planStepId, "running", { now: startedAt });
+              if (!running.ok) {
+                await replyAsk({ error: running.error });
+                return;
+              }
+              assignedPlan = running.plan;
+            }
             const timeoutMs = typeof spawnTimeoutSeconds === "number"
               ? Math.max(30, Math.min(3_600, spawnTimeoutSeconds)) * 1_000
               : 10 * 60 * 1_000;
@@ -3489,6 +3675,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 timeoutMs,
                 ...(tokenBudget ? { tokenBudget } : {}),
                 isolation,
+                ...(planStepId ? { planStepId } : {}),
+                ...(rationale ? { rationale } : {}),
+                ...(assignedSkills.length > 0 ? { skills: assignedSkills } : {}),
+                ...(assignedTools.length > 0 ? { tools: assignedTools } : {}),
+                ...(payload.id ? { correlationId: payload.id } : {}),
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
@@ -3523,7 +3714,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           vendor: spec.title,
                           status: "running",
                           startedAt,
+                          ...(planStepId ? { planStepId } : {}),
+                          ...(rationale ? { rationale } : {}),
                         }),
+                        ...(assignedPlan ? { planRun: assignedPlan } : {}),
                         messages: [
                           ...item.messages,
                           {
@@ -3546,6 +3740,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }));
             const childCwd = sessionExecutionCwd(environment, root);
             const waitForReply = spawnWaitsForReply(payload);
+            const markChildFailure = (error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              setState((current) => {
+                let sessions = applyChildIdleSync(current.sessions, childId, "failed", { report: message, error: message });
+                sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", message);
+                sessions = maybeEnqueueLineupJoin(sessions, parent.id);
+                return { ...current, sessions };
+              });
+            };
             const runChild = async () => {
               const beforeChanges = new Set(
                 window.workhorse?.listGitChanges && childCwd
@@ -3572,6 +3775,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     report: childReportText(current.sessions.find((item) => item.id === childId)),
                     error: terminalStatus,
                   });
+                  sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", terminalStatus);
                   sessions = maybeEnqueueLineupJoin(sessions, parent.id);
                   return { ...current, sessions };
                 });
@@ -3603,6 +3807,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     : item,
                 );
                 let sessions = applyChildIdleSync(withReply, childId, "completed", { report: fallback });
+                sessions = settlePlanAssignment(sessions, parent.id, childId, "completed", fallback);
                 sessions = maybeEnqueueLineupJoin(sessions, parent.id);
                 return { ...current, sessions };
               });
@@ -3625,6 +3830,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         vendor: spec.title,
                         status: "running",
                         startedAt,
+                        ...(planStepId ? { planStepId } : {}),
+                        ...(rationale ? { rationale } : {}),
                       }),
                     ),
                     howToUse:
@@ -3634,10 +3841,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   2,
                 ),
               });
-              void runChild().catch(() => undefined);
+              void runChild().catch(markChildFailure);
               return;
             }
-            const fallback = await runChild();
+            let fallback = "";
+            try {
+              fallback = await runChild();
+            } catch (error) {
+              markChildFailure(error);
+              throw error;
+            }
             if (!fallback) return;
             await replyAsk({ text: fallback });
             return;
@@ -3751,6 +3964,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     role: "user" as const,
                     kind: "peer" as const,
                     fromTitle,
+                    peerFromSessionId: from?.id,
+                    correlationId: payload.id,
                     text: payload.message.trim(),
                     createdAt: startedAt,
                     ...brainStamp(target),
@@ -3787,7 +4002,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const latest = stateRef.current;
           const target = latest.sessions.find((item) => item.id === childId);
           setState((current) => {
-            const failed = applyFailedPeerAsk(
+            let failed = applyFailedPeerAsk(
               applyChildIdleSync(
                 current.sessions.map((item) =>
                   item.id === payload.toSessionId || item.id === payload.childSessionId
@@ -3817,6 +4032,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
             );
             const parentId = payload.fromSessionId || target?.parentId;
+            if (parentId && childId) failed = settlePlanAssignment(failed, parentId, childId, "failed", message);
             return {
               ...current,
               sessions: parentId ? maybeEnqueueLineupJoin(failed, parentId) : failed,
@@ -3839,6 +4055,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
         });
         const parentId = child?.parentId;
+        if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
         if (parentId) sessions = maybeEnqueueLineupJoin(sessions, parentId);
         return { ...current, sessions };
       });

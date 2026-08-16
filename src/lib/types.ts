@@ -102,6 +102,8 @@ export type ChatMessage = {
   provider?: ProviderId;
   model?: string;
   customBotId?: string;
+  peerFromSessionId?: string;
+  correlationId?: string;
 };
 
 export type CommandSource = "workhorse" | "grok" | "codex" | "claude" | "skill";
@@ -162,6 +164,8 @@ export type DeskLineupRow = {
   startedAt: number;
   finishedAt?: number;
   report?: string;
+  planStepId?: string;
+  rationale?: string;
 };
 
 export type DeskLineup = {
@@ -185,6 +189,11 @@ export type AgentRun = {
   changedFiles?: string[];
   conflictFiles?: string[];
   error?: string;
+  planStepId?: string;
+  rationale?: string;
+  skills?: string[];
+  tools?: string[];
+  correlationId?: string;
 };
 
 export type PlanRunStatus =
@@ -216,6 +225,28 @@ export type PlanEvidence = {
   sessionId?: string;
 };
 
+export type PlanAssignment = {
+  sessionId: string;
+  assignedAt: number;
+  provider: ProviderId;
+  model: string;
+  customBotId?: string;
+  rationale: string;
+  skills: string[];
+  tools: string[];
+  requested?: string;
+};
+
+export type PlanEvent = {
+  id: string;
+  at: number;
+  type: string;
+  stepId?: string;
+  sessionId?: string;
+  correlationId?: string;
+  detail?: string;
+};
+
 export type PlanStep = {
   id: string;
   title: string;
@@ -225,6 +256,7 @@ export type PlanStep = {
   evidenceRequired: boolean;
   evidence: PlanEvidence[];
   assignedSessionId?: string;
+  assignment?: PlanAssignment;
   startedAt?: number;
   finishedAt?: number;
   error?: string;
@@ -254,6 +286,7 @@ export type PlanRun = {
   source?: PlanSource;
   constraints?: PlanConstraints;
   steps: PlanStep[];
+  events?: PlanEvent[];
   approvedAt?: number;
   startedAt?: number;
   pausedAt?: number;

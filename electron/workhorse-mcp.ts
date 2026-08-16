@@ -39,6 +39,7 @@ import {
 } from "./peer-inbox";
 import { publicDeskSkills, readDeskSkill } from "./desk-export-host";
 import { APP_VERSION } from "../src/lib/app-info";
+import { parseMarkdownPlan } from "../src/lib/plan";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -216,6 +217,24 @@ const TOOLS = [
     name: "workhorse_probe_runtime",
     description: "Probe local Godot, Android, iOS, and configured MCP capability before assigning device work.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_plan",
+    description: "Import, inspect, approve, run, or update this chat's executable plan.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "import, view, approve, start, pause, resume, status, evidence, complete, block, or cancel" },
+        path: { type: "string", description: "Markdown path for import" },
+        stepId: { type: "string", description: "Plan step id" },
+        status: { type: "string", description: "ready, running, completed, failed, blocked, or cancelled" },
+        kind: { type: "string", description: "note, file, test, screenshot, or runtime" },
+        label: { type: "string", description: "Short evidence label" },
+        value: { type: "string", description: "Evidence value or block reason" },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    },
   },
   {
     name: "workhorse_detect_custom",
@@ -713,6 +732,42 @@ function probeRuntime(): string {
   );
 }
 
+async function runPlanOperation(args: Record<string, unknown>, from?: string): Promise<string> {
+  const allowed = new Set(["import", "view", "approve", "start", "pause", "resume", "status", "evidence", "complete", "block", "cancel"]);
+  const operation = typeof args.action === "string" ? args.action.trim().toLowerCase() : "";
+  if (!allowed.has(operation)) throw new Error("Unknown plan action");
+  let planRun: unknown;
+  let sourcePath: string | undefined;
+  if (operation === "import") {
+    sourcePath = typeof args.path === "string" ? path.resolve(args.path) : "";
+    if (!sourcePath || !fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+      throw new Error("Plan file does not exist");
+    }
+    const markdown = fs.readFileSync(sourcePath, "utf8");
+    planRun = parseMarkdownPlan({
+      markdown,
+      path: sourcePath,
+      constraints: { maxConcurrency: 2 },
+    });
+  }
+  return postBridge(
+    "/bots",
+    botsAsk({
+      action: "plan",
+      message: "plan",
+      planOperation: operation as NonNullable<PeerAsk["planOperation"]>,
+      sourcePath,
+      planRun,
+      planStepId: typeof args.stepId === "string" ? args.stepId : undefined,
+      stepStatus: typeof args.status === "string" ? args.status : undefined,
+      evidenceKind: typeof args.kind === "string" ? args.kind : undefined,
+      evidenceLabel: typeof args.label === "string" ? args.label : undefined,
+      evidenceValue: typeof args.value === "string" ? args.value : undefined,
+    }, from),
+    { timeoutMs: 15_000, inbox: false },
+  );
+}
+
 function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boolean } | null {
   try {
     const parsed = JSON.parse(text) as { allowed?: boolean; retrySpawn?: boolean };
@@ -965,6 +1020,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   }
   if (name === "workhorse_probe_runtime") {
     return probeRuntime();
+  }
+  if (name === "workhorse_plan") {
+    return runPlanOperation(args, from);
   }
   if (name === "workhorse_detect_custom") {
     return JSON.stringify(publicDetectCard(detectCustomLogin()), null, 2);

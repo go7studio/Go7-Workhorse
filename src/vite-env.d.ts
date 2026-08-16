@@ -213,6 +213,7 @@ type WorkhorseBridge = {
     stopReason?: string;
     vendorSessionId?: string;
     opened?: "session/new" | "session/load";
+    nativeSessionArchived?: boolean;
   }>;
   codexAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   codexCancel: (sessionId: string) => Promise<void>;

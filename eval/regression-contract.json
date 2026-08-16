@@ -156,6 +156,15 @@
       "rubric": ["CAP-01", "CAP-12", "ORC-12"],
       "sourceFiles": ["eval/config.example.json", "eval/capability-contract.json", "src/lib/routing.ts"],
       "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-018",
+      "behavior": "Internal Codex workers are archived after completion while Workhorse transcripts and user-facing Codex chats remain available.",
+      "profiles": ["codex-acp"],
+      "scenarios": ["ORC-S1", "ORC-S7"],
+      "rubric": ["ORC-02", "ORC-15"],
+      "sourceFiles": ["electron/codex-host.ts", "electron/codex-app-server.ts", "electron/grok-agent.ts", "src/lib/store.tsx", "test/codex-adapter.test.ts"],
+      "verification": ["eval:validate"]
     }
   ]
 }

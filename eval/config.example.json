@@ -17,28 +17,34 @@
   "profiles": {
     "grok-acp": {
       "enabled": false,
-      "notes": "Enable only when the installed Grok harness and its account may be exercised."
+      "notes": "Detection-only. Do not send model prompts from this eval variant."
     },
     "codex-acp": {
       "enabled": false,
-      "notes": "Enable only when the installed Codex harness and its account may be exercised."
+      "notes": "Detection-only. Do not send model prompts from this eval variant."
     },
     "claude-acp": {
       "enabled": false,
-      "notes": "Enable only when the installed Claude harness and its account may be exercised."
+      "notes": "Detection-only. Do not send model prompts from this eval variant."
     },
     "custom-openai": {
-      "enabled": false,
-      "baseUrlEnv": "WORKHORSE_EVAL_OPENAI_BASE_URL",
-      "apiKeyEnv": "WORKHORSE_EVAL_OPENAI_API_KEY",
-      "modelEnv": "WORKHORSE_EVAL_OPENAI_MODEL"
+      "enabled": true,
+      "baseUrlEnv": "WORKHORSE_EVAL_MINIMAX_BASE_URL",
+      "apiKeyEnv": "WORKHORSE_EVAL_MINIMAX_API_KEY",
+      "model": "MiniMax-M3",
+      "notes": "The only live model-call profile allowed by this variant. Use MiniMax's OpenAI-compatible endpoint, never Anthropic's API."
     },
     "custom-anthropic": {
       "enabled": false,
-      "baseUrlEnv": "WORKHORSE_EVAL_ANTHROPIC_BASE_URL",
-      "apiKeyEnv": "WORKHORSE_EVAL_ANTHROPIC_API_KEY",
-      "modelEnv": "WORKHORSE_EVAL_ANTHROPIC_MODEL"
+      "notes": "Contract/static coverage only. Live Anthropic API calls are prohibited in this variant."
     }
+  },
+  "modelPolicy": {
+    "enforce": true,
+    "allowedLiveProfiles": ["custom-openai"],
+    "allowedModels": ["MiniMax-M3"],
+    "forbidAnthropicApi": true,
+    "notes": "Harness discovery may inspect redacted local readiness, but every model prompt must run as MiniMax-M3."
   },
   "spend": {
     "liveApiAllowed": false,

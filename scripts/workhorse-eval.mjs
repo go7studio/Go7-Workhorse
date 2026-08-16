@@ -252,6 +252,30 @@ async function initRun(manifests, args) {
   const enabledProfiles = Object.entries(config.profiles ?? {})
     .filter(([, value]) => value?.enabled)
     .map(([id]) => id);
+  const modelPolicy = config.modelPolicy ?? null;
+  if (modelPolicy?.enforce) {
+    const allowedProfiles = new Set(modelPolicy.allowedLiveProfiles ?? []);
+    const disallowedProfiles = enabledProfiles.filter((id) => !allowedProfiles.has(id));
+    if (disallowedProfiles.length) {
+      console.error(`Model policy forbids enabled live profiles: ${disallowedProfiles.join(", ")}.`);
+      process.exitCode = 1;
+      return;
+    }
+    const allowedModels = new Set(modelPolicy.allowedModels ?? []);
+    for (const id of enabledProfiles) {
+      const configuredModel = config.profiles[id]?.model;
+      if (!configuredModel || !allowedModels.has(configuredModel)) {
+        console.error(`Model policy requires an allowed explicit model for ${id}; found ${configuredModel ?? "none"}.`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+    if (modelPolicy.forbidAnthropicApi && config.profiles?.["custom-anthropic"]?.enabled) {
+      console.error("Model policy forbids the custom Anthropic API profile.");
+      process.exitCode = 1;
+      return;
+    }
+  }
   const run = {
     schemaVersion: 1,
     runId,
@@ -266,6 +290,7 @@ async function initRun(manifests, args) {
       version: JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version,
     },
     enabledProfiles,
+    modelPolicy,
     safety: config.safety,
     spend: config.spend,
     note: "Initialization creates an evidence plan only. It does not launch Workhorse or call a provider.",
@@ -297,7 +322,7 @@ async function score(manifests, args) {
   if (!value) {
     console.error("Pass --run eval/runs/<run-id>.");
     process.exitCode = 1;
-    return;
+    return null;
   }
   const runDir = path.resolve(root, value);
   const results = await json(path.join(runDir, "results.json"));
@@ -317,7 +342,7 @@ async function score(manifests, args) {
   if (problems.length) {
     console.error("Cannot score run:\n- " + problems.join("\n- "));
     process.exitCode = 1;
-    return;
+    return null;
   }
   const areaReports = manifests.suite.areas.map((area) => {
     const total = area.rubric.reduce((sum, item) => sum + item.weight, 0);
@@ -367,6 +392,45 @@ async function score(manifests, args) {
       ? `Score withheld: ${(weightedCoverage * 100).toFixed(1)}% coverage is below the 60% floor.`
       : `Score ${(weightedScore * 100).toFixed(1)}% over ${(weightedCoverage * 100).toFixed(1)}% coverage.`,
   );
+  return report;
+}
+
+async function finalize(manifests, args) {
+  const value = option(args, "--run");
+  if (!value) {
+    console.error("Pass --run eval/runs/<run-id>.");
+    process.exitCode = 1;
+    return;
+  }
+  const runDir = path.resolve(root, value);
+  const results = await json(path.join(runDir, "results.json"));
+  const expectedIds = manifests.suite.areas.flatMap((area) => area.rubric.map((item) => item.id));
+  const missingIds = expectedIds.filter((id) => !results.verdicts?.[id]);
+  const notRunIds = expectedIds.filter((id) => results.verdicts?.[id]?.verdict === "not_run");
+  if (missingIds.length || notRunIds.length) {
+    const details = [
+      missingIds.length ? `missing: ${missingIds.join(", ")}` : "",
+      notRunIds.length ? `not run: ${notRunIds.join(", ")}` : "",
+    ].filter(Boolean);
+    console.error(`Cannot finalize incomplete run (${details.join("; ")}).`);
+    process.exitCode = 1;
+    return;
+  }
+  const report = await score(manifests, args);
+  if (!report) return;
+  const runPath = path.join(runDir, "run.json");
+  const run = await json(runPath);
+  run.status = "completed";
+  run.executionStarted = true;
+  run.completedAt = new Date().toISOString();
+  run.source = {
+    commit: git("rev-parse", "HEAD"),
+    branch: git("branch", "--show-current"),
+    dirty: Boolean(git("status", "--porcelain")),
+    version: JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version,
+  };
+  await writeFile(runPath, JSON.stringify(run, null, 2) + "\n", "utf8");
+  console.log(`Finalized ${results.runId} with ${Object.keys(results.verdicts).length} verdicts.`);
 }
 
 const args = process.argv.slice(2);
@@ -382,7 +446,9 @@ if (command === "validate") {
   await initRun(manifests, args.slice(1));
 } else if (command === "score") {
   await score(manifests, args.slice(1));
+} else if (command === "finalize") {
+  await finalize(manifests, args.slice(1));
 } else {
-  console.error("Usage: node scripts/workhorse-eval.mjs <validate|list|init|score> [options]");
+  console.error("Usage: node scripts/workhorse-eval.mjs <validate|list|init|score|finalize> [options]");
   process.exitCode = 1;
 }

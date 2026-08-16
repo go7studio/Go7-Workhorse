@@ -21,6 +21,7 @@
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
     "eval:fixture": "node scripts/workhorse-eval-fixture.mjs",
     "eval:score": "node scripts/workhorse-eval.mjs score",
+    "eval:finalize": "node scripts/workhorse-eval.mjs finalize",
     "pack:win": "npm run build && electron-builder --win --dir",
     "package:win": "electron-builder --win nsis --publish never",
     "dist:win": "npm run build && npm run package:win",

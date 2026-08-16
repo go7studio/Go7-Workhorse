@@ -162,6 +162,7 @@
           "steps": [
             "Search by project name, chat title, and distinctive transcript text.",
             "Open the matched message and return to the project.",
+            "Populate an earlier-sorted fixture directory with more than 800 decoy entries, then resolve a basename-only source path located later in the workspace tree.",
             "Review Git edits and open the chat-scoped terminal in the local fixture workspace.",
             "Confirm archived chats and attention items remain scoped to their projects."
           ]
@@ -231,7 +232,7 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["PRJ-S3"],
-          "passCriteria": "Search finds title and transcript matches across projects; review/terminal resolve to the selected chat's local folder or managed worktree.",
+          "passCriteria": "Search finds title and transcript matches across projects; basename-only source resolution remains deterministic in a workspace with more than 800 unrelated entries; review/terminal resolve to the selected chat's local folder or managed worktree.",
           "evidence": "Search results, selected chat identity, review root, and terminal cwd."
         }
       ]
@@ -497,6 +498,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Attach a deterministic local MCP fixture and invoke one read-only and one approval-requiring tool.",
+            "For the OpenAI-compatible lane, stream one argument-bearing desk-tool call with its name and JSON arguments split across multiple chunks and verify execution waits for complete per-id/index accumulation.",
             "Spawn a bounded subagent where the profile claims support and inspect parent/child records.",
             "Cancel the parent and verify cascading cancellation or an explicit unsupported result.",
             "Confirm tool labels and results never pretend a provider executed a Workhorse desk action."
@@ -556,7 +558,7 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S3"],
-          "passCriteria": "The same fixture tool produces equivalent visible results; secrets remain redacted; approval-required calls stop on deny.",
+          "passCriteria": "The same fixture tool produces equivalent visible results; split streaming tool-call fragments are accumulated and executed exactly once with complete arguments; secrets remain redacted; approval-required calls stop on deny.",
           "evidence": "MCP request/result, permission event, tool row, and artifact secret scan."
         },
         {
@@ -694,10 +696,11 @@
           "id": "ORC-S1",
           "name": "Delegate parallel read-only work and synthesize linked child results",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create an isolated parent chat with a bounded goal and ask it to delegate two independent read-only investigations in parallel.",
             "Require distinct child titles, explicit provider/model/effort, a short rationale, and no file changes.",
+            "In the OpenAI-compatible lane, require two argument-bearing spawn calls whose name and JSON arguments arrive in separate streaming chunks; verify each call is assembled by id/index before either is executed.",
             "While both children run, inspect parent and child status, transcript links, identifiers, stop controls, budgets, and usage.",
             "Open each child, verify its self-contained task and real response, then return to the parent.",
             "Verify the parent waits for both, cites their immutable session links, resolves disagreement, and produces one synthesis without inventing a child reply."
@@ -751,9 +754,9 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1"],
-          "passCriteria": "At least two children overlap in time, the parent remains addressable, each child has its own context, and the parent produces one evidence-linked synthesis.",
+          "passCriteria": "At least two children overlap in time, streamed tool arguments are accumulated and each spawn executes exactly once with complete arguments, the parent remains addressable, each child has its own context, and the parent produces one evidence-linked synthesis.",
           "evidence": "Parent/child event timeline, linked transcripts, runtime process/session identifiers, and final synthesis.",
           "baseline": { "status": "partial", "basis": "Static source walk: child sessions and transcript panes exist, but true overlapping execution and a responsive parent require live proof." }
         },

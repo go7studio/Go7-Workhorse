@@ -27,6 +27,7 @@ import { GrokSessionHost, shouldLoadVendorSession } from "../electron/grok-host"
 import { parseGrokPlanUsage } from "../electron/grok-plan";
 import { parseCodexPlanUsage } from "../electron/codex-plan";
 import { detectGrokLogin } from "../electron/grok-login";
+import { titleFromRecord } from "../electron/grok-title";
 import { listDropFiles } from "../electron/drop-files";
 import {
   deskPath,
@@ -145,7 +146,7 @@ import { COUNT_MS, countAt } from "../src/lib/count";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
 import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
 import { fileFolderFromPath, formatEditWhen, holdEditStats, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, projectEdits, projectFileChanges, sameEditPath, statForPath, writeChangeKind } from "../src/lib/project-edits";
-import { autoTitleForSend, suggestedTitleForSession, titleFromPrompt } from "../src/lib/titles";
+import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
 import { isComposerTypeToFocus } from "../src/ui/Composer";
@@ -1244,6 +1245,19 @@ test("ACP text extractors walk nested content and update kinds", () => {
   if (titled.kind !== "title") throw new Error("expected title");
   assert.equal(titled.title, "Loaded.com Darkest Dungeon");
   assert.equal(extractSessionTitle({ sessionUpdate: "session_info_update", title: "  Fix login  " }), "Fix login");
+  assert.equal(extractSessionTitle({ displayName: "Cursor agent name" }), "Cursor agent name");
+  assert.equal(extractSessionTitle({ sessionTitle: "Claude session title" }), "Claude session title");
+  assert.equal(extractSessionTitle({ threadTitle: "Codex thread title" }), "Codex thread title");
+  assert.equal(extractSessionTitle({ name: "sess_abc123" }), undefined);
+  assert.equal(titleFromRecord({ _meta: { generated_title: "Grok summary title" } }), "Grok summary title");
+  const named = classifyAcpUpdate({ sessionUpdate: "agent_message_chunk", title: "Mid-session rename" });
+  assert.equal(named.kind, "title");
+  if (named.kind === "title") assert.equal(named.title, "Mid-session rename");
+  assert.match(readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"), /Steal Claude ACP session\/new/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "cursor-host.ts"), "utf8"), /Steal Cursor ACP session\/new/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8"), /Steal Codex ACP session\/new/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /Steal Grok session\/new/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /no session_info \/ generated_title/);
   assert.equal(isAcpSessionUpdateMethod("session/update"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session/update"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session_notification"), true);
@@ -2557,6 +2571,10 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
     "fix the login redirect on settings...",
   );
   assert.equal(titleFromPrompt("one two three four five six seven"), "one two three four five six...");
+  const prompt = "testing, are you there? Can you hear me please";
+  assert.equal(looksLikePromptSlice("testing, are you there? Can you...", prompt), true);
+  assert.equal(looksLikePromptSlice("testing, are you there? Can you", prompt), true);
+  assert.equal(looksLikePromptSlice("Availability check", prompt), false);
   const session: Session = {
     id: "sess_url",
     projectId: null,
@@ -2572,11 +2590,20 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
     ],
     contextUsed: 0,
   };
-  assert.equal(suggestedTitleForSession(session), "https://www.loaded.com/#q=Darkest%20Dungeon extra words here");
+  assert.equal(suggestedTitleForSession(session), "Loaded.com Darkest Dungeon extra words here");
   assert.equal(suggestedTitleForSession({ ...session, titleLocked: true }), undefined);
+  assert.equal(suggestedTitleForSession({ ...session, title: "Loaded.com Darkest Dungeon" }), undefined);
+  const sliced = {
+    ...session,
+    title: titleFromPrompt("https://www.loaded.com/#q=Darkest%20Dungeon extra words here"),
+  };
+  assert.equal(titleNeedsUpgrade(sliced), true);
+  assert.equal(titleNeedsUpgrade({ ...sliced, title: "Loaded.com Darkest Dungeon" }), false);
+  assert.equal(titleNeedsUpgrade({ ...sliced, titleLocked: true }), false);
   const draft: Session = { ...session, title: "New chat", messages: [] };
-  assert.equal(autoTitleForSend(draft, "What do you have access to?"), "What do you have access to?");
+  assert.equal(autoTitleForSend(draft, "What do you have access to?"), "Have access to");
   assert.equal(autoTitleForSend({ ...draft, titleLocked: true }, "What do you have access to?"), undefined);
+  assert.equal(autoTitleForSend(sliced, "thanks"), undefined);
   const named: Session = {
     ...session,
     title: "Workspace access",
@@ -2584,6 +2611,83 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
     messages: [{ id: "u", role: "user", text: "Workspace access please keep this", createdAt: 1 }],
   };
   assert.equal(autoTitleForSend(named, "thanks"), undefined);
+  const vendor = autoRenameChat([sliced], sliced.id, "Loaded.com Darkest Dungeon");
+  assert.equal(vendor?.[0].title, "Loaded.com Darkest Dungeon");
+  assert.equal(vendor?.[0].titleLocked, false);
+  assert.equal(autoRenameChat([{ ...sliced, titleLocked: true }], sliced.id, "Should not win"), null);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /titleAcceptsVendor\(owner\)/);
+  assert.match(store, /Never bill a model/);
+  assert.match(store, /later mid-session updates/);
+  assert.doesNotMatch(store, /refreshGeneratedTitle/);
+  assert.doesNotMatch(store, /completeChatTitle/);
+  assert.doesNotMatch(store, /title-generate/);
+  assert.doesNotMatch(store, /if \(owner && !isDefaultTitle\(owner\.title\)\) return current/);
+});
+
+test("intent titles reduce pings and filler without calling a model", () => {
+  const prompt = "testing, are you there? Can you hear me please";
+  assert.equal(looksLikePing(prompt), true);
+  assert.equal(looksLikePing("fix the login redirect on settings extra please"), false);
+  assert.equal(titleFromIntent(prompt), "Availability check");
+  assert.equal(titleFromIntent("hi"), "Availability check");
+  assert.equal(titleFromIntent("make a game for me"), "Make a game");
+  assert.equal(titleFromIntent("fix the login redirect on settings extra please"), "Fix login redirect on settings");
+  assert.equal(titleFromIntent("please can you implement the billing webhook"), "Implement the billing webhook");
+  assert.equal(titleFromIntent("I want you to refactor the sidebar"), "Refactor the sidebar");
+  assert.equal(titleFromIntent("What do you have access to?"), "Have access to");
+  assert.equal(
+    titleFromIntent("https://www.loaded.com/#q=Darkest%20Dungeon extra words here"),
+    "Loaded.com Darkest Dungeon extra words here",
+  );
+  assert.equal(titleFromIntent(""), "New chat");
+  assert.equal(titleFromIntent(prompt), titleFromIntent(prompt));
+  const slice = titleFromPrompt(prompt);
+  const ping: Session = {
+    id: "sess_title",
+    projectId: null,
+    provider: "custom",
+    model: "MiniMax-M3",
+    effort: "medium",
+    title: slice,
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages: [{ id: "u", role: "user", text: prompt, createdAt: 1 }],
+    contextUsed: 0,
+  };
+  assert.equal(suggestedTitleForSession(ping), "Availability check");
+  assert.equal(suggestedTitleForSession({ ...ping, titleLocked: true }), undefined);
+  assert.equal(suggestedTitleForSession({ ...ping, title: "Availability check" }), undefined);
+  assert.equal(autoTitleForSend({ ...ping, title: "New chat", messages: [] }, prompt), "Availability check");
+  assert.equal(autoTitleForSend({ ...ping, title: "New chat", titleLocked: true, messages: [] }, prompt), undefined);
+  const intent = { ...ping, title: "Availability check", titleLocked: false };
+  assert.equal(looksLikeIntentTitle(intent.title, prompt), true);
+  assert.equal(titleNeedsUpgrade(intent), true);
+  assert.equal(titleAcceptsVendor(intent), true);
+  const stolen = autoRenameChat([intent], intent.id, "Connection check");
+  assert.equal(stolen?.[0].title, "Connection check");
+  assert.equal(stolen?.[0].titleLocked, false);
+  const later = autoRenameChat(stolen!, intent.id, "Ready when you are");
+  assert.equal(later?.[0].title, "Ready when you are");
+  assert.equal(titleAcceptsVendor(later![0]), true);
+  const locked = renameChat([intent], intent.id, "My name");
+  assert.equal(locked?.[0].titleLocked, true);
+  assert.equal(titleAcceptsVendor(locked![0]), false);
+  assert.equal(autoRenameChat(locked!, intent.id, "Vendor should lose"), null);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const http = readFileSync(path.join(ROOT, "electron", "custom-http.ts"), "utf8");
+  const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
+  assert.equal(existsSync(path.join(ROOT, "src", "lib", "title-generate.ts")), false);
+  assert.doesNotMatch(store, /generateChatTitle|completeChatTitle|refreshGeneratedTitle/);
+  assert.match(store, /titleAcceptsVendor\(owner\)/);
+  assert.doesNotMatch(main, /custom:complete-title|completeCustomTitle/);
+  assert.doesNotMatch(http, /completeCustomTitle|textFromCustomCompletion/);
+  assert.match(row, /onDoubleClick/);
+  assert.match(row, /Rename/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "commands.ts"), "utf8"), /\/rename/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /workhorse_rename_chat/);
 });
 
 test("typing outside an input focuses the composer", () => {

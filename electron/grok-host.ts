@@ -274,6 +274,7 @@ export class GrokSessionHost {
         vendorSessionId: started.sessionId,
         opened: started.opened,
       });
+      // Steal Grok session/new + ~/.grok summary.json generated_title. No billed generate.
       const titled = titleFromRecord(started.sessionNew) ?? readGrokGeneratedTitle(input.cwd, started.sessionId);
       if (titled) emit({ type: "title", sessionId: input.sessionId, title: titled });
     } catch (error) {

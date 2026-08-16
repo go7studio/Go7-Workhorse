@@ -6,6 +6,7 @@ import { shouldLoadVendorSession, type GrokCompactInput, type GrokEventSink, typ
 import { CODEX_ACP_NOT_INSTALLED } from "./codex-login";
 import { buildCodexLaunchSpec, codexSpawnArgs } from "./codex-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
+import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type CodexPromptInput = GrokPromptInput;
@@ -216,6 +217,9 @@ export class CodexSessionHost {
         vendorSessionId: started.sessionId,
         opened: started.opened,
       });
+      // Steal Codex ACP session/new / thread title when present. No billed generate.
+      const titled = titleFromRecord(started.sessionNew);
+      if (titled) emit({ type: "title", sessionId: input.sessionId, title: titled });
     } catch (error) {
       agent.dispose();
       const message = error instanceof Error ? error.message : String(error);

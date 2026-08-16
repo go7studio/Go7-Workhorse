@@ -205,9 +205,17 @@ export function classifyAcpUpdate(update: Record<string, unknown>): ClassifiedAc
   if (tool) return { kind: "tool", tool };
   const compact = extractCompactEvent(update);
   if (compact) return { kind: "compact", compact };
-  if (TITLE_UPDATE_KINDS.has(name)) {
-    const title = extractSessionTitle(update);
-    if (title) return { kind: "title", title };
+  const titled = extractSessionTitle(update);
+  if (
+    titled &&
+    (TITLE_UPDATE_KINDS.has(name) ||
+      typeof update.title === "string" ||
+      typeof update.generated_title === "string" ||
+      typeof update.displayName === "string" ||
+      typeof update.sessionTitle === "string" ||
+      typeof update.threadTitle === "string")
+  ) {
+    return { kind: "title", title: titled };
   }
   if (COMMAND_UPDATE_KINDS.has(name)) {
     const commands = extractAvailableCommands(update);
@@ -417,11 +425,7 @@ export function extractAvailableCommands(update: Record<string, unknown>): Comma
 }
 
 export function extractSessionTitle(update: Record<string, unknown>): string | undefined {
-  const nested = asRecord(update.sessionInfo ?? update.info ?? update._meta);
-  for (const candidate of [update.title, nested.title, update.generated_title, nested.generated_title]) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
-  }
-  return undefined;
+  return titleFromRecord(update);
 }
 
 export function extractCompactEvent(update: Record<string, unknown>): GrokCompactEvent | undefined {

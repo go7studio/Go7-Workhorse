@@ -11,6 +11,7 @@ import {
 import { CURSOR_ACP_NOT_INSTALLED, isCursorAppCommand, isGrokCommand } from "./cursor-login";
 import { buildCursorLaunchSpec, cursorSpawnArgs } from "./cursor-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
+import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type CursorPromptInput = GrokPromptInput;
@@ -159,6 +160,9 @@ export class CursorSessionHost {
         vendorSessionId: started.sessionId,
         opened: started.opened,
       });
+      // Steal Cursor ACP session/new display name when present. No billed generate.
+      const titled = titleFromRecord(started.sessionNew);
+      if (titled) emit({ type: "title", sessionId: input.sessionId, title: titled });
     } catch (error) {
       agent.dispose();
       const message = error instanceof Error ? error.message : String(error);

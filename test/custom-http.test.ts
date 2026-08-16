@@ -1415,10 +1415,12 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(addBot, /probeCustomDraft/);
   assert.match(setup, /"custom"/);
   assert.match(main, /ipcMain\.handle\("custom:prompt"/);
+  assert.doesNotMatch(main, /custom:complete-title/);
   assert.match(main, /detectCustomLogin/);
   assert.match(main, /openClawKeyForBaseUrl/);
   assert.match(main, /fillEmptyCustomBotKeys/);
   assert.match(preload, /custom:detect/);
+  assert.doesNotMatch(preload, /completeChatTitle/);
   assert.match(preload, /customPrompt/);
   const preview = store.slice(store.lastIndexOf("Preview only"), store.lastIndexOf("Preview only") + 400);
   assert.doesNotMatch(preview, /customPrompt/);

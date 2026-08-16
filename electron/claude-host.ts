@@ -12,6 +12,7 @@ import {
 import { CLAUDE_ACP_NOT_INSTALLED } from "./claude-login";
 import { buildClaudeLaunchSpec, claudeSpawnArgs } from "./claude-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
+import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
 export type ClaudePromptInput = GrokPromptInput;
@@ -175,6 +176,9 @@ export class ClaudeSessionHost {
         vendorSessionId: started.sessionId,
         opened: started.opened,
       });
+      // Steal Claude ACP session/new title/displayName when present. No billed generate.
+      const titled = titleFromRecord(started.sessionNew);
+      if (titled) emit({ type: "title", sessionId: input.sessionId, title: titled });
     } catch (error) {
       agent.dispose();
       const message = error instanceof Error ? error.message : String(error);

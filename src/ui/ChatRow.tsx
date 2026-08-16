@@ -173,13 +173,24 @@ export function ChatRow({
           />
         </form>
       ) : (
-        <button className="row chat-open" type="button" onClick={() => store.selectSession(session.id)}>
+        <button
+          className="row chat-open"
+          type="button"
+          onClick={() => store.selectSession(session.id)}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setRenaming(true);
+          }}
+        >
           <span
             className={`dot ${session.provider}${session.status === "running" ? " pulse" : ""}`}
             style={ink ? { background: ink, color: ink } : undefined}
           />
           <span>
-            <span className="row-title">{session.title}</span>
+            <span className="row-title" title="Double-click to rename">
+              {session.title}
+            </span>
             <span className={`row-meta${link ? " peer" : ""}`}>
               {link
                 ? link.label

@@ -238,6 +238,7 @@ function positiveLimit(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+/** Custom HTTP has no session_info / generated_title. Models rename via workhorse_rename_chat. */
 export class CustomSessionHost {
   private tails = new Map<string, Promise<unknown>>();
   private aborts = new Map<string, AbortController>();

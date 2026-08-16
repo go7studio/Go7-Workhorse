@@ -36,7 +36,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { autoTitleForSend, isDefaultTitle, suggestedTitleForSession } from "./titles";
+import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor } from "./titles";
 import {
   applyPermissionAnswer,
   autoAllowPermission,
@@ -449,6 +449,8 @@ function hydrate(value: unknown): AppState {
   const usage = [...backfillCursorUsage(rawSessions, restored), ...restored];
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
+      // Local intent titles only for defaults / old prompt slices. Do not rewrite
+      // unlocked vendor, manual, or already-reduced titles on launch.
       const suggested = suggestedTitleForSession(session);
       return suggested ? { ...session, title: suggested } : session;
     }),
@@ -4387,9 +4389,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "title") {
+        // Free vendor metadata (generated_title / session_info_update / summary.json /
+        // session/new display names). Never bill a model. Steal it onto unlocked rows,
+        // including later mid-session updates. Manual rename locks stay put.
         setState((current) => {
           const owner = current.sessions.find((item) => item.id === event.sessionId);
-          if (owner && !isDefaultTitle(owner.title)) return current;
+          if (!owner || !titleAcceptsVendor(owner)) return current;
           const sessions = autoRenameChat(current.sessions, event.sessionId, event.title);
           return sessions ? { ...current, sessions } : current;
         });

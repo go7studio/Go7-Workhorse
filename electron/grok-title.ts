@@ -11,12 +11,59 @@ export function grokSummaryPath(cwd: string, vendorSessionId: string): string {
   return path.join(grokHome(), "sessions", encodeURIComponent(cwd), vendorSessionId, "summary.json");
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function looksLikeId(value: string): boolean {
+  return (
+    /^(sess_|session_|thread_|conv_|chat_|agent_)/i.test(value) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ||
+    /^[0-9a-f]{16,}$/i.test(value)
+  );
+}
+
+function usableTitle(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const next = value.replace(/\s+/g, " ").trim();
+  if (!next || next.length > 80) return undefined;
+  if (/^(new chat|untitled|untitled chat)$/i.test(next)) return undefined;
+  if (looksLikeId(next)) return undefined;
+  return next;
+}
+
+/**
+ * Steal a sidebar title from vendor session metadata. Cheap fields only:
+ * title / generated_title / displayName / sessionTitle / threadTitle / name.
+ * Ignores ids and empty defaults. Never calls a model.
+ */
 export function titleFromRecord(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  const meta = record._meta && typeof record._meta === "object" ? (record._meta as Record<string, unknown>) : {};
-  for (const candidate of [record.title, record.generated_title, meta.title, meta.generated_title]) {
-    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  const record = asRecord(value);
+  const nested = [
+    record._meta,
+    record.sessionInfo,
+    record.info,
+    record.session,
+    record.thread,
+    record.agent,
+  ].map(asRecord);
+  const keys = [
+    "title",
+    "generated_title",
+    "displayName",
+    "display_name",
+    "sessionTitle",
+    "session_title",
+    "threadTitle",
+    "thread_title",
+    "name",
+  ];
+  for (const bag of [record, ...nested]) {
+    for (const key of keys) {
+      const title = usableTitle(bag[key]);
+      if (title) return title;
+    }
   }
   return undefined;
 }

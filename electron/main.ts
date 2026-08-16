@@ -48,8 +48,13 @@ import { DurableJobEngine } from "./job-engine";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { readVersionedState, writeVersionedState } from "./state-persistence";
+import { workhorseUserDataOverride } from "../src/lib/user-data";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const debugStartup = (stage: string) => {
+  if (process.env.WORKHORSE_DEBUG_STARTUP) console.error(`[workhorse startup] ${stage}`);
+};
+debugStartup("main loaded");
 
 /** Workhorse's own Claude token, so signing in here never touches the shared login. */
 export const CLAUDE_TOKEN_ID = "claude-oauth-token";
@@ -59,7 +64,7 @@ const CLAUDE_AUTH_SESSION = "auth:claude";
 export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
 
 function pinUserData() {
-  const isolated = process.env.WORKHORSE_USER_DATA_PATH?.trim();
+  const isolated = workhorseUserDataOverride();
   const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), WORKHORSE_USER_DATA_DIR);
   try {
     fs.mkdirSync(dest, { recursive: true });
@@ -308,16 +313,19 @@ process.on("unhandledRejection", (error) => {
 });
 
 app.whenReady().then(async () => {
+  debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }
   applyStoredClaudeToken();
+  debugStartup("credentials ready");
   try {
     ensureDeskRipgrep();
   } catch {
     /* rg copy is best-effort */
   }
+  debugStartup("ripgrep ready");
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {
@@ -326,6 +334,7 @@ app.whenReady().then(async () => {
     }
   });
   jobEngine.start();
+  debugStartup("job engine ready");
   const peerBusy = new Set<string>();
   const handlePeerAsk = async (ask: PeerAsk) => {
     const win = BrowserWindow.getAllWindows()[0];
@@ -379,12 +388,19 @@ app.whenReady().then(async () => {
       }
     }
   };
-  const bridge = await startWorkhorseBridge(handlePeerAsk);
-  const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
-  watchPeerInbox(record.inbox, handlePeerAsk);
-  process.env.WORKHORSE_BRIDGE_URL = bridge.url;
-  process.env.WORKHORSE_BRIDGE_TOKEN = bridge.token;
+  void startWorkhorseBridge(handlePeerAsk)
+    .then((bridge) => {
+      const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
+      watchPeerInbox(record.inbox, handlePeerAsk);
+      process.env.WORKHORSE_BRIDGE_URL = bridge.url;
+      process.env.WORKHORSE_BRIDGE_TOKEN = bridge.token;
+      debugStartup("desk bridge ready");
+    })
+    .catch((error) => {
+      console.error("workhorse desk bridge failed", error);
+    });
   setWorkhorseDeskAsk(handlePeerAsk);
+  debugStartup("desk hooks ready");
   process.env.WORKHORSE_MCP_COMMAND = process.execPath;
   process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");
 
@@ -838,6 +854,7 @@ app.whenReady().then(async () => {
     }
   });
 
+  debugStartup("creating window");
   createWindow();
 
   app.on("activate", () => {

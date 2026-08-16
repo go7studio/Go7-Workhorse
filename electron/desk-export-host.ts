@@ -166,14 +166,16 @@ export function importSkillFromPath(from: string, homedir = os.homedir()): DeskE
 export function deleteDeskSkill(dir: string, homedir = os.homedir()): DeskExportResult {
   const source = resolveSkillDir(dir);
   if (!source) return { ok: false, message: "That skill folder is missing SKILL.md." };
-  const homes = skillHomes({ homedir }).map((item) => path.normalize(item.root));
-  if (homes.includes(path.normalize(source))) {
-    return { ok: false, message: "Cannot delete a skills home folder." };
+  const realHome = fs.realpathSync(ensureWorkhorseSkillsHome(homedir));
+  const realSource = fs.realpathSync(source);
+  const relative = path.relative(realHome, realSource);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return { ok: false, message: "This skill is managed outside Workhorse. Remove it from its owning app." };
   }
-  const name = skillNameFromDir(source);
-  fs.rmSync(source, { recursive: true, force: true });
+  const name = skillNameFromDir(realSource);
+  fs.rmSync(realSource, { recursive: true, force: true });
   rememberRemovedSkill(name, homedir);
-  return { ok: true, dest: source, skills: 1, message: `Deleted ${name}.` };
+  return { ok: true, dest: realSource, skills: 1, message: `Deleted ${name} from Workhorse.` };
 }
 
 export function pushSkillToVendor(input: {

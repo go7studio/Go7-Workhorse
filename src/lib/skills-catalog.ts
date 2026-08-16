@@ -33,7 +33,7 @@ export type SkillFs = {
   isDir: (filePath: string) => boolean;
 };
 
-export type SkillHome = { origin: SkillOrigin; root: string };
+export type SkillHome = { origin: SkillOrigin; root: string; managed?: boolean };
 
 export function workhorseSkillsHome(homedir = os.homedir()): string {
   return path.join(homedir, ".workhorse", "skills");
@@ -48,7 +48,7 @@ export function skillHomes(
     { origin: "grok", root: path.join(home, ".grok", "bundled", "skills") },
     { origin: "codex", root: path.join(home, ".codex", "skills") },
     { origin: "claude", root: path.join(home, ".claude", "skills") },
-    { origin: "workhorse", root: workhorseSkillsHome(home) },
+    { origin: "workhorse", root: workhorseSkillsHome(home), managed: true },
     { origin: "codex", root: path.join(home, ".codex", "plugins") },
     { origin: "grok", root: path.join(home, ".grok", "plugins") },
     { origin: "claude", root: path.join(home, ".claude", "plugins") },
@@ -98,7 +98,7 @@ export function catalogSkills(
   const seen = new Set<string>();
   const skills: DeskSkill[] = [];
   for (const home of homes) {
-    walk(home.root, home.origin, 0, io, seen, skills);
+    walk(home.root, home.origin, home.managed === true, 0, io, seen, skills);
   }
   const unique = new Map<string, DeskSkill>();
   for (const skill of skills) {
@@ -111,6 +111,7 @@ export function catalogSkills(
 function walk(
   dir: string,
   origin: SkillOrigin,
+  managed: boolean,
   depth: number,
   io: SkillFs,
   seen: Set<string>,
@@ -131,6 +132,7 @@ function walk(
         origin,
         dir,
         skillFile,
+        managed,
       });
     }
     return;
@@ -145,7 +147,7 @@ function walk(
     if (SKIP.has(name) || name === "SKILL.md") continue;
     const next = path.join(dir, name);
     if (CODEY.has(name) && !io.existsSync(path.join(next, "SKILL.md"))) continue;
-    walk(next, origin, depth + 1, io, seen, skills);
+    walk(next, origin, managed, depth + 1, io, seen, skills);
   }
 }
 
@@ -167,7 +169,8 @@ export function sameDeskSkills(left: DeskSkill[], right: DeskSkill[]): boolean {
       skill.skillFile === other.skillFile &&
       skill.name === other.name &&
       skill.description === other.description &&
-      skill.origin === other.origin
+      skill.origin === other.origin &&
+      skill.managed === other.managed
     );
   });
 }

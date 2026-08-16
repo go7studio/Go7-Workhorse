@@ -45,6 +45,38 @@ export type CustomHttpHandlers = {
   onToolUse?: (tool: CustomToolUse) => void;
 };
 
+type OpenAiToolCallPart = { id?: string; name: string; argumentsJson: string };
+export type OpenAiToolCallState = Map<number, OpenAiToolCallPart>;
+
+function flushOpenAiToolCalls(
+  pending: OpenAiToolCallState,
+  handlers: CustomHttpHandlers,
+): CustomToolUse[] {
+  const tools: CustomToolUse[] = [];
+  for (const [index, part] of [...pending.entries()].sort(([left], [right]) => left - right)) {
+    if (!part.name) continue;
+    let input: Record<string, unknown> = {};
+    if (part.argumentsJson.trim()) {
+      try {
+        const parsed = JSON.parse(part.argumentsJson) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        input = parsed as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+    }
+    const tool = {
+      id: part.id || `call_${index}_${part.name}`,
+      name: parseOpenAiToolCall({ name: part.name })?.name ?? part.name,
+      input,
+    };
+    tools.push(tool);
+    handlers.onToolUse?.(tool);
+  }
+  pending.clear();
+  return tools;
+}
+
 /** Streaming providers may repeat the same request totals across start/delta events. */
 export function mergeCustomUsageSnapshot(
   base: CustomHttpUsage | undefined,
@@ -230,6 +262,7 @@ export function buildOpenAiBody(input: {
   return {
     model: input.model,
     stream: true,
+    stream_options: { include_usage: true },
     max_tokens: input.maxTokens && input.maxTokens > 0 ? input.maxTokens : 4096,
     messages,
     tools: customHttpToolsOpenAi(input.tools, { role: input.role }),
@@ -395,6 +428,7 @@ export function applyAnthropicEvent(
 export function applyOpenAiChunk(
   payload: unknown,
   handlers: CustomHttpHandlers,
+  pending?: OpenAiToolCallState,
 ): { text: string; thought: string; usage?: CustomHttpUsage; tool?: CustomToolUse; stopReason?: string } {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const choices = Array.isArray(root.choices) ? root.choices : [];
@@ -411,6 +445,27 @@ export function applyOpenAiChunk(
   let tool: CustomToolUse | undefined;
   const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls : Array.isArray(first.tool_calls) ? first.tool_calls : [];
   for (const call of calls) {
+    if (pending && call && typeof call === "object") {
+      const record = call as Record<string, unknown>;
+      const fn = record.function && typeof record.function === "object"
+        ? (record.function as Record<string, unknown>)
+        : record;
+      const id = typeof record.id === "string" && record.id ? record.id : undefined;
+      const declaredIndex = typeof record.index === "number" && Number.isInteger(record.index) ? record.index : undefined;
+      const existingIndex = id
+        ? [...pending.entries()].find(([, part]) => part.id === id)?.[0]
+        : undefined;
+      const index = declaredIndex ?? existingIndex ?? pending.size;
+      const current = pending.get(index) ?? { name: "", argumentsJson: "" };
+      if (id) current.id = id;
+      if (typeof fn.name === "string") current.name += fn.name;
+      if (typeof fn.arguments === "string") current.argumentsJson += fn.arguments;
+      else if (fn.arguments && typeof fn.arguments === "object" && !Array.isArray(fn.arguments)) {
+        current.argumentsJson += JSON.stringify(fn.arguments);
+      }
+      pending.set(index, current);
+      continue;
+    }
     const parsed = parseOpenAiToolCall(call);
     if (parsed) {
       tool = parsed;
@@ -421,6 +476,7 @@ export function applyOpenAiChunk(
   if (thought) handlers.onThought?.(thought);
   if (usage) handlers.onUsage?.(usage);
   const stopReason = typeof first.finish_reason === "string" ? first.finish_reason : undefined;
+  if (pending && stopReason) tool = flushOpenAiToolCalls(pending, handlers).at(-1);
   return { text, thought, usage, tool, stopReason };
 }
 
@@ -495,6 +551,7 @@ export async function streamCustomHttp(
       json: "",
       block: undefined as string | undefined,
     };
+    const openAiPending: OpenAiToolCallState = new Map();
     const remember = (tool?: CustomToolUse) => {
       if (!tool) return;
       if (toolUses.some((item) => item.id === tool.id && item.name === tool.name)) return;
@@ -532,7 +589,9 @@ export async function streamCustomHttp(
       const failed = customStreamError(parsed);
       if (failed) throw new Error(failed);
       const next =
-        api === "openai-completions" ? applyOpenAiChunk(parsed, sink) : applyAnthropicEvent(parsed, sink, pending);
+        api === "openai-completions"
+          ? applyOpenAiChunk(parsed, sink, openAiPending)
+          : applyAnthropicEvent(parsed, sink, pending);
       if (next.usage) usage = mergeCustomUsageSnapshot(usage, next.usage);
       if (next.tool) remember(next.tool);
       if (next.stopReason) stopReason = next.stopReason;
@@ -565,6 +624,9 @@ export async function streamCustomHttp(
           throw error;
         }
       }
+    }
+    if (openAiPending.size) {
+      for (const tool of flushOpenAiToolCalls(openAiPending, sink)) remember(tool);
     }
     if (pending.name) {
       remember({

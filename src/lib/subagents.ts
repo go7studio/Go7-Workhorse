@@ -116,7 +116,12 @@ export function deskRoleOf(
   return session.parentId || session.hidden ? "worker" : "orchestrator";
 }
 
-export const WORKER_SPAWN_ERROR = "Workers cannot spawn. Do the assigned slice and return the report.";
+export const WORKER_SPAWN_ERROR =
+  "Nested agent limit reached. A worker may create one MiniMax-M3 helper, and grandchildren cannot spawn again.";
+
+export const MAX_AGENT_DEPTH = 2;
+export const MAX_NESTED_CHILDREN = 1;
+export const NESTED_AGENT_MODEL = "MiniMax-M3";
 
 export const SPAWN_ONLY_PROMPT_ERROR = "Worker prompt is a spawn request, not a slice. Write the actual job.";
 
@@ -124,11 +129,38 @@ export const UNBOUND_SPAWN_ERROR =
   "No project folder is bound. Bind a project or pass an existing folder before spawning.";
 
 export const WORKER_OMIT_TOOLS = [
-  "workhorse_spawn_agent",
-  "workhorse_await_agents",
   "workhorse_request_vendor",
   "workhorse_list_bots",
 ] as const;
+
+export function agentDepth(
+  sessions: Array<{ id: string; parentId?: string | null }>,
+  sessionId: string,
+): number {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const seen = new Set<string>();
+  let depth = 0;
+  let current = byId.get(sessionId);
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId);
+    depth += 1;
+    current = byId.get(current.parentId);
+  }
+  return depth;
+}
+
+export function nestedSpawnError(
+  sessions: Array<{ id: string; parentId?: string | null }>,
+  parentId: string,
+): string | null {
+  const parent = sessions.find((session) => session.id === parentId);
+  if (!parent?.parentId) return null;
+  if (agentDepth(sessions, parentId) >= MAX_AGENT_DEPTH) return WORKER_SPAWN_ERROR;
+  if (sessions.filter((session) => session.parentId === parentId).length >= MAX_NESTED_CHILDREN) {
+    return WORKER_SPAWN_ERROR;
+  }
+  return null;
+}
 
 export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
   if (input.wait === false || input.wait === "false" || input.wait === 0 || input.wait === "0") return false;
@@ -170,7 +202,7 @@ export function isWorkerOmittedTool(name: string): boolean {
 }
 
 export function workerOmittedToolError(name: string): string {
-  if (name === "workhorse_spawn_agent" || name === "workhorse_request_vendor") return WORKER_SPAWN_ERROR;
+  if (name === "workhorse_request_vendor") return WORKER_SPAWN_ERROR;
   return "Workers cannot use this desk tool. Do the assigned slice and return the report.";
 }
 
@@ -242,7 +274,8 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (vendor) lines.push(`VENDOR: ${vendor}`);
   lines.push("");
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
-  lines.push("Do not spawn. Do not list bots. Do not ask the user. Do not review any other tree.");
+  lines.push("Only when this slice explicitly requires a second independent check, you may spawn one MiniMax-M3 helper at low effort with at most 500 tokens, then await it. That helper cannot spawn again.");
+  lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
   lines.push("Return the report as plain text.");
   lines.push("");
   lines.push("TASK:");
@@ -256,12 +289,13 @@ export type SpawnAdmissionInput = {
   folder?: string;
   prompt: string;
   folderExists?: (path: string) => boolean;
+  allowNested?: boolean;
 };
 
 export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: string };
 
 export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
-  if (deskRoleOf(input.parent) === "worker") return { ok: false, error: WORKER_SPAWN_ERROR };
+  if (deskRoleOf(input.parent) === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
   if (!cwd) return { ok: false, error: UNBOUND_SPAWN_ERROR };

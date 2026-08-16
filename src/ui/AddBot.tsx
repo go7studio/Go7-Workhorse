@@ -12,7 +12,7 @@ const CATALOG: {
 }[] = [
   { id: "grok", name: "Grok", hint: "Local Grok Build login on this machine." },
   { id: "codex", name: "Codex", hint: "Local Codex login on this machine." },
-  { id: "claude", name: "Anthropic", hint: "Local Claude Code login on this machine." },
+  { id: "claude", name: "Claude", hint: "Local Claude Code harness and login on this machine." },
   { id: "own", name: "Your own", hint: "Name, color, API URL, and key. Test, then Create." },
 ];
 
@@ -182,12 +182,14 @@ function VendorStatus({
   const store = useStore();
   const link = store.settings.llms[stage];
   const linked = Boolean(link?.connected);
-  const found = Boolean(link?.available ?? link?.connected);
-  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : "Anthropic";
-  const copy = linked
-    ? `Detected the local ${name} login on this machine. It is on the desk.`
+  const found = Boolean(link?.available);
+  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : "Claude";
+  const copy = linked && found
+    ? `Detected the local ${name} harness and login on this machine. It is ready on the desk.`
+    : linked
+      ? `${name} is on the desk, but its harness or login is not currently available. Recheck after signing in or reinstalling it.`
     : found
-      ? `Detected the local ${name} login on this machine. Add it to the desk.`
+      ? `Detected the local ${name} harness and login on this machine. Add it to the desk.`
       : stage === "grok"
         ? "Grok binary or login not found on this machine."
         : stage === "codex"
@@ -212,7 +214,7 @@ function VendorStatus({
         </span>
         <div>
           <strong>{name}</strong>
-          <em>{linked ? "On the desk" : found ? "Ready to add" : "Not found"}</em>
+          <em>{linked && found ? "Ready on the desk" : linked ? "Needs attention" : found ? "Ready to add" : "Not found"}</em>
         </div>
       </div>
       <div className="actions add-bot-actions">

@@ -44,9 +44,12 @@ export class CredentialStore {
 
   get(id: string | undefined): string {
     const key = id?.trim();
-    if (!key || !this.available()) return "";
+    if (!key) return "";
     const row = this.read().credentials[key];
     if (!row?.ciphertext) return "";
+    // Avoid touching the OS keychain on ordinary startup when no matching
+    // credential exists. On macOS that probe can wait for a keychain agent.
+    if (!this.available()) return "";
     try {
       return this.cipher.decryptString(Buffer.from(row.ciphertext, "base64"));
     } catch {

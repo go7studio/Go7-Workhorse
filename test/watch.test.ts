@@ -266,7 +266,8 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /over=\{row\.overPercent/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8"), /fuel-over/);
   assert.match(pane, /Daily bank/);
-  assert.match(pane, /Windows notification/);
+  assert.match(pane, /Desktop notification/);
+  assert.doesNotMatch(pane, /Windows notification/);
   assert.match(pane, /On by default/);
   assert.doesNotMatch(pane, /Off by default/);
   assert.match(pane, /desktopNotify/);

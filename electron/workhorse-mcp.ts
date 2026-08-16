@@ -21,10 +21,11 @@ import {
   admitSpawn,
   deskRoleOf,
   isSpawnOnlyPrompt,
+  nestedSpawnError,
+  NESTED_AGENT_MODEL,
   shouldSpawnInsteadOfAsk,
   toolsForDeskRole,
   SPAWN_ONLY_PROMPT_ERROR,
-  WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
@@ -750,15 +751,36 @@ async function spawnAgent(
 ): Promise<string> {
   if (!input.prompt.trim()) throw new Error("prompt is required");
   const caller = callerSession(from);
-  if (deskRoleOf(caller) === "worker") throw new Error(WORKER_SPAWN_ERROR);
+  const isNested = deskRoleOf(caller) === "worker";
+  if (isNested && caller?.id) {
+    const state = readState();
+    const sessions = (Array.isArray(state?.sessions) ? state.sessions : [])
+      .filter((item): item is { id: string; parentId?: string | null } =>
+        Boolean(item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string"),
+      );
+    const blocked = nestedSpawnError(sessions, caller.id);
+    if (blocked) throw new Error(blocked);
+  }
   if (isSpawnOnlyPrompt(input.prompt)) throw new Error(SPAWN_ONLY_PROMPT_ERROR);
+  const spawnInput = isNested
+    ? {
+        ...input,
+        provider: "custom",
+        model: NESTED_AGENT_MODEL,
+        effort: "low",
+        timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
+        tokenBudget: Math.min(500, Math.max(1, input.tokenBudget ?? 500)),
+        isolation: "shared" as const,
+      }
+    : input;
   const projectFolder = callerProjectFolder(caller);
   const admitted = caller
     ? admitSpawn({
         parent: caller,
         projectFolder,
-        folder: input.folder,
-        prompt: input.prompt,
+        folder: spawnInput.folder,
+        prompt: spawnInput.prompt,
+        allowNested: isNested,
         folderExists: (value) => {
           try {
             return fs.existsSync(value) && fs.statSync(value).isDirectory();
@@ -767,25 +789,25 @@ async function spawnAgent(
           }
         },
       })
-    : projectFolder || input.folder?.trim()
-      ? { ok: true as const, cwd: (input.folder?.trim() || projectFolder) }
+    : projectFolder || spawnInput.folder?.trim()
+      ? { ok: true as const, cwd: (spawnInput.folder?.trim() || projectFolder) }
       : { ok: true as const, cwd: "" };
   if (!admitted.ok) throw new Error(admitted.error);
   const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromSessionId(from),
-    message: input.prompt,
+    message: spawnInput.prompt,
     mode: "spawn",
-    provider: input.provider,
-    model: input.model,
-    description: input.description,
-    chat: input.chat,
-    effort: input.effort,
-    timeoutSeconds: input.timeoutSeconds,
-    tokenBudget: input.tokenBudget,
-    isolation: input.isolation,
+    provider: spawnInput.provider,
+    model: spawnInput.model,
+    description: spawnInput.description,
+    chat: spawnInput.chat,
+    effort: spawnInput.effort,
+    timeoutSeconds: spawnInput.timeoutSeconds,
+    tokenBudget: spawnInput.tokenBudget,
+    isolation: spawnInput.isolation,
     folder: admitted.cwd,
-    wait: input.wait,
+    wait: spawnInput.wait,
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -793,18 +815,18 @@ async function spawnAgent(
     return postBridge("/spawn", {
       toSessionId: "",
       fromSessionId: fromSessionId(from),
-      message: input.prompt,
+      message: spawnInput.prompt,
       mode: "spawn",
-      provider: input.provider,
-      model: input.model,
-      description: input.description,
-      chat: input.chat,
-      effort: input.effort,
-      timeoutSeconds: input.timeoutSeconds,
-      tokenBudget: input.tokenBudget,
-      isolation: input.isolation,
+      provider: spawnInput.provider,
+      model: spawnInput.model,
+      description: spawnInput.description,
+      chat: spawnInput.chat,
+      effort: spawnInput.effort,
+      timeoutSeconds: spawnInput.timeoutSeconds,
+      tokenBudget: spawnInput.tokenBudget,
+      isolation: spawnInput.isolation,
       folder: admitted.cwd,
-      wait: input.wait,
+      wait: spawnInput.wait,
     });
   }
   return first;

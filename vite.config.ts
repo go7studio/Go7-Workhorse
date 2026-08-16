@@ -5,6 +5,15 @@ import electronMcp from "vite-plugin-electron";
 import path from "node:path";
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/scheduler")) return "react";
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

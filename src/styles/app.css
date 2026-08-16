@@ -871,6 +871,49 @@ html.pane-dragging * {
   gap: 10px;
 }
 
+.welcome-harnesses {
+  width: min(460px, 100%);
+  margin: 20px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.welcome-harness-head,
+.welcome-harnesses li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.welcome-harnesses p {
+  max-width: none;
+  margin: 8px 0 12px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.welcome-harnesses ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.welcome-harnesses li {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.welcome-harnesses li em {
+  color: var(--text-tertiary);
+  font-style: normal;
+}
+
 .welcome-steps button {
   width: 100%;
   justify-content: center;

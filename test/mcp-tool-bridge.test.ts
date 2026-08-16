@@ -20,4 +20,6 @@ test("custom Anthropic and OpenAI Chat Completions requests expose translated MC
   assert.ok((anthropic.tools as { name: string }[]).some((tool) => tool.name === extra[0]?.name));
   const openai = buildOpenAiBody({ model: "local-model", messages: [{ role: "user", text: "status" }], tools: extra });
   assert.ok((openai.tools as { function: { name: string } }[]).some((tool) => tool.function.name === extra[0]?.name));
+  assert.deepEqual(openai.stream_options, { include_usage: true });
+  assert.equal(anthropic.stream_options, undefined);
 });

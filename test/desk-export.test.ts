@@ -62,6 +62,8 @@ test("Settings Skills tab and Mass send are wired", () => {
   assert.match(pane, /Delete/);
   assert.match(pane, /skill-detail/);
   assert.match(pane, /filterDeskSkills/);
+  assert.match(pane, /rows\.slice\(0, visibleCount\)/);
+  assert.match(pane, /Show more skills/);
   assert.match(pane, /store.deskSkills/);
   assert.match(pane, /\[listDeskSkills\]/);
   assert.doesNotMatch(pane, /\[store\]/);
@@ -70,7 +72,7 @@ test("Settings Skills tab and Mass send are wired", () => {
   assert.match(store, /massSendVendor/);
   assert.match(store, /listDeskSkills/);
   assert.doesNotMatch(store.slice(store.indexOf("const massSendVendor"), store.indexOf("const exportSession")), /pickExportFolder/);
-  assert.equal(defaultExportRoot("C:\\\\Users\\\\lgovo", true).replace(/\\/g, "/"), "C:/Users/lgovo/Desktop/Workhorse exports");
+  assert.equal(defaultExportRoot("C:\\Users\\lgovo", true).replace(/\\/g, "/"), "C:/Users/lgovo/Desktop/Workhorse exports");
   assert.match(defaultExportRoot("/home/me", false), /Workhorse exports/);
   assert.match(preload, /desk:export-vendor/);
   assert.match(main, /desk:list-skills/);
@@ -91,6 +93,8 @@ test("skill catalog labels Grok Codex Claude and Workhorse", () => {
     ["workhorse:desk", "grok:pdf", "codex:plan", "claude:review"],
   );
   assert.equal(skillHomes({ homedir: home }).some((item) => item.origin === "workhorse"), true);
+  assert.equal(rows.find((row) => row.name === "desk")?.managed, true);
+  assert.equal(rows.find((row) => row.name === "plan")?.managed, false);
 });
 
 test("Grok palette merges catalog skills from ~/.grok/skills bundled and plugins", () => {
@@ -228,6 +232,12 @@ test("Workhorse seeds desk and setup skills into the Workhorse home", () => {
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "desk", "SKILL.md"), "utf8"), /workhorse_ask_chat/);
   assert.match(readFileSync(path.join(home, ".workhorse", "skills", "setup", "SKILL.md"), "utf8"), /workhorse_setup_custom_bot/);
   const deskDir = path.join(home, ".workhorse", "skills", "desk");
+  const vendorDir = path.join(home, ".codex", "skills", "external");
+  writeSkill(vendorDir, "external", "Owned by Codex");
+  const refused = deleteDeskSkill(vendorDir, home);
+  assert.equal(refused.ok, false);
+  assert.match(refused.message ?? "", /managed outside Workhorse/);
+  assert.equal(existsSync(vendorDir), true);
   assert.equal(deleteDeskSkill(deskDir, home).ok, true);
   assert.equal(existsSync(deskDir), false);
   assert.equal(seedWorkhorseSkills(home, shipped), 0);

@@ -23,6 +23,12 @@ export function formatWorked(ms: number): string {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
+export function resolveWorkedMs(startedAt: number, workedMs: number | undefined, activityAt: number[]): number | undefined {
+  if (workedMs !== undefined && Number.isFinite(workedMs) && workedMs >= 0) return workedMs;
+  const latest = activityAt.filter(Number.isFinite).reduce((value, at) => Math.max(value, at), startedAt);
+  return latest > startedAt ? latest - startedAt : undefined;
+}
+
 export function isDeskNotice(message: ChatMessage): boolean {
   if (message.role !== "system" || message.kind) return false;
   return /^(Allowed |Elevated |Denied[:\s]|Kept current limits)/i.test(message.text.trim());

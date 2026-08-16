@@ -5,7 +5,7 @@ import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
-import { formatWorked } from "../lib/turns";
+import { formatWorked, resolveWorkedMs } from "../lib/turns";
 import type { ChatMessage, Session } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 
@@ -69,7 +69,9 @@ export function WorkPopout({
   const hasWork = hasInner || live;
   if (!hasWork) return null;
 
-  const elapsed = live ? now - startedAt : workedMs;
+  const elapsed = live
+    ? now - startedAt
+    : resolveWorkedMs(startedAt, workedMs, [...workTools, ...compacts, ...threads].map((item) => item.createdAt));
   const label = live
     ? `Working · ${formatWorked(elapsed ?? 0)}`
     : elapsed != null

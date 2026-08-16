@@ -796,7 +796,8 @@
             "Require Kimi K3 for the visual UI/UX task and hold one preferred route in Watch; verify the held route is not called and the approved MiniMax-M3 fallback is explicit.",
             "Release three ready root tasks and verify at most two run while the third remains queued.",
             "Send one plan-task peer request and reply with immutable session ids, correlation id, reply id, and attempt.",
-            "Restart with completed, running, and queued work, then resume the same plan; completed tasks stay completed, the running child resumes or becomes an explicit retry, and every queued task dispatches once.",
+            "Restart with completed, running, queued, and interrupted work; terminal child runs clear stale Working rows, completed tasks stay completed, and every queued task dispatches once.",
+            "Finish a second worker wave after the first join; verify its completion wakes the same orchestrator exactly once without a manual prompt.",
             "Reconcile task evidence against acceptance checks before completing the plan."
           ]
         }
@@ -952,7 +953,7 @@
           "testability": "auto",
           "profiles": ["custom-openai", "custom-kimi"],
           "scenarios": ["ORC-S6"],
-          "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; completed task dispatch counts remain one after restart; resumed work preserves task, attempt, and child identity or records an explicit retry.",
+          "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; terminal child runs never remain visibly active or consume a slot; every later worker wave wakes the orchestrator once; completed task dispatch counts remain one after restart; resumed work preserves task, attempt, and child identity or records an explicit retry.",
           "evidence": "Plan event log, concurrency timeline, peer inbox records, restart snapshot, task attempts, child ids, and dispatch counts."
         }
       ]

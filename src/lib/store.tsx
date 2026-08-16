@@ -2449,7 +2449,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             /* host waiter may already have settled */
           }
         };
-        const promptVendor = async (session: Session, text: string, mcpServers: McpServerConfig[]) => {
+        const promptVendor = async (
+          session: Session,
+          text: string,
+          mcpServers: McpServerConfig[],
+          images: import("./types").ChatImage[] = [],
+        ) => {
           const snapshot = stateRef.current;
           const hold = evaluateWatchHold({
             session,
@@ -2478,6 +2483,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sessionId: session.id,
             projectId: session.projectId ?? undefined,
             text,
+            images,
             model: session.model,
             effort: session.effort,
             mode: session.mode,
@@ -2502,6 +2508,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               sessionId: session.id,
               projectId: session.projectId ?? undefined,
               text,
+              images,
               model: custom.model || session.model,
               effort: session.effort,
               cwd,
@@ -3690,6 +3697,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   kind: "peer",
                   fromTitle: parent.title?.trim() || "another agent",
                   text: payload.message.trim(),
+                  ...(payload.attachments?.length ? { images: payload.attachments } : {}),
                   createdAt: startedAt,
                   ...brainStamp(spec),
                 },
@@ -3766,6 +3774,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   vendor: spec.title,
                 }),
                 latest.settings.mcpServers,
+                payload.attachments,
               );
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {

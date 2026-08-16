@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { ChatImage } from "../src/lib/types";
 
 export type PeerAction =
   | "list"
@@ -53,6 +54,8 @@ export type PeerAsk = {
   rationale?: string;
   skills?: string[];
   tools?: string[];
+  files?: string[];
+  attachments?: ChatImage[];
   planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "status" | "evidence" | "complete" | "block" | "cancel";
   sourcePath?: string;
   planRun?: unknown;

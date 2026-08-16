@@ -10,7 +10,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { CustomLlm, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { ChatImage, CustomLlm, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   deskCallCatalog,
   formatDeskRoster,
@@ -182,6 +182,7 @@ const TOOLS = [
         rationale: { type: "string", description: "Why this agent fits this step" },
         skills: { type: "array", items: { type: "string" }, description: "Required skills" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
+        files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
@@ -830,6 +831,42 @@ function callerProjectFolder(session?: { projectId?: string | null }): string {
   return typeof pathValue === "string" ? pathValue.trim() : "";
 }
 
+export function spawnAttachments(files: string[] | undefined, cwd: string): ChatImage[] {
+  if (!files?.length) return [];
+  if (!cwd) throw new Error("Attach files only from a bound project folder");
+  const mimeFor = (file: string) => {
+    const ext = path.extname(file).toLowerCase();
+    return ({
+      ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+      ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
+      ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".mp4": "video/mp4", ".mov": "video/quicktime",
+    } as Record<string, string>)[ext] ?? "application/octet-stream";
+  };
+  return files.slice(0, 8).map((file, index) => {
+    const resolved = path.resolve(cwd, file);
+    const relative = path.relative(path.resolve(cwd), resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Attachment is outside the project: ${file}`);
+    const stat = fs.statSync(resolved);
+    if (!stat.isFile()) throw new Error(`Attachment is not a file: ${file}`);
+    if (stat.size > 30 * 1024 * 1024) throw new Error(`Attachment is over 30 MB: ${file}`);
+    const mimeType = mimeFor(resolved);
+    const kind = mimeType.startsWith("image/") ? "image"
+      : mimeType.startsWith("audio/") ? "audio"
+        : mimeType.startsWith("video/") ? "video"
+          : mimeType === "application/pdf" ? "document"
+            : "file";
+    return {
+      id: `spawn_file_${Date.now()}_${index}`,
+      name: path.basename(resolved),
+      mimeType,
+      data: fs.readFileSync(resolved).toString("base64"),
+      kind,
+      sourcePath: resolved,
+      size: stat.size,
+    } satisfies ChatImage;
+  });
+}
+
 async function spawnAgent(
   input: {
     prompt: string;
@@ -848,6 +885,7 @@ async function spawnAgent(
     rationale?: string;
     skills?: string[];
     tools?: string[];
+    files?: string[];
   },
   from?: string,
 ): Promise<string> {
@@ -896,6 +934,7 @@ async function spawnAgent(
       ? { ok: true as const, cwd: (spawnInput.folder?.trim() || projectFolder) }
       : { ok: true as const, cwd: "" };
   if (!admitted.ok) throw new Error(admitted.error);
+  const attachments = spawnAttachments(spawnInput.files, admitted.cwd);
   const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromSessionId(from),
@@ -916,6 +955,8 @@ async function spawnAgent(
     rationale: spawnInput.rationale,
     skills: spawnInput.skills,
     tools: spawnInput.tools,
+    files: spawnInput.files,
+    attachments,
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -940,6 +981,8 @@ async function spawnAgent(
       rationale: spawnInput.rationale,
       skills: spawnInput.skills,
       tools: spawnInput.tools,
+      files: spawnInput.files,
+      attachments,
     });
   }
   return first;
@@ -1004,6 +1047,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         rationale: typeof args.rationale === "string" ? args.rationale : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
+        files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
       },
       from,
     );

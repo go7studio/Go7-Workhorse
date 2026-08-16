@@ -314,7 +314,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     input_schema: {
       type: "object",
       properties: {
-        vendor: { type: "string", description: "grok, codex, or claude" },
+        vendor: { type: "string", description: "grok, codex, claude, or cursor" },
         reason: { type: "string", description: "Why you need that vendor" },
       },
       required: ["vendor"],

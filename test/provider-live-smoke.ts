@@ -2,23 +2,44 @@ import { ClaudeSessionHost } from "../electron/claude-host";
 import { detectClaudeLogin } from "../electron/claude-login";
 import { CodexSessionHost } from "../electron/codex-host";
 import { detectCodexLogin } from "../electron/codex-login";
+import { CursorSessionHost } from "../electron/cursor-host";
+import { detectCursorLogin } from "../electron/cursor-login";
 import { GrokSessionHost, type GrokIpcEvent } from "../electron/grok-host";
 import { detectGrokLogin } from "../electron/grok-login";
 
-type SmokeProvider = "grok" | "codex" | "claude";
+type SmokeProvider = "grok" | "codex" | "claude" | "cursor";
 
 const provider = process.argv[2] as SmokeProvider | undefined;
-if (provider !== "grok" && provider !== "codex" && provider !== "claude") {
-  throw new Error("Choose exactly one provider: grok, codex, or claude.");
+if (provider !== "grok" && provider !== "codex" && provider !== "claude" && provider !== "cursor") {
+  throw new Error("Choose exactly one provider: grok, codex, claude, or cursor.");
 }
 
 const detection =
-  provider === "grok" ? detectGrokLogin() : provider === "codex" ? detectCodexLogin() : detectClaudeLogin();
+  provider === "grok"
+    ? detectGrokLogin()
+    : provider === "codex"
+      ? detectCodexLogin()
+      : provider === "claude"
+        ? detectClaudeLogin()
+        : detectCursorLogin();
 if (!detection.connected) throw new Error(`${provider} is not connected; no live call was made.`);
 
-const model = provider === "grok" ? "grok-4.6" : provider === "codex" ? "gpt-5.6-sol" : "opus-5";
+const model =
+  provider === "grok"
+    ? "grok-4.6"
+    : provider === "codex"
+      ? "gpt-5.6-sol"
+      : provider === "claude"
+        ? "opus-5"
+        : "composer-2.5";
 const host =
-  provider === "grok" ? new GrokSessionHost() : provider === "codex" ? new CodexSessionHost() : new ClaudeSessionHost();
+  provider === "grok"
+    ? new GrokSessionHost()
+    : provider === "codex"
+      ? new CodexSessionHost()
+      : provider === "claude"
+        ? new ClaudeSessionHost()
+        : new CursorSessionHost();
 const events: GrokIpcEvent[] = [];
 const sessionId = `smoke-${provider}-${Date.now()}`;
 
@@ -32,7 +53,7 @@ try {
         mode: "ask",
         sandbox: "read-only",
         cwd: process.cwd(),
-        text: "Adapter smoke test. Reply with exactly: ADAPTER_OK",
+        text: "Connectivity check only. Do not use tools or inspect files. Return exactly: ADAPTER_OK",
         mcpServers: [],
         role: "orchestrator",
       },

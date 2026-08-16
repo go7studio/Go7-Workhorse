@@ -187,6 +187,80 @@ export type AgentRun = {
   error?: string;
 };
 
+export type PlanRunStatus =
+  | "draft"
+  | "approved"
+  | "running"
+  | "paused"
+  | "completed"
+  | "blocked"
+  | "cancelled";
+
+export type PlanStepStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "cancelled";
+
+export type PlanEvidenceKind = "note" | "file" | "test" | "screenshot" | "runtime";
+
+export type PlanEvidence = {
+  id: string;
+  kind: PlanEvidenceKind;
+  label: string;
+  value: string;
+  recordedAt: number;
+  sessionId?: string;
+};
+
+export type PlanStep = {
+  id: string;
+  title: string;
+  details?: string;
+  status: PlanStepStatus;
+  dependsOn: string[];
+  evidenceRequired: boolean;
+  evidence: PlanEvidence[];
+  assignedSessionId?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  error?: string;
+};
+
+export type PlanSource = {
+  kind: "markdown" | "generated" | "manual";
+  label?: string;
+  path?: string;
+  contentHash?: string;
+  importedAt?: number;
+};
+
+export type PlanConstraints = {
+  tokenBudget?: number;
+  timeoutMs?: number;
+  maxConcurrency?: number;
+};
+
+export type PlanRun = {
+  id: string;
+  objective: string;
+  status: PlanRunStatus;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+  source?: PlanSource;
+  constraints?: PlanConstraints;
+  steps: PlanStep[];
+  approvedAt?: number;
+  startedAt?: number;
+  pausedAt?: number;
+  completedAt?: number;
+  blockedReason?: string;
+};
+
 export type Session = {
   id: string;
   projectId: string | null;
@@ -231,6 +305,8 @@ export type Session = {
   agentRun?: AgentRun;
   /** Active worker crew for this orchestrator chat. */
   lineup?: DeskLineup;
+  /** Workhorse-owned executable plan for this orchestrator chat. */
+  planRun?: PlanRun;
   /** Tool families allowed for the rest of this vendor session. */
   permissionGrants?: string[];
   /** Manual preserves the selected model. Auto may route before a new turn. */

@@ -4,6 +4,7 @@ export type CapabilitySupport = "native" | "workhorse" | "unavailable";
 
 export type ProviderCapabilities = {
   transport: "acp" | "http";
+  ephemeralAuxiliary: CapabilitySupport;
   conversation: {
     resume: CapabilitySupport;
     fork: CapabilitySupport;
@@ -35,6 +36,7 @@ export type ProviderCapabilities = {
 
 const ACP_SHARED = {
   transport: "acp" as const,
+  ephemeralAuxiliary: "unavailable" as const,
   tools: { workspace: true, desk: true, mcp: true, subagents: true },
   input: { images: true, files: true, documents: "workhorse" as const, audio: "workhorse" as const, video: "workhorse" as const },
   usage: "native" as const,
@@ -112,6 +114,7 @@ export const PROVIDER_CAPABILITIES: Record<ProviderId, ProviderCapabilities> = {
   },
   custom: {
     transport: "http",
+    ephemeralAuxiliary: "native",
     conversation: {
       resume: "workhorse",
       fork: "workhorse",

@@ -186,4 +186,14 @@ contextBridge.exposeInMainWorld("workhorse", {
       ipcRenderer.removeListener("grok:event", listener);
     };
   },
+  learningConfigure: (settings: import("../src/lib/types").Settings) => ipcRenderer.invoke("learning:configure", settings),
+  learningProbe: () => ipcRenderer.invoke("learning:probe"),
+  learningRecord: (event: unknown) => ipcRenderer.invoke("learning:record", event),
+  learningRetrieve: (query: unknown) => ipcRenderer.invoke("learning:retrieve", query),
+  learningCompile: () => ipcRenderer.invoke("learning:compile"),
+  learningMemories: () => ipcRenderer.invoke("learning:memories"),
+  learningApprove: (id: string) => ipcRenderer.invoke("learning:approve", id),
+  learningForget: (target: unknown) => ipcRenderer.invoke("learning:forget", target),
+  learningPurge: (target: unknown) => ipcRenderer.invoke("learning:purge", target),
+  learningExport: (dest: string) => ipcRenderer.invoke("learning:export", dest),
 });

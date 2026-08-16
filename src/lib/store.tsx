@@ -215,6 +215,8 @@ import {
   type WatchNotice,
 } from "./watch";
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
+import { normalizeLearning } from "./learning-policy";
+import { settleBoundedGoal } from "./learning-goal";
 import type {
   AppState,
   CustomBot,
@@ -362,6 +364,7 @@ export type Store = AppState & {
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  updateLearning: (patch: Partial<import("./learning-types").LearningSettings>) => void;
   watchNotices: WatchNotice[];
   watchHold: WatchHold | null;
   watchRestore: { text: string; images?: import("./types").ChatImage[] } | null;
@@ -398,6 +401,30 @@ type SendOptions = {
   joinAttempt?: number;
   afterGoalHalt?: boolean;
 };
+
+function emitLearningEvent(draft: {
+  kind: import("./learning-types").LearningEventKind;
+  projectId?: string | null;
+  sessionId?: string;
+  provider?: ProviderId;
+  model?: string;
+  effort?: EffortLevel | null;
+  payload: Record<string, unknown>;
+  actorClass?: "human" | "agent" | "system";
+}) {
+  void window.workhorse?.learningRecord?.({
+    id: uid("lev"),
+    createdAt: Date.now(),
+    kind: draft.kind,
+    actorClass: draft.actorClass ?? "system",
+    projectId: draft.projectId ?? undefined,
+    sessionId: draft.sessionId,
+    provider: draft.provider,
+    model: draft.model,
+    effort: draft.effort,
+    payload: draft.payload,
+  });
+}
 
 function hydrate(value: unknown): AppState {
   if (!value || typeof value !== "object") return EMPTY;
@@ -1784,6 +1811,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         session = { ...routed, routingMode: "auto", routingDecision: decision };
         const routedSession = session;
+        emitLearningEvent({
+          kind: "routing",
+          projectId: routedSession.projectId,
+          sessionId: routedSession.id,
+          provider: decision.provider,
+          model: decision.model,
+          effort: decision.effort,
+          payload: {
+            summary: decision.reason,
+            score: decision.score,
+            taskTier: decision.taskTier,
+            rationale: decision.reason,
+          },
+        });
         setState((latest) => ({
           ...latest,
           lastModel: presetFrom(routedSession),
@@ -1817,6 +1858,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       return false;
     }
+    emitLearningEvent({
+      kind: originalText !== text || options?.replaceUserId ? "human-edit" : "human-prompt",
+      actorClass: "human",
+      projectId: session.projectId,
+      sessionId: session.id,
+      provider: session.provider,
+      model: session.model,
+      effort: session.effort,
+      payload: { summary: originalText.slice(0, 800) },
+    });
     const project = current.projects.find((item) => item.id === session.projectId);
     let working = session.messages;
     let vendorSessionId = vendorSessionForSend(session);
@@ -2405,6 +2456,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
+    emitLearningEvent({
+      kind: "usage",
+      actorClass: "agent",
+      projectId: draft.projectId,
+      sessionId: draft.sessionId,
+      provider: draft.provider,
+      model: draft.model,
+      payload: {
+        summary: `${draft.provider} usage`,
+        inputTokens: draft.inputTokens,
+        outputTokens: draft.outputTokens,
+        costUsd: draft.costUsd,
+        signals: { adapterTerminal: true },
+      },
+    });
     setState((current) => {
       const sessionId = draft.sessionId ?? current.activeSessionId ?? undefined;
       const inputTokens = Math.max(0, Math.round(draft.inputTokens));
@@ -5132,6 +5198,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateLearning = useCallback((patch: Partial<import("./learning-types").LearningSettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        learning: normalizeLearning({ ...current.settings.learning, ...patch }),
+      },
+    }));
+  }, []);
+
   const dismissWatchNotice = useCallback((notice: WatchNotice) => {
     setState((current) => ({
       ...current,
@@ -5283,6 +5359,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [ready, checkAppUpdate]);
 
+  useEffect(() => {
+    void window.workhorse?.learningConfigure?.(state.settings);
+  }, [state.settings.learning]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const due = stateRef.current.sessions.filter(
+        (session) => session.goal && !session.goal.terminal && session.goal.deadlineAt && Date.now() >= session.goal.deadlineAt,
+      );
+      if (due.length === 0) return;
+      for (const session of due) {
+        if (session.status === "running" || session.status === "needs-input") cancelVendorSession(session);
+      }
+      setState((current) => ({
+        ...current,
+        sessions: current.sessions.map((item) => {
+          const goal = settleBoundedGoal(item.goal);
+          if (goal === item.goal) return item;
+          return {
+            ...item,
+            goal,
+            ...(goal?.terminal === "timed-out" && (item.status === "running" || item.status === "needs-input")
+              ? { status: "idle" as const }
+              : {}),
+          };
+        }),
+      }));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const value = useMemo<Store>(
     () => ({
       ...state,
@@ -5370,6 +5477,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateLearning,
       watchNotices,
       watchHold,
       watchRestore,
@@ -5480,6 +5588,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateLearning,
       watchNotices,
       watchHold,
       watchRestore,

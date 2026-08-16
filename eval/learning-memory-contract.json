@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "learning-memory",
+  "requiredRubric": ["LRN-01", "LRN-02", "LRN-03", "LRN-04", "LRN-05"],
+  "packagedSmokeCommand": "eval:learning-smoke",
+  "sqliteProbeCommand": "probe:sqlite"
+}

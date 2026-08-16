@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate eval contracts
+        run: npm run eval:validate
+      - name: SQLite FTS5 probe
+        run: npm run probe:sqlite
+      - name: Test
+        run: npm test
+
+  packaged-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            pack: pack:win
+            platform: win
+          - os: macos-latest
+            pack: pack:mac
+            platform: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Pack ${{ matrix.platform }}
+        run: npm run ${{ matrix.pack }}
+      - name: Packaged learning smoke
+        run: node scripts/learning-packaged-smoke.mjs --platform ${{ matrix.platform }}

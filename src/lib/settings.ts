@@ -1,4 +1,5 @@
 import { customBotEnabled, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
+import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
 import type { BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
     allowLocal: true,
     reservePercent: 15,
   },
+  learning: { ...DEFAULT_LEARNING },
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -260,6 +262,7 @@ export function normalizeSettings(raw: unknown): Settings {
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),
     watch: normalizeWatch(record.watch),
     routing: normalizeRouting(record.routing),
+    learning: normalizeLearning((record as { learning?: unknown }).learning),
   };
 }
 
@@ -275,5 +278,5 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
 }
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
-  return value === "profile" || value === "llms" || value === "skills" || value === "routing" || value === "usage" || value === "watch";
+  return value === "profile" || value === "llms" || value === "skills" || value === "routing" || value === "learning" || value === "usage" || value === "watch";
 }

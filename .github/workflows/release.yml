@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Packaged learning smoke
+        run: node scripts/learning-packaged-smoke.mjs
+
       - name: Build installer
         run: npm run ${{ matrix.script }}
 

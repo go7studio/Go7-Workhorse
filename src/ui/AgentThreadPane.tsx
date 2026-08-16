@@ -63,7 +63,7 @@ export function AgentThreadPane({
             />
             <strong>{thread.title}</strong>
           </div>
-          <em>{[childBrain?.name, thread.live ? "Talking now" : "Earlier this chat"].filter(Boolean).join(" · ")}</em>
+          <em>{[childBrain?.name, child?.effort, thread.live ? "Talking now" : "Earlier this chat"].filter(Boolean).join(" · ")}</em>
         </div>
         <div className="agent-thread-tools">
           {child ? <ContextMeter session={child} compact /> : null}
@@ -95,7 +95,7 @@ export function AgentThreadPane({
                 aria-hidden="true"
               />
               <span>{item.title}</span>
-              {tabBrain ? <em>{tabBrain.name}</em> : null}
+              {tabBrain ? <em>{[tabBrain.name, tabChild?.effort].filter(Boolean).join(" · ")}</em> : null}
             </button>
               );
             })()

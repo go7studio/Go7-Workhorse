@@ -1,5 +1,6 @@
 import type {
   ChatImage,
+  EffortLevel,
   ModelInputCapabilities,
   ModelRoutingProfile,
   ProviderId,
@@ -9,7 +10,7 @@ import type {
   Settings,
 } from "./types";
 import { customBotEnabled } from "./custom-bots";
-import { modelsFor } from "./models";
+import { modelsFor, withEffort } from "./models";
 import { cursorWatchLane } from "./cursor-lane";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
@@ -178,6 +179,16 @@ export function inferRoutingTier(prompt: string, attachments: ChatImage[] = []):
   return "balanced";
 }
 
+export function effortForRoutingTier(
+  provider: ProviderId,
+  model: string,
+  tier: RoutingTaskTier,
+  override?: EffortLevel | null,
+): EffortLevel | null {
+  const preferred: EffortLevel = tier === "quick" ? "low" : tier === "deep" ? "high" : "medium";
+  return withEffort(provider, model, override ?? preferred);
+}
+
 /** Weekly allowance draw at this instant. A positive delta means spare capacity. */
 export function weeklyDrawState(capacity: RoutingCapacity | undefined, now = Date.now()): {
   usedPercent?: number;
@@ -271,9 +282,10 @@ export function chooseRoutingDecision(
     taskTier,
     provider: winner.provider,
     model: winner.model,
+    effort: effortForRoutingTier(winner.provider, winner.model, taskTier),
     customBotId: winner.customBotId,
     score: winner.score,
-    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"}${capacityReason}`,
+    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}`,
     usedPercent: draw.usedPercent,
     expectedUsedPercent: draw.expectedUsedPercent,
   };
@@ -299,6 +311,11 @@ export function normalizeRoutingDecision(raw: unknown): RoutingDecision | undefi
     taskTier,
     provider: record.provider,
     model: record.model.trim(),
+    ...(["off", "adaptive", "low", "medium", "high", "xhigh"] as EffortLevel[]).includes(record.effort as EffortLevel)
+      ? { effort: record.effort as EffortLevel }
+      : record.effort === null
+        ? { effort: null }
+        : {},
     ...(typeof record.customBotId === "string" && record.customBotId.trim() ? { customBotId: record.customBotId.trim() } : {}),
     score: typeof record.score === "number" && Number.isFinite(record.score) ? record.score : 0,
     reason: typeof record.reason === "string" ? record.reason : taskTier,

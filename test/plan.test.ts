@@ -114,6 +114,7 @@ test("plan assignments preserve model fit and agent identity", () => {
     sessionId: "session_kimi",
     provider: "custom",
     model: "hf:moonshotai/Kimi-K3",
+    effort: "medium",
     customBotId: "bot_kimi",
     rationale: "Visual audit and image input",
     skills: ["UI/UX"],
@@ -122,6 +123,7 @@ test("plan assignments preserve model fit and agent identity", () => {
   }, 4));
   assert.equal(plan.steps[0]?.assignment?.sessionId, "session_kimi");
   assert.equal(plan.steps[0]?.assignment?.rationale, "Visual audit and image input");
+  assert.equal(plan.steps[0]?.assignment?.effort, "medium");
   assert.deepEqual(plan.steps[0]?.assignment?.constraints, ["audit-only", "no-commit"]);
   assert.equal(plan.events?.at(-1)?.type, "agent.assigned");
 });

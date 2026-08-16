@@ -175,7 +175,7 @@ export function WorkPopout({
                     aria-hidden="true"
                   />
                   <span className="tool-name">{title}</span>
-                  {brain ? <span className="subagent-model">{brain.name}</span> : null}
+                  {brain ? <span className="subagent-model">{[brain.name, child?.effort].filter(Boolean).join(" · ")}</span> : null}
                   {child?.agentRun?.constraints?.length ? (
                     <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
                   ) : null}

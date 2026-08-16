@@ -6910,6 +6910,9 @@ test("packages use platform Electron and mac builds receive an ad-hoc signature"
   assert.match(hook, /electronPlatformName !== "darwin"/);
   assert.match(hook, /codesign/);
   assert.match(hook, /shouldAdHocSign/);
+  const install = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
+  assert.match(install, /rm -rf "\/Applications\/\$\{APP\}"/);
+  assert.match(install, /rm -rf \/Applications\/Workhorse\.app/);
   assert.match(hook, /"--deep", "--sign", "-"/);
   assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);
 });

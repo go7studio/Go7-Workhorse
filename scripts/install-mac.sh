@@ -43,15 +43,22 @@ mount=$(hdiutil attach "$dmg" -nobrowse -quiet -mountrandom "$tmp" | grep -o '/.
 [ -n "$mount" ] && [ -d "${mount}/${APP}" ] || die "The disk image did not contain ${APP}."
 
 # Replacing a running app leaves a broken bundle, so stop it first.
-if pgrep -f "/Applications/${APP}/Contents/MacOS/" >/dev/null 2>&1; then
+# The pre-rename bundle was Workhorse.app; quit that too.
+if pgrep -f "/Applications/${APP}/Contents/MacOS/|/Applications/Workhorse.app/Contents/MacOS/" >/dev/null 2>&1; then
   say "Quitting the running copy..."
   osascript -e 'tell application "Go7 Workhorse" to quit' 2>/dev/null || true
+  osascript -e 'tell application "Workhorse" to quit' 2>/dev/null || true
   sleep 2
 fi
 
 say "Installing to /Applications..."
 rm -rf "/Applications/${APP}"
 cp -R "${mount}/${APP}" /Applications/
+# One live app. The old short name must not stay beside the current one.
+if [ -d /Applications/Workhorse.app ]; then
+  say "Removing the pre-rename Workhorse.app..."
+  rm -rf /Applications/Workhorse.app
+fi
 
 # The build is unsigned, so a downloaded copy carries a quarantine flag that
 # Gatekeeper refuses. Clear it for this bundle only, and say so plainly.

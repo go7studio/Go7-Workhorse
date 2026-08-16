@@ -971,10 +971,10 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Enable automatic routing and fixture Sol, Terra, Luna, MiniMax, and one local model with explicit capabilities.",
-            "Route equivalent quick, balanced, and deep prompts and capture every ranked candidate and reason.",
+            "Route equivalent quick, balanced, and deep prompts and capture every ranked candidate, reasoning effort, and reason.",
             "Repeat with automatic routing disabled and verify the selected provider and model remain pinned.",
             "Spawn a child with automatic quick routing, then repeat with an explicit provider and model override.",
-            "Verify the transcript, launch request, runtime identity, and usage row agree with each decision."
+            "Verify quick, balanced, and deep default to low, medium, and high reasoning when supported; explicit effort overrides win; transcript, launch, runtime, and usage agree."
           ]
         },
         {
@@ -1032,13 +1032,13 @@
       "rubric": [
         {
           "id": "CAP-01",
-          "criterion": "Automatic routing assigns quick, balanced, and deep work to capability-appropriate models and remains optional per chat.",
+          "criterion": "Automatic routing assigns quick, balanced, and deep work to capability-appropriate models and reasoning levels and remains optional per chat.",
           "weight": 3,
           "type": "rule",
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CAP-S1"],
-          "passCriteria": "Tier, selected provider/model, alternatives, and concise reason are deterministic; disabling Auto preserves the manual selection.",
+          "passCriteria": "Tier, selected provider/model, low/medium/high reasoning effort, alternatives, and concise reason are deterministic; explicit effort and disabling Auto preserve user choices.",
           "evidence": "Routing fixtures, ranked decisions, session state, and manual-pin comparison."
         },
         {

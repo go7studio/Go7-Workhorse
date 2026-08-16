@@ -232,6 +232,7 @@ export type PlanAssignment = {
   assignedAt: number;
   provider: ProviderId;
   model: string;
+  effort?: EffortLevel;
   customBotId?: string;
   rationale: string;
   skills: string[];
@@ -478,6 +479,7 @@ export type RoutingDecision = {
   taskTier: RoutingTaskTier;
   provider: ProviderId;
   model: string;
+  effort?: EffortLevel | null;
   customBotId?: string;
   score: number;
   reason: string;

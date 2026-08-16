@@ -184,7 +184,7 @@ const TOOLS = [
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
-        effort: { type: "string", description: "Optional reasoning effort" },
+        effort: { type: "string", description: "Optional override; otherwise derived from quick, balanced, or deep" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },

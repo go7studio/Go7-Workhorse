@@ -9,6 +9,7 @@ import type {
   PlanSource,
   PlanStep,
   PlanStepStatus,
+  EffortLevel,
 } from "./types";
 
 export type PlanTransition = { ok: true; plan: PlanRun } | { ok: false; error: string };
@@ -192,6 +193,9 @@ function normalizeAssignment(raw: unknown): PlanAssignment | undefined {
     assignedAt: finite(record.assignedAt) ?? 0,
     provider,
     model: clean(record.model),
+    ...(["off", "adaptive", "low", "medium", "high", "xhigh"] as EffortLevel[]).includes(record.effort as EffortLevel)
+      ? { effort: record.effort as EffortLevel }
+      : {},
     ...(clean(record.customBotId) ? { customBotId: clean(record.customBotId) } : {}),
     rationale: clean(record.rationale),
     skills: uniqueStrings(record.skills),

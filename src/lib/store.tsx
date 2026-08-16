@@ -99,7 +99,7 @@ import {
   normalizeRouting,
   vendorAttachedForSession,
 } from "./settings";
-import { chooseRoutingDecision, routingCandidatesForDesk, routingProfileForModel } from "./routing";
+import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingProfileForModel } from "./routing";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -3506,19 +3506,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(
                   routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  { prompt: payload.message, tier: routeTier ?? (isNested ? "quick" : undefined) },
+                  { prompt: payload.message, attachments: payload.attachments, tier: routeTier ?? (isNested ? "quick" : undefined) },
                   latest.settings.routing,
                 )
               : null;
             const spawnProvider = routeDecision?.provider ?? (isNested ? "custom" : payload.provider);
             const spawnModel = routeDecision?.model ?? (isNested ? NESTED_AGENT_MODEL : payload.model);
-            const spawnEffort = routeDecision
-              ? withEffort(
-                  routeDecision.provider,
-                  routeDecision.model,
-                  isNested ? "low" : ((payload.effort as EffortLevel | undefined) ?? null),
-                )
-              : isNested ? "low" : payload.effort;
+            const selectedTier = routeDecision?.taskTier ?? routeTier ?? inferRoutingTier(payload.message, payload.attachments);
+            const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;
@@ -3541,7 +3536,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: "no parent chat to attach this subagent to" });
               return;
             }
-            const spec = resolveSpawnSpec(
+            const resolvedSpec = resolveSpawnSpec(
               {
                 fromSessionId: parent.id,
                 prompt: payload.message,
@@ -3550,12 +3545,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 model: spawnModel,
                 customBotId: routeDecision?.customBotId,
                 chat: payload.chat,
-                effort: spawnEffort ?? undefined,
+                effort: requestedEffort ?? (isNested ? "low" : undefined),
               },
               latest.sessions.filter((item) => !isHiddenSession(item) && !item.archivedAt),
               parent,
               latest.settings.customBots,
             );
+            const spec = {
+              ...resolvedSpec,
+              effort: effortForRoutingTier(
+                resolvedSpec.provider,
+                resolvedSpec.model,
+                selectedTier,
+                isNested ? "low" : requestedEffort ?? routeDecision?.effort,
+              ),
+            };
             if (vendorSendTarget(spec.provider) === "preview") {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;
@@ -3642,6 +3646,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessionId: childId,
                 provider: spec.provider,
                 model: spec.model,
+                ...(spec.effort ? { effort: spec.effort } : {}),
                 ...(spec.customBotId ? { customBotId: spec.customBotId } : {}),
                 rationale,
                 skills: assignedSkills,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   chooseRoutingDecision,
+  effortForRoutingTier,
   inferRoutingTier,
   rankRoutingCandidates,
   routingProfileForModel,
@@ -39,7 +40,11 @@ test("routing tiers keep quick work light and deep work strong", () => {
   const quick = chooseRoutingDecision(rows, { prompt: "Quick: classify this", now: Date.parse("2026-08-13T00:00:00Z") }, settings);
   const deep = chooseRoutingDecision(rows, { prompt: "Architect a production migration", now: Date.parse("2026-08-13T00:00:00Z") }, settings);
   assert.equal(quick?.model, "gpt-5.6-luna");
+  assert.equal(quick?.effort, "low");
   assert.equal(deep?.model, "gpt-5.6-sol");
+  assert.equal(deep?.effort, "high");
+  assert.equal(effortForRoutingTier("codex", "gpt-5.6-terra", "balanced"), "medium");
+  assert.equal(effortForRoutingTier("codex", "gpt-5.6-luna", "quick", "high"), "high");
 });
 
 test("capacity can move balanced work to a model with spare allowance", () => {

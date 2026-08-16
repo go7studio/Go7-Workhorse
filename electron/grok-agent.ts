@@ -709,15 +709,17 @@ export class GrokAgent {
   }
 
   /**
-   * Effort and Fast mode ride on session config options, not on session meta:
-   * the agent reads `_meta.claudeCode.options` for a couple of flags and
-   * ignores the rest, so a picked level did nothing. Only send a value the
-   * session says this model takes, which also keeps Grok and Codex out of it
-   * when they advertise no such option.
+   * Effort, Fast, agent, and (for Cursor) model ride on session config
+   * options, not on session meta: the agent reads `_meta.claudeCode.options`
+   * for a couple of flags and ignores the rest, so a picked level did
+   * nothing. Only send a value the session says this model takes, which
+   * also keeps Grok and Codex out of it when they advertise no such option.
+   * Cursor’s official ACP takes --model on argv and configId "model";
+   * try the model option even when the child advertises no list.
    */
   private async applySessionConfig(sessionId: string, sessionNew: Record<string, unknown>): Promise<void> {
     const raw = sessionNew.configOptions;
-    if (!Array.isArray(raw)) return;
+    const isCursor = (this.spec.agentLabel ?? "").trim().toLowerCase() === "cursor";
     const wanted: { id: string; value: string }[] = [];
     const effort = this.spec.effort?.trim();
     if (effort) wanted.push({ id: "effort", value: effort });
@@ -726,18 +728,39 @@ export class GrokAgent {
     }
     const agentName = this.spec.agentName?.trim();
     if (agentName) wanted.push({ id: "agent", value: agentName });
+    const model = this.spec.model?.trim();
+    if (model) wanted.push({ id: "model", value: model });
+    if (!Array.isArray(raw)) {
+      if (!isCursor || !model) return;
+      try {
+        await this.request("session/set_config_option", { sessionId, configId: "model", value: model });
+      } catch {
+        /* a preference is not a reason to lose the session */
+      }
+      return;
+    }
     for (const want of wanted) {
       const option = raw.find(
         (item): item is { id?: unknown; currentValue?: unknown; options?: unknown } =>
           Boolean(item) && typeof item === "object" && (item as { id?: unknown }).id === want.id,
       );
-      if (!option) continue;
+      if (!option) {
+        if (isCursor && want.id === "model") {
+          try {
+            await this.request("session/set_config_option", { sessionId, configId: want.id, value: want.value });
+          } catch {
+            /* a preference is not a reason to lose the session */
+          }
+        }
+        continue;
+      }
       const allowed = Array.isArray(option.options)
         ? option.options
             .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : null))
             .filter((value): value is string => typeof value === "string")
         : [];
-      if (!allowed.includes(want.value) || option.currentValue === want.value) continue;
+      if (option.currentValue === want.value) continue;
+      if (allowed.length > 0 && !allowed.includes(want.value) && !(isCursor && want.id === "model")) continue;
       try {
         await this.request("session/set_config_option", { sessionId, configId: want.id, value: want.value });
       } catch {

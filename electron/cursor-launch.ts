@@ -2,11 +2,11 @@ import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } fro
 import { APP_VERSION } from "../src/lib/app-info";
 import {
   WORKHORSE_CLIENT_CAPABILITIES,
-  WORKHORSE_SESSION_RULES,
   mergeMcpServers,
   workhorseMcpServer,
   type GrokLaunchSpec,
 } from "./grok-launch";
+import { CURSOR_SESSION_RULES } from "../src/lib/workhorse-rules";
 import {
   detectCursorLogin,
   isCursorAppCommand,
@@ -61,7 +61,7 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
   const model = resolveCursorModel(input.model);
   const effort = resolveCursorEffort(input.effort);
   const permissionMode = resolveCursorPermissionMode(input.mode);
-  const argv = ["acp"];
+  const argv = ["--model", model, "acp"];
   const builtIn = workhorseMcpServer(input.sessionId);
   const mcpServers = mergeMcpServers(input.mcpServers, builtIn);
   const env: Record<string, string> = {};
@@ -87,7 +87,7 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
       cwd: input.cwd,
       mcpServers,
       _meta: {
-        rules: WORKHORSE_SESSION_RULES,
+        rules: CURSOR_SESSION_RULES,
         model,
         effort,
         permissionMode,

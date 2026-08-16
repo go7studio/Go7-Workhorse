@@ -15,15 +15,25 @@ import { defaultModel } from "../src/lib/models";
 import { parseProviderId, resolveSpawnSpec, toolsForDeskRole, admitSpawn } from "../src/lib/subagents";
 import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../src/lib/watch";
 import { normalizeSettings } from "../src/lib/settings";
-import { buildCursorLaunchSpec, resolveCursorModel } from "../electron/cursor-launch";
+import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
 import { detectCursorLogin } from "../electron/cursor-login";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
 import { parseCursorPlanUsage } from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
+import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { buildSessionPreface } from "../src/lib/context-preface";
+import { normalizeRoutingDecision } from "../src/lib/routing";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: string; askPermission?: boolean }) {
+function fakeAcp(script: {
+  methods: string[];
+  loadFail?: boolean;
+  nextId?: string;
+  askPermission?: boolean;
+  configOptions?: unknown[];
+  configs?: Array<{ configId?: string; value?: string }>;
+}) {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -43,9 +53,16 @@ function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: strin
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.trim()) continue;
-      const message = JSON.parse(line) as { id?: number; method?: string; params?: { sessionId?: string } };
+      const message = JSON.parse(line) as {
+        id?: number;
+        method?: string;
+        params?: { sessionId?: string; configId?: string; value?: string };
+      };
       if (message.id === undefined) continue;
       script.methods.push(message.method ?? "");
+      if (message.method === "session/set_config_option") {
+        script.configs?.push({ configId: message.params?.configId, value: message.params?.value });
+      }
       if (message.method === "initialize") {
         stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`);
         continue;
@@ -63,7 +80,9 @@ function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: strin
       if (message.method === "session/new") {
         created += 1;
         const sessionId = script.nextId ?? `new-${created}`;
-        stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { sessionId } })}\n`);
+        const result: Record<string, unknown> = { sessionId };
+        if (script.configOptions) result.configOptions = script.configOptions;
+        stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`);
         continue;
       }
       if (message.method === "session/prompt") {
@@ -145,9 +164,32 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
     },
   });
   assert.equal(spec.command, "/opt/cursor-agent");
-  assert.ok(spec.argv.includes("acp"));
+  assert.deepEqual(spec.argv, ["--model", "composer-2.5", "acp"]);
   assert.equal(spec.cwd, "/proj");
   assert.equal(spec.model, "composer-2.5");
+  assert.equal(spec.sessionParams._meta?.rules, CURSOR_SESSION_RULES);
+  assert.notEqual(spec.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
+  assert.match(spec.sessionParams._meta?.rules ?? "", /You are the Cursor Agent/);
+  assert.match(spec.sessionParams._meta?.rules ?? "", /Grok, Codex, Claude, and Cursor/);
+  assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /Grok Build/);
+  assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /\/goal is Grok/);
+  assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /Run Grok/);
+  assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /update_goal/);
+  assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /shipped vendors are Grok, Codex, and Claude, plus/);
+  const other = buildCursorLaunchSpec({
+    model: "claude-4-sonnet",
+    effort: "high",
+    cwd: "/proj",
+    mode: "ask",
+    detect: {
+      env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },
+      existsSync: (file) => file === "/opt/cursor-agent",
+      pathDirs: [],
+      homedir: "/no-home",
+    },
+  });
+  assert.deepEqual(other.argv, ["--model", "claude-4-sonnet", "acp"]);
+  assert.deepEqual(cursorSpawnArgs(other).args, ["--model", "claude-4-sonnet", "acp"]);
   assert.ok(spec.sessionParams.mcpServers.some((item) => item.name === "figma"));
   assert.notEqual(spec.command.toLowerCase(), "grok");
   assert.doesNotMatch(spec.command, /Cursor\.app/i);
@@ -235,7 +277,7 @@ test("CursorSessionHost new/load/launch-key", async () => {
     },
   );
   host.disposeAll();
-  assert.deepEqual(methods, ["initialize", "session/new", "session/prompt"]);
+  assert.deepEqual(methods, ["initialize", "session/new", "session/set_config_option", "session/prompt"]);
   assert.equal(result.vendorSessionId, "cur-new");
   assert.deepEqual(opened, ["session/new"]);
 
@@ -399,10 +441,67 @@ test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {
   assert.equal(cursorExtensionResult("cursor/create_plan")?.outcome.outcome, "rejected");
 });
 
+test("Cursor applySessionConfig sets configId model", async () => {
+  const methods: string[] = [];
+  const configs: Array<{ configId?: string; value?: string }> = [];
+  const host = new CursorSessionHost(() =>
+    fakeAcp({
+      methods,
+      configs,
+      nextId: "cfg-1",
+      configOptions: [
+        {
+          id: "model",
+          currentValue: "auto",
+          options: [{ value: "composer-2.5" }, { value: "claude-4-sonnet" }],
+        },
+      ],
+    }),
+  );
+  await host.prompt(
+    {
+      sessionId: "work-cfg",
+      text: "hello",
+      model: "claude-4-sonnet",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  host.disposeAll();
+  assert.ok(methods.includes("session/set_config_option"));
+  assert.ok(configs.some((item) => item.configId === "model" && item.value === "claude-4-sonnet"));
+});
+
+test("Cursor session rules and routing hydrate do not treat Cursor as Grok", () => {
+  assert.match(CURSOR_SESSION_RULES, /You are the Cursor Agent/);
+  assert.match(CURSOR_SESSION_RULES, /Grok, Codex, Claude, and Cursor/);
+  assert.doesNotMatch(CURSOR_SESSION_RULES, /Grok Build/);
+  assert.doesNotMatch(CURSOR_SESSION_RULES, /Run Grok/);
+  assert.doesNotMatch(CURSOR_SESSION_RULES, /\/goal is Grok/);
+  assert.doesNotMatch(CURSOR_SESSION_RULES, /update_goal/);
+  const preface = buildSessionPreface({ cwd: "/proj", folders: [], references: [], surface: "cursor" });
+  assert.match(preface, /You are the Cursor Agent/);
+  assert.doesNotMatch(preface, /Grok Build/);
+  const kept = normalizeRoutingDecision({
+    provider: "cursor",
+    model: "composer-2.5",
+    taskTier: "balanced",
+    score: 4,
+    reason: "Balanced",
+    at: 1,
+  });
+  assert.equal(kept?.provider, "cursor");
+  assert.equal(kept?.model, "composer-2.5");
+  assert.equal(normalizeRoutingDecision({ provider: "mystery", model: "x" }), undefined);
+});
+
 test("store and main wire a live cursor path", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(store, /live === "cursor"/);
+  assert.match(store, /session.provider === "cursor" \? "cursor"/);
   assert.match(store, /cursorPrompt/);
   assert.doesNotMatch(store, /live === "cursor"[\s\S]{0,200}Preview only/);
   assert.match(main, /new CursorSessionHost/);

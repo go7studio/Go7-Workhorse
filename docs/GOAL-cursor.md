@@ -113,7 +113,7 @@ One child per chat, not per keystroke. Cancel is `session/cancel`. Plan fetch is
 ## Done when
 
 1. `ProviderId` includes `"cursor"`. `vendorSendTarget("cursor") === "cursor"`. `capabilitiesFor("cursor")` is Cursor, not Grok. `usageProviderForSession` never maps Cursor to Grok.
-2. New chat → Vendor Cursor → send → a real `agent acp` child answers in the project folder. Failure is `Cursor agent failed: …`, never `Preview only`.
+2. New chat → Vendor Cursor → send → a real `agent --model <slug> acp` child answers in the project folder. The picked model also goes out as `session/set_config_option` `configId: "model"`. Session rules name Cursor Agent and do not run Grok Build `/goal`. Hydrated routing keeps `provider: "cursor"`. Failure is `Cursor agent failed: …`, never `Preview only`.
 3. Stream, tools, permission bar, cancel, `session/load` resume work.
 4. `cursorUsageLane` matches the table (tests). Every Cursor usage event has a lane.
 5. Settings shows two Cursor rings plus on-demand when reported. Watch holds per lane. Composer is not held when only Other Models is spent.

@@ -55,7 +55,7 @@ Tests imported by `npm test`. Drive shipped functions.
 1. **No cross-talk.** `vendorSendTarget("cursor") === "cursor"`. Cursor send does not call `grokPrompt`. Other vendors unchanged.
 2. **capabilitiesFor / usageProviderForSession.** Cursor is not Grok. A Cursor usage event is not in the Grok rollup.
 3. **cursorUsageLane.** Full table in `GOAL-cursor.md`.
-4. **Launch spec.** Env wins; fallback `agent`/`cursor-agent`; never grok / Cursor.app; argv has `acp`; cwd set; MCP merge when env set.
+4. **Launch spec.** Env wins; fallback `agent`/`cursor-agent`; never grok / Cursor.app; argv is `--model <resolved slug> acp`; cwd set; MCP merge when env set. `applySessionConfig` sends `session/set_config_option` `configId: "model"` from `spec.model` (Cursor still tries when the child advertises no list). Session `_meta.rules` is `CURSOR_SESSION_RULES`, not Grok Build `/goal`. `normalizeRoutingDecision` keeps `provider: "cursor"`.
 5. **Resume.** Fake stdio child: new → `session/new`+`prompt`; after dispose → `load`+`prompt`; failed load → `new`; launch-key change → `new`.
 6. **Login.** Missing binary / binary no auth / key present / app bundle only.
 7. **Usage + lane.** Event has `provider: "cursor"` and lane. Inclusive-turn repair still applies.

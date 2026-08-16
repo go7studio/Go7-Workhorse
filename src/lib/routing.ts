@@ -283,7 +283,11 @@ export function normalizeRoutingDecision(raw: unknown): RoutingDecision | undefi
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<RoutingDecision>;
   if (
-    (record.provider !== "grok" && record.provider !== "codex" && record.provider !== "claude" && record.provider !== "custom") ||
+    (record.provider !== "grok" &&
+      record.provider !== "codex" &&
+      record.provider !== "claude" &&
+      record.provider !== "cursor" &&
+      record.provider !== "custom") ||
     typeof record.model !== "string" ||
     !record.model.trim()
   ) {

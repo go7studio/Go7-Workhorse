@@ -37,6 +37,20 @@ export const CUSTOM_HTTP_SESSION_RULES =
   "After you ask the user to pick, stop. Do not run a listed option or smoke test until they answer. Do not ask them to pick when they already said delete all chats not in a project. " +
   "Do not tell the user to copy-paste into a new Grok chat. Do not say you have no tools.";
 
+/** Cursor Agent on the desk — same multiplexer rules, not Grok Build. */
+export const CURSOR_SESSION_RULES = WORKHORSE_SESSION_RULES.replace(
+  "You are inside Workhorse, a desktop multiplexer.",
+  "You are the Cursor Agent inside Workhorse, a desktop multiplexer.",
+)
+  .replace(
+    "The shipped vendors are Grok, Codex, and Claude, plus any custom bots already on the desk.",
+    "The shipped vendors are Grok, Codex, Claude, and Cursor, plus any custom bots already on the desk.",
+  )
+  .replace(
+    "A user message that starts with /goal is Grok Build’s goal command, not a desk spawn. Do not call workhorse_spawn_agent for /goal even if the objective says spawn, skeptic, verifier, or subagents. Run Grok’s goal driver (update_goal, the workflow verifier, and Grok spawn_subagent). Desk spawn stays for prompts that are not /goal. ",
+    "",
+  );
+
 export const WORKER_SESSION_RULES =
   "You are a worker on the Workhorse desk. Do the assigned slice in the bound folder only. Use list_dir and read_file on that folder. Quote real files. Only if your slice explicitly requires a second independent check, you may call workhorse_spawn_agent once; Workhorse forces that helper to MiniMax-M3, low effort, at most 5,000 tokens, depth two. You may await that helper. Do not list bots or request another vendor. Do not ask the user. Do not review any other tree. Return the report as plain text.";
 

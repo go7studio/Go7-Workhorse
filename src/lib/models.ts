@@ -84,6 +84,12 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4-mini", name: "GPT-5.4-Mini", effort: true, contextWindow: 400_000 },
   ],
+  cursor: [
+    { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
+    { id: "auto-smart", name: "Auto", effort: true, contextWindow: 200_000 },
+    { id: "grok-4.6", name: "Cursor Grok 4.6", effort: true, contextWindow: 200_000 },
+    { id: "grok-4.5", name: "Cursor Grok 4.5", effort: true, contextWindow: 200_000 },
+  ],
   custom: [
     {
       id: "MiniMax-M3",
@@ -171,7 +177,7 @@ export function shortModelName(provider: ProviderId, modelIdOrName: string): str
     modelsFor(provider).find((model) => model.name === modelIdOrName) ??
     MODEL_CATALOG[provider].find((model) => model.name === modelIdOrName);
   const full = found?.name ?? modelIdOrName;
-  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", custom: "Custom" }[provider];
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
   if (vendor && full.toLowerCase().startsWith(vendor.toLowerCase())) {
     return full.slice(vendor.length).trim() || full;
   }

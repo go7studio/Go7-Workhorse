@@ -1,11 +1,12 @@
 import type { ProviderId } from "./types";
 
-export type VendorSendTarget = "grok" | "codex" | "claude" | "custom" | "preview";
+export type VendorSendTarget = "grok" | "codex" | "claude" | "cursor" | "custom" | "preview";
 
 export function vendorSendTarget(provider: ProviderId): VendorSendTarget {
   if (provider === "grok") return "grok";
   if (provider === "codex") return "codex";
   if (provider === "claude") return "claude";
+  if (provider === "cursor") return "cursor";
   if (provider === "custom") return "custom";
   return "preview";
 }
@@ -13,6 +14,7 @@ export function vendorSendTarget(provider: ProviderId): VendorSendTarget {
 export function vendorAgentLabel(provider: ProviderId): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
+  if (provider === "cursor") return "Cursor";
   if (provider === "custom") return "Custom";
   return "Grok";
 }

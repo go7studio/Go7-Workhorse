@@ -2,9 +2,9 @@ import { providerById } from "./providers";
 import type {
   CustomBot,
   GrokPlanUsage,
-  LlmLink,
   ProviderId,
   Session,
+  Settings,
   UsageEvent,
   WatchDayMark,
   WatchDayMarks,
@@ -14,7 +14,16 @@ import type {
 } from "./types";
 import { customBotEnabled } from "./custom-bots";
 import { defaultModel, modelsFor } from "./models";
-import { customBotUsageEvents, deskUsageCards, eventTotal, formatPlanReset, leftoverForCard, weeklyPlanLeftover } from "./usage";
+import {
+  cursorLaneEvents,
+  customBotUsageEvents,
+  deskUsageCards,
+  eventTotal,
+  formatPlanReset,
+  leftoverForCard,
+  weeklyPlanLeftover,
+} from "./usage";
+import { cursorUsageLane, cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
 import { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
 export { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
@@ -23,6 +32,7 @@ export type WatchPlans = {
   grok?: GrokPlanUsage;
   codex?: GrokPlanUsage;
   claude?: GrokPlanUsage;
+  cursor?: GrokPlanUsage;
   custom?: Record<string, GrokPlanUsage | undefined>;
 };
 
@@ -187,7 +197,8 @@ export function weekDayIndex(resetsAt?: string, now = Date.now()): { day: number
   return { day: mondayFirst + 1, days };
 }
 
-export function watchKeyForSession(session: Pick<Session, "provider" | "customBotId">): string {
+export function watchKeyForSession(session: Pick<Session, "provider" | "customBotId"> & { model?: string }): string {
+  if (session.provider === "cursor") return cursorWatchLane(session.model);
   return session.customBotId ? `bot:${session.customBotId}` : session.provider;
 }
 
@@ -195,7 +206,7 @@ export function deskRowForKey(
   key: string,
   settings: { customBots: CustomBot[] },
 ): {
-  focus: ProviderId | `bot:${string}`;
+  focus: ProviderId | `bot:${string}` | CursorWatchKey;
   provider: ProviderId;
   key: string;
   label: string;
@@ -214,7 +225,16 @@ export function deskRowForKey(
       bot,
     };
   }
-  const provider: ProviderId = key === "claude" || key === "codex" || key === "custom" ? key : "grok";
+  if (isCursorWatchKey(key)) {
+    return {
+      focus: key,
+      provider: "cursor",
+      key,
+      label: cursorWatchKeyLabel(key),
+    };
+  }
+  const provider: ProviderId =
+    key === "claude" || key === "codex" || key === "cursor" || key === "custom" ? key : "grok";
   return {
     focus: provider,
     provider,
@@ -239,6 +259,7 @@ export function eventsForWatchKey(
 ): UsageEvent[] {
   const row = deskRowForKey(key, settings);
   if (row.bot) return customBotUsageEvents(events, row.bot);
+  if (isCursorWatchKey(key)) return cursorLaneEvents(events, key);
   return events.filter((event) => event.provider === row.provider);
 }
 
@@ -348,7 +369,7 @@ export function pruneWatchPermits(permits: WatchPermits, now = Date.now()): Watc
 }
 
 export function evaluateWatchHold(input: {
-  session: Pick<Session, "provider" | "customBotId"> & { id?: string; parentId?: string };
+  session: Pick<Session, "provider" | "customBotId"> & { model?: string; id?: string; parentId?: string };
   settings: { watch?: WatchSettings; customBots: CustomBot[] };
   plans: WatchPlans;
   permits: WatchPermits;
@@ -507,13 +528,16 @@ function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: num
 
 function watchShowsCard(
   card: { focus: string; provider: ProviderId; key: string },
-  settings: { llms: { grok: LlmLink; claude: LlmLink; codex: LlmLink }; customBots: CustomBot[] },
+  settings: { llms: Settings["llms"]; customBots: CustomBot[] },
 ): boolean {
   if (card.provider === "custom" || String(card.focus).startsWith("bot:")) {
     const id = String(card.focus).startsWith("bot:") ? String(card.focus).slice(4) : card.key;
     return customBotEnabled(settings.customBots.find((bot) => bot.id === id));
   }
-  const link = settings.llms[card.provider === "claude" || card.provider === "codex" ? card.provider : "grok"];
+  const link =
+    card.provider === "claude" || card.provider === "codex" || card.provider === "cursor"
+      ? settings.llms[card.provider]
+      : settings.llms.grok;
   return Boolean(link?.connected) && link?.enabled !== false;
 }
 
@@ -521,7 +545,7 @@ export function watchVendorStatuses(input: {
   settings: {
     watch?: WatchSettings;
     usageBudgets: Partial<Record<ProviderId, number>>;
-    llms: { grok: LlmLink; claude: LlmLink; codex: LlmLink };
+    llms: Settings["llms"];
     customBots: CustomBot[];
   };
   usage: UsageEvent[];
@@ -561,6 +585,7 @@ export function watchVendorStatuses(input: {
     const hold = evaluateWatchHold({
       session: {
         provider: card.provider,
+        model: key === "cursor:other-models" ? "claude-sonnet" : key === "cursor:cursor-models" ? "composer-2.5" : "",
         customBotId: key.startsWith("bot:") ? key.slice(4) : undefined,
       },
       settings: input.settings,
@@ -624,7 +649,7 @@ export type DeskCallRow = {
   reason?: string;
 };
 
-const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 function deskCallRow(input: {
   key: string;
@@ -688,7 +713,7 @@ export function deskCallCatalog(input: {
   settings: {
     watch?: WatchSettings;
     usageBudgets: Partial<Record<ProviderId, number>>;
-    llms: { grok: LlmLink; claude: LlmLink; codex: LlmLink };
+    llms: Settings["llms"];
     customBots: CustomBot[];
   };
   usage: UsageEvent[];
@@ -703,6 +728,51 @@ export function deskCallCatalog(input: {
   for (const id of DESK_STOCK) {
     const link = input.settings.llms[id];
     if (link?.connected && link.enabled === false) continue;
+    if (id === "cursor") {
+      const composer = byKey.get("cursor:cursor-models");
+      const api = byKey.get("cursor:other-models");
+      const connected = Boolean(link?.connected);
+      const enabled = Boolean(link?.connected && link?.enabled !== false);
+      const composerModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "cursor-models" || item.id === "auto-smart");
+      const apiModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "other-models");
+      rows.push(
+        deskCallRow({
+          key: "cursor:cursor-models",
+          name: composer?.label ?? "Cursor · Composer",
+          provider: "cursor",
+          model: "composer-2.5",
+          models: composerModels.map((item) => ({ id: item.id, name: item.name })),
+          kind: "vendor",
+          connected,
+          enabled,
+          leftover: composer?.leftover,
+          usedPercent: composer?.usedPercent,
+          allowedPercent: composer?.allowedPercent,
+          overPercent: composer?.overPercent,
+          resetsAt: composer?.resetsAt,
+          holding: Boolean(composer?.holding),
+        }),
+      );
+      rows.push(
+        deskCallRow({
+          key: "cursor:other-models",
+          name: api?.label ?? "Cursor · API",
+          provider: "cursor",
+          model: apiModels[0]?.id,
+          models: apiModels.map((item) => ({ id: item.id, name: item.name })),
+          kind: "vendor",
+          connected,
+          enabled,
+          leftover: api?.leftover,
+          usedPercent: api?.usedPercent,
+          allowedPercent: api?.allowedPercent,
+          overPercent: api?.overPercent,
+          resetsAt: api?.resetsAt,
+          holding: Boolean(api?.holding),
+        }),
+      );
+      continue;
+    }
     const status = byKey.get(id);
     rows.push(
       deskCallRow({
@@ -757,7 +827,7 @@ export function vendorCallBlocked(
   input: Parameters<typeof evaluateWatchHold>[0] & {
     settings: {
       customBots: CustomBot[];
-      llms?: { grok: LlmLink; claude: LlmLink; codex: LlmLink };
+      llms?: Settings["llms"];
     };
   },
 ): string | null {

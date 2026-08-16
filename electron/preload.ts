@@ -113,6 +113,20 @@ contextBridge.exposeInMainWorld("workhorse", {
       ipcRenderer.removeListener("claude:event", listener);
     };
   },
+  detectCursorLogin: () =>
+    ipcRenderer.invoke("cursor:detect-login") as Promise<import("./cursor-login").CursorLoginDetectResult>,
+  cursorPrompt: (input: GrokPromptInput) => ipcRenderer.invoke("cursor:prompt", input),
+  cursorAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
+    ipcRenderer.invoke("cursor:answer-permission", { requestId, answer }),
+  cursorCancel: (sessionId: string) => ipcRenderer.invoke("cursor:cancel", sessionId),
+  cursorPlanUsage: () => ipcRenderer.invoke("cursor:plan-usage") as Promise<import("../src/lib/types").GrokPlanUsage | null>,
+  onCursorEvent: (handler: (event: GrokIpcEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: GrokIpcEvent) => handler(payload);
+    ipcRenderer.on("cursor:event", listener);
+    return () => {
+      ipcRenderer.removeListener("cursor:event", listener);
+    };
+  },
   detectCustomLogin: () => ipcRenderer.invoke("custom:detect"),
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>
     ipcRenderer.invoke("custom:probe", config),

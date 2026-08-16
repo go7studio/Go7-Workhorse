@@ -5,7 +5,7 @@
   "baselineRef": "5d02f78e79a688b316aba9d4f6575df909b2a52b",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
-  "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+  "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
   "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "capabilities", "usage", "reliability"],
   "areas": [
     {
@@ -18,7 +18,7 @@
           "id": "SET-S1",
           "name": "Fresh launch explains the desk and inventories recognized harnesses",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Launch with a fresh isolated user-data directory and capture the first screen before clicking anything.",
             "Verify Getting Started exposes project, folder, chat, model, and permission entry points without tutorial prose.",
@@ -32,7 +32,7 @@
           "id": "SET-S2",
           "name": "Connect stock harnesses and add both custom API shapes",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Open Settings to the connected-LLM surface from both onboarding and /settings.",
             "Inspect detected Grok, Codex, and Claude rows without changing their vendor-owned login state.",
@@ -73,7 +73,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S1", "SET-S2"],
           "passCriteria": "Grok, Codex, Claude, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
           "evidence": "Harness inventory screenshots plus detection payloads with secrets removed.",
@@ -96,7 +96,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "manual",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S2"],
           "passCriteria": "A known canary secret is absent from every collected artifact and normal state backup; custom keys are recovered only through the credential boundary.",
           "evidence": "Redacted state inspection, support report, artifact scan, and credential-store test output."
@@ -118,7 +118,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "scenarios": ["SET-S3"],
           "passCriteria": "Profile/appearance persist, but changing one provider never changes another provider's login, plan, context, or security configuration.",
           "evidence": "Pre/post restart state, screenshots, and provider detection comparison."
@@ -187,7 +187,7 @@
           "weight": 2,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["PRJ-S1"],
           "passCriteria": "Primary cwd is explicit, additional folders/references are discoverable, and no provider is told it has filesystem access that the shell did not grant.",
           "evidence": "Project UI, generated preface, and provider-side cwd/tool evidence."
@@ -198,7 +198,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["PRJ-S1"],
           "passCriteria": "New chat never blocks on a brain picker; unattached providers are not silently selected; the composer remains the model-selection surface.",
           "evidence": "New-chat transcript and composer/model-menu screenshots."
@@ -209,7 +209,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["PRJ-S2"],
           "passCriteria": "After /rename or inline rename, at least three later turns and a restart leave the exact manual title unchanged.",
           "evidence": "Title timeline with timestamps, provider title events if any, and final sidebar screenshot."
@@ -248,7 +248,7 @@
           "id": "MOD-S1",
           "name": "Trace selected identity through every stock adapter",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "steps": [
             "For each enabled stock profile, select a non-default model and supported effort.",
             "Send a deterministic identity probe.",
@@ -260,7 +260,7 @@
           "id": "MOD-S2",
           "name": "Switch models and providers mid-chat without stale identity",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "steps": [
             "Establish a distinctive first-provider fact and collect one response.",
             "Switch model within the same provider, then switch to a different provider.",
@@ -284,7 +284,7 @@
           "id": "MOD-S4",
           "name": "Run bounded live adapter smoke calls without broad fan-out",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Keep MiniMax-M3 as the primary evaluator and call each explicitly enabled stock/API or OAuth profile at most once with a short deterministic identity response.",
             "Capture selected provider/model, launch or request evidence, exact reply, duration, and usage without exposing credentials or hidden context.",
@@ -301,7 +301,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["MOD-S1", "MOD-S3"],
           "passCriteria": "A cache/catalog row is never presented as proof of installed availability or successful authentication.",
           "evidence": "Detection payload, cache/catalog source, model menu, and connection state."
@@ -312,7 +312,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["MOD-S1", "MOD-S3"],
           "passCriteria": "Exact identifiers match between session state and launch/request evidence for every enabled profile.",
           "evidence": "Sanitized session state, launch arguments or HTTP body, and profile id."
@@ -323,7 +323,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["MOD-S1", "MOD-S3"],
           "passCriteria": "Unsupported levels are not offered or silently coerced; adaptive/off/max/ultra distinctions remain provider-specific.",
           "evidence": "Model menu choices and launch/request reasoning fields."
@@ -334,7 +334,7 @@
           "weight": 3,
           "type": "roundtrip",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["MOD-S1", "MOD-S3"],
           "passCriteria": "Selection, launch/request, runtime, transcript, and usage form one consistent provenance chain; missing runtime identity is labeled unknown, not guessed.",
           "evidence": "Five-layer provenance record defined in provider-matrix.json."
@@ -345,7 +345,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "scenarios": ["MOD-S2"],
           "passCriteria": "Old vendor ids/grants are absent after cross-provider switch; new messages and usage carry the new identity; portable history is explicit.",
           "evidence": "Before/after session state, provider request, transcript stamps, and usage rows."
@@ -356,7 +356,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["MOD-S2", "MOD-S3"],
           "passCriteria": "Fallback is either refused or visibly recorded with actual identity; manual titles stay locked; every assistant turn retains its brain stamp.",
           "evidence": "Fallback probe, message records, title timeline, and final sidebar/composer labels."
@@ -384,7 +384,7 @@
           "id": "CMD-S1",
           "name": "Inventory the command palette and aliases for every provider",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Open the slash palette in one chat per profile and capture the common command set.",
             "Exercise every documented alias through typed input, not only palette clicks.",
@@ -396,7 +396,7 @@
           "id": "CMD-S2",
           "name": "Run the complete /goal lifecycle across providers",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Use /goal with the same deterministic objective in each profile.",
             "Check /goal status, pause, resume, and clear.",
@@ -408,7 +408,7 @@
           "id": "CMD-S3",
           "name": "Compare canonical schedule, compact, plan, and native loop behavior",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create a recurring /schedule in every profile without waiting for its due time.",
             "Inspect /plan translation and verify tool restrictions before approval.",
@@ -424,7 +424,7 @@
           "weight": 3,
           "type": "exists",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S1"],
           "passCriteria": "Every command in command-contract.json is reachable with the declared aliases and has an observable effect or explicit input requirement.",
           "evidence": "Per-profile command inventory and alias action transcript."
@@ -435,7 +435,7 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S1", "CMD-S3"],
           "passCriteria": "Each command either maps to the correct provider control, is supplied by Workhorse, or is marked unavailable; no no-op success is allowed.",
           "evidence": "Command action, capability registry row, and launch/request/security effect."
@@ -446,7 +446,7 @@
           "weight": 3,
           "type": "roundtrip",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S2"],
           "passCriteria": "The same objective and lifecycle state are visible regardless of attached provider; control commands remain quiet; active state recovers.",
           "evidence": "Goal state timeline, transcript diff, restart state, and provider prompts."
@@ -457,7 +457,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S3"],
           "passCriteria": "Native versus Workhorse ownership is visible; keep-note is preserved; no provider is credited with a native compact it did not execute.",
           "evidence": "Capability label, compact event/checkpoint, and restored-context probe."
@@ -468,7 +468,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S3"],
           "passCriteria": "A write attempt in plan mode is blocked or requires an explicit mode transition; the UI does not claim a vendor-native plan when Workhorse is enforcing it.",
           "evidence": "Mode UI, provider launch/request, write-attempt result, and permission record."
@@ -479,7 +479,7 @@
           "weight": 2,
           "type": "depth",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S3"],
           "passCriteria": "Every profile can create a persisted Workhorse schedule; native /loop appears only when discovered; the user can tell which mechanism survives a Workhorse restart.",
           "evidence": "Schedule records, provider-native command inventory, and ownership labels."
@@ -496,7 +496,7 @@
           "id": "SEC-S1",
           "name": "Translate the unified permission inbox",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Request a fixture file read, a fixture file write, and a harmless command in Ask mode.",
             "Choose Deny, Allow once, and Allow for session on separate requests.",
@@ -508,7 +508,7 @@
           "id": "SEC-S2",
           "name": "Probe filesystem, network, and outside-workspace boundaries",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Repeat safe read/write probes under off, workspace, read-only, and strict where supported.",
             "Attempt a fixture-only network request with network blocked, ask, and allowed.",
@@ -520,7 +520,7 @@
           "id": "SEC-S3",
           "name": "Exercise MCP, desk tools, subagents, and cancellation",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Attach a deterministic local MCP fixture and invoke one read-only and one approval-requiring tool.",
             "For the OpenAI-compatible lane, stream one argument-bearing desk-tool call with its name and JSON arguments split across multiple chunks and verify execution waits for complete per-id/index accumulation.",
@@ -537,7 +537,7 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S1"],
           "passCriteria": "Decisions are scoped to the exact request/session, denials stop execution, and provider switches clear stale grants.",
           "evidence": "Permission UI, normalized request, provider response, and filesystem/command outcome."
@@ -548,7 +548,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S2"],
           "passCriteria": "Each boundary can be varied independently; Workhorse versus native enforcement is visible; blocked actions leave no side effect.",
           "evidence": "Policy state, capability label, provider launch/request, and canary outcomes."
@@ -559,7 +559,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S2"],
           "passCriteria": "Network/outside-root blocks remain blocks in always-approve; no prompt or provider flag can escalate beyond the Workhorse policy.",
           "evidence": "Security decision trace and absence of network/file side effect."
@@ -570,7 +570,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S2"],
           "passCriteria": "A fixture write cannot complete in plan/read-only state; the transition and resulting authority are visible.",
           "evidence": "Mode/sandbox state, write attempt, permission trace, and fixture checksum."
@@ -581,7 +581,7 @@
           "weight": 2,
           "type": "roundtrip",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S3"],
           "passCriteria": "The same fixture tool produces equivalent visible results; split streaming tool-call fragments are accumulated and executed exactly once with complete arguments; secrets remain redacted; approval-required calls stop on deny.",
           "evidence": "MCP request/result, permission event, tool row, and artifact secret scan."
@@ -592,7 +592,7 @@
           "weight": 2,
           "type": "depth",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S3"],
           "passCriteria": "Parent/child identity, runtime/token ceilings, isolation mode, changed files, and final/cancel state are visible or honestly unsupported.",
           "evidence": "Subagent records, worktree path, resource counters, changed-file review, and cancellation outcome."
@@ -609,7 +609,7 @@
           "id": "CON-S1",
           "name": "Resume the same chat after window and process restarts",
           "executor": "restart",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create a provider-specific fact, tool result, and unresolved next step.",
             "Close and reopen the window, then terminate and restart the app process.",
@@ -621,7 +621,7 @@
           "id": "CON-S2",
           "name": "Switch providers using canonical portable history",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Establish decisions across several complete turns and include tool/thought rows.",
             "Switch to each other profile in sequence.",
@@ -633,7 +633,7 @@
           "id": "CON-S3",
           "name": "Fork, rewind, queue, cancel, and compact without corrupting lineage",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Fork from a known turn and make divergent decisions in parent and child.",
             "Queue a follow-up while a long fixture turn is running, then cancel.",
@@ -649,7 +649,7 @@
           "weight": 3,
           "type": "reliability",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S1"],
           "passCriteria": "The chat resumes without duplicate/missing turns; native session load is used when claimed, otherwise portable replay is explicit.",
           "evidence": "Pre/post state, vendor session id/load trace, transcript diff, and fact probe."
@@ -660,7 +660,7 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S2"],
           "passCriteria": "Opening decisions and recent complete turns survive; brain stamps are retained; truncation and checkpoint boundaries are disclosed.",
           "evidence": "Serialized portable history, source transcript, and receiving-provider prompt."
@@ -671,7 +671,7 @@
           "weight": 2,
           "type": "roundtrip",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S3"],
           "passCriteria": "Divergent turns stay isolated, lineage is navigable, and native versus Workhorse ownership is visible.",
           "evidence": "Parent/child ids, transcript comparison, lineage UI, and vendor operation trace."
@@ -682,7 +682,7 @@
           "weight": 2,
           "type": "reliability",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S3"],
           "passCriteria": "Post-compact probe recovers the keep-note and key decisions; checkpoint/native source is identifiable.",
           "evidence": "Compact event/checkpoint, context counters, and post-compact answers."
@@ -693,7 +693,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S3"],
           "passCriteria": "Canceled output remains canceled, queued work executes once in order, and every result retains its original chat/provider/model identity.",
           "evidence": "Event timeline, queue record, cancel acknowledgement, transcript, and usage rows."
@@ -704,7 +704,7 @@
           "weight": 2,
           "type": "scoping",
           "testability": "manual",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CON-S2", "CON-S3"],
           "passCriteria": "Latest-reply copy is exact, export marks provider/model transitions, and hidden prompts/tool credentials are absent.",
           "evidence": "Clipboard/export artifact and secret/hidden-context scan."
@@ -721,7 +721,7 @@
           "id": "ORC-S1",
           "name": "Delegate parallel read-only work and synthesize linked child results",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create an isolated parent chat with a bounded goal and ask it to delegate two independent read-only investigations in parallel.",
             "Require distinct child titles, explicit provider/model/effort, a short rationale, and no file changes.",
@@ -735,7 +735,7 @@
           "id": "ORC-S2",
           "name": "Choose the right agent by user assignment or explainable skill-aware routing",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create three fixture tasks whose needs differ: repository research, visual UI inspection, and deterministic code verification.",
             "For one task, explicitly assign provider, model, effort, skills, tools, timeout, token budget, and isolation.",
@@ -748,7 +748,7 @@
           "id": "ORC-S3",
           "name": "Attach prior context, message an existing chat, and address sessions truthfully",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create two live chats with similar titles but distinct immutable Workhorse session IDs, providers, models, and canary facts.",
             "From chat A, read or attach chat B as prior context and verify B is not awakened or modified.",
@@ -762,7 +762,7 @@
           "id": "ORC-S4",
           "name": "Run one goal-owning orchestrator through iteration and terminal states",
           "executor": "restart",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "steps": [
             "Set a measurable /goal with an explicit evidence-based completion condition, allowed scope, budget, timeout, and maximum concurrency.",
             "Verify the parent records a plan or next action, delegates only bounded independent work, and continues useful local work while children run.",
@@ -793,7 +793,7 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1"],
           "passCriteria": "At least two children overlap in time, streamed tool arguments are accumulated and each spawn executes exactly once with complete arguments, the parent remains addressable, each child has its own context, and the parent produces one evidence-linked synthesis.",
           "evidence": "Parent/child event timeline, linked transcripts, runtime process/session identifiers, and final synthesis.",
@@ -805,7 +805,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1", "ORC-S2"],
           "passCriteria": "Requested and observed runtime identity agree, inherited values say they were inherited, and every listed field is inspectable from parent and child views or an evidence export.",
           "evidence": "Spawn request, runtime observation, child header, transcript, usage row, isolation record, and file diff.",
@@ -817,7 +817,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S2"],
           "passCriteria": "A user override always wins; automatic routing names the evidence for its choice; unavailable requirements produce an explicit question or downgrade rather than silent substitution.",
           "evidence": "Task requirements, candidate capability cards, routing explanation, user override, launch request, and failure/downgrade transcript.",
@@ -829,7 +829,7 @@
           "weight": 3,
           "type": "roundtrip",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S3"],
           "passCriteria": "The immutable target ID resolves exactly once despite title changes; the target transcript receives a peer turn, its assigned runtime answers, and the correlated reply returns to the sender.",
           "evidence": "Session catalog, address resolution, peer-inbox record, both transcripts, runtime launch/response, and correlation IDs.",
@@ -841,7 +841,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S3"],
           "passCriteria": "Reading context never wakes the source chat; messaging creates a peer turn; resume continues the same child ID; spawn creates a new child ID; labels and audit events use the correct verb.",
           "evidence": "Before/after session state, operation events, transcripts, child IDs, and UI labels.",
@@ -853,7 +853,7 @@
           "weight": 2,
           "type": "reliability",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "scenarios": ["ORC-S1", "ORC-S4"],
           "passCriteria": "Queued, starting, running, needs-input, completed, failed, cancelled, timed-out, and budget-exceeded are distinguishable; controls affect only the selected child; completed transcripts remain inspectable.",
           "evidence": "Lifecycle event log, parent agent tray, child view, control acknowledgements, and persisted evidence.",
@@ -865,7 +865,7 @@
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "scenarios": ["ORC-S4"],
           "passCriteria": "Set and resume trigger useful work rather than acknowledgement; progress/checkpoints persist; complete requires its evidence condition; blocked, paused, cancelled, budget, and timeout states stop further dispatch.",
           "evidence": "Goal state history, plan/checkpoints, delegation graph, evidence reconciliation, restart state, and terminal-state event.",
@@ -877,7 +877,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4"],
           "passCriteria": "No child inherits broader authority than the parent or user assignment; shared writers are serialized or rejected; worktree results are reviewable; limits stop only intended work and conflicts are explicit.",
           "evidence": "Per-child policy snapshot, launch/isolation record, overlapping-file probe, conflict list, limit event, and provider-plan decision.",
@@ -889,7 +889,7 @@
           "weight": 3,
           "type": "reliability",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S3", "ORC-S4"],
           "passCriteria": "Interrupted running children recover as explicit interrupted/failed work, completed work is not re-dispatched, peer requests/replies deduplicate, and stale/archived/deleted targets fail with an actionable reason.",
           "evidence": "Pre/post restart orchestration graph, inbox records, delivery correlation, duplicate probe, and terminal states.",
@@ -901,7 +901,7 @@
           "weight": 2,
           "type": "rule",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S1", "ORC-S2", "ORC-S4", "ORC-S5"],
           "passCriteria": "A worker may create exactly one quick-tier helper within depth two and the configured budget; MiniMax-M3 remains the fallback; a second nested child or great-grandchild is rejected before a provider call; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
           "evidence": "Capability discovery, three-level lineage fixture, limit rejection, descendant transcripts, policy snapshots, and usage rollup.",
@@ -919,7 +919,7 @@
           "id": "CAP-S1",
           "name": "Route quick, balanced, and deep work with an auditable decision",
           "executor": "unit",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Enable automatic routing and fixture Sol, Terra, Luna, MiniMax, and one local model with explicit capabilities.",
             "Route equivalent quick, balanced, and deep prompts and capture every ranked candidate and reason.",
@@ -945,7 +945,7 @@
           "id": "CAP-S3",
           "name": "Attach images, documents, audio, video, and ordinary files safely",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Add one supported image, text file, PDF, office document, audio clip, and video by picker and drag/drop.",
             "Verify names, kinds, sizes, source paths, persistence, removal, and restart behavior.",
@@ -962,7 +962,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CAP-S1"],
           "passCriteria": "Tier, selected provider/model, alternatives, and concise reason are deterministic; disabling Auto preserves the manual selection.",
           "evidence": "Routing fixtures, ranked decisions, session state, and manual-pin comparison."
@@ -973,7 +973,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CAP-S1", "CAP-S3"],
           "passCriteria": "Unsupported candidates are excluded, custom overrides persist, and selected, launched, observed, transcript, and usage identities reconcile.",
           "evidence": "Model profiles, exclusion reasons, five-layer identity chain, and mismatch probe."
@@ -1006,7 +1006,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CAP-S1"],
           "passCriteria": "Automatic children record their decision; explicit child assignments win; unavailable routes fail clearly; lineage and spend remain attached to the root.",
           "evidence": "Spawn payloads, child sessions, lineage, routing decisions, limit rejections, and usage rollup."
@@ -1028,7 +1028,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CAP-S3"],
           "passCriteria": "Images are native, PDF is native where supported, MP3/WAV is native only for audio-enabled compatible bots, video supplies frames, and every fallback is visible to the model.",
           "evidence": "ACP and HTTP request bodies, capability toggles, frame records, and fallback assertions."
@@ -1056,7 +1056,7 @@
           "id": "USG-S1",
           "name": "Reconcile turn usage by provider and actual model",
           "executor": "provider",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Record the empty baseline, then send one deterministic prompt per profile.",
             "Capture raw provider/API usage events and the finalized Workhorse usage row.",
@@ -1080,7 +1080,7 @@
           "id": "USG-S3",
           "name": "Export a support-safe provider report",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Seed canary prompt text, URL, key, environment value, and file content.",
             "Export diagnostics/support information.",
@@ -1096,7 +1096,7 @@
           "weight": 3,
           "type": "provenance",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["USG-S1"],
           "passCriteria": "Provider/model rows match the provenance chain and no preview, failed preflight, or canceled-before-send turn invents tokens.",
           "evidence": "Raw events, finalized usage rows, and Usage UI."
@@ -1107,7 +1107,7 @@
           "weight": 3,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["USG-S1"],
           "passCriteria": "Known cumulative fixtures and live event sequences reconcile exactly once across input/output/cache/cost.",
           "evidence": "Event sequence, deduplication trace, final totals, and independent arithmetic."
@@ -1129,7 +1129,7 @@
           "weight": 2,
           "type": "roundtrip",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["USG-S1"],
           "passCriteria": "Historical rows retain stable provider/model keys and range totals equal their underlying events after restart.",
           "evidence": "Usage state before/after restart, range totals, and model catalog change probe."
@@ -1151,7 +1151,7 @@
           "weight": 3,
           "type": "scoping",
           "testability": "manual",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["USG-S3"],
           "passCriteria": "Safe build/detection/capability metadata exists and every seeded canary is absent.",
           "evidence": "Support report plus automated canary scan."

@@ -37,7 +37,7 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
-type Focus = ProviderId | `bot:${string}` | "overview";
+type Focus = ProviderId | `bot:${string}` | "overview" | "cursor:cursor-models" | "cursor:other-models";
 
 function SplitBar({
   label,
@@ -328,6 +328,8 @@ export function UsagePane({
     refreshCodexPlan,
     claudePlan,
     refreshClaudePlan,
+    cursorPlan,
+    refreshCursorPlan,
     customPlans,
     refreshCustomPlans,
     settings,
@@ -390,14 +392,15 @@ export function UsagePane({
       refreshGrokPlan();
       refreshCodexPlan();
       refreshClaudePlan();
+      refreshCursorPlan();
       refreshCustomPlans();
     };
     pull();
     const timer = window.setInterval(pull, 180_000);
     return () => window.clearInterval(timer);
-  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCustomPlans]);
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
 
-  const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans };
+  const deskPlans = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
   const plan = focused ? leftoverForCard(focused, deskPlans) : undefined;
   const timeWindows = planTimeWindows(plan);
   const claudePick = pickClaudeWindow(focused?.provider === "claude" ? plan : claudePlan, claudeWindow);

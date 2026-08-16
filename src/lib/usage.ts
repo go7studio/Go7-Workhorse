@@ -1,7 +1,8 @@
 import { contextWindowFor, modelsFor, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
 import { vendorLabel, vendorTint } from "./settings";
-import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, UsageDraft, UsageEvent, UsageRange } from "./types";
+import { cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
+import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange } from "./types";
 
 export type UsageTotals = {
   inputTokens: number;
@@ -134,15 +135,15 @@ export function byProvider(events: UsageEvent[]): UsageGroup[] {
 }
 
 export type DeskUsageCard = UsageGroup & {
-  focus: ProviderId | `bot:${string}`;
+  focus: ProviderId | `bot:${string}` | CursorWatchKey;
   color?: string;
 };
 
-const DESK_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const DESK_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function usageProviderForSession(session?: { provider?: ProviderId } | null): ProviderId {
   const provider = session?.provider;
-  if (provider === "claude" || provider === "codex" || provider === "custom") return provider;
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "custom") return provider;
   return "grok";
 }
 
@@ -174,16 +175,39 @@ export function rehomeCustomUsage(
   });
 }
 
+export function cursorLaneEvents(events: UsageEvent[], key: CursorWatchKey): UsageEvent[] {
+  return events.filter((event) => {
+    if (event.provider !== "cursor") return false;
+    if (event.lane === "other-models" || event.lane === "auto-routed") return key === "cursor:other-models";
+    if (event.lane === "cursor-models" || event.lane === "auto-cost") return key === "cursor:cursor-models";
+    return cursorWatchLane(event.model) === key;
+  });
+}
+
 export function deskUsageCards(
   events: UsageEvent[],
   settings: {
-    llms: { grok: LlmLink; claude: LlmLink; codex: LlmLink };
+    llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink };
     customBots: CustomBot[];
   },
 ): DeskUsageCard[] {
   const cards: DeskUsageCard[] = [];
   for (const id of DESK_VENDORS) {
     if (!settings.llms[id]?.connected) continue;
+    if (id === "cursor") {
+      for (const key of ["cursor:cursor-models", "cursor:other-models"] as const) {
+        const slice = cursorLaneEvents(events, key);
+        cards.push({
+          key,
+          focus: key,
+          label: cursorWatchKeyLabel(key),
+          provider: "cursor",
+          color: vendorTint("cursor", settings.llms.cursor),
+          ...rollup(slice),
+        });
+      }
+      continue;
+    }
     const slice = events.filter((event) => event.provider === id);
     cards.push({
       key: id,
@@ -281,14 +305,36 @@ export function leftoverForCard(
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;
     claude?: GrokPlanUsage;
+    cursor?: GrokPlanUsage;
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
 ): GrokPlanUsage | undefined {
   if (row.focus.startsWith("bot:")) return plans.custom?.[row.key];
+  if (isCursorWatchKey(String(row.focus))) {
+    return cursorLanePlan(plans.cursor, row.focus as CursorWatchKey);
+  }
+  if (row.provider === "cursor") {
+    return cursorLanePlan(plans.cursor, cursorWatchLane(row.key));
+  }
   if (row.provider === "grok") return plans.grok;
   if (row.provider === "codex") return plans.codex;
   if (row.provider === "claude") return plans.claude;
   return undefined;
+}
+
+export function cursorLanePlan(plan: GrokPlanUsage | undefined, key: CursorWatchKey): GrokPlanUsage | undefined {
+  if (!plan) return undefined;
+  const productName = key === "cursor:other-models" ? "other-models" : "cursor-models";
+  const product = plan.products.find((item) => item.product === productName);
+  if (!product) return undefined;
+  return {
+    usedPercent: product.usagePercent,
+    leftPercent: Math.max(0, 100 - product.usagePercent),
+    period: "monthly",
+    resetsAt: product.resetsAt ?? plan.resetsAt,
+    prepaidBalance: 0,
+    products: [product],
+  };
 }
 
 const TIME_WINDOW = /^(session|weekly(_all|_scoped)?|primary|interval|five_hour|5h)$/i;

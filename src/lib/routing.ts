@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { customBotEnabled } from "./custom-bots";
 import { modelsFor } from "./models";
+import { cursorWatchLane } from "./cursor-lane";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export type RoutingCapacity = {
@@ -48,10 +49,10 @@ export function routingCandidatesForDesk(
 ): RoutingCandidate[] {
   const status = new Map(statuses.map((item) => [item.key, item]));
   const candidates: RoutingCandidate[] = [];
-  for (const provider of ["grok", "codex", "claude"] as const) {
+  for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
     const link = settings.llms[provider];
     if (!link.connected || link.enabled === false) continue;
-    const capacity = status.get(provider);
+    const capacity = status.get(provider === "cursor" ? "cursor:cursor-models" : provider);
     const plan = plans[provider];
     for (const model of modelsFor(provider)) {
       const slug = model.id.toLowerCase();
@@ -62,6 +63,8 @@ export function routingCandidatesForDesk(
         const key = `${item.product} ${item.label}`.toLowerCase();
         return key.includes(slug) || identityParts.some((part) => key.includes(part));
       });
+      const laneCapacity =
+        provider === "cursor" ? status.get(cursorWatchLane(model.id)) : capacity;
       candidates.push({
         provider,
         model: model.id,
@@ -69,8 +72,8 @@ export function routingCandidatesForDesk(
         connected: true,
         profile: routingProfileForModel(provider, model.id),
         capacity: {
-          usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-          resetsAt: product?.resetsAt ?? capacity?.resetsAt,
+          usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
+          resetsAt: product?.resetsAt ?? laneCapacity?.resetsAt ?? capacity?.resetsAt,
         },
       });
     }
@@ -280,7 +283,11 @@ export function normalizeRoutingDecision(raw: unknown): RoutingDecision | undefi
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<RoutingDecision>;
   if (
-    (record.provider !== "grok" && record.provider !== "codex" && record.provider !== "claude" && record.provider !== "custom") ||
+    (record.provider !== "grok" &&
+      record.provider !== "codex" &&
+      record.provider !== "claude" &&
+      record.provider !== "cursor" &&
+      record.provider !== "custom") ||
     typeof record.model !== "string" ||
     !record.model.trim()
   ) {

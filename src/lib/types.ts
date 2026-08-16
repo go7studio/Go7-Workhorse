@@ -1,4 +1,4 @@
-export type ProviderId = "grok" | "claude" | "codex" | "custom";
+export type ProviderId = "grok" | "claude" | "codex" | "cursor" | "custom";
 
 export type PermissionMode = "ask" | "accept-edits" | "always-approve" | "plan";
 
@@ -405,6 +405,7 @@ export type Settings = {
     grok: LlmLink;
     claude: LlmLink;
     codex: LlmLink;
+    cursor: LlmLink;
     custom: CustomLlm;
   };
   customBots: CustomBot[];
@@ -449,6 +450,8 @@ export type UsageEvent = {
   costUsd?: number;
   /** Context retained by the model for the final request in this turn. */
   contextUsed?: number;
+  /** Cursor two-pool lane. Required on new Cursor events. */
+  lane?: import("./cursor-lane").CursorUsageLane;
 };
 
 export type UsageDraft = {
@@ -463,6 +466,7 @@ export type UsageDraft = {
   cacheWriteTokens?: number;
   costUsd?: number;
   contextUsed?: number;
+  lane?: import("./cursor-lane").CursorUsageLane;
 };
 
 export type AppState = {

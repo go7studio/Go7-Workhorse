@@ -161,6 +161,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
       existsSync: (file) => file === "/opt/cursor-agent",
       pathDirs: [],
       homedir: "/no-home",
+      platform: "linux",
     },
   });
   assert.equal(spec.command, "/opt/cursor-agent");
@@ -186,6 +187,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
       existsSync: (file) => file === "/opt/cursor-agent",
       pathDirs: [],
       homedir: "/no-home",
+      platform: "linux",
     },
   });
   assert.deepEqual(other.argv, ["--model", "claude-4-sonnet", "acp"]);
@@ -226,6 +228,7 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   const missing = detectCursorLogin({
     env: {},
     homedir: "/no-home",
+    platform: "linux",
     existsSync: () => false,
     pathDirs: [],
   });
@@ -235,6 +238,7 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   const appOnly = detectCursorLogin({
     env: {},
     homedir: "/no-home",
+    platform: "linux",
     existsSync: (file) => file === "/Applications/Cursor.app",
     pathDirs: [],
   });
@@ -243,6 +247,7 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   const binaryNoAuth = detectCursorLogin({
     env: { CURSOR_ACP_BIN: "/opt/agent" },
     homedir: "/no-home",
+    platform: "linux",
     existsSync: (file) => file === "/opt/agent",
     pathDirs: [],
   });
@@ -253,6 +258,7 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   const withKey = detectCursorLogin({
     env: { CURSOR_ACP_BIN: "/opt/agent", CURSOR_API_KEY: "ck-test" },
     homedir: "/no-home",
+    platform: "linux",
     existsSync: (file) => file === "/opt/agent",
     pathDirs: [],
   });
@@ -269,6 +275,7 @@ test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binar
     resolveCursorBinary({
       env: { PATH: "/bin" },
       homedir: "/no-home",
+      platform: "linux",
       pathDirs: ["/bin"],
       existsSync: (file) => file === "/bin/agent",
       probeBinary: () => false,
@@ -281,6 +288,7 @@ test("Cursor auth probe overrides a stale config artifact", () => {
   const detected = detectCursorLogin({
     env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },
     homedir: "/no-home",
+    platform: "linux",
     existsSync: (file) => file === "/opt/cursor-agent" || file === "/no-home/.cursor/cli-config.json",
     pathDirs: [],
     probeAuth: () => false,

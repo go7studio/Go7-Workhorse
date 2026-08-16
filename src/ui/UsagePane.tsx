@@ -421,15 +421,15 @@ export function UsagePane({
   const planCopy = plan
     ? weeklyUnlimited
       ? windowPick && !windowPick.unlimited && windowPick.resetsAt
-        ? `Weekly ${planName} allowance is unlimited. The ${windowPick.label} window is the real limit. ${formatPlanReset(windowPick.resetsAt)}.`
-        : `Weekly ${planName} allowance is unlimited. The 5h window is the real limit.`
+        ? `${windowPick.label} limit · ${formatPlanReset(windowPick.resetsAt)}.`
+        : "5h limit."
     : plan.leftPercent <= 0
       ? plan.resetsAt
-        ? `Weekly allowance is spent. It opens again ${formatReset(plan.resetsAt)}.`
-        : "Weekly allowance is spent. Extra credits or the next reset will open it again."
+        ? `Spent · ${formatReset(plan.resetsAt)}.`
+        : "Weekly allowance spent."
       : plan.resetsAt
-        ? `Weekly ${planName} allowance. Resets ${formatReset(plan.resetsAt)}.`
-        : `Weekly ${planName} allowance.`
+        ? `${planName} · ${formatReset(plan.resetsAt)}.`
+        : `${planName} allowance.`
     : undefined;
   const back = () => {
     if (focus !== "overview") {

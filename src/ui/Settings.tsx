@@ -35,21 +35,21 @@ function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
 
 function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (link.connected && link.enabled === false) {
-    return "Off the picker. Enable to use it in new chats.";
+    return "Disabled for new chats.";
   }
   const found = link.available ?? link.connected;
   if (id === "grok") {
-    return found ? "Detected the local Grok login on this machine" : "Grok binary or login not found";
+    return found ? "Local Grok ready." : "Grok not found.";
   }
   if (id === "codex") {
     return found
-      ? "Detected the local Codex login on this machine"
-      : "Codex ACP adapter or login not found";
+      ? "Local Codex ready."
+      : "Codex not found.";
   }
   if (id === "claude") {
     return found
-      ? "Detected the local Claude Code login on this machine"
-      : "Claude ACP adapter or login not found";
+      ? "Local Claude ready."
+      : "Claude not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
 }
@@ -121,7 +121,6 @@ export function Settings() {
 
       {section === "profile" && (
         <>
-          <p>A name is enough. This is local to Workhorse — not a vendor account.</p>
           <label className="field">
             <span>Display name</span>
             <input
@@ -158,7 +157,7 @@ export function Settings() {
               }}>
                 Export diagnostics
               </button>
-              <span className="row-meta">Secrets, prompts, and file contents are excluded.</span>
+              <span className="row-meta">Private data excluded.</span>
             </div>
             {supportNote ? <p className="row-meta">{supportNote}</p> : null}
           </div>
@@ -468,11 +467,6 @@ function MassSend({
   return (
     <div className="mass-send">
       <div className="section-label">Mass send</div>
-      <p className="row-meta">
-        {vendor === "custom"
-          ? "One click sends this bot’s chats and the desk skill catalog to Desktop / Workhorse exports."
-          : "One click sends this vendor’s skills or chats to Desktop / Workhorse exports."}
-      </p>
       <div className="actions">
         <button className="tiny" type="button" disabled={busy !== null} onClick={() => send("skills")}>
           {busy === "skills" ? "Sending…" : "Skills"}

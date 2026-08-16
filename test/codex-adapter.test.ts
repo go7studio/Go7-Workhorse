@@ -141,7 +141,7 @@ test("store send() does not cross-talk vendors", () => {
   assert.doesNotMatch(main, /spawn\(["']grok/);
   assert.match(settings, /refreshCodexLogin/);
   assert.match(settings, />\s*Recheck\s*</);
-  assert.match(settings, /Codex ACP adapter or login not found/);
+  assert.match(settings, /Codex not found/);
 });
 
 test("buildCodexLaunchSpec never spawns grok and maps model sandbox mode MCP", () => {

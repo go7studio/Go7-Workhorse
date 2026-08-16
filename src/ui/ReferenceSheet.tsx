@@ -40,7 +40,6 @@ export function ReferenceSheet() {
         }}
       >
         <h3>Add a reference</h3>
-        <p>A file, URL, or note this project should remember. Not a folder.</p>
         <div className="actions" style={{ marginBottom: 12 }}>
           {(["url", "note", "file"] as const).map((item) => (
             <button

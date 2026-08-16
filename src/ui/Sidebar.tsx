@@ -290,7 +290,7 @@ export function Sidebar() {
         <div className="section-label">Projects</div>
         {liveProjects.length === 0 && (
           <p className="row-meta" style={{ padding: "0 10px" }}>
-            Create a project. Folders are optional.
+            No projects.
           </p>
         )}
         {liveProjects.map((item) => (

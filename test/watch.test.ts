@@ -268,8 +268,7 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /Daily bank/);
   assert.match(pane, /Desktop notification/);
   assert.doesNotMatch(pane, /Windows notification/);
-  assert.match(pane, /On by default/);
-  assert.doesNotMatch(pane, /Off by default/);
+  assert.match(pane, /aria-checked=\{watch\.desktopNotify\}/);
   assert.match(pane, /desktopNotify/);
   assert.match(pane, /setPicking/);
   assert.match(pane, /toggleWatchLockKey/);

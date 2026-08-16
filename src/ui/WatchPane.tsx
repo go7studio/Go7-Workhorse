@@ -43,11 +43,7 @@ export function WatchPane() {
           onClick={() => setPicking((on) => !on)}
         >
           <strong>Daily bank</strong>
-          <p className="watch-copy">
-            {picking
-              ? "Click bots to add or remove them. Click Daily bank again when you're done — selected bots stay on it."
-              : "Click this, then click the bots that should stay on the daily bank. Click it again to put the tool away."}
-          </p>
+          <p className="watch-copy">{picking ? "Select bots." : "Choose watched bots."}</p>
         </button>
         <div className="watch-option link-block">
           <div className="watch-option-head">
@@ -61,15 +57,11 @@ export function WatchPane() {
               onClick={() => store.updateWatch({ desktopNotify: !watch.desktopNotify })}
             />
           </div>
-          <p className="watch-copy">
-            On by default. If Workhorse is in the background, your desktop tells you when a bot needs Allow or used its daily
-            bank. The in-app banner still shows either way.
-          </p>
         </div>
       </div>
 
       {statuses.length === 0 ? (
-        <p className="row-meta">Add a bot on LLMs and leftover will show up here.</p>
+        <p className="row-meta">No bots.</p>
       ) : (
         <div className={`usage-brains watch-brains${picking ? "" : " off"}`}>
           {statuses.map((row, index) => {

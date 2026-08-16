@@ -119,7 +119,7 @@ export function NewProjectSheet() {
           >
             <i className="source-drop-icon" aria-hidden="true" />
             <strong>Add folders</strong>
-            <span>Drop a folder here, or click to choose one the agent can read and edit.</span>
+            <span>Choose or drop folders.</span>
           </button>
         </div>
         <div className="actions">

@@ -135,10 +135,6 @@ export function SkillsPane() {
 
   return (
     <>
-      <p>
-        Every skill folder on this desk. Workhorse skills (`desk`, `setup`) are the baseline for desk control
-        and agent-to-agent talk. Click a skill to read it.
-      </p>
       <label className="field">
         <span>Search</span>
         <input

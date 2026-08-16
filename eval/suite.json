@@ -5,7 +5,7 @@
   "baselineRef": "5d02f78e79a688b316aba9d4f6575df909b2a52b",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
-  "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+  "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
   "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "capabilities", "usage", "reliability"],
   "areas": [
     {
@@ -784,6 +784,21 @@
             "Reverse direction once: the MiniMax-M3 chat messages the provider chat, which answers under its assigned runtime without spawning or silently switching models.",
             "Verify lineage, sender/target IDs, selected and observed models, budgets, usage, duplicate protection, and restart persistence across every hop."
           ]
+        },
+        {
+          "id": "ORC-S6",
+          "name": "Import, approve, execute, and resume a routed production plan",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "custom-openai", "custom-kimi"],
+          "steps": [
+            "Import the production plan fixture and verify stable plan/task ids, source hash, dependencies, acceptance checks, and awaiting-approval state without dispatch.",
+            "Review proposed agent routes and rationales, override one provider/model assignment, then approve and start the exact revision.",
+            "Require Kimi K3 for the visual UI/UX task and hold one preferred route in Watch; verify the held route is not called and the approved MiniMax-M3 fallback is explicit.",
+            "Release three ready root tasks and verify at most two run while the third remains queued.",
+            "Send one plan-task peer request and reply with immutable session ids, correlation id, reply id, and attempt.",
+            "Restart with completed, running, and queued work, then resume the same plan; completed tasks stay completed, the running child resumes or becomes an explicit retry, and every queued task dispatches once.",
+            "Reconcile task evidence against acceptance checks before completing the plan."
+          ]
         }
       ],
       "rubric": [
@@ -906,6 +921,39 @@
           "passCriteria": "A worker may create exactly one quick-tier helper within depth two and the configured budget; MiniMax-M3 remains the fallback; a second nested child or great-grandchild is rejected before a provider call; every descendant retains root goal, lineage, runtime identity, authority, and aggregate spend.",
           "evidence": "Capability discovery, three-level lineage fixture, limit rejection, descendant transcripts, policy snapshots, and usage rollup.",
           "baseline": { "status": "partial", "basis": "Source includes automatic quick-tier routing, MiniMax-M3 fallback, and depth-two one-helper guards; live proof and aggregate usage reconciliation remain required." }
+        },
+        {
+          "id": "ORC-11",
+          "criterion": "A Markdown or JSON plan imports as a stable, reviewable task graph and cannot dispatch until the user approves its exact revision.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "custom-openai", "custom-kimi"],
+          "scenarios": ["ORC-S6"],
+          "passCriteria": "Import preserves source hash, ordered tasks, dependencies, acceptance checks, and stable ids; pre-approval Start performs no provider, agent, device, or write action.",
+          "evidence": "Imported source, normalized plan graph, approval event, source hash, and pre-approval call ledger."
+        },
+        {
+          "id": "ORC-12",
+          "criterion": "Plan tasks can self-route with a concise capability and capacity rationale while explicit user assignments remain authoritative.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "custom-openai", "custom-kimi"],
+          "scenarios": ["ORC-S6"],
+          "passCriteria": "Each automatic route records requirements, candidates, Watch state, cost, concurrency, isolation, and reason; the visual task selects Kimi K3; a user override launches exactly as approved.",
+          "evidence": "Task requirements, route decisions, override event, launch requests, runtime identities, and usage rows."
+        },
+        {
+          "id": "ORC-13",
+          "criterion": "Plan execution enforces root concurrency, correlated peer delivery, and idempotent restart without redispatching completed work.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto",
+          "profiles": ["custom-openai", "custom-kimi"],
+          "scenarios": ["ORC-S6"],
+          "passCriteria": "No more than two root tasks overlap; each peer request has one correlated reply; completed task dispatch counts remain one after restart; resumed work preserves task, attempt, and child identity or records an explicit retry.",
+          "evidence": "Plan event log, concurrency timeline, peer inbox records, restart snapshot, task attempts, child ids, and dispatch counts."
         }
       ]
     },
@@ -952,6 +1000,30 @@
             "Inspect provider payloads: native images, declared audio, native PDF where supported, and video frame adaptation.",
             "Send each attachment to an incompatible manually pinned model and verify explicit fallback or rejection.",
             "Try oversized, unsupported, missing, and renamed files without leaking binary data or unrestricted paths."
+          ]
+        },
+        {
+          "id": "CAP-S4",
+          "name": "Route visual plan work and survive a Watch-held preference",
+          "executor": "provider",
+          "profiles": ["grok-acp", "custom-openai", "custom-kimi"],
+          "steps": [
+            "Route a plan task tagged vision, image, UI, UX, and computer-use; require one bounded Kimi K3 visual call with image evidence.",
+            "Override the proposed visual route and verify the override wins or fails explicitly when required image capability is absent.",
+            "Place the preferred non-visual provider in a Watch safety hold and verify no request reaches it.",
+            "Accept the shown MiniMax-M3 fallback and reconcile selected, requested, observed, transcript, and usage identities."
+          ]
+        },
+        {
+          "id": "CAP-S5",
+          "name": "Probe Godot, Android, and iOS capability without device actions",
+          "executor": "unit",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Run the deterministic device fixture and verify Godot project markers, a Saga adb match, and an available iOS simulator are recognized.",
+            "Run the local probe against the approved game workspace and record unavailable tools as explicit capability results.",
+            "Verify serials and UDIDs are hashed and no install, launch, boot, input, or write action occurs.",
+            "Use the capability result to decide whether Android, iOS, or Godot UI tasks can start or must remain needs-input."
           ]
         }
       ],
@@ -1043,6 +1115,39 @@
           "scenarios": ["CAP-S3"],
           "passCriteria": "Size/type failures are concise, missing paths fail clearly, binary data stays out of ordinary logs, and provider payloads contain only the intended attachment representation.",
           "evidence": "Negative fixtures, error screenshots, state/log scan, and serialized request inspection."
+        },
+        {
+          "id": "CAP-09",
+          "criterion": "Watch-held providers are excluded before dispatch and any fallback is explicit, approved, capable, and identity-auditable.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "custom-openai"],
+          "scenarios": ["CAP-S4"],
+          "passCriteria": "The held provider receives zero calls; the route names the hold and alternatives; fallback occurs only after approval and retains the plan task and usage lineage.",
+          "evidence": "Watch state, route candidates, approval event, provider call ledger, runtime identity, and usage row."
+        },
+        {
+          "id": "CAP-10",
+          "criterion": "Visual UI and UX plan tasks require Kimi K3 image capability and produce visual evidence unless the user explicitly overrides or accepts unavailability.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["custom-kimi"],
+          "scenarios": ["CAP-S4"],
+          "passCriteria": "The selected and observed Kimi K3 identity agree, the task receives its image inputs, and the result cites captured UI evidence; silent text-only substitution fails.",
+          "evidence": "Visual task tags, Kimi bot configuration, image request, runtime model evidence, transcript, screenshots, and usage."
+        },
+        {
+          "id": "CAP-11",
+          "criterion": "Godot, adb/Saga, and iOS simulator readiness is probed read-only before a plan assigns device work.",
+          "weight": 2,
+          "type": "exists",
+          "testability": "auto",
+          "profiles": ["custom-openai"],
+          "scenarios": ["CAP-S5"],
+          "passCriteria": "Godot version and project markers, adb device state and Saga match, and available iOS simulators are reported with redacted ids; absent capability blocks dispatch without mutating a device.",
+          "evidence": "Fixture output, local probe JSON, redaction check, action ledger, and plan capability decision."
         }
       ]
     },

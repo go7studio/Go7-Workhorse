@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Game workspace and device capability probes",
+  "probeCommand": "eval:device-probes",
+  "fixture": "eval/fixtures/device-capabilities.json",
+  "probes": {
+    "godot": {
+      "checks": ["binary version", "project.godot", "export_presets.cfg"],
+      "mutates": false
+    },
+    "android": {
+      "checks": ["adb version", "adb devices -l", "Saga model or ingot product match"],
+      "mutates": false
+    },
+    "ios": {
+      "checks": ["xcrun availability", "simctl list devices available --json"],
+      "mutates": false
+    }
+  },
+  "forbiddenDuringProbe": ["install", "uninstall", "launch", "boot", "erase", "input", "file write"],
+  "evidence": ["capturedAt", "platform", "workspace markers", "tool version", "availability", "redacted device inventory", "error"],
+  "requiredRubric": ["CAP-11"]
+}

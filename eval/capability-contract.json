@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.2.0",
   "title": "Intelligent routing and multimodal attachment contract",
   "routing": {
     "referenceSource": "https://developers.openai.com/api/docs/guides/latest-model",
@@ -21,8 +21,23 @@
       "Prefer capable spare capacity only when spare preference is enabled.",
       "Use local models only when local routing is enabled.",
       "Record tier, winner, alternatives, capacity state, and reason on every automatic route.",
-      "Never merge credentials, subscriptions, contexts, or sandboxes across providers."
+      "Never merge credentials, subscriptions, contexts, or sandboxes across providers.",
+      "Exclude Watch-held routes before dispatch and show any approved fallback.",
+      "Require Kimi K3 image capability for visual UI and UX plan tasks unless the user overrides or accepts unavailability."
     ]
+  },
+  "planRouting": {
+    "selfAssignmentEvidence": ["requirements", "candidates", "winner", "capacity", "Watch state", "cost", "concurrency", "isolation", "reason"],
+    "userOverrideWins": true,
+    "watchHeldCalls": 0,
+    "visualProfile": "custom-kimi",
+    "visualModelFamily": "Kimi K3"
+  },
+  "deviceProbes": {
+    "contract": "eval/device-capability-contract.json",
+    "command": "eval:device-probes",
+    "fixture": "eval/fixtures/device-capabilities.json",
+    "readOnly": true
   },
   "attachments": {
     "kinds": ["image", "file", "document", "audio", "video"],
@@ -40,7 +55,7 @@
     "liveProviderCalls": "Use the smallest deterministic call needed to prove launch and identity.",
     "cascades": "Use fewer low-cost models and stay within the orchestration contract limits."
   },
-  "smokeCommands": ["eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:media-fixtures"],
+  "smokeCommands": ["eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:plan-fixture-check", "eval:device-probes", "eval:media-fixtures"],
   "sourceFiles": [
     "src/lib/routing.ts",
     "src/lib/images.ts",
@@ -50,7 +65,13 @@
     "electron/drop-files.ts",
     "scripts/workhorse-eval-fixture.mjs",
     "scripts/workhorse-eval-media-fixtures.mjs",
+    "scripts/workhorse-eval-plan-fixture.mjs",
+    "scripts/workhorse-eval-device-probes.mjs",
+    "eval/execution-plan-contract.json",
+    "eval/device-capability-contract.json",
+    "eval/fixtures/plans/production-go-time.fixture.md",
+    "eval/fixtures/device-capabilities.json",
     "test/capability-live-smoke.ts"
   ],
-  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08"]
+  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08", "CAP-09", "CAP-10", "CAP-11"]
 }

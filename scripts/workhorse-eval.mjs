@@ -10,6 +10,8 @@ const commandPath = path.join(evalDir, "command-contract.json");
 const providerPath = path.join(evalDir, "provider-matrix.json");
 const orchestrationPath = path.join(evalDir, "orchestration-contract.json");
 const capabilityPath = path.join(evalDir, "capability-contract.json");
+const executionPlanPath = path.join(evalDir, "execution-plan-contract.json");
+const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
 const sourceSettingsPath = path.join(root, "src", "lib", "settings.ts");
 const sourceDeskToolsPath = path.join(root, "electron", "workhorse-mcp.ts");
@@ -62,12 +64,14 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
     json(orchestrationPath),
     json(capabilityPath),
+    json(executionPlanPath),
+    json(deviceCapabilityPath),
     json(packagePath),
     readFile(sourceCommandPath, "utf8"),
     readFile(sourceSettingsPath, "utf8"),
@@ -79,7 +83,9 @@ async function validate() {
     commands.schemaVersion !== 1 ||
     providers.schemaVersion !== 1 ||
     orchestration.schemaVersion !== 1 ||
-    capabilities.schemaVersion !== 1
+    capabilities.schemaVersion !== 1 ||
+    executionPlan.schemaVersion !== 1 ||
+    deviceCapabilities.schemaVersion !== 1
   ) {
     problems.push("all eval manifests must use schemaVersion 1");
   }
@@ -179,6 +185,24 @@ async function validate() {
       `(contract: ${(capabilities.requiredRubric ?? []).join(", ")}; suite: ${capabilityRubric.join(", ")})`,
     );
   }
+  const planRubric = new Set(executionPlan.requiredRubric ?? []);
+  for (const rubric of planRubric) {
+    if (!rubricSet.has(rubric)) problems.push(`execution-plan contract references missing rubric ${rubric}`);
+  }
+  const deviceRubric = new Set(deviceCapabilities.requiredRubric ?? []);
+  for (const rubric of deviceRubric) {
+    if (!rubricSet.has(rubric)) problems.push(`device-capability contract references missing rubric ${rubric}`);
+  }
+  for (const file of [executionPlan.fixture?.source, executionPlan.fixture?.oracle, deviceCapabilities.fixture].filter(Boolean)) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`eval fixture or oracle is missing: ${file}`);
+    }
+  }
+  if (!packageManifest.scripts?.[deviceCapabilities.probeCommand]) {
+    problems.push(`device probe command is missing: ${deviceCapabilities.probeCommand}`);
+  }
   for (const file of capabilities.sourceFiles ?? []) {
     try {
       await readFile(path.join(root, file), "utf8");
@@ -221,7 +245,7 @@ async function validate() {
       `${itemCount} rubric items, ${commands.commands.length} core commands, ` +
       `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles.`,
   );
-  return { suite, commands, providers, orchestration, capabilities };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities };
 }
 
 function list({ suite, commands, providers }) {

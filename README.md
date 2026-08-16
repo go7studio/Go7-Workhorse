@@ -75,6 +75,14 @@ Run `release/Go7-Workhorse-Setup-<version>.exe` to install the branded **Go7 Wor
 
 ## Install on macOS
 
+Take the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/go7studio/Go7-Workhorse/main/scripts/install-mac.sh | bash
+```
+
+Or build it yourself:
+
 ```bash
 npm install
 npm run dist:mac

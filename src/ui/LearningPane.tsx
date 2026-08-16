@@ -34,9 +34,11 @@ export function LearningPane() {
   ];
 
   const exportLearning = async () => {
+    // pickExportFolder returns a PickedFolder now, not a bare path: macOS needs
+    // the security bookmark alongside it.
     const dest = await window.workhorse?.pickExportFolder?.();
-    if (!dest) return;
-    const result = await window.workhorse?.learningExport?.(dest);
+    if (!dest?.path) return;
+    const result = await window.workhorse?.learningExport?.(dest.path);
     setNote(result?.ok ? "Exported." : result?.message || "Export failed.");
   };
 

@@ -291,6 +291,31 @@ test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binar
     }),
     null,
   );
+  // Windows discovery is a different path: cursor-agent.exe under a win32 join.
+  // Proving it here beats only proving the POSIX case does not break.
+  const winBin = path.win32.join("C:\\bin", "cursor-agent.exe");
+  const winFiles = new Set([path.win32.join("C:\\bin", "agent.exe"), winBin]);
+  assert.equal(
+    resolveCursorBinary({
+      platform: "win32",
+      env: { PATH: "C:\\bin" },
+      homedir: "C:\\no-home",
+      pathDirs: ["C:\\bin"],
+      existsSync: (file) => winFiles.has(file),
+    }),
+    winBin,
+  );
+  assert.equal(
+    resolveCursorBinary({
+      platform: "win32",
+      env: { PATH: "C:\\bin" },
+      homedir: "C:\\no-home",
+      pathDirs: ["C:\\bin"],
+      existsSync: (file) => file === path.win32.join("C:\\bin", "agent.exe"),
+      probeBinary: () => false,
+    }),
+    null,
+  );
 });
 
 test("Cursor auth probe overrides a stale config artifact", () => {

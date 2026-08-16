@@ -18,3 +18,5 @@ Current shipped baseline:
 Historical slice documents under `docs/GOAL-*.md` describe how individual adapters landed; they are not the current product boundary.
 
 **Current work:** `docs/GOAL-join-turn.md` — send the crew and stop; stay talkable; when every worker is done the desk builds one join prompt (the original ask, the lineup id, each child report) and the orchestrator answers in a **new** message. Prior slice: `docs/GOAL-orchestration.md`.
+
+**Next adapter:** `docs/GOAL-cursor-acp.md` — live Cursor Agent ACP slot (`provider: "cursor"`), same send / stream / permission / resume / `recordUsage` contract as Grok, Claude, and Codex. Not the open Cursor IDE window, and not Grok Bot. Implementer brief: `docs/agent-goal-cursor-acp.md`.

@@ -3,10 +3,12 @@
   "contractVersion": "0.1.0",
   "title": "Game workspace and device capability probes",
   "probeCommand": "eval:device-probes",
+  "godotSuiteCommand": "eval:godot-suite",
   "fixture": "eval/fixtures/device-capabilities.json",
   "probes": {
     "godot": {
       "checks": ["binary version", "project.godot", "export_presets.cfg"],
+      "availability": "available reports the tool; projectReady also requires project.godot",
       "mutates": false
     },
     "android": {
@@ -19,6 +21,6 @@
     }
   },
   "forbiddenDuringProbe": ["install", "uninstall", "launch", "boot", "erase", "input", "file write"],
-  "evidence": ["capturedAt", "platform", "workspace markers", "tool version", "availability", "redacted device inventory", "error"],
+  "evidence": ["capturedAt", "platform", "workspace markers", "tool version", "availability", "redacted device inventory", "RESULT passed=N failed=0", "error"],
   "requiredRubric": ["CAP-11"]
 }

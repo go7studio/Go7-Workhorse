@@ -78,7 +78,8 @@ export function reportFromFixture(fixture, workspace = ROOT) {
       exportPresets: Boolean(fixture.workspace?.exportPresets),
     },
     godot: {
-      available: Boolean(fixture.godot?.found && fixture.workspace?.projectGodot),
+      available: Boolean(fixture.godot?.found),
+      projectReady: Boolean(fixture.godot?.found && fixture.workspace?.projectGodot),
       binary: fixture.godot?.binary ?? null,
       version: fixture.godot?.version ?? null,
     },
@@ -118,7 +119,8 @@ export function probeWorkspace(workspace = ROOT) {
       exportPresets: existsSync(path.join(workspace, "export_presets.cfg")),
     },
     godot: {
-      available: godot.found && existsSync(path.join(workspace, "project.godot")),
+      available: godot.found,
+      projectReady: godot.found && existsSync(path.join(workspace, "project.godot")),
       binary: godot.binary,
       version: godot.stdout || null,
     },

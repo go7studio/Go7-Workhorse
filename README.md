@@ -1,15 +1,15 @@
 # Go7 Workhorse
 
-**One desk for every agent you already pay for.**
+**One desk. Every Subscription.**
 
 Run Grok, Claude, Codex, Cursor, your own API keys and your local models in one
-window. Each keeps its own login. You see what each one costs.
+window. Each keeps its own login. Usage and costs are all tracked.
 
-Cursor puts a model in your editor. Workhorse puts your models to work.
+Cursor puts a model in your editor. Workhorse puts your existing models to work.
 
-- **Pick the model per chat.** Cheap work goes to a cheap model.
-- **Watch the spend.** Usage is tracked per bot and per chat, against a budget
-  and a weekly pace.
+- **Pick a model per chat.** Orchestration first.
+- **Monitor spend.** Usage is tracked per bot and per chat, against exact budget
+  and weekly pace rate.
 - **Nothing is shared.** No pooled subscriptions, context or sandboxes.
 - **Bring your own.** Any Anthropic or OpenAI-compatible endpoint counts,
   including one on your own machine.

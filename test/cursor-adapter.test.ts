@@ -260,17 +260,48 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
 });
 
 test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binary", () => {
-  const files = new Set(["/bin/agent", "/bin/cursor-agent"]);
+  const posixFiles = new Set(["/bin/agent", "/bin/cursor-agent"]);
   assert.equal(
-    resolveCursorBinary({ env: { PATH: "/bin" }, homedir: "/no-home", pathDirs: ["/bin"], existsSync: (file) => files.has(file) }),
+    resolveCursorBinary({
+      platform: "linux",
+      env: { PATH: "/bin" },
+      homedir: "/no-home",
+      pathDirs: ["/bin"],
+      existsSync: (file) => posixFiles.has(file),
+    }),
     "/bin/cursor-agent",
   );
   assert.equal(
     resolveCursorBinary({
+      platform: "linux",
       env: { PATH: "/bin" },
       homedir: "/no-home",
       pathDirs: ["/bin"],
       existsSync: (file) => file === "/bin/agent",
+      probeBinary: () => false,
+    }),
+    null,
+  );
+
+  const winBin = path.win32.join("C:\\bin", "cursor-agent.exe");
+  const winFiles = new Set([path.win32.join("C:\\bin", "agent.exe"), winBin]);
+  assert.equal(
+    resolveCursorBinary({
+      platform: "win32",
+      env: { PATH: "C:\\bin" },
+      homedir: "C:\\no-home",
+      pathDirs: ["C:\\bin"],
+      existsSync: (file) => winFiles.has(file),
+    }),
+    winBin,
+  );
+  assert.equal(
+    resolveCursorBinary({
+      platform: "win32",
+      env: { PATH: "C:\\bin" },
+      homedir: "C:\\no-home",
+      pathDirs: ["C:\\bin"],
+      existsSync: (file) => file === path.win32.join("C:\\bin", "agent.exe"),
       probeBinary: () => false,
     }),
     null,

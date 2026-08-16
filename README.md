@@ -1,8 +1,36 @@
 # Go7 Workhorse
 
-Go7 Workhorse is a native desktop shell for Grok, Claude, Codex, and any other bot you add later. One window. Projects and chats. One permission bar.
+Go7 Workhorse is a native desktop shell for Grok, Claude, Codex, Cursor, and any other bot you add later. One window. Projects and chats. One permission bar.
 
-This repository is the desktop shell. Grok and Claude use ACP. Codex keeps ACP as its prompt fallback and also has an App Server boundary for native history and capability discovery. Custom is live HTTP.
+This repository is the desktop shell. Grok, Claude and Cursor use ACP. Codex keeps ACP as its prompt fallback and also has an App Server boundary for native history and capability discovery. Custom is live HTTP against an Anthropic Messages or OpenAI Chat Completions endpoint.
+
+## How it fits together
+
+Every vendor stays its own process. The window never talks to a vendor CLI: the
+renderer speaks typed IPC to Electron main, and main owns the adapters, the
+permission prompts, the credentials, and the execution directory.
+
+```mermaid
+flowchart TD
+  UI["src/ui — window, projects, chats, permission bar"]
+  IPC["typed IPC"]
+  MAIN["electron/ — main process"]
+  VAULT["credential store (OS-encrypted)"]
+  TERM["terminal + managed git worktree"]
+
+  UI <--> IPC <--> MAIN
+  MAIN --> VAULT
+  MAIN --> TERM
+
+  MAIN -->|ACP over stdio| GROK["Grok"]
+  MAIN -->|ACP over stdio| CLAUDE["Claude"]
+  MAIN -->|ACP + App Server| CODEX["Codex"]
+  MAIN -->|ACP over stdio| CURSOR["Cursor"]
+  MAIN -->|HTTP| CUSTOM["Custom bot"]
+```
+
+Subscriptions, context and sandboxes are never merged across vendors. Each
+adapter runs the vendor's own CLI, under that vendor's own login.
 
 ## Goal
 

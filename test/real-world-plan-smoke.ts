@@ -16,51 +16,68 @@ const runDir = path.join(process.cwd(), "eval", "runs", `real-plan-${Date.now()}
 fs.mkdirSync(runDir, { recursive: true });
 const startedAt = Date.now();
 const seedState = JSON.parse(fs.readFileSync(path.join(userData, "workhorse-state.json"), "utf8"));
-const m3Bot = seedState.settings?.customBots?.find(
-  (bot: any) => /minimax[ -]?m3/i.test(`${bot.name ?? ""} ${bot.model ?? ""}`) && bot.enabled !== false,
-);
 const requestedRootId = process.env.WORKHORSE_REAL_PLAN_SESSION_ID?.trim();
-const m3Sessions = (seedState.sessions ?? [])
-  .filter((session: any) => session.customBotId === m3Bot?.id && !session.archived && !session.parentId)
+const requestedProvider = process.env.WORKHORSE_REAL_PLAN_ORCHESTRATOR?.trim() || "codex";
+const rootSessions = (seedState.sessions ?? [])
+  .filter((session: any) => session.provider === requestedProvider && !session.archived && !session.parentId && !session.goal)
   .sort((left: any, right: any) => Number(right.updatedAt ?? right.createdAt ?? 0) - Number(left.updatedAt ?? left.createdAt ?? 0));
-const rootSession = m3Sessions.find((session: any) => session.id === requestedRootId) ?? m3Sessions[0];
+const requestedRoot = (seedState.sessions ?? []).find((session: any) => session.id === requestedRootId && !session.parentId);
+const rootSession = requestedRoot ?? rootSessions[0];
 const rootSessionId = rootSession?.id;
 const rootTitle = rootSession?.title;
-if (!m3Bot || !rootSessionId || !rootTitle) throw new Error("An enabled MiniMax M3 root chat is required.");
-const prompt = [
-  "You are the Workhorse orchestrator. Execute this production plan through Workhorse, not by pretending to do it yourself.",
+if (!rootSessionId || !rootTitle) throw new Error(`A ${requestedProvider} root chat without an active goal is required.`);
+const prompt = (rootSession?.planRun ? [
+  "Resume the persisted production plan. Do not import a duplicate plan or repeat completed work.",
+  "Preserve the completed Kimi visual audit; do not call Kimi again or repeat its work. Requeue Task 7 and give implementation to a separate coding worker using that audit.",
+  "The Kimi assignment is audit-only with read-only, audit-only, no-code, and no-commit constraints.",
+  "Keep MiniMax M3 out of this production run. Keep at most two root workers active and preserve routing rationale, skills, tools, and evidence.",
+  "Integrate isolated worker commits into the bound branch before dependent steps. Run artifact checks, Saga, and iOS lanes when their dependencies are ready.",
+  "Treat an idle worker whose agentRun still says running after restart as interrupted: fail and requeue its step instead of waiting forever.",
+  "Continue until the plan is completed or truthfully blocked. Never purchase, change account access, push, or release.",
+] : [
+  "You are the production Workhorse orchestrator. Execute and track this plan through Workhorse; do not pretend to complete delegated work.",
   `Create project “BoomFront Production Orchestration” bound to ${workspace} and move this chat into it.`,
   `Import ${planPath} with workhorse_plan.`,
   "Inspect canonical docs, then revise task details and dependencies before approving and starting the plan.",
   "Call workhorse_list_bots and workhorse_probe_runtime. Choose callable agents yourself from the live roster and current capacity.",
   "For every plan spawn, pass planStepId, a one-line rationale, required skills, and required tools. Explicit user assignments always win.",
   "Kimi K3 must own the visual/UI/icon audit. Attach tools/ui_walk_out/title.png, campaign_page1.png, hud_level01.png, and settings.png to that Kimi spawn.",
-  "Use at most two root workers at once. Prefer MiniMax M3 or lower-cost capable models for bounded checks; use stronger models only when the work requires them.",
+  "Kimi is audit-only for this plan. Pass read-only, audit-only, no-code, and no-commit constraints; route its findings to a separate coding worker.",
+  "Do not call MiniMax M3 in this production run. Choose among callable Codex, Grok, Claude, and Kimi agents using capability, capacity, and task risk.",
+  "Use at most two root workers at once. Use stronger models for implementation and bounded cheaper models only for low-risk verification.",
   "Request accept-edits plus workspace access before implementation. Never purchase, change account access, push, or release.",
-  "Run Godot headless tests and read-only device probes. Do not install or launch on Saga/iOS in this smoke run.",
+  "Run the artifact-checked Godot suite, export Android, and perform the plan's authorized Saga install and UI pass after code gates are green. Probe iOS and record any unavailable lane truthfully.",
   "Continue through joined child reports, record evidence, repair failures, and complete or truthfully block the plan.",
-].join("\n");
+]).join("\n");
 
 const app = await electron.launch({
   ...(executablePath ? { executablePath } : {}),
   args: [...(executablePath ? [] : ["."]), "--no-sandbox", `--workhorse-user-data=${userData}`],
   cwd: process.cwd(),
+  env: { ...process.env, WORKHORSE_VOLATILE_CREDENTIALS: "1" },
 });
 
 try {
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
+  const existingSessionApproval = page.getByRole("button", { name: "Allow for session", exact: true }).first();
+  if (await existingSessionApproval.isVisible().catch(() => false)) await existingSessionApproval.click();
   await page.getByText(rootTitle, { exact: true }).first().click();
   await page.screenshot({ path: path.join(runDir, "01-start.png") });
-  const composer = page.locator("textarea").last();
-  await composer.fill(prompt);
-  await page.waitForTimeout(250);
-  if ((await composer.inputValue()) !== prompt) throw new Error("The orchestration prompt did not reach the composer.");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const liveState = JSON.parse(fs.readFileSync(path.join(userData, "workhorse-state.json"), "utf8"));
+  const liveRoot = liveState.sessions?.find((session: any) => session.id === rootSessionId);
+  if (liveRoot?.status !== "running") {
+    const composer = page.locator("textarea").last();
+    await composer.fill(prompt);
+    await page.waitForTimeout(250);
+    if ((await composer.inputValue()) !== prompt) throw new Error("The orchestration prompt did not reach the composer.");
+    await composer.press("Enter");
+  }
 
   let lastPlanStatus = "none";
   let elevated = false;
-  const deadline = Date.now() + 20 * 60_000;
+  const timeoutMinutes = Math.max(10, Number(process.env.WORKHORSE_REAL_PLAN_TIMEOUT_MINUTES ?? 60));
+  const deadline = Date.now() + timeoutMinutes * 60_000;
   while (Date.now() < deadline) {
     const elevate = page.getByRole("button", { name: /^Elevate(?: to )?/ }).first();
     if (await elevate.isVisible().catch(() => false)) {
@@ -86,7 +103,6 @@ try {
       (message: any) => message.role === "assistant" && message.createdAt >= startedAt && String(message.text ?? "").trim(),
     );
     if (rootIdle && hasUsefulReply && !plan && Date.now() - startedAt > 20_000) break;
-    if (rootIdle && runningChildren.length === 0 && hasUsefulReply && plan && Date.now() - startedAt > 90_000) break;
     await page.waitForTimeout(2_000);
   }
 

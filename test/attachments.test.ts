@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { attachmentKind, buildAcpPrompt, normalizeImages } from "../src/lib/images";
+import {
+  attachmentKind,
+  base64DecodedBytes,
+  buildAcpPrompt,
+  fitModelImages,
+  modelImagePayloadBytes,
+  normalizeImages,
+} from "../src/lib/images";
 import type { ChatImage } from "../src/lib/types";
 import { spawnAttachments } from "../electron/workhorse-mcp";
 
@@ -28,6 +35,21 @@ test("spawned visual agents receive bounded workspace attachments", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("model image payload accounting uses decoded bytes", async () => {
+  const image: ChatImage = {
+    id: "i1",
+    name: "screen.png",
+    mimeType: "image/png",
+    data: Buffer.alloc(12, 1).toString("base64"),
+    kind: "image",
+  };
+  const images = [image];
+  assert.equal(base64DecodedBytes(image.data), 12);
+  assert.equal(modelImagePayloadBytes(images), 12);
+  assert.strictEqual(await fitModelImages(images, 12), images);
+  await assert.rejects(() => fitModelImages([image], 11), /Split them into smaller calls/);
 });
 
 test("ACP media falls back to an auditable manifest and video frames", () => {

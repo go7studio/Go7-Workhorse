@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
+import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
 import { formatWorked } from "../lib/turns";
@@ -148,6 +149,13 @@ export function WorkPopout({
             const childLive = child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
             const title = marker.fromTitle || marker.text || child?.title || "Subagent";
             const ink = child ? deskInk(child, store.settings) : undefined;
+            const brain = child
+              ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
+              : undefined;
+            const stepId = child?.agentRun?.planStepId;
+            const planStep = stepId
+              ? store.sessions.flatMap((session) => session.planRun?.steps ?? []).find((step) => step.id === stepId)
+              : undefined;
             const childMs = childLive ? now - marker.createdAt : undefined;
             return (
               <p key={marker.id} className="tool-line subagent-preview">
@@ -167,6 +175,11 @@ export function WorkPopout({
                     aria-hidden="true"
                   />
                   <span className="tool-name">{title}</span>
+                  {brain ? <span className="subagent-model">{brain.name}</span> : null}
+                  {child?.agentRun?.constraints?.length ? (
+                    <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
+                  ) : null}
+                  {planStep ? <span className="subagent-task">{planStep.title}</span> : null}
                   <span className="tool-status">
                     {childLive
                       ? `working · ${formatWorked(childMs ?? 0)}`

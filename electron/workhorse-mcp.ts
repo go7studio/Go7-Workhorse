@@ -182,6 +182,7 @@ const TOOLS = [
         rationale: { type: "string", description: "Why this agent fits this step" },
         skills: { type: "array", items: { type: "string" }, description: "Required skills" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
+        constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
@@ -893,6 +894,7 @@ async function spawnAgent(
     rationale?: string;
     skills?: string[];
     tools?: string[];
+    constraints?: string[];
     files?: string[];
   },
   from?: string,
@@ -963,6 +965,7 @@ async function spawnAgent(
     rationale: spawnInput.rationale,
     skills: spawnInput.skills,
     tools: spawnInput.tools,
+    constraints: spawnInput.constraints,
     files: spawnInput.files,
     attachments,
   });
@@ -989,6 +992,7 @@ async function spawnAgent(
       rationale: spawnInput.rationale,
       skills: spawnInput.skills,
       tools: spawnInput.tools,
+      constraints: spawnInput.constraints,
       files: spawnInput.files,
       attachments,
     });

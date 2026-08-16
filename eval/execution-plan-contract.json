@@ -30,6 +30,7 @@
     "No more than two root tasks run concurrently; excess ready tasks remain queued.",
     "Every automatic route records candidates, required capabilities, capacity, cost, rationale, and isolation.",
     "A user provider, model, agent, skill, tool, or isolation override is authoritative.",
+    "User-defined assignment constraints are preserved in the worker brief and assignment evidence.",
     "A Watch-held route is never called; fallback requires a recorded reason and remains within the approved plan.",
     "Visual UI and UX tasks require a bounded Kimi K3 visual route unless the user overrides or accepts an explicit unavailable result.",
     "Peer requests and replies carry plan id, task id, immutable sender and target ids, correlation id, reply id, and attempt."

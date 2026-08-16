@@ -118,9 +118,11 @@ test("plan assignments preserve model fit and agent identity", () => {
     rationale: "Visual audit and image input",
     skills: ["UI/UX"],
     tools: ["screenshots"],
+    constraints: ["audit-only", "no-commit"],
   }, 4));
   assert.equal(plan.steps[0]?.assignment?.sessionId, "session_kimi");
   assert.equal(plan.steps[0]?.assignment?.rationale, "Visual audit and image input");
+  assert.deepEqual(plan.steps[0]?.assignment?.constraints, ["audit-only", "no-commit"]);
   assert.equal(plan.events?.at(-1)?.type, "agent.assigned");
 });
 

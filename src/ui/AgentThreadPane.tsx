@@ -32,6 +32,9 @@ export function AgentThreadPane({
   };
   const openInk = threadInk(thread);
   const child = store.sessions.find((session) => session.id === thread.childId);
+  const childBrain = child
+    ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
+    : undefined;
   const blocks = useMemo(() => (child ? groupTranscript(child.messages) : []), [child]);
   const working = child?.status === "running";
   const liveIndex = working ? lastReplyIndex(blocks) : -1;
@@ -60,7 +63,7 @@ export function AgentThreadPane({
             />
             <strong>{thread.title}</strong>
           </div>
-          <em>{thread.live ? "Talking now" : "Earlier this chat"}</em>
+          <em>{[childBrain?.name, thread.live ? "Talking now" : "Earlier this chat"].filter(Boolean).join(" · ")}</em>
         </div>
         <div className="agent-thread-tools">
           {child ? <ContextMeter session={child} compact /> : null}
@@ -72,6 +75,12 @@ export function AgentThreadPane({
       {threads.length > 1 ? (
         <div className="agent-thread-tabs" role="tablist">
           {threads.map((item) => (
+            (() => {
+              const tabChild = store.sessions.find((session) => session.id === item.childId);
+              const tabBrain = tabChild
+                ? brainCaption(brainStamp(tabChild), store.settings.customBots, store.settings.llms)
+                : undefined;
+              return (
             <button
               key={item.id}
               type="button"
@@ -85,8 +94,11 @@ export function AgentThreadPane({
                 style={threadInk(item) ? { background: threadInk(item), color: threadInk(item) } : undefined}
                 aria-hidden="true"
               />
-              {item.title}
+              <span>{item.title}</span>
+              {tabBrain ? <em>{tabBrain.name}</em> : null}
             </button>
+              );
+            })()
           ))}
         </div>
       ) : null}

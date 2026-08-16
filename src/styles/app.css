@@ -1578,12 +1578,36 @@ html.pane-dragging * {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 0;
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.subagent-model {
+  color: var(--text-secondary);
+  font-weight: 560;
+}
+
+.subagent-scope {
+  color: var(--peer);
+  font-weight: 560;
+}
+
+.subagent-task {
+  min-width: 0;
+  max-width: 34ch;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-open .tool-status {
+  margin-left: auto;
 }
 
 .subagent-thread {

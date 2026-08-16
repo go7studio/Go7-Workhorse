@@ -254,24 +254,41 @@ async function initRun(manifests, args) {
     .map(([id]) => id);
   const modelPolicy = config.modelPolicy ?? null;
   if (modelPolicy?.enforce) {
-    const allowedProfiles = new Set(modelPolicy.allowedLiveProfiles ?? []);
-    const disallowedProfiles = enabledProfiles.filter((id) => !allowedProfiles.has(id));
+    const primaryProfile = modelPolicy.primaryLiveProfile;
+    const primaryModel = modelPolicy.primaryModel;
+    const smokePolicy = modelPolicy.providerSmokeExceptions ?? {};
+    const smokeProfiles = new Set(smokePolicy.profiles ?? []);
+    const permittedProfiles = new Set([primaryProfile, ...smokeProfiles].filter(Boolean));
+    const disallowedProfiles = enabledProfiles.filter((id) => !permittedProfiles.has(id));
     if (disallowedProfiles.length) {
       console.error(`Model policy forbids enabled live profiles: ${disallowedProfiles.join(", ")}.`);
       process.exitCode = 1;
       return;
     }
-    const allowedModels = new Set(modelPolicy.allowedModels ?? []);
-    for (const id of enabledProfiles) {
-      const configuredModel = config.profiles[id]?.model;
-      if (!configuredModel || !allowedModels.has(configuredModel)) {
-        console.error(`Model policy requires an allowed explicit model for ${id}; found ${configuredModel ?? "none"}.`);
-        process.exitCode = 1;
-        return;
-      }
+    const configuredPrimaryModel = config.profiles?.[primaryProfile]?.model;
+    if (enabledProfiles.includes(primaryProfile) && configuredPrimaryModel !== primaryModel) {
+      console.error(
+        `Model policy requires ${primaryProfile} to use ${primaryModel}; found ${configuredPrimaryModel ?? "none"}.`,
+      );
+      process.exitCode = 1;
+      return;
     }
-    if (modelPolicy.forbidAnthropicApi && config.profiles?.["custom-anthropic"]?.enabled) {
-      console.error("Model policy forbids the custom Anthropic API profile.");
+    if (enabledProfiles.some((id) => smokeProfiles.has(id)) && !(smokePolicy.maxCallsPerProfile > 0)) {
+      console.error("Enabled provider smoke profiles require a positive maxCallsPerProfile ceiling.");
+      process.exitCode = 1;
+      return;
+    }
+    if (smokePolicy.allowCascading) {
+      console.error("Provider smoke-call exceptions may not enable cascading agents.");
+      process.exitCode = 1;
+      return;
+    }
+    if (
+      modelPolicy.internalToolCallingModel !== primaryModel ||
+      !(modelPolicy.cascade?.models ?? []).every((model) => model === primaryModel) ||
+      !(modelPolicy.cascade?.profiles ?? []).every((profile) => profile === primaryProfile)
+    ) {
+      console.error("Internal tool calling and cascading agents must stay on the primary MiniMax policy.");
       process.exitCode = 1;
       return;
     }

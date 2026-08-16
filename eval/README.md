@@ -27,11 +27,11 @@ task and immutable session identity → selected skills/tools/runtime → child
 evidence → parent synthesis. Reading a prior chat, delivering a peer message,
 resuming a child, and spawning a new agent are separate operations.
 
-The five profiles remain in the compatibility contract, but this eval variant
-permits live prompts only through custom-openai using MiniMax-M3 and MiniMax's
-own OpenAI-compatible endpoint. Grok, Codex, Claude, and custom-anthropic are
-static/detection-only unless a future explicitly approved variant changes the
-policy. Anthropic's API is prohibited here.
+The five profiles remain in the compatibility contract. MiniMax-M3 through
+MiniMax's OpenAI-compatible endpoint is the primary evaluator and the only
+model used for internal tool calling or cascading agents. A provider's
+existing API or OAuth subscription may receive one explicitly bounded smoke
+call when needed to prove that adapter; smoke-call exceptions cannot cascade.
 
 Catalog names and model caches are discovery hints, not runtime proof. The
 required provenance chain is selection → launch/request → runtime observation
@@ -106,10 +106,12 @@ withheld below 60% coverage.
 
 - Live execution remains blocked by the baseline-only mode and zero-spend
   default until an evaluator explicitly activates the run.
-- The example config enforces MiniMax-M3 as the sole live model and rejects any
-  other enabled profile during run initialization.
-- Anthropic API calls are prohibited; local Claude readiness detection is not
-  a model call.
+- The example config enforces MiniMax-M3 for the main eval, internal tool
+  calling, and all child-agent cascades.
+- Existing provider/API or OAuth profiles may be enabled for a minimal adapter
+  smoke call with a per-profile ceiling; those calls cannot spawn children.
+- Cascades default to MiniMax-M3, low effort, depth one, two concurrent
+  children, and 500 tokens per child.
 - liveApiAllowed defaults to false and the approved budget defaults to zero.
 - Direct API keys are environment-variable references, never JSON values.
 - All file/tool probes stay inside the fixture workspace unless a boundary

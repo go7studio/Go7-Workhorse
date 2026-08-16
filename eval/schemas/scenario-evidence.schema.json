@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://go7.studio/workhorse/eval/scenario-evidence.schema.json",
+  "title": "Workhorse scenario evidence",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "scenarioId", "status", "profiles", "observations", "artifacts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "scenarioId": { "type": "string", "pattern": "^[A-Z]{3}-S[0-9]+$" },
+    "status": { "enum": ["completed", "blocked", "error", "not_run"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "profiles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at", "action", "outcome"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "action": { "type": "string" },
+          "outcome": { "type": "string" },
+          "profile": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+          "reproduction": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "path", "redacted"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "enum": ["screenshot", "video", "state", "launch", "http", "log", "support", "file", "clipboard"] },
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "redacted": { "type": "boolean" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["profile", "stage", "value", "evidence"],
+        "properties": {
+          "profile": { "type": "string" },
+          "stage": { "enum": ["selection", "launch-or-request", "runtime-observation", "transcript", "usage"] },
+          "value": { "type": ["string", "null"] },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "uncertain": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

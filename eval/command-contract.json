@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "source": "src/lib/commands.ts#COMMANDS",
+  "commands": [
+    { "id": "new", "name": "/new", "aliases": ["/clear"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-06"] },
+    { "id": "project", "name": "/project", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-01"] },
+    { "id": "link", "name": "/link", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-02"] },
+    { "id": "providers", "name": "/providers", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SET-02"] },
+    { "id": "model", "name": "/model", "aliases": ["/m"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["MOD-02", "CMD-02"] },
+    { "id": "effort", "name": "/effort", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["MOD-03", "CMD-02"] },
+    { "id": "compact", "name": "/compact", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-04", "CON-04"] },
+    { "id": "ask", "name": "/ask", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-01", "CMD-02"] },
+    { "id": "accept", "name": "/accept-edits", "aliases": ["/auto"], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-01", "CMD-02"] },
+    { "id": "always", "name": "/always-approve", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-01", "CMD-02"] },
+    { "id": "plan", "name": "/plan", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-05", "SEC-04"] },
+    { "id": "sandbox", "name": "/sandbox", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-02", "CMD-02"] },
+    { "id": "demo", "name": "/demo-permission", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SEC-01"] },
+    { "id": "theme", "name": "/theme", "aliases": ["/t"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SET-06"] },
+    { "id": "settings", "name": "/settings", "aliases": ["/config", "/preferences", "/prefs"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["SET-05"] },
+    { "id": "rename", "name": "/rename", "aliases": ["/title"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-04", "MOD-06"] },
+    { "id": "archive", "name": "/archive", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-05"] },
+    { "id": "delete", "name": "/delete", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["PRJ-05"] },
+    { "id": "copy", "name": "/copy", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CON-06"] },
+    { "id": "fork", "name": "/fork", "aliases": [], "owner": "translated", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CON-03"] },
+    { "id": "usage", "name": "/usage", "aliases": ["/cost"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["USG-01"] },
+    { "id": "watch", "name": "/watch", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["USG-05"] },
+    { "id": "schedule", "name": "/schedule", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-06", "REL-04"] },
+    { "id": "goal", "name": "/goal", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-03", "REL-04"] },
+    { "id": "quit", "name": "/quit", "aliases": ["/exit"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"], "rubric": ["REL-02"] }
+  ],
+  "providerNative": {
+    "grok-acp": ["/context", "/session-info", "/rewind", "/export", "/view-plan", "/memory", "/hooks", "/plugins", "/skills", "/loop", "/workflow", "/mcps", "/doctor", "/resume"],
+    "codex-acp": ["/skills", "/review"],
+    "claude-acp": ["/skills"],
+    "custom-openai": [],
+    "custom-anthropic": []
+  },
+  "canonicalTranslations": [
+    {
+      "intent": "recurring work",
+      "canonical": "/schedule every <duration> <prompt>",
+      "nativeOpportunities": { "grok-acp": "/loop", "claude-acp": "/loop when exposed by the installed harness" },
+      "rule": "The canonical command must work everywhere; native commands may augment it but may not change the persisted Workhorse schedule semantics."
+    },
+    {
+      "intent": "ongoing objective",
+      "canonical": "/goal <objective>",
+      "nativeOpportunities": {},
+      "rule": "Goal state is owned by Workhorse and must not depend on a provider-specific command name."
+    },
+    {
+      "intent": "context compaction",
+      "canonical": "/compact [keep-note]",
+      "nativeOpportunities": { "grok-acp": "native compact" },
+      "rule": "Use native compaction when honestly available and a portable Workhorse checkpoint otherwise."
+    }
+  ]
+}

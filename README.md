@@ -93,3 +93,13 @@ Each chat can execute in the linked local folder or a managed detached Git workt
 Custom OpenAI-compatible HTTP support intentionally targets Chat Completions. This project does not implement the OpenAI Responses API or Azure OpenAI deployment routing.
 
 Run `npm run build` for the production TypeScript/Vite build and `npm test` for the complete adapter and shell suite.
+
+## Evaluation baseline
+
+The Workhorse-specific reusable eval kit lives in [`eval/`](eval/README.md).
+It covers first-run harness discovery, projects/chats, provider and model
+identity, interoperable commands, permissions/sandboxing, continuity, usage,
+and install/recovery. `npm run eval:validate` checks the suite directly, and
+the production build runs that validation so new core commands or Settings
+sections cannot silently drift out of the audit contract. The baseline is
+defined but deliberately unrun until the next approved build is ready.

@@ -171,7 +171,7 @@ export function AgentThreadPane({
                   <div className={`say final${live ? " streaming" : ""}`}>
                     <MessageBody text={body} vendorSessionId={child.vendorSessionId} />
                     {!live ? (
-                      <TurnActions actions={[{ id: "copy", label: "Copy", run: () => copyText(body) }]} />
+                      <TurnActions actions={[{ id: "copy", label: "Copy", run: async () => { await copyText(body); } }]} />
                     ) : null}
                   </div>
                 ) : null}

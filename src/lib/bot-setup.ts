@@ -1,4 +1,5 @@
 import { BOT_COLORS, botFromDraft, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "./custom-bots";
+import { detectProviderFromKey, fillEmptyFromProvider } from "./provider-catalog";
 import type { CustomBot, CustomLlm, Session } from "./types";
 
 export type PublicBotCard = {
@@ -183,6 +184,18 @@ export function assembleCustomBotDraft(
     tested: false,
     connected: false,
   };
+  if ((!draft.baseUrl.trim() || !draft.model.trim()) && draft.apiKey.trim()) {
+    const preset = detectProviderFromKey(draft.apiKey);
+    if (preset) {
+      const filled = fillEmptyFromProvider(draft, preset, draft.model);
+      draft.baseUrl = filled.baseUrl;
+      draft.model = filled.model;
+      draft.api = filled.api;
+      draft.name = filled.name;
+      draft.color = filled.color;
+      draft.contextWindow = filled.contextWindow;
+    }
+  }
   if (!draft.baseUrl.trim() || !draft.model.trim() || !draft.apiKey.trim()) {
     return {
       draft,

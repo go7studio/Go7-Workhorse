@@ -231,6 +231,23 @@ test("leftover numbers stay visible on cards without a second hold setting", () 
   assert.equal(grok?.holding, false);
   assert.equal(mini?.holding, false);
   assert.equal(leftoverPercentForKey("bot:bot_minimax", { custom: { bot_minimax: plan(9) } }, { customBots: [bot] }), 9);
+  assert.equal(
+    leftoverPercentForKey(
+      "bot:bot_minimax",
+      {
+        custom: {
+          bot_minimax: plan(100, {
+            products: [
+              { product: "session", label: "5h", usagePercent: 81 },
+              { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
+            ],
+          }),
+        },
+      },
+      { customBots: [bot] },
+    ),
+    100,
+  );
 
   const pruned = pruneWatchPermits(
     { grok: { day: "2026-08-12" }, "bot:bot_minimax": { day: dayKey(now) } },
@@ -601,4 +618,19 @@ test("available LLMs include a keyed custom bot when stock vendors are a no-go",
   assert.doesNotMatch(roster, /Nothing is callable right now/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /formatDeskRoster\(catalog\)/);
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /action: "list"/);
+});
+
+test("the daily-over banner names the pace it is measured against", () => {
+  // The screenshot case: day 5 of 7 with 72% of the week used.
+  // "1% over" is one point above an even pace, which the copy must state.
+  const expected = rollingAllowed(DAY_SHARE_PERCENT, 5);
+  assert.equal(Math.round(expected), 71);
+  assert.equal(Math.round(Math.max(0, 72 - expected)), 1);
+
+  const watchSource = readFileSync(path.join(ROOT, "src", "lib", "watch.ts"), "utf8");
+  assert.match(watchSource, /over the expected pace/);
+  assert.match(watchSource, /% expected by now/);
+  // The old wording gave a bare percentage with nothing to read it against.
+  assert.doesNotMatch(watchSource, /is \$\{over\}% over`/);
+  assert.doesNotMatch(watchSource, /leftover can last the rest of the week/);
 });

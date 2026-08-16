@@ -57,29 +57,115 @@ function pickMiniMaxRow(raw: Record<string, unknown>, model?: string): Record<st
   return records.find((row) => String(row.model_name ?? "").toLowerCase() === "general") ?? records[0];
 }
 
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value != null);
+}
+
+function looksUnlimited(value: unknown): boolean {
+  if (value === true || value === -1) return true;
+  if (typeof value === "string" && /^(unlimited|inf(inity)?|∞|none)$/i.test(value.trim())) return true;
+  return false;
+}
+
+function limitLooksUnlimited(value: unknown): boolean {
+  if (looksUnlimited(value)) return true;
+  const amount = numberVal(value);
+  return amount === 0 || amount === -1;
+}
+
+/** Weekly with no cap, or a 0% weekly leftover next to a live 5h window. */
+export function weeklyIsUnlimited(
+  row: Record<string, unknown>,
+  root: Record<string, unknown>,
+  weeklyLeft: number | undefined,
+  intervalLeft: number | undefined,
+): boolean {
+  const flags = [
+    row.weekly_unlimited,
+    row.weeklyUnlimited,
+    row.unlimited,
+    row.weekly_limit_type,
+    row.weeklyLimitType,
+    root.weekly_unlimited,
+    root.unlimited,
+  ];
+  if (flags.some(looksUnlimited)) return true;
+  const caps = [
+    row.weekly_limit,
+    row.weekly_quota,
+    row.weekly_total,
+    row.current_weekly_total_count,
+    row.weekly_limit_count,
+    row.weekly_total_count,
+  ];
+  if (caps.some(limitLooksUnlimited)) return true;
+  if (looksUnlimited(firstDefined(row.current_weekly_remaining_percent, row.weekly_remaining_percent))) return true;
+  return (weeklyLeft === undefined || weeklyLeft === 0) && intervalLeft != null && intervalLeft > 0;
+}
+
+function leftoverOf(row: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    if (row[key] == null) continue;
+    const left = leftoverFromRemainingPercent(row[key]);
+    if (left !== undefined) return left;
+  }
+  return undefined;
+}
+
 export function parseCustomPlanUsage(raw: unknown, model?: string): CustomPlanUsage | undefined {
   const root = asRecord(raw);
   const row = pickMiniMaxRow(root, model) ?? root;
-  const left =
-    leftoverFromRemainingPercent(
-      row.current_weekly_remaining_percent ??
-        row.weekly_remaining_percent ??
-        row.usage_percent ??
-        row.usagePercent ??
-        root.current_weekly_remaining_percent ??
-        root.usage_percent,
-    );
-  if (left === undefined) return undefined;
-  const resetsAt =
-    unixToIso(row.weekly_end_time ?? row.end_time ?? root.weekly_end_time) ??
+  const intervalLeft = leftoverOf(
+    row,
+    "current_interval_remaining_percent",
+    "interval_remaining_percent",
+    "current_5h_remaining_percent",
+  );
+  const weeklyLeft = leftoverOf(row, "current_weekly_remaining_percent", "weekly_remaining_percent")
+    ?? leftoverOf(root, "current_weekly_remaining_percent", "weekly_remaining_percent");
+  const fallbackLeft = leftoverOf(row, "usage_percent", "usagePercent") ?? leftoverOf(root, "usage_percent");
+  const unlimited = weeklyIsUnlimited(row, root, weeklyLeft, intervalLeft);
+  const intervalReset =
+    unixToIso(row.interval_end_time ?? row.current_interval_end_time ?? row.next_interval_end_time) ??
+    (typeof row.interval_resets_at === "string" ? row.interval_resets_at : undefined);
+  const weeklyReset =
+    unixToIso(row.weekly_end_time ?? root.weekly_end_time) ??
     (typeof row.resets_at === "string" ? row.resets_at : undefined);
+  const products: CustomPlanUsage["products"] = [];
+  if (intervalLeft !== undefined) {
+    products.push({
+      product: "session",
+      label: "5h",
+      usagePercent: clampPercent(100 - intervalLeft),
+      resetsAt: intervalReset,
+    });
+  }
+  if (unlimited) {
+    products.push({
+      product: "weekly",
+      label: "Weekly",
+      usagePercent: 0,
+      unlimited: true,
+      resetsAt: weeklyReset,
+    });
+  } else if (weeklyLeft !== undefined) {
+    products.push({
+      product: "weekly",
+      label: "Weekly",
+      usagePercent: clampPercent(100 - weeklyLeft),
+      resetsAt: weeklyReset,
+    });
+  }
+  const left = unlimited ? 100 : (weeklyLeft ?? (products.length ? undefined : fallbackLeft));
+  if (left === undefined && products.length === 0) return undefined;
+  const leftover = left ?? 100;
   return {
-    usedPercent: clampPercent(100 - left),
-    leftPercent: left,
+    usedPercent: clampPercent(100 - leftover),
+    leftPercent: leftover,
     period: "weekly",
-    resetsAt,
+    resetsAt: weeklyReset ?? intervalReset,
     prepaidBalance: 0,
-    products: [],
+    products,
   };
 }
 

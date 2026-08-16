@@ -2,12 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BotAccessDefaults, PermissionMode, SandboxProfile } from "../src/lib/types";
+import { isInsideAsar, localAppDataRoot, runningInElectron, workhorseToolBin } from "./desk-path";
 
 const LOGIN_FILES = ["auth.json", "auth.json.bak", "credentials.json"];
 const PACKAGE_NAME = "@agentclientprotocol/codex-acp";
 
 export const CODEX_ACP_NOT_INSTALLED =
   "Codex ACP is not installed. Add @agentclientprotocol/codex-acp or set CODEX_ACP_BIN to a real file.";
+
+export const CODEX_CLI_NOT_INSTALLED =
+  "Codex CLI not found. Install Codex, or set CODEX_PATH to the codex binary.";
 
 export type CodexLoginDetectInput = {
   env?: NodeJS.Dict<string>;
@@ -19,6 +24,8 @@ export type CodexLoginDetectInput = {
   readFile?: (filePath: string) => string;
   moduleDirs?: string[];
   nodeBinary?: string;
+  execPath?: string;
+  electron?: boolean;
 };
 
 export type CodexLoginDetectResult = {
@@ -27,6 +34,7 @@ export type CodexLoginDetectResult = {
   cliBinary: string | null;
   acpBinary: string | null;
   codexHome: string;
+  accessDefaults?: BotAccessDefaults;
 };
 
 export type CodexAcpLaunch = {
@@ -41,6 +49,56 @@ function hasLoginArtifact(codexHome: string, existsSync: (filePath: string) => b
     if (existsSync(path.join(codexHome, name))) return true;
   }
   return false;
+}
+
+function topLevelTomlStrings(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (line.startsWith("[")) break;
+    const match = /^([A-Za-z0-9_-]+)\s*=\s*(["'])(.*?)\2(?:\s*#.*)?$/.exec(line);
+    if (match) values[match[1]] = match[3];
+  }
+  return values;
+}
+
+function codexPermissionMode(value: unknown): PermissionMode | undefined {
+  if (value === "never") return "always-approve";
+  if (value === "on-request" || value === "untrusted" || value === "on-failure") return "ask";
+  return undefined;
+}
+
+function codexSandboxProfile(value: unknown): SandboxProfile | undefined {
+  if (value === "danger-full-access") return "off";
+  if (value === "workspace-write") return "workspace";
+  if (value === "read-only") return "read-only";
+  return undefined;
+}
+
+/** Read explicit native Codex defaults without exposing the rest of config.toml. */
+export function detectCodexAccessDefaults(input: CodexLoginDetectInput = {}): BotAccessDefaults | undefined {
+  const env = input.env ?? process.env;
+  const homedir = input.homedir ?? os.homedir();
+  const codexHome = (env.CODEX_HOME?.trim() || path.join(homedir, ".codex")).replace(/[\\/]+$/, "");
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  let values: Record<string, unknown> = {};
+  try {
+    values = topLevelTomlStrings(readFile(path.join(codexHome, "config.toml")));
+  } catch {
+    // A Codex login can exist without a config file.
+  }
+  if (env.CODEX_CONFIG?.trim()) {
+    try {
+      const override = JSON.parse(env.CODEX_CONFIG) as Record<string, unknown>;
+      if (override && typeof override === "object") values = { ...values, ...override };
+    } catch {
+      // Ignore malformed ambient config and retain readable file defaults.
+    }
+  }
+  const mode = codexPermissionMode(values.approval_policy);
+  const sandbox = codexSandboxProfile(values.sandbox_mode);
+  return mode || sandbox ? { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}) } : undefined;
 }
 
 function lookOnPath(
@@ -92,15 +150,28 @@ function isNodeBinary(filePath: string): boolean {
   return name === "node" || name === "node.exe";
 }
 
-function resolveNodeBinary(input: CodexLoginDetectInput, existsSync: (filePath: string) => boolean, pathDirs: string[]): string | null {
+function resolveNodeBinary(
+  input: CodexLoginDetectInput,
+  existsSync: (filePath: string) => boolean,
+  pathDirs: string[],
+  scriptPath?: string,
+): string | null {
   const env = input.env ?? process.env;
+  const execPath = input.execPath ?? process.execPath;
   const explicit = input.nodeBinary?.trim() || env.NODE_BINARY?.trim();
   if (explicit && existsSync(explicit)) return explicit;
+  // A packaged script lives inside app.asar, which only Electron can read.
+  // Prefer our own binary over any node on PATH, or the child dies with
+  // MODULE_NOT_FOUND on a machine that happens to have node installed.
+  if (scriptPath && isInsideAsar(scriptPath)) {
+    const electron = input.electron ?? runningInElectron();
+    if (electron && existsSync(execPath)) return execPath;
+  }
   const names = (input.platform ?? process.platform) === "win32" ? ["node.exe", "node"] : ["node"];
   const onPath = lookOnPath(names, pathDirs, existsSync);
   if (onPath) return onPath;
-  if (isNodeBinary(process.execPath) && existsSync(process.execPath)) return process.execPath;
-  if (isElectronBinary(process.execPath) && existsSync(process.execPath)) return process.execPath;
+  if (isNodeBinary(execPath) && existsSync(execPath)) return execPath;
+  if (isElectronBinary(execPath) && existsSync(execPath)) return execPath;
   return null;
 }
 
@@ -145,9 +216,8 @@ function workhorseAcpExe(input: CodexLoginDetectInput, existsSync: (filePath: st
   const homedir = input.homedir ?? os.homedir();
   const platform = input.platform ?? process.platform;
   const exe = platform === "win32" ? "codex-acp.exe" : "codex-acp";
-  const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
   const candidates = [
-    path.join(localApp, "Go7 Workhorse", "bin", exe),
+    path.join(workhorseToolBin(homedir, env, platform), exe),
     path.join(homedir, ".workhorse", "bin", exe),
   ];
   return candidates.find((file) => existsSync(file)) ?? null;
@@ -161,7 +231,7 @@ function launchForFile(
 ): CodexAcpLaunch | null {
   if (!existsSync(filePath)) return null;
   if (isJsEntry(filePath)) {
-    const node = resolveNodeBinary(input, existsSync, pathDirs);
+    const node = resolveNodeBinary(input, existsSync, pathDirs, filePath);
     if (!node) return null;
     return { command: node, argv: [filePath], acpFile: filePath };
   }
@@ -208,8 +278,7 @@ export function resolveOpenAiDesktopCodex(
   const platform = input.platform ?? process.platform;
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const exe = platform === "win32" ? "codex.exe" : "codex";
-  const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
-  const binRoot = path.join(localApp, "OpenAI", "Codex", "bin");
+  const binRoot = path.join(localAppDataRoot(homedir, env, platform), "OpenAI", "Codex", "bin");
   const direct = path.join(binRoot, exe);
   if (existsSync(direct)) return direct;
   if (!existsSync(binRoot)) return null;
@@ -256,9 +325,16 @@ export function detectCodexLogin(input: CodexLoginDetectInput = {}): CodexLoginD
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveCodexCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
   const connected = Boolean(acpBinary && hasLoginArtifact(codexHome, existsSync, env));
-  return { connected, binary: acpBinary, cliBinary, acpBinary, codexHome };
+  const accessDefaults = detectCodexAccessDefaults({ ...input, env, homedir, platform, existsSync, pathDirs });
+  return { connected, binary: acpBinary, cliBinary, acpBinary, codexHome, ...(accessDefaults ? { accessDefaults } : {}) };
 }
 
-export function isElectronAcpCommand(command: string): boolean {
-  return isElectronBinary(command);
+export function isElectronAcpCommand(
+  command: string,
+  execPath: string = process.execPath,
+  electron: boolean = runningInElectron(),
+): boolean {
+  if (isElectronBinary(command)) return true;
+  // A packaged build renames the binary after the product, so compare paths.
+  return electron && command === execPath;
 }

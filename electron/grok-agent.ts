@@ -295,8 +295,7 @@ function locationPath(value: unknown): string {
 function shortLocator(value: string): string {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 180 || trimmed.includes("\n") || trimmed.includes("\\n")) return "";
-  const parts = trimmed.replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts.length > 2 ? parts.slice(-2).join("/") : trimmed;
+  return trimmed;
 }
 
 function shortToolTitle(value: string): string {
@@ -629,6 +628,10 @@ export function pickPermissionOptionId(
 
 export class GrokAgent {
   readonly spec: GrokLaunchSpec;
+  /** Vendor name for errors this agent raises. */
+  private get who(): string {
+    return this.spec.agentLabel?.trim() || "grok";
+  }
   private readonly spawn: GrokSpawnFn;
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
@@ -659,7 +662,7 @@ export class GrokAgent {
     child.on("error", (error) => this.failAll(error));
     child.on("exit", (code, signal) => {
       if (this.closed) return;
-      this.failAll(new Error(`grok agent exited (${code ?? signal ?? "unknown"})${this.stderr.trim() ? `: ${this.stderr.trim()}` : ""}`));
+      this.failAll(new Error(`${this.who} agent exited (${code ?? signal ?? "unknown"})${this.stderr.trim() ? `: ${this.stderr.trim()}` : ""}`));
     });
 
     const initialize = await this.request("initialize", this.spec.initializeParams);
@@ -689,10 +692,49 @@ export class GrokAgent {
       sessionNew = await this.request("session/new", { ...this.spec.sessionParams, mcpServers: [] });
     }
     const sessionId = typeof sessionNew.sessionId === "string" ? sessionNew.sessionId : "";
-    if (!sessionId) throw new Error("grok agent session/new did not return a sessionId");
+    if (!sessionId) throw new Error(`${this.who} agent session/new did not return a sessionId`);
     this.sessionId = sessionId;
     this.opened = "session/new";
+    await this.applySessionConfig(sessionId, sessionNew);
     return { initialize, sessionNew, sessionId, opened: "session/new" };
+  }
+
+  /**
+   * Effort and Fast mode ride on session config options, not on session meta:
+   * the agent reads `_meta.claudeCode.options` for a couple of flags and
+   * ignores the rest, so a picked level did nothing. Only send a value the
+   * session says this model takes, which also keeps Grok and Codex out of it
+   * when they advertise no such option.
+   */
+  private async applySessionConfig(sessionId: string, sessionNew: Record<string, unknown>): Promise<void> {
+    const raw = sessionNew.configOptions;
+    if (!Array.isArray(raw)) return;
+    const wanted: { id: string; value: string }[] = [];
+    const effort = this.spec.effort?.trim();
+    if (effort) wanted.push({ id: "effort", value: effort });
+    if (typeof this.spec.fastMode === "boolean") {
+      wanted.push({ id: "fast", value: this.spec.fastMode ? "on" : "off" });
+    }
+    const agentName = this.spec.agentName?.trim();
+    if (agentName) wanted.push({ id: "agent", value: agentName });
+    for (const want of wanted) {
+      const option = raw.find(
+        (item): item is { id?: unknown; currentValue?: unknown; options?: unknown } =>
+          Boolean(item) && typeof item === "object" && (item as { id?: unknown }).id === want.id,
+      );
+      if (!option) continue;
+      const allowed = Array.isArray(option.options)
+        ? option.options
+            .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : null))
+            .filter((value): value is string => typeof value === "string")
+        : [];
+      if (!allowed.includes(want.value) || option.currentValue === want.value) continue;
+      try {
+        await this.request("session/set_config_option", { sessionId, configId: want.id, value: want.value });
+      } catch {
+        /* a preference is not a reason to lose the session */
+      }
+    }
   }
 
   async prompt(text: string, handlers: GrokAgentHandlers = {}, images: ChatImage[] = []): Promise<GrokPromptResult> {
@@ -780,7 +822,7 @@ export class GrokAgent {
   }
 
   async sessionInfo(): Promise<Record<string, unknown>> {
-    if (!this.sessionId) throw new Error("grok agent has no session");
+    if (!this.sessionId) throw new Error(`${this.who} agent has no session`);
     return this.request("_x.ai/session/info", { sessionId: this.sessionId });
   }
 
@@ -903,7 +945,7 @@ export class GrokAgent {
       waiter("deny");
       this.permissionWaiters.delete(id);
     }
-    this.failAll(new Error("grok agent disposed"));
+    this.failAll(new Error(`${this.who} agent disposed`));
     if (this.child && !this.child.killed) {
       this.child.kill();
     }
@@ -914,7 +956,7 @@ export class GrokAgent {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       if (!this.child?.stdin.writable) {
-        reject(new Error("grok agent stdin is closed"));
+        reject(new Error(`${this.who} agent stdin is closed`));
         return;
       }
       this.pending.set(id, { resolve, reject });
@@ -962,7 +1004,7 @@ export class GrokAgent {
     if (!pending) return;
     this.pending.delete(message.id);
     if (message.error) {
-      pending.reject(new Error(message.error.message || "grok agent request failed"));
+      pending.reject(new Error(message.error.message || `${this.who} agent request failed`));
       return;
     }
     pending.resolve(asRecord(message.result));

@@ -138,11 +138,12 @@ type WorkhorseBridge = {
     opened?: "session/new" | "session/load";
   }>;
   detectGrokLogin: () => Promise<{ connected: boolean; binary: string | null }>;
-  detectCodexLogin: () => Promise<{ connected: boolean; binary: string | null }>;
+  detectCodexLogin: () => Promise<import("../electron/codex-login").CodexLoginDetectResult>;
   detectCodexRuntime?: () => Promise<import("../electron/codex-app-server").CodexRuntimeInfo>;
   listCodexNativeThreads?: (limit?: number) => Promise<import("../electron/codex-app-server").CodexNativeThread[]>;
   codexCapabilities?: (projectRoot?: string) => Promise<ReturnType<typeof import("../electron/codex-capabilities").codexCapabilitySummary>>;
-  detectClaudeLogin: () => Promise<{ connected: boolean; binary: string | null }>;
+  detectClaudeLogin: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null }>;
+  claudeSetupToken: () => Promise<{ ok: boolean; message?: string }>;
   claudePrompt: (input: GrokPromptBridgeInput) => Promise<{
     text?: string;
     stopReason?: string;
@@ -180,6 +181,9 @@ type WorkhorseBridge = {
     mcpServers?: import("./lib/types").McpServerConfig[];
     securityPolicy?: import("./lib/types").SessionSecurityPolicy;
     folders?: string[];
+    parentId?: string;
+    hidden?: boolean;
+    role?: import("./lib/workhorse-rules").DeskRole;
     config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" };
   }) => Promise<{ text?: string; stopReason?: string }>;
   customCancel: (sessionId: string) => Promise<void>;

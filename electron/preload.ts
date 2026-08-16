@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("codex:answer-permission", { requestId, answer }),
   codexCancel: (sessionId: string) => ipcRenderer.invoke("codex:cancel", sessionId),
   detectCodexLogin: () =>
-    ipcRenderer.invoke("codex:detect-login") as Promise<{ connected: boolean; binary: string | null }>,
+    ipcRenderer.invoke("codex:detect-login") as Promise<import("./codex-login").CodexLoginDetectResult>,
   detectCodexRuntime: () =>
     ipcRenderer.invoke("codex:detect-runtime") as Promise<import("./codex-app-server").CodexRuntimeInfo>,
   listCodexNativeThreads: (limit = 12) =>
@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("codex:capabilities", projectRoot) as Promise<ReturnType<typeof import("./codex-capabilities").codexCapabilitySummary>>,
   detectClaudeLogin: () =>
     ipcRenderer.invoke("claude:detect-login") as Promise<{ connected: boolean; binary: string | null }>,
+  claudeSetupToken: () =>
+    ipcRenderer.invoke("claude:setup-token") as Promise<{ ok: boolean; message?: string }>,
   claudePrompt: (input: GrokPromptInput) => ipcRenderer.invoke("claude:prompt", input),
   claudeAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
     ipcRenderer.invoke("claude:answer-permission", { requestId, answer }),

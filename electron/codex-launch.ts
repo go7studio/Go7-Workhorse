@@ -12,10 +12,12 @@ import {
   CODEX_ACP_NOT_INSTALLED,
   isElectronAcpCommand,
   resolveCodexAcpLaunch,
+  CODEX_CLI_NOT_INSTALLED,
   resolveCodexCliBinary,
   type CodexLoginDetectInput,
 } from "./codex-login";
-import { withDeskToolEnv } from "./desk-path";
+import { isInsideAsar, withDeskToolEnv } from "./desk-path";
+import { APP_VERSION } from "../src/lib/app-info";
 
 export type CodexLaunchInput = {
   sessionId?: string;
@@ -134,9 +136,13 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
     }),
   };
   if (cli) env.CODEX_PATH = cli;
+  // See the Claude adapter: a packaged fallback lands inside app.asar and
+  // surfaces as "spawn ENOTDIR" instead of naming the missing CLI.
+  else if (isInsideAsar(launch.acpFile)) throw new Error(CODEX_CLI_NOT_INSTALLED);
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {
+    agentLabel: "Codex",
     command,
     argv: launch.argv,
     cwd: input.cwd,
@@ -153,7 +159,7 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.1",
+        version: APP_VERSION,
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

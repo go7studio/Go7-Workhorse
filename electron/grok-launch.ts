@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
+import { APP_VERSION } from "../src/lib/app-info";
 
 export { WORKHORSE_SESSION_RULES };
 
@@ -71,6 +72,15 @@ export function isElectronBinary(command: string): boolean {
   return name === "electron" || name === "electron.exe";
 }
 
+/** Packaged builds rename Electron to the product name. Spawning that
+ *  without ELECTRON_RUN_AS_NODE opens another desk window. */
+export function isElectronAppCommand(command: string, execPath = process.execPath): boolean {
+  if (isElectronBinary(command)) return true;
+  const name = binaryName(command);
+  if (name === "workhorse" || name === "workhorse.exe") return true;
+  return Boolean(process.versions.electron) && command === execPath;
+}
+
 function findNodeOnPath(): string | null {
   const name = process.platform === "win32" ? "node.exe" : "node";
   const dirs = (process.env.PATH ?? "").split(path.delimiter);
@@ -117,17 +127,16 @@ export function workhorseMcpServer(fromSessionId?: string): GrokMcpServer | null
   // A missing helper exits at once and Grok reports "pipe is being closed" (os 232).
   if (!fs.existsSync(script)) return null;
   const override = process.env.WORKHORSE_MCP_COMMAND?.trim();
-  const resolved =
-    override && !isElectronBinary(override)
-      ? { command: override, runAsNode: false }
-      : resolveNodeExecutable();
+  const resolved = override
+    ? { command: override, runAsNode: isElectronAppCommand(override) }
+    : resolveNodeExecutable();
   const env: Record<string, string> = {
     WORKHORSE_BRIDGE_URL: url,
     WORKHORSE_BRIDGE_TOKEN: token,
     WORKHORSE_STATE_PATH: statePath,
   };
   if (fromSessionId?.trim()) env.WORKHORSE_FROM_SESSION = fromSessionId.trim();
-  if (resolved.runAsNode || isElectronBinary(resolved.command)) {
+  if (resolved.runAsNode || isElectronAppCommand(resolved.command)) {
     env.ELECTRON_RUN_AS_NODE = "1";
   }
   return {
@@ -140,11 +149,18 @@ export function workhorseMcpServer(fromSessionId?: string): GrokMcpServer | null
 }
 
 export type GrokLaunchSpec = {
+  /** Vendor name for messages. The ACP agent is shared, so Claude and Codex
+   *  failures would otherwise all report themselves as grok. */
+  agentLabel?: string;
   command: string;
   argv: string[];
   cwd: string;
   model: string;
   effort: string;
+  /** Claude Code Fast mode, sent as a session config option after session/new. */
+  fastMode?: boolean;
+  /** Claude Code agent persona, sent the same way. */
+  agentName?: string | null;
   alwaysApprove: boolean;
   sandbox: SandboxProfile;
   initializeParams: {
@@ -245,7 +261,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.1",
+        version: APP_VERSION,
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

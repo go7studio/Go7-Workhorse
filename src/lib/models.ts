@@ -30,12 +30,18 @@ export const EFFORTS: ReasoningLevel[] = [
   { id: "xhigh", label: "Extra", hint: "Deepest Grok reasoning." },
 ];
 
+/**
+ * Claude Code's own levels: `claude --effort <low|medium|high|xhigh|max>`, plus
+ * the Default the agent starts a session on, where the model decides how long
+ * to think. The session advertises exactly these for the picked model.
+ */
 export const CLAUDE_EFFORTS: ReasoningLevel[] = [
-  { id: "low", label: "Low", hint: "Faster replies. Lighter reasoning." },
-  { id: "medium", label: "Medium", hint: "Balanced speed and depth." },
-  { id: "high", label: "High", hint: "More time on hard steps." },
-  { id: "xhigh", label: "Extra", hint: "Extra high reasoning for long agent work." },
-  { id: "max", label: "Max", hint: "Maximum reasoning depth." },
+  { id: "adaptive", label: "Default", hint: "Claude decides how long to think per step." },
+  { id: "low", label: "Low", hint: "Short thinking. Quick edits and questions." },
+  { id: "medium", label: "Medium", hint: "Everyday work. Balances speed and depth." },
+  { id: "high", label: "High", hint: "Longer thinking on hard steps." },
+  { id: "xhigh", label: "Xhigh", hint: "Sustained thinking for long agent runs." },
+  { id: "max", label: "Max", hint: "The most thinking this model will do." },
 ];
 
 export const MINIMAX_EFFORTS: ReasoningLevel[] = [

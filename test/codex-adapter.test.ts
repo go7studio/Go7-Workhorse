@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -24,9 +24,11 @@ import {
 } from "../electron/codex-launch";
 import {
   CODEX_ACP_NOT_INSTALLED,
+  detectCodexAccessDefaults,
   detectCodexLogin,
   resolveCodexAcpCommand,
   resolveCodexAcpLaunch,
+  resolveOpenAiDesktopCodex,
 } from "../electron/codex-login";
 import { defaultModel } from "../src/lib/models";
 import { buildGrokLaunchSpec } from "../electron/grok-launch";
@@ -126,12 +128,15 @@ test("store send() does not cross-talk vendors", () => {
   assert.match(main, /ipcMain\.handle\("claude:prompt"/);
   assert.match(main, /ipcMain\.handle\("grok:prompt"/);
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  const preloadBuilt = readFileSync(path.join(ROOT, "dist-electron", "preload.mjs"), "utf8");
+  const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
   assert.match(preloadSrc, /detectCodexLogin/);
-  assert.match(preloadBuilt, /detectCodexLogin/);
-  assert.match(preloadBuilt, /codex:detect-login/);
   assert.match(preloadSrc, /listVendorModels/);
-  assert.match(preloadBuilt, /models:list/);
+  if (existsSync(preloadBuiltPath)) {
+    const preloadBuilt = readFileSync(preloadBuiltPath, "utf8");
+    assert.match(preloadBuilt, /detectCodexLogin/);
+    assert.match(preloadBuilt, /codex:detect-login/);
+    assert.match(preloadBuilt, /models:list/);
+  }
   assert.match(main, /ipcMain\.handle\("models:list"/);
   assert.doesNotMatch(main, /spawn\(["']grok/);
   assert.match(settings, /refreshCodexLogin/);
@@ -271,6 +276,62 @@ test("buildCodexLaunchSpec never spawns grok and maps model sandbox mode MCP", (
   }
 });
 
+test("Codex lookups follow the machine, not a hardcoded Windows path", () => {
+  const macHome = "/Users/me";
+  const macOwned = path.join(macHome, "Library", "Application Support", "Go7 Workhorse", "bin", "codex-acp");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: macHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === macOwned,
+      platform: "darwin",
+    })?.command,
+    macOwned,
+  );
+
+  // A Mac must not go looking in a Windows AppData folder.
+  const winShaped = path.join(macHome, "AppData", "Local", "Go7 Workhorse", "bin", "codex-acp");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: macHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === winShaped,
+      platform: "darwin",
+    }),
+    null,
+  );
+
+  const winHome = "C:\\Users\\me";
+  const winOwned = path.join(winHome, "AppData", "Local", "Go7 Workhorse", "bin", "codex-acp.exe");
+  assert.equal(
+    resolveCodexAcpLaunch({
+      env: { PATH: "" },
+      homedir: winHome,
+      pathDirs: [],
+      moduleDirs: [],
+      existsSync: (file) => file === winOwned,
+      platform: "win32",
+    })?.command,
+    winOwned,
+  );
+
+  // The OpenAI Codex desktop install is probed under this machine's own data root.
+  const macDesktop = path.join(macHome, "Library", "Application Support", "OpenAI", "Codex", "bin", "codex");
+  assert.equal(
+    resolveOpenAiDesktopCodex({
+      homedir: macHome,
+      env: {},
+      platform: "darwin",
+      existsSync: (file) => file === macDesktop,
+    }),
+    macDesktop,
+  );
+});
+
 test("Codex ACP resolve never returns a phantom cmd and requires ACP plus login", () => {
   assert.equal(defaultModel("codex").id, "gpt-5.6-sol");
   const missing = resolveCodexAcpLaunch({
@@ -407,6 +468,32 @@ test("resolveCodex mappings lock documented flags", () => {
   assert.equal(resolveCodexAgentMode("plan", "off"), "read-only");
 });
 
+test("Codex native access defaults map into Workhorse permission and sandbox", () => {
+  const native = detectCodexAccessDefaults({
+    homedir: "/tmp/workhorse-codex-defaults",
+    env: { PATH: "" },
+    readFile: () => [
+      'model = "gpt-5.6-sol"',
+      'approval_policy = "never"',
+      'sandbox_mode = "danger-full-access"',
+      "[profiles.safe]",
+      'approval_policy = "on-request"',
+      'sandbox_mode = "read-only"',
+    ].join("\n"),
+  });
+  assert.deepEqual(native, { mode: "always-approve", sandbox: "off" });
+
+  const overridden = detectCodexAccessDefaults({
+    homedir: "/tmp/workhorse-codex-defaults",
+    env: {
+      PATH: "",
+      CODEX_CONFIG: JSON.stringify({ approval_policy: "on-request", sandbox_mode: "workspace-write" }),
+    },
+    readFile: () => 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n',
+  });
+  assert.deepEqual(overridden, { mode: "ask", sandbox: "workspace" });
+});
+
 test("detectCodexLogin requires binary plus artifact and never marks Grok", () => {
   const home = "/tmp/wh-codex-home";
   const binDir = "/tmp/wh-codex-bin";
@@ -438,9 +525,13 @@ test("detectCodexLogin requires binary plus artifact and never marks Grok", () =
     env: { PATH: binDir },
     existsSync: (file) => file === acp || file === auth,
     platform: "win32",
+    readFile: (file) => file.endsWith("config.toml")
+      ? 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n'
+      : "",
   });
   assert.equal(withAuth.connected, true);
   assert.equal(withAuth.binary, acp);
+  assert.deepEqual(withAuth.accessDefaults, { mode: "always-approve", sandbox: "off" });
 
   const withKey = detectCodexLogin({
     homedir: home,

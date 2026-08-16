@@ -11,17 +11,21 @@ import {
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
+  CLAUDE_CLI_NOT_INSTALLED,
   isElectronAcpCommand,
   resolveClaudeAcpLaunch,
   resolveClaudeCliBinary,
   type ClaudeLoginDetectInput,
 } from "./claude-login";
-import { withDeskToolEnv } from "./desk-path";
+import { isInsideAsar, withDeskToolEnv } from "./desk-path";
+import { APP_VERSION } from "../src/lib/app-info";
 
 export type ClaudeLaunchInput = {
   sessionId?: string;
   model: string;
   effort: EffortLevel | string | null;
+  fastMode?: boolean;
+  agentName?: string | null;
   cwd: string;
   mode: PermissionMode;
   sandbox?: SandboxProfile;
@@ -80,6 +84,9 @@ export function resolveClaudeModel(model: string | null | undefined): string {
 }
 
 export function resolveClaudeEffort(effort: EffortLevel | string | null | undefined): string {
+  // "Default" is a real level here: the agent starts sessions on it and the
+  // model picks its own thinking budget.
+  if (effort === "adaptive" || effort === "default") return "default";
   if (effort === "extra") return "xhigh";
   if (
     effort === "low" ||
@@ -150,6 +157,10 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
     ANTHROPIC_MODEL: model,
   };
   if (cli) env.CLAUDE_CODE_EXECUTABLE = cli;
+  // Without this the agent falls back to a CLI inside its own package. Packaged
+  // that path sits in app.asar, and spawn goes to the OS, which cannot read an
+  // archive — the user gets "spawn ENOTDIR" and no idea what is missing.
+  else if (isInsideAsar(launch.acpFile)) throw new Error(CLAUDE_CLI_NOT_INSTALLED);
   if (!env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
     const desktop = readClaudeDesktopOauth(input.detect);
     if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;
@@ -157,6 +168,9 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
   if (isElectronAcpCommand(command)) env.ELECTRON_RUN_AS_NODE = "1";
 
   return {
+    agentLabel: "Claude",
+    fastMode: input.fastMode === true,
+    agentName: input.agentName ?? null,
     command,
     argv: launch.argv,
     cwd: input.cwd,
@@ -171,7 +185,7 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
       clientInfo: {
         name: "go7-workhorse",
         title: "Workhorse",
-        version: "0.1.1",
+        version: APP_VERSION,
       },
       clientCapabilities: { ...WORKHORSE_CLIENT_CAPABILITIES },
     },

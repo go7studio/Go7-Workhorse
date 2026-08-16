@@ -4,6 +4,11 @@ export type PermissionMode = "ask" | "accept-edits" | "always-approve" | "plan";
 
 export type SandboxProfile = "off" | "workspace" | "read-only" | "strict";
 
+export type BotAccessDefaults = {
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+};
+
 export type SessionSecurityPolicy = {
   network: "blocked" | "allowed";
   root: "ask" | "blocked" | "allowed";
@@ -183,6 +188,10 @@ export type Session = {
   model: string;
   customBotId?: string;
   effort: EffortLevel | null;
+  /** Claude Code's Fast mode. Applied as a session config option. */
+  fastMode?: boolean;
+  /** Claude Code main-thread agent persona, or null for the standard one. */
+  agentName?: string | null;
   title: string;
   titleLocked?: boolean;
   mode: PermissionMode;
@@ -270,8 +279,12 @@ export type LlmLink = {
   connected: boolean;
   enabled?: boolean;
   available?: boolean;
+  /** Installed, but the login is missing or expired. */
+  needsAuth?: boolean;
   name?: string;
   color?: string;
+  /** Native vendor defaults used only when seeding a new chat. */
+  accessDefaults?: BotAccessDefaults;
 };
 
 export type CustomLlm = {
@@ -351,6 +364,8 @@ export type GrokPlanProduct = {
   label: string;
   usagePercent: number;
   resetsAt?: string;
+  /** No cap on this window (MiniMax weekly on some seats). Do not turn this into 100%. */
+  unlimited?: boolean;
 };
 
 export type GrokPlanUsage = {

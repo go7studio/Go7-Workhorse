@@ -89,17 +89,30 @@ function ContextRows({ rows }: { rows: ContextCategory[] }) {
 export function ContextMeter({
   session: sessionProp,
   compact = false,
+  fallbackWindow,
+  matchProvider,
+  matchBotId,
 }: {
   session?: Session | null;
   compact?: boolean;
+  fallbackWindow?: number;
+  matchProvider?: import("../lib/types").ProviderId;
+  matchBotId?: string;
 } = {}) {
-  const active = useActiveSession();
-  const session = sessionProp ?? active;
+  const liveSession = useActiveSession();
+  const matchedSession =
+    matchProvider &&
+    (!liveSession ||
+      liveSession.provider !== matchProvider ||
+      (matchBotId ? liveSession.customBotId !== matchBotId : false))
+      ? undefined
+      : liveSession;
+  const session = sessionProp ?? matchedSession;
   const store = useStore();
   const customWindow =
     (session?.customBotId
       ? store.settings.customBots.find((bot) => bot.id === session.customBotId)?.contextWindow
-      : undefined) ?? store.settings?.llms.custom.contextWindow;
+      : undefined) ?? store.settings?.llms.custom.contextWindow ?? fallbackWindow;
   const [open, setOpen] = useState(false);
   const [live, setLive] = useState<ChatContextStats | null>(null);
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
@@ -163,8 +176,25 @@ export function ContextMeter({
 
   const stats = live ?? estimate;
   const shownUsed = stats?.used ?? 0;
-  const shownTotal = stats?.total ?? 0;
+  const shownTotal = stats?.total ?? fallbackWindow ?? 0;
   const animatedUsed = useAnimatedNumber(shownUsed, session?.id);
+  if ((!session || !estimate || !stats) && !(fallbackWindow && fallbackWindow > 0)) return null;
+  if ((!session || !estimate || !stats) && fallbackWindow && fallbackWindow > 0) {
+    return (
+      <div className="context-meter-wrap">
+        <button
+          type="button"
+          className="context-meter"
+          title={`${formatWindow(fallbackWindow)} context window`}
+        >
+          <span className="context-copy">
+            <strong>{formatWindow(fallbackWindow)}</strong>
+            <em>context</em>
+          </span>
+        </button>
+      </div>
+    );
+  }
   if (!session || !estimate || !stats) return null;
   const ratio = Math.min(1, animatedUsed / Math.max(shownTotal, 1));
   const size = compact ? 24 : 36;

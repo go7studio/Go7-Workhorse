@@ -183,6 +183,7 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
         }))
       : MODEL_CATALOG.claude,
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
+    cursor: MODEL_CATALOG.cursor,
     custom: MODEL_CATALOG.custom,
   };
 }

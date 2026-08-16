@@ -448,7 +448,7 @@ export class CustomSessionHost {
               ? parseProviderId(String(use.input.vendor ?? use.input.provider ?? use.input.name ?? ""))
               : null;
           if (spawnTarget && spawnTarget !== "custom") {
-            const vendorName = { grok: "Grok", claude: "Claude", codex: "Codex" }[spawnTarget];
+            const vendorName = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor" }[spawnTarget];
             const requestId = uid("perm");
             emit({
               type: "permission",

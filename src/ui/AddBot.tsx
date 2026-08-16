@@ -6,20 +6,21 @@ import type { LlmLink } from "../lib/types";
 import { BotForm } from "./BotForm";
 
 const CATALOG: {
-  id: "grok" | "codex" | "claude" | "own";
+  id: "grok" | "codex" | "claude" | "cursor" | "own";
   name: string;
   hint: string;
 }[] = [
   { id: "grok", name: "Grok", hint: "Local Grok Build." },
   { id: "codex", name: "Codex", hint: "Local Codex." },
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
+  { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },
   { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
-type Stage = "catalog" | "own" | "grok" | "codex" | "claude";
+type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor";
 
-export function addBotChoices(llms: Record<"grok" | "codex" | "claude", Pick<LlmLink, "connected">>) {
-  return CATALOG.filter((item) => item.id === "own" || !llms[item.id].connected);
+export function addBotChoices(llms: Record<"grok" | "codex" | "claude" | "cursor", Pick<LlmLink, "connected">>) {
+  return CATALOG.filter((item) => item.id === "own" || !llms[item.id]?.connected);
 }
 
 export function AddBot() {
@@ -162,7 +163,7 @@ export function AddBot() {
         </>
       )}
 
-      {(stage === "grok" || stage === "codex" || stage === "claude") && (
+      {(stage === "grok" || stage === "codex" || stage === "claude" || stage === "cursor") && (
         <VendorStatus stage={stage} onBack={leaveChoice} onDesk={store.closeAddBot} />
       )}
     </section>
@@ -174,7 +175,7 @@ function VendorStatus({
   onBack,
   onDesk,
 }: {
-  stage: "grok" | "codex" | "claude";
+  stage: "grok" | "codex" | "claude" | "cursor";
   onBack: () => void;
   onDesk: () => void;
 }) {
@@ -182,7 +183,7 @@ function VendorStatus({
   const link = store.settings.llms[stage];
   const linked = Boolean(link?.connected);
   const found = Boolean(link?.available);
-  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : "Claude";
+  const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : stage === "cursor" ? "Cursor" : "Claude";
 
   return (
     <>
@@ -213,7 +214,9 @@ function VendorStatus({
               ? store.refreshGrokLogin()
               : stage === "codex"
                 ? store.refreshCodexLogin()
-                : store.refreshClaudeLogin()
+                : stage === "cursor"
+                  ? store.refreshCursorLogin()
+                  : store.refreshClaudeLogin()
           }
         >
           Recheck

@@ -1,5 +1,6 @@
 import type { LinkedReference, PermissionMode, SandboxProfile } from "./types";
 import {
+  CURSOR_SESSION_RULES,
   CUSTOM_HTTP_SESSION_RULES,
   CUSTOM_HTTP_WORKER_RULES,
   WORKHORSE_SESSION_RULES,
@@ -30,8 +31,8 @@ export type PrefaceInput = {
   desk?: DeskContext;
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
-  /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP with desk tools. */
-  surface?: "mcp" | "http";
+  /** mcp = Grok/Codex/Claude with Workhorse tools. http = custom HTTP. cursor = Cursor Agent ACP. */
+  surface?: "mcp" | "http" | "cursor";
   role?: DeskRole;
 };
 
@@ -136,7 +137,9 @@ export function buildSessionPreface(input: PrefaceInput): string {
       : WORKER_SESSION_RULES
     : input.surface === "http"
       ? CUSTOM_HTTP_SESSION_RULES
-      : WORKHORSE_SESSION_RULES;
+      : input.surface === "cursor"
+        ? CURSOR_SESSION_RULES
+        : WORKHORSE_SESSION_RULES;
   const parts = [
     input.sessionId
       ? `This chat's immutable Workhorse session ID is ${input.sessionId}. Use it exactly; never invent or alter a session ID.`

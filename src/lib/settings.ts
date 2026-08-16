@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS: Settings = {
     grok: { connected: false },
     claude: { connected: false },
     codex: { connected: false },
+    cursor: { connected: false },
     custom: structuredClone(EMPTY_CUSTOM_DRAFT),
   },
   customBots: [],
@@ -87,7 +88,7 @@ export function vendorEnabled(link: LlmLink | undefined): boolean {
   return Boolean(link?.connected) && link?.enabled !== false;
 }
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function attachedStockVendors(settings: Settings): Exclude<ProviderId, "custom">[] {
   return STOCK.filter((id) => vendorEnabled(settings.llms[id]));
@@ -251,6 +252,7 @@ export function normalizeSettings(raw: unknown): Settings {
       grok: link(record.llms?.grok),
       claude: link(record.llms?.claude),
       codex: link(record.llms?.codex),
+      cursor: link(record.llms?.cursor),
       custom: custom(record.llms?.custom),
     },
     customBots: normalizeCustomBots(record.customBots, custom(record.llms?.custom)),
@@ -265,7 +267,7 @@ function normalizeUsageBudgets(raw: unknown): Settings["usageBudgets"] {
   if (!raw || typeof raw !== "object") return { grok: 2_000_000 };
   const record = raw as Record<string, unknown>;
   const budgets: Settings["usageBudgets"] = {};
-  for (const id of ["grok", "claude", "codex", "custom"] as const) {
+  for (const id of ["grok", "claude", "codex", "cursor", "custom"] as const) {
     const value = Number(record[id]);
     if (Number.isFinite(value) && value > 0) budgets[id] = Math.round(value);
   }

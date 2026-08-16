@@ -3457,18 +3457,24 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /CATALOG/);
   assert.match(addBot, /addBotChoices/);
   assert.match(addBot, /choices.length === 1/);
-  assert.match(addBot, /item.id === "own" \|\| !llms\[item.id\].connected/);
+  assert.match(addBot, /item.id === "own" \|\| !llms\[item.id\]\?\.connected/);
   const { addBotChoices } = await import("../src/ui/AddBot.tsx");
   assert.deepEqual(
-    addBotChoices({ grok: { connected: true }, codex: { connected: true }, claude: { connected: true } }).map(
-      (item) => item.id,
-    ),
+    addBotChoices({
+      grok: { connected: true },
+      codex: { connected: true },
+      claude: { connected: true },
+      cursor: { connected: true },
+    }).map((item) => item.id),
     ["own"],
   );
   assert.deepEqual(
-    addBotChoices({ grok: { connected: true }, codex: { connected: false }, claude: { connected: true } }).map(
-      (item) => item.id,
-    ),
+    addBotChoices({
+      grok: { connected: true },
+      codex: { connected: false },
+      claude: { connected: true },
+      cursor: { connected: true },
+    }).map((item) => item.id),
     ["codex", "own"],
   );
   assert.doesNotMatch(addBot, /on desk/);

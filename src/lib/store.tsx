@@ -111,6 +111,7 @@ import {
   readyPlanStepIds,
   recordPlanEvidence,
   recordPlanEvent,
+  revisePlanStep,
   resumePlanRun,
   setPlanStepStatus,
   startPlanRun,
@@ -2594,8 +2595,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ? startPlanRun(nextPlan, now)
                     : operation === "pause"
                       ? pausePlanRun(nextPlan, now)
-                      : operation === "resume"
+                    : operation === "resume"
                         ? resumePlanRun(nextPlan, now)
+                        : operation === "revise"
+                          ? revisePlanStep(nextPlan, payload.planStepId ?? "", {
+                              ...(payload.planTitle !== undefined ? { title: payload.planTitle } : {}),
+                              ...(payload.planDetails !== undefined ? { details: payload.planDetails } : {}),
+                              ...(payload.planDependsOn !== undefined ? { dependsOn: payload.planDependsOn } : {}),
+                              ...(payload.planEvidenceRequired !== undefined ? { evidenceRequired: payload.planEvidenceRequired } : {}),
+                            }, now)
                         : operation === "complete"
                           ? completePlanRun(nextPlan, now)
                           : operation === "block"
@@ -2660,7 +2668,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     id: step.id,
                     title: step.title,
                     status: step.status,
+                    dependsOn: step.dependsOn,
+                    evidenceRequired: step.evidenceRequired,
                     assignedSessionId: step.assignedSessionId,
+                    assignment: step.assignment,
                     evidence: step.evidence.length,
                   })),
                 }, null, 2),

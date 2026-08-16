@@ -2054,6 +2054,10 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_read_skill",
     "workhorse_delete_bot",
   ]);
+  const rpcPlan = ((listedTools as { result?: { tools?: { name: string; inputSchema?: unknown }[] } })?.result?.tools ?? [])
+    .find((tool) => tool.name === "workhorse_plan");
+  assert.match(JSON.stringify(rpcPlan?.inputSchema), /revise/);
+  assert.match(JSON.stringify(rpcPlan?.inputSchema), /dependsOn/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_setup_custom_bot/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /importFrom=auto/);
@@ -6070,10 +6074,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(deskRoleOf({ parentId: null }), "orchestrator");
 
   const { customHttpTools } = await import("../electron/custom-tools");
-  const orchTools = customHttpTools().map((tool) => tool.name);
+  const customToolset = customHttpTools();
+  const orchTools = customToolset.map((tool) => tool.name);
   const workerTools = customHttpTools([], { role: "worker" }).map((tool) => tool.name);
   assert.ok(orchTools.includes("workhorse_spawn_agent"));
   assert.ok(orchTools.includes("workhorse_plan"));
+  assert.match(JSON.stringify(customToolset.find((tool) => tool.name === "workhorse_plan")?.input_schema), /revise/);
   assert.ok(orchTools.includes("workhorse_probe_runtime"));
   assert.ok(orchTools.includes("workhorse_request_vendor"));
   assert.ok(workerTools.includes("workhorse_spawn_agent"));

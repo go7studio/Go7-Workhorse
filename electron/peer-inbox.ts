@@ -51,12 +51,16 @@ export type PeerAsk = {
   wait?: boolean;
   route?: "auto" | "quick" | "balanced" | "deep";
   planStepId?: string;
+  planTitle?: string;
+  planDetails?: string;
+  planDependsOn?: string[];
+  planEvidenceRequired?: boolean;
   rationale?: string;
   skills?: string[];
   tools?: string[];
   files?: string[];
   attachments?: ChatImage[];
-  planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "status" | "evidence" | "complete" | "block" | "cancel";
+  planOperation?: "import" | "view" | "approve" | "start" | "pause" | "resume" | "revise" | "status" | "evidence" | "complete" | "block" | "cancel";
   sourcePath?: string;
   planRun?: unknown;
   stepStatus?: string;

@@ -202,9 +202,13 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     input_schema: {
       type: "object",
       properties: {
-        action: { type: "string", description: "import, view, approve, start, pause, resume, status, evidence, complete, block, or cancel" },
+        action: { type: "string", description: "import, view, approve, start, pause, resume, revise, status, evidence, complete, block, or cancel" },
         path: { type: "string", description: "Markdown path for import" },
         stepId: { type: "string", description: "Plan step id" },
+        title: { type: "string", description: "Revised step title" },
+        details: { type: "string", description: "Revised step details" },
+        dependsOn: { type: "array", items: { type: "string" }, description: "Revised prerequisite step ids" },
+        evidenceRequired: { type: "boolean", description: "Require evidence before completion" },
         status: { type: "string", description: "ready, running, completed, failed, blocked, or cancelled" },
         kind: { type: "string", description: "note, file, test, screenshot, or runtime" },
         label: { type: "string", description: "Short evidence label" },

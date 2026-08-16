@@ -2,7 +2,8 @@
   "schemaVersion": 1,
   "contractVersion": "0.1.0",
   "title": "Imported executable plan contract",
-  "formats": ["markdown", "json"],
+  "formats": ["markdown"],
+  "liveSmokeCommand": "eval:real-plan-smoke",
   "fixture": {
     "source": "eval/fixtures/plans/production-go-time.fixture.md",
     "oracle": "scripts/workhorse-eval-plan-fixture.mjs"

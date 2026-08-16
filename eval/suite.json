@@ -924,7 +924,7 @@
         },
         {
           "id": "ORC-11",
-          "criterion": "A Markdown or JSON plan imports as a stable, reviewable task graph and cannot dispatch until the user approves its exact revision.",
+        "criterion": "A Markdown plan imports as a stable, reviewable task graph and cannot dispatch until the user approves its exact revision.",
           "weight": 3,
           "type": "handoff",
           "testability": "auto-partial",

@@ -3740,19 +3740,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   item.id === parent.id
                     ? {
                         ...item,
-                        lineup: addLineupRow(
-                          stampLineupUserText(item.lineup ?? emptyLineup(admitted.cwd, startedAt, waveText), waveText),
-                          {
-                          childId,
-                          title: spec.title,
-                          slice: payload.description?.trim() || spec.title,
-                          folder: admitted.cwd,
-                          vendor: spec.title,
-                          status: "running",
-                          startedAt,
-                          ...(planStepId ? { planStepId } : {}),
-                          ...(rationale ? { rationale } : {}),
-                        }),
+                        lineup: stampLineupUserText(
+                          addLineupRow(
+                            item.lineup ?? emptyLineup(admitted.cwd, startedAt),
+                            {
+                              childId,
+                              title: spec.title,
+                              slice: payload.description?.trim() || spec.title,
+                              folder: admitted.cwd,
+                              vendor: spec.title,
+                              status: "running",
+                              startedAt,
+                              ...(planStepId ? { planStepId } : {}),
+                              ...(rationale ? { rationale } : {}),
+                            },
+                          ),
+                          waveText,
+                        ),
                         ...(assignedPlan ? { planRun: assignedPlan } : {}),
                         messages: [
                           ...item.messages,

@@ -67,6 +67,9 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
 export function addLineupRow(lineup: DeskLineup | undefined, row: DeskLineupRow): DeskLineup {
   const base = lineup ?? emptyLineup(row.folder, row.startedAt);
   if (base.rows.some((item) => item.childId === row.childId)) return base;
+  if (base.notifiedAt) {
+    return { ...emptyLineup(row.folder || base.folder, row.startedAt), rows: [row] };
+  }
   const { notifiedAt: _previousNotification, ...openWave } = base;
   return { ...openWave, folder: row.folder || base.folder, rows: [...base.rows, row] };
 }
@@ -124,7 +127,7 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
   return { ...lineup, notifiedAt: now };
 }
 
-export function lineupJoinPrompt(lineup: DeskLineup | undefined): string {
+export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { continuePlan?: boolean }): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
   const folder = lineup?.folder?.trim() || "(none)";
@@ -146,11 +149,19 @@ export function lineupJoinPrompt(lineup: DeskLineup | undefined): string {
     lines.push((row.report ?? "").trim() || "(no report)");
     lines.push("");
   });
-  lines.push(
-    "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
-    "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
-    "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
-  );
+  if (options?.continuePlan) {
+    lines.push(
+      "Reconcile this wave against the running executable plan. Verify and integrate accepted isolated commits, record evidence, and dispatch newly ready steps.",
+      "Do not stop at a status summary while plan work remains ready. Continue until the plan completes or is truthfully blocked.",
+      "Keep the user-facing update concise; do not paste worker notes, raw checklists, or process narration.",
+    );
+  } else {
+    lines.push(
+      "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
+      "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
+      "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
+    );
+  }
   return lines.join("\n").trim();
 }
 
@@ -393,7 +404,7 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
   const broken = applyLineupTurnBreak(sessions, parentId, now);
   const delay = joinDelayMs(parent.lineup);
   const queued = enqueuePrompt(broken, parentId, {
-    text: lineupJoinPrompt(parent.lineup),
+    text: lineupJoinPrompt(parent.lineup, { continuePlan: parent.planRun?.status === "running" }),
     hideUser: true,
     joinAttempt: 1,
     ...(delay > 0 ? { notBefore: now + delay } : {}),

@@ -6658,6 +6658,11 @@ test("desk builds one named join prompt and syncs idle children", () => {
     },
   );
   assert.equal(nextWave.notifiedAt, undefined);
+  assert.deepEqual(nextWave.rows.map((row) => row.childId), ["c5"]);
+  const planJoin = lineupJoinPrompt(nextWave, { continuePlan: true });
+  assert.match(planJoin, /Reconcile this wave against the running executable plan/);
+  assert.match(planJoin, /Continue until the plan completes or is truthfully blocked/);
+  assert.doesNotMatch(planJoin, /Write one combined review/);
 
   const persistedLineup = normalizeLineup({
     id: "persisted-wave",

@@ -17,7 +17,15 @@ import {
 } from "../src/lib/watch";
 import { isVendorDeclinedResult, vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { catalogSessions, findSession, sessionTranscript } from "../src/lib/session-bridge";
-import { shouldSpawnInsteadOfAsk } from "../src/lib/subagents";
+import {
+  admitSpawn,
+  deskRoleOf,
+  isSpawnOnlyPrompt,
+  shouldSpawnInsteadOfAsk,
+  toolsForDeskRole,
+  SPAWN_ONLY_PROMPT_ERROR,
+  WORKER_SPAWN_ERROR,
+} from "../src/lib/subagents";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import {
@@ -169,8 +177,24 @@ const TOOLS = [
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },
+        folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
+        wait: {
+          type: "boolean",
+          description: "true (default) wait for this worker. false start it and return so you can spawn more, then workhorse_await_agents.",
+        },
       },
       required: ["prompt"],
+    },
+  },
+  {
+    name: "workhorse_await_agents",
+    description:
+      "Status of this chat’s worker lineup. Default returns immediately. wait=true only if the user asked you to sit until they finish. Never treat a timeout as a bot-setup failure.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
+      },
     },
   },
   {
@@ -210,13 +234,13 @@ const TOOLS = [
   {
     name: "workhorse_list_projects",
     description:
-      "List Workhorse sidebar projects (name, linked folders, chat count). Use this before creating a project so you do not duplicate one.",
+      "List Workhorse projects (name, linked folders, chat count). Use this before and after creating a project. Do not tell the user a project exists unless it appears here.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "workhorse_request_vendor",
     description:
-      "Ask the user to allow a vendor that used its daily bank (today's share of the week is spent; leftover remains for later days) for THIS chat. Wait for Allow or Deny. Use only when spawn/ask was blocked for that reason. A USER DECLINED result means they said no — tell them that and stop.",
+      "Do not use this to unlock a spawn. If the daily bank is spent or canCall is false, that vendor is a no-go — skip it. Never ask the user to Allow a spawn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -244,14 +268,90 @@ const TOOLS = [
   {
     name: "workhorse_create_project",
     description:
-      "Create a Workhorse sidebar project with this exact name. The optional folder is linked under that project only, never under a different existing name. Returns immediately — do not wait on another chat. This chat is placed in the new project.",
+      "Create a Workhorse project (a named desk entry under Projects, not a file on disk). Pass the exact name and an existing absolute folder. This chat is placed in the new project automatically. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Project name shown in the sidebar" },
+        name: { type: "string", description: "Project name" },
         folder: { type: "string", description: "Optional absolute folder to link" },
       },
       required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_move_chat",
+    description:
+      "Move a chat into a project. Omit chat to move this chat. Pass the visible project name. Use when the user asks to put a chat in a project, attach this chat, or throw a chat into a project.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project name or id" },
+        chat: { type: "string", description: "Optional chat title or id. Defaults to this chat." },
+      },
+      required: ["project"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_rename_chat",
+    description:
+      "Rename a live chat. Omit chat to rename this chat. Pass the new title in name. Do not delete and recreate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "New chat title" },
+        chat: { type: "string", description: "Optional exact title or id. Defaults to this chat." },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_rename_project",
+    description:
+      "Rename a Workhorse project in place. Omit project to rename this chat’s project. Pass the new name. Do not delete and recreate. Then call workhorse_list_projects. Only say the new name if Visible sidebar names include it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "New project name" },
+        project: { type: "string", description: "Optional project name or id. Defaults to this chat’s project." },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_delete_chat",
+    description:
+      "Delete another live chat by exact title or id, or delete every loose chat (not in a project) with scope=loose. Never omit chat to delete yourself. A bulk “kill these” list must not delete this chat even if it says “this one”. scope=loose never deletes this chat and never touches project chats. onlyThis=true only when the user asked to delete this chat alone. Ambiguous titles (two chats named test) fail — pass the id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        chat: { type: "string", description: "Exact chat title or id of another chat." },
+        scope: {
+          type: "string",
+          description: "loose — delete every chat that is not in a project, except this chat. Do not ask which ones.",
+        },
+        onlyThis: {
+          type: "boolean",
+          description: "true only if the user asked to delete this chat alone. Required to delete the calling chat.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_delete_project",
+    description:
+      "Delete a Workhorse project. chats=keep (default) leaves its chats as loose chats; chats=remove deletes those chats too.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project name or id" },
+        chats: { type: "string", description: "keep (default) or remove" },
+      },
+      required: ["project"],
       additionalProperties: false,
     },
   },
@@ -329,15 +429,37 @@ const TOOLS = [
   },
 ];
 
+type DeskAsk = (ask: PeerAsk) => Promise<{ text?: string; error?: string }>;
+let deskAsk: DeskAsk | null = null;
+
+/** When MiniMax tools run inside Electron main, skip HTTP-to-self and hit the live desk. */
+export function setWorkhorseDeskAsk(handler: DeskAsk | null): void {
+  deskAsk = handler;
+}
+
 async function postBridge(
   pathName: string,
   body: PeerAsk,
   opts?: { timeoutMs?: number; inbox?: boolean },
 ): Promise<string> {
+  if (deskAsk) {
+    const result = await deskAsk(body);
+    if (result.error) throw new Error(result.error);
+    if (typeof result.text === "string") return result.text;
+    throw new Error("Workhorse desk returned no result");
+  }
   const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
   const url = live?.url || process.env.WORKHORSE_BRIDGE_URL;
   const token = live?.token || process.env.WORKHORSE_BRIDGE_TOKEN;
-  const timeoutMs = opts?.timeoutMs ?? (body.mode === "bots" ? 45_000 : 10 * 60 * 1000);
+  const timeoutMs =
+    opts?.timeoutMs ??
+    (body.action === "await-agents"
+      ? body.wait === true
+        ? Math.max(30, Math.min(3_600, body.timeoutSeconds ?? 600)) * 1_000
+        : 15_000
+      : body.mode === "bots"
+        ? 45_000
+        : 10 * 60 * 1000);
   const allowInbox = opts?.inbox !== false;
   if (url && token) {
     try {
@@ -363,6 +485,65 @@ async function postBridge(
   }
   if (!allowInbox || !live?.inbox) throw new Error("Workhorse bridge is not running");
   return askViaInbox(live.inbox, body, timeoutMs);
+}
+
+function formatProjectRows(rows: unknown): string {
+  const list = Array.isArray(rows) ? rows : [];
+  const named = list
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const row = item as { name?: string; folders?: string[] };
+      if (!row.name) return "";
+      const folder = Array.isArray(row.folders) && row.folders[0] ? ` · ${row.folders[0]}` : "";
+      return `- ${row.name}${folder}`;
+    })
+    .filter(Boolean);
+  return named.length === 0 ? "No Workhorse projects on this desk yet." : `Workhorse projects:\n${named.join("\n")}`;
+}
+
+export function parseRenameProjectLive(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+    const requested = typeof parsed.requested === "string" ? parsed.requested.trim() : name;
+    const rows = Array.isArray(parsed.projects) ? parsed.projects : [];
+    const listed = rows
+      .map((item) => (item && typeof item === "object" ? (item as { name?: string }).name : ""))
+      .filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+    const visible =
+      parsed.visibleOnDesk === true &&
+      listed.some((item) => item.trim().toLowerCase() === requested.toLowerCase());
+    if (parsed.ok === true && parsed.notified !== true && name && visible) {
+      return {
+        ...parsed,
+        howToUse:
+          typeof parsed.howToUse === "string" && parsed.howToUse.trim()
+            ? parsed.howToUse
+            : `Visible sidebar names: ${listed.join(", ")}. Call workhorse_list_projects. Only say the project is named “${name}” if that list shows it.`,
+      };
+    }
+  } catch {
+    /* not JSON */
+  }
+  return null;
+}
+
+export function parseCreateProjectLive(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.ok === true && typeof parsed.name === "string" && parsed.name.trim() && parsed.notified !== true) {
+      return {
+        ...parsed,
+        howToUse:
+          typeof parsed.howToUse === "string" && parsed.howToUse.trim()
+            ? parsed.howToUse
+            : `Project “${parsed.name}” is under Projects.${parsed.folder ? ` Linked folder: ${parsed.folder}.` : ""} Call workhorse_list_projects to confirm. Do not say it exists unless it appears there.`,
+      };
+    }
+  } catch {
+    /* not JSON */
+  }
+  return null;
 }
 
 function createWorkhorseProjectLocal(input: {
@@ -398,9 +579,9 @@ function createWorkhorseProjectLocal(input: {
   return JSON.stringify(
     {
       ...applied.result,
-      howToUse: `Project “${applied.result.name}” is on the sidebar under Projects.${
+      howToUse: `Project “${applied.result.name}” is under Projects.${
         applied.result.folder ? ` Linked folder: ${applied.result.folder}.` : ""
-      }`,
+      } Call workhorse_list_projects to confirm. Do not say it exists unless that list shows this name.`,
     },
     null,
     2,
@@ -412,19 +593,30 @@ function fromSessionId(override?: string): string {
 }
 
 function botsAsk(
-  partial: Omit<PeerAsk, "fromSessionId" | "toSessionId" | "message"> & { message?: string },
+  partial: Omit<PeerAsk, "fromSessionId" | "toSessionId" | "message"> & { message?: string; fromSessionId?: string },
   from?: string,
 ): PeerAsk {
   return {
-    fromSessionId: fromSessionId(from),
     toSessionId: "",
     message: partial.message || partial.action || "list",
     mode: "bots",
     ...partial,
+    fromSessionId: fromSessionId(from) || partial.fromSessionId || "",
   };
 }
 
-async function listBots(): Promise<string> {
+async function listBots(from?: string): Promise<string> {
+  try {
+    const live = await postBridge("/bots", botsAsk({ action: "list", message: "list" }, from), {
+      timeoutMs: 8_000,
+      inbox: false,
+    });
+    const parsed = JSON.parse(live) as { bots?: unknown; summary?: string };
+    if (Array.isArray(parsed.bots)) return formatDeskRoster(parsed.bots as Parameters<typeof formatDeskRoster>[0]);
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) return live;
+  } catch {
+    /* fall back to the last saved file */
+  }
   return formatDeskRoster(deskRoster());
 }
 
@@ -516,6 +708,29 @@ async function askChat(chat: string, message: string, from?: string): Promise<st
   return first;
 }
 
+function callerSession(from?: string): { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null } | undefined {
+  const id = fromSessionId(from);
+  if (!id) return undefined;
+  const sessions = readState().sessions;
+  if (!Array.isArray(sessions)) return undefined;
+  const row = sessions.find((item) => item && typeof item === "object" && (item as { id?: string }).id === id);
+  return row && typeof row === "object"
+    ? (row as { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null })
+    : undefined;
+}
+
+function callerProjectFolder(session?: { projectId?: string | null }): string {
+  const projectId = session?.projectId?.trim();
+  if (!projectId) return "";
+  const projects = readState().projects;
+  if (!Array.isArray(projects)) return "";
+  const project = projects.find((item) => item && typeof item === "object" && (item as { id?: string }).id === projectId) as
+    | { folders?: Array<{ path?: string }> }
+    | undefined;
+  const pathValue = project?.folders?.[0]?.path;
+  return typeof pathValue === "string" ? pathValue.trim() : "";
+}
+
 async function spawnAgent(
   input: {
     prompt: string;
@@ -527,10 +742,34 @@ async function spawnAgent(
     timeoutSeconds?: number;
     tokenBudget?: number;
     isolation?: "worktree" | "shared";
+    folder?: string;
+    wait?: boolean;
   },
   from?: string,
 ): Promise<string> {
   if (!input.prompt.trim()) throw new Error("prompt is required");
+  const caller = callerSession(from);
+  if (deskRoleOf(caller) === "worker") throw new Error(WORKER_SPAWN_ERROR);
+  if (isSpawnOnlyPrompt(input.prompt)) throw new Error(SPAWN_ONLY_PROMPT_ERROR);
+  const projectFolder = callerProjectFolder(caller);
+  const admitted = caller
+    ? admitSpawn({
+        parent: caller,
+        projectFolder,
+        folder: input.folder,
+        prompt: input.prompt,
+        folderExists: (value) => {
+          try {
+            return fs.existsSync(value) && fs.statSync(value).isDirectory();
+          } catch {
+            return false;
+          }
+        },
+      })
+    : projectFolder || input.folder?.trim()
+      ? { ok: true as const, cwd: (input.folder?.trim() || projectFolder) }
+      : { ok: true as const, cwd: "" };
+  if (!admitted.ok) throw new Error(admitted.error);
   const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromSessionId(from),
@@ -544,6 +783,8 @@ async function spawnAgent(
     timeoutSeconds: input.timeoutSeconds,
     tokenBudget: input.tokenBudget,
     isolation: input.isolation,
+    folder: admitted.cwd,
+    wait: input.wait,
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -561,19 +802,40 @@ async function spawnAgent(
       timeoutSeconds: input.timeoutSeconds,
       tokenBudget: input.tokenBudget,
       isolation: input.isolation,
+      folder: admitted.cwd,
+      wait: input.wait,
     });
   }
   return first;
 }
 
+async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolean): Promise<string> {
+  const timeoutMs = wait
+    ? Math.max(30, Math.min(3_600, timeoutSeconds ?? 600)) * 1_000 + 5_000
+    : 15_000;
+  return postBridge(
+    "/bots",
+    botsAsk(
+      {
+        action: "await-agents",
+        message: "await-agents",
+        timeoutSeconds,
+        wait,
+      },
+      from,
+    ),
+    { timeoutMs, inbox: false },
+  );
+}
+
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
-    return JSON.stringify(catalogSessions(readState()), null, 2);
+    return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
   }
   if (name === "workhorse_read_chat") {
     const chat = typeof args.chat === "string" ? args.chat : "";
     const limit = typeof args.limit === "number" ? args.limit : 40;
-    const transcript = sessionTranscript(readState(), chat, limit);
+    const transcript = sessionTranscript(readState(), chat, limit, from);
     if (!transcript) throw new Error(`No Workhorse chat matches “${chat}”`);
     return JSON.stringify(transcript, null, 2);
   }
@@ -596,12 +858,21 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
+        folder: typeof args.folder === "string" ? args.folder : undefined,
+        wait: args.wait === false ? false : args.wait === true ? true : undefined,
       },
       from,
     );
   }
+  if (name === "workhorse_await_agents") {
+    return awaitAgents(
+      from,
+      typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
+      args.wait === true,
+    );
+  }
   if (name === "workhorse_list_bots") {
-    return listBots();
+    return listBots(from);
   }
   if (name === "workhorse_detect_custom") {
     return JSON.stringify(publicDetectCard(detectCustomLogin()), null, 2);
@@ -629,6 +900,27 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     );
   }
   if (name === "workhorse_list_projects") {
+    try {
+      const live = await postBridge(
+        "/bots",
+        botsAsk({ action: "list-projects", message: "list-projects" }, from),
+        { timeoutMs: 8_000, inbox: false },
+      );
+      const parsed = JSON.parse(live) as { projects?: unknown; summary?: string; source?: string };
+      if (Array.isArray(parsed.projects)) {
+        return JSON.stringify(
+          {
+            source: parsed.source ?? "live",
+            summary: typeof parsed.summary === "string" ? parsed.summary : formatProjectRows(parsed.projects),
+            projects: parsed.projects,
+          },
+          null,
+          2,
+        );
+      }
+    } catch {
+      /* fall back to the last saved file */
+    }
     const raw = readState();
     const projects = Array.isArray(raw.projects) ? raw.projects : [];
     const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
@@ -648,49 +940,161 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         return { id: record.id, name: record.name, folders, chats };
       })
       .filter((item): item is { id: string; name: string; folders: string[]; chats: number } => item !== null);
-    const summary =
-      rows.length === 0
-        ? "No Workhorse projects on this desk yet."
-        : `Workhorse projects:\n${rows.map((row) => `- ${row.name}${row.folders[0] ? ` · ${row.folders[0]}` : ""} · ${row.chats} chats`).join("\n")}`;
-    return JSON.stringify({ summary, projects: rows }, null, 2);
+    return JSON.stringify({ source: "disk", summary: formatProjectRows(rows), projects: rows }, null, 2);
   }
   if (name === "workhorse_create_project") {
     const projectName = typeof args.name === "string" ? args.name.trim() : "";
     if (!projectName) throw new Error("name is required");
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    const sessionId = fromSessionId(from);
-    let local: string | null = null;
-    try {
-      local = createWorkhorseProjectLocal({
-        name: projectName,
-        folder: folder || undefined,
-        fromSessionId: sessionId || undefined,
-      });
-    } catch {
-      local = null;
+    if (folder) {
+      try {
+        if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
+          throw new Error(`folder is not an existing directory: ${folder}`);
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(detail);
+      }
     }
+    const sessionId = fromSessionId(from);
     const notify = () =>
       postBridge(
         "/bots",
-        botsAsk({
-          action: "create-project",
-          message: projectName,
-          name: projectName,
-          folder: folder || undefined,
-          chat: folder || undefined,
-        }),
-        { timeoutMs: 4_000, inbox: false },
+        botsAsk(
+          {
+            action: "create-project",
+            message: projectName,
+            name: projectName,
+            folder: folder || undefined,
+            chat: folder || undefined,
+          },
+          from,
+        ),
+        { timeoutMs: 12_000, inbox: false },
       );
-    if (local) {
-      void notify().catch(() => undefined);
-      return local;
-    }
     try {
-      return await notify();
+      const live = await notify();
+      const parsed = parseCreateProjectLive(live);
+      if (parsed) return JSON.stringify(parsed, null, 2);
+      throw new Error("live desk did not confirm the project");
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`create-project failed fast: ${detail}. Do not wait on another chat.`);
+      const rendererDown = /bridge is not running|fetch failed|ECONNREFUSED|not available/i.test(detail);
+      if (rendererDown || !process.env.WORKHORSE_BRIDGE_URL?.trim()) {
+        try {
+          return createWorkhorseProjectLocal({
+            name: projectName,
+            folder: folder || undefined,
+            fromSessionId: sessionId || undefined,
+          });
+        } catch {
+          /* use the live error */
+        }
+      }
+      throw new Error(`create-project failed: ${detail}. Do not tell the user the project exists.`);
     }
+  }
+  if (name === "workhorse_move_chat") {
+    const project = typeof args.project === "string" ? args.project.trim() : typeof args.name === "string" ? args.name.trim() : "";
+    if (!project) throw new Error("project is required");
+    const chat = typeof args.chat === "string" ? args.chat.trim() : "";
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "move-chat",
+          message: project,
+          name: project,
+          chat: chat || undefined,
+        },
+        from,
+      ),
+      { timeoutMs: 12_000, inbox: false },
+    );
+  }
+  if (name === "workhorse_rename_chat") {
+    const title = typeof args.name === "string" ? args.name.trim() : typeof args.title === "string" ? args.title.trim() : "";
+    if (!title) throw new Error("name is required");
+    const chat = typeof args.chat === "string" ? args.chat.trim() : "";
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "rename-chat",
+          message: title,
+          name: title,
+          chat: chat || undefined,
+        },
+        from,
+      ),
+      { timeoutMs: 12_000, inbox: false },
+    );
+  }
+  if (name === "workhorse_rename_project") {
+    const title = typeof args.name === "string" ? args.name.trim() : typeof args.title === "string" ? args.title.trim() : "";
+    if (!title) throw new Error("name is required");
+    const project = typeof args.project === "string" ? args.project.trim() : "";
+    const live = await postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "rename-project",
+          message: title,
+          name: title,
+          folder: project || undefined,
+        },
+        from,
+      ),
+      { timeoutMs: 12_000, inbox: false },
+    );
+    const parsed = parseRenameProjectLive(live);
+    if (parsed) return JSON.stringify(parsed, null, 2);
+    throw new Error(
+      `rename did not take on the live desk. Call workhorse_list_projects and quote those names. Do not tell the user it is named “${title}”.`,
+    );
+  }
+  if (name === "workhorse_delete_chat") {
+    const chat = typeof args.chat === "string" ? args.chat.trim() : typeof args.name === "string" ? args.name.trim() : "";
+    const onlyThis = args.onlyThis === true;
+    const scope = typeof args.scope === "string" ? args.scope.trim() : "";
+    const loose = scope.toLowerCase() === "loose" || chat.toLowerCase() === "loose" || chat.toLowerCase() === "not in a project";
+    if (!chat && !onlyThis && !loose) {
+      throw new Error("chat title or id is required. This chat cannot be deleted unless onlyThis=true.");
+    }
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "delete-chat",
+          message: loose ? "loose" : chat || "this chat",
+          name: chat || undefined,
+          chat: loose ? "loose" : chat || undefined,
+          scope: loose ? "loose" : undefined,
+          onlyThis,
+        },
+        from,
+      ),
+      { timeoutMs: 12_000, inbox: false },
+    );
+  }
+  if (name === "workhorse_delete_project") {
+    const project =
+      typeof args.project === "string" ? args.project.trim() : typeof args.name === "string" ? args.name.trim() : "";
+    if (!project) throw new Error("project is required");
+    const chats = args.chats === "remove" || args.chats === "keep" ? args.chats : "keep";
+    return postBridge(
+      "/bots",
+      botsAsk(
+        {
+          action: "delete-project",
+          message: project,
+          name: project,
+          chats,
+        },
+        from,
+      ),
+      { timeoutMs: 12_000, inbox: false },
+    );
   }
   if (name === "workhorse_request_vendor") {
     const vendor =
@@ -705,13 +1109,16 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const reason = typeof args.reason === "string" ? args.reason : "";
     const text = await postBridge(
       "/bots",
-      botsAsk({
-        action: "request-vendor",
-        message: reason || vendor,
-        name: vendor,
-        chat: vendor,
-        provider: vendor,
-      }),
+      botsAsk(
+        {
+          action: "request-vendor",
+          message: reason || vendor,
+          name: vendor,
+          chat: vendor,
+          provider: vendor,
+        },
+        from,
+      ),
       { timeoutMs: 10 * 60 * 1000, inbox: false },
     );
     if (isVendorDeclinedResult(text)) throw new Error(text.trim());
@@ -730,24 +1137,30 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const reason = typeof args.reason === "string" ? args.reason : typeof args.message === "string" ? args.message : "";
     return postBridge(
       "/bots",
-      botsAsk({
-        action: "request-permission",
-        message: reason || "needs more access to finish the work",
-        name: permission || undefined,
-        folder: sandbox || undefined,
-        description: reason || undefined,
-      }),
+      botsAsk(
+        {
+          action: "request-permission",
+          message: reason || "needs more access to finish the work",
+          name: permission || undefined,
+          folder: sandbox || undefined,
+          description: reason || undefined,
+        },
+        from,
+      ),
       { timeoutMs: 10 * 60 * 1000, inbox: true },
     );
   }
   if (name === "workhorse_list_references") {
     return postBridge(
       "/bots",
-      botsAsk({
-        action: "list-references",
-        message: "list-references",
-        name: typeof args.project === "string" ? args.project : undefined,
-      }),
+      botsAsk(
+        {
+          action: "list-references",
+          message: "list-references",
+          name: typeof args.project === "string" ? args.project : undefined,
+        },
+        from,
+      ),
     );
   }
   if (name === "workhorse_add_reference") {
@@ -755,14 +1168,17 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     if (!value.trim()) throw new Error("value is required");
     return postBridge(
       "/bots",
-      botsAsk({
-        action: "add-reference",
-        message: value,
-        chat: value,
-        name: typeof args.kind === "string" ? args.kind : undefined,
-        description: typeof args.label === "string" ? args.label : undefined,
-        bot: typeof args.project === "string" ? args.project : undefined,
-      }),
+      botsAsk(
+        {
+          action: "add-reference",
+          message: value,
+          chat: value,
+          name: typeof args.kind === "string" ? args.kind : undefined,
+          description: typeof args.label === "string" ? args.label : undefined,
+          bot: typeof args.project === "string" ? args.project : undefined,
+        },
+        from,
+      ),
     );
   }
   if (name === "workhorse_delete_reference") {
@@ -771,12 +1187,15 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     if (!reference.trim()) throw new Error("reference is required");
     return postBridge(
       "/bots",
-      botsAsk({
-        action: "delete-reference",
-        message: reference,
-        name: typeof args.project === "string" ? args.project : undefined,
-        bot: reference,
-      }),
+      botsAsk(
+        {
+          action: "delete-reference",
+          message: reference,
+          name: typeof args.project === "string" ? args.project : undefined,
+          bot: reference,
+        },
+        from,
+      ),
     );
   }
   if (name === "workhorse_delete_bot") {
@@ -836,7 +1255,8 @@ export async function handleWorkhorseRpc(
   if (message.method === "notifications/initialized" || message.method === "initialized") return undefined;
   if (message.method === "tools/list") {
     if (message.id === undefined) return undefined;
-    return { jsonrpc: "2.0", id: message.id, result: { tools: TOOLS } };
+    const role = deskRoleOf(callerSession(ctx?.fromSessionId));
+    return { jsonrpc: "2.0", id: message.id, result: { tools: toolsForDeskRole(TOOLS, role) } };
   }
   if (message.method === "ping") {
     if (message.id === undefined) return undefined;

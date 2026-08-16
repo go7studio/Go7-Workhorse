@@ -122,7 +122,10 @@ const PLANNING_LEAD =
   /^(I'|I'll|I will|I am|I'm|Let me|Looking|Checking|First[, ]|The (user|sidebar|connected)|Here are the ones|No "|OK[,—]|Okay[,—]|Excellent|Then (I |let |determine)|But —|Wait[, ]|Actually[, ]|Hmm|I (should|notice|noticed|can't|cannot|need to))/i;
 
 const USER_LEAD =
-  /^(I want to|What I can do|The honest answer|If you|There are more|This chat|Here(?:'s| is)|Done\b|Sure[—,]|Sorry[, ]|No files were)/i;
+  /^(I want to|What I can do|The honest answer|If you|There are more|This chat|Here(?:'s| is)|Done\b|Sure[—,]|Sorry[, ]|No files were|Yes\s*[—–-])/i;
+
+const OUTPUT_LINE =
+  /^(?:#{1,6}\s+|[-*•●]\s+\S|\d+\.\s+\S|(?:By vendor|By project|Provider breakdown|A few standouts|Status:)\b|Yes\s*[—–-]\s)/i;
 
 function firstLine(text: string): string {
   return text.trim().split(/\n/)[0] ?? "";
@@ -187,18 +190,46 @@ export function peelAskMarkup(text: string): string {
   return next.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+const THINK_TAG = /<\/?(?:[a-z][\w-]*:)?think(?:ing)?\b[^>]*>/gi;
+
+function isCloseThinkTag(tag: string): boolean {
+  return /^<\//.test(tag);
+}
+
+/** Pull MiniMax/Grok think markup (`<think>`, `<mm:think>`, orphan closes) out of the visible reply. */
 export function peelThinkTags(text: string): { thought: string; body: string } {
+  const source = String(text ?? "");
+  if (!source) return { thought: "", body: "" };
   const thoughts: string[] = [];
-  let body = text.replace(/<think(?:ing)?\b[^>]*>([\s\S]*?)<\/think(?:ing)?>/gi, (_all, inner: string) => {
-    if (inner.trim()) thoughts.push(inner.trim());
-    return "";
-  });
-  body = body.replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, (open) => {
-    const inner = open.replace(/<think(?:ing)?\b[^>]*>/i, "").trim();
-    if (inner) thoughts.push(inner);
-    return "";
-  });
-  return { thought: thoughts.join("\n\n"), body: body.replace(/\n{3,}/g, "\n\n").trim() };
+  let body = "";
+  let last = 0;
+  let inThink = false;
+  const tag = new RegExp(THINK_TAG.source, THINK_TAG.flags);
+  let match = tag.exec(source);
+  if (!match) return { thought: "", body: source };
+  while (match) {
+    const chunk = source.slice(last, match.index);
+    const close = isCloseThinkTag(match[0]);
+    if (inThink) {
+      if (chunk.trim()) thoughts.push(chunk.trim());
+      inThink = !close;
+    } else if (close) {
+      if (chunk.trim()) thoughts.push(chunk.trim());
+    } else {
+      body += chunk;
+      inThink = true;
+    }
+    last = match.index + match[0].length;
+    match = tag.exec(source);
+  }
+  const tail = source.slice(last);
+  if (inThink) {
+    if (tail.trim()) thoughts.push(tail.trim());
+  } else {
+    body += tail;
+  }
+  body = body.replace(THINK_TAG, "").replace(/\n{3,}/g, "\n\n").trim();
+  return { thought: thoughts.join("\n\n"), body };
 }
 
 function splitPlanningSentences(para: string): { thought: string; body: string } {
@@ -220,7 +251,7 @@ export function peelPlanningPreamble(text: string, live = false): { thought: str
   if (!text) return { thought: "", body: text ?? "" };
   const tagged = peelThinkTags(text);
   const source = tagged.body || text;
-  const match = source.match(/\n(?=#{1,6}\s+|\s*\|.+\|)/);
+  const match = source.match(/\n(?=#{1,6}\s+|[-*•●]\s+\S|\s*\|.+\|)/);
   if (match && match.index !== undefined && match.index >= 40) {
     const thought = source.slice(0, match.index).trim();
     const body = source.slice(match.index).trim();
@@ -237,7 +268,7 @@ export function peelPlanningPreamble(text: string, live = false): { thought: str
   const bodyParas: string[] = [];
   let seenUser = false;
   for (const unit of units) {
-    const user = isConclusionParagraph(unit) || /^(#{1,6}\s+|[-*]\s+\S)/.test(unit);
+    const user = isConclusionParagraph(unit) || OUTPUT_LINE.test(unit);
     const planning = isPlanningParagraph(unit);
     if (user) {
       bodyParas.push(unit);
@@ -256,6 +287,72 @@ export function peelPlanningPreamble(text: string, live = false): { thought: str
     return { thought: thoughtParas.join("\n\n"), body: "" };
   }
   return { thought: thoughtParas.join("\n\n"), body: bodyParas.join("\n\n") };
+}
+
+function normalizeOverlap(text: string): string {
+  return text.toLowerCase().replace(/[*_`>#]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Cut a drafted user-facing answer off the end of a thinking block. */
+const INLINE_OUTPUT =
+  /(?<=[.!?:])\s+(?=(?:Yes\s*[—–-]|By vendor|By project|Provider breakdown|Here(?:'s| is)\b|A few standouts|Status:))/i;
+
+function splitInlineOutput(text: string): { thought: string; leaked: string } {
+  const inline = text.search(INLINE_OUTPUT);
+  if (inline >= 40) {
+    return { thought: text.slice(0, inline).trim(), leaked: text.slice(inline).trim() };
+  }
+  return { thought: text, leaked: "" };
+}
+
+export function splitThoughtFromOutput(text: string): { thought: string; leaked: string } {
+  const raw = String(text ?? "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return { thought: "", leaked: "" };
+  const lines = raw.split("\n");
+  let cut = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]?.trim() ?? "";
+    if (!line) continue;
+    if (OUTPUT_LINE.test(line) && (i > 0 || !isPlanningParagraph(line))) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut === 0) return { thought: "", leaked: raw };
+  const head = cut > 0 ? lines.slice(0, cut).join("\n").trim() : raw;
+  const tail = cut > 0 ? lines.slice(cut).join("\n").trim() : "";
+  const inline = splitInlineOutput(head);
+  return { thought: inline.thought, leaked: [inline.leaked, tail].filter(Boolean).join("\n") };
+}
+
+/** Drop thought lines that are the same as the visible reply. */
+export function dropOverlappingReply(thought: string, body: string): string {
+  const bodyNorm = normalizeOverlap(body);
+  if (!thought.trim() || bodyNorm.length < 24) return thought;
+  if (normalizeOverlap(thought) === bodyNorm) return "";
+  const bodyLines = body
+    .split(/\n+/)
+    .map((line) => normalizeOverlap(line))
+    .filter((line) => line.length >= 20);
+  const kept: string[] = [];
+  for (const line of thought.split("\n")) {
+    const n = normalizeOverlap(line);
+    if (!n) {
+      if (kept.length > 0 && kept[kept.length - 1] !== "") kept.push("");
+      continue;
+    }
+    if (n.length >= 20 && bodyLines.some((item) => item.includes(n) || n.includes(item))) continue;
+    kept.push(line);
+  }
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Thought accordion should keep reasoning, never the user-facing output. */
+export function stripOutputFromThought(thought: string, visibleBody = ""): string {
+  const split = splitThoughtFromOutput(thought);
+  let kept = split.thought;
+  if (visibleBody.trim()) kept = dropOverlappingReply(kept, visibleBody);
+  return kept.trim();
 }
 
 export function isTableLine(line: string): boolean {

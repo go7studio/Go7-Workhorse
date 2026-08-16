@@ -10,6 +10,7 @@ import {
   dayKey,
   DEFAULT_WATCH,
   deskCallBlockFor,
+  callableDeskRows,
   deskCallCatalog,
   deskCallPromptable,
   deskCallRowFor,
@@ -21,6 +22,8 @@ import {
   vendorDeclinedForBot,
   vendorGrantedForChat,
   vendorOverrideNeeded,
+  spawnAllowed,
+  spawnIsNoGo,
   isDesktopWatchNotice,
   leftoverPercentForKey,
   normalizeWatch,
@@ -437,9 +440,9 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.ok(grok?.models?.some((item) => item.id === "grok-4.6"));
   assert.equal(grok?.status, "spent");
   assert.match(grok?.reason ?? "", /no leftover|Watch safety/);
-  assert.equal(claude?.canCall, false);
-  assert.equal(claude?.status, "disabled");
-  assert.match(claude?.reason ?? "", /turned off/);
+  assert.equal(claude, undefined);
+  assert.doesNotMatch(formatDeskRoster(rows), /Claude/);
+  assert.doesNotMatch(formatDeskRoster(rows), /turned off in Settings/);
   assert.equal(mini?.kind, "custom");
   assert.equal(mini?.name, "MiniMax");
   const unlocked = deskCallCatalog({
@@ -457,6 +460,10 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.match(roster, /Grok/);
   assert.match(roster, /models:/);
   assert.match(roster, /you can call this/);
+  assert.match(formatDeskRoster(rows), /API key is on the desk|MiniMax/);
+  assert.ok(callableDeskRows(unlocked).some((row) => row.id === "grok"));
+  assert.ok(callableDeskRows(rows).some((row) => row.kind === "custom"));
+  assert.equal(callableDeskRows(rows).some((row) => row.id === "grok"), false);
   assert.match(roster, /weekly plan total|weekly plan remaining|not this prompt|not this spawn/);
   assert.match(roster, /leftoverMeans/);
   assert.match(
@@ -467,9 +474,9 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.doesNotMatch(roster, /only one bot/);
   assert.match(deskCallBlockFor(rows, { provider: "grok" }) ?? "", /leftover|Watch|bank|Do not wait/);
   assert.equal(deskCallBlockFor(unlocked, { provider: "grok" }), null);
-  assert.match(deskCallBlockFor(rows, { name: "Claude" }) ?? "", /turned off/);
+  assert.equal(deskCallBlockFor(rows, { name: "Claude" }), null);
   assert.equal(deskCallPromptable(grok), true);
-  assert.equal(deskCallPromptable(claude), true);
+  assert.equal(deskCallPromptable(claude), false);
   assert.equal(deskCallPromptable(unlocked.find((row) => row.id === "codex")), false);
   const banked = deskCallCatalog({
     settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 } },
@@ -482,7 +489,14 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.equal(vendorOverrideNeeded(banked.find((row) => row.id === "grok")), true);
   assert.equal(vendorOverrideNeeded(unlocked.find((row) => row.id === "grok")), false);
   assert.equal(vendorOverrideNeeded({ status: "ok" } as (typeof rows)[0]), false);
+  assert.match(spawnIsNoGo(banked.find((row) => row.id === "grok")) ?? "", /no-go — daily bank spent/);
+  assert.equal(spawnIsNoGo(unlocked.find((row) => row.id === "grok")), null);
+  assert.match(spawnIsNoGo(claude) ?? "", /not on this desk/);
+  assert.equal(spawnAllowed(unlocked.find((row) => row.id === "grok")), true);
+  assert.equal(spawnAllowed(banked.find((row) => row.id === "grok")), false);
+  assert.equal(spawnAllowed(claude), false);
   const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSrc, /spawnIsNoGo\(row\)/);
   assert.match(storeSrc, /vendorOverrideNeeded\(row\)/);
   const host = readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8");
   assert.doesNotMatch(
@@ -524,7 +538,7 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
       permits: {},
       now,
     }) ?? "",
-    /turned off/,
+    /not on this desk/,
   );
   assert.equal(
     vendorCallBlocked({
@@ -536,4 +550,55 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     }),
     null,
   );
+});
+
+test("available LLMs include a keyed custom bot when stock vendors are a no-go", () => {
+  const now = Date.parse("2026-08-13T18:00:00");
+  const reset = new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const rows = deskCallCatalog({
+    settings: {
+      watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 },
+      customBots: [bot],
+      usageBudgets: {},
+      llms: {
+        grok: { connected: true },
+        claude: { connected: true, enabled: false },
+        codex: { connected: true },
+      },
+    },
+    usage: [],
+    plans: {
+      grok: plan(36, { resetsAt: reset }),
+      codex: plan(51, { resetsAt: reset }),
+      claude: plan(80, { resetsAt: reset }),
+    },
+    permits: {},
+    now,
+  });
+  const grok = rows.find((row) => row.id === "grok");
+  const codex = rows.find((row) => row.id === "codex");
+  const claude = rows.find((row) => row.id === "claude");
+  const mini = rows.find((row) => row.id === "bot:bot_minimax");
+  assert.equal(grok?.canCall, false);
+  assert.equal(grok?.status, "day_bank");
+  assert.equal(codex?.canCall, false);
+  assert.equal(codex?.status, "day_bank");
+  assert.equal(claude, undefined);
+  assert.doesNotMatch(formatDeskRoster(rows), /Claude/);
+  assert.equal(mini?.kind, "custom");
+  assert.equal(mini?.canCall, true);
+  assert.ok(callableDeskRows(rows).some((row) => row.id === "bot:bot_minimax"));
+  assert.equal(spawnAllowed(mini), true);
+  assert.equal(spawnAllowed(grok), false);
+  assert.equal(spawnAllowed(claude), false);
+  const roster = formatDeskRoster(rows);
+  assert.match(roster, /MiniMax/);
+  assert.match(roster, /API key is on the desk/);
+  assert.match(roster, /Custom API bots on this desk: MiniMax/);
+  assert.match(roster, /Callable now: MiniMax/);
+  assert.doesNotMatch(roster, /No custom\/MiniMax bot is attached/);
+  assert.doesNotMatch(roster, /no custom bot is attached to this desk/i);
+  assert.doesNotMatch(roster, /Nothing is callable right now/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /formatDeskRoster\(catalog\)/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /action: "list"/);
 });

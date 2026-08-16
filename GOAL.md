@@ -16,3 +16,5 @@ Current shipped baseline:
 10. The production build and automated adapter/shell suite must remain green.
 
 Historical slice documents under `docs/GOAL-*.md` describe how individual adapters landed; they are not the current product boundary.
+
+**Current work:** `docs/GOAL-join-turn.md` — send the crew and stop; stay talkable; when every worker is done the desk builds one join prompt (the original ask, the lineup id, each child report) and the orchestrator answers in a **new** message. Prior slice: `docs/GOAL-orchestration.md`.

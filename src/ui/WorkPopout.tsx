@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
-import { subagentTurns } from "../lib/subagents";
+import { deskInk } from "../lib/settings";
+import { useStore } from "../lib/store";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
 import { formatWorked } from "../lib/turns";
 import type { ChatMessage, Session } from "../lib/types";
@@ -45,14 +46,18 @@ export function WorkPopout({
   live: boolean;
   onOpenThread?: (id: string) => void;
 }) {
+  const store = useStore();
   const [now, setNow] = useState(Date.now());
+  const threads = subagents ?? [];
+  const anyChildLive = threads.some((marker) => {
+    const child = sessions?.find((item) => item.id === marker.subagentSessionId);
+    return child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+  });
   useEffect(() => {
-    if (!live) return;
+    if (!live && !anyChildLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [live]);
-
-  const threads = subagents ?? [];
+  }, [live, anyChildLive]);
   const workTools = threads.length
     ? tools.filter((tool) => {
         const key = toolNameKey(splitToolLine(tool.text).title);
@@ -140,58 +145,37 @@ export function WorkPopout({
           ) : null}
           {threads.map((marker) => {
             const child = sessions?.find((item) => item.id === marker.subagentSessionId);
-            const turns = subagentTurns(child, marker.createdAt);
             const childLive = child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
             const title = marker.fromTitle || marker.text || child?.title || "Subagent";
+            const ink = child ? deskInk(child, store.settings) : undefined;
+            const childMs = childLive ? now - marker.createdAt : undefined;
             return (
-              <details key={marker.id} className="work-fold subagent">
-                <summary
-                  onClick={(event) => {
-                    if (!onOpenThread || !marker.subagentSessionId) return;
-                    event.preventDefault();
-                    onOpenThread(marker.subagentSessionId);
+              <p key={marker.id} className="tool-line subagent-preview">
+                <button
+                  type="button"
+                  className="subagent-open"
+                  onClick={() => {
+                    const id = marker.subagentSessionId;
+                    if (!id) return;
+                    if (onOpenThread) onOpenThread(id);
+                    store.selectSession(id);
                   }}
                 >
-                  {title}
-                  <span className="tool-status">{childLive ? "working" : marker.toolStatus === "failed" ? "failed" : "done"}</span>
-                </summary>
-                <div className="subagent-thread">
-                  {turns.length === 0 ? (
-                    <p className="tool-line live">
-                      <span className="tool-name">Waiting for the other agent</span>
-                    </p>
-                  ) : (
-                    turns.map((turn) =>
-                      turn.role === "user" ? (
-                        <article key={turn.id} className="turn user chat peer subagent-turn">
-                          <div className="say">
-                            <span className="peer-from">From {turn.fromTitle || "another agent"}</span>
-                            {turn.text.trim() ? (
-                              <MessageBody
-                                text={turn.text}
-                                vendorSessionId={child?.vendorSessionId}
-                              />
-                            ) : null}
-                          </div>
-                        </article>
-                      ) : (
-                        <article key={turn.id} className="turn assistant reply subagent-turn">
-                          <div className="say final">
-                            {turn.text.trim() ? (
-                              <MessageBody
-                                text={unsquashSentences(turn.text)}
-                                vendorSessionId={child?.vendorSessionId}
-                              />
-                            ) : (
-                              <p className="work-draft-text">Still working</p>
-                            )}
-                          </div>
-                        </article>
-                      ),
-                    )
-                  )}
-                </div>
-              </details>
+                  <span
+                    className={`dot ${child?.provider ?? "custom"}`}
+                    style={ink ? { background: ink, color: ink } : undefined}
+                    aria-hidden="true"
+                  />
+                  <span className="tool-name">{title}</span>
+                  <span className="tool-status">
+                    {childLive
+                      ? `working · ${formatWorked(childMs ?? 0)}`
+                      : marker.toolStatus === "failed"
+                        ? "failed"
+                        : "done"}
+                  </span>
+                </button>
+              </p>
             );
           })}
           {active.map((tool) => (

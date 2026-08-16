@@ -44,6 +44,20 @@ export type CustomHttpHandlers = {
   onToolUse?: (tool: CustomToolUse) => void;
 };
 
+/** Streaming providers may repeat the same request totals across start/delta events. */
+export function mergeCustomUsageSnapshot(
+  base: CustomHttpUsage | undefined,
+  next: CustomHttpUsage,
+): CustomHttpUsage {
+  if (!base) return next;
+  return {
+    inputTokens: next.inputTokens > 0 ? next.inputTokens : base.inputTokens,
+    outputTokens: next.outputTokens > 0 ? next.outputTokens : base.outputTokens,
+    cacheReadTokens: next.cacheReadTokens > 0 ? next.cacheReadTokens : base.cacheReadTokens,
+    cacheWriteTokens: next.cacheWriteTokens > 0 ? next.cacheWriteTokens : base.cacheWriteTokens,
+  };
+}
+
 export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base URL, model, and API key.";
 
 const KNOWN_WINDOWS: Record<string, number> = {
@@ -129,6 +143,7 @@ export function buildAnthropicBody(input: {
   effort?: EffortLevel | string | null;
   maxTokens?: number;
   tools?: CustomHttpTool[];
+  role?: import("../src/lib/workhorse-rules").DeskRole;
 }): Record<string, unknown> {
   const messages = input.messages
     .filter((item) => item.role === "user" || item.role === "assistant")
@@ -166,7 +181,7 @@ export function buildAnthropicBody(input: {
     max_tokens: customMaxTokens(input.model, input.effort, input.maxTokens),
     stream: true,
     messages,
-    tools: customHttpTools(input.tools),
+    tools: customHttpTools(input.tools, { role: input.role }),
   };
   if (input.preface?.trim()) body.system = input.preface.trim();
   if (thinking) body.thinking = thinking;
@@ -179,6 +194,7 @@ export function buildOpenAiBody(input: {
   preface?: string;
   maxTokens?: number;
   tools?: CustomHttpTool[];
+  role?: import("../src/lib/workhorse-rules").DeskRole;
 }): Record<string, unknown> {
   const messages: Record<string, unknown>[] = [];
   if (input.preface?.trim()) messages.push({ role: "system", content: input.preface.trim() });
@@ -219,7 +235,7 @@ export function buildOpenAiBody(input: {
     stream: true,
     max_tokens: input.maxTokens && input.maxTokens > 0 ? input.maxTokens : 4096,
     messages,
-    tools: customHttpToolsOpenAi(input.tools),
+    tools: customHttpToolsOpenAi(input.tools, { role: input.role }),
   };
 }
 
@@ -295,7 +311,7 @@ export function applyAnthropicEvent(
   payload: unknown,
   handlers: CustomHttpHandlers,
   pending?: { id?: string; name?: string; json: string; block?: string },
-): { text: string; thought: string; usage?: CustomHttpUsage; stop?: boolean; tool?: CustomToolUse } {
+): { text: string; thought: string; usage?: CustomHttpUsage; stop?: boolean; stopReason?: string; tool?: CustomToolUse } {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const type = typeof root.type === "string" ? root.type : "";
   const delta = root.delta && typeof root.delta === "object" ? (root.delta as Record<string, unknown>) : {};
@@ -370,13 +386,19 @@ export function applyAnthropicEvent(
   if (thought) handlers.onThought?.(thought);
   if (usage) handlers.onUsage?.(usage);
   if (tool && type !== "message" && type !== "message_delta") handlers.onToolUse?.(tool);
-  return { text, thought, usage, stop: type === "message_stop", tool };
+  const stopReason =
+    typeof delta.stop_reason === "string"
+      ? delta.stop_reason
+      : typeof root.stop_reason === "string"
+        ? root.stop_reason
+        : undefined;
+  return { text, thought, usage, stop: type === "message_stop", stopReason, tool };
 }
 
 export function applyOpenAiChunk(
   payload: unknown,
   handlers: CustomHttpHandlers,
-): { text: string; thought: string; usage?: CustomHttpUsage; tool?: CustomToolUse } {
+): { text: string; thought: string; usage?: CustomHttpUsage; tool?: CustomToolUse; stopReason?: string } {
   const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
   const choices = Array.isArray(root.choices) ? root.choices : [];
   const first = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : {};
@@ -401,7 +423,8 @@ export function applyOpenAiChunk(
   if (text) handlers.onChunk?.(text);
   if (thought) handlers.onThought?.(thought);
   if (usage) handlers.onUsage?.(usage);
-  return { text, thought, usage, tool };
+  const stopReason = typeof first.finish_reason === "string" ? first.finish_reason : undefined;
+  return { text, thought, usage, tool, stopReason };
 }
 
 export function decodeSse(buffer: string): { events: string[]; rest: string } {
@@ -424,10 +447,11 @@ export async function streamCustomHttp(
     effort?: EffortLevel | string | null;
     signal?: AbortSignal;
     tools?: CustomHttpTool[];
+    role?: import("../src/lib/workhorse-rules").DeskRole;
   },
   handlers: CustomHttpHandlers = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<{ text: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[] }> {
+): Promise<{ text: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
   const apiKey = config.apiKey.trim();
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
@@ -436,8 +460,8 @@ export async function streamCustomHttp(
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, tools: input.tools })
-      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, tools: input.tools });
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, tools: input.tools, role: input.role })
+      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, tools: input.tools, role: input.role });
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -467,6 +491,7 @@ export async function streamCustomHttp(
     let emittedThought = "";
     let usage: CustomHttpUsage | undefined;
     const toolUses: CustomToolUse[] = [];
+    let stopReason: string | undefined;
     const pending = {
       id: undefined as string | undefined,
       name: undefined as string | undefined,
@@ -501,7 +526,9 @@ export async function streamCustomHttp(
         }
       },
       onThought: handlers.onThought,
-      onUsage: handlers.onUsage,
+      onUsage: (next) => {
+        usage = mergeCustomUsageSnapshot(usage, next);
+      },
       onToolUse: remember,
     };
     const ingest = (parsed: unknown) => {
@@ -509,8 +536,9 @@ export async function streamCustomHttp(
       if (failed) throw new Error(failed);
       const next =
         api === "openai-completions" ? applyOpenAiChunk(parsed, sink) : applyAnthropicEvent(parsed, sink, pending);
-      if (next.usage) usage = next.usage;
+      if (next.usage) usage = mergeCustomUsageSnapshot(usage, next.usage);
       if (next.tool) remember(next.tool);
+      if (next.stopReason) stopReason = next.stopReason;
     };
     while (true) {
       const { done, value } = await reader.read();
@@ -564,7 +592,8 @@ export async function streamCustomHttp(
       const delta = text.slice(emitted.length);
       if (delta) handlers.onChunk?.(delta);
     }
-    return { text, usage, toolUses };
+    if (usage) handlers.onUsage?.(usage);
+    return { text, usage, toolUses, stopReason };
   };
 
   try {

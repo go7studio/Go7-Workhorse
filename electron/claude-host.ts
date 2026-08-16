@@ -89,6 +89,7 @@ export class ClaudeSessionHost {
     const text = composeVendorPrompt(input.text, input.preface, slot.agent.opened, {
       mode: input.mode,
       sandbox: input.sandbox,
+      role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
     });
 
     try {

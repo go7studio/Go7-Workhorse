@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { splitGoalCommand } from "../lib/commands";
 import { groupAttachments, imageSrc, isPicture } from "../lib/images";
 import { peerPromptParts } from "../lib/session-bridge";
 import { useStore } from "../lib/store";
@@ -8,7 +9,7 @@ import { MessageBody } from "./MessageBody";
 import { copyText } from "../lib/copy-text";
 import { TurnActions } from "./TurnActions";
 
-export function UserTurn({ message }: { message: ChatMessage }) {
+export function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
   const store = useStore();
   const editing = store.editMessageId === message.id;
   const [draft, setDraft] = useState(message.text);
@@ -27,7 +28,7 @@ export function UserTurn({ message }: { message: ChatMessage }) {
     });
   }, [editing, message.text]);
 
-  if (editing) {
+  if (editing && !readOnly) {
     return (
       <article className="turn user chat">
         <form
@@ -72,14 +73,20 @@ export function UserTurn({ message }: { message: ChatMessage }) {
   }
 
   const peer = peerPromptParts(message);
+  const visible = peer?.text ?? message.text;
+  const goal = splitGoalCommand(visible);
   return (
     <article className={`turn user chat${peer ? " peer" : ""}`}>
       <TurnActions
-        actions={[
-          ...(peer ? [] : [{ id: "edit", label: "Edit", run: () => store.requestEditMessage(message.id) }]),
-          { id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) },
-          { id: "fork", label: "Fork", run: () => store.forkFrom(message.id) },
-        ]}
+        actions={
+          readOnly
+            ? [{ id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) }]
+            : [
+                ...(peer ? [] : [{ id: "edit", label: "Edit", run: () => store.requestEditMessage(message.id) }]),
+                { id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) },
+                { id: "fork", label: "Fork", run: () => store.forkFrom(message.id) },
+              ]
+        }
       />
       <div className="say">
         {peer ? <span className="peer-from">From {peer.fromTitle}</span> : null}
@@ -107,7 +114,14 @@ export function UserTurn({ message }: { message: ChatMessage }) {
             )}
           </div>
         )}
-        {(peer?.text ?? message.text).trim() ? <MessageBody text={peer?.text ?? message.text} /> : null}
+        {goal ? (
+          <p className="command-line">
+            <span className="chat-command">{goal.name}</span>
+            {goal.rest}
+          </p>
+        ) : visible.trim() ? (
+          <MessageBody text={visible} />
+        ) : null}
       </div>
     </article>
   );

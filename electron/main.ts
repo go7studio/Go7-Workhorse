@@ -21,7 +21,8 @@ import { fetchCustomPlanUsage } from "./custom-plan";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
-import { watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
+import { setWorkhorseDeskAsk } from "./workhorse-mcp";
+import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { imageMime } from "../src/lib/images";
 import { listDropFiles } from "./drop-files";
@@ -264,7 +265,7 @@ process.on("unhandledRejection", (error) => {
   console.error("workhorse unhandledRejection", error);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === "win32") {
     app.setAppUserModelId("com.go7studio.workhorse");
   }
@@ -287,15 +288,6 @@ app.whenReady().then(() => {
     if (!win || win.webContents.isDestroyed()) return { error: "Workhorse window is closed" };
     const bots = ask.mode === "bots";
     const spawn = !bots && ask.mode === "spawn";
-    if (bots && ask.action === "create-project") {
-      const notifyId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      win.webContents.send("grok:peer-ask", {
-        id: notifyId,
-        ...ask,
-        mode: "bots",
-      });
-      return { text: JSON.stringify({ ok: true, notified: true }) };
-    }
     if (!bots && !spawn && ask.fromSessionId && ask.fromSessionId === ask.toSessionId) {
       return { error: "a chat cannot ask itself" };
     }
@@ -320,19 +312,9 @@ app.whenReady().then(() => {
             win.webContents.send("grok:peer-cancel", { childSessionId, reason: "timed-out" });
           }
           resolve({
-            error: bots
-              ? "Workhorse did not finish setting up that bot in time"
-              : spawn
-                ? "the subagent did not answer in time"
-                : "the other chat did not answer in time",
+            error: peerAskTimeoutMs(ask).timeoutError,
           });
-        }, ask.action === "request-permission" || ask.action === "request-vendor"
-          ? 10 * 60 * 1000
-          : bots
-            ? 45_000
-            : spawn && typeof ask.timeoutSeconds === "number"
-              ? Math.max(30, Math.min(3_600, ask.timeoutSeconds)) * 1_000
-              : 10 * 60 * 1000);
+        }, peerAskTimeoutMs(ask).timeoutMs);
         peerWaiters.set(id, (value) => {
           clearTimeout(timer);
           resolve(value);
@@ -353,11 +335,12 @@ app.whenReady().then(() => {
       }
     }
   };
-  const bridge = startWorkhorseBridge(handlePeerAsk);
+  const bridge = await startWorkhorseBridge(handlePeerAsk);
   const record = writeBridgeRecord(statePath(), { url: bridge.url, token: bridge.token });
   watchPeerInbox(record.inbox, handlePeerAsk);
   process.env.WORKHORSE_BRIDGE_URL = bridge.url;
   process.env.WORKHORSE_BRIDGE_TOKEN = bridge.token;
+  setWorkhorseDeskAsk(handlePeerAsk);
   process.env.WORKHORSE_MCP_COMMAND = process.execPath;
   process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");
 

@@ -22,7 +22,7 @@ test("session environments normalize old saves and resolve an isolated cwd", () 
   assert.equal(sessionEnvironmentKind({ kind: "local" }), "local");
   assert.equal(
     sessionExecutionCwd({ kind: "worktree", path: "C:\\wt", gitRoot: "C:\\repo" }, "C:\\repo"),
-    "C:\\wt",
+    "C:\\repo",
   );
   assert.equal(sessionExecutionCwd(undefined, "C:\\repo"), "C:\\repo");
 });

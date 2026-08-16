@@ -110,6 +110,13 @@ export type QueuedPrompt = {
   createdAt: number;
   scheduledRunId?: string;
   hideUser?: boolean;
+  /** Model payload when it differs from the visible player text (e.g. /goal). */
+  vendorText?: string;
+  /** Already inserted into the transcript so flush must not add a second user bubble. */
+  userMessageId?: string;
+  /** Do not flush this queued send until this time. Used to cool a rate-limited key before join. */
+  notBefore?: number;
+  joinAttempt?: number;
 };
 
 export type ScheduledRun = {
@@ -128,6 +135,30 @@ export type PortableCheckpoint = {
   throughMessageId: string;
   omittedMessages: number;
   summary: string;
+};
+
+export type DeskLineupRowStatus = "queued" | "running" | "completed" | "failed" | "timed-out";
+
+export type DeskLineupRow = {
+  childId: string;
+  title: string;
+  slice: string;
+  folder: string;
+  vendor: string;
+  status: DeskLineupRowStatus;
+  startedAt: number;
+  finishedAt?: number;
+  report?: string;
+};
+
+export type DeskLineup = {
+  id: string;
+  folder: string;
+  startedAt: number;
+  rows: DeskLineupRow[];
+  notifiedAt?: number;
+  /** Original user sentence that started this wave. Desk-owned; not a model paraphrase. */
+  userText?: string;
 };
 
 export type AgentRun = {
@@ -181,6 +212,8 @@ export type Session = {
   goal?: { status: "active" | "paused"; objective: string };
   /** Workhorse-owned lifecycle and review record for hidden cross-provider children. */
   agentRun?: AgentRun;
+  /** Active worker crew for this orchestrator chat. */
+  lineup?: DeskLineup;
   /** Tool families allowed for the rest of this vendor session. */
   permissionGrants?: string[];
 };
@@ -342,6 +375,8 @@ export type UsageEvent = {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   costUsd?: number;
+  /** Context retained by the model for the final request in this turn. */
+  contextUsed?: number;
 };
 
 export type UsageDraft = {

@@ -184,6 +184,67 @@ export function applyArchiveProject(
   );
 }
 
+export function findProjectByQuery<T extends { id: string; name: string; archivedAt?: number | null }>(
+  projects: T[],
+  query: string,
+): T | undefined {
+  const q = query.trim().toLowerCase();
+  if (!q) return undefined;
+  const live = projects.filter((item) => typeof item.archivedAt !== "number");
+  return (
+    live.find((item) => item.id.toLowerCase() === q) ??
+    live.find((item) => item.name.toLowerCase() === q) ??
+    live.find((item) => item.name.toLowerCase().includes(q))
+  );
+}
+
+export function visibleProjectNames(projects: { name: string; archivedAt?: number | null }[]): string[] {
+  return projects.filter((item) => typeof item.archivedAt !== "number").map((item) => item.name);
+}
+
+/** True only when a live project row uses this exact name. */
+export function renameTookOnDesk(projects: { name: string; archivedAt?: number | null }[], requested: string): boolean {
+  const want = requested.trim().toLowerCase();
+  if (!want) return false;
+  return visibleProjectNames(projects).some((name) => name.trim().toLowerCase() === want);
+}
+
+export function renameProject(projects: Project[], id: string, name: string): Project[] | null {
+  const next = name.trim();
+  if (!next) return null;
+  if (!projects.some((project) => project.id === id && typeof project.archivedAt !== "number")) return null;
+  return projects.map((project) => (project.id === id ? { ...project, name: next } : project));
+}
+
+export function applyRenameDeskProject(
+  projects: Project[],
+  input: { name: string; project?: string; fromProjectId?: string },
+):
+  | { ok: true; projects: Project[]; renamed: Project; previous: string }
+  | { ok: false; error: string; projects: Project[] } {
+  const title = input.name.trim();
+  if (!title) return { ok: false, error: "name is required", projects };
+  const query = input.project?.trim() || "";
+  const target = query
+    ? findProjectByQuery(projects, query)
+    : projects.find((item) => item.id === input.fromProjectId?.trim() && typeof item.archivedAt !== "number");
+  if (!target) {
+    return {
+      ok: false,
+      error: query ? `No project matches “${query}”` : "No project is selected to rename.",
+      projects,
+    };
+  }
+  if (target.name === title) {
+    return { ok: true, projects, renamed: target, previous: target.name };
+  }
+  const next = renameProject(projects, target.id, title);
+  if (!next) return { ok: false, error: "Could not rename that project.", projects };
+  const renamed = next.find((item) => item.id === target.id);
+  if (!renamed) return { ok: false, error: "Could not rename that project.", projects };
+  return { ok: true, projects: next, renamed, previous: target.name };
+}
+
 export function applyDeleteProject(projects: Project[], id: string): Project[] | null {
   if (!projects.some((project) => project.id === id)) return null;
   return projects.filter((project) => project.id !== id);

@@ -8,21 +8,29 @@ import {
 } from "react";
 import { StoreContext, useStore } from "./store-context";
 export { useStore };
-import { commandContinuesToVendor, commandsForSession, invokeSkillPrompt, matchCommand } from "./commands";
-import { applyGoalCommand, goalHaltsVendor, goalVendorPrompt, parseGoalInput } from "./goal";
+import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
+import { grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "./goal";
+import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
 import { uid } from "./id";
 import {
   archiveChat,
   autoRenameChat,
   deleteChat,
   dropDrafts,
+  appendUserMessage,
+  deleteWorkerChats,
   dropQueuedPrompt,
   enqueuePrompt,
   forkChat,
   isDraftChat,
   lastUserMessage,
+  applyDeleteDeskChat,
+  applyDeleteLooseDeskChats,
+  isLooseDeleteScope,
+  applyRenameDeskChat,
   listedChats,
   moveChat,
+  resolveListedChat,
   openDraft,
   renameChat,
   rewindToUserMessage,
@@ -70,7 +78,11 @@ import {
   applyCreateWorkhorseProject,
   applyDeleteProject,
   applyProjectChatFate,
+  applyRenameDeskProject,
+  renameTookOnDesk,
+  visibleProjectNames,
   emptyProject,
+  findProjectByQuery,
   folderFromPath,
   normalizeProject,
   primaryFolder,
@@ -97,11 +109,32 @@ import {
 } from "./grok-events";
 import { chatPreview, formatPeerPrompt } from "./session-bridge";
 import {
+  addLineupRow,
+  applyChildIdleSync,
+  awaitAgentsWaits,
+  childReportText,
+  emptyLineup,
+  formatAwaitAgentsSnapshot,
+  lineupSnapshot,
+  applyJoinRateLimitRetry,
+  isJoinAssistantTurn,
+  JOIN_MAX_ATTEMPTS,
+  looksLikeJoinPrompt,
+  maybeEnqueueLineupJoin,
+  reconcileIdleChildren,
+  stampLineupUserText,
+} from "./lineup";
+import {
+  admitSpawn,
+  collectChildAgentReports,
+  deskRoleOf,
   descendantSessionIds,
-  formatSubagentPrompt,
+  formatWorkerPrompt,
   isHiddenSession,
   overlappingAgentFiles,
+  parentHasRunningChildren,
   resolveSpawnSpec,
+  spawnWaitsForReply,
   withSubagentStatus,
 } from "./subagents";
 import {
@@ -129,17 +162,19 @@ import {
   usageProviderForSession,
 } from "./usage";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
-import { vendorEmptyReply, vendorFailedMessage, vendorSendTarget } from "./vendor-bridge";
+import { isVendorRateLimitError, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
 import {
   collectWatchNotices,
   dismissStamp,
   deskCallCatalog,
   deskCallRowFor,
+  formatDeskRoster,
   evaluateWatchHold,
   vendorCallBlocked,
   vendorDeclinedForBot,
   vendorGrantedForChat,
   vendorOverrideNeeded,
+  spawnIsNoGo,
   watchHoldMessage,
   leftoverByWatchKey,
   dayKey,
@@ -234,6 +269,7 @@ export type Store = AppState & {
   setComposerDraft: (id: string, text: string, images?: import("./types").ChatImage[]) => void;
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => void;
+  deleteWorkers: (parentId: string) => void;
   archiveSession: (id: string, archived?: boolean) => void;
   moveSession: (id: string, projectId: string) => void;
   dismissAttention: (id: string) => void;
@@ -328,6 +364,8 @@ type SendOptions = {
   sessionId?: string;
   scheduledRunId?: string;
   hideUser?: boolean;
+  joinAttempt?: number;
+  afterGoalHalt?: boolean;
 };
 
 function hydrate(value: unknown): AppState {
@@ -475,6 +513,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
   const goalHaltedSessions = useRef(new Set<string>());
+  const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
   stateRef.current = state;
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans };
@@ -858,6 +897,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const deleteWorkers = useCallback((parentId: string) => {
+    setState((current) => {
+      const kids = current.sessions.filter((session) => session.parentId === parentId);
+      for (const kid of kids) {
+        if (kid.status === "running" || kid.status === "needs-input") cancelVendorSession(kid);
+      }
+      const sessions = deleteWorkerChats(current.sessions, parentId);
+      if (!sessions) return current;
+      const gone = new Set(kids.map((kid) => kid.id));
+      return {
+        ...current,
+        sessions,
+        pending: current.pending.filter((item) => !gone.has(item.sessionId)),
+        activeSessionId: gone.has(current.activeSessionId ?? "") ? parentId : current.activeSessionId,
+      };
+    });
+  }, []);
+
   const archiveSession = useCallback((id: string, archived = true) => {
     setState((current) => {
       const sessions = archiveChat(current.sessions, id, archived);
@@ -1171,21 +1228,74 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const targetSessionId = options?.sessionId ?? stateRef.current.activeSessionId;
     const liveSession = stateRef.current.sessions.find((item) => item.id === targetSessionId);
-    const goalInput = liveSession ? parseGoalInput(text) : null;
-    if (liveSession && goalHaltsVendor(text)) {
+    const palette = liveSession ? commandsForSession(liveSession, deskSkillsRef.current) : [];
+    const match = originalText.startsWith("/") ? matchCommand(originalText, palette) : undefined;
+    const prep = prepareVendorSend({
+      provider: liveSession?.provider,
+      text: originalText,
+      goal: liveSession?.goal,
+      match,
+    });
+    const goalInput = liveSession && liveSession.provider !== "grok" ? parseGoalInput(originalText) : null;
+    let vendorText = prep.vendorText;
+    const haltPlan = options?.afterGoalHalt
+      ? "send-now"
+      : planHaltForward({
+          haltVendor: prep.haltVendor,
+          skipVendor: prep.skipVendor,
+          sessionStatus: liveSession?.status,
+        });
+    if (liveSession && prep.haltVendor && !options?.afterGoalHalt) {
       if (liveSession.status === "running" || liveSession.status === "needs-input") {
         cancelVendorSession(liveSession);
         goalHaltedSessions.current.add(liveSession.id);
       }
-      const halt = parseGoalInput(text)?.action === "clear" ? "goal cleared" : "goal paused";
+      const cleared =
+        liveSession.provider === "grok"
+          ? parseGrokGoalLine(originalText)?.action === "clear"
+          : parseGoalInput(originalText)?.action === "clear";
+      const halt = cleared ? "goal cleared" : "goal paused";
+      if (haltPlan === "desk-halt-only") {
+        setState((current) => ({
+          ...current,
+          sessions: appendUserMessage(
+            current.sessions.map((item) =>
+              item.id === liveSession.id
+                ? {
+                    ...item,
+                    status: "idle" as const,
+                    goal: nextGoalForSend(item.provider, item.goal, originalText, prep.applyDeskGoal),
+                    messages: [
+                      ...finishOpenToolMessages(item.messages, "failed", halt).filter((message) =>
+                        message.id !== grokAssistantId.current[item.id] || Boolean(message.text.trim() || message.thought?.trim()),
+                      ),
+                      ...(cleared
+                        ? [
+                            {
+                              id: uid("msg"),
+                              role: "system" as const,
+                              text: "Goal cleared.",
+                              createdAt: Date.now(),
+                            },
+                          ]
+                        : []),
+                    ],
+                  }
+                : item,
+            ),
+            liveSession.id,
+            originalText,
+          ),
+        }));
+        return;
+      }
       setState((current) => ({
         ...current,
         sessions: current.sessions.map((item) =>
           item.id === liveSession.id
             ? {
                 ...item,
-                status: "idle",
-                goal: applyGoalCommand(item.goal, text),
+                goal: nextGoalForSend(item.provider, item.goal, originalText, prep.applyDeskGoal),
                 messages: finishOpenToolMessages(item.messages, "failed", halt).filter((message) =>
                   message.id !== grokAssistantId.current[item.id] || Boolean(message.text.trim() || message.thought?.trim()),
                 ),
@@ -1193,27 +1303,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : item,
         ),
       }));
-      return;
-    }
-    if (liveSession && goalInput) {
-      if (goalInput.action === "view") return;
-      const nextGoal = applyGoalCommand(liveSession.goal, text);
-      if (!nextGoal || (goalInput.action !== "set" && goalInput.action !== "resume")) return;
-      goalHaltedSessions.current.delete(liveSession.id);
+      if (haltPlan === "defer-until-cancelled-done") {
+        goalForwardAfterHalt.current[liveSession.id] = {
+          text: originalText,
+          images,
+          hideUser,
+        };
+        return;
+      }
+    } else if (liveSession && prep.applyDeskGoal) {
+      if (!options?.afterGoalHalt) goalHaltedSessions.current.delete(liveSession.id);
       setState((current) => ({
         ...current,
         sessions: current.sessions.map((item) =>
-          item.id === liveSession.id ? { ...item, goal: applyGoalCommand(item.goal, text) } : item,
+          item.id === liveSession.id
+            ? { ...item, goal: nextGoalForSend(item.provider, item.goal, originalText, true) }
+            : item,
         ),
       }));
-      text = goalVendorPrompt(nextGoal, goalInput.action);
-      hideUser = true;
-    } else if (liveSession) {
+    } else if (liveSession && !options?.afterGoalHalt) {
       goalHaltedSessions.current.delete(liveSession.id);
     }
-    if (liveSession?.status === "running" && !options?.steer && !options?.replaceUserId) {
+    const skipQueue = haltPlan === "defer-until-cancelled-done";
+    if (liveSession?.status === "running" && !skipQueue && !options?.afterGoalHalt && !options?.steer && !options?.replaceUserId) {
       setState((current) => {
-        const sessions = enqueuePrompt(current.sessions, liveSession.id, { text, images, hideUser });
+        const sessions = enqueuePrompt(current.sessions, liveSession.id, {
+          text: originalText,
+          images,
+          hideUser,
+          ...(vendorText !== originalText ? { vendorText } : {}),
+        });
         return sessions ? { ...current, sessions } : current;
       });
       return;
@@ -1225,12 +1344,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       else void window.workhorse?.grokCancel(liveSession.id);
     }
 
-    if (text.startsWith("/")) {
+    if (!goalInput && originalText.startsWith("/")) {
       const live = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
-      const extras = commandsForSession(live, deskSkillsRef.current).filter(
-        (command) => command.source && command.source !== "workhorse",
-      );
-      const match = matchCommand(text, extras);
       if (match?.run === "new") {
         setState((current) => ({
           ...current,
@@ -1480,7 +1595,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (match?.run === "skill") {
-        text = invokeSkillPrompt(match, text);
+        text = prep.vendorText;
       } else if (match && !commandContinuesToVendor(match.run)) {
         return;
       }
@@ -1554,6 +1669,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         delete grokChunkQueue.current[session.id];
         const thoughtQueued = grokThoughtQueue.current[session.id] ?? "";
         delete grokThoughtQueue.current[session.id];
+        const live = latest.sessions.find((item) => item.id === session.id);
+        const base = live?.messages ?? working;
         return {
           ...latest,
           sessions: latest.sessions.map((item) =>
@@ -1561,19 +1678,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? {
                   ...item,
                   status: "running",
-                  goal: parseGoalInput(text) ? applyGoalCommand(item.goal, text) : item.goal,
-                  title:
-                    autoTitleForSend(item, text || images[0]?.name || "Image") ?? item.title,
+                  goal: nextGoalForSend(item.provider, item.goal, originalText, prep.applyDeskGoal),
+                  title: hideUser
+                    ? item.title
+                    : autoTitleForSend(item, originalText || images[0]?.name || "Image") ?? item.title,
                   messages: upsertThoughtMessage(
                     [
-                      ...working,
+                      ...base,
                       ...(options?.replaceUserId || hideUser
                         ? []
                         : [
                             {
                               id: uid("msg"),
                               role: "user" as const,
-                              text,
+                              text: originalText,
                               ...(images.length > 0 ? { images } : {}),
                               createdAt: Date.now(),
                               ...brainStamp(session),
@@ -1598,7 +1716,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const promptInput = {
           sessionId: session.id,
           projectId: session.projectId ?? undefined,
-          text,
+          text: vendorText,
           images,
           model: session.model,
           effort: session.effort,
@@ -1607,6 +1725,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           vendorSessionId,
           sandbox: session.sandbox,
           securityPolicy: session.securityPolicy,
+          parentId: session.parentId,
+          hidden: session.hidden,
+          role: deskRoleOf(session),
           mcpServers: stateRef.current.settings.mcpServers,
           preface: withPortableHistory(buildSessionPreface({
             cwd,
@@ -1615,6 +1736,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             mode: session.mode,
             sandbox: session.sandbox,
             surface: session.provider === "custom" ? "http" : "mcp",
+            role: deskRoleOf(session),
             desk: {
               title: session.title,
               projectName: project?.name,
@@ -1649,7 +1771,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const result = await window.workhorse.customPrompt({
             sessionId: session.id,
             projectId: session.projectId ?? undefined,
-            text,
+            text: vendorText,
             images,
             model: custom.model || session.model,
             effort: session.effort,
@@ -1661,6 +1783,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             mcpServers: stateRef.current.settings.mcpServers,
             securityPolicy: session.securityPolicy,
             folders: project?.folders.map((folder) => folder.path) ?? [],
+            parentId: session.parentId,
+            hidden: session.hidden,
+            role: deskRoleOf(session),
             config: {
               baseUrl: custom.baseUrl,
               apiKey: custom.apiKey,
@@ -1771,6 +1896,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...item,
                   status: "idle",
                   vendorSessionId,
+                  goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                   messages: item.messages.map((entry) =>
                     entry.id === assistantId && !(entry.text ?? "").trim()
                       ? { ...entry, text: reply || EMPTY_GROK_REPLY }
@@ -1782,6 +1908,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }));
       })().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
+        const joinTurn = looksLikeJoinPrompt(text) || isJoinAssistantTurn(
+          stateRef.current.sessions.find((item) => item.id === session.id)?.messages ?? [],
+          assistantId,
+        );
+        const attempt = options?.joinAttempt ?? 1;
+        if (joinTurn && isVendorRateLimitError(message) && attempt < JOIN_MAX_ATTEMPTS) {
+          setState((latest) => ({
+            ...latest,
+            sessions: applyJoinRateLimitRetry(latest.sessions, session.id, {
+              prompt: text,
+              attempt,
+              assistantId,
+            }),
+          }));
+          return;
+        }
         setState((latest) => ({
           ...latest,
           sessions: latest.sessions.map((item) =>
@@ -1789,10 +1931,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? {
                   ...item,
                   status: "idle",
+                  goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                   messages: finishOpenToolMessages(
                     item.messages.map((entry) =>
                       entry.id === assistantId
-                        ? { ...entry, text: entry.text || vendorFailedMessage(session.provider, message) }
+                        ? {
+                            ...entry,
+                            text:
+                              entry.text ||
+                              (joinTurn
+                                ? vendorRateLimitNotice(session.provider)
+                                : vendorFailedMessage(session.provider, message)),
+                          }
                         : entry,
                     ),
                     "failed",
@@ -1821,9 +1971,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         item.id === session.id
           ? {
               ...item,
-              goal: parseGoalInput(text) ? applyGoalCommand(item.goal, text) : item.goal,
-              title:
-                autoTitleForSend(item, text || images[0]?.name || "Image") ?? item.title,
+              goal: nextGoalForSend(item.provider, item.goal, originalText, prep.applyDeskGoal),
+              title: hideUser
+                ? item.title
+                : autoTitleForSend(item, originalText || images[0]?.name || "Image") ?? item.title,
               messages: [
                 ...working,
                 ...(options?.replaceUserId || hideUser
@@ -1832,7 +1983,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       {
                         id: uid("msg"),
                         role: "user" as const,
-                        text,
+                        text: originalText,
                         ...(images.length > 0 ? { images } : {}),
                         createdAt: Date.now(),
                         ...brainStamp(session),
@@ -1858,6 +2009,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const sendRef = useRef(send);
   sendRef.current = send;
   const flushing = useRef(new Set<string>());
+  const joinWake = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (watchHold) return;
@@ -1865,6 +2017,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (session.status !== "idle" || !session.queue?.length || flushing.current.has(session.id)) continue;
       if (session.goal?.status === "paused") continue;
       const item = session.queue[0];
+      if (item.notBefore && Date.now() < item.notBefore) {
+        if (!joinWake.current[session.id]) {
+          joinWake.current[session.id] = window.setTimeout(() => {
+            delete joinWake.current[session.id];
+            setState((current) => ({ ...current }));
+          }, item.notBefore - Date.now());
+        }
+        continue;
+      }
       flushing.current.add(session.id);
       setState((current) => {
         const shifted = shiftQueuedPrompt(current.sessions, session.id);
@@ -1890,8 +2051,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sendRef.current(item.text, {
           images: item.images,
           sessionId: session.id,
+          joinAttempt: item.joinAttempt,
+          hideUser: item.hideUser === true || Boolean(item.userMessageId),
           scheduledRunId: item.scheduledRunId,
-          hideUser: item.hideUser,
         });
       });
     }
@@ -2044,6 +2206,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cacheReadTokens,
             cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
             costUsd: draft.costUsd,
+            contextUsed,
           },
           ...current.usage,
         ],
@@ -2082,6 +2245,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const project = snapshot.projects.find((item) => item.id === session.projectId);
           const cwd = sessionExecutionCwd(session.environment, project?.folders[0]?.path ?? "");
           const live = vendorSendTarget(session.provider);
+          const role = deskRoleOf(session);
           const preface = buildSessionPreface({
             cwd,
             folders: project?.folders.map((folder) => folder.path) ?? [],
@@ -2089,6 +2253,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             mode: session.mode,
             sandbox: session.sandbox,
             surface: session.provider === "custom" ? "http" : "mcp",
+            role,
           });
           const promptInput = {
             sessionId: session.id,
@@ -2102,6 +2267,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sandbox: session.sandbox,
             mcpServers,
             preface,
+            parentId: session.parentId,
+            hidden: session.hidden,
+            role,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
           if (live === "custom") {
@@ -2125,6 +2293,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               mcpServers,
               securityPolicy: session.securityPolicy,
               folders: project?.folders.map((folder) => folder.path) ?? [],
+              parentId: session.parentId,
+              hidden: session.hidden,
+              role,
               config: {
                 baseUrl: custom.baseUrl,
                 apiKey: custom.apiKey,
@@ -2154,34 +2325,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (payload.mode === "bots") {
             const action = payload.action ?? (payload.message === "create" || payload.message === "delete" ? payload.message : "list");
             if (action === "list") {
-              await replyAsk({
-                text: JSON.stringify(
-                  {
-                    bots: deskCallCatalog({
-                      settings: latest.settings,
-                      usage: latest.usage,
-                      plans: plansRef.current,
-                      permits: latest.watchPermits,
-                      dayMarks: latest.watchDayMarks,
-                    }),
-                    note: "Name every attached bot. canCall is false when that vendor is off in Settings → LLMs, not attached, or Watch is holding it. Do not spawn or ask a row that is not callable.",
-                  },
-                  null,
-                  2,
-                ),
+              const catalog = deskCallCatalog({
+                settings: latest.settings,
+                usage: latest.usage,
+                plans: plansRef.current,
+                permits: latest.watchPermits,
+                dayMarks: latest.watchDayMarks,
               });
+              await replyAsk({ text: formatDeskRoster(catalog) });
               return;
             }
             if (action === "list-projects") {
+              const projects = latest.projects.map((item) => ({
+                id: item.id,
+                name: item.name,
+                folders: item.folders.map((folder) => folder.path),
+                chats: latest.sessions.filter((session) => session.projectId === item.id && !session.archivedAt).length,
+              }));
               await replyAsk({
                 text: JSON.stringify(
                   {
-                    projects: latest.projects.map((item) => ({
-                      id: item.id,
-                      name: item.name,
-                      folders: item.folders.map((folder) => folder.path),
-                      chats: latest.sessions.filter((session) => session.projectId === item.id && !session.archivedAt).length,
-                    })),
+                    source: "live",
+                    projects,
+                    summary:
+                      projects.length === 0
+                        ? "No Workhorse projects on this desk yet."
+                        : `Visible sidebar names: ${projects.map((row) => row.name).join(", ")}.\n${projects.map((row) => `- ${row.name}${row.folders[0] ? ` · ${row.folders[0]}` : ""} · ${row.chats} chats`).join("\n")}`,
                   },
                   null,
                   2,
@@ -2199,28 +2368,354 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 fromSessionId: fromId,
               });
               const result = applied.result;
+              const nextActive = applied.activeSessionId ?? latest.activeSessionId;
               setState((current) => ({
                 ...current,
                 projects: applied.projects,
                 sessions: applied.sessions,
                 activeProjectId: applied.activeProjectId,
-                activeSessionId: applied.activeSessionId ?? current.activeSessionId,
+                activeSessionId: nextActive,
                 panel: null,
                 sheet: null,
               }));
+              const projects = applied.projects.map((item) => ({
+                id: item.id,
+                name: item.name,
+                folders: item.folders.map((folder) => folder.path),
+                chats: applied.sessions.filter((session) => session.projectId === item.id && !("archivedAt" in session && session.archivedAt)).length,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  projects: applied.projects,
+                  sessions: listedChats(applied.sessions),
+                  activeProjectId: applied.activeProjectId,
+                  activeSessionId: nextActive,
+                })
+                .catch(() => undefined);
               await replyAsk({
                 text: JSON.stringify(
                   {
                     ok: true,
+                    source: "live",
                     alreadyExists: result?.alreadyExists,
                     projectId: result?.projectId,
                     name: result?.name ?? name,
                     folder: result?.folder ?? (folder || null),
                     folders: result?.folders ?? [],
                     movedThisChat: Boolean(result?.movedThisChat),
-                    howToUse: `Project “${result?.name ?? name}” is on the sidebar under Projects.${
+                    projects,
+                    howToUse: `Project “${result?.name ?? name}” is under Projects.${
                       result?.folder ? ` Linked folder: ${result.folder}.` : ""
-                    }`,
+                    }${result?.movedThisChat ? " This chat is in that project." : ""} Live desk now has: ${projects.map((row) => row.name).join(", ") || "(none)"}.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "move-chat") {
+              const projectQuery = (payload.name || payload.message || "").trim();
+              const project = findProjectByQuery(latest.projects, projectQuery);
+              if (!project) {
+                await replyAsk({ error: projectQuery ? `No project matches “${projectQuery}”` : "project is required" });
+                return;
+              }
+              const chatQuery = (payload.chat || "").trim();
+              const fromId = payload.fromSessionId?.trim() || "";
+              let session = fromId ? latest.sessions.find((item) => item.id === fromId) : undefined;
+              if (chatQuery) {
+                const hit = resolveListedChat(latest.sessions, chatQuery);
+                if (!hit.ok) {
+                  await replyAsk({ error: hit.error });
+                  return;
+                }
+                session = hit.session;
+              }
+              if (!session || session.archivedAt) {
+                await replyAsk({
+                  error: chatQuery ? `No chat matches “${chatQuery}”` : "No chat is selected to move.",
+                });
+                return;
+              }
+              if (session.projectId === project.id) {
+                await replyAsk({
+                  text: JSON.stringify(
+                    {
+                      ok: true,
+                      already: true,
+                      chat: session.title,
+                      project: project.name,
+                      projectId: project.id,
+                      howToUse: `Chat “${session.title}” is already in project “${project.name}”.`,
+                    },
+                    null,
+                    2,
+                  ),
+                });
+                return;
+              }
+              const sessions = moveChat(latest.sessions, session.id, project.id);
+              if (!sessions) {
+                await replyAsk({ error: "Could not move that chat." });
+                return;
+              }
+              setState((current) => ({
+                ...current,
+                sessions,
+                activeProjectId: project.id,
+                activeSessionId: session.id,
+                panel: null,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  sessions: listedChats(sessions),
+                  activeProjectId: project.id,
+                  activeSessionId: session.id,
+                })
+                .catch(() => undefined);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    moved: session.title,
+                    project: project.name,
+                    projectId: project.id,
+                    howToUse: `Chat “${session.title}” is now in project “${project.name}”.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "rename-chat") {
+              const applied = applyRenameDeskChat(latest.sessions, {
+                name: (payload.name || payload.message || "").trim(),
+                chat: (payload.chat || "").trim(),
+                fromSessionId: payload.fromSessionId,
+              });
+              if (!applied.ok) {
+                await replyAsk({ error: applied.error });
+                return;
+              }
+              setState((current) => ({ ...current, sessions: applied.sessions }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  sessions: listedChats(applied.sessions),
+                })
+                .catch(() => undefined);
+              const chatTitles = applied.sessions
+                .filter((item) => typeof item.archivedAt !== "number")
+                .map((item) => item.title);
+              const chatVisible = chatTitles.some(
+                (title) => title.trim().toLowerCase() === applied.renamed.title.trim().toLowerCase(),
+              );
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: chatVisible,
+                    source: "live",
+                    previous: applied.previous,
+                    name: applied.renamed.title,
+                    visibleOnDesk: chatVisible,
+                    chats: chatTitles,
+                    howToUse: chatVisible
+                      ? `Live desk chat titles now include “${applied.renamed.title}”. Quote those titles only.`
+                      : `Rename did not take. Live desk chats: ${chatTitles.join(", ") || "(none)"}. Do not tell the user it is named “${(payload.name || payload.message || "").trim()}”.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "rename-project") {
+              const from = latest.sessions.find((item) => item.id === payload.fromSessionId);
+              const requested = (payload.name || payload.message || "").trim();
+              const applied = applyRenameDeskProject(latest.projects, {
+                name: requested,
+                project: (payload.folder || payload.bot || "").trim(),
+                fromProjectId: from?.projectId ?? latest.activeProjectId ?? undefined,
+              });
+              if (!applied.ok) {
+                await replyAsk({ error: applied.error });
+                return;
+              }
+              setState((current) => ({ ...current, projects: applied.projects }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  projects: applied.projects,
+                })
+                .catch(() => undefined);
+              const names = visibleProjectNames(applied.projects);
+              const visibleOnDesk = renameTookOnDesk(applied.projects, requested);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: visibleOnDesk,
+                    source: "live",
+                    previous: applied.previous,
+                    name: applied.renamed.name,
+                    requested,
+                    projectId: applied.renamed.id,
+                    visibleOnDesk,
+                    projects: applied.projects.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                      folders: item.folders.map((folder) => folder.path),
+                    })),
+                    howToUse: visibleOnDesk
+                      ? `Visible sidebar names: ${names.join(", ")}. The project is named “${applied.renamed.name}”. Call workhorse_list_projects and only repeat that if the list still shows it.`
+                      : `Rename did not take. Visible sidebar names: ${names.join(", ") || "(none)"}. Do not tell the user it is named “${requested}”.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "delete-chat") {
+              if (
+                isLooseDeleteScope({
+                  scope: payload.scope,
+                  chat: payload.chat || payload.name,
+                  chats: payload.chats,
+                })
+              ) {
+                const applied = applyDeleteLooseDeskChats(latest.sessions, {
+                  fromSessionId: payload.fromSessionId,
+                });
+                if (!applied.ok) {
+                  await replyAsk({ error: applied.error });
+                  return;
+                }
+                const sessions = applied.sessions;
+                const gone = new Set(
+                  latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
+                );
+                setState((current) => ({
+                  ...current,
+                  sessions,
+                  pending: current.pending.filter((item) => !gone.has(item.sessionId)),
+                }));
+                void window.workhorse
+                  ?.saveState({
+                    ...latest,
+                    sessions: listedChats(sessions),
+                    activeSessionId: latest.activeSessionId,
+                  })
+                  .catch(() => undefined);
+                await replyAsk({
+                  text: JSON.stringify(
+                    {
+                      ok: true,
+                      scope: "loose",
+                      deleted: applied.deleted.map((item) => item.title),
+                      kept: applied.kept?.title ?? null,
+                      howToUse:
+                        applied.deleted.length > 0
+                          ? `Deleted ${applied.deleted.length} loose chat(s). This chat was kept. Chats in a project were not touched.`
+                          : "No other loose chats to delete. This chat was kept.",
+                    },
+                    null,
+                    2,
+                  ),
+                });
+                return;
+              }
+              const applied = applyDeleteDeskChat(latest.sessions, {
+                chat: (payload.chat || payload.name || "").trim(),
+                fromSessionId: payload.fromSessionId,
+                onlyThis: payload.onlyThis === true,
+              });
+              if (!applied.ok) {
+                await replyAsk({ error: applied.error });
+                return;
+              }
+              const sessions = applied.sessions;
+              const session = applied.deleted;
+              const gone = new Set(
+                latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
+              );
+              setState((current) => ({
+                ...current,
+                sessions,
+                pending: current.pending.filter((item) => !gone.has(item.sessionId)),
+                activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  sessions: listedChats(sessions),
+                  activeSessionId:
+                    latest.activeSessionId && gone.has(latest.activeSessionId) ? null : latest.activeSessionId,
+                })
+                .catch(() => undefined);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    deleted: session.title,
+                    howToUse: `Chat “${session.title}” was deleted.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "delete-project") {
+              const projectQuery = (payload.name || payload.message || "").trim();
+              const project = findProjectByQuery(latest.projects, projectQuery);
+              if (!project) {
+                await replyAsk({ error: projectQuery ? `No project matches “${projectQuery}”` : "project is required" });
+                return;
+              }
+              const fate: "keep" | "remove" = payload.chats === "remove" ? "remove" : "keep";
+              const projects = applyDeleteProject(latest.projects, project.id);
+              if (!projects) {
+                await replyAsk({ error: "Could not delete that project." });
+                return;
+              }
+              const sessions = applyProjectChatFate(latest.sessions, project.id, fate);
+              const gone = new Set(
+                latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
+              );
+              const nextActiveProject = latest.activeProjectId === project.id ? null : latest.activeProjectId;
+              const nextActiveSession =
+                latest.activeSessionId && gone.has(latest.activeSessionId) ? null : latest.activeSessionId;
+              setState((current) => ({
+                ...current,
+                projects,
+                sessions,
+                pending: current.pending.filter((item) => !gone.has(item.sessionId)),
+                activeProjectId: current.activeProjectId === project.id ? null : current.activeProjectId,
+                activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  projects,
+                  sessions: listedChats(sessions),
+                  activeProjectId: nextActiveProject,
+                  activeSessionId: nextActiveSession,
+                })
+                .catch(() => undefined);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    deleted: project.name,
+                    chats: fate,
+                    howToUse:
+                      fate === "remove"
+                        ? `Project “${project.name}” and its chats were deleted.`
+                        : `Project “${project.name}” was deleted. Its chats are now loose.`,
                   },
                   null,
                   2,
@@ -2584,13 +3079,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
+            if (action === "await-agents") {
+              const parentId = payload.fromSessionId?.trim() || "";
+              if (!parentId) {
+                await replyAsk({ error: "no parent chat to wait on" });
+                return;
+              }
+              const parentLive = stateRef.current.sessions.find((item) => item.id === parentId);
+              const shouldWait = awaitAgentsWaits({ wait: payload.wait, parentStatus: parentLive?.status });
+              if (shouldWait) {
+                const timeoutMs =
+                  typeof payload.timeoutSeconds === "number"
+                    ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
+                    : 10 * 60 * 1_000;
+                const deadline = Date.now() + timeoutMs;
+                while (parentHasRunningChildren(stateRef.current.sessions, parentId) && Date.now() < deadline) {
+                  await new Promise((resolve) => setTimeout(resolve, 400));
+                }
+              }
+              setState((current) => {
+                let sessions = reconcileIdleChildren(current.sessions, parentId);
+                sessions = maybeEnqueueLineupJoin(sessions, parentId);
+                return sessions === current.sessions ? current : { ...current, sessions };
+              });
+              const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
+              const reports = collectChildAgentReports(stateRef.current.sessions, parentId);
+              await replyAsk({
+                text: formatAwaitAgentsSnapshot({
+                  lineup: parentNow?.lineup,
+                  reports,
+                  wait: shouldWait,
+                }),
+              });
+              return;
+            }
             await replyAsk({ error: `Unknown bots action ${action}` });
             return;
           }
-          const parent =
-            latest.sessions.find((item) => item.id === payload.fromSessionId && !isHiddenSession(item)) ??
+          const caller =
+            latest.sessions.find((item) => item.id === payload.fromSessionId) ??
             latest.sessions.find((item) => item.status === "running" && !isHiddenSession(item));
+          const parent = caller && !isHiddenSession(caller) ? caller : undefined;
           if (payload.mode === "spawn") {
+            if (!caller) {
+              await replyAsk({ error: "no parent chat to attach this subagent to" });
+              return;
+            }
+            const boundProject = latest.projects.find((item) => item.id === caller.projectId);
+            const admitted = admitSpawn({
+              parent: caller,
+              projectFolder: boundProject?.folders[0]?.path ?? "",
+              folder: typeof payload.folder === "string" ? payload.folder : undefined,
+              prompt: payload.message,
+            });
+            if (!admitted.ok) {
+              await replyAsk({ error: admitted.error });
+              return;
+            }
             if (!parent) {
               await replyAsk({ error: "no parent chat to attach this subagent to" });
               return;
@@ -2629,31 +3174,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const sameVendor =
               spec.provider === parent.provider && spec.customBotId === parent.customBotId;
             const granted = vendorGrantedForChat(latest.watchPermits, vendorKey, parent.id);
-            if (!sameVendor && row && vendorOverrideNeeded(row) && !granted) {
-              const vendorStatus =
-                row.status === "day_bank" || row.status === "spent" || row.status === "disabled"
-                  ? row.status
-                  : "ok";
-              const requestId = uid("perm");
-              elevatePeerReply.current.set(requestId, replyAsk);
-              setState((current) => ({
-                ...current,
-                pending: enqueuePermission(current.pending, {
-                  id: requestId,
-                  sessionId: parent.id,
-                  provider: parent.provider,
-                  tool: "workhorse_request_vendor",
-                  detail:
-                    vendorStatus === "ok"
-                      ? `${row.name} will run inside this conversation.`
-                      : row.reason || `${row.name} is not callable right now.`,
-                  kind: "vendor",
-                  vendor: { provider: spec.provider, name: row.name, status: vendorStatus },
-                }),
-                sessions: current.sessions.map((item) =>
-                  item.id === parent.id ? { ...item, status: "needs-input" } : item,
-                ),
-              }));
+            const noGo = !sameVendor && !granted ? spawnIsNoGo(row) : null;
+            if (noGo) {
+              await replyAsk({ error: noGo });
               return;
             }
             const spawnHold = vendorCallBlocked({
@@ -2697,10 +3220,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const tokenBudget = typeof payload.tokenBudget === "number" && payload.tokenBudget > 0
               ? Math.floor(payload.tokenBudget)
               : undefined;
-            const project = latest.projects.find((item) => item.id === parent.projectId);
-            const root = project?.folders[0]?.path ?? "";
+            const project = boundProject ?? latest.projects.find((item) => item.id === parent.projectId);
+            const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
-            let isolation: "worktree" | "shared" = payload.isolation === "shared" ? "shared" : "worktree";
+            let isolation: "worktree" | "shared" = payload.isolation === "worktree" ? "worktree" : "shared";
             if (isolation === "worktree" && root && window.workhorse?.ensureWorktree) {
               const isolated = await window.workhorse.ensureWorktree({ sessionId: childId, root });
               if (isolated.ok && isolated.path && isolated.gitRoot && isolated.head) {
@@ -2749,6 +3272,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 { id: assistantId, role: "assistant", text: "", createdAt: startedAt, ...brainStamp(spec) },
               ],
             };
+            const waveText = lastUserMessage(parent)?.text ?? "";
             setState((current) => ({
               ...current,
               sessions: [
@@ -2756,6 +3280,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   item.id === parent.id
                     ? {
                         ...item,
+                        lineup: addLineupRow(
+                          stampLineupUserText(item.lineup ?? emptyLineup(admitted.cwd, startedAt, waveText), waveText),
+                          {
+                          childId,
+                          title: spec.title,
+                          slice: payload.description?.trim() || spec.title,
+                          folder: admitted.cwd,
+                          vendor: spec.title,
+                          status: "running",
+                          startedAt,
+                        }),
                         messages: [
                           ...item.messages,
                           {
@@ -2777,50 +3312,100 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ],
             }));
             const childCwd = sessionExecutionCwd(environment, root);
-            const beforeChanges = new Set(
-              window.workhorse?.listGitChanges && childCwd
-                ? (await window.workhorse.listGitChanges(childCwd)).map((change) => `${change.status}:${change.path}`)
-                : [],
-            );
-            const reply = await promptVendor(
-              child,
-              formatSubagentPrompt(parent.title?.trim() || "another agent", payload.message),
-              latest.settings.mcpServers,
-            );
-            const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
-            if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") return;
-            const fallback = reply || vendorEmptyReply(spec.provider);
-            const afterChanges = window.workhorse?.listGitChanges && childCwd
-              ? await window.workhorse.listGitChanges(childCwd)
-              : [];
-            const changedFiles = afterChanges
-              .filter((change) => !beforeChanges.has(`${change.status}:${change.path}`))
-              .map((change) => change.path);
-            setState((current) => ({
-              ...current,
-              sessions: withSubagentStatus(
-                current.sessions.map((item) =>
+            const waitForReply = spawnWaitsForReply(payload);
+            const runChild = async () => {
+              const beforeChanges = new Set(
+                window.workhorse?.listGitChanges && childCwd
+                  ? (await window.workhorse.listGitChanges(childCwd)).map((change) => `${change.status}:${change.path}`)
+                  : [],
+              );
+              const reply = await promptVendor(
+                child,
+                formatWorkerPrompt({
+                  fromTitle: parent.title?.trim() || "another agent",
+                  text: payload.message,
+                  folder: admitted.cwd,
+                  project: project?.name,
+                  slice: payload.description,
+                  vendor: spec.title,
+                }),
+                latest.settings.mcpServers,
+              );
+              const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
+              if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
+                setState((current) => {
+                  const rowStatus = terminalStatus === "timed-out" ? "timed-out" as const : "failed" as const;
+                  let sessions = applyChildIdleSync(current.sessions, childId, rowStatus, {
+                    report: childReportText(current.sessions.find((item) => item.id === childId)),
+                    error: terminalStatus,
+                  });
+                  sessions = maybeEnqueueLineupJoin(sessions, parent.id);
+                  return { ...current, sessions };
+                });
+                return "";
+              }
+              const fallback = reply || vendorEmptyReply(spec.provider);
+              const afterChanges = window.workhorse?.listGitChanges && childCwd
+                ? await window.workhorse.listGitChanges(childCwd)
+                : [];
+              const changedFiles = afterChanges
+                .filter((change) => !beforeChanges.has(`${change.status}:${change.path}`))
+                .map((change) => change.path);
+              setState((current) => {
+                const withReply = current.sessions.map((item) =>
                   item.id === childId
                     ? {
                         ...item,
-                        status: "idle",
-                        agentRun: item.agentRun ? {
-                          ...item.agentRun,
-                          status: "completed" as const,
-                          finishedAt: Date.now(),
-                          changedFiles,
-                          conflictFiles: overlappingAgentFiles(current.sessions, childId, changedFiles),
-                        } : undefined,
+                        agentRun: item.agentRun
+                          ? {
+                              ...item.agentRun,
+                              changedFiles,
+                              conflictFiles: overlappingAgentFiles(current.sessions, childId, changedFiles),
+                            }
+                          : undefined,
                         messages: item.messages.map((entry) =>
                           entry.id === assistantId && !entry.text.trim() ? { ...entry, text: fallback } : entry,
                         ),
                       }
                     : item,
+                );
+                let sessions = applyChildIdleSync(withReply, childId, "completed", { report: fallback });
+                sessions = maybeEnqueueLineupJoin(sessions, parent.id);
+                return { ...current, sessions };
+              });
+              return fallback;
+            };
+            if (!waitForReply) {
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    started: true,
+                    title: spec.title,
+                    childSessionId: childId,
+                    folder: admitted.cwd,
+                    lineup: lineupSnapshot(
+                      addLineupRow(parent.lineup ?? emptyLineup(admitted.cwd, startedAt), {
+                        childId,
+                        title: spec.title,
+                        slice: payload.description?.trim() || spec.title,
+                        folder: admitted.cwd,
+                        vendor: spec.title,
+                        status: "running",
+                        startedAt,
+                      }),
+                    ),
+                    howToUse:
+                      "Worker is running in its own chat. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.",
+                  },
+                  null,
+                  2,
                 ),
-                childId,
-                "completed",
-              ),
-            }));
+              });
+              void runChild().catch(() => undefined);
+              return;
+            }
+            const fallback = await runChild();
+            if (!fallback) return;
             await replyAsk({ text: fallback });
             return;
           }
@@ -2965,26 +3550,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const childId = payload.childSessionId || payload.toSessionId;
           const latest = stateRef.current;
           const target = latest.sessions.find((item) => item.id === childId);
-          setState((current) => ({
-            ...current,
-            sessions: applyFailedPeerAsk(
-              withSubagentStatus(
+          setState((current) => {
+            const failed = applyFailedPeerAsk(
+              applyChildIdleSync(
                 current.sessions.map((item) =>
                   item.id === payload.toSessionId || item.id === payload.childSessionId
                     ? {
                         ...item,
-                        status: "idle",
-                        agentRun: item.agentRun ? {
-                          ...item.agentRun,
-                          status: "failed" as const,
-                          finishedAt: Date.now(),
-                          error: message,
-                        } : undefined,
+                        status: "idle" as const,
+                        agentRun: item.agentRun
+                          ? {
+                              ...item.agentRun,
+                              status: "failed" as const,
+                              finishedAt: Date.now(),
+                              error: message,
+                            }
+                          : undefined,
                       }
                     : item,
                 ),
                 childId,
                 "failed",
+                { error: message },
               ),
               {
                 parentId: payload.fromSessionId,
@@ -2992,8 +3579,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 targetTitle: target?.title,
                 error: message,
               },
-            ),
-          }));
+            );
+            const parentId = payload.fromSessionId || target?.parentId;
+            return {
+              ...current,
+              sessions: parentId ? maybeEnqueueLineupJoin(failed, parentId) : failed,
+            };
+          });
           await replyAsk({ error: message });
         }
       })();
@@ -3005,27 +3597,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return window.workhorse.onPeerCancel(({ childSessionId, reason }) => {
       const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
       if (child?.status === "running") cancelVendorSession(child);
-      setState((current) => ({
-        ...current,
-        sessions: withSubagentStatus(
-          current.sessions.map((session) =>
-            session.id === childSessionId
-              ? {
-                  ...session,
-                  status: "idle",
-                  agentRun: session.agentRun ? {
-                    ...session.agentRun,
-                    status: reason,
-                    finishedAt: Date.now(),
-                    error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
-                  } : undefined,
-                }
-              : session,
-          ),
-          childSessionId,
-          "failed",
-        ),
-      }));
+      setState((current) => {
+        const rowStatus = reason === "timed-out" ? "timed-out" as const : "failed" as const;
+        let sessions = applyChildIdleSync(current.sessions, childSessionId, rowStatus, {
+          error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
+        });
+        const parentId = child?.parentId;
+        if (parentId) sessions = maybeEnqueueLineupJoin(sessions, parentId);
+        return { ...current, sessions };
+      });
     });
   }, []);
 
@@ -3033,18 +3613,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const apply = (event: GrokBridgeEvent) => {
       try {
       const goalHalted = goalHaltedSessions.current.has(event.sessionId);
-      if (goalHalted && (event.type === "chunk" || event.type === "thought" || event.type === "tool" || event.type === "permission")) {
-        return;
-      }
-      if (goalHalted && (event.type === "done" || event.type === "error")) {
+      const terminal = vendorTerminalAction({
+        halted: goalHalted,
+        eventType: event.type,
+        liveAssistantId: grokAssistantId.current[event.sessionId],
+      });
+      if (terminal === "ignore") return;
+      if (terminal === "consume-halt-then-forward") {
         goalHaltedSessions.current.delete(event.sessionId);
         const haltedAssistantId = grokAssistantId.current[event.sessionId];
+        const pending = goalForwardAfterHalt.current[event.sessionId];
+        delete goalForwardAfterHalt.current[event.sessionId];
         setState((current) => ({
           ...current,
           sessions: current.sessions.map((session) =>
             session.id === event.sessionId
               ? {
                   ...session,
+                  status: "idle" as const,
                   messages: session.messages.filter((message) =>
                     message.id !== haltedAssistantId || Boolean(message.text.trim() || message.thought?.trim()),
                   ),
@@ -3052,6 +3638,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : session,
           ),
         }));
+        if (pending) {
+          queueMicrotask(() => {
+            sendRef.current(pending.text, {
+              images: pending.images,
+              hideUser: pending.hideUser,
+              sessionId: event.sessionId,
+              afterGoalHalt: true,
+            });
+          });
+        }
+        return;
       }
       if (event.type === "chunk") {
         setState((current) => {
@@ -3425,40 +4022,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
           const assistantId = grokAssistantId.current[event.sessionId];
-          return {
-            ...current,
-            sessions: withSubagentStatus(
-              current.sessions.map((session) => {
-                if (session.id !== event.sessionId) return session;
-                return {
-                  ...session,
-                  status: "idle",
-                  scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
-                    run.status === "running" ? { ...run, status: "completed" as const } : run,
+          let sessions = withSubagentStatus(
+            current.sessions.map((session) => {
+              if (session.id !== event.sessionId) return session;
+              return {
+                ...session,
+                status: "idle" as const,
+                goal: grokGoalAfterTurnIdle(session.provider, session.goal),
+                scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
+                  run.status === "running" ? { ...run, status: "completed" as const } : run,
+                ),
+                messages: finishOpenToolMessages(
+                  failPeerAskMessages(
+                    assistantId
+                      ? session.messages.map((message) => {
+                          if (message.id !== assistantId) return message;
+                          const text = (message.text ?? "").trim() || queued.trim();
+                          return {
+                            ...message,
+                            text: text || (message.thought?.trim() ? "" : EMPTY_GROK_REPLY),
+                            workedMs: Math.max(0, Date.now() - message.createdAt),
+                          };
+                        })
+                      : session.messages,
+                    { error: "the other chat did not answer" },
                   ),
-                  messages: finishOpenToolMessages(
-                    failPeerAskMessages(
-                      assistantId
-                        ? session.messages.map((message) => {
-                            if (message.id !== assistantId) return message;
-                            const text = (message.text ?? "").trim() || queued.trim();
-                            return {
-                              ...message,
-                              text: text || (message.thought?.trim() ? "" : EMPTY_GROK_REPLY),
-                              workedMs: Math.max(0, Date.now() - message.createdAt),
-                            };
-                          })
-                        : session.messages,
-                      { error: "the other chat did not answer" },
-                    ),
-                    "completed",
-                  ),
-                };
-              }),
-              event.sessionId,
-              "completed",
-            ),
-          };
+                  "completed",
+                ),
+              };
+            }),
+            event.sessionId,
+            "completed",
+          );
+          const finished = sessions.find((session) => session.id === event.sessionId);
+          if (finished?.parentId) {
+            sessions = applyChildIdleSync(sessions, event.sessionId, "completed", {
+              report: childReportText(finished),
+            });
+            sessions = maybeEnqueueLineupJoin(sessions, finished.parentId);
+          }
+          return { ...current, sessions };
         });
         return;
       }
@@ -3476,24 +4079,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         }
         const assistantId = grokAssistantId.current[event.sessionId];
-        setState((current) => ({
-          ...current,
-          sessions: withSubagentStatus(
+        setState((current) => {
+          let sessions = withSubagentStatus(
             current.sessions.map((session) =>
               session.id === event.sessionId
                 ? {
                     ...session,
-                    status: "idle",
+                    status: "idle" as const,
+                    goal: grokGoalAfterTurnIdle(session.provider, session.goal),
                     scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
                       run.status === "running" ? { ...run, status: "failed" as const } : run,
                     ),
                     messages: finishOpenToolMessages(
                       session.messages.map((message) =>
                         message.id === assistantId && !message.text
-                          ? {
-                              ...message,
-                              text: vendorFailedMessage(session.provider, event.message),
-                            }
+                          ? isJoinAssistantTurn(session.messages, assistantId ?? "")
+                            ? message
+                            : {
+                                ...message,
+                                text: vendorFailedMessage(session.provider, event.message),
+                              }
                           : message,
                       ),
                       "failed",
@@ -3504,8 +4109,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
             event.sessionId,
             "failed",
-          ),
-        }));
+          );
+          const failed = sessions.find((session) => session.id === event.sessionId);
+          if (failed?.parentId) {
+            sessions = applyChildIdleSync(sessions, event.sessionId, "failed", {
+              report: childReportText(failed),
+              error: event.message,
+            });
+            sessions = maybeEnqueueLineupJoin(sessions, failed.parentId);
+          }
+          return { ...current, sessions };
+        });
       }
       } catch (error) {
         console.error("workhorse vendor event failed", error);
@@ -4160,6 +4774,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setComposerDraft,
       renameSession,
       deleteSession,
+      deleteWorkers,
       archiveSession,
       moveSession,
       dismissAttention,
@@ -4264,6 +4879,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setComposerDraft,
       renameSession,
       deleteSession,
+      deleteWorkers,
       archiveSession,
       moveSession,
       dismissAttention,
@@ -4357,8 +4973,11 @@ export function useProjectSessions(projectId: string | null, archived = false) {
   const store = useStore();
   if (!projectId) return [];
   return store.sessions.filter((session) => {
-    if (isHiddenSession(session) || session.projectId !== projectId || isDraftChat(session)) return false;
-    return archived ? typeof session.archivedAt === "number" : !session.archivedAt;
+    if (session.projectId !== projectId || isDraftChat(session)) return false;
+    const isArchived = typeof session.archivedAt === "number";
+    if (archived ? !isArchived : isArchived) return false;
+    if (session.parentId) return true;
+    return !isHiddenSession(session);
   });
 }
 

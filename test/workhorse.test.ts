@@ -116,7 +116,7 @@ import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, cont
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
-import { listVendorModels, parseCodexModelsCache, parseGrokModelsCache } from "../electron/vendor-models";
+import { listVendorModels, parseCodexModelsCache, parseCursorModelsOutput, parseGrokModelsCache, reconcileCursorModels } from "../electron/vendor-models";
 import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
 import {
   joinChatText,
@@ -5776,6 +5776,16 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     ["grok-4.6", "grok-4.5"],
   );
 
+  const cursor = parseCursorModelsOutput(
+    "Available models\n\nauto - Auto (default)\ncomposer-2.5 - Composer 2.5 (current)\ncursor-grok-4.6-high - Cursor Grok 4.6\n",
+  );
+  assert.deepEqual(cursor.map((model) => model.id), ["auto", "composer-2.5", "cursor-grok-4.6-high"]);
+  assert.equal(cursor[0]?.name, "Auto");
+  assert.deepEqual(
+    reconcileCursorModels(cursor).map((model) => model.id),
+    ["composer-2.5", "auto", "cursor-grok-4.6-high"],
+  );
+
   const missing = listVendorModels({
     env: {},
     homedir: path.join(ROOT, "does-not-exist"),
@@ -5786,6 +5796,15 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   });
   assert.equal(missing.codex[0]?.id, "gpt-5.6-sol");
   assert.ok(missing.grok.some((model) => model.id === "grok-build"));
+
+  const cursorRenamed = listVendorModels({
+    env: {},
+    homedir: path.join(ROOT, "does-not-exist"),
+    existsSync: () => false,
+    readFile: () => "",
+    cursorModelsOutput: "auto-next - Auto\ncomposer-2.6 - Composer 2.5\n",
+  });
+  assert.deepEqual(cursorRenamed.cursor.map((model) => model.id), ["composer-2.6", "auto-next"]);
 
   const home = "C:\\home";
   const files: Record<string, string> = {

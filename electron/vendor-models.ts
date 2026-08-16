@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,17 +13,79 @@ import {
   type ReasoningLevel,
 } from "../src/lib/models";
 import type { ProviderId } from "../src/lib/types";
+import { resolveCursorBinary } from "./cursor-login";
 
 export type VendorModelListInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;
   readFile?: (filePath: string) => string;
   existsSync?: (filePath: string) => boolean;
+  cursorModelsOutput?: string | null;
 };
 
 export type VendorModelLists = Record<ProviderId, ModelInfo[]>;
 
 const GROK_LOCAL_ALIASES = new Set(["grok-build"]);
+
+function cursorModelName(value: string): string {
+  return value
+    .replace(/\s+\((?:default|current)\)\s*$/i, "")
+    .trim();
+}
+
+export function parseCursorModelsOutput(raw: string): ModelInfo[] {
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const line of raw.split(/\r?\n/)) {
+    const match = line.trim().match(/^(\S+)\s+-\s+(.+)$/);
+    const id = match?.[1]?.trim() ?? "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({
+      id,
+      name: cursorModelName(match?.[2] ?? id),
+      effort: true,
+      contextWindow: 200_000,
+    });
+  }
+  return models;
+}
+
+function cursorFamilyName(value: string): string {
+  return cursorModelName(value).replace(/\s+\(Cursor\)\s*$/i, "").trim().toLowerCase();
+}
+
+export function reconcileCursorModels(live: ModelInfo[]): ModelInfo[] {
+  if (live.length === 0) return MODEL_CATALOG.cursor;
+  const rows: ModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const stock of MODEL_CATALOG.cursor) {
+    const match =
+      live.find((model) => model.id === stock.id) ??
+      live.find((model) => cursorFamilyName(model.name) === cursorFamilyName(stock.name));
+    if (!match || seen.has(match.id)) continue;
+    seen.add(match.id);
+    rows.push({ ...stock, id: match.id });
+  }
+  return rows.length > 0 ? rows : MODEL_CATALOG.cursor;
+}
+
+function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
+  const binary = resolveCursorBinary({ env });
+  if (!binary) return null;
+  try {
+    return execFileSync(binary, ["models"], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      timeout: 4_000,
+      maxBuffer: 1_048_576,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    return null;
+  }
+}
 
 function readText(
   filePath: string,
@@ -173,6 +236,8 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
   const claudeRaw = readText(path.join(claudeHome, "models_cache.json"), existsSync, readFile) ?? "";
   const claudeLive = parseCodexModelsCache(claudeRaw);
   const claudeFromGrokShape = claudeLive.length ? claudeLive : parseGrokModelsCache(claudeRaw);
+  const cursorRaw = input.cursorModelsOutput ?? (Object.keys(input).length === 0 ? readInstalledCursorModels(env) : null);
+  const cursorLive = parseCursorModelsOutput(cursorRaw ?? "");
 
   return {
     grok: grokLive.length ? withLocalGrokAliases(grokLive) : MODEL_CATALOG.grok,
@@ -183,7 +248,7 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
         }))
       : MODEL_CATALOG.claude,
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
-    cursor: MODEL_CATALOG.cursor,
+    cursor: reconcileCursorModels(cursorLive),
     custom: MODEL_CATALOG.custom,
   };
 }

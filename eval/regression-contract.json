@@ -172,7 +172,7 @@
       "profiles": ["cursor-acp"],
       "scenarios": ["SET-S4", "MOD-S1"],
       "rubric": ["SET-07", "MOD-01"],
-      "sourceFiles": ["electron/cursor-launch.ts", "src/lib/models.ts", "src/lib/session.ts", "src/lib/vendor-bridge.ts", "test/cursor-adapter.test.ts"],
+      "sourceFiles": ["electron/cursor-launch.ts", "electron/vendor-models.ts", "src/lib/models.ts", "src/lib/session.ts", "src/lib/vendor-bridge.ts", "test/cursor-adapter.test.ts"],
       "verification": ["eval:validate", "eval:smoke"]
     }
   ]

@@ -23,6 +23,7 @@ export type SpawnRequest = {
   planStepId?: string;
   rationale?: string;
   skills?: string[];
+  capabilities?: string[];
   tools?: string[];
   constraints?: string[];
 };
@@ -126,12 +127,10 @@ export function deskRoleOf(
 }
 
 export const WORKER_SPAWN_ERROR =
-  "Nested agent limit reached. A worker may create one MiniMax-M3 helper, and grandchildren cannot spawn again.";
+  "Nested agent limit reached. A worker may create one bounded helper, and grandchildren cannot spawn again.";
 
 export const MAX_AGENT_DEPTH = 2;
 export const MAX_NESTED_CHILDREN = 1;
-export const NESTED_AGENT_MODEL = "MiniMax-M3";
-
 export const SPAWN_ONLY_PROMPT_ERROR = "Worker prompt is a spawn request, not a slice. Write the actual job.";
 
 export const UNBOUND_SPAWN_ERROR =
@@ -255,6 +254,8 @@ export type WorkerBriefInput = {
   slice?: string;
   vendor?: string;
   constraints?: string[];
+  skills?: Array<{ name: string; file: string }>;
+  capabilities?: string[];
 };
 
 export function stripSpawnPreamble(text: string): string {
@@ -310,9 +311,12 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (slice) lines.push(`SLICE: ${slice}`);
   if (vendor) lines.push(`VENDOR: ${vendor}`);
   if (input.constraints?.length) lines.push(`CONSTRAINTS: ${input.constraints.join("; ")}`);
+  if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
+  if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
-  lines.push("For one independent check, you may spawn one low-effort MiniMax-M3 helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
+  if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");
+  lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
   lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
   lines.push("Return the report as plain text.");
   lines.push("");
@@ -539,6 +543,8 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(typeof row.planStepId === "string" && row.planStepId.trim() ? { planStepId: row.planStepId.trim() } : {}),
     ...(typeof row.rationale === "string" && row.rationale.trim() ? { rationale: row.rationale.trim() } : {}),
     ...(Array.isArray(row.skills) ? { skills: row.skills.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.skillFiles) ? { skillFiles: row.skillFiles.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.capabilities) ? { capabilities: row.capabilities.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
   };

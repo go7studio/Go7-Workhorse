@@ -57,6 +57,8 @@ export type PeerAsk = {
   planEvidenceRequired?: boolean;
   rationale?: string;
   skills?: string[];
+  skillFiles?: string[];
+  capabilities?: string[];
   tools?: string[];
   constraints?: string[];
   files?: string[];

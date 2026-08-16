@@ -23,7 +23,6 @@ import {
   deskRoleOf,
   isSpawnOnlyPrompt,
   nestedSpawnError,
-  NESTED_AGENT_MODEL,
   shouldSpawnInsteadOfAsk,
   toolsForDeskRole,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -37,7 +36,8 @@ import {
   readBridgeRecord,
   type PeerAsk,
 } from "./peer-inbox";
-import { publicDeskSkills, readDeskSkill } from "./desk-export-host";
+import { listDeskSkills, publicDeskSkills, readDeskSkill } from "./desk-export-host";
+import { resolveRequestedSkills } from "../src/lib/skills-catalog";
 import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
 
@@ -180,7 +180,8 @@ const TOOLS = [
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },
-        skills: { type: "array", items: { type: "string" }, description: "Required skills" },
+        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names from workhorse_list_skills" },
+        capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
@@ -893,6 +894,7 @@ async function spawnAgent(
     planStepId?: string;
     rationale?: string;
     skills?: string[];
+    capabilities?: string[];
     tools?: string[];
     constraints?: string[];
     files?: string[];
@@ -915,15 +917,24 @@ async function spawnAgent(
   const spawnInput = isNested
     ? {
         ...input,
-        provider: "custom",
-        model: NESTED_AGENT_MODEL,
-        effort: "low",
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
         isolation: "shared" as const,
         route: input.route ?? "quick",
       }
     : input;
+  const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
+  const requestedSkills = skillQueries.length > 0
+    ? resolveRequestedSkills(listDeskSkills(projectFoldersFromState()), skillQueries)
+    : { resolved: [], unresolved: [] };
+  if (requestedSkills.unresolved.length > 0) {
+    throw new Error(
+      `Required skill${requestedSkills.unresolved.length === 1 ? "" : "s"} not installed: ${requestedSkills.unresolved.join(", ")}. ` +
+      "Call workhorse_list_skills for exact names, or pass free-form expertise under capabilities.",
+    );
+  }
+  const resolvedSkills = requestedSkills.resolved.map((skill) => `${skill.origin}:${skill.name}`);
+  const skillFiles = requestedSkills.resolved.map((skill) => skill.skillFile);
   const projectFolder = callerProjectFolder(caller);
   const admitted = caller
     ? admitSpawn({
@@ -963,7 +974,9 @@ async function spawnAgent(
     route: spawnInput.route,
     planStepId: spawnInput.planStepId,
     rationale: spawnInput.rationale,
-    skills: spawnInput.skills,
+    skills: resolvedSkills,
+    skillFiles,
+    capabilities: spawnInput.capabilities,
     tools: spawnInput.tools,
     constraints: spawnInput.constraints,
     files: spawnInput.files,
@@ -990,7 +1003,9 @@ async function spawnAgent(
       route: spawnInput.route,
       planStepId: spawnInput.planStepId,
       rationale: spawnInput.rationale,
-      skills: spawnInput.skills,
+      skills: resolvedSkills,
+      skillFiles,
+      capabilities: spawnInput.capabilities,
       tools: spawnInput.tools,
       constraints: spawnInput.constraints,
       files: spawnInput.files,
@@ -1058,7 +1073,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         rationale: typeof args.rationale === "string" ? args.rationale : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
+        capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
+        constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
       },
       from,

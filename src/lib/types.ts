@@ -193,6 +193,8 @@ export type AgentRun = {
   planStepId?: string;
   rationale?: string;
   skills?: string[];
+  skillFiles?: string[];
+  capabilities?: string[];
   tools?: string[];
   constraints?: string[];
   correlationId?: string;

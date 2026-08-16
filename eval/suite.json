@@ -967,8 +967,8 @@
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S2"],
-          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker is told to read the full file; unknown skills fail before any provider call; capabilities stay separate; description compaction does not count as skill loss.",
-          "evidence": "Catalog snapshot, resolved skill manifest, worker prompt, missing-skill rejection, provider call ledger, and assignment metadata."
+          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker is told to read the full file; unknown skills fail before any provider call; capabilities stay separate; description compaction does not count as skill loss; a Go7 Godot Play Billing assignment resolves ship-go7-godot-play and rejects mock-only completion.",
+          "evidence": "Catalog snapshot, resolved skill manifest, worker prompt, missing-skill rejection, provider call ledger, assignment metadata, and packaged-plugin completion evidence."
         }
       ]
     },

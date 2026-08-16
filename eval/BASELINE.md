@@ -119,7 +119,7 @@ provider/model/effort selection, token and time budgets, shared/worktree
 isolation, changed/conflict file records, chat discovery/read/ask tools, a
 peer inbox, and persistent /goal state.
 
-Required skills now resolve to exact catalog entries and SKILL.md paths before dispatch; free-form expertise is stored separately as capabilities.
+Required skills now resolve to exact catalog entries and SKILL.md paths before dispatch; free-form expertise is stored separately as capabilities. Workhorse ships a Go7 Godot Play skill that rejects adapter-only or mock-only billing completion.
 
 The source does not yet prove that two children overlap while the parent stays
 responsive, that automatic routing is skill-aware and explainable, or that a

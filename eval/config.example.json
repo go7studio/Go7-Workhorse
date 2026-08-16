@@ -4,7 +4,7 @@
   "mode": "baseline-only",
   "source": {
     "channel": "source",
-    "repository": "https://github.com/Spikey222/Go7-Workhorse.git",
+    "repository": "https://github.com/go7studio/Go7-Workhorse.git",
     "ref": "origin/main",
     "expectedVersion": "0.1.6"
   },

@@ -1,5 +1,5 @@
 export const UPDATE_REPO = {
-  owner: "Spikey222",
+  owner: "go7studio",
   repo: "Go7-Workhorse",
 } as const;
 

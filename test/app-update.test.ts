@@ -23,7 +23,7 @@ test("semver compare treats a GitHub tag as newer than the running desk", () => 
   assert.ok(compareVersions("0.1.10", "0.1.9") > 0);
   assert.equal(
     offerFromRelease(
-      { tag_name: "v0.2.0", html_url: "https://github.com/Spikey222/Go7-Workhorse/releases/tag/v0.2.0", body: "Fixes." },
+      { tag_name: "v0.2.0", html_url: "https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.2.0", body: "Fixes." },
       "0.1.0",
     )?.version,
     "0.2.0",

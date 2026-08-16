@@ -6,7 +6,7 @@
     "channel": "source",
     "repository": "https://github.com/Spikey222/Go7-Workhorse.git",
     "ref": "origin/main",
-    "expectedVersion": "0.1.4"
+    "expectedVersion": "0.1.5"
   },
   "install": {
     "existingAppPath": "",
@@ -26,6 +26,10 @@
     "claude-acp": {
       "enabled": false,
       "notes": "Disabled by default; may be enabled for one bounded adapter smoke call."
+    },
+    "cursor-acp": {
+      "enabled": false,
+      "notes": "Disabled by default; may be enabled for one bounded authenticated Cursor ACP smoke call."
     },
     "custom-openai": {
       "enabled": true,
@@ -52,7 +56,7 @@
     "primaryModel": "MiniMax-M3",
     "internalToolCallingModel": "MiniMax-M3",
     "providerSmokeExceptions": {
-      "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-kimi", "custom-anthropic"],
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-kimi", "custom-anthropic"],
       "maxCallsPerProfile": 1,
       "requireAdapterEvidence": true,
       "allowCascading": false

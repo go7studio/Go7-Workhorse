@@ -23,7 +23,8 @@
       "Record tier, winner, alternatives, capacity state, and reason on every automatic route.",
       "Never merge credentials, subscriptions, contexts, or sandboxes across providers.",
       "Exclude Watch-held routes before dispatch and show any approved fallback.",
-      "Require Kimi K3 image capability for visual UI and UX plan tasks unless the user overrides or accepts unavailability."
+      "Require Kimi K3 image capability for visual UI and UX plan tasks unless the user overrides or accepts unavailability.",
+      "Choose the lowest sufficient supported reasoning effort from task complexity and risk; never hard-code every worker to high."
     ]
   },
   "planRouting": {
@@ -31,7 +32,8 @@
     "userOverrideWins": true,
     "watchHeldCalls": 0,
     "visualProfile": "custom-kimi",
-    "visualModelFamily": "Kimi K3"
+    "visualModelFamily": "Kimi K3",
+    "visualRole": "audit-only; implementation is handed to a separate coding worker"
   },
   "deviceProbes": {
     "contract": "eval/device-capability-contract.json",
@@ -53,14 +55,18 @@
   "evalPolicy": {
     "internalModel": "MiniMax-M3",
     "liveProviderCalls": "Use the smallest deterministic call needed to prove launch and identity.",
-    "cascades": "Use fewer low-cost models and stay within the orchestration contract limits."
+    "cascades": "Use fewer low-cost models and stay within the orchestration contract limits.",
+    "productionBoundary": "The MiniMax evaluator policy does not override a real production run; production orchestration uses task-appropriate models, effort, capacity, and explicit user assignments."
   },
-  "smokeCommands": ["eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:plan-fixture-check", "eval:device-probes", "eval:godot-suite", "eval:media-fixtures", "eval:real-plan-smoke"],
+  "smokeCommands": ["eval:smoke", "eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:plan-fixture-check", "eval:device-probes", "eval:godot-suite", "eval:media-fixtures", "eval:real-plan-smoke"],
   "sourceFiles": [
     "src/lib/routing.ts",
     "src/lib/images.ts",
+    "src/lib/turns.ts",
     "src/ui/RoutingPane.tsx",
     "src/ui/Composer.tsx",
+    "src/ui/ChatRow.tsx",
+    "src/ui/UsagePane.tsx",
     "electron/custom-http.ts",
     "electron/drop-files.ts",
     "scripts/workhorse-eval-fixture.mjs",
@@ -75,5 +81,5 @@
     "test/capability-live-smoke.ts",
     "test/real-world-plan-smoke.ts"
   ],
-  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08", "CAP-09", "CAP-10", "CAP-11"]
+  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08", "CAP-09", "CAP-10", "CAP-11", "CAP-12"]
 }

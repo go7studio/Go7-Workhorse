@@ -35,7 +35,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Open Settings to the connected-LLM surface from both onboarding and /settings.",
-            "Inspect detected Grok, Codex, and Claude rows without changing their vendor-owned login state.",
+            "Inspect detected Grok, Codex, Claude, and Cursor rows without changing their vendor-owned login state.",
             "Create one OpenAI Chat Completions bot and one Anthropic Messages bot using local fixture endpoints or approved endpoints.",
             "Probe models where supported, save, disable, re-enable, edit, and remove one bot.",
             "Verify secrets are masked and never copied into ordinary persisted state or support exports."
@@ -51,6 +51,18 @@
             "Change profile, appearance, and one safe preference; leave and return.",
             "Restart Workhorse and confirm the values persist without altering vendor credentials.",
             "Verify Back returns to the prior product context and Usage remains inside Settings."
+          ]
+        },
+        {
+          "id": "SET-S4",
+          "name": "Prove Cursor binary and CLI authentication before ACP readiness",
+          "executor": "provider",
+          "profiles": ["cursor-acp"],
+          "steps": [
+            "Resolve cursor-agent or capability-probe a generic agent binary before accepting it.",
+            "Verify Cursor Agent CLI authentication separately from desktop-app login and stale artifacts.",
+            "Run ACP initialize and session/new; treat authentication-required as not ready.",
+            "Record the selected binary, auth state, launch identity, and concise remediation."
           ]
         }
       ],
@@ -75,7 +87,7 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S1", "SET-S2"],
-          "passCriteria": "Grok, Codex, Claude, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
+          "passCriteria": "Grok, Codex, Claude, Cursor, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
           "evidence": "Harness inventory screenshots plus detection payloads with secrets removed.",
           "baseline": { "status": "partial", "basis": "Static source walk: Settings has stock/custom rows and detection logic, while Welcome does not show the recognized inventory." }
         },
@@ -122,6 +134,17 @@
           "scenarios": ["SET-S3"],
           "passCriteria": "Profile/appearance persist, but changing one provider never changes another provider's login, plan, context, or security configuration.",
           "evidence": "Pre/post restart state, screenshots, and provider detection comparison."
+        },
+        {
+          "id": "SET-07",
+          "criterion": "Cursor readiness requires the correct Agent CLI binary, authenticated CLI state, and a successful ACP session handshake.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["cursor-acp"],
+          "scenarios": ["SET-S4"],
+          "passCriteria": "A different vendor's agent binary, desktop-app login, stale config artifact, or status exit code cannot produce a ready state; ACP session/new must succeed.",
+          "evidence": "Resolved binary identity, auth probe, ACP handshake, readiness row, and failure remediation."
         }
       ]
     },
@@ -528,6 +551,18 @@
             "Cancel the parent and verify cascading cancellation or an explicit unsupported result.",
             "Confirm tool labels and results never pretend a provider executed a Workhorse desk action."
           ]
+        },
+        {
+          "id": "SEC-S4",
+          "name": "Reuse scoped approvals without repeated permission or keychain prompts",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Approve one repeated fixture action for the session and repeat its exact scope.",
+            "Verify Workhorse does not enqueue duplicate approvals for the same pending request.",
+            "Unlock or approve the credential boundary once and repeat credential reads without a prompt loop.",
+            "Restart and verify only documented session or OS credential scopes expire."
+          ]
         }
       ],
       "rubric": [
@@ -596,6 +631,17 @@
           "scenarios": ["SEC-S3"],
           "passCriteria": "Parent/child identity, runtime/token ceilings, isolation mode, changed files, and final/cancel state are visible or honestly unsupported.",
           "evidence": "Subagent records, worktree path, resource counters, changed-file review, and cancellation outcome."
+        },
+        {
+          "id": "SEC-07",
+          "criterion": "Approved scopes and credential access are reused exactly as documented without duplicate or indefinite prompts.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S4"],
+          "passCriteria": "One pending request has one prompt; an in-scope session grant suppresses repeats; keychain access does not loop after approval; expired or out-of-scope access prompts once with a clear reason.",
+          "evidence": "Permission request ids, scope cache, keychain result codes, prompt count, restart trace, and action outcomes."
         }
       ]
     },
@@ -743,7 +789,8 @@
             "For one task, allow Workhorse to recommend an agent and require it to show the matched skills/capabilities, cost/concurrency impact, and why delegation helps.",
             "Reject or edit the recommendation and verify the user choice wins without losing the task.",
             "Pass a missing label as a skill and verify dispatch stops before a provider call; pass it as a capability and verify it is never presented as loaded instructions.",
-            "Emit a skill-description compaction warning and verify identity, path, and the full-file read remain intact."
+            "Emit a skill-description compaction warning and verify identity, path, required instructions, and the full-file read remain intact.",
+            "Assign Go7 Godot Play Billing work and verify ship-go7-godot-play is loaded before implementation evidence is accepted."
           ]
         },
         {
@@ -802,6 +849,19 @@
             "Finish a second worker wave after the first join; verify its completion wakes the same orchestrator exactly once without a manual prompt.",
             "Discover a missing packaged dependency after completion, explicitly reopen its step with a reason, and verify completed dependents require fresh evidence before the plan can complete again.",
             "Reconcile task evidence against acceptance checks before completing the plan."
+          ]
+        },
+        {
+          "id": "ORC-S7",
+          "name": "Monitor live, interrupted, recovered, and completed workers",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+          "steps": [
+            "Start workers on different providers, models, and reasoning efforts and inspect the parent, sidebar, and child views.",
+            "Verify each active row has visible activity, provider color, model, effort, task, status, and elapsed time.",
+            "Interrupt one worker and restart while another completes; reconcile stale running records before dispatching more work.",
+            "Verify recovered and completed calls retain truthful duration and terminal workers stop animating or consuming slots.",
+            "Resume the plan and verify it continues through later waves to a real terminal state."
           ]
         }
       ],
@@ -967,8 +1027,19 @@
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S2"],
-          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker is told to read the full file; unknown skills fail before any provider call; capabilities stay separate; description compaction does not count as skill loss; a Go7 Godot Play Billing assignment resolves ship-go7-godot-play and rejects mock-only completion.",
+          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker reads the full file; unknown skills fail before any provider call; capabilities stay separate; compaction cannot remove required instructions; Go7 Godot Play Billing resolves ship-go7-godot-play and rejects mock-only completion.",
           "evidence": "Catalog snapshot, resolved skill manifest, worker prompt, missing-skill rejection, provider call ledger, assignment metadata, and packaged-plugin completion evidence."
+        },
+        {
+          "id": "ORC-15",
+          "criterion": "Worker monitoring shows live identity and activity, reconciles stale runs, preserves duration, and lets the plan continue to a truthful terminal state.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+          "scenarios": ["ORC-S7"],
+          "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; later plan waves dispatch.",
+          "evidence": "Sidebar and child screenshots, activity animation state, runtime identities, effort values, timestamps, restart reconciliation, slot counts, and terminal plan record."
         }
       ]
     },
@@ -1012,6 +1083,7 @@
           "steps": [
             "Add one supported image, text file, PDF, office document, audio clip, and video by picker and drag/drop.",
             "Verify names, kinds, sizes, source paths, persistence, removal, and restart behavior.",
+            "Exceed the model image payload ceiling and verify bounded compression fits the request or fails clearly without changing the source attachment.",
             "Inspect provider payloads: native images, declared audio, native PDF where supported, and video frame adaptation.",
             "Send each attachment to an incompatible manually pinned model and verify explicit fallback or rejection.",
             "Try oversized, unsupported, missing, and renamed files without leaking binary data or unrestricted paths."
@@ -1040,6 +1112,18 @@
             "Run the local probe against the approved game workspace and record unavailable tools as explicit capability results.",
             "Verify serials and UDIDs are hashed and no install, launch, boot, input, or write action occurs.",
             "Use the capability result to decide whether Android, iOS, or Godot UI tasks can start or must remain needs-input."
+          ]
+        },
+        {
+          "id": "CAP-S6",
+          "name": "Choose reasoning effort by task instead of a fixed default",
+          "executor": "unit",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Route a cheap verification, a normal implementation, and a high-risk architecture task with the same live roster.",
+            "Verify supported effort differs when task risk and complexity differ; all-high is a failure without evidence.",
+            "Repeat under low remaining capacity and verify effort or model changes are explained separately.",
+            "Apply an explicit effort override and verify selection, launch, transcript, and usage agree."
           ]
         }
       ],
@@ -1151,7 +1235,7 @@
           "testability": "auto-partial",
           "profiles": ["custom-kimi"],
           "scenarios": ["CAP-S4"],
-          "passCriteria": "The selected and observed Kimi K3 identity agree, the task receives its image inputs, and the result cites captured UI evidence; silent text-only substitution fails.",
+          "passCriteria": "The selected and observed Kimi K3 identity agree, the task receives image inputs, cites captured UI evidence, makes no code changes, and hands findings to a separate coding worker; silent substitution fails.",
           "evidence": "Visual task tags, Kimi bot configuration, image request, runtime model evidence, transcript, screenshots, and usage."
         },
         {
@@ -1164,6 +1248,17 @@
           "scenarios": ["CAP-S5"],
           "passCriteria": "Godot version and project markers, adb device state and Saga match, and available iOS simulators are reported with redacted ids; absent capability blocks dispatch without mutating a device.",
           "evidence": "Fixture output, local probe JSON, redaction check, action ledger, and plan capability decision."
+        },
+        {
+          "id": "CAP-12",
+          "criterion": "Reasoning effort is selected from task complexity, risk, model support, and capacity rather than fixed at high.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CAP-S6"],
+          "passCriteria": "Low-risk checks use the lowest sufficient supported effort, deeper tasks may escalate with a concise reason, capacity changes remain auditable, and an explicit effort override wins.",
+          "evidence": "Task features, ranked routes, effort rationale, capacity snapshot, launch arguments, runtime observation, transcript, and usage."
         }
       ]
     },
@@ -1189,7 +1284,7 @@
           "id": "USG-S2",
           "name": "Inspect plan remaining, budgets, and Watch holds",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "steps": [
             "Load each available vendor plan/remains source and capture timestamp/source.",
             "Set a small fixture budget or deterministic Watch threshold.",
@@ -1207,6 +1302,18 @@
             "Export diagnostics/support information.",
             "Verify build, OS, detections, capabilities, and safe counts are present.",
             "Scan for every canary and confirm none are present."
+          ]
+        },
+        {
+          "id": "USG-S4",
+          "name": "Keep Cursor Composer and API usage pools separate",
+          "executor": "electron",
+          "profiles": ["cursor-acp"],
+          "steps": [
+            "Load Cursor Composer and API plan sources and record each source timestamp and meter.",
+            "Apply distinct fixture usage to each pool and verify one cannot change the other.",
+            "Run a bounded Cursor ACP turn with no usage event and verify Workhorse records unknown rather than invented tokens.",
+            "Restart and verify both pool histories and unknown turn usage remain truthful."
           ]
         }
       ],
@@ -1239,7 +1346,7 @@
           "weight": 2,
           "type": "provenance",
           "testability": "auto-partial",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "scenarios": ["USG-S2"],
           "passCriteria": "Each number has provider/model, unit, time/source, and unknown/unlimited behavior; stale data is visibly stale.",
           "evidence": "Plan payload, model context source, Usage/Watch UI, and timestamps."
@@ -1261,7 +1368,7 @@
           "weight": 2,
           "type": "scoping",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "scenarios": ["USG-S2"],
           "passCriteria": "A hold blocks only the intended vendor/session/threshold; permit and day-mark expiry are correct across restart.",
           "evidence": "Watch inputs, hold result, permit record, provider send outcome, and restart state."
@@ -1276,6 +1383,17 @@
           "scenarios": ["USG-S3"],
           "passCriteria": "Safe build/detection/capability metadata exists and every seeded canary is absent.",
           "evidence": "Support report plus automated canary scan."
+        },
+        {
+          "id": "USG-07",
+          "criterion": "Cursor Composer and API plan pools stay separate and missing ACP turn usage is represented as unknown.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto-partial",
+          "profiles": ["cursor-acp"],
+          "scenarios": ["USG-S4"],
+          "passCriteria": "Composer and API rings use independent source records, totals, thresholds, and Watch decisions; an ACP turn without a usage event creates no synthetic token count.",
+          "evidence": "Cursor plan payloads, lane keys, Usage and Watch screenshots, raw ACP events, finalized usage row, and restart state."
         }
       ]
     },

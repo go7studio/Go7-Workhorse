@@ -12,6 +12,8 @@ const orchestrationPath = path.join(evalDir, "orchestration-contract.json");
 const capabilityPath = path.join(evalDir, "capability-contract.json");
 const executionPlanPath = path.join(evalDir, "execution-plan-contract.json");
 const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json");
+const regressionPath = path.join(evalDir, "regression-contract.json");
+const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
 const sourceSettingsPath = path.join(root, "src", "lib", "settings.ts");
 const sourceDeskToolsPath = path.join(root, "electron", "workhorse-mcp.ts");
@@ -64,7 +66,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -72,6 +74,8 @@ async function validate() {
     json(capabilityPath),
     json(executionPlanPath),
     json(deviceCapabilityPath),
+    json(regressionPath),
+    json(configExamplePath),
     json(packagePath),
     readFile(sourceCommandPath, "utf8"),
     readFile(sourceSettingsPath, "utf8"),
@@ -85,7 +89,9 @@ async function validate() {
     orchestration.schemaVersion !== 1 ||
     capabilities.schemaVersion !== 1 ||
     executionPlan.schemaVersion !== 1 ||
-    deviceCapabilities.schemaVersion !== 1
+    deviceCapabilities.schemaVersion !== 1 ||
+    regressions.schemaVersion !== 1 ||
+    configExample.schemaVersion !== 1
   ) {
     problems.push("all eval manifests must use schemaVersion 1");
   }
@@ -99,6 +105,15 @@ async function validate() {
     if (!providerNames.has(profile.provider)) problems.push(`unknown provider on profile ${profile.id}`);
     if (!["acp", "http"].includes(profile.transport)) problems.push(`unknown transport on profile ${profile.id}`);
     if (!profile.expectedModelEvidence?.length) problems.push(`profile ${profile.id} has no model-evidence contract`);
+  }
+  if (!sameMembers(Object.keys(configExample.profiles ?? {}), profileIds)) {
+    problems.push("config.example profiles and provider-matrix profiles differ");
+  }
+  if (!sameMembers(Object.keys(commands.providerNative ?? {}), profileIds)) {
+    problems.push("providerNative keys and provider-matrix profiles differ");
+  }
+  for (const profile of configExample.modelPolicy?.providerSmokeExceptions?.profiles ?? []) {
+    if (!profileIds.includes(profile)) problems.push(`config smoke policy references unknown profile ${profile}`);
   }
 
   const areaIds = suite.areas.map((area) => area.id);
@@ -170,6 +185,38 @@ async function validate() {
       if (!rubricSet.has(rubric)) problems.push(`command ${command.id} references missing rubric ${rubric}`);
     }
   }
+
+  const scenarioSet = new Set(scenarioIds);
+  const regressionIds = [];
+  for (const regression of regressions.regressions ?? []) {
+    regressionIds.push(regression.id);
+    if (!/^REG-\d{3}$/.test(regression.id ?? "")) problems.push(`invalid regression id ${regression.id ?? "(missing)"}`);
+    if (!regression.behavior?.trim()) problems.push(`regression ${regression.id} has no behavior`);
+    if (!regression.profiles?.length || !regression.scenarios?.length || !regression.rubric?.length) {
+      problems.push(`regression ${regression.id} needs profile, scenario, and rubric coverage`);
+    }
+    for (const profile of regression.profiles ?? []) {
+      if (!profileIds.includes(profile)) problems.push(`regression ${regression.id} references unknown profile ${profile}`);
+    }
+    for (const scenario of regression.scenarios ?? []) {
+      if (!scenarioSet.has(scenario)) problems.push(`regression ${regression.id} references missing scenario ${scenario}`);
+    }
+    for (const rubric of regression.rubric ?? []) {
+      if (!rubricSet.has(rubric)) problems.push(`regression ${regression.id} references missing rubric ${rubric}`);
+    }
+    for (const file of regression.sourceFiles ?? []) {
+      try {
+        await readFile(path.join(root, file), "utf8");
+      } catch {
+        problems.push(`regression ${regression.id} source file is missing: ${file}`);
+      }
+    }
+    for (const command of regression.verification ?? []) {
+      if (!packageManifest.scripts?.[command]) problems.push(`regression ${regression.id} verification command is missing: ${command}`);
+    }
+  }
+  const duplicateRegressions = regressionIds.filter((value, index) => regressionIds.indexOf(value) !== index);
+  if (duplicateRegressions.length) problems.push(`duplicate regression ids: ${[...new Set(duplicateRegressions)].join(", ")}`);
 
   const orchestrationRubric = rubricIds.filter((id) => id.startsWith("ORC-"));
   if (!sameMembers(orchestration.requiredRubric ?? [], orchestrationRubric)) {
@@ -243,9 +290,10 @@ async function validate() {
   console.log(
     `Workhorse eval kit valid: ${suite.areas.length} areas, ${scenarioCount} scenarios, ` +
       `${itemCount} rubric items, ${commands.commands.length} core commands, ` +
-      `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles.`,
+      `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles, ` +
+      `${regressionIds.length} regression contracts.`,
   );
-  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, regressions };
 }
 
 function list({ suite, commands, providers }) {

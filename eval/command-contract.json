@@ -32,7 +32,9 @@
     "grok-acp": ["/context", "/session-info", "/rewind", "/export", "/view-plan", "/memory", "/hooks", "/plugins", "/skills", "/loop", "/workflow", "/mcps", "/doctor", "/resume"],
     "codex-acp": ["/skills", "/review"],
     "claude-acp": ["/skills"],
+    "cursor-acp": [],
     "custom-openai": [],
+    "custom-kimi": [],
     "custom-anthropic": []
   },
   "canonicalTranslations": [

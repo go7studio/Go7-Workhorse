@@ -31,11 +31,14 @@ Routing adds a third chain: task tier → input capability → capacity state �
 selected model → runtime identity → usage. Attachments add kind → persisted
 metadata → provider representation → model-visible evidence.
 
-The five profiles remain in the compatibility contract. MiniMax-M3 through
+The seven profiles remain in the compatibility contract. MiniMax-M3 through
 MiniMax's OpenAI-compatible endpoint is the primary evaluator and the only
 model used for internal tool calling or cascading agents. A provider's
 existing API or OAuth subscription may receive one explicitly bounded smoke
 call when needed to prove that adapter; smoke-call exceptions cannot cascade.
+Production acceptance runs may select stronger task-appropriate models, but
+their model, reasoning effort, capacity decision, and user override must be
+recorded.
 
 Catalog names and model caches are discovery hints, not runtime proof. The
 required provenance chain is selection → launch/request → runtime observation
@@ -65,6 +68,9 @@ The validator checks:
   mapped;
 - every routing/media source boundary in eval/capability-contract.json exists
   and every CAP rubric item is mapped;
+- every observed regression maps to valid profiles, scenarios, rubrics,
+  source boundaries, and verification commands;
+- config profiles, native-command profiles, and provider profiles agree;
 - the Settings section inventory still matches the product.
 
 This makes adding a core command or Settings section without updating the eval
@@ -159,6 +165,7 @@ verdict.
 - capability-contract.json — model routing, capacity, attachments, and CAP coverage.
 - execution-plan-contract.json — plan import, approval, routing, and resume rules.
 - device-capability-contract.json — read-only Godot, adb, and iOS probes.
+- regression-contract.json — durable coverage for observed production defects.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
 - BASELINE.md — source baseline and activation boundary.

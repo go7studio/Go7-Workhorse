@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Observed production regression coverage",
+  "observedThrough": "2026-08-16",
+  "regressions": [
+    {
+      "id": "REG-001",
+      "behavior": "Cursor readiness proves binary identity, CLI authentication, and ACP session creation.",
+      "profiles": ["cursor-acp"],
+      "scenarios": ["SET-S4"],
+      "rubric": ["SET-07"],
+      "sourceFiles": ["electron/cursor-launch.ts", "electron/cursor-login.ts", "electron/cursor-host.ts", "test/cursor-adapter.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-002",
+      "behavior": "Cursor Composer and API plan pools remain separate while absent ACP token usage stays unknown.",
+      "profiles": ["cursor-acp"],
+      "scenarios": ["USG-S1", "USG-S4"],
+      "rubric": ["USG-01", "USG-07"],
+      "sourceFiles": ["electron/cursor-plan.ts", "src/lib/cursor-lane.ts", "src/ui/UsagePane.tsx", "src/ui/WatchPane.tsx"],
+      "verification": ["eval:validate", "eval:smoke"]
+    },
+    {
+      "id": "REG-003",
+      "behavior": "Session approvals and keychain access do not create duplicate or indefinite prompts.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["SEC-S1", "SEC-S4"],
+      "rubric": ["SEC-01", "SEC-07"],
+      "sourceFiles": ["src/lib/permissions.ts", "electron/credential-store.ts", "test/credential-store.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-004",
+      "behavior": "Live workers show task, provider color, model, effort, activity, state, and elapsed time.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["ORC-S1", "ORC-S7"],
+      "rubric": ["ORC-02", "ORC-15"],
+      "sourceFiles": ["src/ui/ChatRow.tsx", "src/ui/AgentThreadPane.tsx", "src/lib/turns.ts", "src/lib/subagents.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-005",
+      "behavior": "Reasoning effort follows task complexity, risk, support, capacity, and explicit overrides.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CAP-S1", "CAP-S6"],
+      "rubric": ["CAP-01", "CAP-12"],
+      "sourceFiles": ["src/lib/routing.ts", "test/routing.test.ts"],
+      "verification": ["eval:validate", "eval:capability-smoke"]
+    },
+    {
+      "id": "REG-006",
+      "behavior": "Kimi performs visual audit only and hands findings to a separate coding worker.",
+      "profiles": ["custom-kimi"],
+      "scenarios": ["CAP-S4", "ORC-S6"],
+      "rubric": ["CAP-10", "ORC-12"],
+      "sourceFiles": ["eval/capability-contract.json", "eval/orchestration-contract.json"],
+      "verification": ["eval:plan-fixture-check"]
+    },
+    {
+      "id": "REG-007",
+      "behavior": "Critical installed skill identity, path, full-file read, and required instructions survive compaction.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S2"],
+      "rubric": ["ORC-14"],
+      "sourceFiles": ["src/lib/skills-catalog.ts", "electron/workhorse-mcp.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-008",
+      "behavior": "Restart reconciles stale workers, frees slots, preserves completed evidence, and continues later plan waves.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi"],
+      "scenarios": ["ORC-S6", "ORC-S7"],
+      "rubric": ["ORC-09", "ORC-13", "ORC-15"],
+      "sourceFiles": ["src/lib/plan.ts", "src/lib/subagents.ts", "scripts/workhorse-eval-plan-fixture.mjs", "test/plan.test.ts"],
+      "verification": ["eval:plan-fixture-check"]
+    },
+    {
+      "id": "REG-009",
+      "behavior": "Images, files, documents, audio, and video persist, compress safely when needed, and reach only compatible model inputs.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CAP-S3"],
+      "rubric": ["CAP-06", "CAP-07", "CAP-08"],
+      "sourceFiles": ["src/lib/images.ts", "electron/drop-files.ts", "test/attachments.test.ts"],
+      "verification": ["eval:media-fixtures"]
+    },
+    {
+      "id": "REG-010",
+      "behavior": "Thought, tool, and final output remain ordered and recovered calls retain truthful duration.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S7"],
+      "rubric": ["ORC-15"],
+      "sourceFiles": ["src/lib/agent-thread.ts", "src/lib/turns.ts", "src/ui/AgentThreadPane.tsx"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-011",
+      "behavior": "Source, package, and installed application identity are compared before release claims.",
+      "profiles": ["cursor-acp"],
+      "scenarios": ["REL-S1", "REL-S3"],
+      "rubric": ["REL-01", "REL-03"],
+      "sourceFiles": ["package.json", "electron/main.ts", "src/ui/Welcome.tsx"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-012",
+      "behavior": "Onboarding and settings use concise one-line copy and unique provider labels.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["SET-S1", "SET-S2"],
+      "rubric": ["SET-01", "SET-02"],
+      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-013",
+      "behavior": "Requested, launched, observed, transcript, and usage model identities agree without unwanted retitling.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["MOD-S1", "MOD-S3"],
+      "rubric": ["MOD-01", "MOD-06"],
+      "sourceFiles": ["src/lib/session.ts", "src/lib/session-bridge.ts", "src/ui/ChatRow.tsx"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-014",
+      "behavior": "Routing is capability-driven and explainable; explicit user assignments win without provider hard-coding.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["ORC-S2", "CAP-S1"],
+      "rubric": ["ORC-03", "CAP-01", "CAP-02"],
+      "sourceFiles": ["src/lib/routing.ts", "electron/workhorse-mcp.ts"],
+      "verification": ["eval:fixture-check"]
+    },
+    {
+      "id": "REG-015",
+      "behavior": "Peer chat and nested agents preserve immutable correlation, lineage, limits, and real replies.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S3", "ORC-S5"],
+      "rubric": ["ORC-04", "ORC-05", "ORC-10"],
+      "sourceFiles": ["electron/peer-inbox.ts", "src/lib/session-bridge.ts", "src/lib/subagents.ts"],
+      "verification": ["eval:plan-fixture-check"]
+    },
+    {
+      "id": "REG-016",
+      "behavior": "Godot, Saga, iOS, and Play Billing capability gates require real tool and packaged-plugin evidence.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["CAP-S5", "ORC-S2"],
+      "rubric": ["CAP-11", "ORC-14"],
+      "sourceFiles": ["eval/device-capability-contract.json", "scripts/workhorse-eval-device-probes.mjs", "scripts/workhorse-eval-godot-suite.mjs"],
+      "verification": ["eval:device-probes", "eval:godot-suite"]
+    },
+    {
+      "id": "REG-017",
+      "behavior": "Baseline MiniMax eval policy never leaks into real production orchestration or overrides task-aware routing.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["CAP-S1", "CAP-S6", "ORC-S6"],
+      "rubric": ["CAP-01", "CAP-12", "ORC-12"],
+      "sourceFiles": ["eval/config.example.json", "eval/capability-contract.json", "src/lib/routing.ts"],
+      "verification": ["eval:validate"]
+    }
+  ]
+}

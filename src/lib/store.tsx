@@ -137,7 +137,9 @@ import {
   NESTED_AGENT_MODEL,
   overlappingAgentFiles,
   parentHasRunningChildren,
+  rootSpawnError,
   resolveSpawnSpec,
+  shouldAutoRouteSpawn,
   spawnWaitsForReply,
   withSubagentStatus,
 } from "./subagents";
@@ -3305,13 +3307,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: blocked });
                 return;
               }
+            } else {
+              const blocked = rootSpawnError(latest.sessions, caller.id);
+              if (blocked) {
+                await replyAsk({ error: blocked });
+                return;
+              }
             }
             const routeTier = payload.route === "quick" || payload.route === "balanced" || payload.route === "deep"
               ? payload.route
               : undefined;
-            const routeSpawn = latest.settings.routing.enabled && (
-              Boolean(payload.route) || (!payload.provider && !payload.model && !payload.chat)
-            );
+            const routeSpawn = shouldAutoRouteSpawn({
+              routingEnabled: latest.settings.routing.enabled,
+              provider: payload.provider,
+              model: payload.model,
+              chat: payload.chat,
+            });
             const routeStatuses = routeSpawn
               ? watchVendorStatuses({
                   settings: latest.settings,

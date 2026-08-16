@@ -109,3 +109,12 @@ test("automatic custom spawns preserve the selected bot identity", () => {
   );
   assert.equal(spec.customBotId, "audio-bot");
 });
+
+test("Watch-held candidates cannot win automatic routing", () => {
+  const decision = chooseRoutingDecision(
+    [candidate("gpt-5.6-sol", 10, { connected: false }), candidate("gpt-5.6-terra", 30)],
+    { prompt: "Review this production change", tier: "deep" },
+    settings,
+  );
+  assert.equal(decision?.model, "gpt-5.6-terra");
+});

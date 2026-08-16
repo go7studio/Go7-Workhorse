@@ -69,7 +69,7 @@ export function routingCandidatesForDesk(
         provider,
         model: model.id,
         label: model.name,
-        connected: true,
+        connected: !capacity?.holding,
         profile: routingProfileForModel(provider, model.id),
         capacity: {
           usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
@@ -87,7 +87,7 @@ export function routingCandidatesForDesk(
       model: bot.model,
       label: bot.name,
       customBotId: bot.id,
-      connected: true,
+      connected: !capacity?.holding,
       profile: routingProfileForModel("custom", bot.model, bot.routingProfile),
       capacity: {
         usedPercent: product?.usagePercent ?? capacity?.usedPercent,

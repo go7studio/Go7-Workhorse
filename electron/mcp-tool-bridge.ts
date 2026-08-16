@@ -3,6 +3,7 @@ import readline from "node:readline";
 import type { McpServerConfig } from "../src/lib/types";
 import type { CustomToolResult, CustomToolUse } from "./custom-tools";
 import type { CustomHttpTool } from "./custom-http";
+import { APP_VERSION } from "../src/lib/app-info";
 
 type JsonRpcMessage = {
   jsonrpc?: string;
@@ -57,7 +58,7 @@ class McpStdioClient {
     await this.request("initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
-      clientInfo: { name: "go7-workhorse", version: "0.1.1" },
+      clientInfo: { name: "go7-workhorse", version: APP_VERSION },
     });
     this.notify("notifications/initialized", {});
   }

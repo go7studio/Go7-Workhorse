@@ -19,11 +19,13 @@ export type ClaudeEventSink = GrokEventSink;
 type ClaudeSpawnFn = (spec: ReturnType<typeof buildClaudeLaunchSpec>) => ChildProcessWithoutNullStreams;
 
 export function claudeLaunchKey(
-  input: Pick<GrokSessionOpenInput, "model" | "effort" | "mode" | "cwd" | "sandbox" | "mcpServers">,
+  input: Pick<GrokSessionOpenInput, "model" | "effort" | "fastMode" | "agentName" | "mode" | "cwd" | "sandbox" | "mcpServers">,
 ): string {
   const spec = buildClaudeLaunchSpec({
     model: input.model,
     effort: input.effort,
+    fastMode: input.fastMode,
+    agentName: input.agentName,
     cwd: input.cwd,
     mode: input.mode,
     sandbox: input.sandbox,

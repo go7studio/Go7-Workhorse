@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   applyCompactUsage,
   classifyAcpUpdate,
@@ -32,6 +32,7 @@ import {
   deskPath,
   discoverRipgrepDirs,
   ensureDeskRipgrep,
+  extraDeskDirs,
   parseRegPathValue,
   readWindowsPersistedPath,
   resolveDeskBinary,
@@ -53,6 +54,7 @@ import {
   toAcpMcpEnv,
   workhorseMcpScript,
   workhorseMcpServer,
+  isElectronAppCommand,
 } from "../electron/grok-launch";
 import { handleWorkhorseRpc, parseCreateProjectLive, parseRenameProjectLive, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { startWorkhorseBridge } from "../electron/workhorse-bridge";
@@ -110,7 +112,7 @@ import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, cont
 import { safeExternalUrl } from "../src/lib/open-external";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseGrokModelsCache } from "../electron/vendor-models";
-import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
+import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
 import {
   joinChatText,
   parseChatMarkdown,
@@ -131,7 +133,7 @@ import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, a
 import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
-import { findSourceFile, readFileDiff } from "../electron/project-diff";
+import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
 import { fileFolderFromPath, formatEditWhen, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromWriteTool, projectEdits, sameEditPath } from "../src/lib/project-edits";
 import { autoTitleForSend, suggestedTitleForSession, titleFromPrompt } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
@@ -183,7 +185,10 @@ import {
   vendorUsedPercent,
   planRingView,
   pickClaudeWindow,
+  pickPlanWindow,
   claudeWindowTabs,
+  planWindowChip,
+  weeklyPlanLeftover,
   formatPlanReset,
   normalizeUsage,
   rollup,
@@ -951,26 +956,60 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   const fakeRg = path.join(userBin, "rg.exe");
   const fakeGit = path.join(userBin, "git.exe");
   const electronPath = "C:\\Windows\\system32";
-  const found = resolveRipgrep({ PATH: electronPath }, (file) => file === fakeRg, [userBin], userBin);
+  // A Windows machine: the .exe name resolves and Path mirrors PATH.
+  const found = resolveRipgrep({ PATH: electronPath }, (file) => file === fakeRg, [userBin], userBin, "win32");
   assert.equal(found, fakeRg);
   assert.equal(
     resolveDeskBinary(["git.exe"], { PATH: electronPath }, (file) => file === fakeGit, [userBin], userBin),
     fakeGit,
   );
-  const merged = deskPath(electronPath, { PATH: electronPath }, [userBin], userBin);
+  const merged = deskPath(electronPath, { PATH: electronPath }, [userBin], userBin, "win32");
   assert.ok(merged.toLowerCase().includes(userBin.toLowerCase()));
   assert.ok(merged.toLowerCase().includes("windows\\system32"));
   assert.ok(merged.toLowerCase().indexOf(userBin.toLowerCase()) < merged.toLowerCase().indexOf("windows\\system32"));
   const env = withDeskToolEnv(
     { PATH: electronPath },
-    { extra: [userBin], persistedPath: userBin, existsSync: (file) => file === fakeRg || file === fakeGit },
+    { extra: [userBin], persistedPath: userBin, existsSync: (file) => file === fakeRg || file === fakeGit, platform: "win32" },
   );
   assert.ok((env.PATH ?? "").toLowerCase().includes(userBin.toLowerCase()));
   assert.equal(env.Path, env.PATH);
   assert.equal(env.RIPGREP, fakeRg);
   assert.equal(env.GIT, fakeGit);
+
+  // A Mac machine: the same lookups take the bare name and never mirror Path.
+  const macToolsDir = path.join(os.tmpdir(), "workhorse-user-path", "mac-tools");
+  const macRg = path.join(macToolsDir, "rg");
+  const macGit = path.join(macToolsDir, "git");
+  assert.equal(
+    resolveRipgrep({ PATH: "/usr/bin" }, (file) => file === macRg, [macToolsDir], macToolsDir, "darwin"),
+    macRg,
+  );
+  assert.equal(
+    resolveRipgrep(
+      { PATH: "/usr/bin" },
+      (file) => file === path.join(macToolsDir, "rg.exe"),
+      [macToolsDir],
+      macToolsDir,
+      "darwin",
+    ),
+    null,
+  );
+  const macEnv = withDeskToolEnv(
+    { PATH: "/usr/bin" },
+    {
+      extra: [macToolsDir],
+      persistedPath: macToolsDir,
+      existsSync: (file) => file === macRg || file === macGit,
+      platform: "darwin",
+    },
+  );
+  assert.equal(macEnv.RIPGREP, macRg);
+  assert.equal(macEnv.GIT, macGit);
+  assert.equal(macEnv.Path, undefined);
+
   assert.match(parseRegPathValue("    Path    REG_EXPAND_SZ    C:\\Users\\me\\bin;%USERPROFILE%\\.cargo\\bin"), /C:\\Users\\me\\bin/);
-  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools"), process.platform === "win32" ? "D:\\user-tools" : "");
+  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools", "win32"), "D:\\user-tools");
+  assert.equal(readWindowsPersistedPath(() => "D:\\user-tools", "darwin"), "");
   const bin = workhorseToolBin();
   assert.match(bin, /Go7 Workhorse/);
   assert.match(readFileSync(path.join(ROOT, "electron", "codex-launch.ts"), "utf8"), /withDeskToolEnv/);
@@ -988,12 +1027,14 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
       if (dir.includes("OpenAI") && dir.endsWith("bin")) return [];
       return [];
     },
+    "win32",
   );
   assert.ok(discovered.some((dir) => dir.toLowerCase().endsWith(`${wingetPkg}\\ripgrep-15`.toLowerCase()) || dir.toLowerCase().endsWith(`${wingetPkg}/ripgrep-15`.toLowerCase()) || dir.replace(/\\/g, "/").endsWith(`${wingetPkg}/ripgrep-15`)));
   const copied: string[] = [];
   const ensured = ensureDeskRipgrep({
     home: "C:\\Users\\me",
     env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", PATH: electronPath },
+    platform: "win32",
     extra: [userBin],
     existsSync: (file) => file === fakeRg || file === fakeGit,
     mkdirSync: () => undefined,
@@ -1003,6 +1044,20 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   });
   assert.equal(ensured?.source, fakeRg);
   assert.ok(copied.some((file) => /\\?\.grok\\bin\\rg\.exe$/i.test(file) || file.replace(/\\/g, "/").endsWith(".grok/bin/rg.exe")));
+  // path.join uses the host separator, so compare on a normalised copy.
+  // These must hold when the suite runs on Windows too.
+  const macBin = workhorseToolBin("/Users/me", {}, "darwin");
+  assert.match(macBin.replace(/\\/g, "/"), /Library\/Application Support\/Go7 Workhorse\/bin$/);
+  assert.doesNotMatch(macBin, /AppData/);
+  const macDirs = extraDeskDirs("/Users/me", {}, "darwin").join("\n");
+  assert.match(macDirs, /\/opt\/homebrew\/bin/);
+  assert.match(macDirs, /\/usr\/local\/bin/);
+  assert.doesNotMatch(macDirs, /Program Files/);
+  assert.doesNotMatch(macDirs, /WinGet/);
+  assert.doesNotMatch(macDirs, /scoop/);
+  assert.doesNotMatch(macDirs, /AppData/);
+  const linuxBin = workhorseToolBin("/home/me", {}, "linux");
+  assert.match(linuxBin.replace(/\\/g, "/"), /\.local\/share\/Go7 Workhorse\/bin$/);
 });
 
 test("pickPermissionOptionId maps Workhorse answers onto ACP option kinds", () => {
@@ -1470,6 +1525,19 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(started.tool.title, "Read");
   assert.equal(started.tool.status, "in_progress");
   assert.match(started.tool.detail, /src\/main\.rs/);
+  const absWrite = extractToolEvent({
+    sessionUpdate: "tool_call",
+    toolCallId: "call_abs",
+    title: "Edit",
+    status: "completed",
+    rawInput: { path: "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts" },
+  });
+  assert.equal(absWrite?.detail, "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts");
+  assert.equal(shortDisplayPath(absWrite?.detail ?? ""), "electron/main.ts");
+  assert.match(
+    collapseToolText(`Edit · completed — ${absWrite?.detail ?? ""}`, "completed"),
+    /Edit · completed — electron\/main\.ts/,
+  );
 
   const dumped = extractToolEvent({
     sessionUpdate: "tool_call_update",
@@ -1878,6 +1946,11 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.equal(workhorseMcpScript(path.join("C:", "app", "dist-electron", "main.js")), path.join("C:", "app", "dist-electron", "workhorse-mcp.js"));
   assert.match(readFileSync(path.join(ROOT, "vite.config.ts"), "utf8"), /workhorse-mcp/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /workhorse-mcp\.js/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /requestSingleInstanceLock/);
+  assert.equal(isElectronAppCommand("/Applications/Workhorse.app/Contents/MacOS/Workhorse"), true);
+  assert.equal(isElectronAppCommand("C:/Program Files/Workhorse/Workhorse.exe"), true);
+  assert.equal(isElectronAppCommand("/path/to/Electron"), true);
+  assert.equal(isElectronAppCommand(process.execPath), false);
 
   const previous = {
     script: process.env.WORKHORSE_MCP_SCRIPT,
@@ -1898,6 +1971,14 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     const advertised = workhorseMcpServer();
     assert.equal(advertised?.name, "workhorse");
     assert.equal(advertised?.args[0], helper);
+    process.env.WORKHORSE_MCP_COMMAND = "/Applications/Workhorse.app/Contents/MacOS/Workhorse";
+    const packaged = workhorseMcpServer();
+    assert.equal(packaged?.command, "/Applications/Workhorse.app/Contents/MacOS/Workhorse");
+    assert.ok(packaged?.env?.some((row) => row.name === "ELECTRON_RUN_AS_NODE" && row.value === "1"));
+    process.env.WORKHORSE_MCP_COMMAND = process.execPath;
+    const asNode = workhorseMcpServer();
+    assert.equal(asNode?.command, process.execPath);
+    assert.ok(!asNode?.env?.some((row) => row.name === "ELECTRON_RUN_AS_NODE"));
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
     if (previous.script === undefined) delete process.env.WORKHORSE_MCP_SCRIPT;
@@ -2234,7 +2315,7 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   assert.equal(autoTitleForSend(named, "thanks"), undefined);
 });
 
-test("session setup matches the Figma This chat card", () => {
+test("session setup is a compact right-side model and access inspector", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
@@ -2247,7 +2328,7 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(setup, /--setup-vendor/);
   assert.match(setup, /setup-tide/);
   assert.match(setup, /Pause before tools/);
-  assert.match(setup, /Tightest box/);
+  assert.match(setup, /Blocks writes and shell commands/);
   assert.doesNotMatch(setup, /Security boundaries/);
   assert.doesNotMatch(setup, /Outside workspace/);
   assert.match(setup, /aria-label="Vendor"/);
@@ -2258,7 +2339,10 @@ test("session setup matches the Figma This chat card", () => {
     /id: "custom", name: "Custom"/,
   );
   assert.match(setup, /"codex"/);
-  assert.match(setup, /section-label\">Sandbox/);
+  assert.match(setup, /Approval behavior/);
+  assert.match(setup, /File access/);
+  assert.match(setup, /Plan mode never edits/);
+  assert.match(setup, /Full access means the sandbox is off/);
   assert.match(setup, /type="range"/);
   assert.match(setup, /setup-slider-line/);
   assert.doesNotMatch(setup, /setup-slider-head/);
@@ -2270,8 +2354,9 @@ test("session setup matches the Figma This chat card", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);
   const setupCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(setupCss, /container-name:\s*session/);
-  assert.match(setupCss, /56cqi/);
-  assert.match(setupCss, /width:\s*min\(760px/);
+  assert.match(setupCss, /width:\s*min\(720px/);
+  assert.match(setupCss, /setup-top-grid/);
+  assert.match(setupCss, /right:\s*clamp/);
   assert.doesNotMatch(setup, /setup-resize/);
   assert.doesNotMatch(setup, /setSessionSetupHeight/);
   assert.doesNotMatch(setupCss, /setup-resize/);
@@ -3064,13 +3149,16 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.deepEqual(countLineChanges(changed), { added: 1, deleted: 1 });
   assert.equal(formatDiffStat(2, 1), "+2  −1");
 
-  const built = buildFileDiff("C:\\\\proj\\\\WALK-TEST-EDIT.md", "", "Walk Test edit landed.\n");
+  const built = buildFileDiff(path.join("proj", "WALK-TEST-EDIT.md"), "", "Walk Test edit landed.\n");
   assert.equal(built.name, "WALK-TEST-EDIT.md");
   assert.equal(built.added, 1);
   assert.equal(built.deleted, 0);
 
-  const abs = "C:\\\\repo\\\\WALK-TEST-EDIT.md";
-  const live = readFileDiff(abs, ["C:\\\\repo"], {
+  const repoRoot = path.resolve(os.tmpdir(), "wh-diff-repo");
+  const abs = path.join(repoRoot, "WALK-TEST-EDIT.md");
+  assert.equal(isAbsolutePath(abs), true);
+  assert.equal(isAbsolutePath("C:\\repo\\WALK-TEST-EDIT.md"), true);
+  const live = readFileDiff(abs, [repoRoot], {
     existsSync: (file) => file === abs || file.endsWith(`${path.sep}.git`),
     readFile: (file) => (file === abs ? "Walk Test edit landed.\n" : ""),
     gitShow: () => null,
@@ -3083,7 +3171,7 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.equal(looksLikeSourceFile("electron/preload.ts"), true);
   assert.equal(looksLikeSourceFile("https://example.com/preload.ts"), false);
   assert.equal(looksLikeSourceFile("always-approve"), false);
-  const repo = path.join("C:", "repo");
+  const repo = path.resolve(os.tmpdir(), "wh-src-repo");
   const electronDir = path.join(repo, "electron");
   const preload = path.join(electronDir, "preload.ts");
   const found = findSourceFile("preload.ts", [repo], {
@@ -3104,8 +3192,8 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.ok(projectDiff.lines.length > 10);
 
   let gitCalls = 0;
-  const lockedAbs = "C:\\\\repo\\\\electron\\\\app-update.ts";
-  const locked = readFileDiff(lockedAbs, ["C:\\\\repo"], {
+  const lockedAbs = path.join(repoRoot, "electron", "app-update.ts");
+  const locked = readFileDiff(lockedAbs, [repoRoot], {
     existsSync: (file) =>
       file === lockedAbs || file.endsWith(`${path.sep}.git`) || file.endsWith(`${path.sep}index.lock`),
     readFile: (file) => (file === lockedAbs ? "export const n = 1;\n" : ""),
@@ -3118,6 +3206,40 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.match(locked.after, /export const n/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /no-optional-locks/);
   assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /index\.lock/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8"), /os\.homedir/);
+  const looseStats = readFileDiff("electron/main.ts", [ROOT]);
+  assert.ok(looseStats.after.length > 0);
+
+  // With no cwd worth searching, the lookup falls back to the usual project
+  // homes. Stub that tree: asserting against the real one only passes on a
+  // machine that happens to keep its checkouts in ~/workspace.
+  const homeDir = os.homedir();
+  const wsRoot = path.join(homeDir, "workspace");
+  const wsRepo = path.join(wsRoot, "demo-repo");
+  const wsElectron = path.join(wsRepo, "electron");
+  const wsMain = path.join(wsElectron, "main.ts");
+  const known = new Set([wsRoot, wsRepo, wsElectron, wsMain].map((item) => path.normalize(item)));
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(path.parse(previousCwd).root);
+    const fromRoot = findSourceFile("electron/main.ts", [], {
+      existsSync: (file) => known.has(path.normalize(file)),
+      isDir: (file) => path.normalize(file) !== path.normalize(wsMain),
+      readdir: (dir) => {
+        const norm = path.normalize(dir);
+        if (norm === path.normalize(wsRoot)) return ["demo-repo"];
+        if (norm === path.normalize(wsRepo)) return ["electron"];
+        if (norm === path.normalize(wsElectron)) return ["main.ts"];
+        return [];
+      },
+    });
+    assert.match(fromRoot ?? "", /electron[\\/]+main\.ts$/i);
+    // The filesystem root itself is never a search root.
+    assert.equal(findSourceFile("electron/main.ts", [], { existsSync: () => false, isDir: () => true, readdir: () => [] }), null);
+  } finally {
+    process.chdir(previousCwd);
+  }
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /editStats\([\s\S]*fileRoots/);
 });
 
 test("empty chats stay drafts until the first send names them", () => {
@@ -3286,6 +3408,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /Remove from desk/);
   assert.match(addBot, /Your own/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Provider/);
   assert.match(addBot, /createCustomBot/);
   assert.match(addBot, /CATALOG/);
   assert.match(addBot, /addBotChoices/);
@@ -3384,6 +3507,21 @@ test("desk bots keep disable and leave the desk on delete", () => {
   assert.equal(vendorLabel("grok", painted.llms.grok), "Grok");
   assert.equal(applyUpdateStockBot(painted.llms.claude, { name: "  ", color: "" }).name, undefined);
   assert.equal(applyUpdateStockBot(painted.llms.claude, { color: "#30d158" }).color, "#30d158");
+  const nativeCodex = normalizeSettings({
+    llms: {
+      codex: {
+        connected: true,
+        accessDefaults: { mode: "always-approve", sandbox: "off" },
+      },
+    },
+  });
+  assert.deepEqual(firstAttachedChoice(nativeCodex), {
+    provider: "codex",
+    model: defaultModel("codex").id,
+    effort: "medium",
+    sandbox: "off",
+    mode: "always-approve",
+  });
   assert.equal(
     deskInk(
       { provider: "custom", customBotId: "bot_minimax" },
@@ -3612,10 +3750,13 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   assert.match(pane, /Weekly allowance/);
   assert.match(pane, /leftoverForCard/);
   assert.match(pane, /planRingView/);
+  assert.match(pane, /planWindowChip/);
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
   assert.match(pane, /% used/);
+  assert.match(pane, /Unlimited/);
+  assert.match(pane, /ContextMeter/);
   assert.match(pane, /setInterval\(pull, 180_000\)/);
   assert.match(pane, /codexPlan/);
   assert.doesNotMatch(pane, /row\.totalTokens \/ peak/);
@@ -3792,6 +3933,28 @@ test("Usage rings include every desk LLM even with no spend", () => {
       },
     })?.label,
     "100%",
+  );
+  const miniWindows = {
+    usedPercent: 0,
+    leftPercent: 100,
+    period: "weekly" as const,
+    prepaidBalance: 0,
+    products: [
+      { product: "session", label: "5h", usagePercent: 17 },
+      { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
+    ],
+  };
+  assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
+  assert.equal(weeklyPlanLeftover(miniWindows), 100);
+  assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
+  assert.equal(
+    planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } })?.label,
+    "83%",
+  );
+  assert.equal(
+    planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } }, "weekly")
+      ?.label,
+    "∞",
   );
   assert.match(formatPlanReset("2026-08-20T05:59:59Z", Date.parse("2026-08-13T16:00:00Z")), /Resets/);
   assert.deepEqual(
@@ -5446,7 +5609,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  const preloadBuilt = readFileSync(path.join(ROOT, "dist-electron", "preload.mjs"), "utf8");
+  const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
   assert.match(setup, /modelsFor\(session\.provider\)/);
   assert.doesNotMatch(setup, /MODEL_CATALOG\[session\.provider\]/);
   assert.match(menu, /modelsFor\(provider\.id\)/);
@@ -5454,7 +5617,9 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.match(store, /applyVendorCatalog/);
   assert.match(main, /ipcMain\.handle\("models:list"/);
   assert.match(preloadSrc, /listVendorModels/);
-  assert.match(preloadBuilt, /models:list/);
+  if (existsSync(preloadBuiltPath)) {
+    assert.match(readFileSync(preloadBuiltPath, "utf8"), /models:list/);
+  }
 
   const codex = parseCodexModelsCache(
     JSON.stringify({
@@ -6477,4 +6642,41 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.match(css, /\.split-handle/);
   assert.match(css, /cursor: col-resize/);
   assert.match(css, /html\.pane-dragging/);
+});
+
+test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
+  // The flag is set by detection after load. Dropping it here is why the
+  // Claude card kept reading "Not found" with the copy fix already shipped.
+  const settings = normalizeSettings({
+    llms: {
+      claude: { connected: true, available: false, needsAuth: true },
+      grok: { connected: true, available: true },
+    },
+  });
+  assert.equal(settings.llms.claude.needsAuth, true);
+  assert.equal(settings.llms.claude.available, false);
+  assert.equal(settings.llms.grok.needsAuth, undefined);
+});
+
+test("the repo tracks no symlinks and states its working rules", () => {
+  // A build worktree with node_modules symlinked into the main checkout got
+  // the link itself committed: .gitignore said "node_modules/", which matches
+  // a directory, not a link of that name. Anyone cloning then had a link
+  // pointing at one machine's disk where their dependencies belong.
+  const tracked = execFileSync("git", ["ls-files", "-s"], { cwd: ROOT, encoding: "utf8" });
+  const links = tracked
+    .split("\n")
+    .filter((line) => line.startsWith("120000"))
+    .map((line) => line.split("\t")[1] ?? line);
+  assert.deepEqual(links, [], `tracked symlinks: ${links.join(", ")}`);
+
+  // Both spellings, so a link named node_modules is ignored as well as a folder.
+  const ignore = readFileSync(path.join(ROOT, ".gitignore"), "utf8");
+  assert.match(ignore, /^node_modules$/m);
+
+  // The rules that keep parallel agents out of each other's way.
+  const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  assert.match(agents, /Never leave work uncommitted/);
+  assert.match(agents, /One tree per agent/);
+  assert.match(agents, /Tests must not read the machine they run on/);
 });

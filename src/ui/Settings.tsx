@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
-import { formatWindow } from "../lib/models";
+import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { APP_VERSION } from "../lib/app-info";
@@ -8,6 +8,7 @@ import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
 import { BotForm } from "./BotForm";
+import { ContextMeter } from "./ModelMenu";
 import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
@@ -24,6 +25,9 @@ const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
 
 function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (!vendorEnabled(link)) return "Disabled";
+  // Installed but signed out is a different problem from missing, and the
+  // only one the person can fix from here.
+  if (link.needsAuth) return "Needs auth";
   if (link.available === false) return "Not found";
   if (id === "grok" || id === "codex" || id === "claude") return "Local login";
   return "Marked";
@@ -57,6 +61,24 @@ export function Settings() {
   const settings = store.settings;
   const section = store.settingsSection;
   const [llmFocus, setLlmFocus] = useState<LlmFocus>(null);
+  const [authMessage, setAuthMessage] = useState("");
+
+  /**
+   * Mint a token for this desk with `claude setup-token`. Signing in the
+   * ordinary way writes the one credential store Claude Code itself reads,
+   * which signs the person out there; a token of our own lets both run.
+   */
+  const startClaudeAuth = () => {
+    void (async () => {
+      const run = window.workhorse?.claudeSetupToken;
+      if (!run) return;
+      setAuthMessage("Signing in. Finish in your browser.");
+      const result = await run();
+      setAuthMessage(result.ok ? "" : result.message || "Sign-in failed.");
+      store.refreshClaudeLogin();
+    })();
+  };
+
   const [usageTick, setUsageTick] = useState(0);
   const [usageHome, setUsageHome] = useState(0);
   const [supportNote, setSupportNote] = useState("");
@@ -190,6 +212,11 @@ export function Settings() {
                     <span>{name}</span>
                     <em>{llmCardHint(id, link)}</em>
                   </button>
+                  {id === "claude" && link.needsAuth ? (
+                    <button type="button" className="tiny" onClick={startClaudeAuth}>
+                      Log in
+                    </button>
+                  ) : null}
                 </div>
               );
             })}
@@ -234,8 +261,12 @@ export function Settings() {
             <StockBotDetail
               id={llmFocus as Exclude<ProviderId, "custom">}
               onGone={() => setLlmFocus(null)}
+              onStartAuth={startClaudeAuth}
             />
           )}
+
+          {authMessage ? <p className="row-meta">{authMessage}</p> : null}
+
 
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
@@ -255,9 +286,11 @@ export function Settings() {
 function StockBotDetail({
   id,
   onGone,
+  onStartAuth,
 }: {
   id: Exclude<ProviderId, "custom">;
   onGone: () => void;
+  onStartAuth: () => void;
 }) {
   const store = useStore();
   const link = store.settings.llms[id];
@@ -311,6 +344,12 @@ function StockBotDetail({
         </div>
       </div>
 
+      {id === "claude" && link.needsAuth ? (
+        <button type="button" className="ghost" onClick={onStartAuth}>
+          Log in with Claude
+        </button>
+      ) : null}
+
       <BotForm
         identityOnly
         defaultColor={`var(--${id})`}
@@ -319,7 +358,10 @@ function StockBotDetail({
         onChange={(patch) => store.updateLlmLink(id, patch)}
       />
 
-      <p className="row-meta">{llmDetailCopy(id, link)}</p>
+      <div className="bot-context-row">
+        <ContextMeter fallbackWindow={modelsFor(id)[0]?.contextWindow} matchProvider={id} />
+        <p className="row-meta">{llmDetailCopy(id, link)}</p>
+      </div>
       {id === "codex" ? <CodexNativeStatus /> : null}
       <MassSend vendor={id} />
     </div>
@@ -501,12 +543,15 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
         }}
       />
 
-      <p className="row-meta">
-        {probing
-          ? "Testing API…"
-          : probeNote ||
-            `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
-      </p>
+      <div className="bot-context-row">
+        <ContextMeter fallbackWindow={bot.contextWindow} matchProvider="custom" matchBotId={bot.id} />
+        <p className="row-meta">
+          {probing
+            ? "Testing API…"
+            : probeNote ||
+              `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
+        </p>
+      </div>
       <div className="actions add-bot-actions">
         <button
           className="tiny"

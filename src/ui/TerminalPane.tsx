@@ -2,7 +2,18 @@ import { useEffect, useRef, useState } from "react";
 
 const MAX_OUTPUT = 120_000;
 
-export function TerminalPane({ sessionId, cwd, onClose }: { sessionId: string; cwd: string; onClose: () => void }) {
+export function TerminalPane({
+  sessionId,
+  cwd,
+  onClose,
+  initialCommand,
+}: {
+  sessionId: string;
+  cwd: string;
+  onClose: () => void;
+  /** Run this as soon as the shell is up, so a login needs no typing. */
+  initialCommand?: string;
+}) {
   const [output, setOutput] = useState("");
   const [command, setCommand] = useState("");
   const [message, setMessage] = useState("");
@@ -18,10 +29,17 @@ export function TerminalPane({ sessionId, cwd, onClose }: { sessionId: string; c
       }
     });
     void window.workhorse?.terminalStart?.(sessionId, cwd).then((result) => {
-      if (!result.ok) setMessage(result.message || "Could not start terminal.");
+      if (!result.ok) {
+        setMessage(result.message || "Could not start terminal.");
+        return;
+      }
+      if (initialCommand) {
+        setOutput((current) => `${current}> ${initialCommand}\n`.slice(-MAX_OUTPUT));
+        void window.workhorse?.terminalWrite?.(sessionId, initialCommand);
+      }
     });
     return () => off?.();
-  }, [sessionId, cwd]);
+  }, [sessionId, cwd, initialCommand]);
 
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;

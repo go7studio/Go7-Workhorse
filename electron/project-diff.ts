@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { buildFileDiff, type FileDiff } from "../src/lib/file-diff";
 
@@ -15,8 +16,14 @@ export type GitChange = { path: string; status: string };
 
 const SKIP_WALK = new Set(["node_modules", ".git", "dist", "dist-electron", "out", ".next", "coverage", ".cache"]);
 
+/** Host-correct absolute check; also accepts Windows drive/UNC paths on POSIX hosts. */
+export function isAbsolutePath(filePath: string): boolean {
+  if (path.isAbsolute(filePath)) return true;
+  return /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+}
+
 export function listGitChanges(cwd: string): GitChange[] {
-  if (!path.isAbsolute(cwd) || !fs.existsSync(cwd)) return [];
+  if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return [];
   try {
     const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
@@ -69,10 +76,32 @@ export function findSourceFile(
     });
   const trimmed = filePath.trim().replace(/^file:\/\//i, "").replace(/^[`'"]+|[`'"]+$/g, "");
   if (!trimmed) return null;
-  if (path.isAbsolute(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
+  if (isAbsolutePath(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
   const searchRoots = [...roots];
-  const cwd = process.cwd();
-  if (cwd && !searchRoots.some((root) => path.resolve(root) === path.resolve(cwd))) searchRoots.push(cwd);
+  const addRoot = (dir: string) => {
+    if (!dir) return;
+    let resolved = dir;
+    try {
+      resolved = path.resolve(dir);
+    } catch {
+      return;
+    }
+    if (resolved === path.parse(resolved).root) return;
+    if (!existsSync(resolved) || !isDir(resolved)) return;
+    if (searchRoots.some((root) => path.resolve(root) === resolved)) return;
+    searchRoots.push(resolved);
+  };
+  addRoot(process.cwd());
+  try {
+    const home = os.homedir();
+    addRoot(path.join(home, "workspace"));
+    addRoot(path.join(home, "Projects"));
+    addRoot(path.join(home, "Developer"));
+    addRoot(path.join(home, "src"));
+    addRoot(path.join(home, "code"));
+  } catch {
+    /* homedir can throw if $HOME is unset */
+  }
   for (const root of searchRoots) {
     const abs = path.resolve(root, trimmed);
     if (existsSync(abs) && !isDir(abs)) return abs;
@@ -134,7 +163,7 @@ export function resolveExistingFile(
   if (found) return found;
   const trimmed = filePath.trim();
   if (!trimmed) return trimmed;
-  return path.isAbsolute(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
+  return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
 }
 
 function gitIndexLocked(repo: string, existsSync: (filePath: string) => boolean): boolean {

@@ -12,6 +12,8 @@ export type GrokSessionOpenInput = {
   projectId?: string;
   model: string;
   effort: EffortLevel | null;
+  fastMode?: boolean;
+  agentName?: string | null;
   mode: PermissionMode;
   cwd: string;
   vendorSessionId?: string;

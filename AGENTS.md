@@ -27,3 +27,28 @@ src/styles/   design tokens and layout
 - Adapters live behind `src/lib/providers.ts`. Do not call vendor CLIs from React components.
 - Grok, Codex, and Claude are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login.
 - Apple-like means space, hairlines, and short motion — not decoration.
+
+## Working rules
+
+More than one agent works this repo at once. Each rule below is here because
+breaking it cost real time.
+
+- **Never leave work uncommitted.** Commit to a branch when you stop. A dozen
+  modified files in a shared checkout is invisible to everyone else, blocks
+  branch switching, and is one careless command from gone.
+- **One tree per agent.** Take a `git worktree` or a clone, and give it its own
+  `npm ci`. Never symlink `node_modules` from another tree: `npm ci` follows the
+  link and empties the tree it points at.
+- **Stage what you changed.** `git add -A` in a shared checkout sweeps up other
+  people's work and stray files. It is how a `node_modules` symlink reached the
+  repo.
+- **Rebase, never force.** Your base is probably behind. `git rebase origin/main`
+  merges three ways and keeps both sides; a force push does not.
+- **Tests must not read the machine they run on.** Inject `existsSync`/`readdir`,
+  or assert against `ROOT`. Never a home directory, and never a bare `/opt/...`
+  path — those pass on one laptop and fail on every other machine.
+- **Green locally is not green.** The suite runs on Windows and macOS in CI.
+  `path.join` gives backslashes on one of them, and `node.exe` is tried before
+  `node`. Say which platform a test means.
+- **Check the artifact, not the exit code.** A build can exit 0 and ship a
+  hollow app. Count what should be inside before you install or publish.

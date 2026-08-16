@@ -14,7 +14,7 @@ import type {
 } from "./types";
 import { customBotEnabled } from "./custom-bots";
 import { defaultModel, modelsFor } from "./models";
-import { customBotUsageEvents, deskUsageCards, eventTotal, formatPlanReset, leftoverForCard, planRingView } from "./usage";
+import { customBotUsageEvents, deskUsageCards, eventTotal, formatPlanReset, leftoverForCard, weeklyPlanLeftover } from "./usage";
 import { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
 export { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
@@ -229,10 +229,7 @@ export function leftoverPercentForKey(
   settings: { customBots: CustomBot[] },
 ): number | undefined {
   const row = deskRowForKey(key, settings);
-  const ring = planRingView(row, plans);
-  if (ring) return Math.max(0, Math.min(100, ring.value * 100));
-  const plan = leftoverForCard(row, plans);
-  return plan && Number.isFinite(plan.leftPercent) ? plan.leftPercent : undefined;
+  return weeklyPlanLeftover(leftoverForCard(row, plans));
 }
 
 export function eventsForWatchKey(
@@ -476,14 +473,17 @@ function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: num
     const dayLabel = status.weekDay ? `Day ${status.weekDay.day} of ${status.weekDay.days}` : "Today";
     const used = Math.round(status.usedPercent ?? status.todayUsed ?? 0);
     const over = Math.round(status.overPercent);
+    // "Over" is measured against an even weekly pace, so name that figure.
+    // 1% over on day 5 means 72% used where 71% was expected by now.
+    const expected = Math.round(status.allowedPercent);
     notices.push({
       id: `daily:${status.key}:${dayKey(now)}`,
       key: status.key,
       label: status.label,
       kind: "daily",
       tone: locked ? "hold" : "warn",
-      title: over > 0 ? `${status.label} is ${over}% over` : `${status.label} used its daily bank`,
-      detail: `${dayLabel}: ${used}% used. Today's share is spent so leftover can last the rest of the week.`,
+      title: over > 0 ? `${status.label} is ${over}% over the expected pace` : `${status.label} used its daily bank`,
+      detail: `${dayLabel}: ${used}% of the week used, ${expected}% expected by now. Today's share is spent, so what is left covers the days remaining.`,
     });
   }
   if (status.resetsAt && resetSoon(status.resetsAt, now)) {

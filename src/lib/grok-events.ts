@@ -26,6 +26,16 @@ export function formatToolLine(title: string, status: string, detail: string): s
   return `${head} — ${loc}`;
 }
 
+/** Last two path segments for a tool row. Keep the full path in stored text. */
+export function shortDisplayPath(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const parts = trimmed.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length <= 2) return trimmed;
+  const tail = parts.slice(-2).join("/");
+  return /^[A-Za-z]:[\\/]/.test(trimmed) ? tail.replace(/\//g, "\\") : tail;
+}
+
 export function pathFromToolText(text: string): string {
   const { title, detail } = splitToolLine(text);
   const tick = title.match(/`([^`]+)`/)?.[1] ?? "";
@@ -46,7 +56,7 @@ export function collapseToolText(text: string, status?: string): string {
   const path = pathFromToolText(text);
   if (path) {
     const verb = title.trim().split(/\s+/)[0]?.slice(0, 32) || "Write";
-    return formatToolLine(verb, st, path);
+    return formatToolLine(verb, st, shortDisplayPath(path));
   }
   const short =
     title.length > 48 || title.includes("\n") || title.includes("\\n")

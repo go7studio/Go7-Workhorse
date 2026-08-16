@@ -1,43 +1,29 @@
 # Go7 Workhorse
 
-**Productivity unlocked. Put every subscription you already pay for on one desk.**
+**One desk for every agent you already pay for.**
 
-You are probably paying for several coding agents at once, and using them one
-window at a time. Go7 Workhorse is a native desktop shell that runs Grok,
-Claude, Codex, Cursor, your own API keys and your local models side by side —
-one window, one permission bar, one place to see what you are spending.
+Run Grok, Claude, Codex, Cursor, your own API keys and your local models in one
+window. Each keeps its own login. You see what each one costs.
 
-If Cursor brings a model to your editor, Workhorse brings your models to your
-work. It is a harness, not another subscription: every vendor runs under the
-login you already hold.
+Cursor puts a model in your editor. Workhorse puts your models to work.
 
-### What that unlocks
+- **Pick the model per chat.** Cheap work goes to a cheap model.
+- **Watch the spend.** Usage is tracked per bot and per chat, against a budget
+  and a weekly pace.
+- **Nothing is shared.** No pooled subscriptions, context or sandboxes.
+- **Bring your own.** Any Anthropic or OpenAI-compatible endpoint counts,
+  including one on your own machine.
+- **It learns.** A private store on your disk, which you can export or wipe.
+- **Work survives a restart.** Queues, schedules and goals are journalled.
 
-- **The right model for the job, per chat.** Vendor, model and thinking effort
-  are set on the chat, not on the app, so cheap work goes to a cheap model and
-  the expensive one earns its keep.
-- **See what you are burning.** Usage is recorded per provider and per chat.
-  Budgets and a weekly pace tell you that you are 1% over on day 5 of 7, before
-  the bill does.
-- **Nothing is pooled.** Subscriptions, context and sandboxes never merge across
-  vendors. Each adapter runs that vendor's own CLI under that vendor's own
-  login, so nothing you use here leaks into anything else you use.
-- **Your own models count too.** Any Anthropic Messages or OpenAI Chat
-  Completions endpoint is a first-class bot, which covers hosted APIs and a
-  local server on your own machine.
-- **Work survives the app.** Queues, one-shot and recurring schedules, and
-  active goals are journalled by the desktop process and recovered after a
-  restart.
-
-Go7 Workhorse is a native desktop shell for Grok, Claude, Codex, Cursor, and any other bot you add later. One window. Projects and chats. One permission bar.
-
-This repository is the desktop shell. Grok, Claude and Cursor use ACP. Codex keeps ACP as its prompt fallback and also has an App Server boundary for native history and capability discovery. Custom is live HTTP against an Anthropic Messages or OpenAI Chat Completions endpoint.
+Grok, Claude and Cursor speak ACP. Codex adds an App Server for native history.
+Custom bots are plain HTTP.
 
 ## How it fits together
 
-Every vendor stays its own process. The window never talks to a vendor CLI: the
-renderer speaks typed IPC to Electron main, and main owns the adapters, the
-permission prompts, the credentials, and the execution directory.
+Each vendor runs as its own process. The window never touches a vendor CLI. It
+speaks typed IPC to Electron main, which owns the adapters, prompts, credentials
+and working directory.
 
 ```mermaid
 flowchart TD
@@ -58,8 +44,7 @@ flowchart TD
   MAIN -->|HTTP| CUSTOM["Custom bot"]
 ```
 
-Subscriptions, context and sandboxes are never merged across vendors. Each
-adapter runs the vendor's own CLI, under that vendor's own login.
+Each adapter runs the vendor's own CLI, under the login you already hold.
 
 ## Goal
 

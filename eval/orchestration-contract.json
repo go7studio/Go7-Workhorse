@@ -65,7 +65,8 @@
     "maxDepth": 2,
     "maxRootConcurrency": 2,
     "maxNestedChildrenPerWorker": 1,
-    "perChildTokenBudget": 500,
+    "perChildTokenBudget": 10000,
+    "nestedChildTokenBudget": 5000,
     "smokeProvidersMayCascade": false
   },
   "routingContract": {

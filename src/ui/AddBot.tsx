@@ -10,10 +10,10 @@ const CATALOG: {
   name: string;
   hint: string;
 }[] = [
-  { id: "grok", name: "Grok", hint: "Local Grok Build login on this machine." },
-  { id: "codex", name: "Codex", hint: "Local Codex login on this machine." },
-  { id: "claude", name: "Claude", hint: "Local Claude Code harness and login on this machine." },
-  { id: "own", name: "Your own", hint: "Name, color, API URL, and key. Test, then Create." },
+  { id: "grok", name: "Grok", hint: "Local Grok Build." },
+  { id: "codex", name: "Codex", hint: "Local Codex." },
+  { id: "claude", name: "Claude", hint: "Local Claude Code." },
+  { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
 type Stage = "catalog" | "own" | "grok" | "codex" | "claude";
@@ -70,9 +70,6 @@ export function AddBot() {
               </button>
             </div>
             <h2>Add a bot</h2>
-            <p className="lede">
-              Pick a built-in vendor, or wire your own API. Only what you add sits on the desk.
-            </p>
           </header>
           <div className="add-bot-catalog">
             {choices.map((item) => (
@@ -85,7 +82,6 @@ export function AddBot() {
               </button>
             ))}
           </div>
-          <p className="row-meta add-bot-hint">You can also ask Grok or Codex in chat to set one up.</p>
         </>
       )}
 
@@ -99,13 +95,10 @@ export function AddBot() {
               </button>
             </div>
             <h2>New bot</h2>
-            <p className="lede">
-              Pick a known provider or paste a key. Test the API, then Create.
-            </p>
             {draft.source === "openclaw" ? (
-              <p className="row-meta">Detected MiniMax settings from OpenClaw. The API key stays on this Mac.</p>
+              <p className="row-meta">Imported MiniMax from OpenClaw.</p>
             ) : draft.source === "env" ? (
-              <p className="row-meta">Detected MiniMax settings from this app's environment.</p>
+              <p className="row-meta">Imported MiniMax from the environment.</p>
             ) : null}
           </header>
 
@@ -190,17 +183,6 @@ function VendorStatus({
   const linked = Boolean(link?.connected);
   const found = Boolean(link?.available);
   const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : "Claude";
-  const copy = linked && found
-    ? `Detected the local ${name} harness and login on this machine. It is ready on the desk.`
-    : linked
-      ? `${name} is on the desk, but its harness or login is not currently available. Recheck after signing in or reinstalling it.`
-    : found
-      ? `Detected the local ${name} harness and login on this machine. Add it to the desk.`
-      : stage === "grok"
-        ? "Grok binary or login not found on this machine."
-        : stage === "codex"
-          ? "Codex ACP adapter or login not found on this machine."
-          : "Claude ACP adapter or login not found on this machine.";
 
   return (
     <>
@@ -212,7 +194,6 @@ function VendorStatus({
           </button>
         </div>
         <h2>{name}</h2>
-        <p className="lede">{copy}</p>
       </header>
       <div className="add-bot-preview">
         <span className={`llm-mark ${stage}${linked ? " on" : ""}`} aria-hidden="true">

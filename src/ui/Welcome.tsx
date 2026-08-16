@@ -44,7 +44,6 @@ export function Welcome() {
       <img className="welcome-mark" src={horseMark} alt="" />
       <h2>Workhorse</h2>
       <p className="welcome-ver">v{APP_VERSION}</p>
-      <p>One desk for Grok, Codex, Claude, and API harnesses.</p>
       <div className="welcome-harnesses" aria-label="Recognized harnesses">
         <div className="welcome-harness-head">
           <strong>Getting started</strong>
@@ -52,7 +51,6 @@ export function Welcome() {
             Manage harnesses
           </button>
         </div>
-        <p>Workhorse keeps each provider in its own session. These are the harnesses currently recognized on this Mac.</p>
         <ul>
           {harnesses.map((harness) => (
             <li key={harness.id}>
@@ -60,7 +58,6 @@ export function Welcome() {
               <em>{harness.status}</em>
             </li>
           ))}
-          {harnesses.length === 0 ? <li>No harnesses recognized yet.</li> : null}
         </ul>
       </div>
       <div className="welcome-steps">

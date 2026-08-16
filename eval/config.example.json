@@ -56,7 +56,8 @@
       "effort": "low",
       "maxDepth": 2,
       "maxConcurrentChildren": 2,
-      "perChildTokenBudget": 500,
+      "perChildTokenBudget": 10000,
+      "nestedChildTokenBudget": 5000,
       "maxNestedChildrenPerWorker": 1
     },
     "notes": "MiniMax-M3 runs the eval and internal tools. Minimal provider/API or OAuth smoke calls are allowed only to prove an adapter; they may not cascade."

@@ -1120,7 +1120,6 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(addBot, /Your own/);
   assert.match(addBot, /createCustomBot/);
   assert.match(addBot, /probeCustomDraft/);
-  assert.match(addBot, /ask Grok or Codex in chat to set one up/);
   assert.match(setup, /"custom"/);
   assert.match(main, /ipcMain\.handle\("custom:prompt"/);
   assert.match(main, /detectCustomLogin/);

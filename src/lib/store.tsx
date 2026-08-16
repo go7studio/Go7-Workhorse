@@ -3175,7 +3175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;
             const spawnTokenBudget = isNested
-              ? Math.min(500, Math.max(1, payload.tokenBudget ?? 500))
+              ? Math.min(5_000, Math.max(1, payload.tokenBudget ?? 5_000))
               : payload.tokenBudget;
             const spawnIsolation = isNested ? "shared" : payload.isolation;
             const admitted = admitSpawn({

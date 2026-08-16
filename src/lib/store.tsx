@@ -168,6 +168,7 @@ import {
 } from "./usage";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import { isVendorRateLimitError, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
+import { cursorUsageLane } from "./cursor-lane";
 import {
   collectWatchNotices,
   dismissStamp,
@@ -300,6 +301,7 @@ export type Store = AppState & {
   refreshGrokLogin: () => void;
   refreshCodexLogin: () => void;
   refreshClaudeLogin: () => void;
+  refreshCursorLogin: () => void;
   refreshCustomLogin: () => void;
   cycleTheme: () => void;
   toggleWorkhorseTheme: () => void;
@@ -354,6 +356,8 @@ export type Store = AppState & {
   refreshCodexPlan: () => void;
   claudePlan?: import("./types").GrokPlanUsage;
   refreshClaudePlan: () => void;
+  cursorPlan?: import("./types").GrokPlanUsage;
+  refreshCursorPlan: () => void;
   customPlans: Record<string, import("./types").GrokPlanUsage | undefined>;
   refreshCustomPlans: () => void;
   quit: () => void;
@@ -482,6 +486,7 @@ const EMPTY_GROK_REPLY = "Grok finished without a visible reply.";
 function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
   if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
   else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
+  else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
   else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
   else void window.workhorse?.grokCancel?.(session.id);
 }
@@ -506,6 +511,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [grokPlan, setGrokPlan] = useState<GrokPlanUsage | undefined>();
   const [codexPlan, setCodexPlan] = useState<GrokPlanUsage | undefined>();
   const [claudePlan, setClaudePlan] = useState<GrokPlanUsage | undefined>();
+  const [cursorPlan, setCursorPlan] = useState<GrokPlanUsage | undefined>();
   const [customPlans, setCustomPlans] = useState<Record<string, GrokPlanUsage | undefined>>({});
   const [editMessageId, setEditMessageId] = useState<string | null>(null);
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
@@ -524,10 +530,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
   stateRef.current = state;
-  plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans };
+  plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
   useEffect(() => {
     setState((current) => ({ ...current, deskPlans: plansRef.current }));
-  }, [grokPlan, codexPlan, claudePlan, customPlans]);
+  }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,6 +552,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : { connected: false, accessDefaults: undefined };
           const claude = window.workhorse?.detectClaudeLogin
             ? await window.workhorse.detectClaudeLogin()
+            : { connected: false };
+          const cursor = window.workhorse?.detectCursorLogin
+            ? await window.workhorse.detectCursorLogin()
             : { connected: false };
           const catalog = window.workhorse?.listVendorModels
             ? await window.workhorse.listVendorModels()
@@ -572,6 +581,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...current.settings.llms.claude,
                     available: Boolean(claude.connected),
                     needsAuth: Boolean((claude as { needsAuth?: boolean }).needsAuth),
+                  },
+                  cursor: {
+                    ...current.settings.llms.cursor,
+                    available: Boolean(cursor.connected),
+                    needsAuth: Boolean((cursor as { needsAuth?: boolean }).needsAuth),
                   },
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
@@ -1112,6 +1126,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })();
   }, [refreshVendorModels]);
 
+  const refreshCursorLogin = useCallback(() => {
+    void (async () => {
+      const detected = window.workhorse?.detectCursorLogin
+        ? await window.workhorse.detectCursorLogin()
+        : { connected: false };
+      setState((current) => ({
+        ...current,
+        settings: {
+          ...current.settings,
+          llms: {
+            ...current.settings.llms,
+            cursor: {
+              ...current.settings.llms.cursor,
+              available: Boolean(detected.connected),
+              needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+            },
+          },
+        },
+      }));
+      refreshVendorModels();
+    })();
+  }, [refreshVendorModels]);
+
   const refreshClaudeLogin = useCallback(() => {
     void (async () => {
       const detected = window.workhorse?.detectClaudeLogin
@@ -1152,6 +1189,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const vendorAnswer = pending?.kind === "elevate" && answer !== "deny" ? "once" : answer;
     if (session?.provider === "codex") void window.workhorse?.codexAnswerPermission?.(id, vendorAnswer);
     else if (session?.provider === "claude") void window.workhorse?.claudeAnswerPermission?.(id, vendorAnswer);
+    else if (session?.provider === "cursor") void window.workhorse?.cursorAnswerPermission?.(id, vendorAnswer);
     else if (session?.provider === "custom") void window.workhorse?.customAnswerPermission?.(id, vendorAnswer);
     else if (!vendorAsk) void window.workhorse?.grokAnswerPermission?.(id, vendorAnswer);
     const peer = elevatePeerReply.current.get(id);
@@ -1731,6 +1769,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (session.status === "running") {
         if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
         else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
+        else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
         else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
         else void window.workhorse?.grokCancel(session.id);
       }
@@ -1925,6 +1964,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("claude") }
+                        : entry,
+                    ),
+                  }
+                : item,
+            ),
+          }));
+          return;
+        }
+        if (live === "cursor") {
+          if (!window.workhorse?.cursorPrompt) {
+            throw new Error("Cursor agent runs in the Workhorse desktop window.");
+          }
+          if (options?.replaceUserId) vendorSessionId = undefined;
+          const result = await window.workhorse.cursorPrompt({ ...promptInput, vendorSessionId });
+          const reply = typeof result?.text === "string" ? result.text.trim() : "";
+          vendorSessionId =
+            typeof result?.vendorSessionId === "string" && result.vendorSessionId
+              ? result.vendorSessionId
+              : vendorSessionId;
+          setState((latest) => ({
+            ...latest,
+            sessions: latest.sessions.map((item) =>
+              item.id === session.id
+                ? {
+                    ...item,
+                    status: "idle",
+                    vendorSessionId,
+                    messages: item.messages.map((entry) =>
+                      entry.id === assistantId && !(entry.text ?? "").trim()
+                        ? { ...entry, text: reply || vendorEmptyReply("cursor") }
                         : entry,
                     ),
                   }
@@ -2292,6 +2361,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             projectId: draft.projectId ?? current.activeProjectId ?? undefined,
             sessionId,
             customBotId: draft.customBotId,
+            lane: draft.lane ?? (draft.provider === "cursor" ? cursorUsageLane(draft.model) : undefined),
             inputTokens,
             outputTokens: Math.max(0, Math.round(draft.outputTokens)),
             cacheReadTokens,
@@ -2410,6 +2480,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (live === "codex") {
             if (!window.workhorse?.codexPrompt) throw new Error("Codex agent runs in the Workhorse desktop window.");
             const result = await window.workhorse.codexPrompt(promptInput);
+            return typeof result?.text === "string" ? result.text.trim() : "";
+          }
+          if (live === "cursor") {
+            if (!window.workhorse?.cursorPrompt) throw new Error("Cursor agent runs in the Workhorse desktop window.");
+            const result = await window.workhorse.cursorPrompt(promptInput);
             return typeof result?.text === "string" ? result.text.trim() : "";
           }
           if (!window.workhorse?.grokPrompt) throw new Error("Grok agent runs in the Workhorse desktop window.");
@@ -3930,7 +4005,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (event.type === "permission") {
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const provider =
-          owner?.provider === "codex" || owner?.provider === "claude" || owner?.provider === "custom"
+          owner?.provider === "codex" ||
+          owner?.provider === "claude" ||
+          owner?.provider === "cursor" ||
+          owner?.provider === "custom"
             ? owner.provider
             : "grok";
         const eventVendor =
@@ -4042,6 +4120,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (allowed) {
           if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, allowed);
           else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, allowed);
+          else if (provider === "cursor") void window.workhorse?.cursorAnswerPermission?.(event.requestId, allowed);
           else if (provider === "custom") void window.workhorse?.customAnswerPermission?.(event.requestId, allowed);
           else void window.workhorse?.grokAnswerPermission?.(event.requestId, allowed);
           setState((current) => ({
@@ -4096,6 +4175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           projectId: event.projectId,
           sessionId: event.sessionId,
           customBotId: owner?.customBotId,
+          lane: usageProviderForSession(owner) === "cursor" ? cursorUsageLane(event.model) : undefined,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           cacheReadTokens: event.cacheReadTokens,
@@ -4285,11 +4365,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offGrok = window.workhorse?.onGrokEvent?.(apply);
     const offCodex = window.workhorse?.onCodexEvent?.(apply);
     const offClaude = window.workhorse?.onClaudeEvent?.(apply);
+    const offCursor = window.workhorse?.onCursorEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     return () => {
       offGrok?.();
       offCodex?.();
       offClaude?.();
+      offCursor?.();
       offCustom?.();
     };
   }, [recordUsage]);
@@ -4681,6 +4763,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .catch(() => setCodexPlan(undefined));
   }, []);
 
+  const refreshCursorPlan = useCallback(() => {
+    if (!window.workhorse?.cursorPlanUsage) {
+      setCursorPlan(undefined);
+      return;
+    }
+    void window.workhorse
+      .cursorPlanUsage()
+      .then((plan) => setCursorPlan(plan ?? undefined))
+      .catch(() => setCursorPlan(undefined));
+  }, []);
+
   const refreshClaudePlan = useCallback(() => {
     if (!window.workhorse?.claudePlanUsage) return;
     void window.workhorse
@@ -4726,9 +4819,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshGrokPlan();
       refreshCodexPlan();
       refreshClaudePlan();
+      refreshCursorPlan();
       refreshCustomPlans();
     }
-  }, [ready, refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCustomPlans]);
+  }, [ready, refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
 
   const setUsageBudget = useCallback((provider: ProviderId, tokens: number | null) => {
     setState((current) => {
@@ -4782,7 +4876,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const hold = watchHold;
       const sessionId = hold?.sessionId ?? stateRef.current.activeSessionId;
       const key = hold?.key ?? (sessionId
-        ? watchKeyForSession(stateRef.current.sessions.find((item) => item.id === sessionId) ?? { provider: "grok" })
+        ? watchKeyForSession(stateRef.current.sessions.find((item) => item.id === sessionId) ?? { provider: "grok", model: "" })
         : null);
       if (kind === "until-reset" && key) {
         setState((current) => ({
@@ -4824,7 +4918,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       watchVendorStatuses({
         settings: state.settings,
         usage: state.usage,
-        plans: { grok: grokPlan, codex: codexPlan, claude: claudePlan, custom: customPlans },
+        plans: { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans },
         permits: state.watchPermits,
         dayMarks: state.watchDayMarks,
       }),
@@ -4963,6 +5057,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshGrokLogin,
       refreshCodexLogin,
       refreshClaudeLogin,
+      refreshCursorLogin,
       refreshCustomLogin,
       cycleTheme,
       toggleWorkhorseTheme,
@@ -5009,6 +5104,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCodexPlan,
       claudePlan,
       refreshClaudePlan,
+      cursorPlan,
+      refreshCursorPlan,
       customPlans,
       refreshCustomPlans,
       quit,
@@ -5070,6 +5167,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshGrokLogin,
       refreshCodexLogin,
       refreshClaudeLogin,
+      refreshCursorLogin,
       refreshCustomLogin,
       cycleTheme,
       toggleWorkhorseTheme,
@@ -5116,6 +5214,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCodexPlan,
       claudePlan,
       refreshClaudePlan,
+      cursorPlan,
+      refreshCursorPlan,
       customPlans,
       refreshCustomPlans,
       quit,

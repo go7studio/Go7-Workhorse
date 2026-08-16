@@ -26,6 +26,14 @@ export const PROVIDERS: Provider[] = [
     statusNote: "Live ACP adapter. Uses @agentclientprotocol/codex-acp and your existing Codex login.",
   },
   {
+    id: "cursor",
+    name: "Cursor",
+    short: "U",
+    tagline: "Cursor Agent via ACP",
+    connected: false,
+    statusNote: "Live ACP adapter. Uses the Cursor CLI (`agent acp`) and your existing Cursor login.",
+  },
+  {
     id: "custom",
     name: "Custom",
     short: "+",

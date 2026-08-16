@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { ChatMessage, Project, ProviderId, Session } from "./types";
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function vendorExportDirName(provider: ProviderId, botName?: string): string {
   if (provider === "custom") return `workhorse-${slugTitle(botName || "custom", "custom")}`;

@@ -6,7 +6,7 @@ Current shipped baseline:
 
 1. Electron owns all privileged work; React talks through typed IPC.
 2. Projects are named containers with optional folders/references, and chats can move between them.
-3. Grok, Codex, and Claude are live local adapters; custom Anthropic/OpenAI-compatible bots are live HTTP slots.
+3. Grok, Codex, Claude, and Cursor are live local adapters; custom Anthropic/OpenAI-compatible bots are live HTTP slots. Cursor Watch is two monthly pools (Cursor Models vs Other Models).
 4. Codex has a capability-aware App Server boundary with ACP fallback, rather than claiming native features on an incompatible install.
 5. Chats can use a local folder or an isolated managed Git worktree.
 6. Git review and a persistent chat-scoped terminal operate in that exact execution directory.

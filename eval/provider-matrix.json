@@ -32,6 +32,16 @@
       "baselineStatus": "unrun"
     },
     {
+      "id": "cursor-acp",
+      "provider": "cursor",
+      "transport": "acp",
+      "discovery": ["binary", "login artifact", "ACP launch"],
+      "launchBoundary": "electron/cursor-host.ts",
+      "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket", "usage lane"],
+      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native", "routing": "workhorse", "inputs": { "images": "native", "documents": "path", "audio": "manifest", "video": "frames" } },
+      "baselineStatus": "unrun"
+    },
+    {
       "id": "custom-openai",
       "provider": "custom",
       "transport": "http",

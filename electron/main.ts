@@ -5,12 +5,14 @@ import { fileURLToPath } from "node:url";
 import { GrokSessionHost, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
+import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
 import { detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
+import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, hydrateDetectedCustomCredentials } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
@@ -18,6 +20,7 @@ import { listVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
+import { fetchCursorPlanUsage } from "./cursor-plan";
 import { fetchCustomPlanUsage } from "./custom-plan";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
@@ -696,6 +699,14 @@ app.whenReady().then(async () => {
       return null;
     }
   });
+  ipcMain.removeHandler("cursor:plan-usage");
+  ipcMain.handle("cursor:plan-usage", async () => {
+    try {
+      return (await fetchCursorPlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
   ipcMain.removeHandler("custom:plan-usage");
   ipcMain.handle("custom:plan-usage", async (_event, raw: { baseUrl?: string; apiKey?: string; model?: string }) => {
     try {
@@ -758,6 +769,31 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("claude:cancel", (_event, sessionId: string) => {
     claudeHost.cancel(sessionId);
+  });
+
+  ipcMain.handle("cursor:detect-login", () => detectCursorLogin());
+  const cursorHost = new CursorSessionHost();
+  ipcMain.handle("cursor:prompt", async (event, raw: CursorPromptInput) => {
+    const input: CursorPromptInput = {
+      ...raw,
+      cwd: resolveSessionCwd(raw.cwd),
+    };
+    const result = await cursorHost.prompt(input, (payload) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send("cursor:event", payload);
+      } catch (error) {
+        console.error("workhorse cursor event send failed", error);
+      }
+    });
+    const text = typeof result?.text === "string" ? result.text.trim() : "";
+    if (text) settlePeerAsk(input.sessionId, { text });
+    return result;
+  });
+  ipcMain.handle("cursor:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
+    return cursorHost.answerPermission(payload.requestId, payload.answer);
+  });
+  ipcMain.handle("cursor:cancel", (_event, sessionId: string) => {
+    cursorHost.cancel(sessionId);
   });
 
   const customHost = new CustomSessionHost();

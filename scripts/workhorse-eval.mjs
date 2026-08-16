@@ -88,7 +88,7 @@ async function validate() {
   if (!sameMembers(suite.profiles, profileIds)) {
     problems.push("suite profiles and provider-matrix profiles differ");
   }
-  const providerNames = new Set(["grok", "codex", "claude", "custom"]);
+  const providerNames = new Set(["grok", "codex", "claude", "cursor", "custom"]);
   for (const profile of providers.profiles) {
     if (!providerNames.has(profile.provider)) problems.push(`unknown provider on profile ${profile.id}`);
     if (!["acp", "http"].includes(profile.transport)) problems.push(`unknown transport on profile ${profile.id}`);

@@ -24,7 +24,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "watch", label: "Watch" },
 ];
 
-const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const DESK_STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (!vendorEnabled(link)) return "Disabled";
@@ -32,7 +32,7 @@ function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   // only one the person can fix from here.
   if (link.needsAuth) return "Needs auth";
   if (link.available === false) return "Not found";
-  if (id === "grok" || id === "codex" || id === "claude") return "Local login";
+  if (id === "grok" || id === "codex" || id === "claude" || id === "cursor") return "Local login";
   return "Marked";
 }
 
@@ -53,6 +53,9 @@ function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string
     return found
       ? "Local Claude ready."
       : "Claude not found.";
+  }
+  if (id === "cursor") {
+    return found ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
 }
@@ -254,7 +257,7 @@ export function Settings() {
                 +
               </span>
               <span>Add bot</span>
-              <em>Grok, Codex, Claude</em>
+              <em>Grok, Codex, Claude, Cursor</em>
             </button>
           </div>
 
@@ -313,7 +316,9 @@ function StockBotDetail({
                 ? store.refreshGrokLogin()
                 : id === "codex"
                   ? store.refreshCodexLogin()
-                  : store.refreshClaudeLogin()
+                  : id === "cursor"
+                    ? store.refreshCursorLogin()
+                    : store.refreshClaudeLogin()
             }
           >
             Recheck

@@ -3,7 +3,7 @@ import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import type { ProviderId } from "../lib/types";
 
-const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude"];
+const STOCK: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
 export function Welcome() {
   const { openSheet, createProject, openSettings, startSession, settings } = useStore();

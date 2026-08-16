@@ -43,7 +43,7 @@ export function messageBrain(
 }
 
 export function asProviderId(value: string | undefined): ProviderId {
-  if (value === "codex" || value === "claude" || value === "custom") return value;
+  if (value === "codex" || value === "claude" || value === "cursor" || value === "custom") return value;
   return "grok";
 }
 

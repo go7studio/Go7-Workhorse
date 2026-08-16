@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   publicBotsFromState,
   publicDetectCard,
@@ -174,7 +175,12 @@ const TOOLS = [
         description: { type: "string", description: "Short 3–5 word label" },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id such as gpt-5.6-terra" },
+        route: { type: "string", description: "auto, quick, balanced, or deep" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
+        planStepId: { type: "string", description: "Optional executable plan step id" },
+        rationale: { type: "string", description: "Why this agent fits this step" },
+        skills: { type: "array", items: { type: "string" }, description: "Required skills" },
+        tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
@@ -195,6 +201,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
+        wait: { type: "boolean", description: "false (default) status now. true waits for terminal state." },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
       },
     },
@@ -203,6 +210,11 @@ const TOOLS = [
     name: "workhorse_list_bots",
     description:
       "List every attached desk bot (Grok, Codex, Claude, and custom slots) with leftover/Watch status. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. Name every attached bot. Only refuse to spawn or ask one if the summary says it is not callable.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_probe_runtime",
+    description: "Probe local Godot, Android, iOS, and configured MCP capability before assigning device work.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -671,6 +683,36 @@ function deskRoster() {
   });
 }
 
+function probeRuntime(): string {
+  const run = (command: string, args: string[]) => {
+    const result = spawnSync(command, args, { encoding: "utf8", timeout: 5_000, windowsHide: true });
+    return {
+      available: !result.error && result.status === 0,
+      output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(0, 2_000),
+    };
+  };
+  const godot = run(process.env.WORKHORSE_GODOT_PATH?.trim() || "godot", ["--version"]);
+  const adb = run("adb", ["devices", "-l"]);
+  const ios = process.platform === "darwin"
+    ? run("xcrun", ["simctl", "list", "devices", "available", "--json"])
+    : { available: false, output: "" };
+  const settings = normalizeSettings(readState().settings);
+  return JSON.stringify(
+    {
+      godot,
+      android: {
+        available: adb.available,
+        devices: adb.output.split("\n").filter((line) => /\bdevice\b/.test(line)),
+      },
+      ios: { available: ios.available },
+      mcp: settings.mcpServers.map((server) => server.name),
+      computerUse: settings.mcpServers.some((server) => /computer|desktop|screen/i.test(server.name)),
+    },
+    null,
+    2,
+  );
+}
+
 function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boolean } | null {
   try {
     const parsed = JSON.parse(text) as { allowed?: boolean; retrySpawn?: boolean };
@@ -747,6 +789,10 @@ async function spawnAgent(
     folder?: string;
     wait?: boolean;
     route?: "auto" | "quick" | "balanced" | "deep";
+    planStepId?: string;
+    rationale?: string;
+    skills?: string[];
+    tools?: string[];
   },
   from?: string,
 ): Promise<string> {
@@ -811,6 +857,10 @@ async function spawnAgent(
     folder: admitted.cwd,
     wait: spawnInput.wait,
     route: spawnInput.route,
+    planStepId: spawnInput.planStepId,
+    rationale: spawnInput.rationale,
+    skills: spawnInput.skills,
+    tools: spawnInput.tools,
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -831,6 +881,10 @@ async function spawnAgent(
       folder: admitted.cwd,
       wait: spawnInput.wait,
       route: spawnInput.route,
+      planStepId: spawnInput.planStepId,
+      rationale: spawnInput.rationale,
+      skills: spawnInput.skills,
+      tools: spawnInput.tools,
     });
   }
   return first;
@@ -891,6 +945,10 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
           args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
             ? args.route
             : undefined,
+        planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
+        rationale: typeof args.rationale === "string" ? args.rationale : undefined,
+        skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
+        tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
       },
       from,
     );
@@ -904,6 +962,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   }
   if (name === "workhorse_list_bots") {
     return listBots(from);
+  }
+  if (name === "workhorse_probe_runtime") {
+    return probeRuntime();
   }
   if (name === "workhorse_detect_custom") {
     return JSON.stringify(publicDetectCard(detectCustomLogin()), null, 2);

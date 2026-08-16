@@ -80,11 +80,13 @@ import {
   normalizeAgentRun,
   overlappingAgentFiles,
   parentHasRunningChildren,
+  rootSpawnError,
   resolveModelHint,
   resolveSpawnSpec,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
   spawnWaitsForReply,
+  shouldAutoRouteSpawn,
   subagentTurns,
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
@@ -6095,6 +6097,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   };
   assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch"), true);
   assert.equal(parentHasRunningChildren([kidDone], "orch"), false);
+  assert.equal(rootSpawnError([kidRunning], "orch"), null);
+  assert.match(rootSpawnError([kidRunning, { ...kidRunning, id: "kid_run_2" }], "orch") ?? "", /2 workers/);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
   assert.equal(collectChildAgentReports([kidDone], "orch")[0]?.text, "It is a Godot game.");
   const { groupFanOutToolUses } = await import("../electron/custom-tools");
   assert.deepEqual(

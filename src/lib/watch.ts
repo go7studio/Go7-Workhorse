@@ -922,6 +922,16 @@ export function callableDeskRows(rows: DeskCallRow[]): DeskCallRow[] {
   return rows.filter((row) => row.canCall);
 }
 
+function routingStrengths(row: DeskCallRow): string[] {
+  const text = `${row.name} ${row.model ?? ""} ${(row.models ?? []).map((model) => `${model.id} ${model.name}`).join(" ")}`.toLowerCase();
+  if (/kimi|moonshot/.test(text)) return ["visual audit", "images", "UI/UX"];
+  if (/minimax-m3/.test(text)) return ["orchestration", "tools", "low cost"];
+  if (/5\.6-sol|opus|grok-4\.6/.test(text)) return ["deep reasoning", "architecture", "complex execution"];
+  if (/5\.6-terra|sonnet|grok-4\.5/.test(text)) return ["implementation", "review", "balanced cost"];
+  if (/5\.6-luna|haiku|mini/.test(text)) return ["quick tasks", "verification", "low cost"];
+  return ["general work"];
+}
+
 export function formatDeskRoster(rows: DeskCallRow[]): string {
   const attached = rows.filter((row) => row.status !== "not_connected" && row.status !== "disabled");
   const held = attached.filter((row) => !row.canCall);
@@ -964,7 +974,8 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
     {
       leftoverMeans: "Weekly plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
-      bots: attached,
+      bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
+      routingRule: "Choose from callable bots, state the fit, and preserve user assignments.",
     },
     null,
     2,

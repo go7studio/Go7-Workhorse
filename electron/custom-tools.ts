@@ -154,6 +154,10 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id" },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
+        planStepId: { type: "string", description: "Optional executable plan step id" },
+        rationale: { type: "string", description: "Why this agent fits this step" },
+        skills: { type: "array", items: { type: "string" }, description: "Required skills" },
+        tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional reasoning effort" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
@@ -184,6 +188,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     name: "workhorse_list_bots",
     description:
       "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "workhorse_probe_runtime",
+    description: "Probe local Godot, Android, iOS, and configured MCP capability before assigning device work.",
     input_schema: { type: "object", properties: {} },
   },
   {

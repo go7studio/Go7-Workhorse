@@ -19,6 +19,11 @@ export type SpawnRequest = {
   isolation?: "worktree" | "shared";
   folder?: string;
   wait?: boolean;
+  route?: "auto" | "quick" | "balanced" | "deep";
+  planStepId?: string;
+  rationale?: string;
+  skills?: string[];
+  tools?: string[];
 };
 
 export type CustomBotHint = {
@@ -163,6 +168,32 @@ export function nestedSpawnError(
     return WORKER_SPAWN_ERROR;
   }
   return null;
+}
+
+export const MAX_ROOT_WORKERS = 2;
+
+export function rootSpawnError(
+  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun">>,
+  parentId: string,
+): string | null {
+  const running = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      (session.agentRun?.status === "running" || session.status === "running"),
+  ).length;
+  return running >= MAX_ROOT_WORKERS
+    ? `This plan already has ${MAX_ROOT_WORKERS} workers running. Await one before spawning another.`
+    : null;
+}
+
+/** Explicit model, provider, or chat assignments always win over automatic routing. */
+export function shouldAutoRouteSpawn(input: {
+  routingEnabled: boolean;
+  provider?: unknown;
+  model?: unknown;
+  chat?: unknown;
+}): boolean {
+  return input.routingEnabled && !input.provider && !input.model && !input.chat;
 }
 
 export function spawnWaitsForReply(input: { wait?: unknown }): boolean {

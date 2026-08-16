@@ -48,6 +48,10 @@ export type PeerAsk = {
   scope?: string;
   wait?: boolean;
   route?: "auto" | "quick" | "balanced" | "deep";
+  planStepId?: string;
+  rationale?: string;
+  skills?: string[];
+  tools?: string[];
 };
 
 export type PeerAskResult = { text: string } | { error: string };

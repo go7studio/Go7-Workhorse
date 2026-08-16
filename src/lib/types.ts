@@ -106,6 +106,7 @@ export type ChatMessage = {
   customBotId?: string;
   peerFromSessionId?: string;
   correlationId?: string;
+  memoryIds?: string[];
 };
 
 export type CommandSource = "workhorse" | "grok" | "codex" | "claude" | "skill";
@@ -342,7 +343,14 @@ export type Session = {
   archivedAt?: number | null;
   grokCommands?: Command[];
   /** Thread-scoped Codex/Grok Goal lifecycle. */
-  goal?: { status: "active" | "paused"; objective: string };
+  goal?: {
+    status: "active" | "paused";
+    objective: string;
+    startedAt?: number;
+    budgetMs?: number;
+    deadlineAt?: number;
+    terminal?: "completed" | "timed-out" | "cancelled";
+  };
   /** Workhorse-owned lifecycle and review record for hidden cross-provider children. */
   agentRun?: AgentRun;
   /** Active worker crew for this orchestrator chat. */
@@ -376,7 +384,7 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "usage" | "watch";
+export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "learning" | "usage" | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
 
@@ -532,6 +540,7 @@ export type Settings = {
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;
+  learning: import("./learning-types").LearningSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

@@ -7,6 +7,7 @@ import {
   parseGrokGoalLine,
   type GoalState,
 } from "./goal";
+import { extractGoalBudget, settleBoundedGoal } from "./learning-goal";
 import type { Command } from "./types";
 
 export type VendorSendPrep = {
@@ -74,10 +75,24 @@ export function nextGoalForSend(
   state: GoalState | undefined,
   text: string,
   applyDeskGoal: boolean,
+  now = Date.now(),
 ): GoalState | undefined {
-  if (!applyDeskGoal) return state;
-  if (provider === "grok") return applyGrokGoalMirror(state, text);
-  return applyGoalCommand(state, text);
+  if (!applyDeskGoal) return settleBoundedGoal(state, now);
+  const next = provider === "grok" ? applyGrokGoalMirror(state, text) : applyGoalCommand(state, text);
+  const budget = extractGoalBudget(text);
+  if (next?.status === "active" && budget.budgetMs) {
+    return settleBoundedGoal(
+      {
+        ...next,
+        objective: budget.objective || next.objective,
+        startedAt: next.startedAt ?? now,
+        budgetMs: budget.budgetMs,
+        deadlineAt: now + budget.budgetMs,
+      },
+      now,
+    );
+  }
+  return settleBoundedGoal(next, now);
 }
 
 export type HaltForwardPlan = "send-now" | "defer-until-cancelled-done" | "desk-halt-only";

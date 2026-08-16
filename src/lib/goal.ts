@@ -1,8 +1,14 @@
 export type GoalStatus = "none" | "active" | "paused";
 
+export type GoalTerminal = "completed" | "timed-out" | "cancelled";
+
 export type GoalState = {
   status: Exclude<GoalStatus, "none">;
   objective: string;
+  startedAt?: number;
+  budgetMs?: number;
+  deadlineAt?: number;
+  terminal?: GoalTerminal;
 };
 
 export type GoalAction = "set" | "view" | "pause" | "resume" | "clear";
@@ -89,6 +95,15 @@ export function applyGoalCommand(state: GoalState | undefined, text: string): Go
 
 export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
   if (!state?.objective.trim()) return null;
+  if (state.terminal === "timed-out") {
+    return { title: "Goal timed out", status: "paused", objective: state.objective, actions: ["clear"] };
+  }
+  if (state.terminal === "cancelled") {
+    return { title: "Goal cancelled", status: "paused", objective: state.objective, actions: ["clear"] };
+  }
+  if (state.terminal === "completed") {
+    return { title: "Goal completed", status: "paused", objective: state.objective, actions: ["clear"] };
+  }
   if (state.status === "paused") {
     return {
       title: "Goal paused",
@@ -162,5 +177,19 @@ export function normalizeGoal(raw: unknown): GoalState | undefined {
   const objective = typeof record.objective === "string" ? record.objective.trim() : "";
   if (!objective) return undefined;
   if (record.status !== "active" && record.status !== "paused") return undefined;
-  return { status: record.status, objective };
+  const startedAt = typeof record.startedAt === "number" && Number.isFinite(record.startedAt) ? record.startedAt : undefined;
+  const budgetMs = typeof record.budgetMs === "number" && Number.isFinite(record.budgetMs) && record.budgetMs > 0 ? Math.round(record.budgetMs) : undefined;
+  const deadlineAt = typeof record.deadlineAt === "number" && Number.isFinite(record.deadlineAt) ? record.deadlineAt : undefined;
+  const terminal =
+    record.terminal === "completed" || record.terminal === "timed-out" || record.terminal === "cancelled"
+      ? record.terminal
+      : undefined;
+  return {
+    status: record.status,
+    objective,
+    ...(startedAt ? { startedAt } : {}),
+    ...(budgetMs ? { budgetMs } : {}),
+    ...(deadlineAt ? { deadlineAt } : {}),
+    ...(terminal ? { terminal } : {}),
+  };
 }

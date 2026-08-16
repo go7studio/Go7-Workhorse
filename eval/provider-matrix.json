@@ -75,7 +75,7 @@
       "baselineStatus": "unrun"
     }
   ],
-  "settingsSections": ["profile", "llms", "skills", "routing", "usage", "watch"],
+  "settingsSections": ["profile", "llms", "skills", "routing", "learning", "usage", "watch"],
   "requiredProvenanceChain": [
     "selection",
     "launch-or-request",

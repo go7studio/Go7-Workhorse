@@ -6,13 +6,13 @@
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
-  "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "capabilities", "usage", "reliability"],
+  "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "capabilities", "usage", "reliability", "learning-memory"],
   "areas": [
     {
       "id": "setup",
       "title": "Getting started, harness discovery, and settings",
       "prefix": "SET",
-      "areaWeight": 9,
+      "areaWeight": 8,
       "scenarios": [
         {
           "id": "SET-S1",
@@ -47,7 +47,7 @@
           "executor": "electron",
           "profiles": ["grok-acp"],
           "steps": [
-            "Walk Profile, LLMs, Skills, Routing, Usage, and Watch from the Settings header.",
+            "Walk Profile, LLMs, Skills, Routing, Learning, Usage, and Watch from the Settings header.",
             "Change profile, appearance, and one safe preference; leave and return.",
             "Restart Workhorse and confirm the values persist without altering vendor credentials.",
             "Verify Back returns to the prior product context and Usage remains inside Settings."
@@ -115,13 +115,13 @@
         },
         {
           "id": "SET-05",
-          "criterion": "Profile, LLMs, Skills, Routing, Usage, and Watch are all reachable inside Settings and retain their intended navigation hierarchy.",
+          "criterion": "Profile, LLMs, Skills, Routing, Learning, Usage, and Watch are all reachable inside Settings and retain their intended navigation hierarchy.",
           "weight": 2,
           "type": "exists",
           "testability": "auto",
           "profiles": ["grok-acp"],
           "scenarios": ["SET-S3"],
-          "passCriteria": "All six sections open, Usage is not promoted to a top-level sidebar product, and Back returns predictably.",
+          "passCriteria": "All seven sections open, Usage is not promoted to a top-level sidebar product, and Back returns predictably.",
           "evidence": "Settings-tab screenshots and navigation transcript."
         },
         {
@@ -265,7 +265,7 @@
       "id": "model-integrity",
       "title": "Provider, model, effort, and runtime identity",
       "prefix": "MOD",
-      "areaWeight": 12,
+      "areaWeight": 11,
       "scenarios": [
         {
           "id": "MOD-S1",
@@ -761,7 +761,7 @@
       "id": "orchestration",
       "title": "Multi-agent delegation, cross-chat messaging, and goal orchestration",
       "prefix": "ORC",
-      "areaWeight": 12,
+      "areaWeight": 11,
       "scenarios": [
         {
           "id": "ORC-S1",
@@ -1048,7 +1048,7 @@
       "id": "capabilities",
       "title": "Intelligent routing and multimodal inputs",
       "prefix": "CAP",
-      "areaWeight": 12,
+      "areaWeight": 11,
       "scenarios": [
         {
           "id": "CAP-S1",
@@ -1402,7 +1402,7 @@
       "id": "reliability",
       "title": "Install, update, persistence, recovery, and release evidence",
       "prefix": "REL",
-      "areaWeight": 7,
+      "areaWeight": 6,
       "scenarios": [
         {
           "id": "REL-S1",
@@ -1507,6 +1507,93 @@
           "scenarios": ["REL-S3"],
           "passCriteria": "npm run verify passes; eval drift fails the gate; dependency audit findings are captured without an automatic breaking fix.",
           "evidence": "Exact command outputs, test counts, build artifact inventory, and dependency-audit summary."
+        }
+      ]
+    },
+    {
+      "id": "learning-memory",
+      "title": "Private adaptive learning, isolation, and packaged store gates",
+      "prefix": "LRN",
+      "areaWeight": 5,
+      "scenarios": [
+        {
+          "id": "LRN-S1",
+          "name": "Capture, compile, retrieve, export, and purge without chat pollution",
+          "executor": "unit",
+          "profiles": ["grok-acp", "custom-openai"],
+          "steps": [
+            "Open an injected userData learning database and record a redacted human event.",
+            "Restart the store, compile with a stub ephemeral caller, retrieve, export, and purge.",
+            "Verify no Workhorse chat or durable vendor thread was created."
+          ]
+        },
+        {
+          "id": "LRN-S2",
+          "name": "Prove packaged Windows x64 and macOS Apple silicon smokes",
+          "executor": "package",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Count packaged artifact contents for the target OS rather than trusting process exit code.",
+            "Launch the packaged app with --workhorse-learning-smoke and isolated userData.",
+            "Require node:sqlite, FTS5 or lexical fallback, restart, stub compile, retrieve, export, and purge."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "LRN-01",
+          "criterion": "Learning storage is Electron-main-owned under injected userData with project and provider isolation.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["LRN-S1"],
+          "passCriteria": "The database path uses injected userData; another project's intent and another provider's operations cannot be retrieved.",
+          "evidence": "Unit fixtures for path parity, isolation, redaction, forget, and purge."
+        },
+        {
+          "id": "LRN-02",
+          "criterion": "Compiler calls are ephemeral, title-less, and leave no Workhorse or vendor chat clutter.",
+          "weight": 3,
+          "type": "side-effect",
+          "testability": "auto",
+          "profiles": ["custom-openai"],
+          "scenarios": ["LRN-S1"],
+          "passCriteria": "A compile creates no Workhorse chat and no leftover vendor thread; interrupted runs resume once.",
+          "evidence": "Compiler run records, session lists, and auxiliary-call assertions."
+        },
+        {
+          "id": "LRN-03",
+          "criterion": "Packaged Windows x64 and macOS Apple silicon smokes are release gates.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["LRN-S2"],
+          "passCriteria": "Each OS packaged smoke inspects the artifact, probes node:sqlite, and completes record/restart/compile/retrieve/export/purge.",
+          "evidence": "CI packaged-smoke logs, artifact inventories, and JSON smoke reports."
+        },
+        {
+          "id": "LRN-04",
+          "criterion": "Adaptive compiler and routing selection follows policy, capability, capacity, cost, and outcomes rather than hard-coded model names.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "custom-openai"],
+          "scenarios": ["LRN-S1"],
+          "passCriteria": "The same task can choose a different valid route when capacity or verified history changes, while identical inputs stay deterministic.",
+          "evidence": "Adaptive selection unit fixtures and recorded rationales."
+        },
+        {
+          "id": "LRN-05",
+          "criterion": "Bounded /goal cases terminate, time out, or cancel with a durable terminal state; required skills are never silently truncated.",
+          "weight": 2,
+          "type": "reliability",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["LRN-S1"],
+          "passCriteria": "A budgeted review goal reaches a terminal state; oversized required skill context blocks instead of shrinking the skill.",
+          "evidence": "Goal budget fixtures and skill-integrity fixtures."
         }
       ]
     }

@@ -62,12 +62,16 @@ test("plan and device contracts map to suite rubrics and commands", () => {
   const suite = json("eval/suite.json");
   const plan = json("eval/execution-plan-contract.json");
   const devices = json("eval/device-capability-contract.json");
+  const learning = json("eval/learning-memory-contract.json");
   const manifest = json("package.json");
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
-  for (const id of [...plan.requiredRubric, ...devices.requiredRubric]) assert.ok(rubric.has(id), id);
+  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric]) assert.ok(rubric.has(id), id);
   assert.ok(manifest.scripts[devices.probeCommand]);
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
+  assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
+  assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
   assert.ok(suite.profiles.includes("custom-kimi"));
+  assert.ok(suite.areaOrder.includes("learning-memory"));
 });
 
 test("observed regressions stay mapped to live suite coverage", () => {

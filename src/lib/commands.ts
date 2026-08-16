@@ -17,7 +17,7 @@ export const COMMANDS: Command[] = [
   { id: "sandbox", name: "/sandbox", hint: "Sandbox: off, workspace, read-only, or strict", run: "sandbox", inputHint: "off | workspace | read-only | strict" },
   { id: "demo", name: "/demo-permission", hint: "Show a permission prompt", run: "demo-permission" },
   { id: "theme", name: "/theme", hint: "Cycle light, dark, Workhorse, system", run: "theme", aliases: ["/t"] },
-  { id: "settings", name: "/settings", hint: "Profile, connected LLMs, usage, watch", run: "settings", aliases: ["/config", "/preferences", "/prefs"] },
+  { id: "settings", name: "/settings", hint: "Profile, connected LLMs, learning, usage, watch", run: "settings", aliases: ["/config", "/preferences", "/prefs"] },
   { id: "rename", name: "/rename", hint: "Rename this chat", run: "rename", aliases: ["/title"], inputHint: "new title" },
   { id: "archive", name: "/archive", hint: "Archive this chat", run: "archive" },
   { id: "delete", name: "/delete", hint: "Delete this chat", run: "delete" },

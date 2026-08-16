@@ -59,6 +59,15 @@ import {
   mergeFolderBookmarks,
   rememberFolderBookmark,
 } from "./folder-access";
+import { normalizeSettings } from "../src/lib/settings";
+import { routingProfileForModel } from "../src/lib/routing";
+import type { AdaptiveCandidate } from "../src/lib/learning-policy";
+import { LearningService } from "./learning-service";
+import { SqliteMemoryStore } from "./learning-sqlite";
+import { attachLearningIpc } from "./learning-ipc";
+import { runLearningSmoke } from "./learning-smoke";
+import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary } from "./learning-aux";
+import type { Settings } from "../src/lib/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const debugStartup = (stage: string) => {
@@ -120,6 +129,7 @@ function statePath() {
 
 let credentials: CredentialStore | null = null;
 let jobEngine: DurableJobEngine | null = null;
+let learningCloser: { pause: () => void; close: () => void } | null = null;
 function credentialStore(): CredentialStore {
   credentials ??= new CredentialStore(
     path.join(app.getPath("userData"), "credentials.json"),
@@ -411,6 +421,65 @@ app.whenReady().then(async () => {
   });
   jobEngine.start();
   debugStartup("job engine ready");
+
+  const learningSmoke = process.argv.includes("--workhorse-learning-smoke");
+  if (learningSmoke) {
+    const result = await runLearningSmoke(app.getPath("userData"));
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    app.quit();
+    return;
+  }
+
+  let liveSettings: Settings = normalizeSettings({});
+  const learningStore = new SqliteMemoryStore(app.getPath("userData"));
+  const learningService = new LearningService({
+    store: learningStore,
+    settings: () => liveSettings.learning,
+    allowStub: false,
+    candidates: () => {
+      const rows: AdaptiveCandidate[] = [];
+      for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
+        if (!liveSettings.llms[provider].connected) continue;
+        rows.push({
+          provider,
+          model: liveSettings.learning.compilerModel ?? provider,
+          connected: true,
+          ephemeral: providerAllowsEphemeralAuxiliary(provider),
+          ...routingProfileForModel(provider, liveSettings.learning.compilerModel ?? provider),
+        });
+      }
+      for (const bot of liveSettings.customBots) {
+        if (bot.enabled === false) continue;
+        rows.push({
+          provider: "custom" as const,
+          model: bot.model,
+          customBotId: bot.id,
+          connected: true,
+          ephemeral: providerAllowsEphemeralAuxiliary("custom"),
+          ...routingProfileForModel("custom", bot.model, bot.routingProfile),
+        });
+      }
+      return rows;
+    },
+    caller: async (request) => {
+      if (request.provider !== "custom" || !providerAllowsEphemeralAuxiliary("custom")) {
+        throw new Error("no-ephemeral-provider");
+      }
+      const bot = liveSettings.customBots.find((item) => item.id === request.customBotId) ?? liveSettings.customBots[0];
+      if (!bot) throw new Error("no-ephemeral-provider");
+      return ephemeralCustomAuxiliary(
+        { baseUrl: bot.baseUrl, apiKey: bot.apiKey, model: request.model || bot.model, api: bot.api },
+        request,
+      );
+    },
+    idle: { setTimeout, clearTimeout: (id) => clearTimeout(id as NodeJS.Timeout) },
+  });
+  attachLearningIpc(ipcMain, learningService, (settings) => {
+    liveSettings = settings;
+  });
+  learningCloser = learningService;
+  void learningService.recover().catch((error) => console.warn("Learning recover failed", error));
+  debugStartup("learning ready");
   const peerBusy = new Set<string>();
   const handlePeerAsk = async (ask: PeerAsk) => {
     const win = BrowserWindow.getAllWindows()[0];
@@ -959,6 +1028,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  learningCloser?.pause();
+  learningCloser?.close();
   grokHost.disposeAll();
   codexHost.disposeAll();
   terminalHost.disposeAll();

@@ -249,6 +249,20 @@ type WorkhorseBridge = {
   onGrokEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
   checkAppUpdate: () => Promise<import("./lib/app-update").AppUpdateOffer | null>;
   applyAppUpdate: (version: string) => Promise<import("./lib/app-update").AppUpdateApplyResult>;
+  learningConfigure?: (settings: import("./lib/types").Settings) => Promise<boolean>;
+  learningProbe?: () => Promise<import("./lib/learning-types").LearningProbeResult>;
+  learningRecord?: (event: unknown) => Promise<{ inserted: boolean }>;
+  learningRetrieve?: (query: import("./lib/learning-types").RetrievalQuery) => Promise<{
+    items: import("./lib/learning-types").RankedMemory[];
+    frame: string;
+    auditId?: string;
+  }>;
+  learningCompile?: () => Promise<{ ran: boolean; skipped?: string; runId?: string; memories?: number }>;
+  learningMemories?: () => Promise<import("./lib/learning-types").MemoryItem[]>;
+  learningApprove?: (id: string) => Promise<import("./lib/learning-types").MemoryItem | undefined>;
+  learningForget?: (target: import("./lib/learning-types").ForgetTarget) => Promise<{ tombstoned: number }>;
+  learningPurge?: (target: import("./lib/learning-types").ForgetTarget) => Promise<import("./lib/learning-types").PurgeResult>;
+  learningExport?: (dest: string) => Promise<{ ok: boolean; dest?: string; message?: string }>;
 };
 
 interface Window {

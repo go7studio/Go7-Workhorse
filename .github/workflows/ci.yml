@@ -9,6 +9,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     strategy:
@@ -30,8 +33,47 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Validate eval contracts
+        run: npm run eval:validate
+
+      # The learning store needs FTS5. Prove the runtime has it before the
+      # tests assume it.
+      - name: SQLite FTS5 probe
+        run: npm run probe:sqlite
+
       - name: Test
         run: npm test
+
+  # A build can exit 0 and ship an app that cannot read its own files. Pack it
+  # and exercise the learning store inside the packaged tree.
+  packaged-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            pack: pack:win
+            platform: win
+          - os: macos-latest
+            pack: pack:mac
+            platform: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pack ${{ matrix.platform }}
+        run: npm run ${{ matrix.pack }}
+
+      - name: Packaged learning smoke
+        run: node scripts/learning-packaged-smoke.mjs --platform ${{ matrix.platform }}
 
   audit:
     runs-on: ubuntu-latest

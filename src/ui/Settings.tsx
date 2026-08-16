@@ -13,6 +13,7 @@ import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 import { RoutingPane } from "./RoutingPane";
+import { LearningPane } from "./LearningPane";
 import { routingProfileForModel } from "../lib/routing";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -20,6 +21,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "llms", label: "LLMs" },
   { id: "skills", label: "Skills" },
   { id: "routing", label: "Routing" },
+  { id: "learning", label: "Learning" },
   { id: "usage", label: "Usage" },
   { id: "watch", label: "Watch" },
 ];
@@ -281,6 +283,8 @@ export function Settings() {
       {section === "skills" && <SkillsPane />}
 
       {section === "routing" && <RoutingPane />}
+
+      {section === "learning" && <LearningPane />}
 
       {section === "usage" && <UsagePane key={usageTick} homeSignal={usageHome} embedded tabs={tabs} />}
 

@@ -61,6 +61,7 @@ export function buildSupportReport(input: {
       backup: fs.existsSync(path.join(input.userData, "workhorse-state.json.bak")),
       credentials: fs.existsSync(path.join(input.userData, "credentials.json")),
       jobJournal: fs.existsSync(path.join(input.userData, "workhorse-jobs.json")),
+      learning: fs.existsSync(path.join(input.userData, "learning", "learning.sqlite")),
       osEncryption: input.encryptionAvailable,
     },
     workload: {

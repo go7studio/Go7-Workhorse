@@ -6895,10 +6895,11 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
   assert.equal(settings.llms.grok.needsAuth, undefined);
 });
 
-test("local mac packages receive a complete ad-hoc signature before release signing", () => {
+test("packages use platform Electron and mac builds receive an ad-hoc signature", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
-    build?: { afterPack?: string };
+    build?: { afterPack?: string; electronDist?: string };
   };
+  assert.equal(pkg.build?.electronDist, undefined);
   assert.equal(pkg.build?.afterPack, "scripts/after-pack.cjs");
   const hook = readFileSync(path.join(ROOT, "scripts", "after-pack.cjs"), "utf8");
   assert.match(hook, /electronPlatformName !== "darwin"/);

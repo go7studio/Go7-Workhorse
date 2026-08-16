@@ -5777,6 +5777,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   );
 
   const missing = listVendorModels({
+    env: {},
     homedir: path.join(ROOT, "does-not-exist"),
     existsSync: () => false,
     readFile: () => {
@@ -5801,6 +5802,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     }),
   };
   const live = listVendorModels({
+    env: {},
     homedir: home,
     existsSync: (file) => Boolean(files[file]),
     readFile: (file) => files[file] ?? "",

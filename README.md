@@ -1,6 +1,6 @@
 # Go7 Workhorse
 
-A native desktop shell for Grok, Claude, Codex, and any other bot you add later. One window. Projects and chats. One permission bar.
+Go7 Workhorse is a native desktop shell for Grok, Claude, Codex, and any other bot you add later. One window. Projects and chats. One permission bar.
 
 This repository is the desktop shell. Grok and Claude use ACP. Codex keeps ACP as its prompt fallback and also has an App Server boundary for native history and capability discovery. Custom is live HTTP.
 
@@ -11,12 +11,12 @@ See [GOAL.md](GOAL.md). In short: a learnable Apple-like desktop shell, not a we
 ## Run
 
 ```bash
-cd C:\Users\lgovo\Projects\Go7-Workhorse
+cd path\to\Go7-Workhorse
 npm install
 npm run dev
 ```
 
-`npm run dev` opens the **Workhorse window**. It does not use Chrome as the app.
+`npm run dev` opens the **Go7 Workhorse window**. It does not use Chrome as the app.
 
 ## Install on Windows
 
@@ -25,7 +25,7 @@ npm install
 npm run dist:win
 ```
 
-Run `release/Workhorse-Setup-<version>.exe` to install the branded **Workhorse** desktop application. The installer creates Start-menu and Desktop shortcuts and preserves the existing Workhorse projects and chats when updating or uninstalling.
+Run `release/Go7-Workhorse-Setup-<version>.exe` to install the branded **Go7 Workhorse** desktop application. The installer creates Start-menu and Desktop shortcuts and preserves existing projects and chats when updating or uninstalling.
 
 ## Install on macOS
 
@@ -34,7 +34,7 @@ npm install
 npm run dist:mac
 ```
 
-On a Mac, that writes `release/Workhorse-<version>-mac.dmg`, `release/Workhorse-<version>-mac.zip`, and the unpacked `Workhorse.app`. Local packages receive a complete ad-hoc signature so they launch and use secure storage consistently; they remain development artifacts and should not be distributed. Release machines replace it with an Apple Developer ID signature automatically, and notarization credentials should be supplied through the standard electron-builder environment variables. Vendor CLIs (Grok, Codex, Claude) are not bundled — they must already be installed on the machine.
+On a Mac, that writes `release/Go7-Workhorse-<version>-mac.dmg`, `release/Go7-Workhorse-<version>-mac.zip`, and the unpacked `Go7 Workhorse.app`. Local packages receive a complete ad-hoc signature so they launch and use secure storage consistently; they remain development artifacts and should not be distributed. Release machines replace it with an Apple Developer ID signature automatically, and notarization credentials should be supplied through the standard electron-builder environment variables. Vendor CLIs (Grok, Codex, Claude) are not bundled; they must already be installed on the machine.
 
 ## How to use the scaffold
 

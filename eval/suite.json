@@ -1,0 +1,912 @@
+{
+  "schemaVersion": 1,
+  "suite": "go7-workhorse",
+  "title": "Go7 Workhorse outer-harness evaluation",
+  "baselineRef": "d38f449c05a2e14a857c8e2292669c04ca85cda1",
+  "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
+  "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
+  "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+  "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "usage", "reliability"],
+  "areas": [
+    {
+      "id": "setup",
+      "title": "Getting started, harness discovery, and settings",
+      "prefix": "SET",
+      "areaWeight": 12,
+      "scenarios": [
+        {
+          "id": "SET-S1",
+          "name": "Fresh launch explains the desk and inventories recognized harnesses",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Launch with a fresh isolated user-data directory and capture the first screen before clicking anything.",
+            "Verify a Getting Started path explains project versus folder, chat creation, model choice, permission behavior, and where vendor processes run.",
+            "Verify every recognized installed stock harness is listed with detected, authenticated, unavailable, or needs-action state and a plain-language reason.",
+            "Verify custom direct-API choices are introduced without implying that Workhorse owns an account or subscription.",
+            "Dismiss or finish onboarding, restart, and verify its completion state is intentional and reversible from Settings."
+          ]
+        },
+        {
+          "id": "SET-S2",
+          "name": "Connect stock harnesses and add both custom API shapes",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Open Settings to the connected-LLM surface from both onboarding and /settings.",
+            "Inspect detected Grok, Codex, and Claude rows without changing their vendor-owned login state.",
+            "Create one OpenAI Chat Completions bot and one Anthropic Messages bot using local fixture endpoints or approved endpoints.",
+            "Probe models where supported, save, disable, re-enable, edit, and remove one bot.",
+            "Verify secrets are masked and never copied into ordinary persisted state or support exports."
+          ]
+        },
+        {
+          "id": "SET-S3",
+          "name": "Every settings section is reachable and persistent",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Walk Profile, LLMs, Skills, Usage, and Watch from the Settings header.",
+            "Change profile, appearance, and one safe preference; leave and return.",
+            "Restart Workhorse and confirm the values persist without altering vendor credentials.",
+            "Verify Back returns to the prior product context and Usage remains inside Settings."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "SET-01",
+          "criterion": "A first-run Getting Started experience exists and explains the Workhorse mental model before the user must guess how projects, chats, folders, agents, and permissions relate.",
+          "weight": 3,
+          "type": "exists",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["SET-S1"],
+          "passCriteria": "Fresh launch exposes a clear onboarding path with the five named concepts, can be completed or dismissed, and can be reopened later.",
+          "evidence": "First-launch screenshots, action transcript, and post-restart screenshot.",
+          "baseline": { "status": "not_found", "basis": "Static source walk: Welcome.tsx currently offers Create a project, Link an existing folder, and Connect an agent/Start a chat but no Getting Started flow." }
+        },
+        {
+          "id": "SET-02",
+          "criterion": "The first-run and LLM settings surfaces enumerate all recognized stock harnesses and custom connection shapes with honest readiness states and actionable reasons.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SET-S1", "SET-S2"],
+          "passCriteria": "Grok, Codex, Claude, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
+          "evidence": "Harness inventory screenshots plus detection payloads with secrets removed.",
+          "baseline": { "status": "partial", "basis": "Static source walk: Settings has stock/custom rows and detection logic, while Welcome does not show the recognized inventory." }
+        },
+        {
+          "id": "SET-03",
+          "criterion": "Adding, probing, editing, disabling, and deleting a custom bot round-trips without confusing provider presets with verified runtime facts.",
+          "weight": 2,
+          "type": "roundtrip",
+          "testability": "auto",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "scenarios": ["SET-S2"],
+          "passCriteria": "Both API shapes persist their explicit URL/model/schema, probe errors are clear, and deletion does not silently retarget existing chats.",
+          "evidence": "Before/after screenshots, probe transcript, saved public bot card, and affected-chat state."
+        },
+        {
+          "id": "SET-04",
+          "criterion": "Credentials remain vendor-owned or OS-encrypted and never appear in ordinary state, logs, screenshots, diagnostics, or eval artifacts.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "manual",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SET-S2"],
+          "passCriteria": "A known canary secret is absent from every collected artifact and normal state backup; custom keys are recovered only through the credential boundary.",
+          "evidence": "Redacted state inspection, support report, artifact scan, and credential-store test output."
+        },
+        {
+          "id": "SET-05",
+          "criterion": "Profile, LLMs, Skills, Usage, and Watch are all reachable inside Settings and retain their intended navigation hierarchy.",
+          "weight": 2,
+          "type": "exists",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["SET-S3"],
+          "passCriteria": "All five sections open, Usage is not promoted to a top-level sidebar product, and Back returns predictably.",
+          "evidence": "Settings-tab screenshots and navigation transcript."
+        },
+        {
+          "id": "SET-06",
+          "criterion": "Safe local preferences persist across restart while vendor credentials, subscriptions, contexts, and sandboxes remain separate.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "scenarios": ["SET-S3"],
+          "passCriteria": "Profile/appearance persist, but changing one provider never changes another provider's login, plan, context, or security configuration.",
+          "evidence": "Pre/post restart state, screenshots, and provider detection comparison."
+        }
+      ]
+    },
+    {
+      "id": "projects",
+      "title": "Projects, chats, references, and lifecycle",
+      "prefix": "PRJ",
+      "areaWeight": 12,
+      "scenarios": [
+        {
+          "id": "PRJ-S1",
+          "name": "Create a named project, then attach folders and references",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Create a project by name only and verify no folder is required.",
+            "Attach two fixture folders plus file, URL, and note references.",
+            "Start chats from project home and from the global New chat path.",
+            "Verify execution cwd is explicit and additional references reach the prompt context without becoming extra projects."
+          ]
+        },
+        {
+          "id": "PRJ-S2",
+          "name": "Exercise chat rename, title lock, archive, move, fork, and delete",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp"],
+          "steps": [
+            "Create two projects and multiple chats with distinctive message text.",
+            "Manually rename a chat, continue using it, and verify the title stays locked.",
+            "Archive/unarchive, drag or place the chat into the other project, fork it, and delete only the disposable fork.",
+            "Restart and verify ownership and archived state remain correct."
+          ]
+        },
+        {
+          "id": "PRJ-S3",
+          "name": "Search and review project state",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Search by project name, chat title, and distinctive transcript text.",
+            "Open the matched message and return to the project.",
+            "Review Git edits and open the chat-scoped terminal in the local fixture workspace.",
+            "Confirm archived chats and attention items remain scoped to their projects."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "PRJ-01",
+          "criterion": "A project is a named container that can exist without a folder, and chats belong to exactly one project.",
+          "weight": 3,
+          "type": "crud",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["PRJ-S1"],
+          "passCriteria": "Name-only creation succeeds, project home is usable, and each created chat has one visible owner project.",
+          "evidence": "Creation screenshots and persisted project/session records."
+        },
+        {
+          "id": "PRJ-02",
+          "criterion": "Multiple folders and non-folder references can be added later and are represented honestly in execution context.",
+          "weight": 2,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["PRJ-S1"],
+          "passCriteria": "Primary cwd is explicit, additional folders/references are discoverable, and no provider is told it has filesystem access that the shell did not grant.",
+          "evidence": "Project UI, generated preface, and provider-side cwd/tool evidence."
+        },
+        {
+          "id": "PRJ-03",
+          "criterion": "A new chat is created before model selection pressure, then uses the last valid attached model without inventing a connection.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["PRJ-S1"],
+          "passCriteria": "New chat never blocks on a brain picker; unattached providers are not silently selected; the composer remains the model-selection surface.",
+          "evidence": "New-chat transcript and composer/model-menu screenshots."
+        },
+        {
+          "id": "PRJ-04",
+          "criterion": "Manual chat rename locks the title against later prompt-, runtime-, or provider-generated retitling.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["PRJ-S2"],
+          "passCriteria": "After /rename or inline rename, at least three later turns and a restart leave the exact manual title unchanged.",
+          "evidence": "Title timeline with timestamps, provider title events if any, and final sidebar screenshot."
+        },
+        {
+          "id": "PRJ-05",
+          "criterion": "Archive, unarchive, move, fork, and delete affect only the intended chat and preserve project ownership rules.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp"],
+          "scenarios": ["PRJ-S2"],
+          "passCriteria": "Each action persists after restart; deleting a fork does not delete its parent; archived chats remain attached to their project.",
+          "evidence": "Before/after session records, sidebar screenshots, and restart check."
+        },
+        {
+          "id": "PRJ-06",
+          "criterion": "Global search, Git review, and terminal entry points lead to the exact matching chat and its scoped workspace.",
+          "weight": 2,
+          "type": "scoping",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["PRJ-S3"],
+          "passCriteria": "Search finds title and transcript matches across projects; review/terminal resolve to the selected chat's local folder or managed worktree.",
+          "evidence": "Search results, selected chat identity, review root, and terminal cwd."
+        }
+      ]
+    },
+    {
+      "id": "model-integrity",
+      "title": "Provider, model, effort, and runtime identity",
+      "prefix": "MOD",
+      "areaWeight": 16,
+      "scenarios": [
+        {
+          "id": "MOD-S1",
+          "name": "Trace selected identity through every stock adapter",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "steps": [
+            "For each enabled stock profile, select a non-default model and supported effort.",
+            "Send a deterministic identity probe.",
+            "Capture selected UI state, resolved launch spec, runtime/session metadata, assistant message stamp, and usage event.",
+            "Compare every layer and record any fallback or missing evidence."
+          ]
+        },
+        {
+          "id": "MOD-S2",
+          "name": "Switch models and providers mid-chat without stale identity",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "steps": [
+            "Establish a distinctive first-provider fact and collect one response.",
+            "Switch model within the same provider, then switch to a different provider.",
+            "Verify vendor session ids, permissions, message stamps, context handoff, usage buckets, and visible labels.",
+            "Switch back and verify no hidden subscription, sandbox, or vendor session was merged."
+          ]
+        },
+        {
+          "id": "MOD-S3",
+          "name": "Trace direct-API model identity and reject silent fallback",
+          "executor": "api",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "steps": [
+            "Use a local fixture endpoint that records headers/body and can return a deliberately different response model.",
+            "Send one request with each API shape and inspect the exact model, effort/thinking, history, tools, and auth fields.",
+            "Return a mismatched model id, then an unsupported-model error.",
+            "Verify Workhorse surfaces the mismatch/error rather than labeling the reply as the requested model."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "MOD-01",
+          "criterion": "Provider availability and model lists derive from detection/runtime data when available and label catalog fallbacks as unverified choices.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["MOD-S1", "MOD-S3"],
+          "passCriteria": "A cache/catalog row is never presented as proof of installed availability or successful authentication.",
+          "evidence": "Detection payload, cache/catalog source, model menu, and connection state."
+        },
+        {
+          "id": "MOD-02",
+          "criterion": "The selected provider/model is the provider/model actually launched or sent in the outbound API request.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["MOD-S1", "MOD-S3"],
+          "passCriteria": "Exact identifiers match between session state and launch/request evidence for every enabled profile.",
+          "evidence": "Sanitized session state, launch arguments or HTTP body, and profile id."
+        },
+        {
+          "id": "MOD-03",
+          "criterion": "Effort/reasoning choices are limited to values supported by the chosen model and translated exactly for the provider.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["MOD-S1", "MOD-S3"],
+          "passCriteria": "Unsupported levels are not offered or silently coerced; adaptive/off/max/ultra distinctions remain provider-specific.",
+          "evidence": "Model menu choices and launch/request reasoning fields."
+        },
+        {
+          "id": "MOD-04",
+          "criterion": "Runtime observation, transcript stamps, and usage attribution agree with the launched provider/model or expose uncertainty explicitly.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["MOD-S1", "MOD-S3"],
+          "passCriteria": "Selection, launch/request, runtime, transcript, and usage form one consistent provenance chain; missing runtime identity is labeled unknown, not guessed.",
+          "evidence": "Five-layer provenance record defined in provider-matrix.json."
+        },
+        {
+          "id": "MOD-05",
+          "criterion": "Switching provider clears stale vendor session and permission state while preserving only the portable conversation Workhorse intentionally hands over.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp"],
+          "scenarios": ["MOD-S2"],
+          "passCriteria": "Old vendor ids/grants are absent after cross-provider switch; new messages and usage carry the new identity; portable history is explicit.",
+          "evidence": "Before/after session state, provider request, transcript stamps, and usage rows."
+        },
+        {
+          "id": "MOD-06",
+          "criterion": "No silent model fallback or later retitling misrepresents which brain performed a turn.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["MOD-S2", "MOD-S3"],
+          "passCriteria": "Fallback is either refused or visibly recorded with actual identity; manual titles stay locked; every assistant turn retains its brain stamp.",
+          "evidence": "Fallback probe, message records, title timeline, and final sidebar/composer labels."
+        }
+      ]
+    },
+    {
+      "id": "commands",
+      "title": "Interoperable language and provider-specific augmentation",
+      "prefix": "CMD",
+      "areaWeight": 15,
+      "scenarios": [
+        {
+          "id": "CMD-S1",
+          "name": "Inventory the command palette and aliases for every provider",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Open the slash palette in one chat per profile and capture the common command set.",
+            "Exercise every documented alias through typed input, not only palette clicks.",
+            "Verify provider-native commands appear only where supported and duplicate names resolve to the intended owner.",
+            "Confirm unavailable capabilities are hidden or clearly labeled rather than accepted and ignored."
+          ]
+        },
+        {
+          "id": "CMD-S2",
+          "name": "Run the complete /goal lifecycle across providers",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Use /goal with the same deterministic objective in each profile.",
+            "Check /goal status, pause, resume, and clear.",
+            "Verify control commands do not pollute the normal transcript and the goal bar reflects state.",
+            "Restart during an active goal and verify recovery; confirm each provider receives equivalent objective semantics."
+          ]
+        },
+        {
+          "id": "CMD-S3",
+          "name": "Compare canonical schedule, compact, plan, and native loop behavior",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Create a recurring /schedule in every profile without waiting for its due time.",
+            "Inspect /plan translation and verify tool restrictions before approval.",
+            "Create enough fixture context to invoke /compact and identify native versus Workhorse checkpoint behavior.",
+            "Where a harness exposes /loop, compare it with /schedule and verify the UI explains which state Workhorse can recover."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "CMD-01",
+          "criterion": "The command palette exposes the complete Workhorse-owned command language consistently across all providers.",
+          "weight": 3,
+          "type": "exists",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S1"],
+          "passCriteria": "Every command in command-contract.json is reachable with the declared aliases and has an observable effect or explicit input requirement.",
+          "evidence": "Per-profile command inventory and alias action transcript."
+        },
+        {
+          "id": "CMD-02",
+          "criterion": "Canonical model, effort, permission, plan, and sandbox language translates to provider controls without implying identical native capabilities.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S1", "CMD-S3"],
+          "passCriteria": "Each command either maps to the correct provider control, is supplied by Workhorse, or is marked unavailable; no no-op success is allowed.",
+          "evidence": "Command action, capability registry row, and launch/request/security effect."
+        },
+        {
+          "id": "CMD-03",
+          "criterion": "/goal set, status, pause, resume, and clear have equivalent Workhorse semantics across every provider and survive restart.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S2"],
+          "passCriteria": "The same objective and lifecycle state are visible regardless of attached provider; control commands remain quiet; active state recovers.",
+          "evidence": "Goal state timeline, transcript diff, restart state, and provider prompts."
+        },
+        {
+          "id": "CMD-04",
+          "criterion": "/compact uses a native operation only when available and otherwise creates a portable, inspectable Workhorse checkpoint.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S3"],
+          "passCriteria": "Native versus Workhorse ownership is visible; keep-note is preserved; no provider is credited with a native compact it did not execute.",
+          "evidence": "Capability label, compact event/checkpoint, and restored-context probe."
+        },
+        {
+          "id": "CMD-05",
+          "criterion": "/plan establishes an auditable read/research-first boundary and translates to each provider without granting write tools prematurely.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S3"],
+          "passCriteria": "A write attempt in plan mode is blocked or requires an explicit mode transition; the UI does not claim a vendor-native plan when Workhorse is enforcing it.",
+          "evidence": "Mode UI, provider launch/request, write-attempt result, and permission record."
+        },
+        {
+          "id": "CMD-06",
+          "criterion": "Recurring intent works through the canonical /schedule language everywhere, while provider-native loop/workflow features are surfaced as optional augmentations with clear ownership.",
+          "weight": 2,
+          "type": "depth",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CMD-S3"],
+          "passCriteria": "Every profile can create a persisted Workhorse schedule; native /loop appears only when discovered; the user can tell which mechanism survives a Workhorse restart.",
+          "evidence": "Schedule records, provider-native command inventory, and ownership labels."
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "title": "Permissions, sandboxing, tools, and trust boundaries",
+      "prefix": "SEC",
+      "areaWeight": 14,
+      "scenarios": [
+        {
+          "id": "SEC-S1",
+          "name": "Translate the unified permission inbox",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Request a fixture file read, a fixture file write, and a harmless command in Ask mode.",
+            "Choose Deny, Allow once, and Allow for session on separate requests.",
+            "Verify the decision reaches the correct provider/tool call and is not reused outside its scope.",
+            "Switch providers and verify old grants do not cross the boundary."
+          ]
+        },
+        {
+          "id": "SEC-S2",
+          "name": "Probe filesystem, network, and outside-workspace boundaries",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Repeat safe read/write probes under off, workspace, read-only, and strict where supported.",
+            "Attempt a fixture-only network request with network blocked, ask, and allowed.",
+            "Attempt to read a canary path outside the fixture workspace without exposing its contents.",
+            "Verify Workhorse blocks at its boundary before a weaker vendor permission can override it."
+          ]
+        },
+        {
+          "id": "SEC-S3",
+          "name": "Exercise MCP, desk tools, subagents, and cancellation",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Attach a deterministic local MCP fixture and invoke one read-only and one approval-requiring tool.",
+            "Spawn a bounded subagent where the profile claims support and inspect parent/child records.",
+            "Cancel the parent and verify cascading cancellation or an explicit unsupported result.",
+            "Confirm tool labels and results never pretend a provider executed a Workhorse desk action."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "SEC-01",
+          "criterion": "One permission inbox provides Deny, Allow once, and Allow for session and translates each decision to the active provider/tool call.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S1"],
+          "passCriteria": "Decisions are scoped to the exact request/session, denials stop execution, and provider switches clear stale grants.",
+          "evidence": "Permission UI, normalized request, provider response, and filesystem/command outcome."
+        },
+        {
+          "id": "SEC-02",
+          "criterion": "Filesystem sandbox, network policy, and outside-workspace access are distinct controls with provider-honest enforcement labels.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S2"],
+          "passCriteria": "Each boundary can be varied independently; Workhorse versus native enforcement is visible; blocked actions leave no side effect.",
+          "evidence": "Policy state, capability label, provider launch/request, and canary outcomes."
+        },
+        {
+          "id": "SEC-03",
+          "criterion": "The stricter Workhorse boundary wins over provider approval or always-approve state.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S2"],
+          "passCriteria": "Network/outside-root blocks remain blocks in always-approve; no prompt or provider flag can escalate beyond the Workhorse policy.",
+          "evidence": "Security decision trace and absence of network/file side effect."
+        },
+        {
+          "id": "SEC-04",
+          "criterion": "Plan/read-only operation does not permit mutation until an explicit, reviewable transition.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S2"],
+          "passCriteria": "A fixture write cannot complete in plan/read-only state; the transition and resulting authority are visible.",
+          "evidence": "Mode/sandbox state, write attempt, permission trace, and fixture checksum."
+        },
+        {
+          "id": "SEC-05",
+          "criterion": "MCP and desk tools share normalized approvals/results without leaking server credentials or bypassing profile boundaries.",
+          "weight": 2,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S3"],
+          "passCriteria": "The same fixture tool produces equivalent visible results; secrets remain redacted; approval-required calls stop on deny.",
+          "evidence": "MCP request/result, permission event, tool row, and artifact secret scan."
+        },
+        {
+          "id": "SEC-06",
+          "criterion": "Subagent lifecycle, resource ceilings, worktree/shared-workspace isolation, and cancellation are explicit and auditable.",
+          "weight": 2,
+          "type": "depth",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["SEC-S3"],
+          "passCriteria": "Parent/child identity, runtime/token ceilings, isolation mode, changed files, and final/cancel state are visible or honestly unsupported.",
+          "evidence": "Subagent records, worktree path, resource counters, changed-file review, and cancellation outcome."
+        }
+      ]
+    },
+    {
+      "id": "continuity",
+      "title": "Conversation continuity, switching, compaction, and recovery",
+      "prefix": "CON",
+      "areaWeight": 13,
+      "scenarios": [
+        {
+          "id": "CON-S1",
+          "name": "Resume the same chat after window and process restarts",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Create a provider-specific fact, tool result, and unresolved next step.",
+            "Close and reopen the window, then terminate and restart the app process.",
+            "Resume the same visible chat and ask for the fact/next step.",
+            "Verify native session load when claimed and portable replay otherwise, with no duplicate turns."
+          ]
+        },
+        {
+          "id": "CON-S2",
+          "name": "Switch providers using canonical portable history",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Establish decisions across several complete turns and include tool/thought rows.",
+            "Switch to each other profile in sequence.",
+            "Inspect serialized portable history, provider prompt, and visible transcript.",
+            "Verify complete user/assistant turns transfer, tool internals do not impersonate conversation, and truncation is disclosed."
+          ]
+        },
+        {
+          "id": "CON-S3",
+          "name": "Fork, rewind, queue, cancel, and compact without corrupting lineage",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Fork from a known turn and make divergent decisions in parent and child.",
+            "Queue a follow-up while a long fixture turn is running, then cancel.",
+            "Rewind where available or use Workhorse lineage where not.",
+            "Compact and verify both branches retain correct ancestry and no canceled response is later appended."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "CON-01",
+          "criterion": "Visible chat persistence and vendor-session continuity agree after window and app-process restart.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S1"],
+          "passCriteria": "The chat resumes without duplicate/missing turns; native session load is used when claimed, otherwise portable replay is explicit.",
+          "evidence": "Pre/post state, vendor session id/load trace, transcript diff, and fact probe."
+        },
+        {
+          "id": "CON-02",
+          "criterion": "Portable history is canonical across providers, preserves complete conversational turns, and excludes internal tool/thought rows from impersonating user or assistant speech.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S2"],
+          "passCriteria": "Opening decisions and recent complete turns survive; brain stamps are retained; truncation and checkpoint boundaries are disclosed.",
+          "evidence": "Serialized portable history, source transcript, and receiving-provider prompt."
+        },
+        {
+          "id": "CON-03",
+          "criterion": "Fork and rewind preserve explicit parent/child lineage and never mutate the source chat unexpectedly.",
+          "weight": 2,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S3"],
+          "passCriteria": "Divergent turns stay isolated, lineage is navigable, and native versus Workhorse ownership is visible.",
+          "evidence": "Parent/child ids, transcript comparison, lineage UI, and vendor operation trace."
+        },
+        {
+          "id": "CON-04",
+          "criterion": "Compaction preserves declared keep-notes and restores enough context to continue without falsely claiming full native memory.",
+          "weight": 2,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S3"],
+          "passCriteria": "Post-compact probe recovers the keep-note and key decisions; checkpoint/native source is identifiable.",
+          "evidence": "Compact event/checkpoint, context counters, and post-compact answers."
+        },
+        {
+          "id": "CON-05",
+          "criterion": "Queued prompts, cancellation, and retry cannot append stale output to the wrong chat, branch, provider, or model.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S3"],
+          "passCriteria": "Canceled output remains canceled, queued work executes once in order, and every result retains its original chat/provider/model identity.",
+          "evidence": "Event timeline, queue record, cancel acknowledgement, transcript, and usage rows."
+        },
+        {
+          "id": "CON-06",
+          "criterion": "Copy/export/support surfaces produce the visible conversation intended by the user without leaking hidden context or secrets.",
+          "weight": 2,
+          "type": "scoping",
+          "testability": "manual",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S2", "CON-S3"],
+          "passCriteria": "Latest-reply copy is exact, export marks provider/model transitions, and hidden prompts/tool credentials are absent.",
+          "evidence": "Clipboard/export artifact and secret/hidden-context scan."
+        }
+      ]
+    },
+    {
+      "id": "usage",
+      "title": "Usage, plans, budgets, Watch, and support truthfulness",
+      "prefix": "USG",
+      "areaWeight": 10,
+      "scenarios": [
+        {
+          "id": "USG-S1",
+          "name": "Reconcile turn usage by provider and actual model",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Record the empty baseline, then send one deterministic prompt per profile.",
+            "Capture raw provider/API usage events and the finalized Workhorse usage row.",
+            "Switch models once and send again.",
+            "Reconcile provider totals, model totals, input/output/cache tokens, context, and cost without double counting."
+          ]
+        },
+        {
+          "id": "USG-S2",
+          "name": "Inspect plan remaining, budgets, and Watch holds",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "steps": [
+            "Load each available vendor plan/remains source and capture timestamp/source.",
+            "Set a small fixture budget or deterministic Watch threshold.",
+            "Trigger a hold without spending live money and verify the reason plus override scope.",
+            "Restart and verify durable marks/permits behave as documented."
+          ]
+        },
+        {
+          "id": "USG-S3",
+          "name": "Export a support-safe provider report",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Seed canary prompt text, URL, key, environment value, and file content.",
+            "Export diagnostics/support information.",
+            "Verify build, OS, detections, capabilities, and safe counts are present.",
+            "Scan for every canary and confirm none are present."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "USG-01",
+          "criterion": "Usage is reachable inside Settings and attributes every real turn to its actual provider and model.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["USG-S1"],
+          "passCriteria": "Provider/model rows match the provenance chain and no preview, failed preflight, or canceled-before-send turn invents tokens.",
+          "evidence": "Raw events, finalized usage rows, and Usage UI."
+        },
+        {
+          "id": "USG-02",
+          "criterion": "Multiple partial/cumulative usage events are deduplicated and finalized without inflation.",
+          "weight": 3,
+          "type": "rule",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["USG-S1"],
+          "passCriteria": "Known cumulative fixtures and live event sequences reconcile exactly once across input/output/cache/cost.",
+          "evidence": "Event sequence, deduplication trace, final totals, and independent arithmetic."
+        },
+        {
+          "id": "USG-03",
+          "criterion": "Context-window and remaining-plan displays state their source and do not confuse context occupancy, subscription remaining, or local budget.",
+          "weight": 2,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "scenarios": ["USG-S2"],
+          "passCriteria": "Each number has provider/model, unit, time/source, and unknown/unlimited behavior; stale data is visibly stale.",
+          "evidence": "Plan payload, model context source, Usage/Watch UI, and timestamps."
+        },
+        {
+          "id": "USG-04",
+          "criterion": "Usage persists and aggregates by Today/Week/Month/All without changing history when models are renamed or catalogs update.",
+          "weight": 2,
+          "type": "roundtrip",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["USG-S1"],
+          "passCriteria": "Historical rows retain stable provider/model keys and range totals equal their underlying events after restart.",
+          "evidence": "Usage state before/after restart, range totals, and model catalog change probe."
+        },
+        {
+          "id": "USG-05",
+          "criterion": "Watch holds are deterministic, explain the exact threshold, persist safely, and never merge budgets across vendors.",
+          "weight": 2,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "scenarios": ["USG-S2"],
+          "passCriteria": "A hold blocks only the intended vendor/session/threshold; permit and day-mark expiry are correct across restart.",
+          "evidence": "Watch inputs, hold result, permit record, provider send outcome, and restart state."
+        },
+        {
+          "id": "USG-06",
+          "criterion": "Support export is useful for adapter diagnosis but excludes prompts, messages, URLs, file contents, environment values, and credentials.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "manual",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["USG-S3"],
+          "passCriteria": "Safe build/detection/capability metadata exists and every seeded canary is absent.",
+          "evidence": "Support report plus automated canary scan."
+        }
+      ]
+    },
+    {
+      "id": "reliability",
+      "title": "Install, update, persistence, recovery, and release evidence",
+      "prefix": "REL",
+      "areaWeight": 8,
+      "scenarios": [
+        {
+          "id": "REL-S1",
+          "name": "Compare source, packaged build, and existing install",
+          "executor": "package",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Record repository commit, package version, build platform, and installed app version before launch.",
+            "Build or obtain the approved package without overwriting the existing install.",
+            "Inspect packaged contents for renderer, Electron main, icons, and required resources.",
+            "Launch with isolated state and verify the UI can identify its version/build channel."
+          ]
+        },
+        {
+          "id": "REL-S2",
+          "name": "Recover state and active work after process interruption",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "steps": [
+            "Create projects, chats, an active goal, a scheduled run, and one pending/failed attention item.",
+            "Interrupt the app during safe fixture work, then relaunch.",
+            "Verify atomic state recovery, backup fallback, queue/goal/schedule recovery, and no duplicate dispatch.",
+            "Corrupt only a copied fixture state file and verify backup recovery without touching real user data."
+          ]
+        },
+        {
+          "id": "REL-S3",
+          "name": "Exercise update checks, diagnostics, and release gates",
+          "executor": "package",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Run a mocked current/newer/malformed update check and inspect user-facing results.",
+            "Verify the release artifact contains expected files and launches on its claimed platform.",
+            "Run the free structural/unit/build verification lane.",
+            "Record dependency audit findings separately from product verdicts and do not auto-fix breaking updates."
+          ]
+        }
+      ],
+      "rubric": [
+        {
+          "id": "REL-01",
+          "criterion": "The evaluated build is traceable to an exact source commit, package version, platform, and install channel.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S1"],
+          "passCriteria": "Source, package, and running app identities are recorded; mismatches stop or invalidate the run rather than being hand-waved.",
+          "evidence": "Git commit, package metadata, artifact hash, platform, and in-app version."
+        },
+        {
+          "id": "REL-02",
+          "criterion": "Install, update, quit, and relaunch preserve user projects/chats while keeping an isolated eval run from overwriting the user's normal state.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "manual",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S1", "REL-S3"],
+          "passCriteria": "Eval uses isolated userData; update/uninstall policy is explicit; relaunch retains intended state and no real state is mutated.",
+          "evidence": "User-data paths, before/after hashes, install/update transcript, and relaunch screenshot."
+        },
+        {
+          "id": "REL-03",
+          "criterion": "Atomic persistence, backup rotation, migration, and corrupt-primary fallback recover the newest compatible state.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S2"],
+          "passCriteria": "Fixture corruption recovers from backup with a visible/support-safe diagnostic and without accepting plaintext credentials.",
+          "evidence": "State files/hashes, recovery choice, migrated version, and credential scan."
+        },
+        {
+          "id": "REL-04",
+          "criterion": "Goals, scheduled work, active dispatch, queues, and attention state recover once after restart.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai"],
+          "scenarios": ["REL-S2"],
+          "passCriteria": "Each durable item returns with correct status; in-flight work is recovered or failed explicitly; no duplicate provider send occurs.",
+          "evidence": "Journal/state before interruption, recovery log, provider send ids, and final attention inbox."
+        },
+        {
+          "id": "REL-05",
+          "criterion": "Packaged artifacts contain the real renderer/main/resources and update checks fail safely on unavailable or malformed release metadata.",
+          "weight": 2,
+          "type": "rule",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S1", "REL-S3"],
+          "passCriteria": "Artifact inventory meets declared contents and mocked update failures do not corrupt or strand the app.",
+          "evidence": "Artifact inventory, launch result, update fixture responses, and UI messages."
+        },
+        {
+          "id": "REL-06",
+          "criterion": "The free release gate validates eval coverage, TypeScript/build, unit/contract tests, and records dependency risk before any live provider spend.",
+          "weight": 2,
+          "type": "depth",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S3"],
+          "passCriteria": "npm run verify passes; eval drift fails the gate; dependency audit findings are captured without an automatic breaking fix.",
+          "evidence": "Exact command outputs, test counts, build artifact inventory, and dependency-audit summary."
+        }
+      ]
+    }
+  ]
+}

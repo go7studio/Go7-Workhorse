@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "grok-acp",
+      "provider": "grok",
+      "transport": "acp",
+      "discovery": ["binary", "login artifact", "model cache", "runtime command list"],
+      "launchBoundary": "electron/grok-host.ts",
+      "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "native", "fork": "native", "rewind": "native", "compact": "native", "usage": "native" },
+      "baselineStatus": "unrun"
+    },
+    {
+      "id": "codex-acp",
+      "provider": "codex",
+      "transport": "acp",
+      "discovery": ["binary", "login artifact", "model cache", "app-server capabilities"],
+      "launchBoundary": "electron/codex-host.ts",
+      "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native" },
+      "baselineStatus": "unrun"
+    },
+    {
+      "id": "claude-acp",
+      "provider": "claude",
+      "transport": "acp",
+      "discovery": ["binary", "login artifact", "model cache", "ACP launch"],
+      "launchBoundary": "electron/claude-host.ts",
+      "expectedModelEvidence": ["selected session model", "launch arguments", "ACP session metadata or usage event", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "native", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "native" },
+      "baselineStatus": "unrun"
+    },
+    {
+      "id": "custom-openai",
+      "provider": "custom",
+      "transport": "http",
+      "apiShape": "openai-completions",
+      "discovery": ["provider preset", "base URL", "models endpoint probe"],
+      "launchBoundary": "electron/custom-http.ts",
+      "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse" },
+      "baselineStatus": "unrun"
+    },
+    {
+      "id": "custom-anthropic",
+      "provider": "custom",
+      "transport": "http",
+      "apiShape": "anthropic-messages",
+      "discovery": ["manual base URL", "models endpoint probe when supported"],
+      "launchBoundary": "electron/custom-http.ts",
+      "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
+      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse" },
+      "baselineStatus": "unrun"
+    }
+  ],
+  "settingsSections": ["profile", "llms", "skills", "usage", "watch"],
+  "requiredProvenanceChain": [
+    "selection",
+    "launch-or-request",
+    "runtime-observation",
+    "transcript",
+    "usage"
+  ],
+  "truthRule": "A configured or catalog model name is not proof that the runtime used it. Any silent fallback, stale label, or provider/model mismatch is a failure even if the reply itself looks valid."
+}

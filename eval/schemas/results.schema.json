@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://go7.studio/workhorse/eval/results.schema.json",
+  "title": "Workhorse eval verdicts",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "verdicts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "verdicts": {
+      "type": "object",
+      "patternProperties": {
+        "^[A-Z]{3}-[0-9]{2}$": {
+          "type": "object",
+          "required": ["verdict", "notes", "evidence"],
+          "properties": {
+            "verdict": { "enum": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"] },
+            "notes": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "profiles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "defects": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

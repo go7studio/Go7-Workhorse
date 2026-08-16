@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "suite": "go7-workhorse",
+  "mode": "baseline-only",
+  "source": {
+    "channel": "source",
+    "repository": "https://github.com/Spikey222/Go7-Workhorse.git",
+    "ref": "origin/main",
+    "expectedVersion": "0.1.2"
+  },
+  "install": {
+    "existingAppPath": "",
+    "packagedAppPath": "",
+    "freshUserDataDirectory": "",
+    "preserveExistingUserData": true
+  },
+  "profiles": {
+    "grok-acp": {
+      "enabled": false,
+      "notes": "Enable only when the installed Grok harness and its account may be exercised."
+    },
+    "codex-acp": {
+      "enabled": false,
+      "notes": "Enable only when the installed Codex harness and its account may be exercised."
+    },
+    "claude-acp": {
+      "enabled": false,
+      "notes": "Enable only when the installed Claude harness and its account may be exercised."
+    },
+    "custom-openai": {
+      "enabled": false,
+      "baseUrlEnv": "WORKHORSE_EVAL_OPENAI_BASE_URL",
+      "apiKeyEnv": "WORKHORSE_EVAL_OPENAI_API_KEY",
+      "modelEnv": "WORKHORSE_EVAL_OPENAI_MODEL"
+    },
+    "custom-anthropic": {
+      "enabled": false,
+      "baseUrlEnv": "WORKHORSE_EVAL_ANTHROPIC_BASE_URL",
+      "apiKeyEnv": "WORKHORSE_EVAL_ANTHROPIC_API_KEY",
+      "modelEnv": "WORKHORSE_EVAL_ANTHROPIC_MODEL"
+    }
+  },
+  "spend": {
+    "liveApiAllowed": false,
+    "approvedUsd": 0,
+    "approvalTicket": ""
+  },
+  "safety": {
+    "allowNetwork": false,
+    "allowOutsideWorkspace": false,
+    "allowDestructiveProductActions": false,
+    "fixtureWorkspaceOnly": true
+  },
+  "evidence": {
+    "screenshots": true,
+    "screenRecording": false,
+    "supportReport": true,
+    "redactSecrets": true
+  }
+}

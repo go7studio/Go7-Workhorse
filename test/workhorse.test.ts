@@ -2343,13 +2343,13 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.match(pane, /SessionSetup/);
   assert.match(pane, /session-header slim/);
   assert.doesNotMatch(pane, /mode-seg/);
-  assert.match(setup, /This chat/);
+  assert.match(setup, /Chat settings/);
   assert.match(setup, /vendorTidePercent/);
   assert.doesNotMatch(setup, /tide-ink-dark/);
   assert.match(setup, /--setup-vendor/);
   assert.match(setup, /setup-tide/);
-  assert.match(setup, /Pause before tools/);
-  assert.match(setup, /Blocks writes and shell commands/);
+  assert.match(setup, /Ask each time/);
+  assert.match(setup, /label: "Strict"/);
   assert.doesNotMatch(setup, /Security boundaries/);
   assert.doesNotMatch(setup, /Outside workspace/);
   assert.match(setup, /aria-label="Vendor"/);
@@ -2362,8 +2362,8 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.match(setup, /"codex"/);
   assert.match(setup, /Approval behavior/);
   assert.match(setup, /File access/);
-  assert.match(setup, /Plan mode never edits/);
-  assert.match(setup, /Full access means the sandbox is off/);
+  assert.match(setup, /label: "Plan mode"/);
+  assert.match(setup, /label: "Full access"/);
   assert.match(setup, /type="range"/);
   assert.match(setup, /setup-slider-line/);
   assert.doesNotMatch(setup, /setup-slider-head/);
@@ -2371,7 +2371,8 @@ test("session setup is a compact right-side model and access inspector", () => {
   const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSrc, /mode: choice\.mode/);
   assert.match(storeSrc, /applySessionPolicyChange/);
-  assert.match(setup, /File edits run/);
+  assert.match(setup, /Accept edits/);
+  assert.doesNotMatch(setup, /Choose the brain|Approval behavior and file containment|When should Workhorse pause/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /setup-slider-thumb/);
   const setupCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(setupCss, /container-name:\s*session/);
@@ -2559,7 +2560,7 @@ test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () =
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(pane, /leftoverForCard/);
-  assert.match(pane, /Weekly \$\{planName\} allowance/);
+  assert.match(pane, /\$\{planName\} ·/);
   assert.match(store, /codexPlanUsage/);
   assert.match(store, /refreshCodexPlan/);
   assert.match(store, /claudePlanUsage/);
@@ -3108,7 +3109,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(review, /onTracked/);
   assert.match(review, /overlay/);
   assert.match(review, /file-review-close/);
-  assert.match(review, /Couldn’t find this file/);
+  assert.match(review, /File not found/);
   assert.match(review, /rootKey = roots\.join/);
   assert.match(review, /\.catch\(/);
   assert.match(review, /buildFileDiff/);
@@ -3131,7 +3132,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:resolve-file/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /fileDiff/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /resolveFile/);
-  assert.match(home, /New chat stays in the sidebar/);
+  assert.match(home, /empty="No edits\."/);
   assert.match(home, /archiveProject/);
   assert.match(home, /deleteProject/);
   assert.match(home, /Move chats to Chats/);

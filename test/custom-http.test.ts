@@ -708,7 +708,7 @@ test("custom HTTP sandbox stamps live desk limits", () => {
   assert.match(opened, /Writes are allowed this turn/);
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   assert.match(setup, /<strong>File access<\/strong>/);
-  assert.match(setup, /Full access means the sandbox is off/);
+  assert.match(setup, /label: "Full access"/);
   assert.doesNotMatch(
     setup,
     /provider === "grok" \|\| session.provider === "codex"/,

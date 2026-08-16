@@ -8,18 +8,18 @@ import { vendorTidePercent } from "../lib/usage";
 import type { EffortLevel, PermissionMode, ProviderId, SandboxProfile } from "../lib/types";
 import { capabilitiesFor } from "../lib/provider-capabilities";
 
-const PERMISSIONS: { id: PermissionMode; label: string; hint: string }[] = [
-  { id: "ask", label: "Ask each time", hint: "Pause before tools so you stay in control." },
-  { id: "accept-edits", label: "Accept edits", hint: "File edits run; commands still ask." },
-  { id: "always-approve", label: "Always allow", hint: "Run trusted tools without pausing." },
-  { id: "plan", label: "Plan mode", hint: "Research and propose; do not make edits." },
+const PERMISSIONS: { id: PermissionMode; label: string }[] = [
+  { id: "ask", label: "Ask each time" },
+  { id: "accept-edits", label: "Accept edits" },
+  { id: "always-approve", label: "Always allow" },
+  { id: "plan", label: "Plan mode" },
 ];
 
-const SANDBOXES: { id: SandboxProfile; label: string; hint: string }[] = [
-  { id: "off", label: "Full access", hint: "Sandbox off; can reach the full machine." },
-  { id: "workspace", label: "Workspace only", hint: "Writes stay inside the project folder." },
-  { id: "read-only", label: "Read-only", hint: "Files can be inspected, never changed." },
-  { id: "strict", label: "Strict", hint: "Blocks writes and shell commands." },
+const SANDBOXES: { id: SandboxProfile; label: string }[] = [
+  { id: "off", label: "Full access" },
+  { id: "workspace", label: "Workspace only" },
+  { id: "read-only", label: "Read-only" },
+  { id: "strict", label: "Strict" },
 ];
 
 const PERMISSION_ICONS: Record<PermissionMode, string> = {
@@ -153,9 +153,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
       </div>
       <header className="setup-intro">
         <div>
-          <span className="setup-kicker">This chat</span>
-          <strong>Model &amp; chat settings</strong>
-          <p>Choose the brain, reasoning depth, and access for this conversation.</p>
+          <strong>Chat settings</strong>
         </div>
         <button className="setup-close" type="button" aria-label="Close model and chat settings" onClick={onClose}>
           ×
@@ -167,7 +165,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
         <div className="setup-heading">
           <div>
             <strong>Model</strong>
-            <span>Pick a provider, then choose one of its available models.</span>
           </div>
           <span className="setup-current">{formatWindow(modelsFor(session.provider).find((model) => model.id === session.model)?.contextWindow ?? 0)} context</span>
         </div>
@@ -240,8 +237,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <section className="setup-card setup-environment-card">
         <div className="setup-heading compact">
           <div>
-            <strong>Runs on this Mac</strong>
-            <span>Choose the working copy used by this chat.</span>
+            <strong>Workspace</strong>
           </div>
         </div>
         <div className="setup-environments" role="listbox" aria-label="Environment">
@@ -253,7 +249,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
             onClick={() => void chooseEnvironment("local")}
           >
             <span className="setup-environment-icon" aria-hidden="true">⌂</span>
-            <span><strong>{environmentBusy === "local" ? "Opening…" : "Local folder"}</strong><em>Use the project’s linked files directly.</em></span>
+            <span><strong>{environmentBusy === "local" ? "Opening…" : "Local folder"}</strong></span>
           </button>
           <button
             className={environmentKind === "worktree" ? "on" : undefined}
@@ -264,15 +260,17 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
             onClick={() => void chooseEnvironment("worktree")}
           >
             <span className="setup-environment-icon" aria-hidden="true">⑂</span>
-            <span><strong>{environmentBusy === "worktree" ? "Creating…" : "Isolated worktree"}</strong><em>Give this chat its own Git working copy.</em></span>
+            <span><strong>{environmentBusy === "worktree" ? "Creating…" : "Isolated worktree"}</strong></span>
           </button>
         </div>
-        <p className="setup-note">
-          {environmentNote ||
-            (environmentKind === "worktree" && session.environment?.kind === "worktree"
-              ? session.environment.path
-              : localRoot || "Link a project folder to enable local and worktree choices.")}
-        </p>
+        {(environmentNote || localRoot) && (
+          <p className="setup-note">
+            {environmentNote ||
+              (environmentKind === "worktree" && session.environment?.kind === "worktree"
+                ? session.environment.path
+                : localRoot)}
+          </p>
+        )}
           </section>
 
           {thinking.length > 0 && (
@@ -280,7 +278,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div className="setup-heading compact">
             <div>
               <strong>Reasoning level</strong>
-              <span>Control how deeply this model thinks before answering.</span>
             </div>
             <span className="setup-current">{thinkNow?.label}</span>
           </div>
@@ -350,7 +347,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </div>
-          <p className="setup-note">{thinkNow?.hint ?? "More time on hard steps. The next turn uses this."}</p>
             </section>
           )}
         </div>
@@ -360,7 +356,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
         <div className="setup-heading">
           <div>
             <strong>Access &amp; approvals</strong>
-            <span>Approval behavior and file containment are separate controls.</span>
           </div>
           <span className="setup-current">{selectedPermission.label} · {selectedSandbox.label}</span>
         </div>
@@ -368,7 +363,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div className="setup-block">
             <div className="setup-choice-title">
               <strong>Approval behavior</strong>
-              <span>When should Workhorse pause?</span>
             </div>
             <div className="setup-grid">
               {PERMISSIONS.map((item) => (
@@ -380,7 +374,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                   onClick={() => setMode(item.id)}
                 >
                   <span className="setup-choice-icon" aria-hidden="true">{PERMISSION_ICONS[item.id]}</span>
-                  <span className="setup-choice-copy"><strong>{item.label}</strong><em>{item.hint}</em></span>
+                  <span className="setup-choice-copy"><strong>{item.label}</strong></span>
                 </button>
               ))}
             </div>
@@ -389,7 +383,6 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div className="setup-block">
             <div className="setup-choice-title">
               <strong>File access</strong>
-              <span>How far can tools reach?</span>
             </div>
             <div className="setup-grid">
               {SANDBOXES.map((item) => (
@@ -400,15 +393,11 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                   onClick={() => setSandbox(item.id)}
                 >
                   <span className="setup-choice-icon" aria-hidden="true">{SANDBOX_ICONS[item.id]}</span>
-                  <span className="setup-choice-copy"><strong>{item.label}</strong><em>{item.hint}</em></span>
+                  <span className="setup-choice-copy"><strong>{item.label}</strong></span>
                 </button>
               ))}
             </div>
           </div>
-        </div>
-        <div className="setup-access-note">
-          <span aria-hidden="true">i</span>
-          <p><strong>Plan mode never edits.</strong> Full access means the sandbox is off; approval rules still apply independently.</p>
         </div>
       </section>
 

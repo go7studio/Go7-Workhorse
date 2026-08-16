@@ -261,7 +261,7 @@ export function ContextMeter({
             <i className="seg free" style={{ flexGrow: Math.max(categoryShare(stats.free, stackTotal), 8) }} />
           </div>
           {empty ? (
-            <p className="context-empty">Nothing in this chat is using the context window yet.</p>
+            <p className="context-empty">Context empty.</p>
           ) : (
             <>
               <ContextRows
@@ -272,7 +272,7 @@ export function ContextMeter({
               />
               {stats.extra.length > 0 && (
                 <>
-                  <p className="context-aside">Also loaded, not counted in the bar</p>
+                  <p className="context-aside">Not counted</p>
                   <ContextRows rows={stats.extra} />
                 </>
               )}

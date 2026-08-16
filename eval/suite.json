@@ -21,8 +21,9 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Launch with a fresh isolated user-data directory and capture the first screen before clicking anything.",
-            "Verify a Getting Started path explains project versus folder, chat creation, model choice, permission behavior, and where vendor processes run.",
-            "Verify every recognized installed stock harness is listed with detected, authenticated, unavailable, or needs-action state and a plain-language reason.",
+            "Verify Getting Started exposes project, folder, chat, model, and permission entry points without tutorial prose.",
+            "Verify every recognized stock harness has one short, honest readiness state.",
+            "Verify helper copy is necessary, single-line, and never duplicated across a heading, card, and note.",
             "Verify custom direct-API choices are introduced without implying that Workhorse owns an account or subscription.",
             "Dismiss or finish onboarding, restart, and verify its completion state is intentional and reversible from Settings."
           ]
@@ -56,19 +57,19 @@
       "rubric": [
         {
           "id": "SET-01",
-          "criterion": "A first-run Getting Started experience exists and explains the Workhorse mental model before the user must guess how projects, chats, folders, agents, and permissions relate.",
+          "criterion": "A concise first-run Getting Started experience exposes projects, folders, chats, agents, and permissions without crowding the layout.",
           "weight": 3,
           "type": "exists",
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["SET-S1"],
-          "passCriteria": "Fresh launch exposes a clear onboarding path with the five named concepts, can be completed or dismissed, and can be reopened later.",
+          "passCriteria": "Fresh launch exposes the five named concepts with labels or single-line copy, avoids repeated or multi-sentence helper prose, and can be reopened later.",
           "evidence": "First-launch screenshots, action transcript, and post-restart screenshot.",
           "baseline": { "status": "not_found", "basis": "Static source walk: Welcome.tsx currently offers Create a project, Link an existing folder, and Connect an agent/Start a chat but no Getting Started flow." }
         },
         {
           "id": "SET-02",
-          "criterion": "The first-run and LLM settings surfaces enumerate all recognized stock harnesses and custom connection shapes with honest readiness states and actionable reasons.",
+          "criterion": "The first-run and LLM settings surfaces enumerate recognized harnesses and custom connections with short, honest readiness states.",
           "weight": 3,
           "type": "provenance",
           "testability": "auto-partial",

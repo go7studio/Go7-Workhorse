@@ -164,7 +164,7 @@ export function FileReview({
           <pre className={`file-review-code ${mode}`}>
             {!diff && <span className="row-meta">Reading file…</span>}
             {diff && !diff.after && !diff.before ? (
-              <span className="row-meta">Couldn’t find this file on disk. Check the path or link the project folder.</span>
+              <span className="row-meta">File not found.</span>
             ) : null}
             {rows.map((line, index) => (
               <span key={`${mode}-${index}`} className={`diff-line ${line.kind}`}>

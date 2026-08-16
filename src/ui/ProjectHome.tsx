@@ -97,11 +97,7 @@ export function ProjectHome() {
           )}
         </div>
         <h2>{project.name}</h2>
-        <p className="lede">
-          {deleteAsk
-            ? "Remove this project. Keep its chats in the sidebar Chats list, or delete those chats too."
-            : "Linked folders and the files this project has changed. New chat stays in the sidebar."}
-        </p>
+        {deleteAsk && <p className="lede">Keep or delete its chats.</p>}
       </header>
 
       <div className="link-block">
@@ -114,7 +110,7 @@ export function ProjectHome() {
           </button>
         </div>
         {project.folders.length === 0 ? (
-          <p className="row-meta">Optional. Link one or more working directories.</p>
+          <p className="row-meta">No folders.</p>
         ) : (
           <ul className="chip-list">
             {project.folders.map((folder) => (
@@ -142,7 +138,7 @@ export function ProjectHome() {
           </button>
         </div>
         {project.references.length === 0 ? (
-          <p className="row-meta">Files, URLs, or notes. Also optional.</p>
+          <p className="row-meta">No references.</p>
         ) : (
           <ul className="chip-list">
             {project.references.map((reference) => (
@@ -165,7 +161,7 @@ export function ProjectHome() {
       <EditedList
         edits={edits}
         stats={stats}
-        empty="Files chats change in this project will show up here."
+        empty="No edits."
         onOpen={setOpen}
       />
     </section>

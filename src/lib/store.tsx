@@ -11,6 +11,7 @@ export { useStore };
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
 import { grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
+import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
 import {
   archiveChat,
@@ -2725,7 +2726,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               mode: session.mode,
               sandbox: session.sandbox,
               preface,
-              history: [],
+              // A custom bot has no session of its own, so the conversation
+              // has to travel with every request. This used to be [] — which
+              // is why Kimi and MiniMax answered each message as if it were
+              // the first. Text only; see custom-history for why.
+              history: customChatHistory(session.messages),
               mcpServers,
               securityPolicy: session.securityPolicy,
               folders: project?.folders.map((folder) => folder.path) ?? [],

@@ -142,6 +142,7 @@ import {
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
   maybeEnqueueLineupJoin,
+  queueWakeDelayMs,
   reconcileIdleChildren,
   reconcilePersistedLineups,
   stampLineupUserText,
@@ -2322,7 +2323,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const sendRef = useRef(send);
   sendRef.current = send;
   const flushing = useRef(new Set<string>());
-  const joinWake = useRef<Record<string, number>>({});
+  // Bumped when a queued prompt's notBefore passes. It has to be a dependency
+  // of the drainer: re-setting state with the same sessions array re-ran
+  // nothing, and a join queued behind an 8s cool-down sat there until a click.
+  const [queueWake, setQueueWake] = useState(0);
 
   useEffect(() => {
     if (watchHold) return;
@@ -2330,15 +2334,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (session.status !== "idle" || !session.queue?.length || flushing.current.has(session.id)) continue;
       if (session.goal?.status === "paused") continue;
       const item = session.queue[0];
-      if (item.notBefore && Date.now() < item.notBefore) {
-        if (!joinWake.current[session.id]) {
-          joinWake.current[session.id] = window.setTimeout(() => {
-            delete joinWake.current[session.id];
-            setState((current) => ({ ...current }));
-          }, item.notBefore - Date.now());
-        }
-        continue;
-      }
+      if (item.notBefore && Date.now() < item.notBefore) continue;
       flushing.current.add(session.id);
       setState((current) => {
         const shifted = shiftQueuedPrompt(current.sessions, session.id);
@@ -2370,7 +2366,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
       });
     }
-  }, [state.sessions, watchHold]);
+    const wait = queueWakeDelayMs(state.sessions);
+    if (wait === null) return;
+    const timer = window.setTimeout(() => setQueueWake((n) => n + 1), wait);
+    return () => window.clearTimeout(timer);
+  }, [state.sessions, watchHold, queueWake]);
 
   useEffect(() => {
     if (!ready || !window.workhorse?.syncJobs || !window.workhorse.onJobDue) return;

@@ -95,7 +95,7 @@ import {
   withSubagentStatus,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, queueWakeDelayMs, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
 import { looksLikeDispatchCheckBack, looksLikeUnfinishedDeskTurn as looksLikeUnfinishedCustomTurn, shouldEndDispatchTurn } from "../electron/custom-host";
 import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, peerAskTimeoutMs, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
 import {
@@ -7729,6 +7729,14 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.ok((joinItem?.notBefore ?? 0) > 12);
   assert.ok(joinDelayMs(afterParent?.lineup) >= 8_000);
   assert.ok(afterParent?.lineup?.notifiedAt);
+  // The queued join is behind a cool-down. The drainer must arm a wake for it,
+  // and once the clock passes it must want to run now — with no user click.
+  const idleOrch = { ...afterParent!, status: "idle" as const };
+  const wake = queueWakeDelayMs([idleOrch], 12);
+  assert.ok(wake !== null && wake > 0 && wake <= 8_000, `wake should be the cool-down, got ${wake}`);
+  assert.equal(queueWakeDelayMs([idleOrch], (joinItem?.notBefore ?? 0) + 1), 0);
+  assert.equal(queueWakeDelayMs([{ ...idleOrch, status: "running" as const }], 12), null, "a running chat drains on its own turn end");
+  assert.equal(queueWakeDelayMs([{ ...idleOrch, queue: [] }], 12), null);
   const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
   assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);
   const nextWave = addLineupRow(

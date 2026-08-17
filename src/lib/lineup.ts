@@ -370,6 +370,28 @@ export function joinDelayMs(lineup: DeskLineup | undefined): number {
   return 0;
 }
 
+/**
+ * How long until the soonest queued prompt is allowed to send, or null when
+ * nothing is waiting on a clock. Idle sessions only: a running session drains
+ * its queue when its turn ends. The desk used to arm a per-session timer that
+ * re-set state without changing anything the drainer watched, so a join queued
+ * with an 8s cool-down never fired until the user happened to click.
+ */
+export function queueWakeDelayMs(
+  sessions: Array<Pick<Session, "status" | "queue">>,
+  now = Date.now(),
+): number | null {
+  let soonest: number | null = null;
+  for (const session of sessions) {
+    if (session.status !== "idle") continue;
+    const head = session.queue?.[0];
+    if (!head?.notBefore) continue;
+    const wait = Math.max(0, head.notBefore - now);
+    if (soonest === null || wait < soonest) soonest = wait;
+  }
+  return soonest;
+}
+
 export function applyJoinRateLimitRetry(
   sessions: Session[],
   sessionId: string,

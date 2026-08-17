@@ -65,6 +65,7 @@ export function ChatRow({
         effort: session.effort,
         mode: session.mode,
         botName: bot?.name ?? stockLink?.name,
+        routingMode: session.routingMode,
       })
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);

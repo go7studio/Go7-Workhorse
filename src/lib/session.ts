@@ -49,17 +49,25 @@ export function asProviderId(value: string | undefined): ProviderId {
 }
 
 /** Visible sidebar subtitle: model · effort · mode. Not the last-message preview. */
+/**
+ * The sidebar line under a chat title. In auto mode the model and effort are
+ * decided on every send, so naming the last pick here read as a promise:
+ * a chat showed "Composer 2.5 · High" and the prompt went to Kimi K3. The
+ * line says Auto instead; the reply header says what actually answered.
+ */
 export function formatChatSidebar(input: {
   provider: string;
   model: string;
   effort?: string | null;
   mode?: string;
   botName?: string;
+  routingMode?: string;
 }): string {
+  const mode = modeLabel(parsePermissionMode(input.mode ?? "") ?? "ask");
+  if (input.routingMode === "auto") return ["Auto", mode].filter(Boolean).join(" · ");
   const provider = asProviderId(input.provider);
   const name = input.botName?.trim() || modelName(provider, input.model);
   const effort = effortLabel((input.effort as EffortLevel | null) ?? null);
-  const mode = modeLabel(parsePermissionMode(input.mode ?? "") ?? "ask");
   return [name, effort, mode].filter(Boolean).join(" · ");
 }
 

@@ -207,3 +207,75 @@ test("what a row shows adds up to what a row totals", () => {
   assert.equal(formatIoLine(fable), "74 in · 3.9M cached · 31k out");
   assert.equal(fable.totalTokens, 31_256);
 });
+
+test("a worker's usage files under its bot, not the orchestrator's vendor", async () => {
+  const { rehomeCustomUsage, usageHomeForReport, deskUsageCards } = await import("../src/lib/usage");
+  const bots = [
+    { id: "bot_wfd6ghzwhfa7", name: "Kimi K3", model: "hf:moonshotai/Kimi-K3" },
+    { id: "bot_wm5kduiosuu8", name: "MiniMax M3", model: "MiniMax-M3" },
+  ];
+  // The report the custom host sent, arriving under a Cursor orchestrator's
+  // session ("summon 8 bots on different models"). The session says cursor;
+  // the report says custom and names Kimi. Kimi wins.
+  const cursorOwner = { provider: "cursor" as const, customBotId: undefined };
+  assert.deepEqual(usageHomeForReport({ provider: "custom", model: "hf:moonshotai/Kimi-K3" }, cursorOwner, bots), {
+    provider: "custom",
+    customBotId: "bot_wfd6ghzwhfa7",
+  });
+  // The old case still holds: a MiniMax report that arrived stamped grok under a
+  // custom session still lands on the bot.
+  assert.deepEqual(usageHomeForReport({ provider: "grok", model: "MiniMax-M3" }, { provider: "custom", customBotId: "bot_wm5kduiosuu8" }, bots), {
+    provider: "custom",
+    customBotId: "bot_wm5kduiosuu8",
+  });
+  // A Cursor report on a Cursor model under a Cursor session stays Cursor.
+  assert.deepEqual(usageHomeForReport({ provider: "cursor", model: "composer-2.5" }, cursorOwner, bots), { provider: "cursor" });
+  // A Grok report with no owner is Grok.
+  assert.deepEqual(usageHomeForReport({ provider: "grok", model: "grok-4.6" }, undefined, bots), { provider: "grok" });
+
+  // The event as it sits on disk today, verbatim, and its owning session.
+  const stray = {
+    id: "use_4zca5oedho1j",
+    at: 1786982917879,
+    provider: "cursor" as const,
+    model: "hf:moonshotai/Kimi-K3",
+    sessionId: "sess_ra5rpko7gm11",
+    lane: "other-models" as const,
+    inputTokens: 4767,
+    outputTokens: 167,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    contextUsed: 4767,
+  };
+  const genuineCursor = {
+    id: "use_cursor_real",
+    at: 1786982917880,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    sessionId: "sess_ra5rpko7gm11",
+    lane: "cursor-models" as const,
+    inputTokens: 174,
+    outputTokens: 3162,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const rehomed = rehomeCustomUsage([stray, genuineCursor], bots, [
+    { id: "sess_ra5rpko7gm11", provider: "cursor", model: "composer-2.5", customBotId: undefined },
+  ]);
+  assert.equal(rehomed[0].provider, "custom");
+  assert.equal(rehomed[0].customBotId, "bot_wfd6ghzwhfa7");
+  assert.equal("lane" in rehomed[0], false, "a Cursor lane has no meaning on a Kimi event");
+  assert.equal(rehomed[0].inputTokens, 4767, "tokens untouched");
+  assert.equal(rehomed[1].provider, "cursor", "the real Cursor event stays");
+  assert.equal(rehomed[1].lane, "cursor-models");
+
+  // What the pane shows: one Kimi row, and Cursor · API back to zero.
+  const cards = deskUsageCards(rehomed, {
+    llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false }, cursor: { connected: true } },
+    customBots: bots.map((bot) => ({ ...bot, baseUrl: "https://api.synthetic.new/openai/v1", color: "#000" })),
+  } as never);
+  const kimi = cards.find((card) => card.focus === "bot:bot_wfd6ghzwhfa7");
+  assert.equal(kimi?.inputTokens, 4767);
+  const cursorApi = cards.find((card) => card.focus === "cursor:other-models");
+  assert.equal(cursorApi?.inputTokens ?? 0, 0, "Cursor · API no longer claims the Kimi turn");
+});

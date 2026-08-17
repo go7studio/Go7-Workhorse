@@ -247,6 +247,32 @@ export function usageProviderForSession(
   return "grok";
 }
 
+/**
+ * Which desk bot a usage report belongs to, and so which provider it files
+ * under. The session's provider was trusted first, because custom-bot usage
+ * once arrived on the Grok channel stamped `grok` while the session knew
+ * better. The other case is now real too: a worker spawned by a Cursor
+ * orchestrator reports under the orchestrator's session, so the session says
+ * `cursor` while the report says `custom` and names Kimi. The model is the
+ * fact both sides agree on — a report naming a custom bot's model is that
+ * bot's, whatever session it arrived under.
+ */
+export function usageHomeForReport(
+  report: { provider?: ProviderId; model: string },
+  owner: { provider?: ProviderId; customBotId?: string } | null | undefined,
+  bots: Pick<CustomBot, "id" | "name" | "model">[],
+): { provider: ProviderId; customBotId?: string } {
+  const named = bots.find((bot) => bot.model === report.model || bot.id === report.model || bot.name === report.model);
+  if (named && (report.provider === "custom" || owner?.provider !== "custom")) {
+    return { provider: "custom", customBotId: named.id };
+  }
+  const provider = usageProviderForSession(owner, report.provider);
+  if (provider === "custom") {
+    return { provider, customBotId: owner?.customBotId ?? named?.id };
+  }
+  return { provider };
+}
+
 export function customBotUsageEvents(events: UsageEvent[], bot: Pick<CustomBot, "id" | "name" | "model">): UsageEvent[] {
   return events.filter((event) => {
     if (event.provider !== "custom") return false;
@@ -263,6 +289,15 @@ export function rehomeCustomUsage(
 ): UsageEvent[] {
   if (events.length === 0 || (bots.length === 0 && sessions.length === 0)) return events;
   return events.map((event) => {
+    // An event filed under a desk vendor whose model is a custom bot's is that
+    // bot's: a Kimi worker under a Cursor orchestrator was stored as
+    // cursor/hf:moonshotai/Kimi-K3. Only an exact model match moves it — a
+    // Cursor event on a Cursor model must stay where it is.
+    const namedBot = bots.find((item) => item.model === event.model);
+    if (namedBot && event.provider !== "custom") {
+      const { lane: _lane, ...rest } = event;
+      return { ...rest, provider: "custom", customBotId: namedBot.id };
+    }
     if (event.provider === "claude" || event.provider === "codex" || event.provider === "cursor") return event;
     const session = event.sessionId ? sessions.find((item) => item.id === event.sessionId) : undefined;
     if (session && session.provider !== "custom") return event;

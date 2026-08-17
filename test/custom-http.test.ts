@@ -1312,8 +1312,11 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(synPlan?.leftPercent, 90);
   assert.equal(synPlan?.products[0]?.product, "session");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /usageProviderForSession\(owner/);
-  assert.match(store, /customBotId: owner\?\.customBotId/);
+  // The ingest asks which bot the report belongs to before it asks which
+  // session it arrived under; a worker's report lands under its
+  // orchestrator's session, so the session alone filed Kimi as Cursor.
+  assert.match(store, /usageHomeForReport\(event, owner/);
+  assert.match(store, /customBotId: home\.customBotId/);
   assert.equal(defaultModel("custom").id, "MiniMax-M3");
   assert.equal(knownContextWindow("MiniMax-M3"), 1_000_000);
   assert.equal(catalogWindow("hf:moonshotai/Kimi-K3"), 524_288);

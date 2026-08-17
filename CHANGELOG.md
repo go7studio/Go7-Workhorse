@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.3.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.0...v0.3.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* a custom bot is told the conversation, so Kimi and MiniMax remember ([d6d6d66](https://github.com/go7studio/Go7-Workhorse/commit/d6d6d66800af7ad11fd7008a2c4c57a74217807a))
+* a custom bot is told the conversation, so Kimi and MiniMax remember ([520f62e](https://github.com/go7studio/Go7-Workhorse/commit/520f62e6c482c2c7b61fb1638af8c7bfc24cded2))
+
 ## [0.3.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.2.0...v0.3.0) (2026-08-17)
 
 

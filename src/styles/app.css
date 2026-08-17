@@ -4115,8 +4115,6 @@ html.pane-dragging * {
   cursor: pointer;
 }
 
-
-
 .usage-head {
   display: flex;
   align-items: center;
@@ -5345,163 +5343,12 @@ html.pane-dragging * {
   width: 100%;
 }
 
-.chat-bar-ai {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
-
-.model-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.model-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px 4px 2px;
-  border-radius: 10px;
-}
-
-.model-trigger:hover {
-  background: var(--bg-hover);
-}
-
-.model-trigger strong {
-  font-size: 15px;
-  font-weight: 590;
-}
-
 .caret {
   width: 0;
   height: 0;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
   border-top: 5px solid var(--text-tertiary);
-}
-
-.model-pop {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  width: 280px;
-  max-height: 360px;
-  overflow: auto;
-  padding: 8px 0 10px;
-  background: var(--bg-solid);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  animation: rise 160ms var(--ease);
-  z-index: 8;
-}
-
-.brain {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.brain-label,
-.brain-value {
-  font-size: 12px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.brain-value {
-  min-width: 3.4em;
-  color: var(--text);
-  font-weight: 510;
-}
-
-.brain-track {
-  position: relative;
-  width: 132px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-}
-
-.brain-dots {
-  position: absolute;
-  inset: 0 7px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-}
-
-.brain-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-  opacity: 0.45;
-}
-
-.brain-dots i.on {
-  opacity: 0;
-}
-
-.brain-track input[type="range"] {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  margin: 0;
-  appearance: none;
-  background: transparent;
-}
-
-.brain-track input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
-  background: var(--line);
-  border-radius: 99px;
-}
-
-.brain-track input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -5.5px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-}
-
-.brain-track input[type="range"]::-moz-range-track {
-  height: 3px;
-  background: var(--line);
-  border-radius: 99px;
-}
-
-.brain-track input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--text);
-}
-
-.model-line {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
-  min-width: 0;
-  white-space: normal;
-}
-
-.model-line em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--text-tertiary);
 }
 
 .context-meter-wrap {
@@ -5741,34 +5588,6 @@ html.pane-dragging * {
   flex-direction: column;
   gap: 2px;
   margin-top: 12px;
-}
-
-.brain-track input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--text);
-}
-
-.model-group {
-  padding: 2px 8px 8px;
-}
-
-.model-pop button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  text-align: left;
-  border-radius: 10px;
-  font-size: 13px;
-}
-
-.model-pop button:hover,
-.model-pop button.active {
-  background: var(--bg-hover);
 }
 
 .effort-scale {

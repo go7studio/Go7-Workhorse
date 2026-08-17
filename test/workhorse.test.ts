@@ -583,7 +583,7 @@ test("rewindToUserMessage keeps earlier turns and drops everything after the edi
   assert.doesNotMatch(row, /Edit last prompt/);
   const turn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(turn, /resendFrom/);
-  const meter = readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8");
+  const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
   assert.match(meter, /context-pop/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /\.context-pop\s*\{[\s\S]*position:\s*fixed/);
@@ -2838,7 +2838,7 @@ test("estimateChatContext attributes visible messages and leftover occupancy", (
 });
 
 test("context ring opens this-chat stats instead of the Usage page", () => {
-  const meter = readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8");
+  const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
   assert.doesNotMatch(meter, /openUsage\(/);
   assert.match(meter, /This chat/);
   assert.match(meter, /grokSessionInfo/);
@@ -4164,7 +4164,8 @@ test("desk bots keep disable and leave the desk on delete", () => {
     llms: { claude: { connected: true, name: "Clay", color: "#ff9f0a" } },
   });
   assert.equal(firstAttachedChoice(painted)?.provider, "claude");
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8"), /Attach LLM/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8"), /Attach LLM/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /Attach LLM/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /firstAttachedChoice/);
   assert.equal(vendorLabel("claude", painted.llms.claude), "Clay");
   assert.equal(vendorTint("claude", painted.llms.claude), "#ff9f0a");
@@ -5173,7 +5174,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /AgentThreadPane/);
   assert.doesNotMatch(pane, /has-thread/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-twist[\s\S]*z-index:\s*2/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8"), /session: sessionProp/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8"), /session: sessionProp/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /readOnly/);
 
   const parent: Session = {
@@ -6624,14 +6625,12 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.equal(advertisedClaudeWindow("claude-opus-5", 200_000), 1_000_000);
   assert.equal(effortsFor("claude", "claude-sonnet-5").map((item) => item.id).includes("max"), true);
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
-  const menu = readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
   assert.match(setup, /modelsFor\(session\.provider\)/);
   assert.doesNotMatch(setup, /MODEL_CATALOG\[session\.provider\]/);
-  assert.match(menu, /modelsFor\(provider\.id\)/);
   assert.match(store, /listVendorModels/);
   assert.match(store, /applyVendorCatalog/);
   assert.match(main, /ipcMain\.handle\("models:list"/);

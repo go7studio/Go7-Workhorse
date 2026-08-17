@@ -8,7 +8,7 @@ import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
 import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
 import { BotForm } from "./BotForm";
-import { ContextMeter } from "./ModelMenu";
+import { ContextMeter } from "./ContextMeter";
 import { SkillsPane } from "./SkillsPane";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";

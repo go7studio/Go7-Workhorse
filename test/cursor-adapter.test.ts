@@ -819,8 +819,6 @@ test("Cursor Auto is labeled as Cursor Auto; Composer and Cursor Grok stay reada
   resetVendorCatalog();
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   assert.match(setup, /modelName\(session\.provider, model\.id\)/);
-  const menu = readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8");
-  assert.match(menu, /modelName\(provider\.id, model\.id\)/);
 });
 
 test("Available models chips do not ellipsis-clip Cursor Grok names", () => {

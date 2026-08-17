@@ -5,7 +5,7 @@ import { shortModelName, usageModelLabel } from "../lib/models";
 import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStore } from "../lib/store";
 import type { ProviderId, UsageRange } from "../lib/types";
-import { ContextMeter } from "./ModelMenu";
+import { ContextMeter } from "./ContextMeter";
 import {
   byModel,
   customBotUsageEvents,

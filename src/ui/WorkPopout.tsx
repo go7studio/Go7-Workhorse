@@ -192,11 +192,26 @@ export function WorkPopout({
                     <span className="tool-status">
                       {childLive
                         ? `working · ${formatWorked(childMs ?? 0)}`
-                        : marker.toolStatus === "failed"
-                          ? "failed"
-                          : "done"}
+                        : child?.agentRun?.status === "interrupted"
+                          ? "interrupted"
+                          : marker.toolStatus === "failed"
+                            ? "failed"
+                            : "done"}
                     </span>
                   </button>
+                  {/* The desk stopped this worker, so the desk offers it back.
+                      Its brief, its transcript and its folder are all still
+                      here; without a way to press, they were just lost. */}
+                  {child?.agentRun?.status === "interrupted" ? (
+                    <button
+                      type="button"
+                      className="tiny subagent-resume"
+                      title="Send this worker's brief again and carry on from what it already did"
+                      onClick={() => store.resumeAgentRun(child.id)}
+                    >
+                      Resume
+                    </button>
+                  ) : null}
                 </p>
               );
             }

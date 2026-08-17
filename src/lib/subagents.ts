@@ -547,14 +547,26 @@ export function descendantSessionIds(sessions: Pick<Session, "id" | "parentId">[
   return [...found];
 }
 
+/** What builds before the `interrupted` status wrote for the same thing. */
+export const LEGACY_INTERRUPTED_ERROR = "Subagent was interrupted when Workhorse exited.";
+
 export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;
-  const statuses: AgentRun["status"][] = ["running", "completed", "failed", "cancelled", "timed-out", "budget-exceeded"];
+  const statuses: AgentRun["status"][] = ["running", "completed", "failed", "cancelled", "timed-out", "budget-exceeded", "interrupted"];
   if (!statuses.includes(row.status as AgentRun["status"]) || typeof row.startedAt !== "number") return undefined;
-  const interrupted = row.status === "running";
+  // A run still marked running when state was written is a run the desk never
+  // got to finish. Calling that "failed" hid the one thing that mattered: the
+  // worker was fine, and everything needed to pick it up again is right here.
+  //
+  // Builds before this wrote that verdict straight to disk, so a wave already
+  // on disk reads as failed and the truth is gone — except the old code signed
+  // its work. That exact sentence is its fingerprint, and no vendor failure
+  // carries it, so an exact match recovers those runs without guessing.
+  const interrupted =
+    row.status === "running" || (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   return {
-    status: interrupted ? "failed" : row.status as AgentRun["status"],
+    status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
     isolation: row.isolation === "worktree" ? "worktree" : "shared",
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
@@ -566,7 +578,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(typeof row.error === "string" && row.error.trim()
       ? { error: row.error.trim() }
       : interrupted
-        ? { error: "Subagent was interrupted when Workhorse exited." }
+        ? { error: "Workhorse exited while this worker was running. Its brief and its work are kept — resume it from the chat." }
         : {}),
     ...(typeof row.planStepId === "string" && row.planStepId.trim() ? { planStepId: row.planStepId.trim() } : {}),
     ...(typeof row.rationale === "string" && row.rationale.trim() ? { rationale: row.rationale.trim() } : {}),

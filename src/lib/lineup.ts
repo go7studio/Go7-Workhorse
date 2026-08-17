@@ -6,7 +6,7 @@ import { isVendorRateLimitError } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
-const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out"];
+const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted"];
 
 export function emptyLineup(folder: string, now = Date.now(), userText?: string): DeskLineup {
   return {
@@ -286,12 +286,21 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
     if (!child.parentId || !child.agentRun || child.agentRun.status === "running") continue;
     const parent = next.find((session) => session.id === child.parentId);
     const row = parent?.lineup?.rows.find((item) => item.childId === child.id);
-    if (!row || (row.status !== "queued" && row.status !== "running")) continue;
+    if (!row) continue;
+    // A row written by an older build says "failed" for the same interruption
+    // its worker now reports as interrupted. Heal that too, or the wave and
+    // the worker disagree about what happened.
+    const legacyFailedRow = row.status === "failed" && child.agentRun.status === "interrupted";
+    if (row.status !== "queued" && row.status !== "running" && !legacyFailedRow) continue;
     const rowStatus = child.agentRun.status === "completed"
       ? "completed" as const
       : child.agentRun.status === "timed-out"
         ? "timed-out" as const
-        : "failed" as const;
+        : child.agentRun.status === "interrupted"
+          // Not a failure and not still going: the wave stops waiting, and the
+          // row says the slice is unfinished so a join cannot claim it is done.
+          ? "interrupted" as const
+          : "failed" as const;
     next = applyChildIdleSync(next, child.id, rowStatus, {
       report: childReportText(child),
       error: child.agentRun.error,

@@ -7525,3 +7525,20 @@ html.pane-dragging * {
   opacity: 1;
   cursor: default;
 }
+
+/* Resume an interrupted worker. Quiet until the run needs it. */
+.subagent-resume {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: none;
+  font-size: 10px;
+  font-weight: 590;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.subagent-resume:hover {
+  background: var(--bg-active);
+}

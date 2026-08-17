@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { customBotEnabled } from "../lib/custom-bots";
+import { customBotEnabled, customBotModels } from "../lib/custom-bots";
+import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { defaultModel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsFor, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
@@ -215,7 +216,12 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                 type="button"
                 aria-selected={session.customBotId === bot.id}
                 style={{ ["--setup-chip" as string]: bot.color }}
-                onClick={() => setSessionModel("custom", bot.model, bot.id)}
+                onClick={() =>
+                  // Keep the model the chat is already on when this connection
+                  // serves it, so switching back does not silently demote a
+                  // chat from an approved model to the bot's default.
+                  setSessionModel("custom", customBotModels(bot).includes(session.model) ? session.model : bot.model, bot.id)
+                }
               >
                 <span className="setup-provider-dot" aria-hidden="true" />
                 {bot.name}
@@ -226,23 +232,56 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
 
         <div className="setup-subgroup">
           <div className="section-label">Available models</div>
-          <div className="setup-effort setup-models" role="listbox" aria-label="Model">
-            {modelsFor(session.provider).map((model) => {
-              const on = session.model === model.id;
-              return (
-                <button
-                  key={model.id}
-                  className={on ? "on" : undefined}
-                  type="button"
-                  aria-selected={on}
-                  onClick={() => setSessionModel(session.provider, model.id)}
-                >
-                  <strong>{modelName(session.provider, model.id)}</strong>
-                  <span>{formatWindow(model.contextWindow)}</span>
-                </button>
-              );
-            })}
-          </div>
+          {/* A custom chat's models are the ones approved on its own bot, not
+              a stock catalogue. One connection can serve several — Synthetic
+              sells many behind one key — and this is where a chat picks. */}
+          {session.provider === "custom" ? (
+            <div className="setup-effort setup-models" role="listbox" aria-label="Model">
+              {customBotModels(bot).map((id) => {
+                const on = session.model === id;
+                const parsed = parseModelId(id);
+                return (
+                  <button
+                    key={id}
+                    className={on ? "on" : undefined}
+                    type="button"
+                    aria-selected={on}
+                    title={id}
+                    onClick={() => setSessionModel("custom", id, bot?.id)}
+                  >
+                    <strong>{modelChipLabel(parsed)}</strong>
+                    <span>
+                      {id === bot?.model
+                        ? "default"
+                        : parsed.alias
+                          ? "routes to best"
+                          : parsed.maker
+                            ? makerLabel(parsed.maker)
+                            : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="setup-effort setup-models" role="listbox" aria-label="Model">
+              {modelsFor(session.provider).map((model) => {
+                const on = session.model === model.id;
+                return (
+                  <button
+                    key={model.id}
+                    className={on ? "on" : undefined}
+                    type="button"
+                    aria-selected={on}
+                    onClick={() => setSessionModel(session.provider, model.id)}
+                  >
+                    <strong>{modelName(session.provider, model.id)}</strong>
+                    <span>{formatWindow(model.contextWindow)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         </section>
 

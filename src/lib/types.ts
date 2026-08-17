@@ -439,6 +439,14 @@ export type CustomLlm = {
   name?: string;
   color?: string;
   tested?: boolean;
+  /** Models the user approved for this bot. `model` is always among them. */
+  models?: string[];
+  /**
+   * Everything the provider's own /models endpoint offered. The offer, not the
+   * choice: Synthetic lists dozens, and a chat should only ever reach one its
+   * owner ticked. Never saved on the bot.
+   */
+  discovered?: string[];
 };
 
 export type CustomBot = {
@@ -446,7 +454,24 @@ export type CustomBot = {
   name: string;
   color: string;
   baseUrl: string;
+  /** The model a new chat on this bot starts with. Always one of `models`. */
   model: string;
+  /**
+   * The models approved for this connection. A provider like Synthetic sells
+   * many behind a single key and a single quota, so they belong to one bot
+   * rather than one bot each: two bots on one account would draw two leftover
+   * rings from the same pool and report it twice.
+   *
+   * Approved, not offered — the provider's list is shown when the connection
+   * is tested and the owner ticks what they want. Absent means just `model`.
+   */
+  models?: string[];
+  /**
+   * What the provider's /models last offered. Cached so more models can be
+   * approved later without testing the connection again. The offer, never the
+   * permission — only `models` decides what a chat may reach.
+   */
+  discovered?: string[];
   apiKey: string;
   /** Reference to an OS-encrypted secret; apiKey is hydrated only in memory. */
   credentialId?: string;

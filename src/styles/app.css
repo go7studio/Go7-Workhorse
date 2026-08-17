@@ -7479,3 +7479,49 @@ html.pane-dragging * {
 .composer-attach:hover {
   color: var(--text);
 }
+
+/* Approved models on a custom bot. A provider like Synthetic answers /models
+   with dozens, so they are grouped by maker with the newest first; a flat
+   alphabetical list buries this year's frontier under old checkpoints. */
+.bot-models {
+  gap: 4px;
+}
+
+.bot-models > .row-meta {
+  margin: 0 0 4px;
+}
+
+.bot-model-group {
+  min-width: 0;
+}
+
+.bot-model-group .section-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 2px 4px;
+}
+
+/* The All/None shortcut sits with its group, quiet until wanted. */
+.bot-model-group .section-label .tiny {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 10px;
+  font-weight: 590;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.bot-model-group .section-label .tiny:hover {
+  text-decoration: underline;
+}
+
+/* The default model is approved by definition — shown, never toggleable. */
+.bot-models .setup-models button[disabled] {
+  opacity: 1;
+  cursor: default;
+}

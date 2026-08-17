@@ -161,6 +161,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Moving the release pull request's label is a pull-request write, and
+      # labels themselves live on the issues API. Without both, publishing
+      # succeeds and then dies on the label, which is how 0.2.0 shipped under a
+      # red job.
+      pull-requests: write
+      issues: write
     steps:
       - uses: actions/checkout@v7
 

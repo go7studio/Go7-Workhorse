@@ -103,6 +103,11 @@ test("update check is wired through main, preload, and the desk banner", () => {
   // skip-github-release and creates the release itself — so publishing has to
   // move the label, or the first release is the last one anybody can cut.
   assert.match(publish, /autorelease: tagged/);
+  // Moving that label is a pull-request write and labels are an issues API, so
+  // the job needs both. 0.2.0 published every installer and then failed on the
+  // label for want of them.
+  assert.match(publish, /pull-requests: write/);
+  assert.match(publish, /issues: write/);
   assert.match(publish, /--remove-label "autorelease: pending"/);
   assert.match(publish, /!cancelled\(\)/);
   assert.match(publish, /needs\.installers\.result == 'success'/);

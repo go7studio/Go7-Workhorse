@@ -61,6 +61,33 @@ test("update check is wired through main, preload, and the desk banner", () => {
   // downstream job unless it says otherwise. Publishing must ask for the two
   // things that matter — a version was cut, and both installers built — and
   // for nothing else.
+  // 0.1.9 shipped one arm64 dmg because no arch was set, so electron-builder
+  // followed the runner and every Intel Mac got nothing. The pieces have to
+  // agree: two arches built, the arch in the filename so they do not collide,
+  // a glob that collects both, and an installer that picks by uname.
+  const pkgBuild = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).build;
+  const macTargets = pkgBuild.mac.target as Array<{ target: string; arch: string[] }>;
+  for (const target of ["dmg", "zip"]) {
+    const entry = macTargets.find((item) => item.target === target);
+    assert.ok(entry, `mac target ${target} is missing`);
+    assert.deepEqual([...entry.arch].sort(), ["arm64", "x64"], `${target} must build both arches`);
+  }
+  assert.match(pkgBuild.mac.artifactName, /\$\{arch\}/);
+  // Targets named on the command line override build.mac.target, arch and all,
+  // so the config alone builds whatever the runner happens to be. The scripts
+  // have to say both arches out loud.
+  const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts;
+  for (const name of ["package:mac", "pack:mac"]) {
+    assert.match(scripts[name], /--arm64/, `${name} must ask for arm64`);
+    assert.match(scripts[name], /--x64/, `${name} must ask for x64`);
+  }
+  assert.match(workflow, /\*Workhorse-\*-mac-\*\.dmg/);
+  const installer = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
+  assert.match(installer, /uname -m/);
+  assert.match(installer, /arm64\) arch=arm64/);
+  assert.match(installer, /x86_64\) arch=x64/);
+  assert.match(installer, /-mac-\$\{arch\}\\\.dmg\$/);
+
   const publish = workflow.slice(workflow.indexOf("\n  publish:"));
   assert.match(publish, /!cancelled\(\)/);
   assert.match(publish, /needs\.installers\.result == 'success'/);

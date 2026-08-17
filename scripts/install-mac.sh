@@ -16,15 +16,27 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 [ "$(uname -s)" = "Darwin" ] || die "This installer is for macOS. On Windows, run the .exe from the releases page."
 
-say "Finding the latest release..."
-urls=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep -o '"browser_download_url": *"[^"]*-mac\.dmg"' | cut -d'"' -f4)
-# Older releases also carry a pre-rename dmg, so pick the current name first.
-asset=$(printf '%s\n' "$urls" | grep 'Go7-Workhorse-' | head -1)
-[ -n "$asset" ] || asset=$(printf '%s\n' "$urls" | head -1)
-[ -n "$asset" ] || die "No macOS dmg on the latest release. Check https://github.com/${REPO}/releases"
+# Apple silicon takes the arm64 dmg, Intel the x64 one. Running the arm64
+# build on an Intel Mac does not start at all, so guessing is not an option.
+case "$(uname -m)" in
+  arm64) arch=arm64 ;;
+  x86_64) arch=x64 ;;
+  *) die "Unknown Mac architecture $(uname -m). Download a dmg by hand from https://github.com/${REPO}/releases" ;;
+esac
 
-version=$(printf '%s' "$asset" | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)-mac\.dmg/\1/')
+say "Finding the latest release for ${arch}..."
+urls=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+  | grep -o '"browser_download_url": *"[^"]*-mac[^"]*\.dmg"' | cut -d'"' -f4)
+asset=$(printf '%s\n' "$urls" | grep -- "-mac-${arch}\.dmg$" | head -1)
+# Releases up to 0.1.9 shipped one unlabelled dmg, and it was arm64 only.
+if [ -z "$asset" ] && [ "$arch" = "arm64" ]; then
+  asset=$(printf '%s\n' "$urls" | grep -- '-mac\.dmg$' | head -1)
+fi
+if [ -z "$asset" ]; then
+  die "No ${arch} macOS dmg on the latest release. Check https://github.com/${REPO}/releases"
+fi
+
+version=$(printf '%s' "$asset" | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)-mac.*\.dmg/\1/')
 say "Downloading Go7 Workhorse ${version}..."
 
 tmp=$(mktemp -d)

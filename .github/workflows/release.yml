@@ -99,7 +99,9 @@ jobs:
             installer: "*Workhorse-Setup-*.exe"
           - os: macos-latest
             script: package:mac
-            installer: "*Workhorse-*-mac.dmg"
+            # Both Apple silicon and Intel. The glob has to keep the arch
+            # suffix in view or it collects one dmg and Intel Macs get nothing.
+            installer: "*Workhorse-*-mac-*.dmg"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

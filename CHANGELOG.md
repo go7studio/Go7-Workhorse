@@ -6,7 +6,7 @@ tags, so they describe what shipped rather than what was planned.
 Versions follow [semantic versioning](https://semver.org/). Installers for each
 release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/releases):
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
-`Go7-Workhorse-<version>-mac.dmg` for macOS.
+`Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
 ## [0.1.9](https://github.com/go7studio/Go7-Workhorse/compare/v0.1.8...v0.1.9) (2026-08-17)
 

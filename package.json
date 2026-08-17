@@ -53,8 +53,8 @@
     "pack:win": "npm run build && electron-builder --win --dir",
     "package:win": "electron-builder --win nsis --publish never",
     "dist:win": "npm run build && npm run package:win",
-    "pack:mac": "npm run build && electron-builder --mac --dir --publish never",
-    "package:mac": "electron-builder --mac dmg zip --publish never",
+    "pack:mac": "npm run build && electron-builder --mac --dir --arm64 --x64 --publish never",
+    "package:mac": "electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "dist:mac": "npm run build && npm run package:mac",
     "preview": "vite preview",
     "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/cursor-adapter.test.ts test/watch.test.ts test/routing.test.ts test/plan.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts test/eval-kit.test.ts test/folder-access.test.ts test/learning-memory.test.ts test/project-diff.test.ts test/vendor-meter.test.ts test/repo-shape.test.ts test/usage-metering.test.ts test/lineup-sidebar.test.ts",
@@ -120,8 +120,20 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/app-icons/go7-workhorse.icns",
       "category": "public.app-category.developer-tools",
@@ -135,7 +147,7 @@
         "NSRemovableVolumesUsageDescription": "Workhorse uses external disks you link as a project workspace.",
         "NSNetworkVolumesUsageDescription": "Workhorse uses network folders you link as a project workspace."
       },
-      "artifactName": "Go7-Workhorse-${version}-mac.${ext}"
+      "artifactName": "Go7-Workhorse-${version}-mac-${arch}.${ext}"
     }
   }
 }

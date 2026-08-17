@@ -65,7 +65,6 @@ import { CREW_STATUS_HINT, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
-import { agentThreadsForSession, liveAgentThreadId } from "../src/lib/agent-thread";
 import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
@@ -623,8 +622,6 @@ test("sidebar last-talked clock uses the latest user prompt, not later assistant
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.doesNotMatch(pane, /TimeStamp/);
   assert.match(pane, /turn-who/);
-  const thread = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
-  assert.doesNotMatch(thread, /TimeStamp/);
   const popout = readFileSync(path.join(ROOT, "src", "ui", "WorkPopout.tsx"), "utf8");
   assert.match(popout, /TimeStamp/);
   const stamp = readFileSync(path.join(ROOT, "src", "ui", "TimeStamp.tsx"), "utf8");
@@ -3569,28 +3566,6 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(homeCss, /\.project-overview::-webkit-scrollbar-track/);
   assert.doesNotMatch(homeCss, /\.project-home-pane/);
   assert.doesNotMatch(homeCss, /\.main\.has-project-home/);
-  const review = readFileSync(path.join(ROOT, "src", "ui", "FileReview.tsx"), "utf8");
-  assert.match(review, /Source/);
-  assert.match(review, /Diff/);
-  assert.match(review, /Filter files/);
-  assert.match(review, /file-review-code/);
-  assert.match(review, /file-review-tab-row/);
-  assert.match(review, /openFile/);
-  assert.match(review, /closeTab/);
-  assert.match(review, /preferSource \? "source" : "diff"/);
-  assert.match(review, /preferSource/);
-  assert.match(review, /onTracked/);
-  assert.match(review, /overlay/);
-  assert.match(review, /file-review-close/);
-  assert.match(review, /File not found/);
-  assert.match(review, /rootKey = roots\.join/);
-  assert.match(review, /\.catch\(/);
-  assert.match(review, /buildFileDiff/);
-  assert.match(review, /sameEditPath/);
-  assert.match(review, /mergeEdits\(files/);
-  assert.match(review, /DiffStat/);
-  assert.match(review, /statForPath/);
-  assert.doesNotMatch(review, /\[file\.path, roots\]/);
   const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
   assert.match(diffStat, /diff-add/);
   assert.match(diffStat, /diff-del/);
@@ -3599,7 +3574,6 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /fileRoots = useMemo/);
   assert.match(pane, /fileRootKey/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.diff-line\.add/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.file-review-code/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session-file/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session\.has-file/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
@@ -3631,7 +3605,6 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(css.match(/@keyframes file-pane-out\s*\{[\s\S]*?\n\}/)?.[0] ?? "", /max-width:\s*0/);
   assert.doesNotMatch(css, /\.session-file \.file-review-modes/);
   assert.doesNotMatch(css, /\.session-file \.file-close-x/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.file-review\.overlay/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:file-diff/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:read-file/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:resolve-file/);
@@ -3685,7 +3658,6 @@ test("diff counts ease from the last shown integer toward the new total", () => 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /holdEditStats/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /DiffStat/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /pathChanged/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileReview.tsx"), "utf8"), /DiffStat/);
 });
 
 test("file diffs count added and deleted lines from real before/after text", () => {
@@ -4811,7 +4783,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
     ],
   };
   assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
-  assert.equal(weeklyPlanLeftover(miniWindows), 100);
+  assert.equal(weeklyPlanLeftover(miniWindows), undefined);
   assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
   assert.equal(
     planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } })?.label,
@@ -4985,7 +4957,6 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(popout, /Copy work/);
   assert.match(popout, /unsquashSentences\(text\)/);
   assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /displayWorkSteps\(block, \{ live \}\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
   assert.doesNotMatch(
@@ -5086,29 +5057,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   const foldBlock = foldAt >= 0 ? workCss.slice(foldAt, foldAt + 280) : "";
   assert.match(foldBlock, /border-radius:\s*50%/);
   assert.doesNotMatch(foldBlock, /rotate\(-45deg\)/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread/);
   assert.doesNotMatch(pane, /AgentThreadPane/);
   assert.doesNotMatch(pane, /has-thread/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /Talking now/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /deskInk/);
-  const threadPane = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
-  assert.match(threadPane, /compact-thread overlay/);
-  assert.match(threadPane, /groupTranscript\(child\.messages\)/);
-  assert.match(threadPane, /WorkPopout/);
-  assert.match(threadPane, /ContextMeter session=\{child\}/);
-  assert.match(threadPane, /compact/);
-  assert.match(threadPane, /readOnly/);
-  assert.match(threadPane, /id: "copy"/);
-  assert.doesNotMatch(threadPane, /Composer/);
-  assert.doesNotMatch(threadPane, /SessionSetup/);
-  assert.doesNotMatch(threadPane, /GoalBar/);
-  assert.doesNotMatch(threadPane, /WatchBanners/);
-  assert.doesNotMatch(threadPane, /TerminalPane/);
-  assert.doesNotMatch(threadPane, /FileReview/);
-  assert.doesNotMatch(threadPane, /agent-bubble/);
-  assert.doesNotMatch(threadPane, /id: "fork"/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread\.compact-thread/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.agent-thread\.compact-thread\.overlay/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-twist[\s\S]*z-index:\s*2/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ModelMenu.tsx"), "utf8"), /session: sessionProp/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /readOnly/);
@@ -5137,58 +5087,6 @@ test("transcript groups tools and thoughts above the final reply", () => {
       },
     ],
   };
-  const child: Session = {
-    ...parent,
-    id: "child",
-    parentId: "parent",
-    hidden: true,
-    provider: "grok",
-    model: "grok-4.6",
-    title: "Grok",
-    status: "running",
-    messages: [
-      { id: "u", role: "user", kind: "peer", fromTitle: "Can you contact Grok?", text: "are you there?", createdAt: 2 },
-      { id: "a", role: "assistant", text: "yes", createdAt: 3 },
-    ],
-  };
-  const found = agentThreadsForSession(parent, [parent, child]);
-  assert.equal(found.length, 1);
-  assert.equal(found[0]?.title, "Grok");
-  assert.equal(found[0]?.live, true);
-  assert.equal(found[0]?.turns.length, 2);
-  assert.equal(liveAgentThreadId(found), "child");
-  const waiting = agentThreadsForSession(
-    {
-      ...parent,
-      messages: [
-        { id: "tool", role: "assistant", kind: "tool", text: "workhorse_spawn_agent · running — grok", toolStatus: "running", createdAt: 2 },
-      ],
-    },
-    [parent],
-  );
-  assert.equal(waiting[0]?.live, true);
-  assert.match(waiting[0]?.title ?? "", /grok|other agent/i);
-  const blocked = agentThreadsForSession(
-    {
-      ...parent,
-      status: "idle",
-      messages: [
-        {
-          id: "fail",
-          role: "system",
-          kind: "subagent",
-          fromTitle: "Grok",
-          toolStatus: "failed",
-          text: "Grok has no leftover left. Watch safety is on — this vendor has no more usability until the plan window resets.",
-          createdAt: 4,
-        },
-      ],
-    },
-    [parent],
-  );
-  assert.equal(blocked[0]?.error?.includes("Watch safety"), true);
-  assert.equal(liveAgentThreadId(blocked), blocked[0]?.id);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /agent-thread-warn/);
   const stuckTools = [
     {
       id: "ask",
@@ -5240,69 +5138,6 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(closed[0]?.toolStatus, "failed");
   assert.match(closed[0]?.text ?? "", /failed/);
   assert.equal(closed[1]?.toolStatus, "completed");
-  const stillLive = agentThreadsForSession(
-    {
-      ...parent,
-      status: "idle",
-      messages: [
-        {
-          id: "ask",
-          role: "system",
-          kind: "tool",
-          text: "Asking WORKHORSE Live Health Check Reply · failed — WORKHORSE Live Health Check Reply",
-          toolStatus: "failed",
-          createdAt: 3,
-        },
-      ],
-    },
-    [{ ...parent, status: "idle" }],
-  );
-  assert.equal(stillLive.length, 0);
-  const setupTimeout = agentThreadsForSession(
-    {
-      ...parent,
-      status: "idle",
-      messages: [
-        {
-          id: "bots",
-          role: "system",
-          kind: "subagent",
-          fromTitle: "Workhorse did not finish setting up that bot in time",
-          toolStatus: "failed",
-          text: "Workhorse did not finish setting up that bot in time",
-          createdAt: 5,
-        },
-      ],
-    },
-    [parent],
-  );
-  assert.equal(setupTimeout.length, 0);
-  const otherChat = {
-    ...parent,
-    id: "other",
-    title: "Campaign, sectors, workshop surface",
-    parentId: "someone-else",
-    hidden: true,
-  };
-  const leaked = agentThreadsForSession(
-    {
-      ...parent,
-      messages: [
-        {
-          id: "mark-other",
-          role: "system",
-          kind: "subagent",
-          fromTitle: otherChat.title,
-          subagentSessionId: otherChat.id,
-          toolStatus: "completed",
-          text: otherChat.title,
-          createdAt: 6,
-        },
-      ],
-    },
-    [parent, otherChat],
-  );
-  assert.equal(leaked.length, 0);
   assert.equal(interpretPeerAskHttp(400, { error: "Grok is over its day bank" }).retryable, false);
   assert.equal(interpretPeerAskHttp(200, { text: "hi" }).ok, true);
   assert.equal(interpretPeerAskHttp(500, { error: "bridge down" }).retryable, true);
@@ -5383,72 +5218,6 @@ test("subagent pane groups child thought tools and usage like the usual chat", (
   );
   assert.equal(ink, "#3dff7a");
   assert.notEqual(who.color, undefined);
-});
-
-test("agent thread pane only lists this chat’s workers", () => {
-  const parent: Session = {
-    id: "parent",
-    projectId: null,
-    provider: "custom",
-    model: "MiniMax-M3",
-    effort: "medium",
-    title: "Please summon subagents",
-    mode: "always-approve",
-    sandbox: "off",
-    status: "idle",
-    contextUsed: 0,
-    messages: [
-      {
-        id: "mine",
-        role: "system",
-        kind: "subagent",
-        fromTitle: "Battle HUD",
-        subagentSessionId: "kid",
-        toolStatus: "completed",
-        text: "Battle HUD",
-        createdAt: 1,
-      },
-      {
-        id: "setup",
-        role: "system",
-        kind: "subagent",
-        fromTitle: "Workhorse did not finish setting up that bot in time",
-        toolStatus: "failed",
-        text: "Workhorse did not finish setting up that bot in time",
-        createdAt: 2,
-      },
-      {
-        id: "foreign",
-        role: "system",
-        kind: "subagent",
-        fromTitle: "Campaign, sectors, workshop surface",
-        subagentSessionId: "other-kid",
-        toolStatus: "completed",
-        text: "Campaign, sectors, workshop surface",
-        createdAt: 3,
-      },
-    ],
-  };
-  const mine: Session = {
-    ...parent,
-    id: "kid",
-    parentId: "parent",
-    hidden: true,
-    title: "Battle HUD",
-    messages: [{ id: "u", role: "user", kind: "peer", text: "do hud", createdAt: 1 }],
-  };
-  const other: Session = {
-    ...parent,
-    id: "other-kid",
-    parentId: "other-parent",
-    hidden: true,
-    title: "Campaign, sectors, workshop surface",
-    messages: [],
-  };
-  const found = agentThreadsForSession(parent, [parent, mine, other]);
-  assert.equal(found.length, 1);
-  assert.equal(found[0]?.title, "Battle HUD");
-  assert.equal(found[0]?.childId, "kid");
 });
 
 test("shipped launch spec maps sandbox and plan without yolo", () => {
@@ -7204,7 +6973,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.ok(workerTools.includes("list_dir"));
   assert.ok(workerTools.includes("read_file"));
 
-  assert.equal(spawnWaitsForReply({}), true);
+  assert.equal(spawnWaitsForReply({}), false);
   assert.equal(spawnWaitsForReply({ wait: true }), true);
   assert.equal(spawnWaitsForReply({ wait: false }), false);
   assert.equal(spawnWaitsForReply({ wait: "false" }), false);
@@ -7927,11 +7696,6 @@ test("side panes clamp and persist so you can drag them to size", () => {
   const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
   assert.match(sidebar, /Resize sidebar/);
   assert.match(sidebar, /setSidebarWidth/);
-
-  const thread = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
-  assert.match(thread, /compact-thread overlay/);
-  assert.doesNotMatch(thread, /Resize conversation pane/);
-  assert.doesNotMatch(thread, /setThreadWidth/);
 
   assert.doesNotMatch(store, /sessionSetupHeight/);
   assert.doesNotMatch(store, /setSessionSetupWidth/);

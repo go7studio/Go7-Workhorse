@@ -294,7 +294,7 @@ test("leftover numbers stay visible on cards without a second hold setting", () 
       },
       { customBots: [bot] },
     ),
-    100,
+    undefined,
   );
 
   const pruned = pruneWatchPermits(

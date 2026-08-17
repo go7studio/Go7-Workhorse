@@ -219,8 +219,7 @@ export function shouldAutoRouteSpawn(input: {
 }
 
 export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
-  if (input.wait === false || input.wait === "false" || input.wait === 0 || input.wait === "0") return false;
-  return true;
+  return input.wait === true || input.wait === "true" || input.wait === 1 || input.wait === "1";
 }
 
 export function parentHasRunningChildren(

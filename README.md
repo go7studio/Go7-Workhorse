@@ -114,27 +114,9 @@ macOS approval belongs to the signed app identity. One allow sticks across updat
 3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
 4. **New chat** starts with the last model. Change vendor, model, and brain level from the menu on the composer.
 5. **Talk** — Grok, Codex, and Claude run live. Custom uses the HTTP bot you created.
-6. **Type `/`** — command palette.
+6. **Type `/`** — command palette. `/providers` goes back to this project’s home. `/settings` opens Profile, connected LLMs, skills, routing, learning, usage, and watch.
 7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
 8. **Review / Terminal** — inspect the real Git working tree or open a shell scoped to this chat's local folder or worktree.
-
-| Command | What it does |
-|---|---|
-| `/new` | Back to this project’s home |
-| `/project` | Create a project |
-| `/link` | Link a folder to this project |
-| `/providers` | Back to the project home |
-| `/ask` `/accept-edits` `/always-approve` | Permission mode |
-| `/theme` | Light, dark, or system |
-| `/model` | Switch model (`/model grok-4.6`) |
-| `/effort` | Brain level (`low` `medium` `high` `extra`) |
-| `/settings` | Profile, connected LLMs, custom API, usage |
-| `/usage` | Open Settings → Usage |
-| `/schedule 30m …` | Persist a one-shot background run and execute it in this chat when due |
-| `/schedule every 30m …` | Create a recurring, restart-safe background run |
-| `/compact` | Compact natively when available, otherwise create a portable Workhorse checkpoint |
-| `/goal objective` | Start a quiet Workhorse goal; use `pause`, `resume`, `status`, or `clear` without adding control turns to the transcript |
-| `/quit` | Close the app |
 
 ## Layout
 
@@ -158,7 +140,7 @@ Each chat can execute in the linked local folder or a managed detached Git workt
 - Custom Anthropic Messages and OpenAI Chat Completions bots can use configured MCP servers through the same normalized approval and result path as built-in tools.
 - Electron main journals queues, one-shot and recurring schedules, and active goals. Dispatched work is recovered after an app-process restart.
 - Cross-provider subagents have explicit lifecycle records, runtime and token ceilings, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it.
-- The sidebar searches chat titles and message text across projects. Its attention inbox retains permission requests, failed scheduled work, failed subagents, and conflict warnings until dismissed.
+- The sidebar searches chat titles and message text across projects.
 - Settings can export a support-safe provider report. It excludes prompts, messages, file contents, environment variables, URLs, and credential values.
 
 Custom OpenAI-compatible HTTP support intentionally targets Chat Completions. This project does not implement the OpenAI Responses API or Azure OpenAI deployment routing.
@@ -172,5 +154,4 @@ It covers first-run harness discovery, projects/chats, provider and model
 identity, interoperable commands, permissions/sandboxing, continuity, usage,
 and install/recovery. `npm run eval:validate` checks the suite directly, and
 the production build runs that validation so new core commands or Settings
-sections cannot silently drift out of the audit contract. The baseline is
-defined but deliberately unrun until the next approved build is ready.
+sections cannot silently drift out of the audit contract.

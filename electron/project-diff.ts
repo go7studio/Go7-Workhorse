@@ -168,7 +168,7 @@ export function findSourceFile(
     }
     let loose: string | null = null;
     for (const name of names) {
-      if (SKIP_WALK.has(name) || name.startsWith(".")) continue;
+      if (SKIP_WALK.has(name) || name === "." || name === "..") continue;
       const full = path.join(dir, name);
       scanned += 1;
       if (scanned > MAX_SOURCE_SCAN_ENTRIES) return null;

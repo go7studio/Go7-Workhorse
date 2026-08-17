@@ -1453,7 +1453,8 @@ html.pane-dragging * {
 
 .edited-block.compact .file-list {
   max-height: 148px;
-  padding: 0 4px;
+  padding: 0 10px 0 4px;
+  scrollbar-gutter: stable;
 }
 
 .edited-block.compact.open .file-list {
@@ -2795,6 +2796,13 @@ html.pane-dragging * {
   border-radius: 14px;
 }
 
+.project-overview .edited-block.compact .file-list,
+.project-overview .edited-block.compact.open .edited-files-slot > .file-list {
+  max-height: none;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
 .project-hero {
   display: flex;
   flex-direction: column;
@@ -2851,6 +2859,11 @@ html.pane-dragging * {
   cursor: pointer;
 }
 
+.file-row > span:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
 .file-row:hover {
   background: var(--bg-hover);
 }
@@ -2858,7 +2871,7 @@ html.pane-dragging * {
 .file-diff-stat {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
@@ -3379,11 +3392,17 @@ html.pane-dragging * {
 .file-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-secondary);
-  white-space: pre;
+}
+
+.file-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .file-meta .dot {

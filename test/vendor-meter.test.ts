@@ -31,6 +31,11 @@ test("vendor-meter is a Workhorse desk skill with official-docs leftover rules",
   assert.match(read.text, /unknown/);
   assert.match(read.text, /never scrape|unpublished/i);
   assert.match(read.text, /100 − used|100 −/);
+  assert.match(read.text, /leftoverForCard/);
+  assert.match(read.text, /ACP/);
+  assert.match(read.text, /MCP/);
+  assert.match(read.text, /Never fold/);
+  assert.match(read.text, /Classify the import|custom HTTP|ProviderId/i);
   const palette = commandsForSession({ provider: "custom" }, rows);
   assert.ok(palette.some((command) => command.name === "/vendor-meter" && command.run === "skill"));
 });

@@ -40,6 +40,30 @@ export function vendorEmptyReply(provider: ProviderId): string {
   return `${vendorAgentLabel(provider)} finished without a visible reply.`;
 }
 
+/**
+ * What to write in an assistant turn that ended with no prose.
+ *
+ * "Finished without a visible reply" used to be the answer to all three of
+ * these, which read as a failure every time. A 64-second Kimi turn with 11
+ * thoughts and 22 tool calls said it, and so did a turn the person stopped
+ * themselves.
+ *
+ * The old guard — `message.thought ? "" : vendorEmptyReply(...)` — meant the
+ * right thing and never once fired: `ChatMessage.thought` is declared but
+ * never assigned, because thinking becomes its own `kind: "thought"` message.
+ * `worked` asks the transcript instead.
+ */
+export function turnEndedWithoutProse(input: {
+  provider: ProviderId;
+  stopReason?: string;
+  /** The turn left thinking or tool calls behind, so the record is not empty. */
+  worked: boolean;
+}): string {
+  if (input.stopReason === "cancelled") return "Stopped.";
+  if (input.worked) return "";
+  return vendorEmptyReply(input.provider);
+}
+
 export function previewOnlyReply(providerName: string, projectName: string, folders: string[], text: string): string {
   const where = folders.length > 0 ? folders.join("\n") : "(no folder linked — basic chat)";
   return [

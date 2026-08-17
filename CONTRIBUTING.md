@@ -29,33 +29,51 @@ commit as the feature.** A feature nobody documented is a feature nobody finds.
 
 ## Versioning
 
-[Semantic versioning](https://semver.org). While the major is `0`:
-
-- **PATCH** (`0.1.8` → `0.1.9`) — a fix. Nothing new to learn.
-- **MINOR** (`0.1.8` → `0.2.0`) — a new ability, or a change that alters how
-  something already worked.
-- **MAJOR** — held at `0` until the product boundary is stable.
-
-Rules that come from getting this wrong:
-
-- **One version per release, and never reuse one.** If a release published a
-  bad or partial artifact, cut the next number. Rebuilding a published version
-  leaves two different binaries wearing the same name.
-- **Never skip a number.** `v0.1.3` does not exist, and now nobody can say why.
-- **Bump only in a release commit**, and put the `CHANGELOG.md` entry in that
-  same commit. The bump is what triggers the release workflow, so a stray bump
-  ships.
-- **The tag follows the build, not the other way round.** CI reads the version
-  from `package.json` and publishes `v<version>`.
-
-A release is only cut from a commit where CI is green on Linux, Windows and
-macOS. The release job runs the whole suite on both packaging machines before
-it builds anything, so a red suite publishes nothing rather than half of it.
+[Semantic versioning](https://semver.org), held at major `0` until the product
+boundary is stable. You never edit the version and you never tag anything —
+your commit type decides both. See Releases below.
 
 ## Commits
 
-Say what changed and why it needed changing. The subject is a sentence, not a
-label. If the reason is a bug, describe the failure, not the symptom.
+Start the subject with a type, then say what changed and why it needed
+changing. If the reason is a bug, describe the failure, not the symptom.
+
+```
+fix: Claude launches from a packaged build
+feat: a chat can run in a managed git worktree
+```
+
+The type sets the next version, so it is not decoration:
+
+| Type | Version | Use it for |
+| --- | --- | --- |
+| `fix:` | patch — `0.1.8` → `0.1.9` | a defect |
+| `feat:` | minor — `0.1.8` → `0.2.0` | a new ability |
+| `feat!:`, or a `BREAKING CHANGE:` footer | major | a change that breaks how something worked |
+| `docs:` `ci:` `build:` `test:` `refactor:` `chore:` | none | everything else |
+
+Only `fix:` and `feat:` reach the changelog. Work of any other type still
+ships with the next release; it just does not cut one on its own.
+
+## Releases
+
+1. Push to main as usual. Nothing publishes.
+2. release-please opens a pull request called `chore(main): release <version>`
+   holding the bump and the changelog entry, and rewrites it as more commits
+   land.
+3. Merge it when you want that version to exist. The tag, the release and both
+   installers follow.
+
+Merging is the only way to cut a version, so one cannot be skipped, reused, or
+spent by accident. Under the old scheme any push touching `package.json`
+published: `0.1.3` went missing, and `0.1.2` was built twice.
+
+Both installers are built before either is published, so a release is whole or
+it does not exist. `0.1.6` shipped a dmg with no exe and `0.1.8` an exe with no
+dmg, each marked latest, each broken for half the people who downloaded it.
+
+Run the Release workflow by hand to get installers to test. They attach to the
+run, so testing costs no version number and publishes nothing.
 
 ## Before you push
 

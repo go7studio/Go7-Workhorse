@@ -1,6 +1,6 @@
 name: CI
 
-# Release only runs when package.json changes, so a branch could sit broken for
+# Release only builds when a version is cut, so a branch could sit broken for
 # days. This runs the same checks on every push and pull request, and is what
 # branch protection on main should require.
 on:

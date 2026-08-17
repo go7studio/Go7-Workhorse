@@ -190,7 +190,7 @@ import {
   rehomeCustomUsage,
   backfillCursorUsage,
   usageHasBilledTokens,
-  usageProviderForSession,
+  usageHomeForReport,
 } from "./usage";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import { isVendorRateLimitError, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
@@ -4606,13 +4606,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "usage") {
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        // A worker's report can arrive under its orchestrator's session, so the
+        // session's provider is not enough on its own: a Kimi worker under a
+        // Cursor chat filed as cursor/Kimi-K3 that way. The model names the bot.
+        const home = usageHomeForReport(event, owner, stateRef.current.settings.customBots);
         const incoming: UsageDraft = {
-          provider: usageProviderForSession(owner, event.provider),
+          provider: home.provider,
           model: event.model,
           projectId: event.projectId,
           sessionId: event.sessionId,
-          customBotId: owner?.customBotId,
-          lane: usageProviderForSession(owner, event.provider) === "cursor" ? cursorUsageLane(event.model) : undefined,
+          customBotId: home.customBotId,
+          lane: home.provider === "cursor" ? cursorUsageLane(event.model) : undefined,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           cacheReadTokens: event.cacheReadTokens,

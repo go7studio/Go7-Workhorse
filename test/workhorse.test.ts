@@ -4901,8 +4901,11 @@ test("custom MiniMax In/Out tracks on the bot card, not Grok", () => {
   assert.equal(cards.find((card) => card.label === "Grok")?.inputTokens, 0);
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /usageProviderForSession\(owner/);
-  assert.match(store, /customBotId: owner\?\.customBotId/);
+  // The ingest asks which bot the report belongs to before it asks which
+  // session it arrived under; a worker's report lands under its
+  // orchestrator's session, so the session alone filed Kimi as Cursor.
+  assert.match(store, /usageHomeForReport\(event, owner/);
+  assert.match(store, /customBotId: home\.customBotId/);
   assert.match(store, /rehomeCustomUsage/);
   assert.doesNotMatch(store, /provider: owner\?\.provider === "codex" \? "codex" : "grok"/);
 });

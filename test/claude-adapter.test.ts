@@ -12,6 +12,7 @@ import {
   isElectronAcpCommand,
   oauthNotExpired,
   resolveClaudeAcpLaunch,
+  resolveClaudeCliBinary,
 } from "../electron/claude-login";
 import { isInsideAsar, runningInElectron } from "../electron/desk-path";
 import { findClaudeOauthToken } from "../electron/claude-auth";
@@ -32,6 +33,60 @@ test("vendorSendTarget routes claude live like grok and codex", () => {
   assert.equal(vendorSendTarget("grok"), "grok");
   const preview = previewOnlyReply("Claude", "Demo", [], "hi");
   assert.match(preview, /Preview only/);
+});
+
+/**
+ * A desktop app launched from Finder gets /usr/bin:/bin:/usr/sbin:/sbin. The
+ * installed build reported "Claude Code CLI not found" on a machine where the
+ * CLI was sitting in ~/.local/bin the whole time.
+ */
+test("resolveClaudeCliBinary finds the CLI where the installer put it, not only on PATH", () => {
+  const home = path.join(path.sep, "Users", "someone");
+  const installed = path.join(home, ".local", "bin", "claude");
+  const found = resolveClaudeCliBinary({
+    env: { PATH: ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(path.delimiter) },
+    homedir: home,
+    platform: "darwin",
+    existsSync: (filePath) => filePath === installed,
+  });
+  assert.equal(found, installed);
+});
+
+test("resolveClaudeCliBinary prefers PATH over the installer directories", () => {
+  const home = path.join(path.sep, "Users", "someone");
+  const onPath = path.join(path.sep, "opt", "chosen", "claude");
+  const found = resolveClaudeCliBinary({
+    env: { PATH: path.dirname(onPath) },
+    homedir: home,
+    platform: "darwin",
+    existsSync: (filePath) => filePath === onPath || filePath === path.join(home, ".local", "bin", "claude"),
+  });
+  assert.equal(found, onPath);
+});
+
+test("resolveClaudeCliBinary reads a Windows shim, and still returns null when nothing is installed", () => {
+  const home = path.join(path.sep, "Users", "someone");
+  const shim = path.join(home, ".local", "bin", "claude.cmd");
+  assert.equal(
+    resolveClaudeCliBinary({
+      env: { PATH: "" },
+      homedir: home,
+      platform: "win32",
+      extraDirs: [path.join(home, ".local", "bin")],
+      existsSync: (filePath) => filePath === shim,
+    }),
+    shim,
+  );
+  assert.equal(
+    resolveClaudeCliBinary({
+      env: { PATH: "" },
+      homedir: home,
+      platform: "darwin",
+      extraDirs: [path.join(home, ".local", "bin")],
+      existsSync: () => false,
+    }),
+    null,
+  );
 });
 
 test("detectClaudeLogin requires ACP plus a real login artifact", () => {

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { isInsideAsar, runningInElectron } from "./desk-path";
+import { extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
 
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 
@@ -21,6 +21,8 @@ export type ClaudeLoginDetectInput = {
   existsSync?: (filePath: string) => boolean;
   listDir?: (dirPath: string) => string[];
   pathDirs?: string[];
+  /** Where installers put binaries. Injected so tests never read this machine. */
+  extraDirs?: string[];
   readFile?: (filePath: string) => string;
   moduleDirs?: string[];
   nodeBinary?: string;
@@ -207,6 +209,15 @@ export function resolveClaudeCliBinary(input: ClaudeLoginDetectInput = {}): stri
   if (existsSync(homeBin)) return homeBin;
   const onPath = lookOnPath(platform === "win32" ? ["claude.exe"] : ["claude"], pathDirs, existsSync);
   if (onPath) return onPath;
+  // A desktop app launched from Finder gets /usr/bin:/bin:/usr/sbin:/sbin, so
+  // the installer's own directory is not on PATH — the CLI is sitting in
+  // ~/.local/bin and we would still report Claude as never installed.
+  const installed = lookOnPath(
+    platform === "win32" ? ["claude.exe", "claude.cmd", "claude"] : ["claude"],
+    [path.join(homedir, ".claude", "local"), ...(input.extraDirs ?? extraDeskDirs(homedir, env, platform))],
+    existsSync,
+  );
+  if (installed) return installed;
   if (platform === "win32") {
     const localApp = env.LOCALAPPDATA?.trim() || path.join(homedir, "AppData", "Local");
     const store = resolveWindowsStoreClaude(localApp, existsSync, input.listDir);

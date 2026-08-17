@@ -60,30 +60,14 @@ jobs:
         with:
           node-version: 22
 
+      # Cuts when the version itself changed and that version has no release.
+      # See scripts/detect-release.mjs for why "package.json was touched" was
+      # the wrong question, and what it cost.
       - name: Detect an unpublished version bump
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          tag="v${version}"
-          {
-            echo "version=${version}"
-            echo "tag=${tag}"
-          } >> "$GITHUB_OUTPUT"
-
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "cut=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          changed_files="$(git diff --name-only HEAD^ HEAD || true)"
-          if grep -qx 'package.json' <<< "$changed_files"; then
-            echo "cut=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "cut=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: node scripts/detect-release.mjs
 
   installers:
     needs: [prepare, detect-release]

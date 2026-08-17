@@ -12,7 +12,7 @@ import { useActiveSession, useStore } from "../lib/store";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { WatchBanners } from "./WatchNotices";
-import { ContextMeter } from "./ModelMenu";
+import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
 import { FileOpenProvider } from "./FileOpen";
 import { FileViewer } from "./FileViewer";

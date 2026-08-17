@@ -73,9 +73,9 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
     "no routingMode at all reads as before",
   );
   // The row passes the mode through, and the composer chip — Composer's
-  // setup-trigger, the one that actually renders — says Auto too. (ModelMenu
-  // has an Auto label as well, but nothing mounts ModelMenu any more; only
-  // its ContextMeter is imported. Live testing found that.)
+  // setup-trigger, the one that actually renders — says Auto too. (An older
+  // ModelMenu carried its own Auto label but nothing mounted it; live testing
+  // found that, and it has since been removed. See test/dead-ui.test.ts.)
   assert.match(read("src/ui/ChatRow.tsx"), /routingMode: session\.routingMode/);
   const composer = read("src/ui/Composer.tsx");
   const chip = composer.slice(composer.indexOf('className={`setup-trigger'), composer.indexOf('className={`setup-trigger') + 1400);

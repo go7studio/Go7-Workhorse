@@ -33,6 +33,7 @@ const TOP_LEVEL = new Set([
   "electron",
   "eval",
   "index.html",
+  "llms.txt",
   "package-lock.json",
   "package.json",
   "scripts",

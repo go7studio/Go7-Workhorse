@@ -196,7 +196,7 @@ export function formatAwaitAgentsSnapshot(input: {
       lineup: snapshot,
       howToUse:
         running.length === 0
-          ? "All workers finished. The desk will send the join prompt as a new turn. Do not ask the user to pick 1/2/3."
+          ? "All workers finished and their reports are above. Join them now, in your own words: one list, worst first, naming which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
     null,
@@ -437,10 +437,36 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
   );
 }
 
+/**
+ * The orchestrator asked for the reports and got them. It joins them itself,
+ * so a desk join on top would say the same thing twice — drop any queued one
+ * and mark the lineup handed over. Nothing to do while a worker still runs.
+ */
+export function handOverLineup(sessions: Session[], parentId: string, now = Date.now()): Session[] {
+  const parent = sessions.find((session) => session.id === parentId);
+  if (!parent?.lineup || !lineupIsTerminal(parent.lineup)) return sessions;
+  return applyLineupTurnBreak(sessions, parentId, now).map((session) => {
+    if (session.id !== parentId || !session.lineup) return session;
+    const queue = (session.queue ?? []).filter((item) => item.joinAttempt == null);
+    return {
+      ...session,
+      ...(queue.length === (session.queue ?? []).length ? {} : { queue }),
+      lineup: session.lineup.notifiedAt ? session.lineup : markLineupNotified(session.lineup, now),
+    };
+  });
+}
+
 export function applyLineupTurnBreak(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   return sessions.map((session) => {
     if (session.id !== parentId) return session;
-    if (session.messages.some((message) => message.role === "system" && message.text === LINEUP_FINISHED_NOTICE)) {
+    // One notice per lineup, not per chat: a second lineup in the same chat
+    // used to get none because the first one's was still in the transcript.
+    const since = session.lineup?.startedAt ?? 0;
+    if (
+      session.messages.some(
+        (message) => message.role === "system" && message.text === LINEUP_FINISHED_NOTICE && message.createdAt >= since,
+      )
+    ) {
       return session;
     }
     return {

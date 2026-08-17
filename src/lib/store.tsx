@@ -141,6 +141,7 @@ import {
   isJoinAssistantTurn,
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
+  handOverLineup,
   maybeEnqueueLineupJoin,
   queueWakeDelayMs,
   reconcileIdleChildren,
@@ -3593,7 +3594,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
               setState((current) => {
                 let sessions = reconcileIdleChildren(current.sessions, parentId);
-                sessions = maybeEnqueueLineupJoin(sessions, parentId);
+                // The reports go back to the orchestrator in this result, so it
+                // joins them itself. Queueing the desk's join as well produced
+                // the same combined review twice, a minute apart.
+                sessions = handOverLineup(sessions, parentId);
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
               const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);

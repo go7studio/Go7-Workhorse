@@ -95,7 +95,7 @@ import {
   withSubagentStatus,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
-import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, queueWakeDelayMs, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, handOverLineup, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, queueWakeDelayMs, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
 import { looksLikeDispatchCheckBack, looksLikeUnfinishedDeskTurn as looksLikeUnfinishedCustomTurn, shouldEndDispatchTurn } from "../electron/custom-host";
 import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, peerAskTimeoutMs, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
 import {
@@ -7737,6 +7737,48 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.equal(queueWakeDelayMs([idleOrch], (joinItem?.notBefore ?? 0) + 1), 0);
   assert.equal(queueWakeDelayMs([{ ...idleOrch, status: "running" as const }], 12), null, "a running chat drains on its own turn end");
   assert.equal(queueWakeDelayMs([{ ...idleOrch, queue: [] }], 12), null);
+  // The orchestrator called await_agents and took the reports itself. The
+  // desk's queued join would repeat that review a minute later, so it goes.
+  const handed = handOverLineup(joinedAfter, "orch", 14);
+  const handedParent = handed.find((item) => item.id === "orch");
+  assert.equal(handedParent?.queue?.some((item) => item.joinAttempt != null), false, "queued desk join is dropped");
+  assert.ok(handedParent?.lineup?.notifiedAt, "lineup stays marked, so nothing re-queues it");
+  assert.equal(
+    handedParent?.messages.filter((message) => message.text === LINEUP_FINISHED_NOTICE).length,
+    1,
+    "the finished notice is written once",
+  );
+  // A lineup that still has a worker running hands nothing over.
+  const busy = [
+    {
+      ...afterParent!,
+      lineup: addLineupRow(afterParent!.lineup!, {
+        childId: "c9",
+        title: "Nine",
+        slice: "Nine",
+        folder,
+        vendor: "Grok",
+        status: "running",
+        startedAt: 20,
+      }),
+    },
+  ];
+  assert.equal(handOverLineup(busy, "orch", 14), busy);
+  // A second lineup in the same chat gets its own finished notice: the check
+  // used to look for the notice anywhere in the transcript.
+  const secondWave = handed.map((item) =>
+    item.id === "orch" && item.lineup
+      ? { ...item, lineup: { ...item.lineup, startedAt: 100, notifiedAt: undefined } }
+      : item,
+  );
+  const secondBreak = applyLineupTurnBreak(secondWave, "orch", 120);
+  assert.equal(
+    secondBreak.find((item) => item.id === "orch")?.messages.filter((message) => message.text === LINEUP_FINISHED_NOTICE).length,
+    2,
+    "each lineup announces its own finish",
+  );
+  assert.match(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /Join them now/);
+  assert.doesNotMatch(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /desk will send the join/);
   const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
   assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);
   const nextWave = addLineupRow(

@@ -262,7 +262,7 @@ type WorkhorseBridge = {
   replyPeerAsk: (payload: { id: string; text?: string; error?: string }) => Promise<boolean>;
   onPeerCancel?: (handler: (payload: { childSessionId: string; reason: "timed-out" | "cancelled" }) => void) => () => void;
   onGrokEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
-  checkAppUpdate: () => Promise<import("./lib/app-update").AppUpdateOffer | null>;
+  checkAppUpdate: () => Promise<import("./lib/app-update").AppUpdateCheckResult>;
   applyAppUpdate: (version: string) => Promise<import("./lib/app-update").AppUpdateApplyResult>;
   learningConfigure?: (settings: import("./lib/types").Settings) => Promise<boolean>;
   learningProbe?: () => Promise<import("./lib/learning-types").LearningProbeResult>;

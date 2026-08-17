@@ -14,7 +14,7 @@ import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
-import { detectCustomLogin, hydrateDetectedCustomCredentials } from "./custom-login";
+import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { listVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
@@ -221,9 +221,10 @@ function readState(): Persistable {
     // recovered state in memory, but never persist a plaintext replacement.
   }
   const hydrated = hydrateStateCredentials(state, credentialStore());
-  const ready = workhorseVolatileCredentials()
+  const detected = workhorseVolatileCredentials()
     ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
     : hydrated;
+  const ready = fillEmptyCustomBotKeys(detected);
   claimLinkedFolders(ready);
   return ready;
 }
@@ -849,9 +850,17 @@ app.whenReady().then(async () => {
           apiKey = "";
         }
       }
+      const baseUrl = typeof raw?.baseUrl === "string" ? raw.baseUrl : "";
+      if (!apiKey.trim() && baseUrl) {
+        try {
+          apiKey = openClawKeyForBaseUrl(baseUrl);
+        } catch {
+          apiKey = "";
+        }
+      }
       return (
         (await fetchCustomPlanUsage({
-          baseUrl: typeof raw?.baseUrl === "string" ? raw.baseUrl : "",
+          baseUrl,
           apiKey,
           model: typeof raw?.model === "string" ? raw.model : undefined,
         })) ?? null

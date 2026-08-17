@@ -155,3 +155,80 @@ export function hydrateDetectedCustomCredentials<T extends LooseState>(
   }
   return next;
 }
+
+function hostnameOf(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    return new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function hostsShareVendor(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (left.endsWith(`.${right}`) || right.endsWith(`.${left}`)) return true;
+  if (/minimax/i.test(left) && /minimax/i.test(right)) return true;
+  if (/(^|\.)synthetic\.new$/i.test(left) && /(^|\.)synthetic\.new$/i.test(right)) return true;
+  return false;
+}
+
+function keyFromOpenClawProviders(raw: unknown, hostname: string): string {
+  const providers = asRecord(asRecord(asRecord(raw).models).providers);
+  for (const [id, value] of Object.entries(providers)) {
+    const row = asRecord(value);
+    const apiKey = typeof row.apiKey === "string" ? row.apiKey.trim() : "";
+    if (!apiKey) continue;
+    const providerHost = hostnameOf(typeof row.baseUrl === "string" ? row.baseUrl : "");
+    const idMatch =
+      (/minimax/i.test(id) && /minimax/i.test(hostname)) ||
+      (/synthetic/i.test(id) && /(^|\.)synthetic\.new$/i.test(hostname));
+    if (idMatch || hostsShareVendor(hostname, providerHost)) return apiKey;
+  }
+  return "";
+}
+
+/** MiniMax / Synthetic leftover APIs need the same key OpenClaw already stores. */
+export function openClawKeyForBaseUrl(baseUrl: string, input: CustomLoginDetectInput = {}): string {
+  const hostname = hostnameOf(baseUrl);
+  if (!hostname) return "";
+  const env = input.env ?? process.env;
+  if (/minimax/i.test(hostname)) {
+    const envKey = env.MINIMAX_API_KEY?.trim();
+    if (envKey) return envKey;
+  }
+  if (/(^|\.)synthetic\.new$/i.test(hostname)) {
+    const envKey = env.SYNTHETIC_API_KEY?.trim();
+    if (envKey) return envKey;
+  }
+  const homedir = input.homedir ?? os.homedir();
+  const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  const configPath = path.join(homedir, ".openclaw", "openclaw.json");
+  if (!existsSync(configPath)) return "";
+  try {
+    return keyFromOpenClawProviders(JSON.parse(readFile(configPath)), hostname);
+  } catch {
+    return "";
+  }
+}
+
+/** When the OS vault cannot decrypt, reuse OpenClaw/env keys already on this machine. */
+export function fillEmptyCustomBotKeys<T extends LooseState>(state: T, input: CustomLoginDetectInput = {}): T {
+  const next = structuredClone(state);
+  const settings = asRecord(next.settings);
+  const llms = asRecord(settings.llms);
+  const rows = [asRecord(llms.custom)];
+  if (Array.isArray(settings.customBots)) {
+    for (const item of settings.customBots) rows.push(asRecord(item));
+  }
+  for (const row of rows) {
+    if (!row || (typeof row.apiKey === "string" && row.apiKey.trim())) continue;
+    const baseUrl = typeof row.baseUrl === "string" ? row.baseUrl : "";
+    const found = openClawKeyForBaseUrl(baseUrl, input);
+    if (found) row.apiKey = found;
+  }
+  return next;
+}

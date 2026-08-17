@@ -62,7 +62,13 @@ test("OpenAI-compatible tool calls wait for all streamed argument fragments", as
     { id: "child-a", name: "workhorse_spawn_agent", input: { prompt: "read only", wait: false } },
   ]);
 });
-import { detectCustomLogin, hydrateDetectedCustomCredentials, parseOpenClawMinimax } from "../electron/custom-login";
+import {
+  detectCustomLogin,
+  fillEmptyCustomBotKeys,
+  hydrateDetectedCustomCredentials,
+  openClawKeyForBaseUrl,
+  parseOpenClawMinimax,
+} from "../electron/custom-login";
 import { customPlanRemainsUrl, fetchCustomPlanUsage, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
 import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "../src/lib/custom-bots";
@@ -847,6 +853,68 @@ test("OpenClaw MiniMax import fills Custom without a phantom preview", () => {
   assert.equal(rehydrated.settings.customBots[1].apiKey, "");
 });
 
+test("openClawKeyForBaseUrl matches MiniMax and Synthetic hosts from OpenClaw on Windows", () => {
+  const windowsHome = "C:\\home";
+  const openClawPath = path.join(windowsHome, ".openclaw", "openclaw.json");
+  const input = {
+    homedir: windowsHome,
+    env: {},
+    existsSync: (file: string) => file === openClawPath,
+    readFile: (file: string) => {
+      assert.equal(file, openClawPath);
+      return JSON.stringify({
+        models: {
+          providers: {
+            "fireworks-kimi": { apiKey: "sk-other", baseUrl: "https://example.invalid/v1" },
+            "minimax-portal": { apiKey: "sk-portal", baseUrl: "https://api.minimax.io/anthropic/v1" },
+            "synthetic-k3": { apiKey: "syn_test", baseUrl: "https://api.synthetic.new/openai/v1" },
+          },
+        },
+      });
+    },
+  };
+  assert.equal(openClawKeyForBaseUrl("https://api.minimax.io/v1", input), "sk-portal");
+  assert.equal(openClawKeyForBaseUrl("https://api.synthetic.new/openai/v1", input), "syn_test");
+  assert.equal(openClawKeyForBaseUrl("https://api.groq.com/openai/v1", input), "");
+  assert.equal(
+    openClawKeyForBaseUrl("https://api.minimax.io/v1", {
+      homedir: windowsHome,
+      env: { MINIMAX_API_KEY: "sk-env" },
+      existsSync: () => {
+        throw new Error("Windows env MiniMax key should not read OpenClaw");
+      },
+      readFile: () => {
+        throw new Error("should not read");
+      },
+    }),
+    "sk-env",
+  );
+  const missing = openClawKeyForBaseUrl("https://api.minimax.io/v1", {
+    homedir: path.join(ROOT, "does-not-exist"),
+    env: {},
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("should not read");
+    },
+  });
+  assert.equal(missing, "");
+  const filled = fillEmptyCustomBotKeys(
+    {
+      settings: {
+        customBots: [
+          { id: "mini", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3", apiKey: "", credentialId: "custom-bot-mini" },
+          { id: "kimi", baseUrl: "https://api.synthetic.new/openai/v1", model: "hf:moonshotai/Kimi-K3", apiKey: "" },
+          { id: "keep", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3", apiKey: "sk-keep" },
+        ],
+      },
+    },
+    input,
+  );
+  assert.equal(filled.settings.customBots[0].apiKey, "sk-portal");
+  assert.equal(filled.settings.customBots[1].apiKey, "syn_test");
+  assert.equal(filled.settings.customBots[2].apiKey, "sk-keep");
+});
+
 test("parseCustomPlanUsage reads MiniMax weekly leftover percent", () => {
   assert.equal(leftoverFromRemainingPercent(100), 100);
   assert.equal(leftoverFromRemainingPercent(0.86), 86);
@@ -1269,6 +1337,8 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(setup, /"custom"/);
   assert.match(main, /ipcMain\.handle\("custom:prompt"/);
   assert.match(main, /detectCustomLogin/);
+  assert.match(main, /openClawKeyForBaseUrl/);
+  assert.match(main, /fillEmptyCustomBotKeys/);
   assert.match(preload, /custom:detect/);
   assert.match(preload, /customPrompt/);
   const preview = store.slice(store.lastIndexOf("Preview only"), store.lastIndexOf("Preview only") + 400);

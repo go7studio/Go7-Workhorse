@@ -97,6 +97,13 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(installer, /device=\$\(printf/);
 
   const publish = workflow.slice(workflow.indexOf("\n  publish:"));
+  // release-please aborts with "There are untagged, merged release PRs
+  // outstanding" while a merged release PR still carries its pending label.
+  // It relabels when it creates the release, but this workflow passes
+  // skip-github-release and creates the release itself — so publishing has to
+  // move the label, or the first release is the last one anybody can cut.
+  assert.match(publish, /autorelease: tagged/);
+  assert.match(publish, /--remove-label "autorelease: pending"/);
   assert.match(publish, /!cancelled\(\)/);
   assert.match(publish, /needs\.installers\.result == 'success'/);
   assert.match(publish, /needs\.detect-release\.outputs\.cut == 'true'/);

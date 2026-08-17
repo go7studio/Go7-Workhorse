@@ -202,3 +202,23 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Go7 Workhorse ${{ needs.detect-release.outputs.version }}" \
             --notes-file release-notes.md
+
+      # release-please refuses to open the next release pull request while a
+      # merged one still looks untagged — "There are untagged, merged release
+      # PRs outstanding - aborting". It normally moves this label itself when it
+      # creates the GitHub release, but this workflow passes
+      # skip-github-release and creates the release above, so the label has to
+      # be moved here. Without it, one release is the last release anyone can
+      # cut, and nothing says why.
+      - name: Mark the release pull request tagged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "autorelease: tagged" --repo "$GITHUB_REPOSITORY" \
+            --color ededed --description "Release pull request whose tag exists" 2>/dev/null || true
+          for pr in $(gh pr list --repo "$GITHUB_REPOSITORY" --state merged \
+                        --label "autorelease: pending" --json number --jq '.[].number'); do
+            echo "marking #${pr} tagged"
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" \
+              --add-label "autorelease: tagged" --remove-label "autorelease: pending"
+          done

@@ -31,6 +31,18 @@ added with a URL and a key.*
 bot a slice of its plan per day and carries forward what it did not spend, so a
 long Monday does not leave Sunday with nothing.*
 
+<img src="docs/media/fanout.png" alt="One orchestrator chat with seven worker chats nested under it, each on a different model, all done" width="336" align="right">
+
+**One brief, seven workers.** The orchestrator wrote a lineup and spawned every
+bot on the desk at once — Codex, Grok, Claude, Cursor twice, and two custom
+bots — at three effort levels, each in its own chat with its own slice. When the
+last one finished, the desk joined their reports into one ranked list.
+
+That is the desk reviewing its own repository. Two of the fixes it found are
+already on `main`.
+
+<br clear="right">
+
 Grok, Claude and Cursor speak ACP. Codex adds an App Server for native history.
 Custom bots are plain HTTP.
 

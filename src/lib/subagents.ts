@@ -142,6 +142,106 @@ export const SPAWN_ONLY_PROMPT_ERROR = "Worker prompt is a spawn request, not a 
 export const UNBOUND_SPAWN_ERROR =
   "No project folder is bound. Bind a project or pass an existing folder before spawning.";
 
+/**
+ * Workers are people, not paper cups.
+ *
+ * A worker used to be anonymous and disposable: every slice made a new hidden
+ * chat, so one orchestrator finished a Grok 4.6 medium job and then started a
+ * SECOND Grok 4.6 medium from cold for the next slice on the same project.
+ * The first one already knew the tree, the task and what it had just read,
+ * and all of that was thrown away.
+ *
+ * A name is what makes reuse possible: something the desk, the orchestrator
+ * and the person can all point at. Plain English, no theme — the point is to
+ * be memorable in a sidebar, not clever.
+ */
+export const WORKER_NAMES = [
+  "Wren", "Dexter", "Marlow", "Piper", "Otis", "Hazel", "Rufus", "Nadia",
+  "Silas", "Greta", "Milo", "Odette", "Barnaby", "Juno", "Casper", "Wanda",
+] as const;
+
+/** The first unused name, then Wren 2, Wren 3 — never a collision. */
+export function nextWorkerName(taken: Iterable<string>): string {
+  const used = new Set(Array.from(taken, (name) => name.trim().toLowerCase()).filter(Boolean));
+  for (const name of WORKER_NAMES) {
+    if (!used.has(name.toLowerCase())) return name;
+  }
+  for (let round = 2; ; round += 1) {
+    for (const name of WORKER_NAMES) {
+      const candidate = `${name} ${round}`;
+      if (!used.has(candidate.toLowerCase())) return candidate;
+    }
+  }
+}
+
+export type WorkerRecord = {
+  id: string;
+  workerName?: string;
+  provider: ProviderId;
+  model: string;
+  effort: EffortLevel | null;
+  customBotId?: string;
+  projectId: string | null;
+  parentId?: string;
+  hidden?: boolean;
+  archivedAt?: number;
+  status: string;
+  agentRun?: { status?: string };
+};
+
+/** Busy means it is mid-slice. Reusing a busy worker would queue behind it. */
+export function workerIsFree(worker: Pick<WorkerRecord, "status" | "agentRun">): boolean {
+  return worker.status !== "running" && worker.agentRun?.status !== "running";
+}
+
+/**
+ * The worker this slice should go back to, or null to start a new one.
+ *
+ * Scoped to the asking chat and its project, because a name means something
+ * to that orchestrator and its work — reaching across projects would hand a
+ * worker context from a business it was never shown.
+ *
+ * Never reuses a BUSY worker. Fanning several slices out at once is the
+ * point of the desk, and each of those needs its own worker; the duplicate
+ * this fixes is the SEQUENTIAL one, where the first worker had long since
+ * finished and was sitting idle with everything it had learned.
+ */
+export function findReusableWorker(
+  want: {
+    name?: string;
+    provider: ProviderId;
+    model: string;
+    effort: EffortLevel | null;
+    customBotId?: string;
+  },
+  workers: WorkerRecord[],
+  scope: { parentId: string; projectId: string | null },
+): WorkerRecord | null {
+  const mine = workers.filter(
+    (worker) =>
+      worker.hidden &&
+      !worker.archivedAt &&
+      worker.parentId === scope.parentId &&
+      worker.projectId === scope.projectId &&
+      workerIsFree(worker),
+  );
+  const asked = want.name?.trim().toLowerCase();
+  if (asked) {
+    // Named is an address: it means that worker or a new one, never a
+    // stranger wearing the name.
+    return mine.find((worker) => worker.workerName?.trim().toLowerCase() === asked) ?? null;
+  }
+  const sameBot = mine.filter(
+    (worker) =>
+      worker.provider === want.provider &&
+      worker.model === want.model &&
+      (worker.effort ?? null) === (want.effort ?? null) &&
+      (worker.customBotId ?? "") === (want.customBotId ?? ""),
+  );
+  // The most recently used one knows the most about where this work got to.
+  return sameBot.length ? sameBot[sameBot.length - 1] : null;
+}
+
 export const WORKER_OMIT_TOOLS = [
   "workhorse_request_vendor",
   "workhorse_list_bots",

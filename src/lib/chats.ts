@@ -250,6 +250,27 @@ export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "
   return !hasUserPrompt(session);
 }
 
+/**
+ * One rule for both sidebar lists — the project's, and the loose list for
+ * chats with no project. A chat is listed unless it is a draft, is on the
+ * wrong side of the archive line, or is hidden; and a hidden chat is still
+ * listed when it has a parent, so a worker can nest under the chat that
+ * spawned it. The two lists once held two copies of this rule, and only the
+ * project copy learned to keep workers, so a lineup run from a loose chat put
+ * seven workers in the transcript and none in the sidebar.
+ */
+export function sidebarKeepsChat(
+  session: Pick<Session, "projectId" | "parentId" | "hidden" | "archivedAt" | "messages" | "composerDraft" | "composerImages">,
+  where: { projectId: string | null; archived: boolean },
+): boolean {
+  if ((session.projectId ?? null) !== where.projectId) return false;
+  if (isDraftChat(session)) return false;
+  const isArchived = typeof session.archivedAt === "number";
+  if (where.archived ? !isArchived : isArchived) return false;
+  if (session.parentId) return true;
+  return !session.hidden;
+}
+
 export function findDraftChat(sessions: Session[], projectId: string | null): Session | undefined {
   return sessions.find((session) => isDraftChat(session) && (session.projectId ?? null) === projectId);
 }

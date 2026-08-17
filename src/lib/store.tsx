@@ -22,7 +22,6 @@ import {
   dropQueuedPrompt,
   enqueuePrompt,
   forkChat,
-  isDraftChat,
   lastUserMessage,
   applyDeleteDeskChat,
   applyDeleteLooseDeskChats,
@@ -35,6 +34,7 @@ import {
   renameChat,
   rewindToUserMessage,
   shiftQueuedPrompt,
+  sidebarKeepsChat,
 } from "./chats";
 import { autoTitleForSend, isDefaultTitle, suggestedTitleForSession } from "./titles";
 import {
@@ -1862,9 +1862,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             rationale: decision.reason,
           },
         });
+        // lastModel is what the user last chose, and seeds the next new chat.
+        // A routed pick is not a choice: writing it here made one routed turn
+        // to Kimi the default for every chat opened after it.
         setState((latest) => ({
           ...latest,
-          lastModel: presetFrom(routedSession),
           sessions: latest.sessions.map((item) => (item.id === routedSession.id ? routedSession : item)),
         }));
       }
@@ -5754,19 +5756,11 @@ export function useActiveSession() {
 export function useProjectSessions(projectId: string | null, archived = false) {
   const store = useStore();
   if (!projectId) return [];
-  return store.sessions.filter((session) => {
-    if (session.projectId !== projectId || isDraftChat(session)) return false;
-    const isArchived = typeof session.archivedAt === "number";
-    if (archived ? !isArchived : isArchived) return false;
-    if (session.parentId) return true;
-    return !isHiddenSession(session);
-  });
+  return store.sessions.filter((session) => sidebarKeepsChat(session, { projectId, archived }));
 }
 
+/** Chats with no project. Same rule as the project list — see sidebarKeepsChat. */
 export function useLooseSessions(archived = false) {
   const store = useStore();
-  return store.sessions.filter((session) => {
-    if (isHiddenSession(session) || session.projectId || isDraftChat(session)) return false;
-    return archived ? typeof session.archivedAt === "number" : !session.archivedAt;
-  });
+  return store.sessions.filter((session) => sidebarKeepsChat(session, { projectId: null, archived }));
 }

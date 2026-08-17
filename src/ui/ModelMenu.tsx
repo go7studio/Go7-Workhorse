@@ -370,12 +370,18 @@ export function ModelMenu() {
           {attached ? (
             <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
           ) : null}
-          <strong>
+          {/* In auto mode routing picks the model on every send, so naming the
+              last pick here read as the plan: the chip said Composer 2.5 and
+              the prompt went to Kimi K3. Say Auto; picking any model below
+              makes the chat manual again. */}
+          <strong title={attached && session.routingMode === "auto" ? `Routing picks the model each send · last: ${modelName(session.provider, session.model)}` : undefined}>
             {attached
-              ? session.customBotId
-                ? store.settings.customBots.find((bot) => bot.id === session.customBotId)?.name ??
-                  modelName(session.provider, session.model)
-                : modelName(session.provider, session.model)
+              ? session.routingMode === "auto"
+                ? "Auto"
+                : session.customBotId
+                  ? store.settings.customBots.find((bot) => bot.id === session.customBotId)?.name ??
+                    modelName(session.provider, session.model)
+                  : modelName(session.provider, session.model)
               : "Attach LLM"}
           </strong>
           <span className="caret" aria-hidden="true" />

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -48,6 +49,7 @@ const TOP_LEVEL = new Set([
  * whoever made them.
  */
 const BANNED = [
+  { rx: /(^|\/)BIBLE\.md$/, why: "operator product law — keep it out of the public repo" },
   { rx: /(^|\/)GOAL-[^/]*\.md$/, why: "slice plan — keep working papers out of the repo" },
   { rx: /(^|\/)agent-goal-[^/]*\.md$/, why: "implementer brief — keep working papers out of the repo" },
   { rx: /(^|\/)[^/]*-handoff\.md$/, why: "handoff note — written for a moment, not for readers" },
@@ -94,4 +96,10 @@ test("the version is a single semantic version, and the changelog knows it", asy
     changelog.includes(`## [${version}]`),
     `CHANGELOG.md has no entry for ${version}. Write it in the commit that bumps the version.`,
   );
+});
+
+test("the public tree does not ship operator product law", () => {
+  assert.match(readFileSync(path.join(ROOT, "AGENTS.md"), "utf8"), /This repository is public/);
+  assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /does not live in this public repository/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /BIBLE/);
 });

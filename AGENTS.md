@@ -2,6 +2,10 @@
 
 A native desktop shell for coding agents. Each vendor stays its own process. This app is the window, the project, the chats, the `/` palette, and the permission bar.
 
+This repository is public. Ship production code, tests, and docs a stranger
+may read. Do not add operator Bibles, studio memory, or working papers here.
+`docs/FEATURES.md` is the public inventory.
+
 ## Shape
 
 - **A project is a named container.** Create it with a name only. Folders and other references are optional links, added later.

@@ -1,43 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import os from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { catalogSkills, findDeskSkill } from "../src/lib/skills-catalog";
-import { commandsForSession } from "../src/lib/commands";
 import { leftoverForCard } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
-import { readDeskSkill, seedWorkhorseSkills } from "../electron/desk-export-host";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SHIPPED = path.join(ROOT, "skills");
 
-test("vendor-meter is a Workhorse desk skill with official-docs leftover rules", () => {
-  const home = mkdtempSync(path.join(os.tmpdir(), "wh-vendor-meter-"));
-  const seeded = seedWorkhorseSkills(home, SHIPPED);
-  assert.ok(seeded >= 1);
-  assert.equal(existsSync(path.join(home, ".workhorse", "skills", "vendor-meter", "SKILL.md")), true);
-  const rows = catalogSkills({ homedir: home });
-  const skill = findDeskSkill(rows, "vendor-meter");
-  assert.equal(skill?.origin, "workhorse");
-  assert.ok(skill?.name);
-  assert.ok(skill?.description);
-  const read = readDeskSkill("vendor-meter", [], home);
-  assert.equal(read.origin, "workhorse");
-  assert.match(read.text, /official/i);
-  assert.match(read.text, /leftover/);
-  assert.match(read.text, /unknown/);
-  assert.match(read.text, /never scrape|unpublished/i);
-  assert.match(read.text, /100 − used|100 −/);
-  assert.match(read.text, /leftoverForCard/);
-  assert.match(read.text, /ACP/);
-  assert.match(read.text, /MCP/);
-  assert.match(read.text, /Never fold/);
-  assert.match(read.text, /Classify the import|custom HTTP|ProviderId/i);
-  const palette = commandsForSession({ provider: "custom" }, rows);
-  assert.ok(palette.some((command) => command.name === "/vendor-meter" && command.run === "skill"));
+test("public Workhorse does not ship vendor-meter; leftover parsers stay shipped", () => {
+  assert.equal(existsSync(path.join(ROOT, "skills", "vendor-meter", "SKILL.md")), false);
+  assert.match(readFileSync(path.join(ROOT, "skills", "setup", "SKILL.md"), "utf8"), /skills hub/);
 });
 
 test("official Claude MiniMax and Synthetic fixtures invert leftover; missing stays unknown", () => {

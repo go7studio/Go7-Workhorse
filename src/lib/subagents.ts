@@ -116,14 +116,20 @@ export function resolveModelHint(query: string): { provider: ProviderId; model: 
 }
 
 export function isHiddenSession(session: Pick<Session, "hidden" | "parentId">): boolean {
-  return Boolean(session.hidden || session.parentId);
+  return Boolean(session.hidden);
+}
+
+export function isWorkerSession(
+  session?: Pick<Session, "hidden" | "parentId" | "agentRun"> | { hidden?: boolean; parentId?: string | null; agentRun?: unknown } | null,
+): boolean {
+  return Boolean(session?.hidden || session?.agentRun);
 }
 
 export function deskRoleOf(
-  session?: Pick<Session, "hidden" | "parentId"> | { hidden?: boolean; parentId?: string | null } | null,
+  session?: Pick<Session, "hidden" | "parentId" | "agentRun"> | { hidden?: boolean; parentId?: string | null; agentRun?: unknown } | null,
 ): DeskRole {
   if (!session) return "orchestrator";
-  return session.parentId || session.hidden ? "worker" : "orchestrator";
+  return isWorkerSession(session) ? "worker" : "orchestrator";
 }
 
 export const WORKER_SPAWN_ERROR =
@@ -159,13 +165,15 @@ export function agentDepth(
 }
 
 export function nestedSpawnError(
-  sessions: Array<{ id: string; parentId?: string | null }>,
+  sessions: Array<{ id: string; parentId?: string | null; hidden?: boolean; agentRun?: unknown }>,
   parentId: string,
 ): string | null {
   const parent = sessions.find((session) => session.id === parentId);
-  if (!parent?.parentId) return null;
+  if (!isWorkerSession(parent)) return null;
   if (agentDepth(sessions, parentId) >= MAX_AGENT_DEPTH) return WORKER_SPAWN_ERROR;
-  if (sessions.filter((session) => session.parentId === parentId).length >= MAX_NESTED_CHILDREN) {
+  if (
+    sessions.filter((session) => session.parentId === parentId && isWorkerSession(session)).length >= MAX_NESTED_CHILDREN
+  ) {
     return WORKER_SPAWN_ERROR;
   }
   return null;
@@ -174,12 +182,13 @@ export function nestedSpawnError(
 export const MAX_ROOT_WORKERS = 2;
 
 export function rootSpawnError(
-  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun">>,
+  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
   parentId: string,
 ): string | null {
   const running = sessions.filter(
     (session) =>
       session.parentId === parentId &&
+      isWorkerSession(session) &&
       (session.agentRun?.status === "running" || session.status === "running"),
   ).length;
   return running >= MAX_ROOT_WORKERS
@@ -203,12 +212,14 @@ export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
 }
 
 export function parentHasRunningChildren(
-  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun">>,
+  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
   parentId: string,
 ): boolean {
   return sessions.some(
     (session) =>
-      session.parentId === parentId && (session.agentRun?.status === "running" || session.status === "running"),
+      session.parentId === parentId &&
+      isWorkerSession(session) &&
+      (session.agentRun?.status === "running" || session.status === "running"),
   );
 }
 
@@ -217,7 +228,7 @@ export function collectChildAgentReports(
   parentId: string,
 ): Array<{ title: string; status: string; text: string; childSessionId: string }> {
   return sessions
-    .filter((session) => session.parentId === parentId)
+    .filter((session) => session.parentId === parentId && isWorkerSession(session))
     .map((session) => {
       const reply = [...session.messages]
         .reverse()

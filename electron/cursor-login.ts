@@ -11,17 +11,22 @@ export type CursorLoginDetectInput = {
   homedir?: string;
   platform?: NodeJS.Platform;
   existsSync?: (filePath: string) => boolean;
+  readdir?: (dirPath: string) => string[];
   pathDirs?: string[];
-  probeBinary?: (filePath: string) => boolean;
-  probeAuth?: (filePath: string) => boolean | undefined;
+  probeBinary?: (filePath: string, prefixArgs?: string[]) => boolean;
+  probeAuth?: (filePath: string, prefixArgs?: string[]) => boolean | undefined;
 };
 
 export type CursorLoginDetectResult = {
   connected: boolean;
   needsAuth: boolean;
   binary: string | null;
+  prefixArgs: string[];
   cursorHome: string;
 };
+
+/** Official Windows CLI: %LOCALAPPDATA%\cursor-agent\versions\<date-hash>\ */
+const WIN_VERSION_DIR = /^\d{4}\.\d{1,2}\.\d{1,2}(-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/i;
 
 const AUTH_FILES = [
   "cli-config.json",
@@ -51,8 +56,8 @@ function lookOnPath(
   return null;
 }
 
-function probeCursorBinary(filePath: string): boolean {
-  const result = spawnSync(filePath, ["--help"], {
+function probeCursorBinary(filePath: string, prefixArgs: string[] = []): boolean {
+  const result = spawnSync(filePath, [...prefixArgs, "--help"], {
     encoding: "utf8",
     timeout: 3_000,
     windowsHide: true,
@@ -60,17 +65,53 @@ function probeCursorBinary(filePath: string): boolean {
   return /Cursor Agent/i.test(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
 }
 
-function probeCursorAuth(filePath: string): boolean | undefined {
-  const result = spawnSync(filePath, ["about"], {
+export function cursorAboutLoggedIn(output: string): boolean | undefined {
+  if (/User Email\s+Not logged in/i.test(output)) return false;
+  if (/User Email[^\n]*\S+@\S+/i.test(output)) return true;
+  return undefined;
+}
+
+function probeCursorAuth(filePath: string, prefixArgs: string[] = []): boolean | undefined {
+  const result = spawnSync(filePath, [...prefixArgs, "about"], {
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: 8_000,
     windowsHide: true,
   });
   if (result.error) return undefined;
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  if (/User Email\s+Not logged in/i.test(output)) return false;
-  if (/User Email\s+\S+@\S+/i.test(output)) return true;
-  return undefined;
+  return cursorAboutLoggedIn(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+}
+
+function winVersionRank(name: string): number {
+  const datePart = name.split("-")[0] ?? "";
+  const [year, month, day] = datePart.split(".");
+  if (!year || !month || !day) return 0;
+  return Number(`${year}${month.padStart(2, "0")}${day.padStart(2, "0")}`) || 0;
+}
+
+export function resolveCursorWindowsPackage(input: CursorLoginDetectInput = {}): { command: string; script: string } | null {
+  const env = input.env ?? process.env;
+  const platform = input.platform ?? process.platform;
+  if (platform !== "win32") return null;
+  const join = pathMod(platform).join;
+  const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
+  const readdir = input.readdir ?? ((dirPath: string) => fs.readdirSync(dirPath));
+  const localAppData = env.LOCALAPPDATA?.trim();
+  if (!localAppData) return null;
+  const versionsDir = join(localAppData, "cursor-agent", "versions");
+  let names: string[] = [];
+  try {
+    names = readdir(versionsDir);
+  } catch {
+    return null;
+  }
+  const latest = names
+    .filter((name) => WIN_VERSION_DIR.test(name))
+    .sort((a, b) => winVersionRank(b) - winVersionRank(a))[0];
+  if (!latest) return null;
+  const command = join(versionsDir, latest, "node.exe");
+  const script = join(versionsDir, latest, "index.js");
+  if (!existsSync(command) || !existsSync(script)) return null;
+  return { command, script };
 }
 
 export function isCursorAppCommand(command: string): boolean {
@@ -108,6 +149,11 @@ export function resolveCursorBinary(input: CursorLoginDetectInput = {}): string 
   const homeBin = join(homedir, ".local", "bin", ambiguousAgent);
   if (existsSync(homeBin) && probeBinary(homeBin)) return homeBin;
 
+  // Official Windows CLI: node.exe + index.js under %LOCALAPPDATA%\cursor-agent\versions.
+  // The editor (Cursor.exe) and the .cmd wrappers are not spawnable ACP commands.
+  const winPack = resolveCursorWindowsPackage({ ...input, env, platform, existsSync });
+  if (winPack) return winPack.command;
+
   const supportAgent = join(
     homedir,
     "Library",
@@ -139,6 +185,13 @@ export function hasCursorLoginArtifact(
   return false;
 }
 
+export function resolveCursorPrefixArgs(input: CursorLoginDetectInput = {}): string[] {
+  const binary = resolveCursorBinary(input);
+  const winPack = resolveCursorWindowsPackage(input);
+  if (binary && winPack && binary === winPack.command) return [winPack.script];
+  return [];
+}
+
 export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLoginDetectResult {
   const env = input.env ?? process.env;
   const platform = input.platform ?? process.platform;
@@ -146,17 +199,20 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const homedir = input.homedir ?? os.homedir();
   const cursorHome = (env.CURSOR_HOME?.trim() || join(homedir, ".cursor")).replace(/[\\/]+$/, "");
-  const binary = resolveCursorBinary({ ...input, env, homedir, platform, existsSync });
+  const resolved = { ...input, env, homedir, platform, existsSync };
+  const binary = resolveCursorBinary(resolved);
+  const prefixArgs = resolveCursorPrefixArgs(resolved);
   if (!binary || isCursorAppCommand(binary) || isGrokCommand(binary)) {
-    return { connected: false, needsAuth: false, binary: null, cursorHome };
+    return { connected: false, needsAuth: false, binary: null, prefixArgs: [], cursorHome };
   }
   const envAuth = Boolean(env.CURSOR_API_KEY?.trim() || env.CURSOR_AUTH_TOKEN?.trim());
-  const authProbe = envAuth ? true : (input.probeAuth ?? probeCursorAuth)(binary);
+  const authProbe = envAuth ? true : (input.probeAuth ?? ((file) => probeCursorAuth(file, prefixArgs)))(binary);
   const loggedIn = envAuth || authProbe === true || (authProbe === undefined && hasCursorLoginArtifact(cursorHome, existsSync, env, join));
   return {
     connected: loggedIn,
     needsAuth: !loggedIn,
     binary,
+    prefixArgs,
     cursorHome,
   };
 }

@@ -120,7 +120,7 @@ export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
   };
 }
 
-/** Grok local mirror is not an ongoing desk goal. Hide it once the vendor turn is idle. Paused stays. */
+/** Hide an active goal once the vendor turn is idle. Paused stays until resume or End. */
 export function goalDisplayForSession(session?: {
   provider?: string;
   status?: string;
@@ -128,23 +128,17 @@ export function goalDisplayForSession(session?: {
 } | null): GoalDisplay | null {
   const view = goalDisplay(session?.goal);
   if (!view) return null;
-  if (
-    session?.provider === "grok" &&
-    view.status === "active" &&
-    session.status !== "running" &&
-    session.status !== "needs-input"
-  ) {
+  if (view.status === "active" && session?.status !== "running" && session?.status !== "needs-input") {
     return null;
   }
   return view;
 }
 
-/** Drop a finished Grok-mirrored goal when the turn goes idle. Desk goals and paused Grok goals stay. */
+/** Drop a finished active goal when the turn goes idle. Paused goals stay. */
 export function grokGoalAfterTurnIdle(
-  provider: string | undefined,
+  _provider: string | undefined,
   goal: GoalState | undefined,
 ): GoalState | undefined {
-  if (provider !== "grok") return goal;
   if (goal?.status === "paused") return goal;
   return undefined;
 }

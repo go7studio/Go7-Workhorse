@@ -1,7 +1,29 @@
-import { collapseThoughtDisplay, mergeThoughtText } from "./grok-events";
+import {
+  collapseThoughtDisplay,
+  mergeThoughtText,
+  toolIsFinished,
+  upsertCompactMessage,
+  upsertThoughtMessage,
+  upsertToolMessage,
+  type CompactRowInput,
+  type ToolRowInput,
+} from "./grok-events";
 import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
 import type { ChatMessage } from "./types";
+
+export type WorkStepType = "thought" | "tool" | "compact" | "subagent";
+
+export type WorkStep = {
+  type: WorkStepType;
+  message: ChatMessage;
+};
+
+export type DisplayWorkStep =
+  | { type: "thought"; id: string; text: string }
+  | { type: "tool"; message: ChatMessage }
+  | { type: "compact"; message: ChatMessage }
+  | { type: "subagent"; message: ChatMessage };
 
 export type TranscriptBlock =
   | { type: "user"; message: ChatMessage }
@@ -13,7 +35,14 @@ export type TranscriptBlock =
       compacts: ChatMessage[];
       thoughts: ChatMessage[];
       subagents: ChatMessage[];
+      steps: WorkStep[];
     };
+
+export type WorkStreamEvent =
+  | { kind: "thought"; text: string }
+  | { kind: "tool"; tool: ToolRowInput }
+  | { kind: "message"; text: string }
+  | { kind: "compact"; compact?: CompactRowInput };
 
 export function formatWorked(ms: number): string {
   const seconds = Math.max(1, Math.round(ms / 1000));
@@ -53,12 +82,25 @@ function mergeAssistantMessage(current: ChatMessage | null, message: ChatMessage
   return current;
 }
 
+function pushStep(
+  steps: WorkStep[],
+  buckets: { tools: ChatMessage[]; compacts: ChatMessage[]; thoughts: ChatMessage[]; subagents: ChatMessage[] },
+  type: WorkStepType,
+  message: ChatMessage,
+): void {
+  steps.push({ type, message });
+  buckets[type === "thought" ? "thoughts" : type === "tool" ? "tools" : type === "compact" ? "compacts" : "subagents"].push(
+    message,
+  );
+}
+
 export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
   const blocks: TranscriptBlock[] = [];
   let tools: ChatMessage[] = [];
   let compacts: ChatMessage[] = [];
   let thoughts: ChatMessage[] = [];
   let subagents: ChatMessage[] = [];
+  let steps: WorkStep[] = [];
   let assistant: ChatMessage | null = null;
 
   const flush = () => {
@@ -72,11 +114,12 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
       createdAt:
         tools[0]?.createdAt ?? compacts[0]?.createdAt ?? thoughts[0]?.createdAt ?? subagents[0]?.createdAt ?? 0,
     };
-    blocks.push({ type: "reply", assistant: placeholder, tools, compacts, thoughts, subagents });
+    blocks.push({ type: "reply", assistant: placeholder, tools, compacts, thoughts, subagents, steps });
     tools = [];
     compacts = [];
     thoughts = [];
     subagents = [];
+    steps = [];
     assistant = null;
   };
 
@@ -87,19 +130,19 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
       continue;
     }
     if (message.kind === "tool") {
-      tools.push(message);
+      pushStep(steps, { tools, compacts, thoughts, subagents }, "tool", message);
       continue;
     }
     if (message.kind === "compact") {
-      compacts.push(message);
+      pushStep(steps, { tools, compacts, thoughts, subagents }, "compact", message);
       continue;
     }
     if (message.kind === "thought") {
-      thoughts.push(message);
+      pushStep(steps, { tools, compacts, thoughts, subagents }, "thought", message);
       continue;
     }
     if (message.kind === "subagent") {
-      subagents.push(message);
+      pushStep(steps, { tools, compacts, thoughts, subagents }, "subagent", message);
       continue;
     }
     if (message.role === "assistant") {
@@ -109,7 +152,7 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
     }
     if (isSessionIntro(message)) continue;
     if (isDeskNotice(message)) {
-      tools.push(deskNoticeAsTool(message));
+      pushStep(steps, { tools, compacts, thoughts, subagents }, "tool", deskNoticeAsTool(message));
       continue;
     }
     flush();
@@ -117,6 +160,138 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
   }
   flush();
   return blocks;
+}
+
+export function workStepKinds(steps: Array<{ type: string }>): string[] {
+  return steps.map((step) => step.type);
+}
+
+function thoughtCovers(existing: string, incoming: string): boolean {
+  const have = collapseThoughtDisplay(existing);
+  const add = collapseThoughtDisplay(incoming);
+  if (!add) return true;
+  if (!have) return false;
+  if (have === add || have.includes(add) || add.includes(have)) return true;
+  return mergeThoughtText(have, add) === have;
+}
+
+export function displayWorkSteps(
+  block: Extract<TranscriptBlock, { type: "reply" }>,
+  input: { live?: boolean } = {},
+): DisplayWorkStep[] {
+  const live = Boolean(input.live);
+  const assistantText = block.assistant.text ?? "";
+  const peeled = peelPlanningPreamble(assistantText, live);
+  const visible = peeled.body || (!live ? assistantText : "");
+  const out: DisplayWorkStep[] = [];
+
+  const pushThought = (id: string, raw: string) => {
+    const text = stripOutputFromThought(collapseThoughtDisplay(raw), visible);
+    if (!text.trim()) return;
+    const last = out.at(-1);
+    if (last?.type === "thought") {
+      const merged = mergeThoughtText(last.text, text);
+      if (merged === last.text) return;
+      if (thoughtCovers(last.text, text)) return;
+      out[out.length - 1] = { type: "thought", id: last.id, text: merged };
+      return;
+    }
+    out.push({ type: "thought", id, text });
+  };
+
+  if (block.assistant.thought && block.thoughts.length === 0) {
+    pushThought(`${block.assistant.id}-thought`, block.assistant.thought);
+  }
+
+  for (const step of block.steps) {
+    if (step.type === "thought") {
+      const raw =
+        out.every((item) => item.type !== "thought") && block.assistant.thought
+          ? mergeThoughtText(block.assistant.thought, step.message.text)
+          : step.message.text;
+      const last = out.at(-1);
+      if (last?.type === "tool") {
+        const text =
+          stripOutputFromThought(collapseThoughtDisplay(raw), visible) || collapseThoughtDisplay(raw).trim();
+        if (text) out.push({ type: "thought", id: step.message.id, text });
+        else out.push({ type: "thought", id: step.message.id, text: raw.trim() || "Thought" });
+        continue;
+      }
+      pushThought(step.message.id, raw);
+      continue;
+    }
+    out.push({ type: step.type, message: step.message });
+  }
+
+  if (peeled.thought) {
+    const extra = stripOutputFromThought(collapseThoughtDisplay(peeled.thought), visible);
+    if (extra && !out.some((item) => item.type === "thought" && thoughtCovers(item.text, extra))) {
+      pushThought(`${block.assistant.id}-preamble`, extra);
+    }
+  }
+
+  return out;
+}
+
+export type GroupedWorkRow =
+  | { type: "thought"; step: Extract<DisplayWorkStep, { type: "thought" }>; index: number }
+  | { type: "tools"; items: Array<{ step: Extract<DisplayWorkStep, { type: "tool" }>; index: number }> }
+  | { type: "compact"; step: Extract<DisplayWorkStep, { type: "compact" }>; index: number }
+  | { type: "subagent"; step: Extract<DisplayWorkStep, { type: "subagent" }>; index: number };
+
+/** Consecutive in-flight tools share a fold. A finished run starts a new fold when the next call begins. */
+export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
+  const rows: GroupedWorkRow[] = [];
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (!step) continue;
+    if (step.type === "tool") {
+      const last = rows.at(-1);
+      if (last?.type === "tools") {
+        const prevDone = last.items.every((item) => toolIsFinished(item.step.message.toolStatus));
+        if (prevDone) rows.push({ type: "tools", items: [{ step, index }] });
+        else last.items.push({ step, index });
+      } else {
+        rows.push({ type: "tools", items: [{ step, index }] });
+      }
+      continue;
+    }
+    if (step.type === "thought") rows.push({ type: "thought", step, index });
+    else if (step.type === "compact") rows.push({ type: "compact", step, index });
+    else rows.push({ type: "subagent", step, index });
+  }
+  return rows;
+}
+
+/** The last thought or tool run stays open while the turn is live. Earlier folds close when the next phase starts. */
+export function isActiveWorkRow(rows: GroupedWorkRow[], index: number, live: boolean): boolean {
+  return Boolean(live && rows.length > 0 && index === rows.length - 1);
+}
+
+/** Replay a vendor stream the way the store appends it: assistant placeholder, then thought/tool/message. */
+export function playWorkEvents(events: WorkStreamEvent[], now = 1): ChatMessage[] {
+  let messages: ChatMessage[] = [
+    { id: "assistant", role: "assistant", text: "", createdAt: now },
+  ];
+  let clock = now + 1;
+  for (const event of events) {
+    if (event.kind === "thought") {
+      messages = upsertThoughtMessage(messages, event.text, clock++);
+      continue;
+    }
+    if (event.kind === "tool") {
+      messages = upsertToolMessage(messages, event.tool, clock++);
+      continue;
+    }
+    if (event.kind === "compact") {
+      messages = upsertCompactMessage(messages, event.compact ?? {}, clock++);
+      continue;
+    }
+    messages = messages.map((message) =>
+      message.role === "assistant" && !message.kind ? { ...message, text: `${message.text}${event.text}` } : message,
+    );
+  }
+  return messages;
 }
 
 export function thoughtForReply(input: {

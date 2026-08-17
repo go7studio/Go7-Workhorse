@@ -88,7 +88,7 @@ import {
   normalizeProject,
   primaryFolder,
 } from "./project";
-import { projectEdits } from "./project-edits";
+import { isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
 import {
@@ -123,6 +123,7 @@ import {
   applyFailedPeerAsk,
   failPeerAskMessages,
   finishOpenToolMessages,
+  toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
   upsertToolMessage,
@@ -182,7 +183,9 @@ import {
   finalizeTurnUsage,
   normalizeUsage,
   occupancyFromUsage,
+  estimateTurnTokens,
   rehomeCustomUsage,
+  backfillCursorUsage,
   usageHasBilledTokens,
   usageProviderForSession,
 } from "./usage";
@@ -439,7 +442,8 @@ function hydrate(value: unknown): AppState {
     ? record.sessions.map(normalizeSession).filter((item): item is Session => item !== null)
     : [];
   const rawSessions = reconcilePersistedLineups(normalizedSessions);
-  const usage = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
+  const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
+  const usage = [...backfillCursorUsage(rawSessions, restored), ...restored];
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       const suggested = suggestedTitleForSession(session);
@@ -585,6 +589,24 @@ function settlePlanAssignment(
   });
 }
 
+function snapshotWriteInstance(
+  state: AppState,
+  sessionId: string,
+  title: string,
+  detail: string,
+  toolCallId = "",
+): void {
+  if (!window.workhorse?.recordFileWrite || !isWriteToolTitle(title)) return;
+  const filePath = writePathFromToolEvent(title, detail, toolCallId);
+  if (!filePath) return;
+  const session = state.sessions.find((item) => item.id === sessionId);
+  const project =
+    state.projects.find((item) => item.id === session?.projectId) ??
+    state.projects.find((item) => item.id === state.activeProjectId);
+  const roots = project?.folders.map((folder) => folder.path) ?? [];
+  void window.workhorse.recordFileWrite(filePath, roots);
+}
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY);
   const [ready, setReady] = useState(false);
@@ -640,7 +662,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : { connected: false };
           const cursor = window.workhorse?.detectCursorLogin
             ? await window.workhorse.detectCursorLogin()
-            : { connected: false };
+            : { connected: false, binary: null };
           const catalog = window.workhorse?.listVendorModels
             ? await window.workhorse.listVendorModels()
             : null;
@@ -669,8 +691,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   },
                   cursor: {
                     ...current.settings.llms.cursor,
-                    available: Boolean(cursor.connected),
-                    needsAuth: Boolean((cursor as { needsAuth?: boolean }).needsAuth),
+                    available: Boolean(cursor.binary || cursor.connected),
+                    needsAuth: Boolean((cursor as { needsAuth?: boolean }).needsAuth) && !cursor.connected,
                   },
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
@@ -689,6 +711,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    setState((current) => {
+      const extra = backfillCursorUsage(current.sessions, current.usage);
+      if (extra.length === 0) return current;
+      return { ...current, usage: [...extra, ...current.usage] };
+    });
+  }, [ready]);
 
   useEffect(() => {
     if (!ready || !window.workhorse) return;
@@ -1220,7 +1251,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const detected = window.workhorse?.detectCursorLogin
         ? await window.workhorse.detectCursorLogin()
-        : { connected: false };
+        : { connected: false, binary: null };
       setState((current) => ({
         ...current,
         settings: {
@@ -1229,8 +1260,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...current.settings.llms,
             cursor: {
               ...current.settings.llms.cursor,
-              available: Boolean(detected.connected),
-              needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+              available: Boolean(detected.binary || detected.connected),
+              needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth) && !detected.connected,
             },
           },
         },
@@ -2045,6 +2076,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? {
                     ...item,
                     status: "idle",
+                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("custom") }
@@ -2075,6 +2107,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...item,
                     status: "idle",
                     vendorSessionId,
+                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("claude") }
@@ -2114,6 +2147,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 : item,
             ),
           }));
+          void window.workhorse?.cursorPlanUsage?.()
+            .then((plan) => setCursorPlan(plan ?? undefined))
+            .catch(() => undefined);
           return;
         }
         if (live === "codex") {
@@ -2136,6 +2172,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...item,
                     status: "idle",
                     vendorSessionId,
+                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("codex") }
@@ -2416,31 +2453,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeProjectId: forked.session.projectId,
       panel: null,
     });
-    if (source.provider !== "grok" || !window.workhorse?.grokFork) return;
     const project = current.projects.find((item) => item.id === source.projectId);
-    void window.workhorse
-      .grokFork({
-        sessionId: source.id,
-        projectId: source.projectId ?? undefined,
-        text: "",
-        model: source.model,
-        effort: source.effort,
-        mode: source.mode,
-        cwd: sessionExecutionCwd(source.environment, project?.folders[0]?.path ?? ""),
-        vendorSessionId: source.vendorSessionId,
-        sandbox: source.sandbox,
-        mcpServers: current.settings.mcpServers,
-      })
-      .then((result) => {
-        if (!result?.vendorSessionId) return;
-        setState((latest) => ({
-          ...latest,
-          sessions: latest.sessions.map((item) =>
-            item.id === nextId ? { ...item, vendorSessionId: result.vendorSessionId } : item,
-          ),
-        }));
-      })
-      .catch(() => undefined);
+    const root = project?.folders[0]?.path ?? "";
+    const attachGrokFork = (cwd: string) => {
+      if (source.provider !== "grok" || !window.workhorse?.grokFork) return;
+      void window.workhorse
+        .grokFork({
+          sessionId: source.id,
+          projectId: source.projectId ?? undefined,
+          text: "",
+          model: source.model,
+          effort: source.effort,
+          mode: source.mode,
+          cwd,
+          vendorSessionId: source.vendorSessionId,
+          sandbox: source.sandbox,
+          mcpServers: current.settings.mcpServers,
+        })
+        .then((result) => {
+          if (!result?.vendorSessionId) return;
+          setState((latest) => ({
+            ...latest,
+            sessions: latest.sessions.map((item) =>
+              item.id === nextId ? { ...item, vendorSessionId: result.vendorSessionId } : item,
+            ),
+          }));
+        })
+        .catch(() => undefined);
+    };
+    if (root && window.workhorse?.ensureWorktree) {
+      void window.workhorse
+        .ensureWorktree({ sessionId: nextId, root })
+        .then((isolated) => {
+          const cwd = isolated.ok && isolated.path ? isolated.path : root;
+          if (isolated.ok && isolated.path && isolated.gitRoot) {
+            setState((latest) => ({
+              ...latest,
+              sessions: latest.sessions.map((item) =>
+                item.id === nextId
+                  ? {
+                      ...item,
+                      environment: {
+                        kind: "worktree" as const,
+                        path: isolated.path,
+                        gitRoot: isolated.gitRoot,
+                        ...(isolated.head ? { head: isolated.head } : {}),
+                      },
+                    }
+                  : item,
+              ),
+            }));
+          }
+          attachGrokFork(cwd);
+        })
+        .catch(() => attachGrokFork(root));
+      return;
+    }
+    attachGrokFork(sessionExecutionCwd(source.environment, root));
   }, []);
   forkFromRef.current = forkFrom;
 
@@ -3377,27 +3446,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 latest.activeSessionId ||
                 latest.sessions.find((item) => item.projectId === latest.activeProjectId)?.id ||
                 "";
+              const hint = `${payload.name ?? ""} ${payload.scope ?? ""}`.toLowerCase();
+              const title = /\bedit/.test(hint) ? "Edit" : "Write";
               if (!path || !sessionId) {
                 await replyAsk({ error: "Need a file path and a project chat to record a write." });
                 return;
               }
-              setState((current) => ({
-                ...current,
-                sessions: current.sessions.map((session) =>
-                  session.id === sessionId
-                    ? {
-                        ...session,
-                        messages: upsertToolMessage(session.messages, {
-                          toolCallId: `write:${path}`,
-                          title: "Write",
-                          status: "completed",
-                          detail: path,
-                        }),
-                      }
-                    : session,
-                ),
-              }));
-              await replyAsk({ text: JSON.stringify({ ok: true, sessionId, path }, null, 2) });
+              const sessions = latest.sessions.map((session) =>
+                session.id === sessionId
+                  ? {
+                      ...session,
+                      messages: upsertToolMessage(session.messages, {
+                        toolCallId: `${title.toLowerCase()}:${path}`,
+                        title,
+                        status: "completed",
+                        detail: path,
+                      }),
+                    }
+                  : session,
+              );
+              setState((current) => ({ ...current, sessions }));
+              snapshotWriteInstance({ ...latest, sessions }, sessionId, title, path, `${title.toLowerCase()}:${path}`);
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  sessions: listedChats(sessions),
+                })
+                .catch(() => undefined);
+              await replyAsk({ text: JSON.stringify({ ok: true, sessionId, path, title }, null, 2) });
               return;
             }
             if (action === "select-project") {
@@ -4333,6 +4409,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : session,
           ),
         }));
+        const status = (event.status ?? "").toLowerCase().replaceAll("_", " ");
+        if ((status === "completed" || status === "complete") && toolIsFinished(event.status)) {
+          snapshotWriteInstance(stateRef.current, event.sessionId, event.title, event.detail, event.toolCallId);
+        }
         return;
       }
       if (event.type === "compact") {
@@ -4587,15 +4667,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const safetyPaused = event.stopReason === "safety_pause";
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
+        const session = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (pending?.length) {
           const folded = finalizeTurnUsage(pending);
           if (usageHasBilledTokens(folded)) {
-            const session = stateRef.current.sessions.find((item) => item.id === event.sessionId);
             recordUsage({
               ...folded,
               contextUsed: occupancyForSession(session, folded, grokContextSeen.current[event.sessionId]),
             });
           }
+        } else if (session?.provider === "cursor") {
+          const queued = grokChunkQueue.current[event.sessionId] ?? "";
+          const assistant = [...session.messages].reverse().find((item) => item.role === "assistant");
+          const user = [...session.messages].reverse().find((item) => item.role === "user");
+          const estimated = estimateTurnTokens(user?.text ?? "", (assistant?.text ?? "").trim() || queued);
+          if (usageHasBilledTokens({ ...estimated, cacheReadTokens: 0, cacheWriteTokens: 0 })) {
+            recordUsage({
+              provider: "cursor",
+              model: session.model,
+              projectId: session.projectId ?? undefined,
+              sessionId: session.id,
+              lane: cursorUsageLane(session.model),
+              inputTokens: estimated.inputTokens,
+              outputTokens: estimated.outputTokens,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              contextUsed: grokContextSeen.current[event.sessionId],
+            });
+          }
+        }
+        if (session?.provider === "cursor") {
+          void window.workhorse?.cursorPlanUsage?.()
+            .then((plan) => setCursorPlan(plan ?? undefined))
+            .catch(() => undefined);
         }
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";

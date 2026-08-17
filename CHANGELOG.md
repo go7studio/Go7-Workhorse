@@ -8,6 +8,24 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac.dmg` for macOS.
 
+## [0.1.8] — 2026-08-17
+
+- A turn’s work popout keeps thinking and tool calls in the order they
+  happened: think, tool, think. Finished hops close so the open fold is
+  the current phase; click a finished dot to expand it again.
+- Profile shows Your Workhorse as tiny moving blobs of the bots you have
+  called. Spend sets how many of each color; they merge in space without
+  mixing into a new one.
+- Project home Edited opens the file on disk. Rows keep who and when, and
+  drop git `+/−` counts that read as thousands of adds on a folder that is
+  not a repo.
+- Chat rows and turns show when you last sent a prompt.
+- A private learning store lives on your own disk, and the public desk no
+  longer ships a Go7 Play Billing skill.
+- Cursor models stay in step with the live CLI, including Auto.
+- Mac releases require notarization, and the installer removes the old
+  Workhorse.app name.
+
 ## [0.1.7] — 2026-08-16
 
 Cut so that Windows has an installer again: 0.1.6 published only a dmg,
@@ -78,6 +96,7 @@ First release built for both platforms from one commit.
 - Windows desktop shell with Grok, Codex and Claude adapters, projects and
   chats, the permission bar, and the NSIS installer.
 
+[0.1.8]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.8
 [0.1.7]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.7
 [0.1.6]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.6
 [0.1.5]: https://github.com/go7studio/Go7-Workhorse/releases/tag/v0.1.5

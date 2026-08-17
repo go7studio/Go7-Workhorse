@@ -19,7 +19,7 @@ export function exportableSessions(
   customBotId?: string,
 ): Session[] {
   return sessions.filter((session) => {
-    if (session.hidden || session.parentId || typeof session.archivedAt === "number") return false;
+    if (session.hidden || typeof session.archivedAt === "number") return false;
     if (session.provider !== provider) return false;
     if (provider === "custom" && customBotId) return session.customBotId === customBotId;
     return true;

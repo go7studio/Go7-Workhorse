@@ -30,6 +30,7 @@ import {
   pruneWatchPermits,
   rollingAllowed,
   toggleWatchLockKey,
+  watchDayFill,
   watchBarDetail,
   watchBarTitle,
   watchHoldMessage,
@@ -90,6 +91,53 @@ test("weekDayIndex treats the next local date as the next Watch day", () => {
   assert.deepEqual(weekDayIndex(weekEnd, first), { day: 1, days: 7 });
   assert.deepEqual(weekDayIndex(weekEnd, Date.parse("2026-08-14T00:10:00")), { day: 2, days: 7 });
   assert.deepEqual(weekDayIndex("2026-08-20T12:00:00", Date.parse("2026-08-14T00:52:00")), { day: 2, days: 7 });
+});
+
+test("monthly Cursor watch uses the billing month, not 7 days", () => {
+  const now = Date.parse("2026-08-17T12:00:00");
+  const reset = "2026-09-12T00:00:00.000Z";
+  const idx = weekDayIndex(reset, now, "monthly");
+  assert.ok(idx.days >= 28 && idx.days <= 31);
+  assert.notEqual(idx.days, 7);
+  assert.ok(idx.day >= 1 && idx.day < idx.days);
+  assert.deepEqual(weekDayIndex(reset, now), { day: 1, days: 7 });
+  const settings = {
+    watch: DEFAULT_WATCH,
+    customBots: [] as CustomBot[],
+    usageBudgets: {},
+    llms: {
+      grok: { connected: false },
+      claude: { connected: false },
+      codex: { connected: false },
+      cursor: { connected: true },
+    },
+  };
+  const statuses = watchVendorStatuses({
+    settings,
+    usage: [],
+    plans: {
+      cursor: {
+        usedPercent: 32.5,
+        leftPercent: 67.5,
+        period: "monthly",
+        prepaidBalance: 0,
+        resetsAt: reset,
+        products: [
+          { product: "cursor-models", label: "Cursor Models", usagePercent: 19, resetsAt: reset },
+          { product: "other-models", label: "Other Models", usagePercent: 46, resetsAt: reset },
+        ],
+      },
+    },
+    permits: {},
+    now,
+  });
+  const composer = statuses.find((row) => row.key === "cursor:cursor-models");
+  assert.equal(composer?.weekDay?.days, idx.days);
+  assert.equal(composer?.weekDay?.day, idx.day);
+  assert.ok((composer?.allowedPercent ?? 0) < 40);
+  assert.equal(watchDayFill({ usedPercent: 19, allowedPercent: 19, weekDay: { days: 31 } }), 0.19);
+  assert.equal(watchDayFill({ usedPercent: 46, allowedPercent: 19, weekDay: { days: 31 } }), 0.46);
+  assert.equal(watchDayFill({ usedPercent: 51, allowedPercent: 71, weekDay: { days: 7 } }), 51 / 71);
 });
 
 test("unused days stack so day 4 can spend 60% and day 2 locks only past 30%", () => {
@@ -263,8 +311,11 @@ test("Watch settings and send hold are wired through the desk", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(settings, /id: "watch"/);
   assert.match(pane, /FuelRing/);
+  assert.match(pane, /cursor: store.cursorPlan/);
   assert.match(pane, /over=\{row\.overPercent/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8"), /fuel-over/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.watch-day-track i\.cursor/);
+  assert.match(pane, /watchDayFill/);
   assert.match(pane, /Daily bank/);
   assert.match(pane, /Desktop notification/);
   assert.doesNotMatch(pane, /Windows notification/);
@@ -272,6 +323,8 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /desktopNotify/);
   assert.match(pane, /setPicking/);
   assert.match(pane, /toggleWatchLockKey/);
+  assert.match(pane, /\$\{Math\.round\(used\)\} \/ \$\{allowed\}%/);
+  assert.doesNotMatch(pane, /Roams free/);
   assert.match(pane, /disabled=\{!picking\}/);
   assert.match(pane, /watch-option/);
   assert.match(pane, /watch-copy/);

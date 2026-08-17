@@ -3,7 +3,7 @@ import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import type { AgentThread } from "../lib/agent-thread";
 import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp, messageBrain } from "../lib/session";
-import { groupTranscript, isDeskNotice, lastReplyIndex, thoughtForReply } from "../lib/turns";
+import { displayWorkSteps, groupTranscript, isDeskNotice, lastReplyIndex } from "../lib/turns";
 import { useStore } from "../lib/store";
 import { copyText } from "../lib/copy-text";
 import { ContextMeter } from "./ModelMenu";
@@ -149,12 +149,7 @@ export function AgentThreadPane({
             const live = working && index === liveIndex;
             const assistantText = block.assistant.text ?? "";
             const peeled = peelPlanningPreamble(assistantText, live);
-            const thought = thoughtForReply({
-              assistantThought: block.assistant.thought,
-              thoughtMessages: block.thoughts,
-              assistantText,
-              live,
-            });
+            const steps = displayWorkSteps(block, { live });
             const body = unsquashSentences(peeled.body || (!live ? assistantText : ""));
             const who = brainCaption(
               messageBrain(block.assistant, brainStamp(child)),
@@ -172,9 +167,7 @@ export function AgentThreadPane({
                   {who.name}
                 </div>
                 <WorkPopout
-                  thought={thought}
-                  tools={block.tools}
-                  compacts={block.compacts}
+                  steps={steps}
                   startedAt={block.assistant.createdAt}
                   workedMs={block.assistant.workedMs}
                   live={live}

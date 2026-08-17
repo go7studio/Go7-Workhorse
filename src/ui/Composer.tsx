@@ -19,6 +19,29 @@ import { deskInk } from "../lib/settings";
 import { useActiveSession, useStore } from "../lib/store";
 import type { ChatImage } from "../lib/types";
 
+export function isEditableKeyTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof Element)) return false;
+  if (el instanceof HTMLElement && el.isContentEditable) return true;
+  if (el.closest("textarea, select, [contenteditable='true'], [data-keep-keys], .terminal-pane")) return true;
+  const input = el instanceof HTMLInputElement ? el : el.closest("input");
+  if (!input) return false;
+  const type = input.type;
+  return !["button", "submit", "checkbox", "radio", "file", "reset", "range", "color", "hidden"].includes(type);
+}
+
+export function isComposerTypeToFocus(event: {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing?: boolean;
+}): boolean {
+  if (event.isComposing || event.key === "Dead") return false;
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (event.key === " ") return true;
+  return event.key.length === 1;
+}
+
 export function Composer({
   setupOpen,
   onToggleSetup,
@@ -85,6 +108,25 @@ export function Composer({
       if (sessionId) setComposerDraft(sessionId, valueRef.current, imagesRef.current);
     };
   }, [sessionId, setComposerDraft]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!isComposerTypeToFocus(event) || event.defaultPrevented) return;
+      if (isEditableKeyTarget(event.target)) return;
+      const el = field.current;
+      if (!el || event.target === el) return;
+      event.preventDefault();
+      const next = `${valueRef.current}${event.key}`;
+      setValue(next);
+      el.focus();
+      const place = () => el.setSelectionRange(next.length, next.length);
+      queueMicrotask(place);
+      requestAnimationFrame(place);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [sessionId]);
 
   useEffect(() => {
     document.querySelector(".palette button.active")?.scrollIntoView({ block: "nearest" });
@@ -297,6 +339,7 @@ export function Composer({
         >
         <textarea
           ref={field}
+          data-composer-field="true"
           rows={1}
           value={value}
           placeholder={

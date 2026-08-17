@@ -93,10 +93,9 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
   for (const raw of state.sessions) {
     const session = asRecord(raw);
     if (typeof session.id !== "string") continue;
-    const parentId = typeof session.parentId === "string" ? session.parentId : "";
     const from = opts?.fromSessionId?.trim() ?? "";
     const crewChild = Boolean(from && sameSessionCrew(crewSessions, from, session.id));
-    if (!crewChild && (session.hidden === true || parentId)) continue;
+    if (!crewChild && session.hidden === true) continue;
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
     const messages = Array.isArray(session.messages) ? session.messages : [];

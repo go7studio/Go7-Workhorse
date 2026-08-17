@@ -285,7 +285,23 @@ function firstPath(value: unknown): string {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (!value || typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
-  for (const key of ["path", "file", "target", "chat", "description", "command", "query"]) {
+  for (const key of [
+    "path",
+    "file",
+    "file_path",
+    "filePath",
+    "target_file",
+    "targetFile",
+    "filename",
+    "file_name",
+    "relative_path",
+    "relativePath",
+    "target",
+    "chat",
+    "description",
+    "command",
+    "query",
+  ]) {
     if (typeof record[key] === "string" && record[key].trim()) return record[key].trim();
   }
   return "";
@@ -302,14 +318,14 @@ function locationPath(value: unknown): string {
 
 function shortLocator(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 180 || trimmed.includes("\n") || trimmed.includes("\\n")) return "";
+  if (!trimmed || trimmed.length > 180 || /[\r\n]/.test(trimmed)) return "";
   return trimmed;
 }
 
 function shortToolTitle(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
-  if (trimmed.includes("\n") || trimmed.includes("\\n") || trimmed.length > 64) {
+  if (/[\r\n]/.test(trimmed) || trimmed.length > 64) {
     const first = trimmed.split(/\s+/)[0] ?? "";
     if (first && first.length <= 32 && /^[\w./:-]+$/.test(first)) return first;
     return "tool";
@@ -339,7 +355,9 @@ export function extractToolEvent(update: Record<string, unknown>): GrokToolEvent
     locationPath(update.locations) ||
     locationPath(nested.locations) ||
     firstPath(update.path ?? nested.path) ||
-    firstPath(update.rawInput ?? nested.rawInput);
+    firstPath(update.rawInput ?? nested.rawInput) ||
+    firstPath(update.content ?? nested.content) ||
+    locationPath(update.content ?? nested.content);
   const detail = shortLocator(locator);
   const peer = describePeerTool(shortened || (typeof titleRaw === "string" ? titleRaw : ""), detail);
   const title = peer?.title || prettyToolTitle(shortened) || shortened;
@@ -556,8 +574,22 @@ export function parseGrokUsage(value: unknown): GrokUsageDraft | undefined {
   const record = asRecord(value);
   const nested = asRecord(record.usage);
   const source = Object.keys(nested).length > 0 ? nested : record;
-  const input = usageNumber(source.inputTokens, source.input_tokens);
-  const output = usageNumber(source.outputTokens, source.output_tokens);
+  const input = usageNumber(
+    source.inputTokens,
+    source.input_tokens,
+    source.promptTokens,
+    source.prompt_tokens,
+    source.tokensIn,
+    typeof source.input === "number" ? source.input : undefined,
+  );
+  const output = usageNumber(
+    source.outputTokens,
+    source.output_tokens,
+    source.completionTokens,
+    source.completion_tokens,
+    source.tokensOut,
+    typeof source.output === "number" ? source.output : undefined,
+  );
   const exclusiveCacheRead = usageNumber(
     source.cacheReadTokens,
     source.cache_read_input_tokens,

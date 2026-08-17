@@ -111,12 +111,22 @@ type WorkhorseBridge = {
   >;
   revealProject: (folder: string) => Promise<void>;
   openExternal?: (href: string) => Promise<boolean>;
-  fileDiff: (filePath: string, roots?: string[]) => Promise<import("./lib/file-diff").FileDiff | null>;
+  fileDiff: (
+    filePath: string,
+    roots?: string[],
+    created?: boolean,
+  ) => Promise<import("./lib/file-diff").FileDiff | null>;
+  recordFileWrite?: (filePath: string, roots?: string[]) => Promise<string>;
+  readSourceFile?: (
+    filePath: string,
+    roots?: string[],
+  ) => Promise<import("../electron/project-diff").SourceRead | null>;
   listGitChanges?: (cwd: string) => Promise<import("../electron/project-diff").GitChange[]>;
   resolveFile?: (filePath: string, roots?: string[]) => Promise<string | null>;
   editStats: (
     paths: string[],
     roots?: string[],
+    createdPaths?: string[],
   ) => Promise<Record<string, { added: number; deleted: number }>>;
   ensureWorktree: (
     input: import("../electron/worktree-host").EnsureWorktreeInput,

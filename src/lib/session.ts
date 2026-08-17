@@ -4,7 +4,7 @@ import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
 import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
 import { isProviderId } from "./providers";
-import { normalizeGoal } from "./goal";
+import { grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
@@ -179,7 +179,7 @@ export function normalizeSession(raw: unknown): Session | null {
     id: record.id,
     projectId: typeof record.projectId === "string" && record.projectId ? record.projectId : null,
     parentId: typeof record.parentId === "string" && record.parentId.trim() ? record.parentId.trim() : undefined,
-    hidden: record.hidden === true || (typeof record.parentId === "string" && Boolean(record.parentId.trim())) || undefined,
+    hidden: record.hidden === true || undefined,
     provider,
     model,
     customBotId:
@@ -220,7 +220,10 @@ export function normalizeSession(raw: unknown): Session | null {
       const images = normalizeImages(record.composerImages);
       return images.length > 0 ? images : undefined;
     })(),
-    goal: normalizeGoal(record.goal),
+    goal:
+      record.status === "needs-input"
+        ? normalizeGoal(record.goal)
+        : grokGoalAfterTurnIdle(provider, normalizeGoal(record.goal)),
     agentRun: normalizeAgentRun(record.agentRun),
     lineup: normalizeLineup(record.lineup),
     planRun: normalizePlanRun(record.planRun),

@@ -14,6 +14,7 @@ import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 import { RoutingPane } from "./RoutingPane";
 import { LearningPane } from "./LearningPane";
+import { ProfileHorse } from "./ProfileHorse";
 import { routingProfileForModel } from "../lib/routing";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -32,7 +33,7 @@ function llmCardHint(id: Exclude<ProviderId, "custom">, link: LlmLink): string {
   if (!vendorEnabled(link)) return "Disabled";
   // Installed but signed out is a different problem from missing, and the
   // only one the person can fix from here.
-  if (link.needsAuth) return "Needs auth";
+  if (link.needsAuth && !link.connected) return "Needs auth";
   if (link.available === false) return "Not found";
   if (id === "grok" || id === "codex" || id === "claude" || id === "cursor") return "Local login";
   return "Marked";
@@ -57,7 +58,8 @@ function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string
       : "Claude not found.";
   }
   if (id === "cursor") {
-    return found ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
+    if (link.needsAuth && !link.connected) return "Cursor Agent is installed. Sign in with agent login, then Recheck.";
+    return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
 }
@@ -86,6 +88,10 @@ export function Settings() {
       store.refreshClaudeLogin();
     })();
   };
+
+  useEffect(() => {
+    if (section === "llms") store.refreshCursorLogin();
+  }, [section, store.refreshCursorLogin]);
 
   const [usageTick, setUsageTick] = useState(0);
   const [usageHome, setUsageHome] = useState(0);
@@ -129,6 +135,7 @@ export function Settings() {
 
       {section === "profile" && (
         <>
+          <ProfileHorse />
           <label className="field">
             <span>Display name</span>
             <input

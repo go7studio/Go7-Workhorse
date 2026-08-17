@@ -177,12 +177,14 @@ test("chat markdown export skips archived and hidden chats", () => {
       sampleSession(),
       sampleSession({ id: "hid", hidden: true, title: "Hidden" }),
       sampleSession({ id: "arch", archivedAt: 9, title: "Archived" }),
-      sampleSession({ id: "kid", parentId: "sess_1", title: "Child" }),
+      sampleSession({ id: "kid", parentId: "sess_1", hidden: true, title: "Child" }),
+      sampleSession({ id: "fork", parentId: "sess_1", title: "Fork of Walk" }),
       sampleSession({ id: "cx", provider: "codex", title: "Codex only" }),
     ],
     [{ id: "proj_1", name: "Walk Test", createdAt: 1, openedAt: 1, folders: [], references: [] }],
   );
-  assert.equal(files.length, 1);
+  assert.equal(files.length, 2);
+  assert.ok(files.some((file) => /fork-of-walk/.test(file.relPath)));
   assert.match(files[0].relPath, /projects\/walk-test\/what-do-you-have-access-to\.md/);
 });
 

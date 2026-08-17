@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -19,9 +20,14 @@ import { parseProviderId, resolveSpawnSpec, toolsForDeskRole, admitSpawn } from 
 import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../src/lib/watch";
 import { normalizeSettings } from "../src/lib/settings";
 import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
-import { detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
+import { cursorAboutLoggedIn, detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
-import { parseCursorPlanUsage } from "../electron/cursor-plan";
+import {
+  cursorStateDatabasePath,
+  fetchCursorPlanUsage,
+  parseCursorPlanUsage,
+  readCursorAuthToken,
+} from "../electron/cursor-plan";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
 import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import { buildSessionPreface } from "../src/lib/context-preface";
@@ -246,6 +252,12 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   );
 });
 
+test("cursorAboutLoggedIn reads the official about table", () => {
+  assert.equal(cursorAboutLoggedIn("User Email          Not logged in"), false);
+  assert.equal(cursorAboutLoggedIn("User Email          sgovoni@gmail.com\nSubscription Tier   Ultra"), true);
+  assert.equal(cursorAboutLoggedIn("CLI Version         2026.08.11-e8db854"), undefined);
+});
+
 test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   const missing = detectCursorLogin({
     env: {},
@@ -287,13 +299,50 @@ test("detectCursorLogin requires binary plus login, not Cursor.app", () => {
   assert.equal(withKey.connected, true);
 });
 
+test("Cursor discovery finds the official Windows CLI folder, never Cursor.exe", () => {
+  const local = "C:\\Users\\desk\\AppData\\Local";
+  const node = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\node.exe`;
+  const script = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\index.js`;
+  const ide = `${local}\\Programs\\cursor\\Cursor.exe`;
+  const files = new Set([node, script, ide]);
+  const detect = {
+    env: { LOCALAPPDATA: local },
+    platform: "win32" as const,
+    homedir: "C:\\Users\\desk",
+    pathDirs: [] as string[],
+    existsSync: (file: string) => files.has(file),
+    readdir: (dir: string) =>
+      dir === `${local}\\cursor-agent\\versions` ? ["2026.08.11-e8db854"] : [],
+  };
+  assert.equal(resolveCursorBinary(detect), node);
+  const spec = buildCursorLaunchSpec({
+    model: "composer-2.5",
+    effort: "medium",
+    cwd: "C:\\proj",
+    mode: "ask",
+    detect: { ...detect, probeAuth: () => true },
+  });
+  assert.equal(spec.command, node);
+  assert.deepEqual(spec.argv, [script, "--model", "composer-2.5", "acp"]);
+  assert.equal(
+    resolveCursorBinary({
+      env: { LOCALAPPDATA: local },
+      platform: "win32",
+      homedir: "C:\\Users\\desk",
+      pathDirs: [],
+      existsSync: (file) => file === ide,
+    }),
+    null,
+  );
+});
+
 test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binary", () => {
   const files = new Set(["/bin/agent", "/bin/cursor-agent"]);
   assert.equal(
     resolveCursorBinary({
       env: { PATH: "/bin" },
-      homedir: "/no-home",
       platform: "linux",
+      homedir: "/no-home",
       pathDirs: ["/bin"],
       existsSync: (file) => files.has(file),
     }),
@@ -302,8 +351,8 @@ test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binar
   assert.equal(
     resolveCursorBinary({
       env: { PATH: "/bin" },
-      homedir: "/no-home",
       platform: "linux",
+      homedir: "/no-home",
       pathDirs: ["/bin"],
       existsSync: (file) => file === "/bin/agent",
       probeBinary: () => false,
@@ -508,6 +557,82 @@ test("parseCursorPlanUsage official shape; missing is unknown", () => {
   assert.equal(parseCursorPlanUsage(null), undefined);
 });
 
+test("parseCursorPlanUsage reads dashboard planUsage percents", () => {
+  const parsed = parseCursorPlanUsage({
+    billingCycleEnd: "1789241010000",
+    planUsage: { autoPercentUsed: 18.4165, apiPercentUsed: 46.312 },
+  });
+  assert.equal(Math.round(parsed?.products.find((item) => item.product === "cursor-models")?.usagePercent ?? 0), 18);
+  assert.equal(Math.round(parsed?.products.find((item) => item.product === "other-models")?.usagePercent ?? 0), 46);
+  assert.equal(parsed?.resetsAt, new Date(1789241010000).toISOString());
+});
+
+test("readCursorAuthToken prefers env then injected Cursor state db", () => {
+  assert.equal(readCursorAuthToken({ env: { CURSOR_API_KEY: "ck-test" } }), "ck-test");
+  const mac = cursorStateDatabasePath({ homedir: "/tmp/wh-mac", platform: "darwin" });
+  assert.equal(mac.replace(/\\/g, "/"), "/tmp/wh-mac/Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+  const win = cursorStateDatabasePath({
+    homedir: "C:\\Users\\x",
+    env: { APPDATA: "C:\\Users\\x\\AppData\\Roaming" },
+    platform: "win32",
+  });
+  assert.match(win.replace(/\\/g, "/"), /AppData\/Roaming\/Cursor\/User\/globalStorage\/state\.vscdb$/);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-cursor-state-"));
+  const dbPath = cursorStateDatabasePath({ homedir: dir, env: {}, platform: "darwin" });
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+  db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run("cursorAuth/accessToken", "jwt-from-state");
+  db.close();
+  assert.equal(
+    readCursorAuthToken({ homedir: dir, env: {}, platform: "darwin", readFile: () => { throw new Error("no json"); } }),
+    "jwt-from-state",
+  );
+});
+
+test("fetchCursorPlanUsage reads official JSON when a token is present", async () => {
+  const plan = await fetchCursorPlanUsage({
+    token: "ck-test",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          cursorModels: { usagePercent: 12 },
+          otherModels: { usagePercent: 40 },
+        }),
+        { status: 200 },
+      ),
+  });
+  assert.equal(plan?.products.find((item) => item.product === "cursor-models")?.usagePercent, 12);
+  assert.equal(plan?.products.find((item) => item.product === "other-models")?.usagePercent, 40);
+  const missing = await fetchCursorPlanUsage({
+    readOfficial: async () => undefined,
+  });
+  assert.equal(missing, undefined);
+});
+
+test("fetchCursorPlanUsage posts GetCurrentPeriodUsage", async () => {
+  const urls: string[] = [];
+  const methods: string[] = [];
+  const plan = await fetchCursorPlanUsage({
+    token: "jwt",
+    fetchImpl: async (url, init) => {
+      urls.push(String(url));
+      methods.push(String(init?.method ?? "GET"));
+      return new Response(
+        JSON.stringify({
+          billingCycleEnd: "1789241010000",
+          planUsage: { autoPercentUsed: 18.4, apiPercentUsed: 46.3 },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  assert.match(urls[0] ?? "", /GetCurrentPeriodUsage/);
+  assert.equal(methods[0], "POST");
+  assert.equal(Math.round(plan?.products.find((item) => item.product === "cursor-models")?.usagePercent ?? 0), 18);
+  assert.equal(Math.round(plan?.products.find((item) => item.product === "other-models")?.usagePercent ?? 0), 46);
+});
+
 test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {
   assert.equal(parseProviderId("cursor"), "cursor");
   assert.equal(defaultModel("cursor").id, "composer-2.5");
@@ -523,7 +648,8 @@ test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {
     tools.map((item) => item.name),
     ["read_file", "cursor/task"],
   );
-  assert.equal(admitSpawn({ parent: { parentId: "x" }, prompt: "do the slice", folder: "/proj" }).ok, false);
+  assert.equal(admitSpawn({ parent: { parentId: "x", hidden: true }, prompt: "do the slice", folder: "/proj" }).ok, false);
+  assert.equal(admitSpawn({ parent: { parentId: "x" }, prompt: "do the slice", folder: "/proj" }).ok, true);
   assert.equal(isCursorInnerTask({ method: "cursor/task" }), true);
   const tool = extractToolEvent({ sessionUpdate: "cursor/task", title: "Cursor task", toolCallId: "t1" });
   assert.ok(tool);

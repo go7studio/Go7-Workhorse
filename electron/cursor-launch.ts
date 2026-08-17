@@ -62,7 +62,7 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
   const model = resolveCursorModel(input.model);
   const effort = resolveCursorEffort(input.effort);
   const permissionMode = resolveCursorPermissionMode(input.mode);
-  const argv = ["--model", model, "acp"];
+  const argv = [...detected.prefixArgs, "--model", model, "acp"];
   const builtIn = workhorseMcpServer(input.sessionId);
   const mcpServers = mergeMcpServers(input.mcpServers, builtIn);
   const env: Record<string, string> = {};

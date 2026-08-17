@@ -182,7 +182,8 @@ function VendorStatus({
   const store = useStore();
   const link = store.settings.llms[stage];
   const linked = Boolean(link?.connected);
-  const found = Boolean(link?.available);
+  const needsAuth = Boolean(link?.needsAuth);
+  const found = Boolean(link?.available) || needsAuth;
   const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : stage === "cursor" ? "Cursor" : "Claude";
 
   return (
@@ -202,7 +203,21 @@ function VendorStatus({
         </span>
         <div>
           <strong>{name}</strong>
-          <em>{linked && found ? "Ready on the desk" : linked ? "Needs attention" : found ? "Ready to add" : "Not found"}</em>
+          <em>
+            {linked && found && !needsAuth
+              ? "Ready on the desk"
+              : linked
+                ? "Needs attention"
+                : needsAuth
+                  ? stage === "cursor"
+                    ? "Installed — sign in with agent login"
+                    : "Needs auth"
+                  : found
+                    ? "Ready to add"
+                    : stage === "cursor"
+                      ? "Needs Cursor Agent CLI, not the editor app"
+                      : "Not found"}
+          </em>
         </div>
       </div>
       <div className="actions add-bot-actions">

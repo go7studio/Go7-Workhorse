@@ -19,10 +19,15 @@ export type CompactRowInput = {
 
 const TOOL_LINE_LIMIT = 180;
 
+/** True only for real line breaks. Do not treat Windows `\nothing.md` as a newline. */
+export function hasLineBreak(value: string): boolean {
+  return /[\r\n]/.test(value);
+}
+
 export function formatToolLine(title: string, status: string, detail: string): string {
   const head = status ? `${title} · ${status}` : title;
   const loc = detail.trim();
-  if (!loc || loc.length > TOOL_LINE_LIMIT || loc.includes("\n") || loc.includes("\\n")) return head;
+  if (!loc || loc.length > TOOL_LINE_LIMIT || hasLineBreak(loc)) return head;
   return `${head} — ${loc}`;
 }
 
@@ -42,7 +47,7 @@ export function pathFromToolText(text: string): string {
   const win = title.match(/[A-Za-z]:[\\/][^\s`]+/)?.[0] ?? "";
   for (const raw of [detail, tick, win]) {
     const value = raw.trim().replace(/^`+|`+$/g, "");
-    if (!value || value.includes("\n")) continue;
+    if (!value || hasLineBreak(value)) continue;
     if (/^[A-Za-z]:[\\/]/.test(value) || value.includes("/") || value.includes("\\") || /\.[a-z0-9]{1,8}$/i.test(value)) {
       return value;
     }
@@ -59,10 +64,10 @@ export function collapseToolText(text: string, status?: string): string {
     return formatToolLine(verb, st, shortDisplayPath(path));
   }
   const short =
-    title.length > 48 || title.includes("\n") || title.includes("\\n")
+    title.length > 48 || hasLineBreak(title)
       ? title.split(/\s+/)[0]?.slice(0, 32) || "tool"
       : title;
-  if (text.length <= TOOL_LINE_LIMIT && !text.includes("\n") && !text.includes("\\n") && short === title) {
+  if (text.length <= TOOL_LINE_LIMIT && !hasLineBreak(text) && short === title) {
     return text;
   }
   return formatToolLine(short, st ?? "", "");
@@ -230,7 +235,7 @@ export function upsertToolMessage(messages: ChatMessage[], event: ToolRowInput, 
   const title = event.title.trim() || (previous ? titleFromToolLine(previous.text) : "use a tool");
   const incoming = event.detail.trim();
   const usable =
-    incoming && incoming.length <= TOOL_LINE_LIMIT && !incoming.includes("\n") && !incoming.includes("\\n")
+    incoming && incoming.length <= TOOL_LINE_LIMIT && !hasLineBreak(incoming)
       ? incoming
       : previous
         ? detailFromToolLine(collapseToolText(previous.text, event.status))

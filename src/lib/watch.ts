@@ -181,13 +181,41 @@ export function startOfLocalDay(now = Date.now()): number {
   return date.getTime();
 }
 
-/** Which day of the vendor week this is (1–7). Local calendar days: the 13th is day 1, the 14th is day 2. */
-export function weekDayIndex(resetsAt?: string, now = Date.now()): { day: number; days: number } {
+const MS_DAY = 24 * 60 * 60 * 1000;
+
+/** Which day of a monthly billing cycle this is (1–28…31), from the previous reset to `resetsAt`. */
+export function monthDayIndex(resetsAt?: string, now = Date.now()): { day: number; days: number } {
+  if (resetsAt) {
+    const reset = Date.parse(resetsAt);
+    if (!Number.isNaN(reset)) {
+      const resetDay = startOfLocalDay(reset);
+      const today = startOfLocalDay(now);
+      const start = new Date(resetDay);
+      start.setMonth(start.getMonth() - 1);
+      const startDay = startOfLocalDay(start.getTime());
+      const days = Math.max(28, Math.round((resetDay - startDay) / MS_DAY));
+      if (today >= resetDay) return { day: days, days };
+      const elapsed = Math.round((today - startDay) / MS_DAY);
+      return { day: Math.min(days, Math.max(1, elapsed + 1)), days };
+    }
+  }
+  const local = new Date(now);
+  const days = new Date(local.getFullYear(), local.getMonth() + 1, 0).getDate();
+  return { day: local.getDate(), days };
+}
+
+/** Which day of the vendor week this is (1–7). Monthly plans use the billing month instead. */
+export function weekDayIndex(
+  resetsAt?: string,
+  now = Date.now(),
+  period?: "weekly" | "monthly" | "unknown",
+): { day: number; days: number } {
+  if (period === "monthly") return monthDayIndex(resetsAt, now);
   const days = 7;
   if (resetsAt) {
     const reset = Date.parse(resetsAt);
     if (!Number.isNaN(reset)) {
-      const daysLeft = Math.round((startOfLocalDay(reset) - startOfLocalDay(now)) / (24 * 60 * 60 * 1000));
+      const daysLeft = Math.round((startOfLocalDay(reset) - startOfLocalDay(now)) / MS_DAY);
       if (daysLeft <= 0) return { day: days, days };
       return { day: Math.min(days, Math.max(1, days - daysLeft + 1)), days };
     }
@@ -273,9 +301,23 @@ export function weekTokens(events: UsageEvent[], now = Date.now()): number {
   return events.reduce((sum, event) => (event.at >= start ? sum + eventTotal(event) : sum), 0);
 }
 
-/** Unused daily slices stack. Day 4 at 100/7 each is 400/7 of the week. */
-export function rollingAllowed(dailyLimit: number, weekDay: number): number {
-  return Math.min(100, Math.max(0, dailyLimit) * Math.max(1, weekDay));
+/** Bar fill: weekly cards use used/allowed (stacked bank). Monthly cards use used/100 so the month can fill over 28–31 days. */
+export function watchDayFill(row: {
+  usedPercent?: number;
+  allowedPercent: number;
+  weekDay?: { days: number };
+}): number {
+  if (row.usedPercent == null || !Number.isFinite(row.usedPercent)) return 0;
+  const used = Math.max(0, row.usedPercent);
+  if (row.weekDay && row.weekDay.days > 7) return Math.min(1, used / 100);
+  if (row.allowedPercent > 0) return Math.min(1, used / row.allowedPercent);
+  return 0;
+}
+
+/** Unused daily slices stack. Weekly: Day 4 at 100/7 each is 400/7. Monthly uses 100/days. */
+export function rollingAllowed(dailyLimit: number, weekDay: number, days = 7): number {
+  const slice = days === 7 ? Math.max(0, dailyLimit) : 100 / Math.max(1, days);
+  return Math.min(100, slice * Math.max(1, weekDay));
 }
 
 export function weekUsedFromLeftover(leftover?: number, usedPercent?: number): number | undefined {
@@ -298,6 +340,7 @@ export function todayUsedOfWeek(input: {
   day: string;
   dailyLimit?: number;
   weekDay?: number;
+  cycleDays?: number;
 }): number | undefined {
   const parts: number[] = [];
   if (input.leftover != null && input.mark?.day === input.day) {
@@ -311,7 +354,9 @@ export function todayUsedOfWeek(input: {
   // If this is day 2, yesterday could have used at most one daily slice —
   // anything above that must be today's.
   if (input.usedPercent != null && input.dailyLimit != null && input.dailyLimit > 0 && input.weekDay != null) {
-    const prior = input.dailyLimit * Math.max(0, input.weekDay - 1);
+    const days = input.cycleDays && input.cycleDays > 0 ? input.cycleDays : 7;
+    const slice = days === 7 ? input.dailyLimit : 100 / days;
+    const prior = slice * Math.max(0, input.weekDay - 1);
     parts.push(Math.max(0, input.usedPercent - prior));
   }
   if (parts.length === 0) return undefined;
@@ -398,8 +443,8 @@ export function evaluateWatchHold(input: {
   const plan = leftoverForCard(row, input.plans);
   const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent);
   const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
-  const weekDay = weekDayIndex(resetsAt, now).day;
-  const allowedPercent = rollingAllowed(watch.dailyLimitPercent, weekDay);
+  const cycle = weekDayIndex(resetsAt, now, plan?.period);
+  const allowedPercent = rollingAllowed(watch.dailyLimitPercent, cycle.day, cycle.days);
   const permit = input.permits[key];
   if (!watchLocksKey(watch, key)) return null;
   if (input.session.id && permit?.sessions?.[input.session.id] === day) return null;
@@ -568,8 +613,8 @@ export function watchVendorStatuses(input: {
     const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent);
     const today = todayTokens(slice, now);
     const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
-    const weekDay = weekDayIndex(resetsAt, now);
-    const allowedPercent = rollingAllowed(watch.dailyLimitPercent, weekDay.day);
+    const weekDay = weekDayIndex(resetsAt, now, plan?.period);
+    const allowedPercent = rollingAllowed(watch.dailyLimitPercent, weekDay.day, weekDay.days);
     const todayUsed = todayUsedOfWeek({
       leftover,
       usedPercent,
@@ -579,6 +624,7 @@ export function watchVendorStatuses(input: {
       day,
       dailyLimit: watch.dailyLimitPercent,
       weekDay: weekDay.day,
+      cycleDays: weekDay.days,
     });
     const overPercent = usedPercent != null ? Math.max(0, usedPercent - allowedPercent) : 0;
     const dailyOver = usedPercent != null && usedPercent >= allowedPercent;

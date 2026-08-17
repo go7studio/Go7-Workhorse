@@ -308,7 +308,6 @@ export type Store = AppState & {
   deleteWorkers: (parentId: string) => void;
   archiveSession: (id: string, archived?: boolean) => void;
   moveSession: (id: string, projectId: string) => void;
-  dismissAttention: (id: string) => void;
   forkFrom: (messageId: string, sessionId?: string) => void;
   send: (
     text: string,
@@ -1161,12 +1160,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         sessions: current.sessions.map((item) => (item.id === live.id ? next : item)),
       };
     });
-  }, []);
-
-  const dismissAttention = useCallback((id: string) => {
-    setState((current) => current.dismissedAttention?.includes(id)
-      ? current
-      : { ...current, dismissedAttention: [...(current.dismissedAttention ?? []), id].slice(-500) });
   }, []);
 
   const setSecurityPolicy = useCallback((patch: Partial<SessionSecurityPolicy>) => {
@@ -5584,7 +5577,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteWorkers,
       archiveSession,
       moveSession,
-      dismissAttention,
+
       forkFrom,
       send,
       dropQueued,
@@ -5695,7 +5688,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       deleteWorkers,
       archiveSession,
       moveSession,
-      dismissAttention,
+
       forkFrom,
       send,
       dropQueued,

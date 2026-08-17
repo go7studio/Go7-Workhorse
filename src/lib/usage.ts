@@ -487,7 +487,7 @@ export function planTimeWindows(plan: GrokPlanUsage | undefined): GrokPlanProduc
 
 export function weeklyPlanLeftover(plan: GrokPlanUsage | undefined): number | undefined {
   if (!plan) return undefined;
-  if (plan.products.some((item) => item.unlimited && /weekly/i.test(item.product))) return 100;
+  if (plan.products.some((item) => item.unlimited && /weekly/i.test(item.product))) return undefined;
   if (Number.isFinite(plan.leftPercent)) return Math.min(100, Math.max(0, plan.leftPercent));
   return undefined;
 }

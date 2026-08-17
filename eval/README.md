@@ -6,10 +6,8 @@ evidence, cannot-judge versus real failure, manual follow-up, and a coverage
 floor, but changes the subject from a browser SaaS clone to a native
 multi-provider agent shell.
 
-The baseline is now activated. The first full v0.1.4 run used MiniMax-M3 for
-the live evaluation lane; the v0.1.5 repair run adds one bounded adapter smoke
-call for each installed stock harness. See `FINDINGS-v0.1.4.md` for the initial
-findings and the ignored run directories for complete evidence.
+The kit is activated. Live adapter smoke is one bounded call per installed
+stock harness.
 
 ## What is different for Workhorse
 
@@ -168,7 +166,5 @@ verdict.
 - regression-contract.json — durable coverage for observed production defects.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
-- BASELINE.md — source baseline and activation boundary.
-- FINDINGS-v0.1.4.md — durable findings from the first full run.
 - scripts/workhorse-eval.mjs — validation, inventory, run initialization,
   and evidence scoring.

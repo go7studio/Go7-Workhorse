@@ -37,7 +37,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["ORC-S1", "ORC-S7"],
       "rubric": ["ORC-02", "ORC-15"],
-      "sourceFiles": ["src/ui/ChatRow.tsx", "src/ui/AgentThreadPane.tsx", "src/lib/turns.ts", "src/lib/subagents.ts"],
+      "sourceFiles": ["src/ui/ChatRow.tsx", "src/lib/turns.ts", "src/lib/subagents.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -91,7 +91,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S7"],
       "rubric": ["ORC-15"],
-      "sourceFiles": ["src/lib/agent-thread.ts", "src/lib/turns.ts", "src/ui/AgentThreadPane.tsx"],
+      "sourceFiles": ["src/lib/turns.ts"],
       "verification": ["eval:validate"]
     },
     {

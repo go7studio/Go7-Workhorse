@@ -41,11 +41,9 @@
       "src/lib/session-bridge.ts",
       "src/lib/skills-catalog.ts",
       "src/lib/subagents.ts",
-      "src/lib/agent-thread.ts",
       "src/lib/goal.ts",
       "src/lib/plan.ts",
       "src/lib/turns.ts",
-      "src/ui/AgentThreadPane.tsx",
       "src/ui/ChatRow.tsx",
       "src/ui/GoalBar.tsx"
     ],

@@ -8023,4 +8023,5 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(agents, /Never leave work uncommitted/);
   assert.match(agents, /One tree per agent/);
   assert.match(agents, /Tests must not read the machine they run on/);
+  assert.match(agents, /This repository is public/);
 });

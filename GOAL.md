@@ -15,6 +15,7 @@ Current shipped baseline:
 9. Settings surfaces native Codex thread/child-thread history and discovered user/project hooks when App Server and local configuration expose them; unsupported cloud selection stays explicitly unavailable.
 10. The production build and automated adapter/shell suite must remain green.
 
-What ships is listed in [docs/FEATURES.md](docs/FEATURES.md). Slice plans and
-implementer notes are working papers, not product documentation, and are kept
-outside this repository.
+The locked product is [docs/BIBLE.md](docs/BIBLE.md). What ships is listed in
+[docs/FEATURES.md](docs/FEATURES.md). Slice plans and implementer notes are
+working papers, not product documentation, and are kept outside this
+repository.

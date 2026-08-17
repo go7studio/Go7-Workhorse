@@ -2,6 +2,8 @@
 
 A native desktop shell for coding agents. Each vendor stays its own process. This app is the window, the project, the chats, the `/` palette, and the permission bar.
 
+**Product law:** [docs/BIBLE.md](docs/BIBLE.md). Read it before you change the desk. Do not add or drop a locked item unless Steve agreed and that file changes in the same commit. `docs/FEATURES.md` is the inventory, not permission to invent.
+
 ## Shape
 
 - **A project is a named container.** Create it with a name only. Folders and other references are optional links, added later.

@@ -3,6 +3,9 @@
 Every ability the desk has, in one place. Anything listed here ships on `main`.
 When you add a feature, add it here in the same commit.
 
+The locked product — what must stay, what must not appear, and how that
+list changes — is [BIBLE.md](BIBLE.md). This file is the inventory.
+
 ## Agents
 
 | Vendor | How it connects | Notes |

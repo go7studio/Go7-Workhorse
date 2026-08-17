@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -94,4 +95,18 @@ test("the version is a single semantic version, and the changelog knows it", asy
     changelog.includes(`## [${version}]`),
     `CHANGELOG.md has no entry for ${version}. Write it in the commit that bumps the version.`,
   );
+});
+
+test("the Bible is law and the agent docs point at it", () => {
+  const bible = readFileSync(path.join(ROOT, "docs", "BIBLE.md"), "utf8");
+  assert.match(bible, /Workhorse Bible/);
+  assert.match(bible, /Steve agrees/);
+  assert.match(bible, /Several agents at once/);
+  assert.match(bible, /user controls how intelligence is called/i);
+  assert.match(bible, /SQLite/);
+  assert.match(bible, /leftover/);
+  assert.match(bible, /Production code/);
+  assert.match(readFileSync(path.join(ROOT, "AGENTS.md"), "utf8"), /docs\/BIBLE\.md/);
+  assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /docs\/BIBLE\.md/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /BIBLE\.md/);
 });

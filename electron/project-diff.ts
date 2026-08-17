@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { buildFileDiff, type FileDiff } from "../src/lib/file-diff";
 
@@ -104,8 +103,14 @@ export function findSourceFile(
     });
   const trimmed = filePath.trim().replace(/^file:\/\//i, "").replace(/^[`'"]+|[`'"]+$/g, "");
   if (!trimmed) return null;
-  if (isAbsolutePath(trimmed) && existsSync(trimmed) && !isDir(trimmed)) return trimmed;
-  const searchRoots = [...roots];
+  if (isAbsolutePath(trimmed)) {
+    if (existsSync(trimmed) && !isDir(trimmed)) {
+      if (roots.length === 0 || roots.some((root) => isPathInsideRoot(trimmed, root))) return trimmed;
+    } else if (roots.length > 0) {
+      return null;
+    }
+  }
+  const searchRoots: string[] = [];
   const addRoot = (dir: string) => {
     if (!dir) return;
     let resolved = dir;
@@ -119,26 +124,30 @@ export function findSourceFile(
     if (searchRoots.some((root) => path.resolve(root) === resolved)) return;
     searchRoots.push(resolved);
   };
-  addRoot(process.cwd());
-  try {
-    const home = os.homedir();
-    addRoot(path.join(home, "workspace"));
-    addRoot(path.join(home, "Projects"));
-    addRoot(path.join(home, "Developer"));
-    addRoot(path.join(home, "src"));
-    addRoot(path.join(home, "code"));
-  } catch {
-    /* homedir can throw if $HOME is unset */
+  for (const root of roots) {
+    if (!root.trim()) continue;
+    let resolved: string;
+    try {
+      resolved = path.resolve(root);
+    } catch {
+      continue;
+    }
+    if (resolved === path.parse(resolved).root) continue;
+    if (existsSync(resolved) && !isDir(resolved)) continue;
+    if (searchRoots.some((item) => path.resolve(item) === resolved)) continue;
+    searchRoots.push(resolved);
   }
+  // Linked project folders are the only trees. Cwd/home steal same basenames.
+  if (searchRoots.length === 0 && roots.length === 0) addRoot(process.cwd());
   for (const root of searchRoots) {
     const abs = path.resolve(root, trimmed);
     if (existsSync(abs) && !isDir(abs)) return abs;
   }
   const needle = trimmed.replaceAll("\\", "/").replace(/^\.\//, "");
   const base = path.posix.basename(needle).toLowerCase();
+  const wantPath = needle.includes("/");
   if (!base) return null;
   let scanned = 0;
-  let loose: string | null = null;
   const walk = (dir: string, depth: number): string | null => {
     if (depth > 12 || scanned >= MAX_SOURCE_SCAN_ENTRIES) return null;
     let names: string[] = [];
@@ -147,6 +156,7 @@ export function findSourceFile(
     } catch {
       return null;
     }
+    let loose: string | null = null;
     for (const name of names) {
       if (SKIP_WALK.has(name) || name.startsWith(".")) continue;
       const full = path.join(dir, name);
@@ -159,16 +169,29 @@ export function findSourceFile(
       }
       const posix = full.replaceAll("\\", "/").toLowerCase();
       const want = needle.toLowerCase();
-      if (posix.endsWith(`/${want}`) || posix.endsWith(want)) return full;
-      if (name.toLowerCase() === base) loose = loose ?? full;
+      if (posix.endsWith(`/${want}`) || posix === want) return full;
+      if (!wantPath && name.toLowerCase() === base) loose = loose ?? full;
     }
-    return null;
+    return loose;
   };
   for (const root of searchRoots) {
     const hit = walk(root, 0);
     if (hit) return hit;
   }
-  return loose;
+  return null;
+}
+
+function isPathInsideRoot(filePath: string, root: string): boolean {
+  let resolvedRoot: string;
+  let resolvedFile: string;
+  try {
+    resolvedRoot = path.resolve(root);
+    resolvedFile = path.resolve(filePath);
+  } catch {
+    return false;
+  }
+  const rel = path.relative(resolvedRoot, resolvedFile);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
 function gitRootFrom(start: string, existsSync: (filePath: string) => boolean): string | null {
@@ -234,7 +257,9 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
     roots.map((root) => gitRootFrom(root, existsSync)).find((item): item is string => Boolean(item)) ??
     null;
   const rel = repo ? path.relative(repo, abs) : path.basename(abs);
-  const before = repo && !gitIndexLocked(repo, existsSync) ? gitShow(repo, rel) ?? "" : "";
+  const inRepo = Boolean(repo && rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+  const before =
+    repo && inRepo && !gitIndexLocked(repo, existsSync) ? gitShow(repo, rel) ?? "" : "";
   return buildFileDiff(abs, before, after);
 }
 

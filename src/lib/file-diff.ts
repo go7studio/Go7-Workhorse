@@ -110,6 +110,13 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   return out;
 }
 
+/** Rebuild after-text from the line kinds. Deletes drop; same/add stay. */
+export function applyLineDiff(lines: DiffLine[]): string {
+  const kept = lines.filter((line) => line.kind !== "del").map((line) => line.text);
+  if (kept.length === 0) return "";
+  return `${kept.join("\n")}\n`;
+}
+
 export function buildFileDiff(pathName: string, before: string, after: string): FileDiff {
   const lines = lineDiff(before, after);
   const { added, deleted } = countLineChanges(lines);

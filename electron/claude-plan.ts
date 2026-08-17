@@ -48,6 +48,13 @@ export function usedPercentFromUtilization(value: unknown): number {
   return Math.min(100, Math.max(0, used));
 }
 
+/** Official used_percentage / percent fields are already 0–100. */
+export function usedPercentFromUsedPercentage(value: unknown): number {
+  const raw = numberVal(value);
+  if (!Number.isFinite(raw) || raw < 0) return Number.NaN;
+  return Math.min(100, Math.max(0, raw));
+}
+
 function oauthObject(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
@@ -247,9 +254,10 @@ function claudeLimitLabel(limit: Record<string, unknown>): string {
 
 function windowProduct(product: string, label: string, raw: unknown): GrokPlanProduct | undefined {
   const row = asRecord(raw);
-  const used = usedPercentFromUtilization(
-    row.utilization ?? row.used_percentage ?? row.used_percent ?? row.percent,
-  );
+  const used =
+    row.utilization != null
+      ? usedPercentFromUtilization(row.utilization)
+      : usedPercentFromUsedPercentage(row.used_percentage ?? row.used_percent ?? row.percent);
   if (!Number.isFinite(used)) return undefined;
   return { product, label, usagePercent: used, resetsAt: resetOf(row) };
 }
@@ -262,11 +270,15 @@ function claudeProductId(kind: string): string {
 }
 
 function usedFromLimitRow(limit: Record<string, unknown>): number {
-  const direct = usedPercentFromUtilization(
-    limit.percent ?? limit.utilization ?? limit.used_percentage ?? limit.used_percent ?? limit.usedPercent,
+  if (limit.utilization != null) {
+    const fromUtilization = usedPercentFromUtilization(limit.utilization);
+    if (Number.isFinite(fromUtilization)) return fromUtilization;
+  }
+  const direct = usedPercentFromUsedPercentage(
+    limit.used_percentage ?? limit.used_percent ?? limit.usedPercent ?? limit.percent,
   );
   if (Number.isFinite(direct)) return direct;
-  const remaining = usedPercentFromUtilization(limit.remaining_percent ?? limit.remainingPercent);
+  const remaining = usedPercentFromUsedPercentage(limit.remaining_percent ?? limit.remainingPercent);
   if (Number.isFinite(remaining)) return Math.max(0, 100 - remaining);
   const spent = numberVal(limit.used ?? limit.used_tokens ?? limit.tokens);
   const cap = numberVal(limit.limit ?? limit.included ?? limit.max);

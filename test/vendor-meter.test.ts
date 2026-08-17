@@ -50,6 +50,11 @@ test("official Claude MiniMax and Synthetic fixtures invert leftover; missing st
   });
   assert.equal(statusline?.usedPercent, 18);
   assert.equal(statusline?.leftPercent, 82);
+  const onePercent = parseClaudePlanUsage({
+    rate_limits: { seven_day: { used_percentage: 1 } },
+  });
+  assert.equal(onePercent?.usedPercent, 1);
+  assert.equal(onePercent?.leftPercent, 99);
   assert.equal(parseClaudePlanUsage(null), undefined);
   assert.equal(parseClaudePlanUsage({}), undefined);
   assert.equal(parseClaudePlanUsage({ error: { status: 404 } }), undefined);

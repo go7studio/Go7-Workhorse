@@ -119,17 +119,35 @@ jobs:
         run: npm test
 
       - name: Build installer
+        shell: bash
         env:
           # Only a release has to be signed and notarized. Demanding a
           # certificate for a test build would mean never getting one.
           WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
-          CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
-          APPLE_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_ID || '' }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
-        run: npm run ${{ matrix.script }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_CSC_NAME: ${{ secrets.MAC_CSC_NAME }}
+          MAC_APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
+          MAC_APP_SPECIFIC_PASSWORD: ${{ secrets.MAC_APP_SPECIFIC_PASSWORD }}
+          MAC_APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
+        # A signing variable is exported only when its secret has a value.
+        # electron-builder treats CSC_LINK="" as a path, resolves it to the
+        # checkout, and dies with "not a file" — which is what a missing secret
+        # used to look like. Unset, it falls back to an ad-hoc signature for a
+        # test build, and the release gate in after-pack says plainly what is
+        # missing.
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            for pair in CSC_LINK:MAC_CSC_LINK CSC_KEY_PASSWORD:MAC_CSC_KEY_PASSWORD CSC_NAME:MAC_CSC_NAME \
+                        APPLE_ID:MAC_APPLE_ID APPLE_APP_SPECIFIC_PASSWORD:MAC_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID:MAC_APPLE_TEAM_ID; do
+              target="${pair%%:*}"
+              source="${pair#*:}"
+              if [ -n "${!source}" ]; then
+                export "$target"="${!source}"
+              fi
+            done
+          fi
+          npm run ${{ matrix.script }}
 
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs

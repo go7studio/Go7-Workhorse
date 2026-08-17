@@ -6,6 +6,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const productName = packageJson.build?.productName ?? packageJson.productName ?? "Go7 Workhorse";
+function appExecutableNames(targetPlatform, appName) {
+  return Array.from(
+    new Set(
+      [
+        packageJson.build?.executableName,
+        targetPlatform === "mac" ? packageJson.build?.mac?.executableName : packageJson.build?.win?.executableName,
+        appName?.endsWith(".app") ? path.basename(appName, ".app") : null,
+        productName,
+        "Workhorse",
+      ].filter(Boolean),
+    ),
+  );
+}
 const platform = process.argv.includes("--platform")
   ? process.argv[process.argv.indexOf("--platform") + 1]
   : process.platform === "win32"
@@ -38,13 +53,18 @@ function locatePackedApp() {
     const app = fs.readdirSync(macDir).find((name) => name.endsWith(".app"));
     if (!app) return null;
     const appPath = path.join(macDir, app);
-    const binary = path.join(appPath, "Contents", "MacOS", "Workhorse");
+    const macOsDir = path.join(appPath, "Contents", "MacOS");
+    const names = appExecutableNames("mac", app);
+    const binaryName = names.find((name) => fs.existsSync(path.join(macOsDir, name)));
+    const binary = path.join(macOsDir, binaryName ?? names[0]);
     return { artifactDir: macDir, binary, appPath };
   }
   if (platform === "win") {
     const winDir = ["win-unpacked", "win-arm64-unpacked"].map((name) => path.join(release, name)).find((dir) => fs.existsSync(dir));
     if (!winDir) return null;
-    const exe = path.join(winDir, "Workhorse.exe");
+    const exeNames = appExecutableNames("win").map((name) => `${name}.exe`);
+    const exeName = exeNames.find((name) => fs.existsSync(path.join(winDir, name)));
+    const exe = path.join(winDir, exeName ?? exeNames[0]);
     return { artifactDir: winDir, binary: exe, appPath: exe };
   }
   return null;

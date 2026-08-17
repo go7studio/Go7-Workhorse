@@ -43,9 +43,6 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Packaged learning smoke
-        run: node scripts/learning-packaged-smoke.mjs
-
       - name: Build installer
         env:
           WORKHORSE_RELEASE_BUILD: ${{ runner.os == 'macOS' && '1' || '0' }}
@@ -56,6 +53,9 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
         run: npm run ${{ matrix.script }}
+
+      - name: Packaged learning smoke
+        run: node scripts/learning-packaged-smoke.mjs
 
       - id: ver
         shell: pwsh

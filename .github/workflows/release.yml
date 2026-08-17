@@ -16,30 +16,83 @@ permissions:
 
 jobs:
   # Reads the commits since the last tag, works out the next version, and keeps
-  # the release pull request in step with it. On merge it tags and creates the
-  # release. Nothing else in this file decides a version.
-  version:
+  # the release pull request in step with it. It does not publish; the publish
+  # job below waits until both installers are built.
+  prepare:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       issues: write
-    outputs:
-      cut: ${{ steps.please.outputs.releases_created }}
-      tag: ${{ steps.please.outputs.tag_name }}
-      version: ${{ steps.please.outputs.version }}
     steps:
       # `node` reads and writes package.json, so the version the desk compares
       # itself against is the same one that gets tagged.
       - uses: googleapis/release-please-action@v5
         id: please
+        continue-on-error: true
         with:
           release-type: node
+          skip-github-release: true
+
+      - name: Explain release-please permission failures
+        if: steps.please.outcome == 'failure'
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          release-please prepared the release branch but could not open/update
+          the pull request. Turn on "Allow GitHub Actions to create and approve
+          pull requests" for the org/repo, or create the release PR manually
+          from the release-please branch.
+          EOF
+
+  # A version exists only after the release PR's package.json bump reaches main.
+  # That keeps ordinary fixes/features from publishing anything.
+  detect-release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      cut: ${{ steps.detect.outputs.cut }}
+      tag: ${{ steps.detect.outputs.tag }}
+      version: ${{ steps.detect.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Detect an unpublished version bump
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v${version}"
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed_files="$(git diff --name-only HEAD^ HEAD || true)"
+          if grep -qx 'package.json' <<< "$changed_files"; then
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+          fi
 
   installers:
-    needs: version
-    if: ${{ !cancelled() && needs.version.result != 'failure' && (needs.version.outputs.cut == 'true' || github.event_name == 'workflow_dispatch') }}
+    needs: [prepare, detect-release]
+    if: ${{ always() && !cancelled() && (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true') }}
     permissions:
       contents: read
     strategy:
@@ -74,7 +127,7 @@ jobs:
         env:
           # Only a release has to be signed and notarized. Demanding a
           # certificate for a test build would mean never getting one.
-          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && needs.version.outputs.cut == 'true') && '1' || '0' }}
+          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
           CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
@@ -99,19 +152,49 @@ jobs:
   # exe with no dmg. Each was marked latest, and each was broken for half the
   # people who downloaded it.
   publish:
-    needs: [version, installers]
-    if: ${{ needs.version.outputs.cut == 'true' }}
+    needs: [detect-release, installers]
+    if: ${{ needs.detect-release.outputs.cut == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           path: installers
           merge-multiple: true
 
-      - name: Attach the installers
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.detect-release.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = process.env.VERSION;
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const heading = new RegExp(`^## \\[?${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]?.*$`, 'm');
+          const match = heading.exec(changelog);
+
+          if (!match) {
+            fs.writeFileSync('release-notes.md', `See CHANGELOG.md for ${version}.\n`);
+            process.exit(0);
+          }
+
+          const start = match.index + match[0].length;
+          const rest = changelog.slice(start);
+          const next = rest.search(/^## /m);
+          const body = (next === -1 ? rest : rest.slice(0, next)).trim();
+          fs.writeFileSync('release-notes.md', `${body || `See CHANGELOG.md for ${version}.`}\n`);
+          NODE
+
+      - name: Publish the whole release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ needs.version.outputs.tag }}" installers/* --clobber --repo "${{ github.repository }}"
+        run: |
+          gh release create "${{ needs.detect-release.outputs.tag }}" installers/* \
+            --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" \
+            --title "Go7 Workhorse ${{ needs.detect-release.outputs.version }}" \
+            --notes-file release-notes.md

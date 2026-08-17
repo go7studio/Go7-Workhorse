@@ -20,6 +20,7 @@ export function workerSidebarLabel(session: Session, botName?: string): string {
   else if (run === "failed") state = "Failed";
   else if (run === "timed-out") state = "Timed out";
   else if (run === "budget-exceeded") state = "Budget stop";
+  else if (run === "interrupted") state = "Interrupted";
   else if (run === "cancelled") state = "Cancelled";
   else if (session.status === "needs-input") state = "Needs you";
   return [name, effort, state].filter(Boolean).join(" · ");

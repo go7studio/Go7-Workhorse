@@ -296,6 +296,8 @@ export type Store = AppState & {
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
+  /** Pick an interrupted worker back up. Returns why not, when it cannot. */
+  resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
   createCustomBot: () => string | null;
   installCustomBot: (draft: CustomLlm) => { ok: boolean; created: boolean; bot?: PublicBotCard; error?: string };
   deleteCustomBot: (id: string) => void;
@@ -2320,6 +2322,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ),
     }));
   }, [cycleTheme, demoPermission, linkFolder, setMode, setSandbox, setSessionEffort, setSessionModel]);
+
+  /**
+   * Pick up a worker the desk interrupted.
+   *
+   * Closing Workhorse mid-wave used to mark every running worker "failed" and
+   * leave it there — four of them, sixty-odd messages of finished work each,
+   * with no way back. Nothing was actually lost: the brief, the transcript,
+   * the folder and the model are all on disk. This puts the worker back to
+   * running and re-sends its brief; the vendor sees the chat it already has,
+   * so it continues rather than starting over.
+   */
+  const resumeAgentRun = useCallback((sessionId: string) => {
+    const snapshot = stateRef.current;
+    const child = snapshot.sessions.find((item) => item.id === sessionId);
+    if (!child) return { ok: false, message: "That chat is gone." };
+    if (!child.agentRun) return { ok: false, message: "This chat is not a worker." };
+    if (child.agentRun.status === "running" || child.status === "running") {
+      return { ok: false, message: "It is already running." };
+    }
+    if (child.agentRun.status !== "interrupted") {
+      return { ok: false, message: "Only an interrupted worker can be resumed." };
+    }
+    const brief = lastUserMessage(child)?.text?.trim();
+    if (!brief) return { ok: false, message: "This worker has no brief to resume from." };
+
+    const startedAt = Date.now();
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) => {
+        if (item.id === child.id) {
+          return {
+            ...item,
+            agentRun: { ...item.agentRun!, status: "running" as const, startedAt, finishedAt: undefined, error: undefined },
+          };
+        }
+        if (item.id === child.parentId && item.lineup) {
+          return {
+            ...item,
+            lineup: {
+              ...item.lineup,
+              rows: item.lineup.rows.map((row) =>
+                row.childId === child.id ? { ...row, status: "running" as const, startedAt, finishedAt: undefined } : row,
+              ),
+            },
+          };
+        }
+        return item;
+      }),
+    }));
+    // hideUser: the brief is already the first thing in this chat. Showing it
+    // again would read as the user asking twice.
+    send(brief, { sessionId: child.id, hideUser: true });
+    return { ok: true, message: "Resumed." };
+  }, [send]);
 
   const resendFrom = useCallback(
     (messageId: string, text: string) => {
@@ -5642,6 +5698,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startSession,
       setSessionModel,
       setSessionRoutingMode,
+      resumeAgentRun,
       createCustomBot,
       installCustomBot,
       deleteCustomBot,
@@ -5753,6 +5810,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startSession,
       setSessionModel,
       setSessionRoutingMode,
+      resumeAgentRun,
       createCustomBot,
       installCustomBot,
       deleteCustomBot,

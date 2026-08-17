@@ -155,7 +155,14 @@ export type PortableCheckpoint = {
   summary: string;
 };
 
-export type DeskLineupRowStatus = "queued" | "running" | "completed" | "failed" | "timed-out";
+export type DeskLineupRowStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timed-out"
+  /** The desk exited mid-run. The slice is unfinished but the worker can be resumed. */
+  | "interrupted";
 
 export type DeskLineupRow = {
   childId: string;
@@ -183,7 +190,12 @@ export type DeskLineup = {
 };
 
 export type AgentRun = {
-  status: "running" | "completed" | "failed" | "cancelled" | "timed-out" | "budget-exceeded";
+  /**
+   * `interrupted` is the desk stopping, not the worker failing — Workhorse
+   * exited while this run was going. The brief, the transcript and the folder
+   * all survive, so it can be picked up again; `failed` cannot.
+   */
+  status: "running" | "completed" | "failed" | "cancelled" | "timed-out" | "budget-exceeded" | "interrupted";
   startedAt: number;
   finishedAt?: number;
   timeoutMs?: number;

@@ -136,6 +136,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     };
   },
   detectCustomLogin: () => ipcRenderer.invoke("custom:detect"),
+  customModels: (config: { baseUrl: string; apiKey: string }) => ipcRenderer.invoke("custom:models", config),
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>
     ipcRenderer.invoke("custom:probe", config),
   customPrompt: (input: import("./custom-host").CustomPromptInput) => ipcRenderer.invoke("custom:prompt", input),

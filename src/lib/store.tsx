@@ -60,6 +60,7 @@ import {
   customBotForSession,
   draftReady,
   EMPTY_CUSTOM_DRAFT,
+  normalizeCustomModelList,
 } from "./custom-bots";
 import {
   DEFAULT_CHOICE,
@@ -5071,6 +5072,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       model: draft.model,
       api: draft.api,
     });
+    // Ask the provider what it serves. Synthetic sells many models behind one
+    // key and one quota, and typing one id by hand made each its own bot —
+    // which draws one leftover ring per bot from a single shared pool.
+    //
+    // This is the offer, not the choice. The owner ticks what they want; a
+    // chat should never reach a model nobody approved. A provider that
+    // publishes no /models simply keeps the id that was typed.
+    const listed = result.ok && window.workhorse?.customModels
+      ? await window.workhorse.customModels({ baseUrl: draft.baseUrl, apiKey: draft.apiKey }).catch(() => [])
+      : [];
+    const discovered = normalizeCustomModelList(listed);
     setState((current) => ({
       ...current,
       settings: {
@@ -5083,11 +5095,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             contextWindow: result.contextWindow ?? current.settings.llms.custom.contextWindow,
             api: result.api ?? current.settings.llms.custom.api,
             model: result.model ?? current.settings.llms.custom.model,
+            ...(discovered ? { discovered } : {}),
           },
         },
       },
     }));
-    return { ok: result.ok, message: result.message };
+    const offered = discovered ? discovered.filter((id) => id !== (result.model ?? draft.model)).length : 0;
+    return {
+      ok: result.ok,
+      message:
+        offered > 0
+          ? `${result.message} This key also serves ${offered} other model${offered === 1 ? "" : "s"} — tick the ones you want.`
+          : result.message,
+    };
   }, []);
 
   const createCustomBot = useCallback(() => {
@@ -5161,14 +5181,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       model: bot.model,
       api: bot.api,
     });
+    // Same as a new connection: ask what else this key serves, and cache the
+    // offer so more models can be approved later without testing again.
+    const listed = result.ok && window.workhorse?.customModels
+      ? await window.workhorse.customModels({ baseUrl: bot.baseUrl, apiKey: bot.apiKey }).catch(() => [])
+      : [];
+    const discovered = normalizeCustomModelList(listed);
     if (result.ok) {
       updateCustomBot(id, {
         ...(result.contextWindow ? { contextWindow: result.contextWindow } : {}),
         ...(result.api ? { api: result.api } : {}),
         ...(result.model ? { model: result.model } : {}),
+        ...(discovered ? { discovered } : {}),
       });
     }
-    return { ok: result.ok, message: result.message };
+    const offered = discovered ? discovered.filter((item) => item !== (result.model ?? bot.model)).length : 0;
+    return {
+      ok: result.ok,
+      message:
+        offered > 0
+          ? `${result.message} This key also serves ${offered} other model${offered === 1 ? "" : "s"} — tick the ones you want.`
+          : result.message,
+    };
   }, [updateCustomBot]);
 
   const setCustomBotEnabled = useCallback((id: string, enabled: boolean) => {

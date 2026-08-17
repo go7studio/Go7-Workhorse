@@ -22,6 +22,7 @@ import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
 import { fetchCursorPlanUsage } from "./cursor-plan";
 import { fetchCustomPlanUsage } from "./custom-plan";
+import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
@@ -823,6 +824,9 @@ app.whenReady().then(async () => {
     return { ok: true };
   });
   ipcMain.handle("custom:detect", () => detectCustomLogin());
+  ipcMain.handle("custom:models", async (_event, config: { baseUrl: string; apiKey: string }) => {
+    return fetchCustomModels(config);
+  });
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });

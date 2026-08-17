@@ -612,6 +612,8 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           baseUrl: bot.baseUrl,
           apiKey: bot.apiKey,
           contextWindow: bot.contextWindow,
+          models: bot.models,
+          discovered: bot.discovered,
         }}
         onChange={(patch) => {
           setProbeNote("");

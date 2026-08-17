@@ -184,6 +184,8 @@ type WorkhorseBridge = {
     config: import("./lib/types").CustomLlm;
     models: import("./lib/models").ModelInfo[];
   }>;
+  /** Models the provider itself lists. Empty when it publishes none. */
+  customModels?: (config: { baseUrl: string; apiKey: string }) => Promise<string[]>;
   probeCustom: (config: {
     baseUrl: string;
     apiKey: string;

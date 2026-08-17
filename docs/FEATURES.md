@@ -107,7 +107,10 @@ transcript rather than as a path.
 - **MCP servers** — attached to a runtime, with the same approval and result
   path as built-in tools.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own
-  name and colour.
+  name and colour. Testing the connection asks the provider which models it
+  serves; tick the ones you want and any chat on that bot can pick between
+  them. One key is one bot and one leftover ring, however many models it
+  offers — Usage still breaks the tokens out per model.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

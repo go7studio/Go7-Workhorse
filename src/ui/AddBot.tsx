@@ -121,6 +121,8 @@ export function AddBot() {
               baseUrl: draft.baseUrl,
               apiKey: draft.apiKey,
               contextWindow: draft.contextWindow,
+              models: draft.models,
+              discovered: draft.discovered,
             }}
             onChange={(patch) => store.updateCustomLlm({ ...patch, source: "manual" })}
           />

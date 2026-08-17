@@ -49,6 +49,7 @@ const TOP_LEVEL = new Set([
  * whoever made them.
  */
 const BANNED = [
+  { rx: /(^|\/)BIBLE\.md$/, why: "operator product law — keep it out of the public repo" },
   { rx: /(^|\/)GOAL-[^/]*\.md$/, why: "slice plan — keep working papers out of the repo" },
   { rx: /(^|\/)agent-goal-[^/]*\.md$/, why: "implementer brief — keep working papers out of the repo" },
   { rx: /(^|\/)[^/]*-handoff\.md$/, why: "handoff note — written for a moment, not for readers" },
@@ -97,16 +98,8 @@ test("the version is a single semantic version, and the changelog knows it", asy
   );
 });
 
-test("the Bible is law and the agent docs point at it", () => {
-  const bible = readFileSync(path.join(ROOT, "docs", "BIBLE.md"), "utf8");
-  assert.match(bible, /Workhorse Bible/);
-  assert.match(bible, /Steve agrees/);
-  assert.match(bible, /Several agents at once/);
-  assert.match(bible, /user controls how intelligence is called/i);
-  assert.match(bible, /SQLite/);
-  assert.match(bible, /leftover/);
-  assert.match(bible, /Production code/);
-  assert.match(readFileSync(path.join(ROOT, "AGENTS.md"), "utf8"), /docs\/BIBLE\.md/);
-  assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /docs\/BIBLE\.md/);
-  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /BIBLE\.md/);
+test("the public tree does not ship operator product law", () => {
+  assert.match(readFileSync(path.join(ROOT, "AGENTS.md"), "utf8"), /This repository is public/);
+  assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /does not live in this public repository/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /BIBLE/);
 });

@@ -2,7 +2,9 @@
 
 A native desktop shell for coding agents. Each vendor stays its own process. This app is the window, the project, the chats, the `/` palette, and the permission bar.
 
-**Product law:** [docs/BIBLE.md](docs/BIBLE.md). Read it before you change the desk. Do not add or drop a locked item unless Steve agreed and that file changes in the same commit. `docs/FEATURES.md` is the inventory, not permission to invent.
+This repository is public. Ship production code, tests, and docs a stranger
+may read. Do not add operator Bibles, studio memory, or working papers here.
+`docs/FEATURES.md` is the public inventory.
 
 ## Shape
 

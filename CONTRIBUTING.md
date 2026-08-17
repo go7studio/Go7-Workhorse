@@ -20,15 +20,13 @@ effect, so the shape check has to be updated in the same change.
 | `test/` | The suite |
 | `eval/` | Eval kit contracts, fixtures and schemas |
 | `scripts/` | Build, probe and release scripts referenced by `package.json` |
-| `docs/` | Documentation people read, including `BIBLE.md` and `FEATURES.md` |
+| `docs/` | Public-facing docs a stranger may read, including `FEATURES.md` |
 | `skills/` | Skills that ship with the desk |
 | `assets/`, `build/` | Icons and packaging inputs |
 
-`docs/BIBLE.md` is the locked product. Agents do not drift from it. Steve
-agrees every add or remove; the same commit updates the Bible.
-
 `docs/FEATURES.md` lists every ability the desk has. **Add to it in the same
 commit as the feature.** A feature nobody documented is a feature nobody finds.
+Operator product law does not live in this public repository.
 
 ## Versioning
 

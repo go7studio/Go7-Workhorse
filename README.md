@@ -63,8 +63,7 @@ Repository shape and versioning rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What it does
 
-Every ability is listed in [docs/FEATURES.md](docs/FEATURES.md). The locked
-product is [docs/BIBLE.md](docs/BIBLE.md).
+Every ability is listed in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Goal
 

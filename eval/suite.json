@@ -792,7 +792,7 @@
             "Reject or edit the recommendation and verify the user choice wins without losing the task.",
             "Pass a missing label as a skill and verify dispatch stops before a provider call; pass it as a capability and verify it is never presented as loaded instructions.",
             "Emit a skill-description compaction warning and verify identity, path, required instructions, and the full-file read remain intact.",
-            "Assign Go7 Godot Play Billing work and verify ship-go7-godot-play is loaded before implementation evidence is accepted."
+            "Assign work that requires an installed skill and verify the skill is loaded before implementation evidence is accepted."
           ]
         },
         {
@@ -1030,7 +1030,7 @@
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S2"],
-          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker reads the full file; unknown skills fail before any provider call; capabilities stay separate; compaction cannot remove required instructions; Go7 Godot Play Billing resolves ship-go7-godot-play and rejects mock-only completion.",
+          "passCriteria": "Each required skill resolves to one catalog identity and SKILL.md path before dispatch; the worker reads the full file; unknown skills fail before any provider call; capabilities stay separate; compaction cannot remove required instructions; a skill-gated task resolves its skill and rejects mock-only completion.",
           "evidence": "Catalog snapshot, resolved skill manifest, worker prompt, missing-skill rejection, provider call ledger, assignment metadata, and packaged-plugin completion evidence."
         },
         {

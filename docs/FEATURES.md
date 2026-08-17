@@ -79,8 +79,9 @@ transcript rather than as a path.
 
 ## Extending it
 
-- **Skills** — listed from Grok, Codex, Claude and Cursor homes, and pushed
-  back to a vendor.
+- **Skills** — two ship with the desk, `desk` for chat-to-chat control and
+  `setup` for adding bots and references. Skills are also listed from Grok,
+  Codex, Claude and Cursor homes, and can be pushed back to a vendor.
 - **MCP servers** — attached to a runtime, with the same approval and result
   path as built-in tools.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own

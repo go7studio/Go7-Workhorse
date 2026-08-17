@@ -101,13 +101,13 @@
       "cost and concurrency impact",
       "shared versus worktree isolation"
     ],
-    "fallbackRule": "If the requested agent, skill, tool, provider capability, budget, capacity, or isolation is unavailable, stop or downgrade explicitly; never silently substitute identity or authority. Only installed skill references count as skills; free-form expertise is a capability. Go7 Godot Play Billing work requires the installed ship-go7-godot-play skill and packaged-plugin evidence.",
+    "fallbackRule": "If the requested agent, skill, tool, provider capability, budget, capacity, or isolation is unavailable, stop or downgrade explicitly; never silently substitute identity or authority. Only installed skill references count as skills; free-form expertise is a capability.",
     "precedenceRule": "An explicit child provider or model assignment wins. Automatic nested routing defaults to quick and records its capacity-aware decision.",
     "selfRoutingRule": "A plan task may choose its agent only after recording required capabilities, candidates, Watch state, cost, concurrency, isolation, and a short rationale.",
     "watchRule": "A Watch-held provider receives no request. An approved capable fallback may run with the hold and substitution recorded.",
     "visualRule": "Tasks tagged visual, UI, UX, image, or computer-use require the configured Kimi K3 visual profile unless the user overrides or accepts unavailability. Kimi is audit-only and hands implementation to a coding worker.",
     "effortRule": "Choose the lowest sufficient supported reasoning effort for the task and record the rationale. Do not default every worker to high; explicit effort wins.",
-    "skillRule": "Critical installed skill identity, path, and required instructions survive context compaction. Play Billing work requires ship-go7-godot-play before implementation.",
+    "skillRule": "Critical installed skill identity, path, and required instructions survive context compaction.",
     "recoveryRule": "On restart, reconcile orphaned running work to an explicit interrupted state, preserve elapsed time, release capacity, and continue eligible plan waves."
   },
   "planExecution": {

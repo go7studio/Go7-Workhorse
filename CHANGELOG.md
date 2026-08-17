@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.3.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.2.0...v0.3.0) (2026-08-17)
+
+
+### Features
+
+* workers have names and are reused instead of started again ([#31](https://github.com/go7studio/Go7-Workhorse/issues/31)) ([b512a4f](https://github.com/go7studio/Go7-Workhorse/commit/b512a4f26a0399ca605598450701c96ace47fa3a))
+
+
+### Bug Fixes
+
+* a worker the desk interrupted can be picked up again ([5a21341](https://github.com/go7studio/Go7-Workhorse/commit/5a213415b65780d34ef0878eb5d185b93b9807ab))
+* a worker the desk interrupted can be picked up again ([472d855](https://github.com/go7studio/Go7-Workhorse/commit/472d85548854d28bc69c8d88ce5cb20e3889315a))
+* publishing can move the release label it is told to move ([f76e41c](https://github.com/go7studio/Go7-Workhorse/commit/f76e41c8e8e73b0ba1b2a52a919e397929c7339d))
+
 ## [0.2.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.1.10...v0.2.0) (2026-08-17)
 
 

@@ -6943,6 +6943,7 @@ test("packages use platform Electron and mac release builds require a stable sig
   assert.match(workflow, /WORKHORSE_RELEASE_BUILD/);
   assert.match(workflow, /secrets\.MAC_CSC_LINK/);
   assert.match(workflow, /secrets\.MAC_CSC_NAME/);
+  assert.match(workflow, /secrets\.MAC_APP_SPECIFIC_PASSWORD/);
   assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);
 });
 

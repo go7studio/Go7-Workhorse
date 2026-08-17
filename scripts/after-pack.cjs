@@ -21,6 +21,13 @@ function assertStableReleaseIdentity(env = process.env) {
   if (requiresStableIdentity(env) && !/^Developer ID Application:/.test(String(env.CSC_NAME ?? "").trim())) {
     throw new Error("macOS release builds require CSC_NAME to select a Developer ID Application identity.");
   }
+  const hasAppleIdCredentials = [env.APPLE_ID, env.APPLE_APP_SPECIFIC_PASSWORD, env.APPLE_TEAM_ID]
+    .every((value) => String(value ?? "").trim());
+  const hasApiCredentials = [env.APPLE_API_KEY, env.APPLE_API_KEY_ID, env.APPLE_API_ISSUER]
+    .every((value) => String(value ?? "").trim());
+  if (requiresStableIdentity(env) && !hasAppleIdCredentials && !hasApiCredentials) {
+    throw new Error("macOS release builds require Apple notarization credentials.");
+  }
 }
 
 async function afterPack(context) {

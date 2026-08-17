@@ -34,7 +34,13 @@ test("mac release packaging refuses an identity that would retrigger Keychain ap
     /require CSC_LINK or CSC_NAME/,
   );
   assert.doesNotThrow(() =>
-    afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1", CSC_NAME: "Developer ID Application: Go7" }),
+    afterPack.assertStableReleaseIdentity({
+      WORKHORSE_RELEASE_BUILD: "1",
+      CSC_NAME: "Developer ID Application: Go7",
+      APPLE_ID: "release@example.test",
+      APPLE_APP_SPECIFIC_PASSWORD: "app-password",
+      APPLE_TEAM_ID: "TEAM123456",
+    }),
   );
   assert.doesNotThrow(() => afterPack.assertStableReleaseIdentity({}));
 });
@@ -43,6 +49,16 @@ test("mac release packaging rejects an App Store distribution identity", () => {
   assert.throws(
     () => afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1", CSC_NAME: "Apple Distribution: Go7" }),
     /Developer ID Application/,
+  );
+});
+
+test("mac release packaging requires notarization credentials", () => {
+  assert.throws(
+    () => afterPack.assertStableReleaseIdentity({
+      WORKHORSE_RELEASE_BUILD: "1",
+      CSC_NAME: "Developer ID Application: Go7",
+    }),
+    /notarization credentials/,
   );
 });
 

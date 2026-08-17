@@ -20,6 +20,7 @@ import { parseProviderId, resolveSpawnSpec, toolsForDeskRole, admitSpawn } from 
 import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../src/lib/watch";
 import { normalizeSettings } from "../src/lib/settings";
 import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
+import { withDeskToolEnv } from "../electron/desk-path";
 import { cursorAboutLoggedIn, detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
 import {
@@ -207,6 +208,9 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   });
   assert.deepEqual(other.argv, ["--model", "claude-4-sonnet", "acp"]);
   assert.deepEqual(cursorSpawnArgs(other).args, ["--model", "claude-4-sonnet", "acp"]);
+  // Cursor was the only vendor spawned with the raw process environment, so a
+  // Finder-launched app left its tools unable to find git, node or ripgrep.
+  assert.equal(cursorSpawnArgs(other).env.PATH, withDeskToolEnv({ ...process.env }).PATH);
   assert.ok(spec.sessionParams.mcpServers.some((item) => item.name === "figma"));
   assert.notEqual(spec.command.toLowerCase(), "grok");
   assert.doesNotMatch(spec.command, /Cursor\.app/i);

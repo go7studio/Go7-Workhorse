@@ -193,7 +193,7 @@ import {
   usageHomeForReport,
 } from "./usage";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
-import { isVendorRateLimitError, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
+import { isVendorRateLimitError, turnEndedWithoutProse, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
 import { cursorUsageLane } from "./cursor-lane";
 import {
   collectWatchNotices,
@@ -4750,15 +4750,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 messages: finishOpenToolMessages(
                   failPeerAskMessages(
                     assistantId
-                      ? session.messages.map((message) => {
-                          if (message.id !== assistantId) return message;
-                          const text = (message.text ?? "").trim() || queued.trim();
-                          return {
-                            ...message,
-                            text: text || (message.thought?.trim() ? "" : vendorEmptyReply(session.provider)),
-                            workedMs: Math.max(0, Date.now() - message.createdAt),
-                          };
-                        })
+                      ? (() => {
+                          // Did this turn leave anything behind? Thinking and tool
+                          // calls land as their own messages after the assistant
+                          // one, so ask the transcript rather than the message.
+                          const at = session.messages.findIndex((message) => message.id === assistantId);
+                          const worked =
+                            at >= 0 &&
+                            session.messages
+                              .slice(at + 1)
+                              .some((message) => message.kind === "thought" || message.kind === "tool");
+                          return session.messages.map((message) => {
+                            if (message.id !== assistantId) return message;
+                            const text = (message.text ?? "").trim() || queued.trim();
+                            return {
+                              ...message,
+                              text:
+                                text ||
+                                turnEndedWithoutProse({
+                                  provider: session.provider,
+                                  stopReason: event.stopReason,
+                                  worked,
+                                }),
+                              workedMs: Math.max(0, Date.now() - message.createdAt),
+                            };
+                          });
+                        })()
                       : session.messages,
                     { error: "the other chat did not answer" },
                   ),

@@ -73,7 +73,23 @@ export function withVendorPreface(text: string, preface: string | undefined): st
   return `${head}\n\n${text}`;
 }
 
-export function buildPolicyContext(input: Pick<PrefaceInput, "mode" | "sandbox">): string {
+/**
+ * Which shell the machine actually speaks. An ACP vendor learns this from its
+ * own CLI; a custom HTTP bot has no CLI and guesses. Kimi guessed Windows on a
+ * Mac and ran `dir D:/ shoreclose* 2>nul`, which failed, and the turn then had
+ * nothing to report.
+ */
+export function machineLine(platform: string): string {
+  if (platform === "win32") {
+    return "- Machine: Windows. Shell commands are cmd/PowerShell — backslash paths, `dir`, `2>nul`. Never POSIX paths or `/dev/null`.";
+  }
+  const name = platform === "darwin" ? "macOS" : "Linux";
+  return `- Machine: ${name}. Shell commands are POSIX — forward-slash paths, \`ls\`, \`2>/dev/null\`. Never a drive letter, \`dir\`, or \`2>nul\`.`;
+}
+
+export function buildPolicyContext(
+  input: Pick<PrefaceInput, "mode" | "sandbox"> & { platform?: string },
+): string {
   const mode = input.mode ?? "ask";
   const sandbox = input.sandbox ?? "off";
   const permission =
@@ -97,6 +113,7 @@ export function buildPolicyContext(input: Pick<PrefaceInput, "mode" | "sandbox">
     `- Permission: ${permission}`,
     `- Sandbox: ${box}`,
   ];
+  if (input.platform) lines.push(machineLine(input.platform));
   if (writesAreBlocked(mode, sandbox)) {
     lines.push(
       "You cannot write files this turn until the user elevates. Call workhorse_request_permission with sandbox=off or workspace and permission=ask (or accept-edits / always-approve), then continue. A card appears above the composer. Do not tell them to open Settings.",

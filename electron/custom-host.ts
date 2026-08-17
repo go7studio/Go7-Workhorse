@@ -50,7 +50,9 @@ export function customPrefaceForLimits(
   mode?: PermissionMode,
   sandbox?: SandboxProfile,
 ): string {
-  const policy = buildPolicyContext({ mode, sandbox });
+  // Threaded, never read ambiently inside the shared lib — that lib also runs
+  // in the renderer, where process.platform is not the machine's answer.
+  const policy = buildPolicyContext({ mode, sandbox, platform: process.platform });
   const head = preface?.trim() ?? "";
   if (!head) return policy;
   if (head.includes("This chat’s live desk limits")) return head;
@@ -124,6 +126,33 @@ export function shouldEndDispatchTurn(
   results: Array<{ name?: string; content?: string; isError?: boolean }>,
 ): boolean {
   return results.some(spawnDispatchStarted);
+}
+
+/**
+ * A dispatch turn ends on purpose the moment the workers are away, so the model
+ * is never asked for a closing line. When it also wrote no prose — it thought,
+ * then spawned — the chat used to show "finished without a visible reply" over
+ * a turn that had just started seven workers. Say what it did instead.
+ */
+export function dispatchSummary(
+  results: Array<{ name?: string; content?: string; isError?: boolean }>,
+): string {
+  const titles = results
+    .filter(spawnDispatchStarted)
+    .map((result) => {
+      try {
+        const parsed = JSON.parse(result.content ?? "") as { title?: unknown };
+        return typeof parsed.title === "string" ? parsed.title.trim() : "";
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
+  if (titles.length === 0) return "";
+  const shown = titles.slice(0, 4).join(", ");
+  const rest = titles.length - 4;
+  const list = rest > 0 ? `${shown} and ${rest} more` : shown;
+  return `Started ${titles.length} ${titles.length === 1 ? "worker" : "workers"}: ${list}.`;
 }
 
 /** Worker already wrote enough of a report — do not keep nudging or safety-pause it. */
@@ -733,6 +762,13 @@ export class CustomSessionHost {
           break;
         }
         if (shouldEndDispatchTurn(results)) {
+          if (!text.trim()) {
+            const summary = dispatchSummary(results);
+            if (summary) {
+              text = summary;
+              emit({ type: "chunk", sessionId: input.sessionId, text: summary });
+            }
+          }
           break;
         }
         messages = compactCustomTurnTranscript(messages, baseMessageCount, this.safety.maxTranscriptChars);

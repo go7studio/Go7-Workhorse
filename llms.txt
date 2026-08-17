@@ -2,6 +2,10 @@
 
 > One desk for every AI subscription you already pay for. A native desktop app for Windows and macOS that runs Grok, Claude, Codex, Cursor and your own API keys side by side, each under its own login. Pick a model per chat or let it route by task with a reserve you set. See what each vendor has left this week, before the bill. Open source under MIT. Runs on your machine; there is no hosted service and no account with us.
 
+## Why it exists
+
+It began at a desk paying for SuperGrok Heavy, Cursor, Claude and Codex, where one plan ran dry most days while another sat idle. The sharpest case is Grok with Cursor: a Grok plan and a Cursor plan each give you Grok 4.6, on separate meters. Workhorse treats them as one model with two pools — it shows both meters, moves a chat between them, and with auto-route on leans each task toward the pool with more left, so a plan you already pay for gets used before another is spent. The same holds for any two subscriptions that overlap. Optimising several subscriptions at once, without pooling or sharing them, is the job.
+
 ## Who it is for
 
 - Someone who holds two or more AI subscriptions or API keys — Grok on any plan, Claude, Codex, Cursor, or an Anthropic- or OpenAI-compatible endpoint, hosted or local — and wants one place to choose which one does each job.

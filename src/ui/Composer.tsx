@@ -423,11 +423,19 @@ export function Composer({
             aria-expanded={setupOpen}
             onClick={onToggleSetup}
           >
-            <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
+            {/* On Auto the model and effort are picked on every send, so
+                naming the last pick here read as the plan: this chip said
+                Composer 2.5 · High and the prompt went to Kimi K3. Say Auto;
+                the reply header names what actually answered. */}
+            {session.routingMode === "auto" ? (
+              <span className="dot auto" aria-hidden="true" />
+            ) : (
+              <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
+            )}
             <span>
-              {modelName(session.provider, session.model)}
-              {session.effort ? ` · ${effortLabel(session.effort)}` : ""}
-              {` · ${shortModeLabel(session.mode)}`}
+              {session.routingMode === "auto"
+                ? `Auto · ${shortModeLabel(session.mode)}`
+                : `${modelName(session.provider, session.model)}${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`}
             </span>
             <span className="caret" aria-hidden="true" />
           </button>

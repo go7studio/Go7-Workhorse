@@ -210,17 +210,18 @@ export function rootSpawnError(
 
 /**
  * When a chat hands out work, the desk picks the bot for the slice unless the
- * orchestrator named one. This is the system routing its own work, and it is
- * always on: it does not read the human's Settings → Routing switch, which
- * only says whether a person's new chat starts on Auto. An explicit provider,
- * model, or chat always wins.
+ * orchestrator named one. This is the desk's own routing — Settings → Routing,
+ * on unless the person turns it off. An explicit provider, model, or chat
+ * always wins. It has nothing to do with a person's own chat, which routes
+ * only when they set that chat to Auto.
  */
 export function shouldAutoRouteSpawn(input: {
+  routingEnabled: boolean;
   provider?: unknown;
   model?: unknown;
   chat?: unknown;
 }): boolean {
-  return !input.provider && !input.model && !input.chat;
+  return input.routingEnabled && !input.provider && !input.model && !input.chat;
 }
 
 export function spawnWaitsForReply(input: { wait?: unknown }): boolean {

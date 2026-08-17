@@ -20,7 +20,10 @@ export const DEFAULT_SETTINGS: Settings = {
   usageBudgets: { grok: 2_000_000 },
   watch: { ...DEFAULT_WATCH },
   routing: {
-    enabled: false,
+    // The desk's own routing, for the work a chat hands out. On unless the
+    // person turns it off. It never touches a person's own chat — that
+    // routes only when they set the chat to Auto.
+    enabled: true,
     capacityAware: true,
     preferExcess: true,
     allowLocal: true,
@@ -34,7 +37,7 @@ export function normalizeRouting(raw: unknown): RoutingSettings {
   const record = raw as Partial<RoutingSettings>;
   const reserve = Number(record.reservePercent);
   return {
-    enabled: record.enabled === true,
+    enabled: record.enabled !== false,
     capacityAware: record.capacityAware !== false,
     preferExcess: record.preferExcess !== false,
     allowLocal: record.allowLocal !== false,

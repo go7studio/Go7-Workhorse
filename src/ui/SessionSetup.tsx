@@ -286,7 +286,21 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
         )}
           </section>
 
-          {thinking.length > 0 && (
+          {/* On Auto the level is picked with the model on every send — quick
+              at low, deep at high — so a slider here would promise a level the
+              next message may not keep. Say so instead. */}
+          {session.routingMode === "auto" && (
+            <section className="setup-card setup-reasoning-card">
+              <div className="setup-heading compact">
+                <div>
+                  <strong>Reasoning level</strong>
+                </div>
+                <span className="setup-current">Auto</span>
+              </div>
+              <p className="row-meta">Picked with the model for each message. Choose a provider above to set it yourself.</p>
+            </section>
+          )}
+          {session.routingMode !== "auto" && thinking.length > 0 && (
             <section className="setup-card setup-reasoning-card">
           <div className="setup-heading compact">
             <div>

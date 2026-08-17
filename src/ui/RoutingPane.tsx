@@ -60,8 +60,8 @@ export function RoutingPane() {
     <>
       <div className="settings-group">
         <SwitchRow
-          label="New chats start on Auto"
-          copy="Auto picks the bot and effort for each message. Off, a new chat keeps the bot you chose. Any chat can be set to Auto from its model menu."
+          label="Route the work the desk hands out"
+          copy="When a chat spawns a worker without naming a bot, the desk picks the bot and effort for the slice. Off, the worker takes its parent's bot. Your own chats route only when you set one to Auto."
           on={routing.enabled}
           onChange={(on) => set({ enabled: on })}
         />
@@ -108,9 +108,9 @@ export function RoutingPane() {
       <div className="settings-picks">
         <div className="settings-picks-head">
           <div className="section-label">Picks now</div>
-          {/* Auto chats and spawned workers both draw from these, whatever the
-              new-chat switch says, so the picks are always live. */}
-          <span>{`From ${inPlay} ${inPlay === 1 ? "bot" : "bots"} · Auto chats and spawned workers`}</span>
+          {/* Auto chats always draw from these; spawned workers do while the
+              switch above is on. */}
+          <span>{`From ${inPlay} ${inPlay === 1 ? "bot" : "bots"} · ${routing.enabled ? "Auto chats and spawned workers" : "Auto chats only"}`}</span>
         </div>
         <div className="usage-brains">
           {picks.map((tier) => {

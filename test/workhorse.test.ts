@@ -7353,13 +7353,13 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(maxRootWorkers(1), MIN_ROOT_WORKERS);
   assert.equal(rootSpawnError(sixRunning.slice(0, MIN_ROOT_WORKERS - 1), "orch", maxRootWorkers(1)), null);
   assert.match(rootSpawnError(sixRunning.slice(0, MIN_ROOT_WORKERS), "orch", maxRootWorkers(1)) ?? "", new RegExp(`${MIN_ROOT_WORKERS} workers`));
-  // The system routes its own spawns whenever the orchestrator names no bot.
-  // It does not read the person's Settings switch — that only says how a new
-  // human chat starts.
-  assert.equal(shouldAutoRouteSpawn({}), true);
-  assert.equal(shouldAutoRouteSpawn({ provider: "custom" }), false);
-  assert.equal(shouldAutoRouteSpawn({ model: "MiniMax-M3" }), false);
-  assert.equal(shouldAutoRouteSpawn({ chat: "Kimi" }), false);
+  // The desk routes the work it hands out (Settings → Routing, on by default)
+  // whenever the orchestrator names no bot; a named one wins.
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
   assert.equal(collectChildAgentReports([kidDone], "orch")[0]?.text, "It is a Godot game.");
   const { groupFanOutToolUses } = await import("../electron/custom-tools");
   assert.deepEqual(

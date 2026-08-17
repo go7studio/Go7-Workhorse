@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { sidebarKeepsChat } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
 import { formatChatSidebar } from "../src/lib/session";
-import { DEFAULT_SETTINGS } from "../src/lib/settings";
+import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
+import { shouldAutoRouteSpawn } from "../src/lib/subagents";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -71,10 +72,15 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
     "Grok 4.6 · Medium · Ask",
     "no routingMode at all reads as before",
   );
-  // The row passes the mode through, and the composer chip says Auto too.
+  // The row passes the mode through, and the composer chip — Composer's
+  // setup-trigger, the one that actually renders — says Auto too. (ModelMenu
+  // has an Auto label as well, but nothing mounts ModelMenu any more; only
+  // its ContextMeter is imported. Live testing found that.)
   assert.match(read("src/ui/ChatRow.tsx"), /routingMode: session\.routingMode/);
-  const menu = read("src/ui/ModelMenu.tsx");
-  assert.match(menu, /session\.routingMode === "auto"\s*\?\s*"Auto"/);
+  const composer = read("src/ui/Composer.tsx");
+  const chip = composer.slice(composer.indexOf('className={`setup-trigger'), composer.indexOf('className={`setup-trigger') + 1400);
+  assert.match(chip, /session\.routingMode === "auto"\s*\?\s*`Auto · \$\{shortModeLabel\(session\.mode\)\}`/);
+  assert.match(chip, /className="dot auto"/);
 });
 
 test("a routed pick does not become the default for the next new chat", () => {
@@ -88,15 +94,16 @@ test("a routed pick does not become the default for the next new chat", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Who routes, and when. Two actors, two defaults.
+// Who routes, and when. Two actors, two switches.
 //
 //   A person's chat keeps the model they picked. Only a chat set to Auto hands
-//   model and effort to routing, and it does so on every message.
+//   model and effort to routing, and it does so on every message. Auto is a
+//   pick made on the chat. New chats are manual; no setting puts a chat on
+//   Auto for anyone.
 //
-//   The system, when a chat spawns a worker, picks the bot for the slice
-//   unless the orchestrator named one. That is on regardless of any switch.
-//
-//   Settings → Routing decides one thing: whether a NEW chat starts on Auto.
+//   The desk routes the work it hands out: when a chat spawns a worker without
+//   naming a bot, the desk picks the bot and effort for the slice. That is
+//   Settings → Routing — on unless the person turns it off. A named bot wins.
 // ---------------------------------------------------------------------------
 
 test("a person's chat routes only when that chat is set to Auto", () => {
@@ -104,36 +111,53 @@ test("a person's chat routes only when that chat is set to Auto", () => {
   const send = store.slice(store.indexOf("let session = current.sessions.find((item) => item.id === targetSessionId)"));
   const gate = send.slice(0, send.indexOf("chooseRoutingDecision("));
   assert.match(gate, /session\.routingMode === "auto"/, "the chat's own mode is the gate");
-  assert.doesNotMatch(gate, /settings\.routing\.enabled/, "the Settings switch does not reach into a chat");
+  assert.doesNotMatch(gate, /settings\.routing\.enabled/, "the Settings switch does not reach into a person's chat");
   // Auto picks the effort with the model.
   const routed = send.slice(send.indexOf("if (decision) {"), send.indexOf("if (decision) {") + 600);
   assert.match(routed, /effort: decision\.effort/);
 });
 
-test("Settings → Routing only decides how a new chat starts", () => {
+test("a new chat is manual; no setting puts it on Auto", () => {
   const store = read("src/lib/store.tsx");
-  assert.match(store, /routingMode: current\.settings\.routing\.enabled \? "auto" : "manual"/, "newChat reads the switch");
-  const otherReads = store.split("settings.routing.enabled").length - 1;
-  assert.equal(otherReads, 1, "and nothing else in the store does");
-  assert.equal(DEFAULT_SETTINGS.routing.enabled, false, "off by default: a new chat keeps the person's pick");
+  const create = store.slice(store.indexOf('title: "New chat"'), store.indexOf('title: "New chat"') + 900);
+  assert.match(create, /routingMode: "manual"/);
+  assert.doesNotMatch(create, /routing\.enabled \? "auto"/);
 });
 
 test("Auto is a pick a person makes on the chat, not in Settings", () => {
   const setup = read("src/ui/SessionSetup.tsx");
   assert.match(setup, /onClick=\{\(\) => setSessionRoutingMode\("auto"\)\}/);
   assert.doesNotMatch(setup, /settings\.routing\.enabled \? setSessionRoutingMode/, "Auto no longer bounces to Settings");
-  const menu = read("src/ui/ModelMenu.tsx");
-  assert.match(menu, /setSessionRoutingMode\("auto"\);\s*setOpen\(false\);/, "the model menu offers Auto");
-  assert.match(menu, /picks bot and effort per message/);
-  // In Auto the effort is picked per message, so the slider steps aside.
-  assert.match(menu, /attached && session\.routingMode !== "auto" \? <BrainSlider \/> : null/);
+  // In Auto the effort is picked per message, so the reasoning slider in the
+  // setup panel steps aside and says so.
+  assert.match(setup, /session\.routingMode === "auto" && \(\s*<section className="setup-card setup-reasoning-card">/);
+  assert.match(setup, /Picked with the model for each message/);
+  assert.match(setup, /session\.routingMode !== "auto" && thinking\.length > 0 && \(/);
 });
 
-test("the system routes its own spawns unless the orchestrator names a bot", () => {
+test("Settings → Routing is the desk's own routing for spawned work: on by default, off is a choice", () => {
+  assert.equal(DEFAULT_SETTINGS.routing.enabled, true, "the desk routes the work it hands out unless told not to");
+  // A stored false is the person turning it off; anything else is on.
+  assert.equal(normalizeRouting({}).enabled, true);
+  assert.equal(normalizeRouting({ enabled: false }).enabled, false);
+  assert.equal(normalizeRouting({ enabled: true }).enabled, true);
+  // The store reads the switch in exactly one place: the spawn gate.
   const store = read("src/lib/store.tsx");
-  const spawn = store.slice(store.indexOf("const routeSpawn = shouldAutoRouteSpawn({"), store.indexOf("const routeSpawn = shouldAutoRouteSpawn({") + 300);
-  assert.doesNotMatch(spawn, /routingEnabled/, "no human switch in the spawn gate");
-  assert.match(spawn, /provider: payload\.provider,\s*model: payload\.model,\s*chat: payload\.chat/);
-  // And it picks effort for the slice too, unless the orchestrator named one.
+  assert.equal(store.split("settings.routing.enabled").length - 1, 1);
+  const spawn = store.slice(store.indexOf("const routeSpawn = shouldAutoRouteSpawn({"), store.indexOf("const routeSpawn = shouldAutoRouteSpawn({") + 320);
+  assert.match(spawn, /routingEnabled: latest\.settings\.routing\.enabled/);
+  // The Settings pane names what it governs.
+  const pane = read("src/ui/RoutingPane.tsx");
+  assert.match(pane, /Route the work the desk hands out/);
+  assert.match(pane, /Your own chats route only when you set one to Auto/);
+});
+
+test("the desk routes a spawn unless the orchestrator names a bot, and picks effort for the slice", () => {
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false, "a named provider wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false, "a named model wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false, "a named chat wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
+  const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
 });

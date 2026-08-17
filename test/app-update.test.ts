@@ -47,6 +47,10 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(store, /applyAppUpdate/);
   assert.match(sidebar, /brand-update/);
   assert.match(sidebar, /UpdateChip/);
-  assert.match(workflow, /gh release create/);
-  assert.match(workflow, /package.json/);
+  // The desk offers an update by reading GitHub releases, so the workflow has
+  // to create one and put installers in it. release-please cuts the tag from
+  // the package.json version, which is the version the desk compares against.
+  assert.match(workflow, /release-please-action/);
+  assert.match(workflow, /release-type: node/);
+  assert.match(workflow, /gh release upload/);
 });

@@ -1,30 +1,57 @@
 name: Release
 
+# Pushing to main publishes nothing. release-please keeps one pull request up
+# to date with the next version and its changelog; merging that pull request is
+# what cuts a release. Nothing here can block a push or a merge.
+#
+# Run this by hand when you want installers to test. They attach to the run, so
+# testing never spends a version number.
 on:
   push:
     branches: [main]
-    paths: [package.json]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  # Reads the commits since the last tag, works out the next version, and keeps
+  # the release pull request in step with it. On merge it tags and creates the
+  # release. Nothing else in this file decides a version.
+  version:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      cut: ${{ steps.please.outputs.releases_created }}
+      tag: ${{ steps.please.outputs.tag_name }}
+      version: ${{ steps.please.outputs.version }}
+    steps:
+      # `node` reads and writes package.json, so the version the desk compares
+      # itself against is the same one that gets tagged.
+      - uses: googleapis/release-please-action@v5
+        id: please
+        with:
+          release-type: node
+
+  installers:
+    needs: version
+    if: ${{ !cancelled() && needs.version.result != 'failure' && (needs.version.outputs.cut == 'true' || github.event_name == 'workflow_dispatch') }}
+    permissions:
+      contents: read
     strategy:
-      # One at a time: the first machine creates the release, the second
-      # uploads into it. Running together races on `gh release create`.
-      max-parallel: 1
       fail-fast: false
       matrix:
         include:
           - os: windows-latest
             script: package:win
-            installer: '*Workhorse-Setup-*.exe'
+            installer: "*Workhorse-Setup-*.exe"
           - os: macos-latest
             script: package:mac
-            installer: '*Workhorse-*-mac.dmg'
+            installer: "*Workhorse-*-mac.dmg"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -45,7 +72,9 @@ jobs:
 
       - name: Build installer
         env:
-          WORKHORSE_RELEASE_BUILD: ${{ runner.os == 'macOS' && '1' || '0' }}
+          # Only a release has to be signed and notarized. Demanding a
+          # certificate for a test build would mean never getting one.
+          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && needs.version.outputs.cut == 'true') && '1' || '0' }}
           CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
@@ -57,24 +86,32 @@ jobs:
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs
 
-      - id: ver
-        shell: pwsh
-        run: |
-          $version = node -p "require('./package.json').version"
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=v$version" >> $env:GITHUB_OUTPUT
+      # Held here rather than sent straight to the release, so a machine that
+      # fails cannot leave half a release behind.
+      - name: Keep the installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ runner.os }}
+          path: release/${{ matrix.installer }}
+          if-no-files-found: error
 
-      - name: Publish GitHub release and installer
-        shell: pwsh
+  # Both installers or neither. 0.1.6 published a dmg with no exe and 0.1.8 an
+  # exe with no dmg. Each was marked latest, and each was broken for half the
+  # people who downloaded it.
+  publish:
+    needs: [version, installers]
+    if: ${{ needs.version.outputs.cut == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - name: Attach the installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ steps.ver.outputs.tag }}"
-          $installer = Get-ChildItem -Path "release" -File -Filter "${{ matrix.installer }}" | Select-Object -First 1
-          if (-not $installer) { throw "No installer matched ${{ matrix.installer }}" }
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $installer.FullName --clobber
-          } else {
-            gh release create $tag $installer.FullName --target "${{ github.sha }}" --title "Go7 Workhorse ${{ steps.ver.outputs.version }}" --generate-notes
-          }
+        run: gh release upload "${{ needs.version.outputs.tag }}" installers/* --clobber --repo "${{ github.repository }}"

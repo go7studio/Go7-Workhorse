@@ -72,6 +72,22 @@ test("path helper is platform-neutral and uses injected userData", () => {
   assert.doesNotMatch(unix, /Users\/venomspike|\/Users\//);
 });
 
+test("packaged learning smoke follows the branded app binary", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const smoke = fs.readFileSync(path.join(ROOT, "scripts", "learning-packaged-smoke.mjs"), "utf8");
+  const release = fs.readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  assert.equal(packageJson.build.productName, "Go7 Workhorse");
+  assert.equal(packageJson.build.win.executableName, "Go7 Workhorse");
+  assert.match(smoke, /packageJson\.build\?\.win\?\.executableName/);
+  assert.match(smoke, /fs\.existsSync\(path\.join\(macOsDir, name\)\)/);
+  assert.doesNotMatch(smoke, /path\.join\(winDir, "Workhorse\.exe"\)/);
+  assert.doesNotMatch(smoke, /Contents", "MacOS", "Workhorse"/);
+  const buildInstaller = release.indexOf("- name: Build installer");
+  const packagedSmoke = release.indexOf("- name: Packaged learning smoke");
+  assert.ok(buildInstaller >= 0);
+  assert.ok(packagedSmoke > buildInstaller);
+});
+
 test("redaction strips keys, tokens, env, and keychain text", () => {
   const sample = "token=sk-abc1234567890 Bearer secret-value API_KEY=hunter2 keychain login password=foo";
   const redacted = redactText(sample);

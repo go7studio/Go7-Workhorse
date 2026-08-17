@@ -563,6 +563,21 @@ export type GrokPlanUsage = {
   products: GrokPlanProduct[];
 };
 
+/**
+ * Where a usage number came from. The source decides how numbers combine, so
+ * it travels with them instead of being guessed from their size afterwards.
+ *
+ * - `turn`     — one authoritative total for the whole turn (ACP
+ *                PromptResponse.usage, Codex turn end). Replaces anything
+ *                collected mid-turn; never summed with it.
+ * - `request`  — one HTTP request's own bill. A turn made of many requests
+ *                (tool loops) sums these, and only these.
+ * - `gauge`    — a context meter (ACP usage_update `used`/`size`, Codex
+ *                token_count). Carries contextUsed and cost. Never tokens.
+ * - `estimate` — characters / 4 because the vendor reported nothing.
+ */
+export type UsageSource = "turn" | "request" | "gauge" | "estimate";
+
 export type UsageEvent = {
   id: string;
   at: number;
@@ -571,13 +586,17 @@ export type UsageEvent = {
   projectId?: string;
   sessionId?: string;
   customBotId?: string;
+  /** Fresh prompt tokens the model read for the first time. Excludes cache reads. */
   inputTokens: number;
   outputTokens: number;
+  /** Prompt tokens served from cache. Context replayed, not new work. */
   cacheReadTokens: number;
   cacheWriteTokens: number;
   costUsd?: number;
   /** Context retained by the model for the final request in this turn. */
   contextUsed?: number;
+  /** How the numbers were obtained. Absent on events written before it was recorded. */
+  source?: UsageSource;
   /** Cursor two-pool lane. Required on new Cursor events. */
   lane?: import("./cursor-lane").CursorUsageLane;
 };
@@ -594,6 +613,7 @@ export type UsageDraft = {
   cacheWriteTokens?: number;
   costUsd?: number;
   contextUsed?: number;
+  source?: UsageSource;
   lane?: import("./cursor-lane").CursorUsageLane;
 };
 

@@ -383,6 +383,18 @@ export function contextWindowFor(
   return findModel(provider, modelId)?.contextWindow ?? 128_000;
 }
 
+/**
+ * The widest prompt any model on the desk can hold, from the catalog. A single
+ * turn's fresh input past this cannot be one prompt; it is a sum of prompts.
+ */
+export function largestKnownContextWindow(): number {
+  let widest = 0;
+  for (const models of Object.values(MODEL_CATALOG)) {
+    for (const model of models) widest = Math.max(widest, model.contextWindow);
+  }
+  return widest;
+}
+
 export function formatWindow(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;

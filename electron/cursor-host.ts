@@ -103,6 +103,7 @@ export class CursorSessionHost {
         cacheWriteTokens: number;
         costUsd?: number;
         contextUsed?: number;
+        source?: import("../src/lib/types").UsageSource;
       }) =>
         emit({
           type: "usage" as const,

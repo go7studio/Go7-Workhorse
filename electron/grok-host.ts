@@ -64,6 +64,7 @@ export type GrokIpcEvent =
       cacheWriteTokens: number;
       costUsd?: number;
       contextUsed?: number;
+      source?: import("../src/lib/types").UsageSource;
     }
   | {
       type: "vendor-session";
@@ -194,6 +195,7 @@ export class GrokSessionHost {
         cacheWriteTokens: number;
         costUsd?: number;
         contextUsed?: number;
+        source?: import("../src/lib/types").UsageSource;
       }) =>
         emit({
           type: "usage" as const,

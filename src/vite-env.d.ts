@@ -52,6 +52,7 @@ type GrokBridgeEvent =
       cacheWriteTokens: number;
       costUsd?: number;
       contextUsed?: number;
+      source?: import("./lib/types").UsageSource;
     }
   | {
       type: "vendor-session";

@@ -1,3 +1,4 @@
+import https from "node:https";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
@@ -294,16 +295,45 @@ export async function fetchCustomPlanUsage(input: {
     const url = customPlanRemainsUrl(input.baseUrl);
     const apiKey = input.apiKey.trim();
     if (!url || !apiKey) return undefined;
-    const fetchImpl = input.fetchImpl ?? fetch;
-    const response = await fetchImpl(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
+    if (input.fetchImpl) {
+      const response = await input.fetchImpl(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+      });
+      if (!response.ok) return undefined;
+      return parseCustomPlanUsage(await response.json(), input.model);
+    }
+    // Electron's Chromium fetch can strip User-Agent and 429/empty these hosts.
+    const { status, json } = await new Promise<{ status: number; json: unknown }>((resolve, reject) => {
+      const req = https.get(
+        url,
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+            "User-Agent": "go7-workhorse",
+          },
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(chunk as Buffer));
+          res.on("end", () => {
+            const body = Buffer.concat(chunks).toString("utf8");
+            try {
+              resolve({ status: res.statusCode ?? 500, json: body ? JSON.parse(body) : null });
+            } catch {
+              resolve({ status: res.statusCode ?? 500, json: null });
+            }
+          });
+        },
+      );
+      req.on("error", reject);
     });
-    if (!response.ok) return undefined;
-    return parseCustomPlanUsage(await response.json(), input.model);
+    if (status < 200 || status >= 300) return undefined;
+    return parseCustomPlanUsage(json, input.model);
   } catch {
     return undefined;
   }

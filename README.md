@@ -16,6 +16,11 @@ Cursor puts a model in your editor. Workhorse puts your existing models to work.
 - **It learns.** A private store on your disk, which you can export or wipe.
 - **Work survives a restart.** Queues, schedules and goals are journalled.
 
+![Switching provider inside one chat — the model list follows](docs/media/providers.gif)
+
+*One chat, four providers. Kimi K3 and MiniMax M3 in that list are custom bots,
+added with a URL and a key.*
+
 Grok, Claude and Cursor speak ACP. Codex adds an App Server for native history.
 Custom bots are plain HTTP.
 

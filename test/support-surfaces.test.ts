@@ -3,9 +3,9 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { attentionInbox, searchChats } from "../src/lib/search";
+import { searchChats } from "../src/lib/search";
 import { buildSupportReport } from "../electron/diagnostics";
-import type { AppState, Session } from "../src/lib/types";
+import type { Session } from "../src/lib/types";
 
 const session = {
   id: "chat-1",
@@ -25,17 +25,6 @@ test("global search finds titles and transcript text across projects", () => {
   const projects = [{ id: "project-1", name: "Workhorse", folders: [], references: [] }];
   assert.equal(searchChats([session], projects, "deployment")[0]?.messageId, "message-1");
   assert.equal(searchChats([session], projects, "Workhorse")[0]?.sessionId, "chat-1");
-});
-
-test("attention inbox derives durable failures and honors dismissed ids", () => {
-  const failed: Session = {
-    ...session,
-    scheduledRuns: [{ id: "run-1", prompt: "deploy", dueAt: 10, createdAt: 1, status: "failed" }],
-  };
-  const state = { sessions: [failed], pending: [], dismissedAttention: [] };
-  const item = attentionInbox(state as Pick<AppState, "sessions" | "pending" | "dismissedAttention">)[0];
-  assert.equal(item?.id, "schedule:run-1");
-  assert.equal(attentionInbox({ ...state, dismissedAttention: [item!.id] } as Pick<AppState, "sessions" | "pending" | "dismissedAttention">).length, 0);
 });
 
 test("support report contains capabilities but never credential values or prompts", () => {

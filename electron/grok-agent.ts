@@ -1203,13 +1203,6 @@ export class GrokAgent {
   }
 }
 
-export async function startGrokAgent(input: GrokLaunchInput): Promise<GrokAgent> {
-  const spec = buildGrokLaunchSpec(input);
-  const agent = new GrokAgent(spec);
-  await agent.start();
-  return agent;
-}
-
 export async function runGrokOneShot(
   input: GrokLaunchInput & { prompt: string },
   handlers: GrokAgentHandlers = {},

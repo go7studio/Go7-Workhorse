@@ -10,15 +10,6 @@ export type ChatSearchResult = {
   at: number;
 };
 
-export type AttentionItem = {
-  id: string;
-  sessionId: string;
-  title: string;
-  detail: string;
-  severity: "needs-input" | "failed" | "warning";
-  at: number;
-};
-
 const clip = (text: string, query: string, limit = 140) => {
   const clean = text.replace(/\s+/g, " ").trim();
   const at = clean.toLowerCase().indexOf(query.toLowerCase());
@@ -65,47 +56,4 @@ export function searchChats(
     }
   }
   return rows.sort((a, b) => b.at - a.at).slice(0, Math.max(1, limit));
-}
-
-export function attentionInbox(state: Pick<AppState, "sessions" | "pending" | "dismissedAttention">): AttentionItem[] {
-  const dismissed = new Set(state.dismissedAttention ?? []);
-  const rows: AttentionItem[] = [];
-  for (const request of state.pending) {
-    const session = state.sessions.find((item) => item.id === request.sessionId);
-    rows.push({
-      id: `permission:${request.id}`,
-      sessionId: request.sessionId,
-      title: session?.title ?? "Chat needs input",
-      detail: `${request.tool}: ${request.detail}`,
-      severity: "needs-input",
-      at: Date.now(),
-    });
-  }
-  for (const session of state.sessions) {
-    for (const run of session.scheduledRuns ?? []) {
-      if (run.status !== "failed") continue;
-      rows.push({ id: `schedule:${run.id}`, sessionId: session.id, title: session.title, detail: `Scheduled run failed: ${run.prompt}`, severity: "failed", at: run.dueAt });
-    }
-    if (session.agentRun?.status === "failed" || session.agentRun?.status === "timed-out" || session.agentRun?.status === "budget-exceeded") {
-      rows.push({
-        id: `agent:${session.id}:${session.agentRun.finishedAt ?? session.agentRun.startedAt}`,
-        sessionId: session.parentId ?? session.id,
-        title: session.title,
-        detail: session.agentRun.error ?? `Subagent ${session.agentRun.status}.`,
-        severity: "failed",
-        at: session.agentRun.finishedAt ?? session.agentRun.startedAt,
-      });
-    }
-    if (session.agentRun?.conflictFiles?.length) {
-      rows.push({
-        id: `conflict:${session.id}:${session.agentRun.finishedAt ?? session.agentRun.startedAt}`,
-        sessionId: session.parentId ?? session.id,
-        title: session.title,
-        detail: `${session.agentRun.conflictFiles.length} file conflict${session.agentRun.conflictFiles.length === 1 ? "" : "s"} need review.`,
-        severity: "warning",
-        at: session.agentRun.finishedAt ?? session.agentRun.startedAt,
-      });
-    }
-  }
-  return rows.filter((item) => !dismissed.has(item.id)).sort((a, b) => b.at - a.at);
 }

@@ -174,6 +174,11 @@ const TOOLS = [
       properties: {
         prompt: { type: "string", description: "Full task for the subagent" },
         description: { type: "string", description: "Short 3–5 word label" },
+        worker: {
+          type: "string",
+          description:
+            "Name of a worker you already used (Wren, Dexter). Sends this slice back to that worker with everything it learned. Leave empty and the desk reuses an idle worker on the same bot, or starts a new one.",
+        },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id such as gpt-5.6-terra" },
         route: { type: "string", description: "auto, quick, balanced, or deep" },

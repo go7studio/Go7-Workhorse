@@ -317,6 +317,13 @@ export type Session = {
   fastMode?: boolean;
   /** Claude Code main-thread agent persona, or null for the standard one. */
   agentName?: string | null;
+  /**
+   * This worker's name on the desk — Wren, Dexter, Marlow. Set once when the
+   * worker is first started and kept for its life, so a later slice can be
+   * handed back to the worker that already did the last one instead of
+   * starting an identical bot from cold.
+   */
+  workerName?: string;
   title: string;
   titleLocked?: boolean;
   mode: PermissionMode;

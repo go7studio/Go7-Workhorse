@@ -80,6 +80,8 @@ import {
   normalizeAgentRun,
   overlappingAgentFiles,
   parentHasRunningChildren,
+  maxRootWorkers,
+  MIN_ROOT_WORKERS,
   rootSpawnError,
   resolveModelHint,
   resolveSpawnSpec,
@@ -7230,7 +7232,16 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch"), true);
   assert.equal(parentHasRunningChildren([kidDone], "orch"), false);
   assert.equal(rootSpawnError([kidRunning], "orch"), null);
-  assert.match(rootSpawnError([kidRunning, { ...kidRunning, id: "kid_run_2" }], "orch") ?? "", /2 workers/);
+  // A seven-bot desk gets a seven-worker lineup. The old flat cap of 2 rejected
+  // the third spawn of the seven the desk skill asks for.
+  const sevenDesk = maxRootWorkers(7);
+  const sixRunning = Array.from({ length: 6 }, (_, i) => ({ ...kidRunning, id: `kid_run_${i}` }));
+  assert.equal(rootSpawnError(sixRunning, "orch", sevenDesk), null);
+  assert.match(rootSpawnError([...sixRunning, { ...kidRunning, id: "kid_run_7" }], "orch", sevenDesk) ?? "", /7 workers/);
+  // A one-vendor desk still gets room to split a job into parts.
+  assert.equal(maxRootWorkers(1), MIN_ROOT_WORKERS);
+  assert.equal(rootSpawnError(sixRunning.slice(0, MIN_ROOT_WORKERS - 1), "orch", maxRootWorkers(1)), null);
+  assert.match(rootSpawnError(sixRunning.slice(0, MIN_ROOT_WORKERS), "orch", maxRootWorkers(1)) ?? "", new RegExp(`${MIN_ROOT_WORKERS} workers`));
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);

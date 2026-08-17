@@ -156,6 +156,7 @@ import {
   nestedSpawnError,
   overlappingAgentFiles,
   parentHasRunningChildren,
+  maxRootWorkers,
   rootSpawnError,
   resolveSpawnSpec,
   shouldAutoRouteSpawn,
@@ -3620,6 +3621,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const boundProject = latest.projects.find((item) => item.id === caller.projectId);
             const isNested = deskRoleOf(caller) === "worker";
+            const catalog = deskCallCatalog({
+              settings: latest.settings,
+              usage: latest.usage,
+              plans: latest.deskPlans ?? plansRef.current,
+              permits: latest.watchPermits,
+              dayMarks: latest.watchDayMarks,
+            });
             if (isNested) {
               const blocked = nestedSpawnError(latest.sessions, caller.id);
               if (blocked) {
@@ -3627,7 +3635,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
             } else {
-              const blocked = rootSpawnError(latest.sessions, caller.id);
+              // One worker per bot on the desk: the lineup the skill asks for.
+              const blocked = rootSpawnError(latest.sessions, caller.id, maxRootWorkers(catalog.length));
               if (blocked) {
                 await replyAsk({ error: blocked });
                 return;
@@ -3712,13 +3721,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;
             }
-            const catalog = deskCallCatalog({
-              settings: latest.settings,
-              usage: latest.usage,
-              plans: latest.deskPlans ?? plansRef.current,
-              permits: latest.watchPermits,
-              dayMarks: latest.watchDayMarks,
-            });
             const row = deskCallRowFor(catalog, {
               provider: spec.provider,
               customBotId: spec.customBotId,

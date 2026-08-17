@@ -179,11 +179,23 @@ export function nestedSpawnError(
   return null;
 }
 
-export const MAX_ROOT_WORKERS = 2;
+/**
+ * A lineup is every bot on the desk, once. The cap used to be a flat 2, which
+ * rejected the third spawn of the seven the desk skill itself asks for — the
+ * orchestrator then reported "only two bots were callable", which was untrue.
+ * Spend per vendor is the Watch daily bank's job, not this number's; this only
+ * stops a runaway loop. The floor lets a one-vendor desk split a job in parts.
+ */
+export const MIN_ROOT_WORKERS = 4;
+
+export function maxRootWorkers(deskBots: number): number {
+  return Math.max(MIN_ROOT_WORKERS, Math.floor(deskBots));
+}
 
 export function rootSpawnError(
   sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
   parentId: string,
+  limit = MIN_ROOT_WORKERS,
 ): string | null {
   const running = sessions.filter(
     (session) =>
@@ -191,8 +203,8 @@ export function rootSpawnError(
       isWorkerSession(session) &&
       (session.agentRun?.status === "running" || session.status === "running"),
   ).length;
-  return running >= MAX_ROOT_WORKERS
-    ? `This plan already has ${MAX_ROOT_WORKERS} workers running. Await one before spawning another.`
+  return running >= limit
+    ? `This plan already has ${limit} workers running. Await one before spawning another.`
     : null;
 }
 

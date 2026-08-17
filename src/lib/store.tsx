@@ -162,6 +162,9 @@ import {
   maxRootWorkers,
   rootSpawnError,
   resolveSpawnSpec,
+  findReusableWorker,
+  nextWorkerName,
+  type WorkerRecord,
   shouldAutoRouteSpawn,
   spawnWaitsForReply,
   withSubagentStatus,
@@ -3784,6 +3787,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 requestedEffort ?? routeDecision?.effort,
               ),
             };
+            /*
+             * Hand the slice back to the worker that already did the last one.
+             *
+             * Without this, an orchestrator finishing a Grok 4.6 medium job
+             * started a SECOND Grok 4.6 medium from cold for the next slice on
+             * the same project — the first one idle beside it, still holding
+             * the tree and the task. Only an IDLE worker of this chat, in this
+             * project, is reused; a busy one still gets a colleague, because
+             * running several at once is the point of the desk.
+             */
+            const reusedWorker = findReusableWorker(
+              {
+                name: typeof payload.worker === "string" ? payload.worker : undefined,
+                provider: spec.provider,
+                model: spec.model,
+                effort: spec.effort,
+                customBotId: spec.customBotId,
+              },
+              latest.sessions as unknown as WorkerRecord[],
+              { parentId: parent.id, projectId: parent.projectId },
+            );
             if (vendorSendTarget(spec.provider) === "preview") {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;
@@ -3834,7 +3858,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
             }
-            const childId = payload.childSessionId?.trim() || uid("sess");
+            const childId = reusedWorker?.id || payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
             let spawnImages: import("./types").ChatImage[] = [];
@@ -3894,7 +3918,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
             let isolation: "worktree" | "shared" = spawnIsolation === "worktree" ? "worktree" : "shared";
-            if (isolation === "worktree" && root && window.workhorse?.ensureWorktree) {
+            const priorWorker = reusedWorker
+              ? latest.sessions.find((item) => item.id === reusedWorker.id)
+              : undefined;
+            if (priorWorker?.environment) {
+              // It is already sitting in its tree. Re-cutting one would move
+              // the worker away from the work it just did.
+              environment = priorWorker.environment;
+              isolation = priorWorker.environment.kind === "worktree" ? "worktree" : "shared";
+            } else if (isolation === "worktree" && root && window.workhorse?.ensureWorktree) {
               const isolated = await window.workhorse.ensureWorktree({ sessionId: childId, root });
               if (isolated.ok && isolated.path && isolated.gitRoot && isolated.head) {
                 environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
@@ -3905,8 +3937,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               isolation = "shared";
             }
             grokAssistantId.current[childId] = assistantId;
+            const workerName =
+              priorWorker?.workerName ||
+              nextWorkerName(
+                latest.sessions
+                  .filter((item) => item.parentId === parent.id && item.workerName)
+                  .map((item) => item.workerName as string),
+              );
             const child: Session = {
+              // A reused worker keeps everything it already is — most of all
+              // vendorSessionId, which IS its memory of the last slice. Only
+              // the run and the new message are fresh.
+              ...(priorWorker ?? {}),
               id: childId,
+              workerName,
               projectId: parent.projectId,
               parentId: parent.id,
               hidden: true,
@@ -3914,7 +3958,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: spec.model,
               customBotId: spec.customBotId,
               effort: spec.effort,
-              title: spec.title,
+              title: priorWorker?.title || `${workerName} · ${spec.title}`,
               titleLocked: true,
               mode: parent.mode,
               sandbox: parent.sandbox,
@@ -3940,6 +3984,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
               messages: [
+                ...(priorWorker?.messages ?? []),
                 {
                   id: uid("msg"),
                   role: "user",
@@ -3995,8 +4040,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         ],
                       }
                     : item,
-                ),
-                child,
+                ).map((item) => (item.id === childId ? child : item)),
+                ...(priorWorker ? [] : [child]),
               ],
             }));
             const childCwd = sessionExecutionCwd(environment, root);
@@ -4099,8 +4144,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         ...(rationale ? { rationale } : {}),
                       }),
                     ),
+                    worker: workerName,
+                    reused: Boolean(priorWorker),
                     howToUse:
-                      "Worker is running in its own chat. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.",
+                      `Worker is running in its own chat. ${priorWorker ? `${workerName} picked this up with what it already knew.` : `${workerName} is new to this work.`} For the next slice of the same kind pass worker="${workerName}" and it goes back to the same worker. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`,
                   },
                   null,
                   2,

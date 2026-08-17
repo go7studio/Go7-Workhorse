@@ -45,6 +45,8 @@ export type PeerAsk = {
   api?: string;
   contextWindow?: number;
   bot?: string;
+  /** Name of the worker to hand this slice back to — Wren, Dexter, Marlow. */
+  worker?: string;
   chats?: "keep" | "remove";
   onlyThis?: boolean;
   scope?: string;

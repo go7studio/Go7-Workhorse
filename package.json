@@ -1,7 +1,7 @@
 {
   "name": "go7-workhorse",
   "productName": "Go7 Workhorse",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "private": true,
   "description": "One desk for every AI subscription you already pay for: Grok, Claude, Codex, Cursor and your own API keys, each under its own login, on Windows and macOS.",
   "keywords": [
@@ -57,7 +57,7 @@
     "package:mac": "electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "dist:mac": "npm run build && npm run package:mac",
     "preview": "vite preview",
-    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/cursor-adapter.test.ts test/watch.test.ts test/routing.test.ts test/plan.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts test/eval-kit.test.ts test/folder-access.test.ts test/learning-memory.test.ts test/project-diff.test.ts test/vendor-meter.test.ts test/repo-shape.test.ts test/usage-metering.test.ts test/lineup-sidebar.test.ts test/empty-reply.test.ts test/detect-release.test.ts test/austerity.test.ts test/model-groups.test.ts test/custom-multi-model.test.ts test/interrupted-workers.test.ts",
+    "test": "tsx --test test/workhorse.test.ts test/codex-adapter.test.ts test/codex-app-server.test.ts test/custom-http.test.ts test/claude-adapter.test.ts test/cursor-adapter.test.ts test/watch.test.ts test/routing.test.ts test/plan.test.ts test/attachments.test.ts test/app-update.test.ts test/session-environment.test.ts test/terminal-host.test.ts test/schedule.test.ts test/provider-contract.test.ts test/credential-store.test.ts test/mcp-tool-bridge.test.ts test/portable-compaction.test.ts test/support-surfaces.test.ts test/state-persistence.test.ts test/desk-export.test.ts test/eval-kit.test.ts test/folder-access.test.ts test/learning-memory.test.ts test/project-diff.test.ts test/vendor-meter.test.ts test/repo-shape.test.ts test/usage-metering.test.ts test/lineup-sidebar.test.ts test/empty-reply.test.ts test/detect-release.test.ts test/austerity.test.ts test/model-groups.test.ts test/custom-multi-model.test.ts test/interrupted-workers.test.ts test/worker-reuse.test.ts",
     "eval:learning-smoke": "node scripts/learning-packaged-smoke.mjs",
     "probe:sqlite": "node scripts/learning-sqlite-probe.mjs"
   },
@@ -84,7 +84,7 @@
   "build": {
     "appId": "com.go7studio.workhorse",
     "productName": "Go7 Workhorse",
-    "copyright": "Copyright © 2026 Go7 Studio",
+    "copyright": "Copyright \u00a9 2026 Go7 Studio",
     "asar": true,
     "afterPack": "scripts/after-pack.cjs",
     "afterSign": "scripts/after-sign.cjs",

@@ -333,7 +333,7 @@ function BrainSlider() {
 export function ModelMenu() {
   const session = useActiveSession();
   const store = useStore();
-  const { setSessionModel, openSettings } = store;
+  const { setSessionModel, setSessionRoutingMode, openSettings } = store;
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -368,7 +368,9 @@ export function ModelMenu() {
           }}
         >
           {attached ? (
-            <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
+            session.routingMode === "auto"
+              ? <span className="dot auto" aria-hidden="true" />
+              : <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
           ) : null}
           {/* In auto mode routing picks the model on every send, so naming the
               last pick here read as the plan: the chip said Composer 2.5 and
@@ -388,6 +390,24 @@ export function ModelMenu() {
         </button>
         {open && (
           <div className="model-pop" role="listbox">
+            {/* Auto is a pick like any other: this chat hands model and effort
+                to routing on every message. Any model below takes it back. */}
+            <div className="model-group">
+              <button
+                className={session.routingMode === "auto" ? "active" : undefined}
+                type="button"
+                onClick={() => {
+                  setSessionRoutingMode("auto");
+                  setOpen(false);
+                }}
+              >
+                <span className="dot auto" aria-hidden="true" />
+                <span className="model-line">
+                  Auto
+                  <em>picks bot and effort per message</em>
+                </span>
+              </button>
+            </div>
             {PROVIDERS.filter((provider) => provider.id !== "custom").map((provider) => {
               const providerId = provider.id as Exclude<typeof provider.id, "custom">;
               if (!vendorEnabled(store.settings.llms[providerId])) return null;
@@ -451,7 +471,9 @@ export function ModelMenu() {
           </div>
         )}
       </div>
-      {attached ? <BrainSlider /> : null}
+      {/* In Auto the effort is picked with the model each message, so a
+          slider here would promise a level the next send may not keep. */}
+      {attached && session.routingMode !== "auto" ? <BrainSlider /> : null}
     </div>
   );
 }

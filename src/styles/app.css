@@ -2722,6 +2722,11 @@ html.pane-dragging * {
   color: var(--custom);
 }
 
+/* Auto: no one vendor, so no one colour — every desk vendor at once. */
+.dot.auto {
+  background: conic-gradient(var(--grok), var(--claude), var(--codex), var(--cursor), var(--grok));
+}
+
 .path {
   font-family: var(--mono);
   font-size: 12px;

@@ -27,6 +27,15 @@ or an API key for a hosted or local model — and each sits idle while you work
 in the other. Workhorse is one place to pick which one does each job, and to
 see what each has left this week.
 
+**Why it exists.** It began at a desk paying for SuperGrok Heavy, Cursor,
+Claude and Codex, where one plan ran dry most days while another sat idle. The
+sharpest case is Grok with Cursor: a Grok plan and a Cursor plan each give you
+Grok 4.6, on separate meters. Workhorse treats them as one model with two
+pools — it shows both meters, moves a chat between them, and with auto-route
+on leans each task toward the pool with more left. So a plan you already pay
+for gets used before another is spent. The same holds for any two
+subscriptions that overlap.
+
 **A good fit if**
 
 - You hold two or more AI subscriptions or API keys.

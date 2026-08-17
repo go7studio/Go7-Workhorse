@@ -1201,11 +1201,18 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           model: event.model,
+          source: event.source,
+          contextUsed: event.contextUsed,
         });
       }
     },
   );
-  assert.deepEqual(hostEvents, [{ type: "usage", inputTokens: 80, outputTokens: 12, model: "MiniMax-M3" }]);
+  // One HTTP call = one `request` bill, then a `gauge` with what the model
+  // holds (fresh + cached) so the context ring is right without booking tokens.
+  assert.deepEqual(hostEvents, [
+    { type: "usage", inputTokens: 80, outputTokens: 12, model: "MiniMax-M3", source: "request", contextUsed: undefined },
+    { type: "usage", inputTokens: 0, outputTokens: 0, model: "MiniMax-M3", source: "gauge", contextUsed: 90 },
+  ]);
 
   let rounds = 0;
   const roundHost = new CustomSessionHost(async () => {
@@ -1222,7 +1229,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       usage: { inputTokens: 520_000, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 },
     };
   });
-  const roundUsage: number[] = [];
+  const roundUsage: { inputTokens: number; source?: string; contextUsed?: number }[] = [];
   await roundHost.prompt(
     {
       sessionId: "s-kimi",
@@ -1236,11 +1243,18 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       config: { baseUrl: "https://api.synthetic.new/openai/v1", apiKey: "syn_k", model: "hf:moonshotai/Kimi-K3" },
     },
     (event) => {
-      if (event.type === "usage") roundUsage.push(event.inputTokens);
+      if (event.type === "usage") roundUsage.push({ inputTokens: event.inputTokens, source: event.source, contextUsed: event.contextUsed });
     },
   );
   assert.equal(rounds, 2);
-  assert.deepEqual(roundUsage, [520_000]);
+  // Both requests in the tool loop go out as their own bill. The old host kept
+  // only the last one ([520_000]) and let the store guess; a 21-request Kimi
+  // turn then stored 3.59M as one event. The store adds `request` reports.
+  assert.deepEqual(roundUsage, [
+    { inputTokens: 500_000, source: "request", contextUsed: undefined },
+    { inputTokens: 520_000, source: "request", contextUsed: undefined },
+    { inputTokens: 0, source: "gauge", contextUsed: 520_000 },
+  ]);
   assert.equal(customPlanRemainsUrl("https://openrouter.ai/api/v1"), "https://openrouter.ai/api/v1/key");
   const openRouter = parseCustomPlanUsage({ data: { usage: 2, limit: 10, limit_remaining: 8 } });
   assert.equal(openRouter?.usedPercent, 20);

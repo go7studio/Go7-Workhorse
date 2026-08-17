@@ -4420,7 +4420,11 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
     customBots: [],
   });
   assert.equal(cursorCards.find((card) => card.focus === "cursor:cursor-models")?.inputTokens, 40);
-  assert.equal(formatIoLine({ inputTokens: 6, outputTokens: 2500, cacheReadTokens: 120_000 }), "120k in · 2.5k out");
+  // "in" is fresh input; cache reads are named apart. This row once read
+  // "120k in", which is the whole replayed prompt, beside a total that left
+  // the cache out — the two could never be reconciled by eye.
+  assert.equal(formatIoLine({ inputTokens: 6, outputTokens: 2500, cacheReadTokens: 120_000 }), "6 in · 120k cached · 2.5k out");
+  assert.equal(formatIoLine({ inputTokens: 349, outputTokens: 7168 }), "349 in · 7.2k out");
   assert.equal(modelName("custom", "hf:moonshotai/Kimi-K3"), "Kimi K3");
   const mini = byModel(
     [

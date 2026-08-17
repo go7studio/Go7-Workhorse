@@ -2569,6 +2569,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
             costUsd: draft.costUsd,
             contextUsed,
+            ...(draft.source ? { source: draft.source } : {}),
           },
           ...current.usage,
         ],
@@ -4616,8 +4617,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           cacheWriteTokens: event.cacheWriteTokens,
           costUsd: event.costUsd,
           contextUsed: event.contextUsed,
+          source: event.source,
         };
-        if (usageHasBilledTokens(incoming)) {
+        // A gauge has no tokens but carries the context and cost the turn
+        // should end with, so it queues too; the fold books zero from it.
+        if (usageHasBilledTokens(incoming) || (incoming.source === "gauge" && (incoming.contextUsed !== undefined || incoming.costUsd !== undefined))) {
           const pending = grokUsagePending.current[event.sessionId] ?? [];
           grokUsagePending.current[event.sessionId] = [...pending, incoming];
         }
@@ -4699,6 +4703,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               cacheReadTokens: 0,
               cacheWriteTokens: 0,
               contextUsed: grokContextSeen.current[event.sessionId],
+              source: "estimate",
             });
           }
         }

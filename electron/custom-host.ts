@@ -12,7 +12,7 @@ import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
-import { CUSTOM_NOT_CONFIGURED, mergeCustomUsageSnapshot, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
+import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
 import {
   customToolPolicy,
   executeCustomTool,
@@ -323,16 +323,41 @@ export class CustomSessionHost {
     let unfulfilledContinuations = 0;
     let previousContinuation = "";
     let safetyPause: SafetyPause | null = null;
-    let turnUsage: CustomHttpUsage | undefined;
-    const emitTurnUsage = () => {
-      if (!turnUsage) return;
+    // Every HTTP call in the tool loop is its own bill, and goes out on its own
+    // tagged `request` so the store adds them. Folding them into one snapshot
+    // here lost the count: replace-if-nonzero kept only the last request, and
+    // the store then guessed the rest from the sizes. The last prompt's size is
+    // also the context the model holds now, which is a gauge, sent once at the
+    // end.
+    let lastUsage: CustomHttpUsage | undefined;
+    let requestsBilled = 0;
+    const emitRequestUsage = (usage: CustomHttpUsage) => {
+      lastUsage = usage;
+      requestsBilled += 1;
       emit({
         type: "usage",
         sessionId: input.sessionId,
         model: input.model || input.config.model,
         projectId: input.projectId,
         provider: "custom",
-        ...turnUsage,
+        source: "request",
+        ...usage,
+      });
+    };
+    const emitTurnUsage = () => {
+      if (!lastUsage || requestsBilled === 0) return;
+      emit({
+        type: "usage",
+        sessionId: input.sessionId,
+        model: input.model || input.config.model,
+        projectId: input.projectId,
+        provider: "custom",
+        source: "gauge",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        contextUsed: lastUsage.inputTokens + lastUsage.cacheReadTokens,
       });
     };
     try {
@@ -369,7 +394,7 @@ export class CustomSessionHost {
           },
         );
         text = result.text || text;
-        if (result.usage) turnUsage = mergeCustomUsageSnapshot(turnUsage, result.usage);
+        if (result.usage) emitRequestUsage(result.usage);
         const toolUses = result.toolUses ?? [];
         if (toolUses.length === 0) {
           if (looksLikeUnfinishedDeskTurn(result.text || text, result.stopReason, role)) {

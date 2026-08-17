@@ -311,21 +311,60 @@ export function buildOpenAiBody(input: {
   };
 }
 
+/**
+ * Read one HTTP response's usage as fresh input, cache read, cache write, out.
+ *
+ * The two dialects define the prompt figure in opposite ways, and the field
+ * name says which one is speaking:
+ *
+ * - Anthropic `input_tokens` is fresh only; `cache_read_input_tokens` and
+ *   `cache_creation_input_tokens` sit beside it. Take all three as they are.
+ * - OpenAI `prompt_tokens` is fresh PLUS cached; the cached share is
+ *   `prompt_tokens_details.cached_tokens`. Subtract it out, or every request in
+ *   a tool loop bills the whole replayed conversation as new work. Kimi and
+ *   MiniMax speak this dialect, and a 21-turn Kimi chat stored 3.59M "input"
+ *   that way — more than the model can hold at all.
+ *
+ * `reasoning_tokens` are already inside `completion_tokens`, so they are not
+ * added again.
+ */
 export function parseCustomUsage(raw: unknown): CustomHttpUsage | undefined {
   const root = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const usage = root.usage && typeof root.usage === "object" ? (root.usage as Record<string, unknown>) : root;
-  const inputTokens = Number(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? 0);
-  const outputTokens = Number(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? 0);
-  const cacheRead = Number(usage.cache_read_input_tokens ?? usage.cache_read_tokens ?? 0);
-  const cacheWrite = Number(usage.cache_creation_input_tokens ?? usage.cache_write_tokens ?? 0);
-  if (![inputTokens, outputTokens, cacheRead, cacheWrite].some((value) => Number.isFinite(value) && value > 0)) {
+  const num = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const details = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  const outputTokens = num(usage.output_tokens) ?? num(usage.completion_tokens) ?? num(usage.outputTokens) ?? 0;
+  const anthropicInput = num(usage.input_tokens) ?? num(usage.inputTokens);
+  const openaiPrompt = num(usage.prompt_tokens);
+  const openaiCached = num(details(usage.prompt_tokens_details).cached_tokens) ?? num(usage.cached_tokens);
+  const explicitCacheRead = num(usage.cache_read_input_tokens) ?? num(usage.cache_read_tokens);
+  const cacheWrite = num(usage.cache_creation_input_tokens) ?? num(usage.cache_write_tokens) ?? 0;
+
+  let inputTokens: number;
+  let cacheRead: number;
+  if (anthropicInput !== undefined) {
+    inputTokens = anthropicInput;
+    cacheRead = explicitCacheRead ?? 0;
+  } else if (openaiPrompt !== undefined) {
+    // Some OpenAI-compatible hosts send Anthropic-style cache fields beside
+    // prompt_tokens; treat either as the cached share of the inclusive prompt.
+    cacheRead = openaiCached ?? explicitCacheRead ?? 0;
+    inputTokens = Math.max(0, openaiPrompt - cacheRead);
+  } else {
+    inputTokens = 0;
+    cacheRead = explicitCacheRead ?? 0;
+  }
+  if (![inputTokens, outputTokens, cacheRead, cacheWrite].some((value) => value > 0)) {
     return undefined;
   }
   return {
-    inputTokens: Number.isFinite(inputTokens) ? Math.max(0, Math.round(inputTokens)) : 0,
-    outputTokens: Number.isFinite(outputTokens) ? Math.max(0, Math.round(outputTokens)) : 0,
-    cacheReadTokens: Number.isFinite(cacheRead) ? Math.max(0, Math.round(cacheRead)) : 0,
-    cacheWriteTokens: Number.isFinite(cacheWrite) ? Math.max(0, Math.round(cacheWrite)) : 0,
+    inputTokens: Math.round(inputTokens),
+    outputTokens: Math.round(outputTokens),
+    cacheReadTokens: Math.round(cacheRead),
+    cacheWriteTokens: Math.round(cacheWrite),
   };
 }
 

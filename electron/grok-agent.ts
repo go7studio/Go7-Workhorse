@@ -25,6 +25,8 @@ export type GrokUsageDraft = {
   cacheWriteTokens: number;
   costUsd?: number;
   contextUsed?: number;
+  /** See UsageSource in src/lib/types. Decides how this combines with other reports. */
+  source?: import("../src/lib/types").UsageSource;
 };
 
 export type GrokPermissionAsk = {
@@ -219,9 +221,26 @@ export function classifyAcpUpdate(update: Record<string, unknown>): ClassifiedAc
   if (THOUGHT_UPDATE_KINDS.has(name)) return { kind: "thought", text };
   if (USAGE_UPDATE_KINDS.has(name)) {
     const usage = parseGrokUsage(update) ?? parseGrokUsage(update.usage);
-    if (usage) return { kind: "usage", usage };
+    if (usage) return { kind: "usage", usage: { ...usage, source: acpUpdateUsageSource(name, usage) } };
   }
   return { kind: "other", name };
+}
+
+/**
+ * ACP `usage_update` is `{ used, size, cost }` — how full the context is, and
+ * what the session has cost so far. It is a gauge, not a bill: `used` is the
+ * whole prompt the model holds, so adding it to a ledger books the same
+ * context again on every turn. Grok's `turn_completed` is the opposite: the
+ * adapter's own per-turn total, authoritative for the turn.
+ */
+export function acpUpdateUsageSource(
+  name: string,
+  usage: Pick<GrokUsageDraft, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
+): import("../src/lib/types").UsageSource {
+  if (name === "turn_completed" || name === "response_completed") return "turn";
+  // A usage_update that somehow carries token buckets is still one request's
+  // snapshot, never a turn total; without buckets it is only a gauge.
+  return usageHasBilledTokens(usage) ? "request" : "gauge";
 }
 
 function debugAcp(entry: Record<string, unknown>): void {
@@ -841,23 +860,17 @@ export class GrokAgent {
       sessionId: this.sessionId,
       prompt: buildAcpPrompt(text, images),
     });
+    // PromptResponse.usage is the adapter's own total for this turn — Claude's
+    // adapter sums every API call it made into it. It is the one number to
+    // keep. Mid-turn snapshots (sawBilled) are the same tokens seen early;
+    // sending the total tagged `turn` lets the store replace them rather than
+    // add to them. The old code did the reverse and zeroed the total whenever a
+    // snapshot had arrived, leaving the ledger to guess from the snapshots.
     const usage = parseGrokUsage(result) ?? parseGrokUsage(asRecord(result._meta));
     if (usage) {
-      if (sawBilled) {
-        if (usage.contextUsed !== undefined || usage.costUsd !== undefined) {
-          handlers.onUsage?.({
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            costUsd: usage.costUsd,
-            contextUsed: usage.contextUsed,
-          });
-        }
-      } else {
-        handlers.onUsage?.(usage);
-      }
+      handlers.onUsage?.({ ...usage, source: usageHasBilledTokens(usage) ? "turn" : "gauge" });
     }
+    void sawBilled;
     const titled = titleFromRecord(result) ?? titleFromRecord(asRecord(result._meta));
     if (titled) handlers.onTitle?.(titled);
     const fromResult = extractUpdateText({

@@ -1,4 +1,4 @@
-import { contextWindowFor, modelsFor, usageModelKey, usageToneForModel } from "./models";
+import { contextWindowFor, largestKnownContextWindow, modelsFor, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
 import { vendorLabel, vendorTint } from "./settings";
 import {
@@ -9,7 +9,7 @@ import {
   type CursorUsageLane,
   type CursorWatchKey,
 } from "./cursor-lane";
-import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange } from "./types";
+import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange, UsageSource } from "./types";
 
 export type UsageTotals = {
   inputTokens: number;
@@ -1200,12 +1200,23 @@ export function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+/** The whole prompt the model held: fresh input plus what it read back from cache. */
 export function promptTokens(row: { inputTokens: number; cacheReadTokens?: number }): number {
   return row.inputTokens + (row.cacheReadTokens ?? 0);
 }
 
+/**
+ * "in" is fresh input only. Cache reads are the same context replayed each
+ * turn, and were once folded into "in" — so a chat that read 74 new tokens
+ * against 3.9M of cached history said "3.9M in", beside a total that left the
+ * cache out. Now the two figures are named apart, and both add up to the total.
+ */
 export function formatIoLine(row: { inputTokens: number; outputTokens: number; cacheReadTokens?: number }): string {
-  return `${formatTokens(promptTokens(row))} in · ${formatTokens(row.outputTokens)} out`;
+  const cached = row.cacheReadTokens ?? 0;
+  const parts = [`${formatTokens(row.inputTokens)} in`];
+  if (cached > 0) parts.push(`${formatTokens(cached)} cached`);
+  parts.push(`${formatTokens(row.outputTokens)} out`);
+  return parts.join(" · ");
 }
 
 export function formatCost(totals: UsageTotals): string {
@@ -1303,10 +1314,68 @@ function isMonotoneCovering(drafts: UsageDraft[]): UsageDraft | undefined {
   return drafts[drafts.length - 1];
 }
 
-/** If one snapshot already covers the others, keep it. Otherwise sum genuine per-request deltas. */
+function lastDefined<T>(drafts: UsageDraft[], pick: (draft: UsageDraft) => T | undefined): T | undefined {
+  return drafts.reduce<T | undefined>((kept, draft) => pick(draft) ?? kept, undefined);
+}
+
+/**
+ * Add the bills of one turn's HTTP requests. Output is always new work, so it
+ * always adds. Input only adds when the vendor split fresh from cached — then
+ * each request's `inputTokens` is what the model read for the first time. A
+ * vendor that reports one inclusive prompt figure and no cache bucket sends the
+ * whole conversation again on every request; adding those books the same
+ * context once per tool call. For that vendor the last prompt already contains
+ * every earlier one, so it stands as the turn's input.
+ */
+export function sumRequestBills(requests: UsageDraft[]): UsageDraft {
+  const last = requests[requests.length - 1]!;
+  const splitsCache = requests.some((draft) => (draft.cacheReadTokens ?? 0) > 0 || (draft.cacheWriteTokens ?? 0) > 0);
+  if (splitsCache || requests.length === 1) return requests.reduce(addUsageDraft);
+  return {
+    ...last,
+    inputTokens: Math.max(...requests.map((draft) => draft.inputTokens)),
+    outputTokens: requests.reduce((sum, draft) => sum + draft.outputTokens, 0),
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+}
+
+/**
+ * Fold every usage report from one turn into the one event that gets stored.
+ *
+ * Reports carry a `source`, and the source decides how they combine:
+ *
+ * - a `turn` total is the vendor's own figure for the whole turn. It replaces
+ *   everything else. If two arrive, the last wins — the adapter re-sent it,
+ *   it did not bill twice.
+ * - `request` reports are single HTTP bills. A tool loop makes many, and each
+ *   is real work, so they add. Their prompts already split fresh input from
+ *   cache reads (see parseCustomUsage), so summing does not re-book context.
+ * - `gauge` reports carry contextUsed and cost, never tokens.
+ * - an `estimate` only stands when nothing measured arrived.
+ *
+ * Reports without a source predate tagging. For those the old size-based
+ * guess still runs below: it stays for events already on disk, and for any
+ * adapter not yet tagging. Once a turn has one tagged report, tags rule.
+ */
 export function finalizeTurnUsage(drafts: UsageDraft[]): UsageDraft {
   if (drafts.length === 0) {
     return { provider: "grok", model: "", inputTokens: 0, outputTokens: 0 };
+  }
+  if (drafts.some((draft) => draft.source)) {
+    const contextUsed = lastDefined(drafts, (draft) => draft.contextUsed);
+    const costUsd = lastDefined(drafts, (draft) => draft.costUsd);
+    const trailer = { ...(contextUsed !== undefined ? { contextUsed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
+    const turns = drafts.filter((draft) => draft.source === "turn" && usageHasBilledTokens(draft));
+    if (turns.length) return { ...turns[turns.length - 1]!, ...trailer };
+    const requests = drafts.filter((draft) => draft.source === "request" && usageHasBilledTokens(draft));
+    if (requests.length) return { ...sumRequestBills(requests), ...trailer };
+    const untagged = drafts.filter((draft) => !draft.source && usageHasBilledTokens(draft));
+    if (untagged.length) return { ...finalizeTurnUsage(untagged), ...trailer };
+    const estimates = drafts.filter((draft) => draft.source === "estimate" && usageHasBilledTokens(draft));
+    if (estimates.length) return { ...estimates[estimates.length - 1]!, ...trailer };
+    // Only gauges: no tokens to book, but the context and cost are still true.
+    return { ...drafts[drafts.length - 1]!, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, ...trailer };
   }
   const unique = uniqueDrafts(drafts);
   if (unique.length === 1) return unique[0];
@@ -1442,6 +1511,27 @@ function collapseStackedCustomTurns(events: UsageEvent[]): UsageEvent[] {
   return drop.size ? events.filter((event) => !drop.has(event.id)) : events;
 }
 
+const USAGE_SOURCES = new Set(["turn", "request", "gauge", "estimate"]);
+
+/**
+ * One event stores one turn. A turn's fresh input can be at most one prompt,
+ * and no prompt is wider than the widest window on the desk. An event past
+ * that was written by the old fold summing every request's prompt in a tool
+ * loop — a 21-turn Kimi chat stored 3.59M that way — and cannot be undone
+ * exactly, because the per-request bills are gone. What is left is what the
+ * model held at the end: contextUsed if it was kept, else the ceiling. That
+ * still overstates the fresh input, but by at most one prompt, not twenty.
+ */
+export function repairSummedPromptTurn<T extends { inputTokens: number; contextUsed?: number; source?: UsageSource }>(
+  event: T,
+  ceiling = largestKnownContextWindow(),
+): T {
+  if (event.source && event.source !== "estimate") return event;
+  if (event.inputTokens <= ceiling) return event;
+  const held = event.contextUsed !== undefined && event.contextUsed > 0 ? Math.min(event.contextUsed, ceiling) : ceiling;
+  return { ...event, inputTokens: held };
+}
+
 export function normalizeUsage(raw: unknown): UsageEvent[] {
   if (!Array.isArray(raw)) return [];
   const events: UsageEvent[] = [];
@@ -1482,8 +1572,9 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
         typeof record.contextUsed === "number" && Number.isFinite(record.contextUsed)
           ? Math.max(0, Math.round(record.contextUsed))
           : undefined,
+      ...(typeof record.source === "string" && USAGE_SOURCES.has(record.source) ? { source: record.source as UsageSource } : {}),
       ...(lane ? { lane } : {}),
     });
   }
-  return collapseStackedCustomTurns(collapseInflatedUsage(events));
+  return collapseStackedCustomTurns(collapseInflatedUsage(events)).map((event) => repairSummedPromptTurn(event));
 }

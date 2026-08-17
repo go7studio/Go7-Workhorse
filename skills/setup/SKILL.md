@@ -45,7 +45,7 @@ Pin a URL, note, or file on this project (Project home → References):
 
 ## Skills
 
-Desk skills include Grok, Codex, Claude, and **Workhorse** (`desk`, `setup`, `vendor-meter`). New or broken leftover rings (any vendor ACP / API / MCP / custom bot) → `vendor-meter`.
+Desk skills include Grok, Codex, Claude, and **Workhorse** (`desk`, `setup`). Leftover-meter wiring for a new vendor lives in the private skills hub (`vendor-meter`), not this public repo.
 
 - `workhorse_list_skills` then `workhorse_read_skill` by name (or `workhorse:desk`)
 - Reading a skill returns instructions. It does not run scripts.

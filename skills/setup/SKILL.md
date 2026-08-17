@@ -45,7 +45,7 @@ Pin a URL, note, or file on this project (Project home → References):
 
 ## Skills
 
-Desk skills include Grok, Codex, Claude, and **Workhorse** (`desk`, `setup`).
+Desk skills include Grok, Codex, Claude, and **Workhorse** (`desk`, `setup`, `vendor-meter`). Leftover rings and billing/quota APIs → `vendor-meter`.
 
 - `workhorse_list_skills` then `workhorse_read_skill` by name (or `workhorse:desk`)
 - Reading a skill returns instructions. It does not run scripts.

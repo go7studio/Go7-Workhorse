@@ -132,11 +132,13 @@ function claudeCodeUserAgent(): string {
 }
 
 function resetOf(value: Record<string, unknown>): string | undefined {
-  return typeof value.resets_at === "string"
-    ? value.resets_at
-    : typeof value.resetsAt === "string"
-      ? value.resetsAt
-      : undefined;
+  if (typeof value.resets_at === "string") return value.resets_at;
+  if (typeof value.resetsAt === "string") return value.resetsAt;
+  const stamp = numberVal(value.resets_at ?? value.resetsAt);
+  if (!Number.isFinite(stamp) || stamp <= 0) return undefined;
+  const ms = stamp > 1e12 ? stamp : stamp * 1000;
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 function claudeLimitLabel(limit: Record<string, unknown>): string {
@@ -151,7 +153,9 @@ function claudeLimitLabel(limit: Record<string, unknown>): string {
 
 function windowProduct(product: string, label: string, raw: unknown): GrokPlanProduct | undefined {
   const row = asRecord(raw);
-  const used = usedPercentFromUtilization(row.utilization ?? row.used_percent ?? row.percent);
+  const used = usedPercentFromUtilization(
+    row.utilization ?? row.used_percentage ?? row.used_percent ?? row.percent,
+  );
   if (!Number.isFinite(used)) return undefined;
   return { product, label, usagePercent: used, resetsAt: resetOf(row) };
 }
@@ -165,7 +169,7 @@ function claudeProductId(kind: string): string {
 
 function usedFromLimitRow(limit: Record<string, unknown>): number {
   const direct = usedPercentFromUtilization(
-    limit.percent ?? limit.utilization ?? limit.used_percent ?? limit.usedPercent,
+    limit.percent ?? limit.utilization ?? limit.used_percentage ?? limit.used_percent ?? limit.usedPercent,
   );
   if (Number.isFinite(direct)) return direct;
   const remaining = usedPercentFromUtilization(limit.remaining_percent ?? limit.remainingPercent);
@@ -197,8 +201,17 @@ export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined 
     }
   }
   if (products.length === 0) {
-    const session = windowProduct("session", "Current session", root.five_hour ?? root.fiveHour ?? root.session);
-    const week = windowProduct("weekly_all", "All models", root.seven_day ?? root.sevenDay ?? root.weekly);
+    const limits = asRecord(root.rate_limits ?? root.rateLimits);
+    const session = windowProduct(
+      "session",
+      "Current session",
+      root.five_hour ?? root.fiveHour ?? root.session ?? limits.five_hour ?? limits.fiveHour,
+    );
+    const week = windowProduct(
+      "weekly_all",
+      "All models",
+      root.seven_day ?? root.sevenDay ?? root.weekly ?? limits.seven_day ?? limits.sevenDay,
+    );
     if (session) products.push(session);
     if (week) products.push(week);
   }

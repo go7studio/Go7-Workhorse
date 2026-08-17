@@ -49,7 +49,7 @@ export function WatchPane() {
           <div className="watch-option-head">
             <strong>Desktop notification</strong>
             <button
-              className={`watch-toggle${watch.desktopNotify ? " on" : ""}`}
+              className={`switch${watch.desktopNotify ? " on" : ""}`}
               type="button"
               role="switch"
               aria-checked={watch.desktopNotify}

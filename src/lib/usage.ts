@@ -236,9 +236,14 @@ export type DeskUsageCard = UsageGroup & {
 
 const DESK_VENDORS: Exclude<ProviderId, "custom">[] = ["grok", "codex", "claude", "cursor"];
 
-export function usageProviderForSession(session?: { provider?: ProviderId } | null): ProviderId {
-  const provider = session?.provider;
-  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "custom") return provider;
+export function usageProviderForSession(
+  session?: { provider?: ProviderId } | null,
+  fallback?: ProviderId,
+): ProviderId {
+  const provider = session?.provider ?? fallback;
+  if (provider === "claude" || provider === "codex" || provider === "cursor" || provider === "custom" || provider === "grok") {
+    return provider;
+  }
   return "grok";
 }
 
@@ -258,13 +263,15 @@ export function rehomeCustomUsage(
 ): UsageEvent[] {
   if (events.length === 0 || (bots.length === 0 && sessions.length === 0)) return events;
   return events.map((event) => {
-    if (event.provider === "claude" || event.provider === "codex") return event;
+    if (event.provider === "claude" || event.provider === "codex" || event.provider === "cursor") return event;
     const session = event.sessionId ? sessions.find((item) => item.id === event.sessionId) : undefined;
+    if (session && session.provider !== "custom") return event;
     const sessionBotId = session?.provider === "custom" ? session.customBotId : undefined;
     const bot =
       bots.find((item) => item.id === event.customBotId || item.id === sessionBotId) ??
       bots.find((item) => item.model === event.model || item.id === event.model || item.name === event.model);
     if (!bot) return event;
+    if (!session && event.provider === "grok") return event;
     if (event.provider === "custom" && event.customBotId === bot.id) return event;
     return { ...event, provider: "custom", customBotId: bot.id };
   });
@@ -548,7 +555,7 @@ function customBotForEvent(event: UsageEvent, bots: HeatBotHint[]): HeatBotHint 
 export function byModel(events: UsageEvent[], customBots: CustomBot[] = []): UsageGroup[] {
   const map = new Map<string, UsageGroup>();
   for (const event of events) {
-    const provider = usageToneForModel(event.model, event.provider);
+    const provider = event.provider;
     const bot = provider === "custom" ? customBotForEvent(event, customBots) : undefined;
     const key = bot ? `bot:${bot.id}:${usageModelKey(event.model)}` : `${provider}:${usageModelKey(event.model)}`;
     const current = map.get(key) ?? {
@@ -1193,6 +1200,14 @@ export function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+export function promptTokens(row: { inputTokens: number; cacheReadTokens?: number }): number {
+  return row.inputTokens + (row.cacheReadTokens ?? 0);
+}
+
+export function formatIoLine(row: { inputTokens: number; outputTokens: number; cacheReadTokens?: number }): string {
+  return `${formatTokens(promptTokens(row))} in · ${formatTokens(row.outputTokens)} out`;
+}
+
 export function formatCost(totals: UsageTotals): string {
   if (!totals.costKnown) return "—";
   if (totals.costUsd < 0.01) return `$${totals.costUsd.toFixed(4)}`;
@@ -1278,6 +1293,16 @@ function isCoveringTotal(
   return close || broader;
 }
 
+function isMonotoneCovering(drafts: UsageDraft[]): UsageDraft | undefined {
+  if (drafts.length < 2) return undefined;
+  for (let index = 1; index < drafts.length; index += 1) {
+    const previous = draftBucket(drafts[index - 1]!);
+    const current = draftBucket(drafts[index]!);
+    if (!coversUsage(current, previous)) return undefined;
+  }
+  return drafts[drafts.length - 1];
+}
+
 /** If one snapshot already covers the others, keep it. Otherwise sum genuine per-request deltas. */
 export function finalizeTurnUsage(drafts: UsageDraft[]): UsageDraft {
   if (drafts.length === 0) {
@@ -1285,6 +1310,15 @@ export function finalizeTurnUsage(drafts: UsageDraft[]): UsageDraft {
   }
   const unique = uniqueDrafts(drafts);
   if (unique.length === 1) return unique[0];
+  const monotone = isMonotoneCovering(unique);
+  if (monotone) {
+    return {
+      ...monotone,
+      ...draftBucket(monotone),
+      costUsd: drafts.reduce((cost, draft) => draft.costUsd ?? cost, monotone.costUsd),
+      contextUsed: drafts.reduce((used, draft) => draft.contextUsed ?? used, monotone.contextUsed),
+    };
+  }
   for (const candidate of unique) {
     const others = unique.filter((draft) => draft !== candidate);
     const otherSum = others.reduce(addUsageDraft);
@@ -1365,6 +1399,49 @@ export function collapseInflatedUsage(events: UsageEvent[]): UsageEvent[] {
   return events.filter((event) => !drop.has(event.id)).map(repairInflatedTurn);
 }
 
+function asCursorLane(value: unknown): CursorUsageLane | undefined {
+  if (
+    value === "cursor-models" ||
+    value === "other-models" ||
+    value === "auto-cost" ||
+    value === "auto-routed" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function collapseStackedCustomTurns(events: UsageEvent[]): UsageEvent[] {
+  const drop = new Set<string>();
+  const bySession = new Map<string, UsageEvent[]>();
+  for (const event of events) {
+    if (event.provider !== "custom" || !event.sessionId) continue;
+    const list = bySession.get(event.sessionId) ?? [];
+    list.push(event);
+    bySession.set(event.sessionId, list);
+  }
+  for (const group of bySession.values()) {
+    if (group.length < 2) continue;
+    const ordered = [...group].sort((a, b) => a.at - b.at);
+    let monotone = true;
+    for (let index = 1; index < ordered.length; index += 1) {
+      const previous = ordered[index - 1]!;
+      const current = ordered[index]!;
+      if (current.inputTokens + (current.cacheReadTokens ?? 0) < previous.inputTokens + (previous.cacheReadTokens ?? 0)) {
+        monotone = false;
+        break;
+      }
+    }
+    if (!monotone) continue;
+    const keep = ordered[ordered.length - 1]!;
+    for (const event of ordered) {
+      if (event.id !== keep.id) drop.add(event.id);
+    }
+  }
+  return drop.size ? events.filter((event) => !drop.has(event.id)) : events;
+}
+
 export function normalizeUsage(raw: unknown): UsageEvent[] {
   if (!Array.isArray(raw)) return [];
   const events: UsageEvent[] = [];
@@ -1385,6 +1462,8 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
     const outputTokens = Number(record.outputTokens) || 0;
     const cacheReadTokens = Number(record.cacheReadTokens) || 0;
     const cacheWriteTokens = Number(record.cacheWriteTokens) || 0;
+    const lane =
+      record.provider === "cursor" ? asCursorLane(record.lane) ?? cursorUsageLane(record.model) : undefined;
     events.push({
       id: typeof record.id === "string" ? record.id : `use_${events.length}`,
       at: typeof record.at === "number" ? record.at : Date.now(),
@@ -1403,7 +1482,8 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
         typeof record.contextUsed === "number" && Number.isFinite(record.contextUsed)
           ? Math.max(0, Math.round(record.contextUsed))
           : undefined,
+      ...(lane ? { lane } : {}),
     });
   }
-  return collapseInflatedUsage(events);
+  return collapseStackedCustomTurns(collapseInflatedUsage(events));
 }

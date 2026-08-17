@@ -21,7 +21,7 @@ import {
   resolveClaudeModel,
   resolveClaudePermissionMode,
 } from "../electron/claude-launch";
-import { fetchClaudePlanUsage, parseClaudePlanUsage, usedPercentFromUtilization } from "../electron/claude-plan";
+import { fetchClaudePlanUsage, parseClaudePlanUsage, resolveClaudePlanToken, usedPercentFromUtilization } from "../electron/claude-plan";
 import { previewOnlyReply, vendorSendTarget } from "../src/lib/vendor-bridge";
 import { CLAUDE_EFFORTS, effortsFor } from "../src/lib/models";
 
@@ -248,6 +248,129 @@ test("parseClaudePlanUsage reads weekly leftover the same way as SuperGrok", () 
     ["Current session:23", "All models:7", "Fable:12"],
   );
   assert.equal(desktop?.usedPercent, 7);
+});
+
+test("parseClaudePlanUsage keeps a 5h window when weekly is missing", () => {
+  const sessionOnly = parseClaudePlanUsage({
+    limits: [{ kind: "five_hour", percent: 23, resets_at: "2026-08-13T19:39:59Z" }],
+  });
+  assert.equal(sessionOnly?.products[0]?.product, "session");
+  assert.equal(sessionOnly?.usedPercent, 23);
+  assert.equal(sessionOnly?.leftPercent, 77);
+});
+
+test("parseClaudePlanUsage reads current oauth five_hour / seven_day JSON", () => {
+  const plan = parseClaudePlanUsage({
+    five_hour: { utilization: 33.0, resets_at: "2026-04-11T07:00:00.528743+00:00" },
+    seven_day: { utilization: 13.0, resets_at: "2026-04-17T00:59:59.951713+00:00" },
+    seven_day_opus: null,
+    extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: null },
+  });
+  assert.equal(plan?.usedPercent, 13);
+  assert.equal(plan?.leftPercent, 87);
+  assert.equal(plan?.products[0]?.product, "session");
+  assert.equal(plan?.products[0]?.usagePercent, 33);
+  const remaining = parseClaudePlanUsage({
+    limits: [{ kind: "seven_day", remaining_percent: 80, resets_at: "2026-08-20T05:59:59Z" }],
+  });
+  assert.equal(remaining?.usedPercent, 20);
+  assert.equal(remaining?.leftPercent, 80);
+  assert.equal(parseClaudePlanUsage({ extra_usage: { is_enabled: false } }), undefined);
+});
+
+test("resolveClaudePlanToken uses Claude Code credentials without reading the machine", async () => {
+  const credPath = path.join("/Users/me", ".claude", ".credentials.json");
+  const fromFile = await resolveClaudePlanToken({
+    env: {},
+    homedir: "/Users/me",
+    platform: "darwin",
+    existsSync: (file) => file === credPath,
+    readFile: () =>
+      JSON.stringify({
+        claudeAiOauth: { accessToken: "sk-ant-oat01-filefixturexxxxxxxx", expiresAt: Date.now() + 60_000 },
+      }),
+    readKeychain: () => null,
+    readDesktop: () => null,
+  });
+  assert.equal(fromFile, "sk-ant-oat01-filefixturexxxxxxxx");
+
+  const fromKeychain = await resolveClaudePlanToken({
+    env: {},
+    homedir: "/Users/nobody",
+    platform: "darwin",
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    readKeychain: () => JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat01-keychainfixturexxxx" } }),
+    readDesktop: () => null,
+  });
+  assert.equal(fromKeychain, "sk-ant-oat01-keychainfixturexxxx");
+
+  const missing = await resolveClaudePlanToken({
+    env: {},
+    homedir: "/Users/nobody",
+    platform: "linux",
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    readKeychain: () => {
+      throw new Error("linux tests must not call the macOS keychain");
+    },
+    readDesktop: () => null,
+  });
+  assert.equal(missing, "");
+});
+
+test("resolveClaudePlanToken refreshes an expired Claude Code OAuth token", async () => {
+  const written: string[] = [];
+  const token = await resolveClaudePlanToken({
+    env: {},
+    homedir: "/Users/nobody",
+    platform: "darwin",
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    readKeychain: () =>
+      JSON.stringify({
+        accessToken: "sk-ant-oat01-expiredfixturexxxxxxxx",
+        refreshToken: "sk-ant-ort01-refreshfixturexxxxxxxx",
+        expiresAt: Date.now() - 60_000,
+      }),
+    writeKeychain: (contents) => {
+      written.push(contents);
+    },
+    refreshOauth: async () => ({
+      accessToken: "sk-ant-oat01-refreshedfixturexxxxxx",
+      refreshToken: "sk-ant-ort01-rotatedfixturexxxxxxx",
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+    }),
+    readDesktop: () => null,
+  });
+  assert.equal(token, "sk-ant-oat01-refreshedfixturexxxxxx");
+  assert.equal(written.length, 1);
+  assert.match(written[0] ?? "", /sk-ant-oat01-refreshedfixturexxxxxx/);
+  assert.match(written[0] ?? "", /sk-ant-ort01-rotatedfixturexxxxxxx/);
+});
+
+test("fetchClaudePlanUsage stays unknown without a token", async () => {
+  const plan = await fetchClaudePlanUsage({
+    env: {},
+    homedir: "/Users/nobody",
+    platform: "linux",
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    readKeychain: () => null,
+    readDesktop: () => null,
+    fetchImpl: async () => {
+      throw new Error("must not fetch without a token");
+    },
+  });
+  assert.equal(plan, undefined);
 });
 
 test("fetchClaudePlanUsage sends the claude-code User-Agent", async () => {

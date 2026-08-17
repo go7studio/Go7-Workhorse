@@ -112,7 +112,7 @@ import {
 } from "../src/lib/commands";
 import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSession, goalHaltsVendor, goalVendorPrompt, grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "../src/lib/goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
-import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
+import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, modelName, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import { WORKHORSE_APP_ID, workhorseRuntimeIdentity } from "../src/lib/app-identity";
@@ -219,6 +219,7 @@ import {
   planWindowChip,
   weeklyPlanLeftover,
   formatPlanReset,
+  formatIoLine,
   normalizeUsage,
   rollup,
   heatLevel,
@@ -1562,6 +1563,14 @@ test("MiniMax usage row bills the turn total while the context ring keeps last o
   const billed = eventTotal({ ...folded, id: "fold", at: 1, cacheWriteTokens: folded.cacheWriteTokens ?? 0 });
   assert.ok(lastOccupancy !== undefined);
   assert.ok(billed !== lastOccupancy);
+
+  const kimiFolded = finalizeTurnUsage([
+    { provider: "custom", model: "hf:moonshotai/Kimi-K3", inputTokens: 500_000, outputTokens: 1_200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    { provider: "custom", model: "hf:moonshotai/Kimi-K3", inputTokens: 510_000, outputTokens: 2_400, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    { provider: "custom", model: "hf:moonshotai/Kimi-K3", inputTokens: 520_000, outputTokens: 3_100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  ]);
+  assert.equal(kimiFolded.inputTokens, 520_000);
+  assert.equal(kimiFolded.outputTokens, 3_100);
 });
 
 test("mergeUsageDraft prefers a running turn total over summing it", () => {
@@ -4356,6 +4365,10 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   assert.doesNotMatch(pane, /row\.totalTokens \/ peak/);
   assert.match(pane, /function modelShare/);
   assert.match(pane, /total=\{modelsTotal\}/);
+  assert.match(pane, /formatIoLine/);
+  assert.match(pane, /cursorLaneEvents/);
+  assert.match(pane, /cursorPlanUsage/);
+  assert.match(pane, /usageModelLabel/);
   assert.match(pane, /byModel\(events, settings.customBots\)/);
   assert.match(pane, /row.color \? \{ background: row.color \}/);
   assert.match(pane, /total=\{focusedTotal\}/);
@@ -4373,9 +4386,40 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
     { id: "a", at: 1, provider: "custom", model: "claude-opus", inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
     { id: "b", at: 2, provider: "grok", model: "claude-opus", inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
   ]);
-  assert.equal(mixed.length, 1);
-  assert.equal(mixed[0].provider, "claude");
-  assert.equal(mixed[0].totalTokens, 18);
+  assert.equal(mixed.length, 2);
+  assert.equal(mixed.find((row) => row.provider === "custom")?.totalTokens, 12);
+  assert.equal(mixed.find((row) => row.provider === "grok")?.totalTokens, 6);
+  const cursorGpt = byModel([
+    { id: "c", at: 3, provider: "cursor", model: "gpt-5.6-sol", inputTokens: 8, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, lane: "other-models" },
+  ]);
+  assert.equal(cursorGpt[0].provider, "cursor");
+  const cursorHydrated = normalizeUsage([
+    {
+      id: "use_cur",
+      at: 1,
+      provider: "cursor",
+      model: "composer-2.5",
+      inputTokens: 40,
+      outputTokens: 8,
+      cacheReadTokens: 12,
+      cacheWriteTokens: 0,
+      lane: "cursor-models",
+    },
+  ]);
+  assert.equal(cursorHydrated[0]?.provider, "cursor");
+  assert.equal(cursorHydrated[0]?.lane, "cursor-models");
+  const cursorCards = deskUsageCards(cursorHydrated, {
+    llms: {
+      grok: { connected: false },
+      claude: { connected: false },
+      codex: { connected: false },
+      cursor: { connected: true },
+    },
+    customBots: [],
+  });
+  assert.equal(cursorCards.find((card) => card.focus === "cursor:cursor-models")?.inputTokens, 40);
+  assert.equal(formatIoLine({ inputTokens: 6, outputTokens: 2500, cacheReadTokens: 120_000 }), "120k in · 2.5k out");
+  assert.equal(modelName("custom", "hf:moonshotai/Kimi-K3"), "Kimi K3");
   const mini = byModel(
     [
       {
@@ -4691,8 +4735,12 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(cards.find((card) => card.label === "Claude")?.totalTokens, 0);
   assert.equal(cards.find((card) => card.label === "MiniMax")?.color, "#30d158");
   const claude = leftoverForCard(cards.find((card) => card.label === "Claude")!, {
-    claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [] },
+    claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
   });
+  assert.equal(planRingView(cards.find((card) => card.label === "Claude")!, {
+    claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
+  })?.label, "93%");
+  assert.equal(leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, {}), undefined);
   const mini = leftoverForCard(cards.find((card) => card.label === "MiniMax")!, {
     custom: {
       bot_mini: { usedPercent: 0, leftPercent: 100, period: "weekly", prepaidBalance: 0, products: [] },
@@ -4791,7 +4839,9 @@ test("custom MiniMax In/Out tracks on the bot card, not Grok", () => {
   assert.equal(usageProviderForSession({ provider: "claude" }), "claude");
   assert.equal(usageProviderForSession({ provider: "codex" }), "codex");
   assert.equal(usageProviderForSession({ provider: "grok" }), "grok");
+  assert.equal(usageProviderForSession({ provider: "cursor" }), "cursor");
   assert.equal(usageProviderForSession(undefined), "grok");
+  assert.equal(usageProviderForSession(undefined, "cursor"), "cursor");
 
   const bot = {
     id: "bot_mini",
@@ -4845,7 +4895,7 @@ test("custom MiniMax In/Out tracks on the bot card, not Grok", () => {
   assert.equal(cards.find((card) => card.label === "Grok")?.inputTokens, 0);
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /usageProviderForSession\(owner\)/);
+  assert.match(store, /usageProviderForSession\(owner/);
   assert.match(store, /customBotId: owner\?\.customBotId/);
   assert.match(store, /rehomeCustomUsage/);
   assert.doesNotMatch(store, /provider: owner\?\.provider === "codex" \? "codex" : "grok"/);

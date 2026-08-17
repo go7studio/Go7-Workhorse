@@ -57,6 +57,7 @@ export type GrokIpcEvent =
       sessionId: string;
       model: string;
       projectId?: string;
+      provider?: import("../src/lib/types").ProviderId;
       inputTokens: number;
       outputTokens: number;
       cacheReadTokens: number;
@@ -199,6 +200,7 @@ export class GrokSessionHost {
           sessionId: input.sessionId,
           model: input.model,
           projectId: input.projectId,
+          provider: "grok",
           ...usage,
         }),
       onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>

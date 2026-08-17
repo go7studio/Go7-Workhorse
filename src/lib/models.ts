@@ -105,6 +105,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
       contextWindow: 204_800,
       reasoningLevels: MINIMAX_EFFORTS,
     },
+    { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3", effort: false, contextWindow: 524_288 },
   ],
 };
 
@@ -184,6 +185,16 @@ export function findModel(provider: ProviderId, modelId: string): ModelInfo | un
 export function modelName(provider: ProviderId, modelId: string): string {
   const name = findModel(provider, modelId)?.name ?? modelId;
   return provider === "cursor" ? cursorModelDisplayName(modelId, name) : name;
+}
+
+/** Overview list: desk vendor plus model, without double-prefixing Grok 4.6. */
+export function usageModelLabel(provider: ProviderId, modelId: string): string {
+  const name = modelName(provider, modelId);
+  if (provider === "custom") return name;
+  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor" }[provider];
+  if (!vendor) return name;
+  if (name.toLowerCase().startsWith(vendor.toLowerCase())) return name;
+  return `${vendor} · ${name}`;
 }
 
 /** Color/vendor family from the model slug, not which desk bot recorded the spend. */

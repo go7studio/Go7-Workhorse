@@ -4598,12 +4598,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (event.type === "usage") {
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const incoming: UsageDraft = {
-          provider: usageProviderForSession(owner),
+          provider: usageProviderForSession(owner, event.provider),
           model: event.model,
           projectId: event.projectId,
           sessionId: event.sessionId,
           customBotId: owner?.customBotId,
-          lane: usageProviderForSession(owner) === "cursor" ? cursorUsageLane(event.model) : undefined,
+          lane: usageProviderForSession(owner, event.provider) === "cursor" ? cursorUsageLane(event.model) : undefined,
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           cacheReadTokens: event.cacheReadTokens,
@@ -5252,7 +5252,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.customPlanUsage) return;
     for (const bot of stateRef.current.settings.customBots) {
       void window.workhorse
-        .customPlanUsage({ baseUrl: bot.baseUrl, apiKey: bot.apiKey, model: bot.model })
+        .customPlanUsage({
+          baseUrl: bot.baseUrl,
+          apiKey: bot.apiKey,
+          model: bot.model,
+          credentialId: bot.credentialId || `custom-bot-${bot.id}`,
+        })
         .then((plan) => {
           setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
         })

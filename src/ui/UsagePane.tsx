@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FuelRing } from "./FuelRing";
-import { modelName, shortModelName } from "../lib/models";
+import { shortModelName, usageModelLabel } from "../lib/models";
+import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStore } from "../lib/store";
 import type { ProviderId, UsageRange } from "../lib/types";
 import { ContextMeter } from "./ModelMenu";
 import {
   byModel,
   customBotUsageEvents,
+  cursorLaneEvents,
   deskUsageCards,
   leftoverForCard,
   planRingView,
@@ -18,6 +20,7 @@ import {
   planWindowChip,
   formatPlanReset,
   formatCost,
+  formatIoLine,
   formatTokens,
   inRange,
   modelsForProvider,
@@ -67,7 +70,7 @@ function SplitBar({
 function cellSummary(cell: HeatCell): string {
   if (cell.tokens <= 0) return `${cell.label}: no tokens`;
   const bots = cell.bots.map((bot) => `${bot.label} ${formatTokens(bot.tokens)}`).join(", ");
-  const io = `${formatTokens(cell.inputTokens)} in · ${formatTokens(cell.outputTokens)} out`;
+  const io = formatIoLine(cell);
   return bots
     ? `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io} · ${bots}`
     : `${cell.label}: ${formatTokens(cell.tokens)} tokens · ${io}`;
@@ -281,7 +284,7 @@ function ModelRow({
           )}
           {row.label}
           <em>
-            {formatTokens(row.inputTokens)} in · {formatTokens(row.outputTokens)} out
+            {formatIoLine(row)}
           </em>
         </span>
         <strong>{formatTokens(row.totalTokens)}</strong>
@@ -311,6 +314,7 @@ function planLoaderFor(row: { provider: ProviderId; focus: string }): boolean {
   if (row.provider === "grok") return Boolean(window.workhorse?.grokPlanUsage);
   if (row.provider === "codex") return Boolean(window.workhorse?.codexPlanUsage);
   if (row.provider === "claude") return Boolean(window.workhorse?.claudePlanUsage);
+  if (row.provider === "cursor") return Boolean(window.workhorse?.cursorPlanUsage);
   return Boolean(window.workhorse?.customPlanUsage);
 }
 
@@ -350,7 +354,7 @@ export function UsagePane({
   const cards = deskUsageCards(events, settings);
   const models = byModel(events, settings.customBots).map((row) => ({
     ...row,
-    label: modelName(row.provider, row.label),
+    label: usageModelLabel(row.provider, row.label),
   }));
   const modelsTotal = models.reduce((sum, row) => sum + row.totalTokens, 0);
   const vendorLooks = {
@@ -370,9 +374,11 @@ export function UsagePane({
             model: focused.label,
           },
         )
-      : focused
-        ? events.filter((event) => event.provider === focused.provider)
-        : [];
+      : focused && isCursorWatchKey(focused.focus)
+        ? cursorLaneEvents(events, focused.focus)
+        : focused
+          ? events.filter((event) => event.provider === focused.provider)
+          : [];
   const focusedModels =
     !focused
       ? []
@@ -498,7 +504,7 @@ export function UsagePane({
                         ? chip
                         : row.provider === "claude" && claudePick
                           ? `${Math.round(Math.max(0, 100 - claudePick.usagePercent))}% ${claudePick.label.toLowerCase()}`
-                          : `${formatTokens(row.inputTokens)} in  ·  ${formatTokens(row.outputTokens)} out`}
+                          : formatIoLine(row)}
                     </em>
                   </button>
                 );

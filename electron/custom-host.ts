@@ -12,7 +12,7 @@ import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
-import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig } from "./custom-http";
+import { CUSTOM_NOT_CONFIGURED, mergeCustomUsageSnapshot, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
 import {
   customToolPolicy,
   executeCustomTool,
@@ -323,6 +323,18 @@ export class CustomSessionHost {
     let unfulfilledContinuations = 0;
     let previousContinuation = "";
     let safetyPause: SafetyPause | null = null;
+    let turnUsage: CustomHttpUsage | undefined;
+    const emitTurnUsage = () => {
+      if (!turnUsage) return;
+      emit({
+        type: "usage",
+        sessionId: input.sessionId,
+        model: input.model || input.config.model,
+        projectId: input.projectId,
+        provider: "custom",
+        ...turnUsage,
+      });
+    };
     try {
       while (true) {
         if (abort.signal.aborted) throw new Error("cancelled");
@@ -357,15 +369,7 @@ export class CustomSessionHost {
           },
         );
         text = result.text || text;
-        if (result.usage) {
-          emit({
-            type: "usage",
-            sessionId: input.sessionId,
-            model: input.model || input.config.model,
-            projectId: input.projectId,
-            ...result.usage,
-          });
-        }
+        if (result.usage) turnUsage = mergeCustomUsageSnapshot(turnUsage, result.usage);
         const toolUses = result.toolUses ?? [];
         if (toolUses.length === 0) {
           if (looksLikeUnfinishedDeskTurn(result.text || text, result.stopReason, role)) {
@@ -709,6 +713,7 @@ export class CustomSessionHost {
       }
       if (safetyPause) {
         if (role === "worker" && workerHasDeliverableReport(text)) {
+          emitTurnUsage();
           emit({ type: "done", sessionId: input.sessionId, stopReason: "end_turn" });
           return { text, stopReason: "end_turn" };
         }
@@ -717,13 +722,16 @@ export class CustomSessionHost {
         const notice = `${separator}${message}`;
         text = `${text.trimEnd()}${notice}`;
         emit({ type: "chunk", sessionId: input.sessionId, text: notice });
+        emitTurnUsage();
         emit({ type: "done", sessionId: input.sessionId, stopReason: "safety_pause" });
         return { text, stopReason: "safety_pause" };
       }
+      emitTurnUsage();
       emit({ type: "done", sessionId: input.sessionId, stopReason: "end_turn" });
       return { text, stopReason: "end_turn" };
     } catch (error) {
       if (abort.signal.aborted) {
+        emitTurnUsage();
         emit({ type: "done", sessionId: input.sessionId, stopReason: "cancelled" });
         return { text, stopReason: "cancelled" };
       }

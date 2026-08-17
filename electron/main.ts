@@ -14,7 +14,7 @@ import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
-import { detectCustomLogin, hydrateDetectedCustomCredentials } from "./custom-login";
+import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { listVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
@@ -224,9 +224,10 @@ function readState(): Persistable {
     // recovered state in memory, but never persist a plaintext replacement.
   }
   const hydrated = hydrateStateCredentials(state, credentialStore());
-  const ready = workhorseVolatileCredentials()
+  const detected = workhorseVolatileCredentials()
     ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
     : hydrated;
+  const ready = fillEmptyCustomBotKeys(detected);
   claimLinkedFolders(ready);
   return ready;
 }
@@ -859,12 +860,29 @@ app.whenReady().then(async () => {
     }
   });
   ipcMain.removeHandler("custom:plan-usage");
-  ipcMain.handle("custom:plan-usage", async (_event, raw: { baseUrl?: string; apiKey?: string; model?: string }) => {
+  ipcMain.handle("custom:plan-usage", async (_event, raw: { baseUrl?: string; apiKey?: string; model?: string; credentialId?: string }) => {
     try {
+      let apiKey = typeof raw?.apiKey === "string" ? raw.apiKey : "";
+      const credentialId = typeof raw?.credentialId === "string" ? raw.credentialId.trim() : "";
+      if (!apiKey.trim() && credentialId) {
+        try {
+          apiKey = credentialStore().get(credentialId);
+        } catch {
+          apiKey = "";
+        }
+      }
+      const baseUrl = typeof raw?.baseUrl === "string" ? raw.baseUrl : "";
+      if (!apiKey.trim() && baseUrl) {
+        try {
+          apiKey = openClawKeyForBaseUrl(baseUrl);
+        } catch {
+          apiKey = "";
+        }
+      }
       return (
         (await fetchCustomPlanUsage({
-          baseUrl: typeof raw?.baseUrl === "string" ? raw.baseUrl : "",
-          apiKey: typeof raw?.apiKey === "string" ? raw.apiKey : "",
+          baseUrl,
+          apiKey,
           model: typeof raw?.model === "string" ? raw.model : undefined,
         })) ?? null
       );

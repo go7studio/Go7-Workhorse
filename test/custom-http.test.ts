@@ -62,8 +62,14 @@ test("OpenAI-compatible tool calls wait for all streamed argument fragments", as
     { id: "child-a", name: "workhorse_spawn_agent", input: { prompt: "read only", wait: false } },
   ]);
 });
-import { detectCustomLogin, hydrateDetectedCustomCredentials, parseOpenClawMinimax } from "../electron/custom-login";
-import { customPlanRemainsUrl, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
+import {
+  detectCustomLogin,
+  fillEmptyCustomBotKeys,
+  hydrateDetectedCustomCredentials,
+  openClawKeyForBaseUrl,
+  parseOpenClawMinimax,
+} from "../electron/custom-login";
+import { customPlanRemainsUrl, fetchCustomPlanUsage, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
 import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "../src/lib/custom-bots";
 import {
@@ -909,12 +915,78 @@ test("OpenClaw MiniMax import fills Custom without a phantom preview", () => {
   assert.equal(rehydrated.settings.customBots[1].apiKey, "");
 });
 
+test("openClawKeyForBaseUrl matches MiniMax and Synthetic hosts from OpenClaw on Windows", () => {
+  const windowsHome = "C:\\home";
+  const openClawPath = path.join(windowsHome, ".openclaw", "openclaw.json");
+  const input = {
+    homedir: windowsHome,
+    env: {},
+    existsSync: (file: string) => file === openClawPath,
+    readFile: (file: string) => {
+      assert.equal(file, openClawPath);
+      return JSON.stringify({
+        models: {
+          providers: {
+            "fireworks-kimi": { apiKey: "sk-other", baseUrl: "https://example.invalid/v1" },
+            "minimax-portal": { apiKey: "sk-portal", baseUrl: "https://api.minimax.io/anthropic/v1" },
+            "synthetic-k3": { apiKey: "syn_test", baseUrl: "https://api.synthetic.new/openai/v1" },
+          },
+        },
+      });
+    },
+  };
+  assert.equal(openClawKeyForBaseUrl("https://api.minimax.io/v1", input), "sk-portal");
+  assert.equal(openClawKeyForBaseUrl("https://api.synthetic.new/openai/v1", input), "syn_test");
+  assert.equal(openClawKeyForBaseUrl("https://api.groq.com/openai/v1", input), "");
+  assert.equal(
+    openClawKeyForBaseUrl("https://api.minimax.io/v1", {
+      homedir: windowsHome,
+      env: { MINIMAX_API_KEY: "sk-env" },
+      existsSync: () => {
+        throw new Error("Windows env MiniMax key should not read OpenClaw");
+      },
+      readFile: () => {
+        throw new Error("should not read");
+      },
+    }),
+    "sk-env",
+  );
+  const missing = openClawKeyForBaseUrl("https://api.minimax.io/v1", {
+    homedir: path.join(ROOT, "does-not-exist"),
+    env: {},
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("should not read");
+    },
+  });
+  assert.equal(missing, "");
+  const filled = fillEmptyCustomBotKeys(
+    {
+      settings: {
+        customBots: [
+          { id: "mini", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3", apiKey: "", credentialId: "custom-bot-mini" },
+          { id: "kimi", baseUrl: "https://api.synthetic.new/openai/v1", model: "hf:moonshotai/Kimi-K3", apiKey: "" },
+          { id: "keep", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3", apiKey: "sk-keep" },
+        ],
+      },
+    },
+    input,
+  );
+  assert.equal(filled.settings.customBots[0].apiKey, "sk-portal");
+  assert.equal(filled.settings.customBots[1].apiKey, "syn_test");
+  assert.equal(filled.settings.customBots[2].apiKey, "sk-keep");
+});
+
 test("parseCustomPlanUsage reads MiniMax weekly leftover percent", () => {
   assert.equal(leftoverFromRemainingPercent(100), 100);
   assert.equal(leftoverFromRemainingPercent(0.86), 86);
   assert.equal(
     customPlanRemainsUrl("https://api.minimax.io/anthropic"),
-    "https://api.minimax.io/v1/token_plan/remains",
+    "https://www.minimax.io/v1/token_plan/remains",
+  );
+  assert.equal(
+    customPlanRemainsUrl("https://api.minimax.io/v1"),
+    "https://www.minimax.io/v1/token_plan/remains",
   );
   const plan = parseCustomPlanUsage(
     {
@@ -997,6 +1069,22 @@ test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
   assert.equal(inferred?.products[1]?.unlimited, true);
   assert.equal(inferred?.leftPercent, 100);
   assert.equal(inferred?.products[0]?.usagePercent, 17);
+
+  const percentOnly = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        current_interval_remaining_percent: 99,
+        current_weekly_remaining_percent: 99,
+        remains_time: 14998196,
+        weekly_remains_time: 547798196,
+      },
+    ],
+  });
+  assert.equal(percentOnly?.leftPercent, 99);
+  assert.equal(percentOnly?.products[0]?.usagePercent, 1);
+  assert.ok(percentOnly?.products[0]?.resetsAt);
+  assert.ok(percentOnly?.resetsAt);
 });
 
 test("MiniMax Anthropic request and stream usage parse", async () => {
@@ -1118,8 +1206,99 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
     },
   );
   assert.deepEqual(hostEvents, [{ type: "usage", inputTokens: 80, outputTokens: 12, model: "MiniMax-M3" }]);
+
+  let rounds = 0;
+  const roundHost = new CustomSessionHost(async () => {
+    rounds += 1;
+    if (rounds === 1) {
+      return {
+        text: "checking",
+        usage: { inputTokens: 500_000, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        toolUses: [{ id: "t1", name: "list_dir", input: { path: "." } }],
+      };
+    }
+    return {
+      text: "done",
+      usage: { inputTokens: 520_000, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    };
+  });
+  const roundUsage: number[] = [];
+  await roundHost.prompt(
+    {
+      sessionId: "s-kimi",
+      text: "hi",
+      model: "hf:moonshotai/Kimi-K3",
+      effort: "low",
+      cwd: ROOT,
+      mode: "always-approve",
+      sandbox: "off",
+      history: [],
+      config: { baseUrl: "https://api.synthetic.new/openai/v1", apiKey: "syn_k", model: "hf:moonshotai/Kimi-K3" },
+    },
+    (event) => {
+      if (event.type === "usage") roundUsage.push(event.inputTokens);
+    },
+  );
+  assert.equal(rounds, 2);
+  assert.deepEqual(roundUsage, [520_000]);
+  assert.equal(customPlanRemainsUrl("https://openrouter.ai/api/v1"), "https://openrouter.ai/api/v1/key");
+  const openRouter = parseCustomPlanUsage({ data: { usage: 2, limit: 10, limit_remaining: 8 } });
+  assert.equal(openRouter?.usedPercent, 20);
+  assert.equal(openRouter?.leftPercent, 80);
+  assert.equal(customPlanRemainsUrl("https://api.synthetic.new/openai/v1"), "https://api.synthetic.new/v2/quotas");
+  assert.equal(customPlanRemainsUrl("https://synthetic.new"), "https://api.synthetic.new/v2/quotas");
+  const synthetic = parseCustomPlanUsage({
+    subscription: { limit: 135, requests: 27, renewsAt: "2025-09-21T14:36:14.288Z" },
+  });
+  assert.equal(synthetic?.usedPercent, 20);
+  assert.equal(synthetic?.leftPercent, 80);
+  assert.equal(synthetic?.products[0]?.product, "session");
+  assert.equal(synthetic?.products[0]?.label, "5h");
+  assert.equal(synthetic?.resetsAt, "2025-09-21T14:36:14.288Z");
+  const synWeekly = parseCustomPlanUsage({
+    subscription: { limit: 500, requests: 0, renewsAt: "2026-08-17T06:26:17.610Z" },
+    weeklyTokenLimit: { percentRemaining: 57.25, nextRegenAt: "2026-08-17T03:58:52.000Z" },
+    rollingFiveHourLimit: { remaining: 500, max: 500, nextTickAt: "2026-08-17T01:37:24.000Z" },
+  });
+  assert.equal(synWeekly?.leftPercent, 57.25);
+  assert.equal(synWeekly?.products[0]?.product, "session");
+  assert.equal(synWeekly?.products[0]?.usagePercent, 0);
+  assert.equal(synWeekly?.products[1]?.product, "weekly");
+  assert.equal(synWeekly?.products[1]?.usagePercent, 42.75);
+  assert.equal(parseCustomPlanUsage({ subscription: { limit: 0, requests: 0 } }), undefined);
+  assert.equal(parseCustomPlanUsage({ subscription: { requests: 3 } }), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.groq.com/openai/v1"), undefined);
+  const seen: string[] = [];
+  const miniPlan = await fetchCustomPlanUsage({
+    baseUrl: "https://api.minimax.io/anthropic",
+    apiKey: "sk-test",
+    fetchImpl: async (url) => {
+      seen.push(String(url));
+      return new Response(
+        JSON.stringify({
+          model_remains: [{ model_name: "general", current_weekly_remaining_percent: 86, current_interval_remaining_percent: 90 }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  assert.equal(seen[0], "https://www.minimax.io/v1/token_plan/remains");
+  assert.equal(miniPlan?.leftPercent, 86);
+  const synPlan = await fetchCustomPlanUsage({
+    baseUrl: "https://api.synthetic.new/openai/v1",
+    apiKey: "syn_test",
+    fetchImpl: async (url) => {
+      seen.push(String(url));
+      return new Response(JSON.stringify({ subscription: { limit: 500, requests: 50, renewAt: "2026-08-16T12:00:00Z" } }), {
+        status: 200,
+      });
+    },
+  });
+  assert.equal(seen[1], "https://api.synthetic.new/v2/quotas");
+  assert.equal(synPlan?.leftPercent, 90);
+  assert.equal(synPlan?.products[0]?.product, "session");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /usageProviderForSession\(owner\)/);
+  assert.match(store, /usageProviderForSession\(owner/);
   assert.match(store, /customBotId: owner\?\.customBotId/);
   assert.equal(defaultModel("custom").id, "MiniMax-M3");
   assert.equal(knownContextWindow("MiniMax-M3"), 1_000_000);
@@ -1220,6 +1399,8 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(setup, /"custom"/);
   assert.match(main, /ipcMain\.handle\("custom:prompt"/);
   assert.match(main, /detectCustomLogin/);
+  assert.match(main, /openClawKeyForBaseUrl/);
+  assert.match(main, /fillEmptyCustomBotKeys/);
   assert.match(preload, /custom:detect/);
   assert.match(preload, /customPrompt/);
   const preview = store.slice(store.lastIndexOf("Preview only"), store.lastIndexOf("Preview only") + 400);

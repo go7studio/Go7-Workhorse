@@ -166,7 +166,12 @@ jobs:
   # people who downloaded it.
   publish:
     needs: [detect-release, installers]
-    if: ${{ needs.detect-release.outputs.cut == 'true' }}
+    # Both installers or neither — but nothing else gets a veto. `prepare` only
+    # keeps the next release pull request up to date; when a GitHub incident
+    # made it fail, 0.1.9 built and signed both installers and then published
+    # nothing, because a failed ancestor skips a job that does not say
+    # otherwise. Ask for what actually matters instead.
+    if: ${{ !cancelled() && needs.detect-release.outputs.cut == 'true' && needs.installers.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

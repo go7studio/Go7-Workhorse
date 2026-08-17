@@ -55,4 +55,14 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(workflow, /skip-github-release: true/);
   assert.match(workflow, /gh release create/);
   assert.match(workflow, /installers\/\*/);
+
+  // 0.1.9 signed both installers and published nothing: release-please's
+  // prepare job failed in a GitHub incident, and a failed ancestor skips a
+  // downstream job unless it says otherwise. Publishing must ask for the two
+  // things that matter — a version was cut, and both installers built — and
+  // for nothing else.
+  const publish = workflow.slice(workflow.indexOf("\n  publish:"));
+  assert.match(publish, /!cancelled\(\)/);
+  assert.match(publish, /needs\.installers\.result == 'success'/);
+  assert.match(publish, /needs\.detect-release\.outputs\.cut == 'true'/);
 });

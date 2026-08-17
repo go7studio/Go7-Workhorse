@@ -1,0 +1,37 @@
+# Go7 Workhorse
+
+> One desk for every AI subscription you already pay for. A native desktop app for Windows and macOS that runs Grok, Claude, Codex, Cursor and your own API keys side by side, each under its own login. Pick a model per chat or let it route by task with a reserve you set. See what each vendor has left this week, before the bill. Open source under MIT. Runs on your machine; there is no hosted service and no account with us.
+
+## Who it is for
+
+- Someone who holds two or more AI subscriptions or API keys — Grok on any plan, Claude, Codex, Cursor, or an Anthropic- or OpenAI-compatible endpoint, hosted or local — and wants one place to choose which one does each job.
+- Someone who wants that choice to stay theirs: a model per chat, or auto-routing by task (quick, balanced, deep) that can be turned off, with a weekly reserve per vendor.
+- Someone who wants the work to run locally, under their own logins, with per-vendor usage visible.
+
+## Who it is not for
+
+- One vendor, happy in that vendor's own app.
+- Anyone who wants a hosted service. This is a desktop app.
+- Linux users today: installers ship for Windows and macOS.
+
+## What it does with accounts and data
+
+- Each vendor runs through its own CLI or API under its own login. Nothing is pooled, proxied, or shared between vendors.
+- API keys are stored in the OS credential store (Keychain on macOS, DPAPI on Windows), never in plain text. If that store is unavailable, the key is not saved.
+- Network: the vendors you connect (their CLIs and their usage endpoints for the meters) and GitHub, to check for a newer release. No analytics.
+- Learning memory is a SQLite file on the user's disk, exportable and wipeable from Settings. Nothing is sent anywhere to hold it.
+- Permission mode (ask, accept-edits, always-approve, plan) and sandbox profile (off, workspace, read-only, strict) are set per chat and shown on it. Every tool prompt from every vendor lands in one inbox.
+
+## Docs
+
+- [README](https://github.com/go7studio/Go7-Workhorse/blob/main/README.md): what it is, how to install and run it
+- [Features](https://github.com/go7studio/Go7-Workhorse/blob/main/docs/FEATURES.md): every ability that ships, kept current in the same commit as each feature
+- [Contributing](https://github.com/go7studio/Go7-Workhorse/blob/main/CONTRIBUTING.md): repository shape, versioning, commit types
+- [Releases](https://github.com/go7studio/Go7-Workhorse/releases): installers for Windows and macOS
+- [macOS install script](https://raw.githubusercontent.com/go7studio/Go7-Workhorse/main/scripts/install-mac.sh): reads the latest release and installs it
+
+## Optional
+
+- [Changelog](https://github.com/go7studio/Go7-Workhorse/blob/main/CHANGELOG.md)
+- [Goal](https://github.com/go7studio/Go7-Workhorse/blob/main/GOAL.md): the product in one page
+- [License](https://github.com/go7studio/Go7-Workhorse/blob/main/LICENSE): MIT

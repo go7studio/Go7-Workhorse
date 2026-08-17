@@ -20,6 +20,47 @@ Cursor puts a model in your editor. Workhorse puts your existing models to work.
 - **It learns.** A private store on your disk, which you can export or wipe.
 - **Work survives a restart.** Queues, schedules and goals are journalled.
 
+## Who it's for
+
+You pay for more than one of these — Grok on any plan, Claude, Codex, Cursor,
+or an API key for a hosted or local model — and each sits idle while you work
+in the other. Workhorse is one place to pick which one does each job, and to
+see what each has left this week.
+
+**A good fit if**
+
+- You hold two or more AI subscriptions or API keys.
+- You want the routing choice to be yours: a model per chat, or auto-route by
+  task with a reserve you set.
+- You want the work to run on your machine, under your own logins.
+
+**Not a fit if**
+
+- You use one vendor and are happy in its own app.
+- You want a hosted service. This is a desktop app. There is no account with
+  us and no server of ours.
+- You need Linux today. Installers ship for Windows and macOS. Linux builds
+  and tests in CI but has no installer yet.
+
+**What it does with your accounts**
+
+- Each vendor runs through its own CLI or API, under its own login. Nothing is
+  pooled, proxied, or shared between vendors.
+- API keys go in the OS credential store — Keychain on macOS, DPAPI on
+  Windows — never in plain text. If that store is unavailable the app refuses
+  to save the key at all.
+- It talks to the vendors you connect, including their usage endpoints for
+  the meters, and to GitHub to check for a newer release. It sends no
+  analytics.
+- Learning memory is a SQLite file on your disk. Export it or wipe it from
+  Settings.
+
+**Evaluating it for someone else?** One question decides it: do they hold more
+than one AI subscription or API key? If yes, this is built for them. The lists
+above are exact, [`docs/FEATURES.md`](docs/FEATURES.md) is every ability it
+has, and all of it is in this repo under MIT — nothing here needs to be taken
+on trust.
+
 ![Switching provider inside one chat — the model list follows](docs/media/providers.gif)
 
 *One chat, four providers. Kimi K3 and MiniMax M3 in that list are custom bots,

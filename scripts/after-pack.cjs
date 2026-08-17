@@ -18,8 +18,19 @@ function assertStableReleaseIdentity(env = process.env) {
       "macOS release builds require CSC_LINK or CSC_NAME so Keychain approval survives app updates.",
     );
   }
-  if (requiresStableIdentity(env) && !/^Developer ID Application:/.test(String(env.CSC_NAME ?? "").trim())) {
-    throw new Error("macOS release builds require CSC_NAME to select a Developer ID Application identity.");
+  // electron-builder picks the certificate type itself and rejects a CSC_NAME
+  // that carries one: "Please remove prefix ... from the specified name". This
+  // gate used to demand that prefix, so a signed release could never be built.
+  // What the identity really is now gets checked against the signature the
+  // build produced, in after-sign.cjs — the outcome, not an env string.
+  const certificateName = String(env.CSC_NAME ?? "").trim();
+  const typePrefix = certificateName.match(
+    /^(Developer ID Application|Developer ID Installer|Apple Distribution|Apple Development|Mac Developer|3rd Party Mac Developer [A-Za-z]+):/,
+  );
+  if (requiresStableIdentity(env) && typePrefix) {
+    throw new Error(
+      `Remove "${typePrefix[1]}:" from CSC_NAME. electron-builder chooses the certificate type and rejects a name that names one; leave the common name only, such as "Moonlight Capital LLC (TEAMID1234)".`,
+    );
   }
   const hasAppleIdCredentials = [env.APPLE_ID, env.APPLE_APP_SPECIFIC_PASSWORD, env.APPLE_TEAM_ID]
     .every((value) => String(value ?? "").trim());

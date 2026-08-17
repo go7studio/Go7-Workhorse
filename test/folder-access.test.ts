@@ -20,6 +20,14 @@ const afterPack = require("../scripts/after-pack.cjs") as {
   shouldAdHocSign: (env?: NodeJS.Dict<string>) => boolean;
   assertStableReleaseIdentity: (env?: NodeJS.Dict<string>) => void;
 };
+const afterSign = require("../scripts/after-sign.cjs") as {
+  readAuthorities: (output: string) => string[];
+  developerIdProblem: (output: string) => string | null;
+  assertDeveloperIdSignature: (
+    appPath: string,
+    run: () => { stdout?: string; stderr?: string },
+  ) => string;
+};
 
 test("ad-hoc mac signature is skipped when a release identity will stamp the app", () => {
   assert.equal(afterPack.shouldAdHocSign({}), true);
@@ -36,7 +44,17 @@ test("mac release packaging refuses an identity that would retrigger Keychain ap
   assert.doesNotThrow(() =>
     afterPack.assertStableReleaseIdentity({
       WORKHORSE_RELEASE_BUILD: "1",
-      CSC_NAME: "Developer ID Application: Go7",
+      CSC_NAME: "Go7 (TEAM123456)",
+      APPLE_ID: "release@example.test",
+      APPLE_APP_SPECIFIC_PASSWORD: "app-password",
+      APPLE_TEAM_ID: "TEAM123456",
+    }),
+  );
+  // The identity may come from the .p12 alone; CSC_NAME is optional.
+  assert.doesNotThrow(() =>
+    afterPack.assertStableReleaseIdentity({
+      WORKHORSE_RELEASE_BUILD: "1",
+      CSC_LINK: "base64-p12",
       APPLE_ID: "release@example.test",
       APPLE_APP_SPECIFIC_PASSWORD: "app-password",
       APPLE_TEAM_ID: "TEAM123456",
@@ -45,18 +63,67 @@ test("mac release packaging refuses an identity that would retrigger Keychain ap
   assert.doesNotThrow(() => afterPack.assertStableReleaseIdentity({}));
 });
 
-test("mac release packaging rejects an App Store distribution identity", () => {
+/**
+ * The gate used to demand that CSC_NAME start with "Developer ID Application:".
+ * electron-builder rejects exactly that — "Please remove prefix ... from the
+ * specified name" — so no signed macOS release could ever be built. 0.1.9 died
+ * on it after a full build.
+ */
+test("mac release packaging rejects a CSC_NAME carrying a certificate type", () => {
+  for (const name of [
+    "Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
+    "Apple Distribution: Moonlight Capital LLC",
+    "Apple Development: Someone",
+    "3rd Party Mac Developer Application: Someone",
+  ]) {
+    assert.throws(
+      () =>
+        afterPack.assertStableReleaseIdentity({
+          WORKHORSE_RELEASE_BUILD: "1",
+          CSC_NAME: name,
+          APPLE_ID: "release@example.test",
+          APPLE_APP_SPECIFIC_PASSWORD: "app-password",
+          APPLE_TEAM_ID: "TEAM123456",
+        }),
+      /Remove ".*:" from CSC_NAME/,
+      name,
+    );
+  }
+});
+
+test("a release is verified against the signature it produced, not the env", () => {
+  const developerId = [
+    "Executable=/tmp/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+    "Authority=Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
+    "Authority=Developer ID Certification Authority",
+    "Authority=Apple Root CA",
+  ].join("\n");
+  assert.equal(afterSign.developerIdProblem(developerId), null);
+  assert.equal(
+    afterSign.assertDeveloperIdSignature("/tmp/app", () => ({ stderr: developerId })),
+    "Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
+  );
+
+  // An App Store identity signs happily and is refused outside the store.
+  assert.match(
+    afterSign.developerIdProblem("Authority=Apple Distribution: Moonlight Capital LLC") ?? "",
+    /signed by "Apple Distribution/,
+  );
+  assert.match(afterSign.developerIdProblem("Signature=adhoc") ?? "", /ad-hoc/);
+  assert.match(afterSign.developerIdProblem("") ?? "", /no certificate authority/);
   assert.throws(
-    () => afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1", CSC_NAME: "Apple Distribution: Go7" }),
-    /Developer ID Application/,
+    () => afterSign.assertDeveloperIdSignature("/tmp/app", () => ({ stderr: "Signature=adhoc" })),
+    /Developer ID Application certificate/,
   );
 });
+
+
 
 test("mac release packaging requires notarization credentials", () => {
   assert.throws(
     () => afterPack.assertStableReleaseIdentity({
       WORKHORSE_RELEASE_BUILD: "1",
-      CSC_NAME: "Developer ID Application: Go7",
+      CSC_NAME: "Go7 (TEAM123456)",
     }),
     /notarization credentials/,
   );

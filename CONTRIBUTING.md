@@ -78,10 +78,19 @@ run, so testing costs no version number and publishes nothing.
 ## Before you push
 
 ```bash
-npm run build && npm test
+npm run verify
 ```
 
-CI runs the same on three platforms, plus a secret scan and a repo-shape check.
+That runs the build and the whole suite. It works the same in PowerShell, cmd
+and a shell — Windows PowerShell 5.1 does not understand `&&`, so chaining the
+two by hand fails there and nowhere else.
+
+CI runs the same on Linux, Windows and macOS, plus a secret scan, a repo-shape
+check, and a check that at least one commit in your pull request carries a type.
+That last one fails when release-please would not see your work at all.
+
 Tests must not read the machine they run on: inject `existsSync`/`readdir`, or
 assert against `ROOT`. Never a home directory, and never a bare absolute path —
-those pass on one laptop and fail on every other machine.
+those pass on one laptop and fail on every other machine. Build paths with
+`path.join` rather than writing separators, or the test passes here and fails on
+Windows.

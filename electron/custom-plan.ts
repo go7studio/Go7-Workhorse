@@ -21,6 +21,13 @@ function unixToIso(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+/** MiniMax remains_time is milliseconds left in the window, not a unix stamp. */
+function remainingMsToIso(value: unknown, now = Date.now()): string | undefined {
+  const ms = numberVal(value);
+  if (!Number.isFinite(ms) || ms <= 0 || ms >= 1e9) return undefined;
+  return new Date(now + ms).toISOString();
+}
+
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
 }
@@ -38,8 +45,14 @@ export function customPlanRemainsUrl(baseUrl: string): string | undefined {
   if (!trimmed) return undefined;
   try {
     const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    if (!/minimax/i.test(url.hostname)) return undefined;
-    return `${url.protocol}//${url.hostname}/v1/token_plan/remains`;
+    // Chat hosts are api.minimax.io; the documented remains path lives on www.
+    if (/minimax/i.test(url.hostname)) {
+      const host = /minimaxi\.com$/i.test(url.hostname) ? "www.minimaxi.com" : "www.minimax.io";
+      return `${url.protocol}//${host}/v1/token_plan/remains`;
+    }
+    if (/openrouter\.ai$/i.test(url.hostname)) return `${url.protocol}//${url.hostname}/api/v1/key`;
+    if (/(^|\.)synthetic\.new$/i.test(url.hostname)) return `${url.protocol}//api.synthetic.new/v2/quotas`;
+    return undefined;
   } catch {
     return undefined;
   }
@@ -112,25 +125,89 @@ function leftoverOf(row: Record<string, unknown>, ...keys: string[]): number | u
   return undefined;
 }
 
+function parseOpenRouterKeyUsage(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const data = asRecord(root.data);
+  const limit = numberVal(data.limit);
+  const usage = numberVal(data.usage);
+  const remaining = numberVal(data.limit_remaining);
+  if (!Number.isFinite(limit) || limit <= 0) return undefined;
+  const used =
+    Number.isFinite(usage) && usage >= 0
+      ? clampPercent((usage / limit) * 100)
+      : Number.isFinite(remaining)
+        ? clampPercent(100 - (remaining / limit) * 100)
+        : undefined;
+  if (used === undefined) return undefined;
+  return {
+    usedPercent: used,
+    leftPercent: clampPercent(100 - used),
+    period: "monthly",
+    prepaidBalance: 0,
+    products: [
+      {
+        product: "weekly",
+        label: "Limit",
+        usagePercent: used,
+      },
+    ],
+  };
+}
+
+/** Documented GET /v2/quotas: subscription.limit / requests leftover. Missing cap stays unknown. */
+function parseSyntheticQuotas(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const sub = asRecord(root.subscription);
+  const limit = numberVal(sub.limit);
+  const requests = numberVal(sub.requests);
+  if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(requests) || requests < 0) return undefined;
+  const used = clampPercent((requests / limit) * 100);
+  const reset =
+    typeof sub.renewsAt === "string" ? sub.renewsAt : typeof sub.renewAt === "string" ? sub.renewAt : undefined;
+  return {
+    usedPercent: used,
+    leftPercent: clampPercent(100 - used),
+    period: "weekly",
+    resetsAt: reset,
+    prepaidBalance: 0,
+    products: [
+      {
+        product: "session",
+        label: "5h",
+        usagePercent: used,
+        resetsAt: reset,
+      },
+    ],
+  };
+}
+
 export function parseCustomPlanUsage(raw: unknown, model?: string): CustomPlanUsage | undefined {
-  const root = asRecord(raw);
+  const wrapped = asRecord(raw);
+  const nested = asRecord(wrapped.data);
+  const root = Object.keys(nested).length && nested.limit == null ? { ...wrapped, ...nested } : wrapped;
   const row = pickMiniMaxRow(root, model) ?? root;
+  const openRouter = parseOpenRouterKeyUsage(root);
+  if (openRouter) return openRouter;
+  const synthetic = parseSyntheticQuotas(root);
+  if (synthetic) return synthetic;
   const intervalLeft = leftoverOf(
     row,
     "current_interval_remaining_percent",
     "interval_remaining_percent",
     "current_5h_remaining_percent",
+    "remaining_percent",
+    "remain_percent",
   );
   const weeklyLeft = leftoverOf(row, "current_weekly_remaining_percent", "weekly_remaining_percent")
     ?? leftoverOf(root, "current_weekly_remaining_percent", "weekly_remaining_percent");
-  const fallbackLeft = leftoverOf(row, "usage_percent", "usagePercent") ?? leftoverOf(root, "usage_percent");
+  const fallbackLeft = leftoverOf(row, "usage_percent", "usagePercent", "remaining_percent") ?? leftoverOf(root, "usage_percent");
   const unlimited = weeklyIsUnlimited(row, root, weeklyLeft, intervalLeft);
   const intervalReset =
     unixToIso(row.interval_end_time ?? row.current_interval_end_time ?? row.next_interval_end_time) ??
-    (typeof row.interval_resets_at === "string" ? row.interval_resets_at : undefined);
+    (typeof row.interval_resets_at === "string" ? row.interval_resets_at : undefined) ??
+    remainingMsToIso(row.remains_time);
   const weeklyReset =
     unixToIso(row.weekly_end_time ?? root.weekly_end_time) ??
-    (typeof row.resets_at === "string" ? row.resets_at : undefined);
+    (typeof row.resets_at === "string" ? row.resets_at : undefined) ??
+    remainingMsToIso(row.weekly_remains_time ?? root.weekly_remains_time);
   const products: CustomPlanUsage["products"] = [];
   if (intervalLeft !== undefined) {
     products.push({

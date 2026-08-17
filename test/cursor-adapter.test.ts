@@ -21,7 +21,13 @@ import { normalizeSettings } from "../src/lib/settings";
 import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
 import { detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
-import { parseCursorPlanUsage } from "../electron/cursor-plan";
+import {
+  cursorStateDatabasePath,
+  fetchCursorPlanUsage,
+  parseCursorPlanUsage,
+  readCursorAuthToken,
+} from "../electron/cursor-plan";
+import { DatabaseSync } from "node:sqlite";
 import { cursorExtensionResult, extractToolEvent } from "../electron/grok-agent";
 import { CURSOR_SESSION_RULES, WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
 import { buildSessionPreface } from "../src/lib/context-preface";
@@ -506,6 +512,79 @@ test("parseCursorPlanUsage official shape; missing is unknown", () => {
   assert.equal(parsed?.products.find((item) => item.product === "other-models")?.usagePercent, 40);
   assert.equal(parseCursorPlanUsage({ hello: true }), undefined);
   assert.equal(parseCursorPlanUsage(null), undefined);
+});
+
+test("parseCursorPlanUsage reads dashboard planUsage percents", () => {
+  const parsed = parseCursorPlanUsage({
+    billingCycleEnd: "1789241010000",
+    planUsage: { autoPercentUsed: 18.4165, apiPercentUsed: 46.312 },
+  });
+  assert.equal(Math.round(parsed?.products.find((item) => item.product === "cursor-models")?.usagePercent ?? 0), 18);
+  assert.equal(Math.round(parsed?.products.find((item) => item.product === "other-models")?.usagePercent ?? 0), 46);
+  assert.equal(parsed?.resetsAt, new Date(1789241010000).toISOString());
+});
+
+test("readCursorAuthToken prefers env then injected Cursor state db", () => {
+  assert.equal(readCursorAuthToken({ env: { CURSOR_API_KEY: "ck-test" } }), "ck-test");
+  const mac = cursorStateDatabasePath({ homedir: "/tmp/wh-mac", platform: "darwin" });
+  assert.equal(mac.replace(/\\/g, "/"), "/tmp/wh-mac/Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+  const win = cursorStateDatabasePath({
+    homedir: "C:\\Users\\x",
+    env: { APPDATA: "C:\\Users\\x\\AppData\\Roaming" },
+    platform: "win32",
+  });
+  assert.match(win.replace(/\\/g, "/"), /AppData\/Roaming\/Cursor\/User\/globalStorage\/state\.vscdb$/);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-cursor-state-"));
+  const dbPath = cursorStateDatabasePath({ homedir: dir, env: {}, platform: "darwin" });
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+  db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run("cursorAuth/accessToken", "jwt-from-state");
+  db.close();
+  assert.equal(readCursorAuthToken({ homedir: dir, env: {}, platform: "darwin", readFile: () => { throw new Error("no json"); } }), "jwt-from-state");
+});
+
+test("fetchCursorPlanUsage reads official JSON when a token is present", async () => {
+  const plan = await fetchCursorPlanUsage({
+    token: "ck-test",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          cursorModels: { usagePercent: 12 },
+          otherModels: { usagePercent: 40 },
+        }),
+        { status: 200 },
+      ),
+  });
+  assert.equal(plan?.products.find((item) => item.product === "cursor-models")?.usagePercent, 12);
+  assert.equal(plan?.products.find((item) => item.product === "other-models")?.usagePercent, 40);
+  const missing = await fetchCursorPlanUsage({
+    readOfficial: async () => undefined,
+  });
+  assert.equal(missing, undefined);
+});
+
+test("fetchCursorPlanUsage posts GetCurrentPeriodUsage", async () => {
+  const urls: string[] = [];
+  const methods: string[] = [];
+  const plan = await fetchCursorPlanUsage({
+    token: "jwt",
+    fetchImpl: async (url, init) => {
+      urls.push(String(url));
+      methods.push(String(init?.method ?? "GET"));
+      return new Response(
+        JSON.stringify({
+          billingCycleEnd: "1789241010000",
+          planUsage: { autoPercentUsed: 18.4, apiPercentUsed: 46.3 },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  assert.match(urls[0] ?? "", /GetCurrentPeriodUsage/);
+  assert.equal(methods[0], "POST");
+  assert.equal(Math.round(plan?.products.find((item) => item.product === "cursor-models")?.usagePercent ?? 0), 18);
+  assert.equal(Math.round(plan?.products.find((item) => item.product === "other-models")?.usagePercent ?? 0), 46);
 });
 
 test("desk spawn defaults to Composer 2.5; inner task is not a worker", () => {

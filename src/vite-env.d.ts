@@ -45,6 +45,7 @@ type GrokBridgeEvent =
       sessionId: string;
       model: string;
       projectId?: string;
+      provider?: import("./lib/types").ProviderId;
       inputTokens: number;
       outputTokens: number;
       cacheReadTokens: number;

@@ -125,6 +125,7 @@ export class ClaudeSessionHost {
           sessionId: input.sessionId,
           model: input.model,
           projectId: input.projectId,
+          provider: "claude",
           ...usage,
         }),
       onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>

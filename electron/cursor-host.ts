@@ -109,6 +109,7 @@ export class CursorSessionHost {
           sessionId: input.sessionId,
           model: input.model,
           projectId: input.projectId,
+          provider: "cursor",
           ...usage,
         }),
       onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>

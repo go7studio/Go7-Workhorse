@@ -1,9 +1,24 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import https from "node:https";
+import os from "node:os";
+import path from "node:path";
 import type { GrokPlanProduct, GrokPlanUsage } from "../src/lib/types";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
-import { resolveClaudeCliBinary } from "./claude-login";
+import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 
 export type ClaudePlanUsage = GrokPlanUsage;
+
+export type ClaudePlanTokenInput = {
+  env?: NodeJS.Dict<string>;
+  homedir?: string;
+  platform?: NodeJS.Platform;
+  existsSync?: (filePath: string) => boolean;
+  readFile?: (filePath: string) => string;
+  /** Injectable so tests never call `security` or the login keychain. */
+  readKeychain?: () => string | null;
+  readDesktop?: () => { accessToken?: string } | null;
+};
 
 function numberVal(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -24,10 +39,90 @@ export function usedPercentFromUtilization(value: unknown): number {
   return Math.min(100, Math.max(0, used));
 }
 
-function claudeOauthToken(): string {
-  const env = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-  if (env) return env;
-  return readClaudeDesktopOauth()?.accessToken?.trim() || "";
+function accessTokenFromOauth(raw: unknown, now = Date.now()): string {
+  if (typeof raw === "string") {
+    const token = raw.trim();
+    return token.length > 8 ? token : "";
+  }
+  if (!raw || typeof raw !== "object") return "";
+  const rec = raw as Record<string, unknown>;
+  const oauth = rec.claudeAiOauth && typeof rec.claudeAiOauth === "object" ? rec.claudeAiOauth : rec;
+  const nested = oauth as Record<string, unknown>;
+  const token =
+    typeof nested.accessToken === "string"
+      ? nested.accessToken.trim()
+      : typeof nested.token === "string"
+        ? nested.token.trim()
+        : "";
+  if (!token || token.length < 8) return "";
+  if (!oauthNotExpired(oauth, now)) return "";
+  return token;
+}
+
+function defaultMacClaudeKeychain(): string | null {
+  if (process.platform !== "darwin") return null;
+  try {
+    return execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function tokenFromKeychainDump(dump: string | null): string {
+  if (!dump?.trim()) return "";
+  const trimmed = dump.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      return accessTokenFromOauth(JSON.parse(trimmed));
+    } catch {
+      return "";
+    }
+  }
+  return accessTokenFromOauth(trimmed);
+}
+
+/** Claude Code login on this machine: env, macOS keychain, ~/.claude, then Desktop (Windows). */
+export function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): string {
+  const env = input.env ?? process.env;
+  const fromEnv = env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  const platform = input.platform ?? process.platform;
+  if (platform === "darwin") {
+    const fromKeychain = tokenFromKeychainDump(
+      input.readKeychain ? input.readKeychain() : defaultMacClaudeKeychain(),
+    );
+    if (fromKeychain) return fromKeychain;
+  }
+  const homedir = input.homedir ?? os.homedir();
+  const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  const claudeHome = (env.CLAUDE_CONFIG_DIR?.trim() || env.CLAUDE_HOME?.trim() || path.join(homedir, ".claude")).replace(
+    /[\\/]+$/,
+    "",
+  );
+  const credPath = path.join(claudeHome, ".credentials.json");
+  if (existsSync(credPath)) {
+    try {
+      const fromFile = accessTokenFromOauth(JSON.parse(readFile(credPath)));
+      if (fromFile) return fromFile;
+    } catch {
+      /* broken leftover file */
+    }
+  }
+  const desktop = input.readDesktop
+    ? input.readDesktop()
+    : readClaudeDesktopOauth({
+        env,
+        homedir,
+        platform,
+        existsSync,
+        readFile,
+      });
+  return desktop?.accessToken?.trim() || "";
 }
 
 function claudeCodeUserAgent(): string {
@@ -61,36 +156,61 @@ function windowProduct(product: string, label: string, raw: unknown): GrokPlanPr
   return { product, label, usagePercent: used, resetsAt: resetOf(row) };
 }
 
+function claudeProductId(kind: string): string {
+  const id = kind.trim().toLowerCase();
+  if (id === "five_hour" || id === "fivehour" || id === "5h") return "session";
+  if (id === "seven_day" || id === "sevenday" || id === "weekly") return "weekly_all";
+  return kind || "session";
+}
+
+function usedFromLimitRow(limit: Record<string, unknown>): number {
+  const direct = usedPercentFromUtilization(
+    limit.percent ?? limit.utilization ?? limit.used_percent ?? limit.usedPercent,
+  );
+  if (Number.isFinite(direct)) return direct;
+  const remaining = usedPercentFromUtilization(limit.remaining_percent ?? limit.remainingPercent);
+  if (Number.isFinite(remaining)) return Math.max(0, 100 - remaining);
+  const spent = numberVal(limit.used ?? limit.used_tokens ?? limit.tokens);
+  const cap = numberVal(limit.limit ?? limit.included ?? limit.max);
+  if (Number.isFinite(spent) && Number.isFinite(cap) && cap > 0) {
+    return Math.min(100, Math.max(0, (spent / cap) * 100));
+  }
+  return Number.NaN;
+}
+
 export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined {
-  const root = asRecord(raw);
+  const wrapped = asRecord(raw);
+  const root = Object.keys(asRecord(wrapped.data)).length ? { ...wrapped, ...asRecord(wrapped.data) } : wrapped;
   const products: GrokPlanProduct[] = [];
   if (Array.isArray(root.limits)) {
     for (const item of root.limits) {
       const limit = asRecord(item);
-      const used = usedPercentFromUtilization(limit.percent ?? limit.utilization);
+      const used = usedFromLimitRow(limit);
       if (!Number.isFinite(used)) continue;
+      const kind = String(limit.kind ?? limit.group ?? `limit-${products.length}`);
       products.push({
-        product: String(limit.kind ?? limit.group ?? `limit-${products.length}`),
-        label: claudeLimitLabel(limit),
+        product: claudeProductId(kind),
+        label: claudeLimitLabel({ ...limit, kind: claudeProductId(kind) === "session" && kind !== "session" ? "session" : kind }),
         usagePercent: used,
         resetsAt: resetOf(limit),
       });
     }
   }
   if (products.length === 0) {
-    const session = windowProduct("session", "Current session", root.five_hour ?? root.fiveHour);
+    const session = windowProduct("session", "Current session", root.five_hour ?? root.fiveHour ?? root.session);
     const week = windowProduct("weekly_all", "All models", root.seven_day ?? root.sevenDay ?? root.weekly);
     if (session) products.push(session);
     if (week) products.push(week);
   }
+  if (products.length === 0) return undefined;
   const weekly = products.find((row) => row.product === "weekly_all") ?? products.find((row) => row.label === "All models");
-  const used = weekly?.usagePercent ?? usedPercentFromUtilization(asRecord(root.seven_day ?? root.sevenDay).utilization);
+  const used = weekly?.usagePercent ?? products[0]?.usagePercent;
   if (!Number.isFinite(used)) return undefined;
   return {
     usedPercent: used,
     leftPercent: Math.max(0, 100 - used),
     period: "weekly",
-    resetsAt: weekly?.resetsAt ?? resetOf(asRecord(root.seven_day ?? root.sevenDay)),
+    resetsAt: weekly?.resetsAt ?? products[0]?.resetsAt ?? resetOf(asRecord(root.seven_day ?? root.sevenDay)),
     prepaidBalance: 0,
     products,
   };
@@ -117,12 +237,12 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
 let cachedPlan: { at: number; plan: ClaudePlanUsage | undefined } | null = null;
 const CACHE_MS = 180_000;
 
-export async function fetchClaudePlanUsage(input?: {
+export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   fetchImpl?: typeof fetch;
   token?: string;
 }): Promise<ClaudePlanUsage | undefined> {
   try {
-    const token = input?.token?.trim() || claudeOauthToken();
+    const token = input?.token?.trim() || resolveClaudePlanToken(input);
     if (!token) return undefined;
     const headers = {
       Authorization: `Bearer ${token}`,

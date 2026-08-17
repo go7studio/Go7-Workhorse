@@ -165,6 +165,7 @@ export class CodexSessionHost {
           sessionId: input.sessionId,
           model: input.model,
           projectId: input.projectId,
+          provider: "codex",
           ...usage,
         }),
       onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>

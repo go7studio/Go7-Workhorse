@@ -9,14 +9,23 @@ import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 
 export type ClaudePlanUsage = GrokPlanUsage;
 
+const CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const CLAUDE_OAUTH_REFRESH_URLS = [
+  "https://platform.claude.com/v1/oauth/token",
+  "https://console.anthropic.com/v1/oauth/token",
+];
+
 export type ClaudePlanTokenInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;
   platform?: NodeJS.Platform;
   existsSync?: (filePath: string) => boolean;
   readFile?: (filePath: string) => string;
+  writeFile?: (filePath: string, contents: string) => void;
   /** Injectable so tests never call `security` or the login keychain. */
   readKeychain?: () => string | null;
+  writeKeychain?: (contents: string) => void;
+  refreshOauth?: (refreshToken: string) => Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number } | undefined>;
   readDesktop?: () => { accessToken?: string } | null;
 };
 
@@ -39,15 +48,20 @@ export function usedPercentFromUtilization(value: unknown): number {
   return Math.min(100, Math.max(0, used));
 }
 
+function oauthObject(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  const nested = rec.claudeAiOauth && typeof rec.claudeAiOauth === "object" ? rec.claudeAiOauth : rec;
+  return nested as Record<string, unknown>;
+}
+
 function accessTokenFromOauth(raw: unknown, now = Date.now()): string {
   if (typeof raw === "string") {
     const token = raw.trim();
     return token.length > 8 ? token : "";
   }
-  if (!raw || typeof raw !== "object") return "";
-  const rec = raw as Record<string, unknown>;
-  const oauth = rec.claudeAiOauth && typeof rec.claudeAiOauth === "object" ? rec.claudeAiOauth : rec;
-  const nested = oauth as Record<string, unknown>;
+  const nested = oauthObject(raw);
+  if (!nested) return "";
   const token =
     typeof nested.accessToken === "string"
       ? nested.accessToken.trim()
@@ -55,7 +69,7 @@ function accessTokenFromOauth(raw: unknown, now = Date.now()): string {
         ? nested.token.trim()
         : "";
   if (!token || token.length < 8) return "";
-  if (!oauthNotExpired(oauth, now)) return "";
+  if (!oauthNotExpired(nested, now)) return "";
   return token;
 }
 
@@ -72,34 +86,113 @@ function defaultMacClaudeKeychain(): string | null {
   }
 }
 
-function tokenFromKeychainDump(dump: string | null): string {
-  if (!dump?.trim()) return "";
-  const trimmed = dump.trim();
-  if (trimmed.startsWith("{")) {
+function persistMacClaudeKeychain(contents: string): void {
+  if (process.platform !== "darwin") return;
+  execFileSync(
+    "security",
+    ["add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", os.userInfo().username, "-w", contents],
+    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "ignore", "ignore"] },
+  );
+}
+
+async function refreshClaudeOauth(
+  refreshToken: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number } | undefined> {
+  const body = JSON.stringify({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: CLAUDE_OAUTH_CLIENT_ID,
+  });
+  const fetchFn = fetchImpl ?? fetch;
+  for (const url of CLAUDE_OAUTH_REFRESH_URLS) {
     try {
-      return accessTokenFromOauth(JSON.parse(trimmed));
+      const response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body,
+      });
+      if (!response.ok) continue;
+      const json = asRecord(await response.json());
+      const accessToken = typeof json.access_token === "string" ? json.access_token.trim() : "";
+      if (!accessToken) continue;
+      const nextRefresh = typeof json.refresh_token === "string" ? json.refresh_token.trim() : undefined;
+      const expiresIn = numberVal(json.expires_in);
+      const expiresAt = Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined;
+      return { accessToken, refreshToken: nextRefresh, expiresAt };
     } catch {
-      return "";
+      /* try the next documented token URL */
     }
   }
-  return accessTokenFromOauth(trimmed);
+  return undefined;
+}
+
+function mergeRefreshedOauth(
+  raw: unknown,
+  next: { accessToken: string; refreshToken?: string; expiresAt?: number },
+): string {
+  const rec = asRecord(raw);
+  const wrapped = Boolean(rec.claudeAiOauth && typeof rec.claudeAiOauth === "object");
+  const oauth = { ...(wrapped ? asRecord(rec.claudeAiOauth) : rec) };
+  oauth.accessToken = next.accessToken;
+  if (next.refreshToken) oauth.refreshToken = next.refreshToken;
+  if (next.expiresAt) oauth.expiresAt = next.expiresAt;
+  return JSON.stringify(wrapped ? { ...rec, claudeAiOauth: oauth } : oauth);
+}
+
+async function tokenFromOauthStore(
+  raw: unknown,
+  persist: (contents: string) => void,
+  input: ClaudePlanTokenInput,
+): Promise<string> {
+  const live = accessTokenFromOauth(raw);
+  if (live) return live;
+  const oauth = oauthObject(raw);
+  const refresh = typeof oauth?.refreshToken === "string" ? oauth.refreshToken.trim() : "";
+  if (!refresh) return "";
+  const refreshed = input.refreshOauth ? await input.refreshOauth(refresh) : await refreshClaudeOauth(refresh);
+  if (!refreshed?.accessToken) return "";
+  try {
+    persist(mergeRefreshedOauth(raw, refreshed));
+  } catch {
+    /* still use the new access token for this process */
+  }
+  return refreshed.accessToken;
+}
+
+function parseKeychainDump(dump: string | null): unknown {
+  if (!dump?.trim()) return null;
+  const trimmed = dump.trim();
+  if (!trimmed.startsWith("{")) return trimmed;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 /** Claude Code login on this machine: env, macOS keychain, ~/.claude, then Desktop (Windows). */
-export function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): string {
+export async function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): Promise<string> {
   const env = input.env ?? process.env;
   const fromEnv = env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
   if (fromEnv) return fromEnv;
   const platform = input.platform ?? process.platform;
   if (platform === "darwin") {
-    const fromKeychain = tokenFromKeychainDump(
-      input.readKeychain ? input.readKeychain() : defaultMacClaudeKeychain(),
-    );
-    if (fromKeychain) return fromKeychain;
+    const dump = input.readKeychain ? input.readKeychain() : defaultMacClaudeKeychain();
+    const parsed = parseKeychainDump(dump);
+    if (parsed != null) {
+      const fromKeychain = await tokenFromOauthStore(
+        parsed,
+        input.writeKeychain ?? persistMacClaudeKeychain,
+        input,
+      );
+      if (fromKeychain) return fromKeychain;
+    }
   }
   const homedir = input.homedir ?? os.homedir();
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  const writeFile = input.writeFile ?? ((filePath: string, contents: string) => fs.writeFileSync(filePath, contents, "utf8"));
   const claudeHome = (env.CLAUDE_CONFIG_DIR?.trim() || env.CLAUDE_HOME?.trim() || path.join(homedir, ".claude")).replace(
     /[\\/]+$/,
     "",
@@ -107,7 +200,8 @@ export function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): string
   const credPath = path.join(claudeHome, ".credentials.json");
   if (existsSync(credPath)) {
     try {
-      const fromFile = accessTokenFromOauth(JSON.parse(readFile(credPath)));
+      const parsed: unknown = JSON.parse(readFile(credPath));
+      const fromFile = await tokenFromOauthStore(parsed, (contents) => writeFile(credPath, contents), input);
       if (fromFile) return fromFile;
     } catch {
       /* broken leftover file */
@@ -255,7 +349,7 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
   token?: string;
 }): Promise<ClaudePlanUsage | undefined> {
   try {
-    const token = input?.token?.trim() || resolveClaudePlanToken(input);
+    const token = input?.token?.trim() || (await resolveClaudePlanToken(input));
     if (!token) return undefined;
     const headers = {
       Authorization: `Bearer ${token}`,

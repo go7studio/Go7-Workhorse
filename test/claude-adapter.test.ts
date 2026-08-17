@@ -278,9 +278,9 @@ test("parseClaudePlanUsage reads current oauth five_hour / seven_day JSON", () =
   assert.equal(parseClaudePlanUsage({ extra_usage: { is_enabled: false } }), undefined);
 });
 
-test("resolveClaudePlanToken uses Claude Code credentials without reading the machine", () => {
+test("resolveClaudePlanToken uses Claude Code credentials without reading the machine", async () => {
   const credPath = path.join("/Users/me", ".claude", ".credentials.json");
-  const fromFile = resolveClaudePlanToken({
+  const fromFile = await resolveClaudePlanToken({
     env: {},
     homedir: "/Users/me",
     platform: "darwin",
@@ -294,7 +294,7 @@ test("resolveClaudePlanToken uses Claude Code credentials without reading the ma
   });
   assert.equal(fromFile, "sk-ant-oat01-filefixturexxxxxxxx");
 
-  const fromKeychain = resolveClaudePlanToken({
+  const fromKeychain = await resolveClaudePlanToken({
     env: {},
     homedir: "/Users/nobody",
     platform: "darwin",
@@ -307,7 +307,7 @@ test("resolveClaudePlanToken uses Claude Code credentials without reading the ma
   });
   assert.equal(fromKeychain, "sk-ant-oat01-keychainfixturexxxx");
 
-  const missing = resolveClaudePlanToken({
+  const missing = await resolveClaudePlanToken({
     env: {},
     homedir: "/Users/nobody",
     platform: "linux",
@@ -321,6 +321,38 @@ test("resolveClaudePlanToken uses Claude Code credentials without reading the ma
     readDesktop: () => null,
   });
   assert.equal(missing, "");
+});
+
+test("resolveClaudePlanToken refreshes an expired Claude Code OAuth token", async () => {
+  const written: string[] = [];
+  const token = await resolveClaudePlanToken({
+    env: {},
+    homedir: "/Users/nobody",
+    platform: "darwin",
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    readKeychain: () =>
+      JSON.stringify({
+        accessToken: "sk-ant-oat01-expiredfixturexxxxxxxx",
+        refreshToken: "sk-ant-ort01-refreshfixturexxxxxxxx",
+        expiresAt: Date.now() - 60_000,
+      }),
+    writeKeychain: (contents) => {
+      written.push(contents);
+    },
+    refreshOauth: async () => ({
+      accessToken: "sk-ant-oat01-refreshedfixturexxxxxx",
+      refreshToken: "sk-ant-ort01-rotatedfixturexxxxxxx",
+      expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+    }),
+    readDesktop: () => null,
+  });
+  assert.equal(token, "sk-ant-oat01-refreshedfixturexxxxxx");
+  assert.equal(written.length, 1);
+  assert.match(written[0] ?? "", /sk-ant-oat01-refreshedfixturexxxxxx/);
+  assert.match(written[0] ?? "", /sk-ant-ort01-rotatedfixturexxxxxxx/);
 });
 
 test("fetchClaudePlanUsage stays unknown without a token", async () => {

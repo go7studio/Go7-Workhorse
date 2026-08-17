@@ -87,6 +87,14 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(installer, /arm64\) arch=arm64/);
   assert.match(installer, /x86_64\) arch=x64/);
   assert.match(installer, /-mac-\$\{arch\}\\\.dmg\$/);
+  // `hdiutil attach -quiet` prints nothing, so the mount point parsed out of
+  // it was always empty: the script decided every disk image was missing the
+  // app, then its cleanup removed $tmp while the image was still mounted
+  // inside it and printed 634 "Read-only file system" lines. Nothing was ever
+  // installed. Attach must stay loud, and detach must happen by device first.
+  assert.doesNotMatch(installer, /hdiutil attach[^\n]*-quiet/);
+  assert.match(installer, /hdiutil detach "\$device"/);
+  assert.match(installer, /device=\$\(printf/);
 
   const publish = workflow.slice(workflow.indexOf("\n  publish:"));
   assert.match(publish, /!cancelled\(\)/);

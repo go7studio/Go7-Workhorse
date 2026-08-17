@@ -40,10 +40,16 @@ version=$(printf '%s' "$asset" | sed -E 's/.*-([0-9]+\.[0-9]+\.[0-9]+)-mac.*\.dm
 say "Downloading Go7 Workhorse ${version}..."
 
 tmp=$(mktemp -d)
-mount=""
+device=""
 cleanup() {
-  [ -n "$mount" ] && hdiutil detach "$mount" -quiet 2>/dev/null || true
-  rm -rf "$tmp"
+  # Detach by device and confirm it, because the image is mounted inside $tmp.
+  # Removing $tmp while it is still mounted walks the read-only image and
+  # prints a screenful of "Read-only file system" instead of tidying up.
+  if [ -n "$device" ]; then
+    hdiutil detach "$device" -quiet 2>/dev/null ||
+      hdiutil detach "$device" -force -quiet 2>/dev/null || true
+  fi
+  rm -rf "$tmp" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -51,7 +57,12 @@ dmg="${tmp}/workhorse.dmg"
 curl -fsSL --progress-bar "$asset" -o "$dmg" || die "Download failed."
 
 say "Mounting..."
-mount=$(hdiutil attach "$dmg" -nobrowse -quiet -mountrandom "$tmp" | grep -o '/.*' | tail -1)
+# Not -quiet: it silences the very table the mount point is read from, which
+# left this script certain that every disk image was empty.
+attached=$(hdiutil attach "$dmg" -nobrowse -readonly -mountrandom "$tmp") ||
+  die "Could not mount the disk image."
+device=$(printf '%s\n' "$attached" | awk '/^\/dev\// {print $1}' | head -1)
+mount=$(printf '%s\n' "$attached" | grep -o "${tmp}/[^[:space:]]*" | tail -1)
 [ -n "$mount" ] && [ -d "${mount}/${APP}" ] || die "The disk image did not contain ${APP}."
 
 # Replacing a running app leaves a broken bundle, so stop it first.

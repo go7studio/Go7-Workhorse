@@ -53,56 +53,77 @@ export function LearningPane() {
 
   return (
     <>
-      <p className="row-meta">Private adaptive memory for this desk. Off until you opt in.</p>
-      <div className="actions" role="radiogroup" aria-label="Learning">
-        {MODES.map((mode) => (
-          <button
-            key={mode.id}
-            className={learning.mode === mode.id ? "tiny active-kind" : "tiny"}
-            type="button"
-            role="radio"
-            aria-checked={learning.mode === mode.id}
-            onClick={() => store.updateLearning({ mode: mode.id })}
-          >
-            {mode.label}
-          </button>
-        ))}
-      </div>
-      <p className="row-meta">{MODES.find((mode) => mode.id === learning.mode)?.hint}</p>
-      <label className="field">
-        <span>Compiler model</span>
-        <select
-          value={learning.compilerCustomBotId ?? `${learning.compilerProvider ?? ""}:${learning.compilerModel ?? ""}`}
-          onChange={(event) => {
-            const option = compilerOptions.find((item) => (item.customBotId ?? `${item.provider}:${item.model}`) === event.target.value);
-            store.updateLearning({
-              compilerProvider: option?.provider,
-              compilerModel: option?.model,
-              compilerCustomBotId: option?.customBotId,
-            });
-          }}
-        >
-          <option value="">Policy selects an eligible model</option>
-          {compilerOptions.map((item) => (
-            <option key={item.customBotId ?? `${item.provider}:${item.model}`} value={item.customBotId ?? `${item.provider}:${item.model}`}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="actions">
-        <button className="tiny" type="button" onClick={() => void window.workhorse?.learningCompile?.().then(refresh)}>
-          Learning brief
-        </button>
-        <button className="tiny" type="button" onClick={refresh}>
-          Sources
-        </button>
-        <button className="tiny" type="button" onClick={() => void exportLearning()}>
-          Export
-        </button>
-        <button className="tiny" type="button" onClick={() => setForgetOpen(true)}>
-          Forget
-        </button>
+      <div className="settings-group">
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <strong>Learning</strong>
+            <span>{MODES.find((mode) => mode.id === learning.mode)?.hint} Private memory, on this disk only.</span>
+          </div>
+          <div className="settings-control">
+            <div className="actions" role="radiogroup" aria-label="Learning">
+              {MODES.map((mode) => (
+                <button
+                  key={mode.id}
+                  className={learning.mode === mode.id ? "tiny active-kind" : "tiny"}
+                  type="button"
+                  role="radio"
+                  aria-checked={learning.mode === mode.id}
+                  onClick={() => store.updateLearning({ mode: mode.id })}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <label className="settings-row">
+          <div className="settings-row-copy">
+            <strong>Compiler model</strong>
+            <span>Turns captured events into memories.</span>
+          </div>
+          <div className="settings-control">
+            <select
+              value={learning.compilerCustomBotId ?? `${learning.compilerProvider ?? ""}:${learning.compilerModel ?? ""}`}
+              onChange={(event) => {
+                const option = compilerOptions.find((item) => (item.customBotId ?? `${item.provider}:${item.model}`) === event.target.value);
+                store.updateLearning({
+                  compilerProvider: option?.provider,
+                  compilerModel: option?.model,
+                  compilerCustomBotId: option?.customBotId,
+                });
+              }}
+            >
+              <option value="">Policy selects an eligible model</option>
+              {compilerOptions.map((item) => (
+                <option key={item.customBotId ?? `${item.provider}:${item.model}`} value={item.customBotId ?? `${item.provider}:${item.model}`}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </label>
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <strong>Store</strong>
+            <span>Read the brief and its sources, take a copy, or forget it.</span>
+          </div>
+          <div className="settings-control">
+            <div className="actions">
+              <button className="tiny" type="button" onClick={() => void window.workhorse?.learningCompile?.().then(refresh)}>
+                Learning brief
+              </button>
+              <button className="tiny" type="button" onClick={refresh}>
+                Sources
+              </button>
+              <button className="tiny" type="button" onClick={() => void exportLearning()}>
+                Export
+              </button>
+              <button className="tiny" type="button" onClick={() => setForgetOpen(true)}>
+                Forget
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
       {forgetOpen ? (
         <div className="link-block" role="alertdialog" aria-label="Forget learning">

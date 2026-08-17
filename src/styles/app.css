@@ -5847,6 +5847,189 @@ html.pane-dragging * {
   width: auto;
 }
 
+/*
+ * Settings reads like System Settings: one toolbar, then grouped rows. A row
+ * is a label and one line of copy on the left, its control on the right, a
+ * hairline between neighbours. The window title already says Settings, so
+ * the pane does not say it again.
+ */
+.settings-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 18px;
+}
+
+.settings-bar .actions {
+  flex-wrap: wrap;
+  width: auto;
+}
+
+.settings-group {
+  margin: 0 0 14px;
+  padding: 0 16px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 52px;
+  padding: 11px 0;
+  transition: opacity 160ms var(--ease);
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--line);
+}
+
+/* Depends on a switch above it that is off. Still readable, plainly inert. */
+.settings-row.off {
+  opacity: 0.42;
+}
+
+.settings-row-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-row-copy strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+}
+
+.settings-row-copy span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  text-wrap: pretty;
+}
+
+.settings-control {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-control > input,
+.settings-control > select {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.settings-control > input {
+  width: 224px;
+}
+
+.settings-control > input[type="number"] {
+  width: 64px;
+  text-align: right;
+}
+
+.settings-control > select {
+  max-width: 260px;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2386868b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 4.5 6 2l2.5 2.5M3.5 7.5 6 10l2.5-2.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+}
+
+.settings-control > input:focus,
+.settings-control > select:focus {
+  border-color: var(--accent);
+}
+
+.settings-control > input:disabled {
+  color: var(--text-tertiary);
+}
+
+.settings-control .unit {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.settings-control .actions {
+  width: auto;
+}
+
+/* Routing's preview: what auto-route would hand each kind of task. */
+.settings-picks {
+  margin: 0 0 14px;
+  padding: 14px 16px 16px;
+  background: var(--bg-solid);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.settings-picks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-picks-head .section-label {
+  margin: 0;
+}
+
+.settings-picks-head > span {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.settings-picks .usage-brains {
+  margin: 0;
+}
+
+.settings-picks .usage-brain {
+  background: var(--bg);
+}
+
+.settings-picks .llm-mark.on {
+  color: var(--text);
+}
+
+.settings-note {
+  margin: -4px 4px 14px;
+  white-space: normal;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.settings-search {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-solid);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.settings-search:focus {
+  border-color: var(--accent);
+}
+
 .llm-brains {
   display: flex;
   justify-content: center;
@@ -6909,7 +7092,7 @@ html.pane-dragging * {
   text-overflow: unset;
 }
 
-.watch-toggle {
+.switch {
   flex-shrink: 0;
   align-self: center;
   width: 44px;
@@ -6922,7 +7105,7 @@ html.pane-dragging * {
   transition: background 180ms var(--ease), border-color 180ms var(--ease);
 }
 
-.watch-toggle::after {
+.switch::after {
   content: "";
   position: absolute;
   top: 2px;
@@ -6935,13 +7118,17 @@ html.pane-dragging * {
   transition: transform 180ms var(--ease);
 }
 
-.watch-toggle.on {
+.switch.on {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-.watch-toggle.on::after {
+.switch.on::after {
   transform: translateX(18px);
+}
+
+.switch:disabled {
+  cursor: default;
 }
 
 .watch-brains {

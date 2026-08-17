@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   chooseRoutingDecision,
   effortForRoutingTier,
@@ -11,6 +14,8 @@ import {
 } from "../src/lib/routing";
 import type { RoutingSettings } from "../src/lib/types";
 import { resolveSpawnSpec } from "../src/lib/subagents";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const settings: RoutingSettings = {
   enabled: true,
@@ -122,4 +127,43 @@ test("Watch-held candidates cannot win automatic routing", () => {
     settings,
   );
   assert.equal(decision?.model, "gpt-5.6-terra");
+});
+
+test("the Routing pane shows the two settings that hang off leftover weighing as dependent", () => {
+  // preferExcess and reservePercent are only read inside the capacityAware
+  // branch of rankRoutingCandidates, so with it off they do nothing. The pane
+  // says so by disabling them, instead of offering two live-looking controls.
+  const base: RoutingCandidate[] = [
+    candidate("a", 10, { capacity: { usedPercent: 90, resetsAt: "2026-08-17T00:00:00Z" } }),
+    candidate("b", 10, { capacity: { usedPercent: 10, resetsAt: "2026-08-17T00:00:00Z" } }),
+  ];
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const off = { ...settings, capacityAware: false };
+  const untouched = rankRoutingCandidates(base, { prompt: "", tier: "balanced", now }, off).map((row) => row.score);
+  const flipped = rankRoutingCandidates(
+    base,
+    { prompt: "", tier: "balanced", now },
+    { ...off, preferExcess: !off.preferExcess, reservePercent: 50 },
+  ).map((row) => row.score);
+  assert.deepEqual(flipped, untouched);
+
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "RoutingPane.tsx"), "utf8");
+  assert.match(pane, /const weighs = routing\.capacityAware/);
+  assert.match(pane, /label="Prefer spare"[\s\S]{0,200}disabled=\{!weighs\}/);
+  assert.match(pane, /Weekly reserve[\s\S]{0,600}disabled=\{!weighs\}/);
+  assert.match(pane, /role="switch"/);
+  assert.doesNotMatch(pane, /type="checkbox"/);
+});
+
+test("Settings draws one bar on every tab and no second title", () => {
+  // Usage used to draw its own "Usage" heading and tab row, so choosing it
+  // shifted the page; the window title already says Settings.
+  const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const usage = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(settingsUi, /className="settings-bar"/);
+  assert.match(usage, /className="settings-bar"/);
+  assert.doesNotMatch(settingsUi, /<h2>Settings<\/h2>/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /^\.switch \{/m);
+  assert.doesNotMatch(css, /\.watch-toggle/);
 });

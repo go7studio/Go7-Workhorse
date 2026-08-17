@@ -105,13 +105,19 @@ export function Settings() {
     store.setSettingsSection(id);
   };
 
+  // The window title already reads Settings; the pane does not repeat it. One
+  // row holds the tabs and Back, and it is the same row on every tab so
+  // switching never shifts the page. Usage draws it itself because its Back
+  // first steps out of a drilled-in view.
   const tabs = (
-    <div className="actions" style={{ marginBottom: 12 }}>
+    <div className="actions" role="tablist" aria-label="Settings">
       {SECTIONS.map((item) => (
         <button
           key={item.id}
           className={section === item.id ? "tiny active-kind" : "tiny"}
           type="button"
+          role="tab"
+          aria-selected={section === item.id}
           onClick={() => openSection(item.id)}
         >
           {item.label}
@@ -123,72 +129,91 @@ export function Settings() {
   return (
     <section className={`picker project-home settings settings-full${section === "usage" ? " usage-section" : ""}`}>
       {section !== "usage" && (
-        <div className="link-head">
-          <h2>Settings</h2>
+        <div className="settings-bar">
+          {tabs}
           <button className="tiny" type="button" onClick={store.closeSettings}>
             Back
           </button>
         </div>
       )}
 
-      {section !== "usage" && tabs}
-
       {section === "profile" && (
         <>
           <ProfileHorse />
-          <label className="field">
-            <span>Display name</span>
-            <input
-              value={settings.profile.name}
-              placeholder="Your name"
-              onChange={(event) => store.updateProfile({ name: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Handle</span>
-            <input
-              value={settings.profile.handle}
-              placeholder="@you"
-              onChange={(event) => store.updateProfile({ handle: event.target.value })}
-            />
-          </label>
-          <div className="field">
-            <span>Updates</span>
-            <div className="actions">
-              <button className="tiny" type="button" onClick={() => void store.checkAppUpdate()}>
-                Check now
-              </button>
-              <span className="row-meta">Workhorse build v{APP_VERSION}</span>
-            </div>
+          <div className="settings-group">
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Display name</strong>
+              </div>
+              <div className="settings-control">
+                <input
+                  value={settings.profile.name}
+                  placeholder="Your name"
+                  onChange={(event) => store.updateProfile({ name: event.target.value })}
+                />
+              </div>
+            </label>
+            <label className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Handle</strong>
+              </div>
+              <div className="settings-control">
+                <input
+                  value={settings.profile.handle}
+                  placeholder="@you"
+                  onChange={(event) => store.updateProfile({ handle: event.target.value })}
+                />
+              </div>
+            </label>
           </div>
-          <div className="field">
-            <span>Support information</span>
-            <div className="actions">
-              <button className="tiny" type="button" onClick={() => {
-                void window.workhorse?.exportDiagnostics?.().then((result) => {
-                  if (!result || result.canceled) return;
-                  setSupportNote(result.ok ? `Saved to ${result.path}` : "Could not export support information.");
-                });
-              }}>
-                Export diagnostics
-              </button>
-              <span className="row-meta">Private data excluded.</span>
+          <div className="settings-group">
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Appearance</strong>
+              </div>
+              <div className="settings-control">
+                <div className="actions" role="radiogroup" aria-label="Appearance">
+                  {SETTINGS_THEME_CHOICES.map((item) => (
+                    <button
+                      key={item.id}
+                      className={store.theme === item.id ? "tiny active-kind" : "tiny"}
+                      type="button"
+                      role="radio"
+                      aria-checked={store.theme === item.id}
+                      onClick={() => store.setTheme(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-            {supportNote ? <p className="row-meta">{supportNote}</p> : null}
-          </div>
-          <div className="field">
-            <span>Appearance</span>
-            <div className="actions">
-              {SETTINGS_THEME_CHOICES.map((item) => (
-                <button
-                  key={item.id}
-                  className={store.theme === item.id ? "tiny active-kind" : "tiny"}
-                  type="button"
-                  onClick={() => store.setTheme(item.id)}
-                >
-                  {item.label}
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Updates</strong>
+                <span>Workhorse build v{APP_VERSION}</span>
+              </div>
+              <div className="settings-control">
+                <button className="tiny" type="button" onClick={() => void store.checkAppUpdate()}>
+                  Check now
                 </button>
-              ))}
+              </div>
+            </div>
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <strong>Diagnostics</strong>
+                <span>{supportNote || "A support report. Private data excluded."}</span>
+              </div>
+              <div className="settings-control">
+                <button className="tiny" type="button" onClick={() => {
+                  void window.workhorse?.exportDiagnostics?.().then((result) => {
+                    if (!result || result.canceled) return;
+                    setSupportNote(result.ok ? `Saved to ${result.path}` : "Could not export support information.");
+                  });
+                }}>
+                  Export
+                </button>
+              </div>
             </div>
           </div>
         </>

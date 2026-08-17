@@ -456,13 +456,24 @@ export function UsagePane({
 
   return (
     <section className={embedded ? "usage-embed" : "picker usage-page"}>
-      <div className="usage-head">
-        <h2>Usage</h2>
-        <button className="tiny" type="button" onClick={back}>
-          Back
-        </button>
-      </div>
-      {tabs}
+      {embedded ? (
+        // The same bar Settings draws for every other tab, so the page does
+        // not shift when Usage is chosen. Back is ours: from a drilled-in
+        // view it steps out first.
+        <div className="settings-bar">
+          {tabs}
+          <button className="tiny" type="button" onClick={back}>
+            Back
+          </button>
+        </div>
+      ) : (
+        <div className="usage-head">
+          <h2>Usage</h2>
+          <button className="tiny" type="button" onClick={back}>
+            Back
+          </button>
+        </div>
+      )}
 
       {focus === "overview" ? (
         <>

@@ -137,14 +137,14 @@ export function SkillsPane() {
 
   return (
     <>
-      <label className="field">
-        <span>Search</span>
-        <input
-          value={query}
-          placeholder="Name, origin, or what it does"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
+      <input
+        className="settings-search"
+        type="search"
+        value={query}
+        placeholder="Search by name, origin, or what it does"
+        aria-label="Search skills"
+        onChange={(event) => setQuery(event.target.value)}
+      />
       <div className="actions" style={{ marginBottom: 12 }}>
         {FILTERS.map((item) => (
           <button

@@ -903,7 +903,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         status: "idle",
         contextUsed: 0,
         messages: [],
-        routingMode: current.settings.routing.enabled ? "auto" : "manual",
+        // A new chat keeps the model the person picked. Auto is a pick they
+        // make on the chat afterwards; no setting puts a chat on Auto for them.
+        routingMode: "manual",
       });
       return {
         ...current,
@@ -3659,6 +3661,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? payload.route
               : undefined;
             const routeSpawn = shouldAutoRouteSpawn({
+              routingEnabled: latest.settings.routing.enabled,
               provider: payload.provider,
               model: payload.model,
               chat: payload.chat,

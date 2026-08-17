@@ -115,6 +115,7 @@ import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalActi
 import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
+import { WORKHORSE_APP_ID, workhorseRuntimeIdentity } from "../src/lib/app-identity";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseCursorModelsOutput, parseGrokModelsCache, reconcileCursorModels } from "../electron/vendor-models";
 import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
@@ -232,6 +233,9 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
   assert.equal(workhorseVolatileCredentials([], { WORKHORSE_VOLATILE_CREDENTIALS: "true" }), true);
   assert.equal(workhorseVolatileCredentials([], {}), false);
+  assert.deepEqual(workhorseRuntimeIdentity(true), { name: "Go7 Workhorse", userDataDirectory: "Go7 Workhorse" });
+  assert.deepEqual(workhorseRuntimeIdentity(false), { name: "Go7 Workhorse Dev", userDataDirectory: "Go7 Workhorse Dev" });
+  assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
 });
 
 test("filterCommands returns the shipped command list and filters it", () => {
@@ -426,9 +430,9 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarStyle:\s*"hidden"/);
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
-  assert.match(main, /WORKHORSE_USER_DATA_DIR = "Go7 Workhorse"/);
-  assert.match(main, /WORKHORSE_DEV_USER_DATA_DIR = "Go7 Workhorse Dev"/);
-  assert.match(main, /app\.isPackaged \? WORKHORSE_USER_DATA_DIR : WORKHORSE_DEV_USER_DATA_DIR/);
+  assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged\)/);
+  assert.match(main, /app\.setName\(runtimeIdentity\.name\)/);
+  assert.match(main, /runtimeIdentity\.userDataDirectory/);
   assert.match(main, /app\.setPath\("userData"/);
   assert.equal(selectSurface({ panel: "settings", hasProject: true, hasSession: true }), "settings");
   assert.equal(selectSurface({ panel: "add-bot", hasProject: true, hasSession: true }), "add-bot");
@@ -6919,7 +6923,7 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
   assert.equal(settings.llms.grok.needsAuth, undefined);
 });
 
-test("packages use platform Electron and mac builds receive an ad-hoc signature", () => {
+test("packages use platform Electron and mac release builds require a stable signature", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     build?: { afterPack?: string; electronDist?: string; mac?: { extendInfo?: Record<string, string> } };
   };
@@ -6929,10 +6933,16 @@ test("packages use platform Electron and mac builds receive an ad-hoc signature"
   assert.match(hook, /electronPlatformName !== "darwin"/);
   assert.match(hook, /codesign/);
   assert.match(hook, /shouldAdHocSign/);
+  assert.match(hook, /assertStableReleaseIdentity/);
+  assert.match(hook, /Developer ID Application/);
   const install = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
   assert.match(install, /rm -rf "\/Applications\/\$\{APP\}"/);
   assert.match(install, /rm -rf \/Applications\/Workhorse\.app/);
   assert.match(hook, /"--deep", "--sign", "-"/);
+  const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  assert.match(workflow, /WORKHORSE_RELEASE_BUILD/);
+  assert.match(workflow, /secrets\.MAC_CSC_LINK/);
+  assert.match(workflow, /secrets\.MAC_CSC_NAME/);
   assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);
 });
 

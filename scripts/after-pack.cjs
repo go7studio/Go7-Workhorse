@@ -8,8 +8,24 @@ function shouldAdHocSign(env = process.env) {
   return true;
 }
 
+function requiresStableIdentity(env = process.env) {
+  return String(env.WORKHORSE_RELEASE_BUILD ?? "").trim() === "1";
+}
+
+function assertStableReleaseIdentity(env = process.env) {
+  if (requiresStableIdentity(env) && shouldAdHocSign(env)) {
+    throw new Error(
+      "macOS release builds require CSC_LINK or CSC_NAME so Keychain approval survives app updates.",
+    );
+  }
+  if (requiresStableIdentity(env) && !/^Developer ID Application:/.test(String(env.CSC_NAME ?? "").trim())) {
+    throw new Error("macOS release builds require CSC_NAME to select a Developer ID Application identity.");
+  }
+}
+
 async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return;
+  assertStableReleaseIdentity();
   if (!shouldAdHocSign()) return;
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
@@ -24,4 +40,6 @@ async function afterPack(context) {
 
 module.exports = afterPack;
 module.exports.shouldAdHocSign = shouldAdHocSign;
+module.exports.requiresStableIdentity = requiresStableIdentity;
+module.exports.assertStableReleaseIdentity = assertStableReleaseIdentity;
 module.exports.afterPack = afterPack;

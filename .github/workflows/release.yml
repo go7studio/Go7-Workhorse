@@ -47,6 +47,11 @@ jobs:
         run: node scripts/learning-packaged-smoke.mjs
 
       - name: Build installer
+        env:
+          WORKHORSE_RELEASE_BUILD: ${{ runner.os == 'macOS' && '1' || '0' }}
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
         run: npm run ${{ matrix.script }}
 
       - id: ver

@@ -19,6 +19,7 @@ function emptyFile(): CredentialFile {
 export class CredentialStore {
   private loaded: CredentialFile | null = null;
   private readonly memory = new Map<string, string>();
+  private encryptionAvailable = false;
 
   constructor(
     private readonly file: string,
@@ -27,7 +28,9 @@ export class CredentialStore {
   ) {}
 
   available(): boolean {
-    return this.memoryOnly || this.cipher.isEncryptionAvailable();
+    if (this.memoryOnly || this.encryptionAvailable) return true;
+    this.encryptionAvailable = this.cipher.isEncryptionAvailable();
+    return this.encryptionAvailable;
   }
 
   put(secret: string, preferredId?: string): string {
@@ -40,10 +43,12 @@ export class CredentialStore {
     }
     if (!this.available()) throw new Error("OS credential encryption is unavailable.");
     const state = this.read();
+    if (this.memory.get(id) === value && state.credentials[id]?.ciphertext) return id;
     state.credentials[id] = {
       ciphertext: this.cipher.encryptString(value).toString("base64"),
       updatedAt: Date.now(),
     };
+    this.memory.set(id, value);
     this.write(state);
     return id;
   }
@@ -51,14 +56,18 @@ export class CredentialStore {
   get(id: string | undefined): string {
     const key = id?.trim();
     if (!key) return "";
-    if (this.memoryOnly) return this.memory.get(key) ?? "";
+    const cached = this.memory.get(key);
+    if (cached !== undefined) return cached;
+    if (this.memoryOnly) return "";
     const row = this.read().credentials[key];
     if (!row?.ciphertext) return "";
     // Avoid touching the OS keychain on ordinary startup when no matching
     // credential exists. On macOS that probe can wait for a keychain agent.
     if (!this.available()) return "";
     try {
-      return this.cipher.decryptString(Buffer.from(row.ciphertext, "base64"));
+      const value = this.cipher.decryptString(Buffer.from(row.ciphertext, "base64"));
+      this.memory.set(key, value);
+      return value;
     } catch {
       return "";
     }
@@ -67,8 +76,8 @@ export class CredentialStore {
   remove(id: string | undefined): void {
     const key = id?.trim();
     if (!key) return;
+    this.memory.delete(key);
     if (this.memoryOnly) {
-      this.memory.delete(key);
       return;
     }
     const state = this.read();

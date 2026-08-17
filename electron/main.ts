@@ -68,6 +68,12 @@ import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
+import {
+  WORKHORSE_APP_ID,
+  WORKHORSE_DEV_USER_DATA_DIR,
+  WORKHORSE_USER_DATA_DIR,
+  workhorseRuntimeIdentity,
+} from "../src/lib/app-identity";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const debugStartup = (stage: string) => {
@@ -79,14 +85,16 @@ debugStartup("main loaded");
 export const CLAUDE_TOKEN_ID = "claude-oauth-token";
 const CLAUDE_AUTH_SESSION = "auth:claude";
 
-/** Stable store folder. productName changes must not orphan chats. */
-export const WORKHORSE_USER_DATA_DIR = "Go7 Workhorse";
-export const WORKHORSE_DEV_USER_DATA_DIR = "Go7 Workhorse Dev";
+export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
+
+// Electron development shells must never request access to the installed
+// app's Keychain item. The name also controls Electron Safe Storage's service.
+const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged);
+app.setName(runtimeIdentity.name);
 
 function pinUserData() {
   const isolated = workhorseUserDataOverride();
-  const directory = app.isPackaged ? WORKHORSE_USER_DATA_DIR : WORKHORSE_DEV_USER_DATA_DIR;
-  const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), directory);
+  const dest = isolated ? path.resolve(isolated) : path.join(app.getPath("appData"), runtimeIdentity.userDataDirectory);
   try {
     fs.mkdirSync(dest, { recursive: true });
     app.setPath("userData", dest);
@@ -402,7 +410,7 @@ app.whenReady().then(async () => {
     })
     .catch((error) => console.warn("Workhorse Codex worker cleanup failed", error));
   if (process.platform === "win32") {
-    app.setAppUserModelId("com.go7studio.workhorse");
+    app.setAppUserModelId(WORKHORSE_APP_ID);
   }
   applyStoredClaudeToken();
   debugStartup("credentials ready");

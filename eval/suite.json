@@ -562,7 +562,8 @@
             "Approve one repeated fixture action for the session and repeat its exact scope.",
             "Verify Workhorse does not enqueue duplicate approvals for the same pending request.",
             "Unlock or approve the credential boundary once and repeat credential reads without a prompt loop.",
-            "Restart and verify only documented session or OS credential scopes expire."
+            "Confirm development and installed builds use separate credential namespaces.",
+            "Restart the same install and update it with the same signed app identity; verify only documented scopes expire."
           ]
         }
       ],
@@ -641,8 +642,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S4"],
-          "passCriteria": "One pending request has one prompt; an in-scope session grant suppresses repeats; keychain access does not loop after approval; expired or out-of-scope access prompts once with a clear reason.",
-          "evidence": "Permission request ids, scope cache, keychain result codes, prompt count, restart trace, and action outcomes."
+          "passCriteria": "One pending request has one prompt; an in-scope session grant suppresses repeats; each credential decrypts at most once per process; development cannot open the installed app's vault; macOS updates keep the same signed identity; expired or out-of-scope access prompts once with a clear reason.",
+          "evidence": "Permission request ids, scope cache, cipher call counts, runtime name and vault path, macOS designated requirement, Windows identity, restart/update trace, and action outcomes."
         }
       ]
     },

@@ -24,11 +24,11 @@
     },
     {
       "id": "REG-003",
-      "behavior": "Session approvals and keychain access do not create duplicate or indefinite prompts.",
+      "behavior": "Session approvals and OS credential access do not create duplicate or indefinite prompts across one installed app identity.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["SEC-S1", "SEC-S4"],
       "rubric": ["SEC-01", "SEC-07"],
-      "sourceFiles": ["src/lib/permissions.ts", "electron/credential-store.ts", "test/credential-store.test.ts"],
+      "sourceFiles": ["src/lib/permissions.ts", "src/lib/app-identity.ts", "electron/credential-store.ts", "scripts/after-pack.cjs", "test/credential-store.test.ts", "test/folder-access.test.ts"],
       "verification": ["eval:validate"]
     },
     {

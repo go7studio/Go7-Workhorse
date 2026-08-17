@@ -18,6 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const afterPack = require("../scripts/after-pack.cjs") as {
   shouldAdHocSign: (env?: NodeJS.Dict<string>) => boolean;
+  assertStableReleaseIdentity: (env?: NodeJS.Dict<string>) => void;
 };
 
 test("ad-hoc mac signature is skipped when a release identity will stamp the app", () => {
@@ -25,6 +26,24 @@ test("ad-hoc mac signature is skipped when a release identity will stamp the app
   assert.equal(afterPack.shouldAdHocSign({ CSC_IDENTITY_AUTO_DISCOVERY: "false" }), true);
   assert.equal(afterPack.shouldAdHocSign({ CSC_NAME: "Developer ID Application: Moonlight" }), false);
   assert.equal(afterPack.shouldAdHocSign({ CSC_LINK: "/secrets/cert.p12" }), false);
+});
+
+test("mac release packaging refuses an identity that would retrigger Keychain approval", () => {
+  assert.throws(
+    () => afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1" }),
+    /require CSC_LINK or CSC_NAME/,
+  );
+  assert.doesNotThrow(() =>
+    afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1", CSC_NAME: "Developer ID Application: Go7" }),
+  );
+  assert.doesNotThrow(() => afterPack.assertStableReleaseIdentity({}));
+});
+
+test("mac release packaging rejects an App Store distribution identity", () => {
+  assert.throws(
+    () => afterPack.assertStableReleaseIdentity({ WORKHORSE_RELEASE_BUILD: "1", CSC_NAME: "Apple Distribution: Go7" }),
+    /Developer ID Application/,
+  );
 });
 
 test("folder bookmarks persist and are claimed on later launch", () => {

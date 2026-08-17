@@ -60,11 +60,16 @@ if [ -d /Applications/Workhorse.app ]; then
   rm -rf /Applications/Workhorse.app
 fi
 
-# The build is unsigned, so a downloaded copy carries a quarantine flag that
-# Gatekeeper refuses. Clear it for this bundle only, and say so plainly.
+# Keep Gatekeeper intact for signed releases. Legacy development artifacts need
+# their bundle-scoped quarantine flag removed to launch.
 if xattr -p com.apple.quarantine "/Applications/${APP}" >/dev/null 2>&1; then
-  say "Clearing the quarantine flag (this build is not yet signed)..."
-  xattr -dr com.apple.quarantine "/Applications/${APP}"
+  signature=$(codesign -dvv "/Applications/${APP}" 2>&1 || true)
+  if printf '%s' "$signature" | grep -q 'Authority=Developer ID Application:'; then
+    say "Verifying the signed app with Gatekeeper..."
+  else
+    say "Clearing quarantine for this legacy development build..."
+    xattr -dr com.apple.quarantine "/Applications/${APP}"
+  fi
 fi
 
 say ""

@@ -71,3 +71,30 @@ test("credential vault recovers its last encrypted generation after corruption",
   assert.doesNotMatch(fs.readFileSync(file, "utf8"), /first-secret|second-secret/);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("credential access opens the OS vault once per secret and reuses the decrypted value", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-credentials-cache-"));
+  const file = path.join(root, "credentials.json");
+  const calls = { available: 0, encrypt: 0, decrypt: 0 };
+  const counted: SecretCipher = {
+    isEncryptionAvailable: () => {
+      calls.available += 1;
+      return true;
+    },
+    encryptString: (value) => {
+      calls.encrypt += 1;
+      return Buffer.from(`locked:${value}`, "utf8");
+    },
+    decryptString: (value) => {
+      calls.decrypt += 1;
+      return value.toString("utf8").replace(/^locked:/, "");
+    },
+  };
+  new CredentialStore(file, counted).put("secret", "custom-default");
+  const restarted = new CredentialStore(file, counted);
+  assert.equal(restarted.get("custom-default"), "secret");
+  assert.equal(restarted.get("custom-default"), "secret");
+  restarted.put("secret", "custom-default");
+  assert.deepEqual(calls, { available: 2, encrypt: 1, decrypt: 1 });
+  fs.rmSync(root, { recursive: true, force: true });
+});

@@ -18,7 +18,7 @@ export function PermissionCard() {
       ? vendorLabel(request.provider, stock)
       : settings.customBots.find((bot) => bot.id === child?.customBotId)?.name ?? provider.name;
   const tint = child ? deskInk(child, settings) : undefined;
-  const who = child?.parentId ? `${label} subagent` : label;
+  const who = child?.hidden || child?.agentRun ? `${label} subagent` : label;
   const elevate = request.kind === "elevate" && request.elevate;
   const action = permissionActionLabel(request.tool);
   const detail = elevate

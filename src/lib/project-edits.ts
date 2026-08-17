@@ -1,6 +1,8 @@
 import { pathFromToolText, splitToolLine } from "./grok-events";
 import type { ProviderId, Session } from "./types";
 
+export type FileChangeKind = "created" | "edited";
+
 export type ProjectEdit = {
   path: string;
   name: string;
@@ -8,13 +10,17 @@ export type ProjectEdit = {
   edits: number;
   at: number;
   provider: ProviderId;
+  kind?: FileChangeKind;
 };
 
 const WRITE_TITLE =
-  /^(write|edit|strreplace|str_replace|search_replace|search-replace|apply_patch|apply-patch|applypatch|create|save|update_file|update-file|replace|patch|insert)$/i;
+  /^(write|writefile|edit|strreplace|str_replace|search_replace|search-replace|apply_patch|apply-patch|applypatch|create|created|creating|save|update_file|update-file|replace|patch|insert)$/i;
 
 const WRITE_HINT =
-  /\b(write|writing|wrote|edit|editing|edited|strreplace|str_replace|search_replace|apply_patch|applypatch|apply(?:ing|ed)?\s*patch|update(?:d|s|_file)?|updating|replace|patch(?:ed|ing)?|insert|save)\b/i;
+  /\b(write|writing|wrote|edit|editing|edited|strreplace|str_replace|search_replace|apply_patch|applypatch|apply(?:ing|ed)?\s*patch|update(?:d|s|_file)?|updating|replace|patch(?:ed|ing)?|insert|save|created?|creating)\b/i;
+
+const CREATE_HINT =
+  /\b(write|writing|wrote|created?|creating|save[ds]?|saving)\b/i;
 
 const READ_HINT = /^(read|reading|list|grep|glob|find|ls|cat|view|stat)\b/i;
 
@@ -25,6 +31,23 @@ export function isWriteToolTitle(title: string): boolean {
   if (READ_HINT.test(text) || READ_HINT.test(key)) return false;
   const head = key.split(/[\s_./\\]/)[0] ?? "";
   return WRITE_TITLE.test(head) || WRITE_HINT.test(text) || WRITE_HINT.test(key);
+}
+
+export function writeChangeKind(title: string, nearby = ""): FileChangeKind | null {
+  if (!isWriteToolTitle(title)) return null;
+  const text = title.trim();
+  const key = text.toLowerCase().replace(/[\s-]+/g, "_");
+  const head = key.split(/[\s_./\\]/)[0] ?? "";
+  if (/^edit$/i.test(head) && !/\bfile\b/i.test(text)) return "edited";
+  if (
+    CREATE_HINT.test(text) ||
+    CREATE_HINT.test(head) ||
+    CREATE_HINT.test(nearby) ||
+    /^(write|create|created|creating|save)$/i.test(head)
+  ) {
+    return "created";
+  }
+  return "edited";
 }
 
 export function looksLikePath(value: string): boolean {
@@ -45,6 +68,18 @@ export function looksLikeSourceFile(value: string): boolean {
   return SOURCE_EXT.test(text);
 }
 
+/** Path from a completed write/edit tool event (title, detail, or write:path id). */
+export function writePathFromToolEvent(title: string, detail = "", toolCallId = ""): string {
+  const fromId = toolCallId.match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";
+  const line = detail ? `${title} — ${detail}` : title;
+  return (
+    pathFromWriteTool(line) ||
+    pathFromWriteTool(detail) ||
+    pathFromWriteTool(title) ||
+    (looksLikePath(fromId) ? fromId : "")
+  );
+}
+
 /** Write rows may be `Write · completed — path` or `Write \`path\` · completed`. */
 export function pathFromWriteTool(text: string): string {
   const extracted = pathFromToolText(text);
@@ -52,6 +87,32 @@ export function pathFromWriteTool(text: string): string {
   const { title } = splitToolLine(text);
   const rest = title.replace(WRITE_TITLE, "").replace(/^[`\s]+|[`\s]+$/g, "");
   return looksLikePath(rest) ? rest.trim() : "";
+}
+
+/** Cursor/Composer often stores `Edit File · completed` with the path only in nearby thought/assistant text. */
+export function pathFromNearbyWrite(text: string): string {
+  const ticks = [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1]?.trim() ?? "");
+  const named = [...text.matchAll(/\bnamed\s+([^\s`]+)/gi)].map((match) =>
+    (match[1] ?? "").trim().replace(/[.,;:]+$/, ""),
+  );
+  for (const raw of [...ticks, ...named]) {
+    if (looksLikeSourceFile(raw)) return raw;
+  }
+  return "";
+}
+
+function nearbyWriteContext(messages: Session["messages"], index: number): string {
+  let start = index;
+  while (start > 0 && messages[start - 1]?.role !== "user") start -= 1;
+  let end = index;
+  while (end + 1 < messages.length && messages[end + 1]?.role !== "user") end += 1;
+  const parts: string[] = [];
+  for (let i = start; i <= end; i += 1) {
+    const message = messages[i];
+    if (!message || i === index) continue;
+    if (message.kind === "thought" || message.role === "assistant") parts.push(message.text);
+  }
+  return parts.join("\n");
 }
 
 export function fileNameFromPath(path: string): string {
@@ -87,14 +148,20 @@ export function formatEditWhen(at: number, now = Date.now()): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function projectEdits(sessions: Session[], folderRoots: string[] = []): ProjectEdit[] {
+function collectWrites(sessions: Session[], folderRoots: string[] = []): ProjectEdit[] {
   const map = new Map<string, ProjectEdit>();
   for (const session of sessions) {
-    for (const message of session.messages) {
+    for (const [index, message] of session.messages.entries()) {
       if (message.kind !== "tool") continue;
       const { title } = splitToolLine(message.text);
-      const path = pathFromWriteTool(message.text);
-      if (!isWriteToolTitle(title) || !path) continue;
+      const nearby = nearbyWriteContext(session.messages, index);
+      const fromId = (message.toolCallId ?? "").match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";
+      const path =
+        pathFromWriteTool(message.text) ||
+        (looksLikePath(fromId) ? fromId : "") ||
+        pathFromNearbyWrite(nearby);
+      const kind = writeChangeKind(title, nearby);
+      if (!kind || !path) continue;
       const key = path.replaceAll("\\", "/").toLowerCase();
       const current = map.get(key);
       if (current) {
@@ -102,6 +169,7 @@ export function projectEdits(sessions: Session[], folderRoots: string[] = []): P
         if (message.createdAt >= current.at) {
           current.at = message.createdAt;
           current.provider = session.provider;
+          if (kind === "edited") current.kind = "edited";
         }
         continue;
       }
@@ -112,10 +180,26 @@ export function projectEdits(sessions: Session[], folderRoots: string[] = []): P
         edits: 1,
         at: message.createdAt,
         provider: session.provider,
+        kind,
       });
     }
   }
   return mergeEdits([...map.values()], []);
+}
+
+export function projectEdits(sessions: Session[], folderRoots: string[] = []): ProjectEdit[] {
+  return collectWrites(sessions, folderRoots);
+}
+
+export function projectFileChanges(
+  sessions: Session[],
+  folderRoots: string[] = [],
+): { created: ProjectEdit[]; edited: ProjectEdit[] } {
+  const all = collectWrites(sessions, folderRoots);
+  return {
+    created: all.filter((item) => item.kind === "created"),
+    edited: all.filter((item) => item.kind !== "created"),
+  };
 }
 
 export function editPathKey(path: string): string {
@@ -127,6 +211,41 @@ export function sameEditPath(left: string, right: string): boolean {
   const b = editPathKey(right);
   if (a === b) return true;
   return a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+}
+
+export type EditLineStat = { added: number; deleted: number };
+
+/** Look up +/- by exact path or the same file under a longer/shorter path. */
+export function statForPath(
+  stats: Record<string, EditLineStat>,
+  filePath: string,
+): EditLineStat | undefined {
+  if (Object.prototype.hasOwnProperty.call(stats, filePath)) return stats[filePath];
+  for (const [key, value] of Object.entries(stats)) {
+    if (sameEditPath(key, filePath)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Keep last known +/- while a refresh is in flight. An empty next map is not
+ * a real zero — only an explicit { added, deleted } replaces a path.
+ */
+export function holdEditStats(
+  previous: Record<string, EditLineStat>,
+  next: Record<string, EditLineStat> | null | undefined,
+  paths: string[],
+): Record<string, EditLineStat> {
+  if (paths.length === 0) return previous;
+  const incoming = next ?? {};
+  const out: Record<string, EditLineStat> = {};
+  for (const filePath of paths) {
+    const fresh = statForPath(incoming, filePath);
+    const prior = statForPath(previous, filePath);
+    if (fresh) out[filePath] = fresh;
+    else if (prior) out[filePath] = prior;
+  }
+  return out;
 }
 
 export function mergeEdits(base: ProjectEdit[], extra: ProjectEdit[]): ProjectEdit[] {
@@ -144,6 +263,7 @@ export function mergeEdits(base: ProjectEdit[], extra: ProjectEdit[]): ProjectEd
       path: item.path.length >= current.path.length ? item.path : current.path,
       edits: Math.max(current.edits, item.edits, 1),
       at: Math.max(current.at, item.at),
+      kind: item.kind ?? current.kind,
     };
   }
   return out.sort((a, b) => b.at - a.at);

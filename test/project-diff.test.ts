@@ -6,7 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { applyLineDiff, splitLines } from "../src/lib/file-diff";
-import { findSourceFile, readEditStats, readFileDiff } from "../electron/project-diff";
+import { growInstanceBaseline, rememberInstance, reviewCreatedDiff } from "../src/lib/file-instances";
+import { findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance } from "../electron/project-diff";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -106,16 +107,154 @@ test("new file is all adds of the real after; delete is all deletes of the real 
   rmSync(repo, { recursive: true, force: true });
 });
 
-test("Project Home still reads stats and File Review from shipped resolve+diff", () => {
+test("Project Home lists +/- stats and FileViewer colors add/del lines", () => {
   const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
+  assert.match(home, /projectFileChanges/);
+  assert.match(home, /label="Changes"/);
+  assert.match(home, /FileViewer/);
   assert.match(home, /editStats/);
-  assert.match(home, /projectEdits/);
-  assert.match(home, /FileReview/);
-  const review = readFileSync(path.join(ROOT, "src", "ui", "FileReview.tsx"), "utf8");
-  assert.match(review, /fileDiff\(requestPath, searchRoots\)/);
-  assert.match(review, /buildFileDiff/);
+  assert.match(home, /holdEditStats/);
+  assert.doesNotMatch(home, /showLineStats=\{false\}/);
+  assert.doesNotMatch(home, /FileReview/);
+  const viewer = readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8");
+  assert.match(viewer, /fileDiff/);
+  assert.match(viewer, /diff-line/);
+  assert.match(viewer, /sameEditPath/);
+  assert.match(viewer, /pathChanged/);
+  assert.doesNotMatch(viewer, /file-close-x/);
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(pane, /item\.edits/);
+  assert.match(pane, /item\.at/);
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
-  assert.match(main, /readFileDiff/);
-  assert.match(main, /readEditStats/);
+  assert.match(main, /readSourceText/);
   assert.match(main, /findSourceFile/);
+  assert.match(main, /created === true/);
+  assert.match(main, /recordFileInstance/);
+  assert.match(main, /fileInstances/);
+  assert.match(viewer, /file\.edits/);
+  assert.match(viewer, /file\.at/);
+});
+
+test("non-git existing file is not a fake whole-file add; created is all adds", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-nongit-diff-"));
+  writeFileSync(path.join(dir, "generic.inc"), "keep\nthis file\n");
+  const existing = readFileDiff("generic.inc", [dir]);
+  assert.equal(existing.added, 0);
+  assert.equal(existing.deleted, 0);
+  assert.equal(existing.lines.every((line) => line.kind === "same"), true);
+
+  const created = readFileDiff("generic.inc", [dir], { created: true });
+  assert.equal(created.added, 2);
+  assert.equal(created.deleted, 0);
+  assert.equal(created.lines.every((line) => line.kind === "add"), true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("source read is the file on disk, not a git whole-file add", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-src-read-"));
+  writeFileSync(path.join(dir, "generic.inc"), "keep\nthis file\n");
+  const got = readSourceText("generic.inc", [dir]);
+  assert.equal(got.missing, false);
+  assert.equal(got.unreadable, false);
+  assert.equal(got.text, "keep\nthis file\n");
+  assert.equal(got.name, "generic.inc");
+
+  const missing = readSourceText("gone.inc", [dir]);
+  assert.equal(missing.missing, true);
+  assert.equal(missing.text, "");
+
+  writeFileSync(path.join(dir, "blob.bin"), Buffer.from([0, 1, 2, 0]));
+  const binary = readSourceText("blob.bin", [dir]);
+  assert.equal(binary.unreadable, true);
+  assert.equal(binary.text, "");
+
+  const huge = readSourceText("generic.inc", [dir], {
+    existsSync: () => true,
+    isDir: () => false,
+    readFile: () => "x".repeat(1_500_001),
+  });
+  assert.equal(huge.unreadable, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("created file keeps deleted green lines as red instances", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wh-instance-"));
+  const abs = path.join(dir, "hundred-lines.md");
+  const lines = Array.from({ length: 100 }, (_, index) => `Line ${index + 1}`);
+  writeFileSync(abs, `${lines.join("\n")}\n`);
+  const instances = new Map<string, string>();
+  const created = readFileDiff(abs, [dir], { created: true, instances });
+  assert.equal(created.added, 100);
+  assert.equal(created.deleted, 0);
+  assert.equal(created.lines.every((line) => line.kind === "add"), true);
+
+  const kept = lines.filter((_, index) => index !== 49 && index !== 50);
+  writeFileSync(abs, `${kept.join("\n")}\n`);
+  const afterDelete = readFileDiff(abs, [dir], { created: true, instances });
+  assert.equal(afterDelete.added, 98);
+  assert.equal(afterDelete.deleted, 2);
+  assert.equal(
+    afterDelete.lines.some((line) => line.kind === "del" && line.text === "Line 50"),
+    true,
+  );
+  assert.equal(
+    afterDelete.lines.some((line) => line.kind === "del" && line.text === "Line 51"),
+    true,
+  );
+  assert.equal(afterDelete.lines.filter((line) => line.kind === "add").length, 98);
+
+  writeFileSync(abs, `${[...kept, "Line 101"].join("\n")}\n`);
+  const afterAdd = readFileDiff(abs, [dir], { created: true, instances });
+  assert.equal(afterAdd.added, 99);
+  assert.equal(afterAdd.deleted, 2);
+  assert.equal(
+    afterAdd.lines.some((line) => line.kind === "add" && line.text === "Line 101"),
+    true,
+  );
+  const stats = readEditStats([abs], [dir], { instances }, [abs]);
+  assert.deepEqual(stats[abs], { added: 99, deleted: 2 });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("untracked file uses the write snapshot, not empty-before, after a later delete", () => {
+  const repo = makeRepo("wh-instance-git-");
+  const abs = path.join(repo, "hundred-lines.md");
+  writeFileSync(abs, "a\nb\nc\n");
+  const instances = new Map<string, string>();
+  recordFileInstance(abs, [repo], { instances });
+  writeFileSync(abs, "a\nc\n");
+  const diff = readFileDiff(abs, [repo], { instances });
+  assert.equal(diff.added, 2);
+  assert.equal(diff.deleted, 1);
+  assert.equal(diff.lines.some((line) => line.kind === "del" && line.text === "b"), true);
+  assert.equal(diff.lines.filter((line) => line.kind === "add").map((line) => line.text).join("\n"), "a\nc");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("instance store is injected and does not read the home directory", () => {
+  const root = path.join("C:", "proj");
+  const abs = path.join(root, "hundred-lines.md");
+  const files = new Map<string, string>([[abs, "one\ntwo\nthree\n"]]);
+  const instances = new Map<string, string>();
+  const input = {
+    created: true as const,
+    instances,
+    existsSync: (item: string) => files.has(item),
+    readFile: (item: string) => files.get(item) ?? "",
+    isDir: () => false,
+    gitShow: () => null,
+  };
+  const first = readFileDiff(abs, [root], input);
+  assert.equal(first.added, 3);
+  assert.equal(first.deleted, 0);
+  files.set(abs, "one\nthree\n");
+  const second = readFileDiff(abs, [root], input);
+  assert.equal(second.added, 2);
+  assert.equal(second.deleted, 1);
+  assert.equal(second.lines.some((line) => line.kind === "del" && line.text === "two"), true);
+  rememberInstance(instances, abs, "one\nthree\nfour\n");
+  assert.equal(growInstanceBaseline("one\ntwo\nthree\n", "one\nthree\n").includes("two"), true);
+  const painted = reviewCreatedDiff(abs, "one\ntwo\nthree\n", "one\nthree\n");
+  assert.equal(painted.added, 2);
+  assert.equal(painted.deleted, 1);
 });

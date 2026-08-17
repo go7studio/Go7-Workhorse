@@ -50,12 +50,18 @@ contextBridge.exposeInMainWorld("workhorse", {
   listDropFiles: (paths: string[]) => ipcRenderer.invoke("drop:list", paths) as Promise<import("./drop-files").ListedDropFile[]>,
   revealProject: (folder: string) => ipcRenderer.invoke("project:reveal", folder),
   openExternal: (href: string) => ipcRenderer.invoke("shell:open", href) as Promise<boolean>,
-  fileDiff: (filePath: string, roots: string[] = []) => ipcRenderer.invoke("project:file-diff", filePath, roots),
+  fileDiff: (filePath: string, roots: string[] = [], created = false) =>
+    ipcRenderer.invoke("project:file-diff", filePath, roots, created),
+  recordFileWrite: (filePath: string, roots: string[] = []) =>
+    ipcRenderer.invoke("project:record-write", filePath, roots) as Promise<string>,
+  readSourceFile: (filePath: string, roots: string[] = []) =>
+    ipcRenderer.invoke("project:read-file", filePath, roots) as Promise<import("./project-diff").SourceRead | null>,
   listGitChanges: (cwd: string) =>
     ipcRenderer.invoke("project:git-changes", cwd) as Promise<import("./project-diff").GitChange[]>,
   resolveFile: (filePath: string, roots: string[] = []) =>
     ipcRenderer.invoke("project:resolve-file", filePath, roots) as Promise<string | null>,
-  editStats: (paths: string[], roots: string[] = []) => ipcRenderer.invoke("project:edit-stats", paths, roots),
+  editStats: (paths: string[], roots: string[] = [], createdPaths: string[] = []) =>
+    ipcRenderer.invoke("project:edit-stats", paths, roots, createdPaths),
   ensureWorktree: (input: import("./worktree-host").EnsureWorktreeInput) =>
     ipcRenderer.invoke("project:ensure-worktree", input) as Promise<import("./worktree-host").EnsureWorktreeResult>,
   terminalStart: (sessionId: string, cwd: string) => ipcRenderer.invoke("terminal:start", { sessionId, cwd }),

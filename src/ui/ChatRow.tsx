@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { lastTalkedAt } from "../lib/chats";
+import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk, vendorAttachedForSession } from "../lib/settings";
 import { chatLinksFromSessions } from "../lib/tool-labels";
 import { useStore } from "../lib/store";
 import type { Session } from "../lib/types";
+import { TimeStamp } from "./TimeStamp";
 
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
@@ -36,10 +40,16 @@ export function ChatRow({
 }) {
   const store = useStore();
   const [menu, setMenu] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveSide, setMoveSide] = useState<"right" | "left">("right");
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(session.title);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const moreBtn = useRef<HTMLButtonElement>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  const movePanel = useRef<HTMLDivElement>(null);
+  const [menuAt, setMenuAt] = useState<{ top: number; left: number } | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const archived = typeof session.archivedAt === "number";
   const bot = session.customBotId
@@ -66,14 +76,58 @@ export function ChatRow({
   useEffect(() => {
     if (!menu && !confirmDelete) return;
     const close = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) {
-        setMenu(false);
-        setConfirmDelete(false);
-      }
+      const target = event.target as Node;
+      if (root.current?.contains(target) || menuBox.current?.contains(target)) return;
+      setMenu(false);
+      setMoveOpen(false);
+      setConfirmDelete(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menu, confirmDelete]);
+
+  useEffect(() => {
+    if (!menu) setMoveOpen(false);
+  }, [menu]);
+
+  useLayoutEffect(() => {
+    if (!menu) {
+      setMenuAt(null);
+      return;
+    }
+    const place = () => {
+      const btn = moreBtn.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const width = menuBox.current?.offsetWidth || 160;
+      const height = menuBox.current?.offsetHeight || 240;
+      const next = clampMenuPosition(
+        rect.right - width,
+        rect.bottom + 4,
+        width,
+        height,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      setMenuAt({ left: next.x, top: next.y });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [menu, confirmDelete]);
+
+  useLayoutEffect(() => {
+    if (!moveOpen || !movePanel.current) {
+      setMoveSide("right");
+      return;
+    }
+    const box = movePanel.current.getBoundingClientRect();
+    setMoveSide(box.right > window.innerWidth - 8 ? "left" : "right");
+  }, [moveOpen]);
 
   useEffect(() => {
     if (renaming) {
@@ -87,9 +141,11 @@ export function ChatRow({
     setRenaming(false);
   };
 
+  const talkedAt = lastTalkedAt(session);
+
   return (
     <div
-      className={`chat-row${nested ? " nested-worker" : ""}${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}`}
+      className={`chat-row${nested ? " nested-worker" : ""}${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -126,7 +182,7 @@ export function ChatRow({
             <span className={`row-meta${link ? " peer" : ""}`}>
               {link
                 ? link.label
-                : nested
+                : nested && (session.hidden || session.agentRun)
                   ? workerLabel
                   : session.status === "running"
                     ? "Working…"
@@ -135,6 +191,7 @@ export function ChatRow({
                       : rowLabel}
             </span>
           </span>
+          <TimeStamp at={talkedAt} className="row-talked" />
         </button>
       )}
 
@@ -155,108 +212,132 @@ export function ChatRow({
       ) : null}
 
       <button
+        ref={moreBtn}
         className="tiny chat-more"
         type="button"
         aria-label="Chat actions"
-        onClick={() => {
+        aria-expanded={menu}
+        onClick={(event) => {
+          event.stopPropagation();
           setConfirmDelete(false);
+          setMoveOpen(false);
           setMenu((value) => !value);
         }}
       >
         ···
       </button>
 
-      {menu && (
-        <div className="chat-menu">
-          <button
-            type="button"
-            onClick={() => {
-              setMenu(false);
-              setRenaming(true);
-            }}
+      {menu &&
+        createPortal(
+          <div
+            ref={menuBox}
+            className="chat-menu floating"
+            role="menu"
+            style={menuAt ? { top: menuAt.top, left: menuAt.left } : { visibility: "hidden", top: 0, left: 0 }}
           >
-            Rename
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const last = [...session.messages]
-                .reverse()
-                .find((message) => message.role === "user" || message.role === "assistant");
-              setMenu(false);
-              if (last) store.forkFrom(last.id, session.id);
-            }}
-          >
-            Fork chat
-          </button>
-          <div className="chat-move">
-            <span>{session.projectId ? "Move to" : "Add to"}</span>
-            {store.projects
-              .filter((project) => project.id !== session.projectId)
-              .map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  onClick={() => {
-                    store.moveSession(session.id, project.id);
-                    setMenu(false);
-                  }}
-                >
-                  {project.name}
-                </button>
-              ))}
-            {store.projects.filter((project) => project.id !== session.projectId).length === 0 && (
-              <em>No other project</em>
+            <button
+              type="button"
+              onClick={() => {
+                setMenu(false);
+                setRenaming(true);
+              }}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const last = [...session.messages]
+                  .reverse()
+                  .find((message) => message.role === "user" || message.role === "assistant");
+                setMenu(false);
+                if (last) store.forkFrom(last.id, session.id);
+              }}
+            >
+              Fork chat
+            </button>
+            <div className={`chat-move${moveOpen ? " open" : ""}`}>
+              <button
+                type="button"
+                className="chat-move-toggle"
+                aria-expanded={moveOpen}
+                onClick={() => setMoveOpen((value) => !value)}
+              >
+                <span>{session.projectId ? "Move to" : "Add to"}</span>
+                <i className="twist" aria-hidden="true" />
+              </button>
+              {moveOpen ? (
+                <div ref={movePanel} className={`chat-move-panel ${moveSide}`} role="menu">
+                  {store.projects
+                    .filter((project) => project.id !== session.projectId)
+                    .map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        onClick={() => {
+                          store.moveSession(session.id, project.id);
+                          setMenu(false);
+                          setMoveOpen(false);
+                        }}
+                      >
+                        {project.name}
+                      </button>
+                    ))}
+                  {store.projects.filter((project) => project.id !== session.projectId).length === 0 && (
+                    <em>No other project</em>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMenu(false);
+                void store.exportSession(session.id);
+              }}
+            >
+              Export chat
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                store.archiveSession(session.id, !archived);
+                setMenu(false);
+              }}
+            >
+              {archived ? "Unarchive" : "Archive"}
+            </button>
+            {workerCount > 0 ? (
+              <button
+                className="danger"
+                type="button"
+                onClick={() => {
+                  store.deleteWorkers(session.id);
+                  setMenu(false);
+                }}
+              >
+                Delete workers
+              </button>
+            ) : null}
+            {confirmDelete ? (
+              <button
+                className="danger"
+                type="button"
+                onClick={() => {
+                  store.deleteSession(session.id);
+                  setMenu(false);
+                }}
+              >
+                Delete for good
+              </button>
+            ) : (
+              <button className="danger" type="button" onClick={() => setConfirmDelete(true)}>
+                Delete
+              </button>
             )}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setMenu(false);
-              void store.exportSession(session.id);
-            }}
-          >
-            Export chat
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              store.archiveSession(session.id, !archived);
-              setMenu(false);
-            }}
-          >
-            {archived ? "Unarchive" : "Archive"}
-          </button>
-          {workerCount > 0 ? (
-            <button
-              className="danger"
-              type="button"
-              onClick={() => {
-                store.deleteWorkers(session.id);
-                setMenu(false);
-              }}
-            >
-              Delete workers
-            </button>
-          ) : null}
-          {confirmDelete ? (
-            <button
-              className="danger"
-              type="button"
-              onClick={() => {
-                store.deleteSession(session.id);
-                setMenu(false);
-              }}
-            >
-              Delete for good
-            </button>
-          ) : (
-            <button className="danger" type="button" onClick={() => setConfirmDelete(true)}>
-              Delete
-            </button>
-          )}
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

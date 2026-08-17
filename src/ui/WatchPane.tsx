@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useStore } from "../lib/store";
-import { DEFAULT_WATCH, toggleWatchLockKey, watchPicksKey, watchVendorStatuses } from "../lib/watch";
+import { DEFAULT_WATCH, toggleWatchLockKey, watchDayFill, watchPicksKey, watchVendorStatuses } from "../lib/watch";
 import { FuelRing } from "./FuelRing";
 
-function dayCopy(row: ReturnType<typeof watchVendorStatuses>[number], picked: boolean): string {
+function dayCopy(row: ReturnType<typeof watchVendorStatuses>[number]): string {
   const allowed = Math.round(row.allowedPercent);
   const used = row.usedPercent;
   const day = row.weekDay ? `Day ${row.weekDay.day} of ${row.weekDay.days}` : null;
-  if (!picked) return [day, "Roams free"].filter(Boolean).join(" · ");
   if (row.holding && row.overPercent > 0) {
     return [day, `${Math.round(row.overPercent)}% over`].filter(Boolean).join(" · ");
   }
@@ -27,6 +26,7 @@ export function WatchPane() {
       grok: store.grokPlan,
       codex: store.codexPlan,
       claude: store.claudePlan,
+      cursor: store.cursorPlan,
       custom: store.customPlans,
     },
     permits: store.watchPermits,
@@ -66,10 +66,7 @@ export function WatchPane() {
         <div className={`usage-brains watch-brains${picking ? "" : " off"}`}>
           {statuses.map((row, index) => {
             const leftover = row.leftover;
-            const fill =
-              row.allowedPercent > 0 && row.usedPercent != null
-                ? Math.min(1, row.usedPercent / row.allowedPercent)
-                : 0;
+            const fill = watchDayFill(row);
             const picked = watchPicksKey(watch, row.key);
             return (
               <button
@@ -99,7 +96,7 @@ export function WatchPane() {
                   label={leftover != null ? `${Math.round(leftover)}%` : "…"}
                 />
                 <span>{row.label}</span>
-                <em>{dayCopy(row, picked)}</em>
+                <em>{dayCopy(row)}</em>
                 <div className="watch-day-track" aria-hidden="true">
                   <i
                     className={row.provider}

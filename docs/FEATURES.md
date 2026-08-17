@@ -37,10 +37,19 @@ transcript rather than as a path.
 - Chats belong to a project, and can be renamed, archived, deleted, or dragged
   to another project.
 - Vendor, model and thinking effort are set per chat, not per app.
-- Fork a chat to try a different model on the same history.
+- Fork a chat to try a different model on the same history. The fork is layered
+  under the source chat, with a managed worktree when the project has a Git
+  folder — the same isolation subagents use.
 - Rewind to an earlier turn.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
+- Each chat row shows when you last sent a prompt: a clock for today,
+  Yesterday, or a date such as Aug 16. Hover the stamp for the full time.
+- User and assistant turns in the transcript use the same clock.
+- A turn’s work popout keeps thinking and tool calls in the order they
+  happened: think, tool, think. Each finished tool run closes when the
+  next thought or tool run starts, so the open fold is the current hop.
+  Click a finished dot to expand it again. The visible reply stays below that.
 
 ## Control
 
@@ -52,6 +61,9 @@ transcript rather than as a path.
   worktree, isolated from your working copy.
 - **Terminal** — chat-scoped, in that same directory.
 - **Git review** — see changed files and diffs for the work a chat did.
+- **Change instances** — a created file’s lines stay green. A later prompt that
+  deletes some of them keeps those lines as red instances in the review, instead
+  of shrinking the green count against empty / HEAD.
 
 ## Spend
 
@@ -93,6 +105,11 @@ transcript rather than as a path.
 ## Settings
 
 Profile, connected LLMs, skills, routing, learning, usage, watch.
+
+The profile shows the Workhorse mark as tiny moving blobs of the bots you
+have called. Spend sets how many of each color; blobs merge in space without
+mixing into a new color. Hover it for Your Workhorse and what it is made of.
+With no spend yet, it keeps the native sunset-to-blue blobs.
 
 Settings can export a support report that excludes prompts, messages, file
 contents, environment variables, URLs and credential values.

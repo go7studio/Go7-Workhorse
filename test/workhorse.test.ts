@@ -135,16 +135,18 @@ import {
   wrapMarkdown,
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer } from "../src/lib/permissions";
-import { appendUserMessage, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
+import { COUNT_MS, countAt } from "../src/lib/count";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
 import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
-import { fileFolderFromPath, formatEditWhen, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromWriteTool, projectEdits, sameEditPath } from "../src/lib/project-edits";
+import { fileFolderFromPath, formatEditWhen, holdEditStats, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, projectEdits, projectFileChanges, sameEditPath, statForPath, writeChangeKind } from "../src/lib/project-edits";
 import { autoTitleForSend, suggestedTitleForSession, titleFromPrompt } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
-import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
+import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
+import { isComposerTypeToFocus } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
   applyCut,
@@ -167,7 +169,19 @@ import {
   prettyToolTitle,
   talkingToSummary,
 } from "../src/lib/tool-labels";
-import { formatWorked, groupTranscript, lastReplyIndex, resolveWorkedMs, thoughtForReply } from "../src/lib/turns";
+import {
+  displayWorkSteps,
+  formatWorked,
+  groupTranscript,
+  groupWorkRows,
+  isActiveWorkRow,
+  lastReplyIndex,
+  playWorkEvents,
+  resolveWorkedMs,
+  thoughtForReply,
+  workStepKinds,
+  type WorkStreamEvent,
+} from "../src/lib/turns";
 import type { ChatMessage, PermissionMode, PermissionRequest, Session } from "../src/lib/types";
 import {
   addUsageDraft,
@@ -182,6 +196,8 @@ import {
   modelsForProvider,
   customBotUsageEvents,
   deskUsageCards,
+  estimateTurnTokens,
+  backfillCursorUsage,
   leftoverForCard,
   byModel,
   rehomeCustomUsage,
@@ -189,6 +205,12 @@ import {
   tideNeedsDarkInk,
   vendorTidePercent,
   deskPulseLines,
+  profileHorseInks,
+  profileHorseBlobs,
+  HORSE_BLOB_COUNT,
+  profileHorseTip,
+  profileHorseVisualInks,
+  HORSE_NATIVE_INKS,
   vendorUsedPercent,
   planRingView,
   pickClaudeWindow,
@@ -479,17 +501,42 @@ test("forkChat copies history through a turn into a new listed chat", () => {
   assert.ok(forked);
   assert.equal(forked.session.id, "sess_fork");
   assert.equal(forked.session.title, "Fork of Login Fix");
+  assert.equal(forked.session.parentId, "sess_src");
+  assert.equal(forked.session.hidden, undefined);
+  assert.equal(forked.session.agentRun, undefined);
+  assert.equal(forked.session.environment?.kind, "local");
   assert.equal(forked.session.vendorSessionId, undefined);
   assert.equal(forked.session.messages.length, 3);
   assert.notEqual(forked.session.messages[0]?.id, "u1");
   assert.equal(forked.session.messages[0]?.text, "first");
   assert.equal(source.vendorSessionId, "keep-original");
   assert.equal(forkTitle("Fork of Login Fix"), "Fork of Login Fix");
+  const isolated = forkChat([source], "sess_src", "a1", "sess_wt", {
+    environment: { kind: "worktree", path: "C:\\wt\\sess_wt", gitRoot: "C:\\repo", head: "abc" },
+  });
+  assert.equal(isolated?.session.environment?.kind, "worktree");
+  if (isolated?.session.environment?.kind === "worktree") {
+    assert.equal(isolated.session.environment.path, "C:\\wt\\sess_wt");
+    assert.equal(isolated.session.environment.gitRoot, "C:\\repo");
+  }
+  const layered = nestProjectChats([source, forked.session]);
+  assert.equal(layered.length, 1);
+  assert.equal(layered[0]?.id, "sess_src");
+  assert.equal(layered[0]?.workers[0]?.id, "sess_fork");
+  const orphaned = nestProjectChats([forked.session]);
+  assert.equal(orphaned.length, 1);
+  assert.equal(orphaned[0]?.id, "sess_fork");
+  assert.equal(deskRoleOf(forked.session), "orchestrator");
+  assert.equal(isHiddenSession(forked.session), false);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(pane, /Copy/);
   assert.match(pane, /Fork/);
   const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
   assert.match(row, /Fork chat/);
+  const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSrc, /const forked = forkChat[\s\S]*ensureWorktree/);
+  const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
+  assert.match(sidebar, /active\.parentId/);
 });
 
 test("rewindToUserMessage keeps earlier turns and drops everything after the edit", () => {
@@ -538,6 +585,53 @@ test("rewindToUserMessage keeps earlier turns and drops everything after the edi
   assert.match(meter, /context-pop/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /\.context-pop\s*\{[\s\S]*position:\s*fixed/);
+});
+
+test("sidebar last-talked clock uses the latest user prompt, not later assistant turns", () => {
+  const now = new Date(2026, 7, 17, 12, 0, 0).getTime();
+  const empty: Pick<Session, "messages"> = { messages: [] };
+  const assistantOnly: Pick<Session, "messages"> = {
+    messages: [{ id: "a1", role: "assistant", text: "ready", createdAt: now }],
+  };
+  const talked: Pick<Session, "messages"> = {
+    messages: [
+      { id: "u1", role: "user", text: "first", createdAt: new Date(2026, 7, 16, 9, 0, 0).getTime() },
+      { id: "a1", role: "assistant", text: "one", createdAt: new Date(2026, 7, 16, 9, 1, 0).getTime() },
+      { id: "u2", role: "user", text: "second", createdAt: new Date(2026, 7, 17, 0, 18, 0).getTime() },
+      { id: "a2", role: "assistant", text: "two", createdAt: new Date(2026, 7, 17, 0, 19, 0).getTime() },
+    ],
+  };
+  assert.equal(lastTalkedAt(empty), undefined);
+  assert.equal(lastTalkedAt(assistantOnly), undefined);
+  assert.equal(lastTalkedAt(talked), new Date(2026, 7, 17, 0, 18, 0).getTime());
+  assert.equal(formatLastTalked(lastTalkedAt(talked), now), "12:18");
+  assert.equal(formatLastTalked(new Date(2026, 7, 17, 15, 5, 0).getTime(), now), "3:05");
+  assert.equal(formatLastTalked(new Date(2026, 7, 16, 23, 59, 0).getTime(), now), "Yesterday");
+  assert.equal(formatLastTalked(new Date(2026, 7, 10, 9, 0, 0).getTime(), now), "Aug 10");
+  assert.equal(formatLastTalked(new Date(2025, 7, 16, 9, 0, 0).getTime(), now), "Aug 16, 2025");
+  assert.equal(formatLastTalked(undefined, now), "");
+  const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
+  assert.match(row, /row-talked/);
+  assert.match(row, /TimeStamp/);
+  assert.doesNotMatch(row, /row-headline/);
+  const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
+  assert.match(userTurn, /TimeStamp/);
+  assert.match(userTurn, /message\.createdAt/);
+  assert.ok(userTurn.indexOf("<TimeStamp") < userTurn.indexOf('<div className="say">'));
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.doesNotMatch(pane, /TimeStamp/);
+  assert.match(pane, /turn-who/);
+  const thread = readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8");
+  assert.doesNotMatch(thread, /TimeStamp/);
+  const popout = readFileSync(path.join(ROOT, "src", "ui", "WorkPopout.tsx"), "utf8");
+  assert.match(popout, /TimeStamp/);
+  const stamp = readFileSync(path.join(ROOT, "src", "ui", "TimeStamp.tsx"), "utf8");
+  assert.match(stamp, /formatLastTalked/);
+  assert.match(stamp, /<time/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.row-talked\s*\{/);
+  assert.match(css, /\.turn-stamp\s*\{/);
+  assert.match(css, /\.work-pop > summary \.turn-stamp/);
 });
 
 test("dropped images become ACP image blocks and stay on the user turn", () => {
@@ -1218,6 +1312,61 @@ test("parseGrokUsage reads ACP usage_update and token fields", () => {
   if (contextMeter.kind !== "usage") throw new Error("expected usage");
   assert.equal(contextMeter.usage.inputTokens, 0);
   assert.equal(contextMeter.usage.contextUsed, 525000);
+  const cursorNamed = parseGrokUsage({ promptTokens: 40, completionTokens: 12 });
+  assert.equal(cursorNamed?.inputTokens, 40);
+  assert.equal(cursorNamed?.outputTokens, 12);
+});
+
+test("estimateTurnTokens covers Cursor turns that omit billed usage", () => {
+  const estimated = estimateTurnTokens("hello there", "pong");
+  assert.ok(estimated.inputTokens > 0);
+  assert.ok(estimated.outputTokens > 0);
+  assert.deepEqual(estimateTurnTokens("", ""), { inputTokens: 0, outputTokens: 0 });
+});
+
+test("normalizeUsage keeps Cursor composer events and their lane", () => {
+  const hydrated = normalizeUsage([
+    {
+      id: "use_cursor_keep",
+      at: 10,
+      provider: "cursor",
+      model: "composer-2.5",
+      lane: "cursor-models",
+      inputTokens: 12,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ]);
+  assert.equal(hydrated.length, 1);
+  assert.equal(hydrated[0].provider, "cursor");
+  assert.equal(hydrated[0].inputTokens, 12);
+  assert.equal(hydrated[0].outputTokens, 4);
+  assert.equal(hydrated[0].lane, "cursor-models");
+});
+
+test("backfillCursorUsage estimates missing Composer turns", () => {
+  const session = {
+    id: "sess_cursor_gap",
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    projectId: "proj_1",
+    messages: [
+      { role: "user" as const, text: "hello there", createdAt: 1 },
+      { role: "assistant" as const, text: "pong from composer", createdAt: 2 },
+      { role: "user" as const, text: "again please", createdAt: 3 },
+      { role: "assistant" as const, text: "pong two", createdAt: 4 },
+    ],
+  };
+  const first = backfillCursorUsage([session], []);
+  assert.equal(first.length, 2);
+  assert.ok(first.every((event) => event.provider === "cursor" && event.lane === "cursor-models"));
+  assert.ok(first[0].inputTokens > 0 && first[0].outputTokens > 0);
+  const once = backfillCursorUsage([session], first);
+  assert.equal(once.length, 0);
+  const partial = backfillCursorUsage([session], [first[1]]);
+  assert.equal(partial.length, 1);
+  assert.equal(partial[0].id, first[0].id);
 });
 
 test("collapseInflatedUsage drops used-as-input snapshots and duplicate finals", () => {
@@ -1588,6 +1737,26 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(dumped?.status, "completed");
   assert.equal(dumped?.detail, "");
 
+  const cursorWrite = extractToolEvent({
+    sessionUpdate: "tool_call",
+    toolCallId: "edit_file_1",
+    title: "Edit File",
+    status: "completed",
+    rawInput: { file_path: "nothing.md" },
+  });
+  assert.equal(cursorWrite?.title, "Edit File");
+  assert.equal(cursorWrite?.detail, "nothing.md");
+  assert.equal(
+    extractToolEvent({
+      sessionUpdate: "tool_call",
+      toolCallId: "edit_file_2",
+      title: "Edit File",
+      status: "completed",
+      locations: [{ path: path.join("C:", "proj", "another-one.md") }],
+    })?.detail,
+    path.join("C:", "proj", "another-one.md"),
+  );
+
   const rows = upsertToolMessage(
     upsertToolMessage([], started.tool, 1),
     { toolCallId: "call_1", title: "", status: dumped!.status, detail: dumped!.detail },
@@ -1597,6 +1766,21 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(rows[0].kind, "tool");
   assert.equal(rows[0].text, "Read · completed — src/main.rs");
   assert.match(formatToolLine("Read", "in_progress", "src/main.rs"), /Read · in_progress — src\/main\.rs/);
+  assert.match(
+    formatToolLine("Edit", "completed", "C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md"),
+    /nothing\.md/,
+  );
+  const keptPath = upsertToolMessage(
+    [],
+    {
+      toolCallId: "edit:C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md",
+      title: "Edit",
+      status: "completed",
+      detail: "C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md",
+    },
+    3,
+  );
+  assert.match(keptPath[0]?.text ?? "", /nothing\.md/);
   assert.equal(formatToolLine("Read", "completed", "a".repeat(400)), "Read · completed");
   assert.match(collapseToolText(`Read · completed — ${"x".repeat(500)}`, "completed"), /^Read · completed$/);
   assert.match(
@@ -2400,12 +2584,26 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   assert.equal(autoTitleForSend(named, "thanks"), undefined);
 });
 
+test("typing outside an input focuses the composer", () => {
+  assert.equal(isComposerTypeToFocus({ key: "h", ctrlKey: false, metaKey: false, altKey: false }), true);
+  assert.equal(isComposerTypeToFocus({ key: "/", ctrlKey: false, metaKey: false, altKey: false }), true);
+  assert.equal(isComposerTypeToFocus({ key: " ", ctrlKey: false, metaKey: false, altKey: false }), true);
+  assert.equal(isComposerTypeToFocus({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false }), false);
+  assert.equal(isComposerTypeToFocus({ key: "h", ctrlKey: true, metaKey: false, altKey: false }), false);
+  assert.equal(isComposerTypeToFocus({ key: "v", ctrlKey: false, metaKey: true, altKey: false }), false);
+});
+
 test("session setup is a compact right-side model and access inspector", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  assert.match(composer, /isComposerTypeToFocus/);
+  assert.match(composer, /document.addEventListener\("keydown", onKey, true\)/);
+  assert.match(composer, /data-composer-field/);
+  assert.doesNotMatch(composer, /el\.focus\(\);\s*\}, \[sessionId\]/);
   assert.match(pane, /SessionSetup/);
   assert.match(pane, /session-header slim/);
+  assert.doesNotMatch(pane, /data-composer-field/);
   assert.doesNotMatch(pane, /mode-seg/);
   assert.match(setup, /Chat settings/);
   assert.match(setup, /vendorTidePercent/);
@@ -2543,6 +2741,7 @@ test("context ring opens this-chat stats instead of the Usage page", () => {
   assert.match(meter, /shownUsed/);
   assert.match(meter, /useAnimatedNumber/);
   assert.match(meter, /strokeDashoffset/);
+  assert.match(meter, /--desk-ink/);
   assert.doesNotMatch(meter, /Estimated from this chat/);
   assert.doesNotMatch(meter, /until a Grok turn is live/);
   assert.doesNotMatch(meter, /Live breakdown from this Grok session/);
@@ -2989,7 +3188,17 @@ test("move-chat and delete desk tools hit the live hook", async () => {
 
 test("project home lists edited files from write tools, not Choose a brain", () => {
   assert.equal(isWriteToolTitle("Write"), true);
+  assert.equal(isWriteToolTitle("Created hello.md"), true);
+  assert.equal(writeChangeKind("Write"), "created");
+  assert.equal(writeChangeKind("Created hello.md"), "created");
+  assert.equal(writeChangeKind("Edit file"), "edited");
+  assert.equal(writeChangeKind("Edit File"), "edited");
+  assert.equal(writeChangeKind("Edit File", "Creating a simple placeholder markdown file."), "created");
+  assert.equal(writeChangeKind("Edit", "Created `another-one.md` in the project folder."), "edited");
   assert.equal(isWriteToolTitle("Edit file"), true);
+  assert.equal(isWriteToolTitle("Edit File"), true);
+  assert.equal(pathFromNearbyWrite("Created a minimal markdown file named nothing.md."), "nothing.md");
+  assert.equal(pathFromNearbyWrite("Created `another-one.md` in the project folder."), "another-one.md");
   assert.equal(isWriteToolTitle("Read"), false);
   assert.equal(isWriteToolTitle("Applying patch"), true);
   assert.equal(isWriteToolTitle("apply_patch · completed"), true);
@@ -3109,6 +3318,19 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     ),
     true,
   );
+  const prior = { "src/foo.ts": { added: 12, deleted: 3 } };
+  assert.deepEqual(holdEditStats(prior, {}, ["src/foo.ts"]), prior);
+  assert.deepEqual(holdEditStats(prior, null, ["src/foo.ts"]), prior);
+  assert.deepEqual(
+    holdEditStats(prior, { "C:/proj/src/foo.ts": { added: 18, deleted: 4 } }, ["C:/proj/src/foo.ts"]),
+    { "C:/proj/src/foo.ts": { added: 18, deleted: 4 } },
+  );
+  assert.deepEqual(statForPath(prior, "C:/proj/src/foo.ts"), { added: 12, deleted: 3 });
+  assert.deepEqual(
+    holdEditStats(prior, { "src/foo.ts": { added: 0, deleted: 0 } }, ["src/foo.ts"]),
+    { "src/foo.ts": { added: 0, deleted: 0 } },
+  );
+  assert.deepEqual(holdEditStats(prior, {}, []), prior);
   const twins = projectEdits(
     [
       {
@@ -3146,25 +3368,205 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(twins[0]?.name, "app-update.ts");
   assert.equal(edits[3].provider, "claude");
   assert.equal(formatEditWhen(noon - 86_400_000, noon), "yesterday");
+  const split = projectFileChanges(
+    [
+      {
+        id: "s5",
+        projectId: "p1",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "high",
+        title: "Split",
+        mode: "ask",
+        sandbox: "off",
+        status: "idle",
+        contextUsed: 0,
+        messages: [
+          { id: "c1", role: "system", kind: "tool", text: "Write · completed — notes.md", createdAt: noon },
+          { id: "c2", role: "system", kind: "tool", text: "Created · completed — hello.md", createdAt: noon + 1 },
+          { id: "e1", role: "system", kind: "tool", text: "Edit · completed — src/lib/usage.ts", createdAt: noon + 2 },
+        ],
+      },
+    ],
+    ["C:/proj"],
+  );
+  assert.deepEqual(split.created.map((item) => item.name).sort(), ["hello.md", "notes.md"]);
+  assert.equal(split.edited[0]?.name, "usage.ts");
+
+  const cursorCreatesSession = {
+    id: "s-cursor",
+    projectId: "p1",
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "medium" as const,
+    title: "Create another file please",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    status: "idle" as const,
+    contextUsed: 0,
+    messages: [
+      { id: "u1", role: "user" as const, text: "create a file", createdAt: noon },
+      {
+        id: "a1",
+        role: "assistant" as const,
+        text: "Created `nothing.md` in the project folder.",
+        createdAt: noon + 1,
+      },
+      {
+        id: "th1",
+        role: "system" as const,
+        kind: "thought" as const,
+        text: "Creating a simple placeholder markdown file.",
+        createdAt: noon + 2,
+      },
+      { id: "t1", role: "system" as const, kind: "tool" as const, text: "Edit File · completed", createdAt: noon + 3 },
+      {
+        id: "th2",
+        role: "system" as const,
+        kind: "thought" as const,
+        text: "Created a minimal markdown file named nothing.md.",
+        createdAt: noon + 4,
+      },
+      { id: "u2", role: "user" as const, text: "Create another file please", createdAt: noon + 5 },
+      {
+        id: "a2",
+        role: "assistant" as const,
+        text: "Created `another-one.md` in the project folder.",
+        createdAt: noon + 6,
+      },
+      { id: "t2", role: "system" as const, kind: "tool" as const, text: "Edit File · completed", createdAt: noon + 7 },
+    ],
+  };
+  const cursorCreates = projectFileChanges([cursorCreatesSession], [path.join("C:", "proj")]);
+  assert.deepEqual(cursorCreates.created.map((item) => item.name).sort(), ["another-one.md", "nothing.md"]);
+  assert.equal(cursorCreates.edited.length, 0);
+
+  const afterEdits = projectFileChanges(
+    [
+      {
+        ...cursorCreatesSession,
+        messages: [
+          ...cursorCreatesSession.messages,
+          {
+            id: "e-n",
+            role: "system",
+            kind: "tool",
+            text: `Edit · completed — ${path.join("C:", "proj", "nothing.md")}`,
+            createdAt: noon + 20,
+          },
+          {
+            id: "e-a",
+            role: "system",
+            kind: "tool",
+            text: `Edit · completed — ${path.join("C:", "proj", "another-one.md")}`,
+            createdAt: noon + 21,
+          },
+        ],
+      },
+    ],
+    [path.join("C:", "proj")],
+  );
+  assert.equal(afterEdits.created.length, 0);
+  assert.deepEqual(afterEdits.edited.map((item) => item.name).sort(), ["another-one.md", "nothing.md"]);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "record-write"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /\? "Edit" : "Write"/);
 
   const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
   assert.match(home, /Project/);
-  assert.match(home, /Edited/);
-  assert.match(home, /projectEdits/);
-  assert.match(home, /FileReview/);
+  assert.match(home, /projectFileChanges/);
+  assert.match(home, /FileViewer/);
   assert.match(home, /EditedList/);
   assert.match(home, /editStats/);
+  assert.match(home, /holdEditStats/);
+  assert.match(home, /label="Changes"/);
+  assert.match(home, /onDismiss=\{dismissFile\}/);
+  assert.match(home, /sameEditPath/);
+  assert.match(home, /session-file/);
+  assert.match(home, /fileOut/);
+  assert.match(home, /closeFilePane/);
+  assert.match(home, /has-file/);
+  assert.match(home, /FILE_PANE/);
+  assert.match(home, /Resize file pane/);
+  assert.match(home, /picker project-home project-overview/);
+  assert.match(home, /project-home-shell/);
+  assert.doesNotMatch(home, /showLineStats=\{false\}/);
+  assert.doesNotMatch(home, /FileReview/);
+  assert.doesNotMatch(home, /project-home-pane/);
+  assert.doesNotMatch(home, /closeProjectHome/);
+  assert.doesNotMatch(home, /PROJECT_PANE/);
+  const app = readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8");
+  assert.match(app, /surface === "project-home"/);
+  assert.doesNotMatch(app, /has-project-home/);
+  assert.doesNotMatch(app, /projectHomeOpen/);
+  const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSrc, /const selectProject = useCallback/);
+  assert.doesNotMatch(storeSrc, /projectHomeOpen/);
+  assert.doesNotMatch(storeSrc, /closeProjectHome/);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(pane, /EditedList/);
-  assert.match(pane, /FileReview/);
+  assert.match(pane, /FileViewer/);
+  assert.match(pane, /session-file/);
+  assert.match(pane, /fileOut/);
+  assert.match(pane, /closeFilePane/);
+  assert.match(pane, /has-file/);
+  assert.match(pane, /FILE_PANE/);
+  assert.match(pane, /Resize file pane/);
   assert.match(pane, /projectEdits\(\[session\]/);
+  assert.match(pane, /sameEditPath/);
   assert.match(pane, /\{project \? \(/);
   assert.match(pane, /project && terminalOpen && cwd/);
-  assert.match(pane, /file-review overlay|overlay/);
+  assert.doesNotMatch(pane, /FileReview/);
+  assert.doesNotMatch(pane, /overlay/);
   assert.doesNotMatch(pane, /if \(open\) \{\s*return \(/);
   assert.match(pane, /compact/);
   assert.match(pane, /session-edits/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /edited-toggle/);
+  assert.match(pane, /session-edits-slot/);
+  assert.match(pane, /editsBarOpen/);
+  assert.match(pane, /holdEditStats/);
+  assert.match(pane, /heldEditsRef/);
+  assert.match(pane, /hiddenByChat/);
+  assert.match(pane, /label="Changes"/);
+  assert.match(pane, /onDismiss=\{dismissFile\}/);
+  assert.doesNotMatch(pane, /setStats\(\{\}\);\s*return;/);
+  assert.doesNotMatch(pane, /editsHidden/);
+  assert.doesNotMatch(pane, /label="Created"/);
+  assert.doesNotMatch(pane, /onClose=\{\(\) => setEditsHidden/);
+  const editedList = readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8");
+  assert.match(editedList, /edited-toggle/);
+  assert.match(editedList, /startOpen/);
+  assert.match(editedList, /showLineStats/);
+  assert.match(editedList, /label = "Edited"/);
+  assert.match(editedList, /file-kind/);
+  assert.match(editedList, /Created/);
+  assert.match(editedList, /Edited/);
+  assert.match(editedList, /onDismiss\?: \(file: ProjectEdit\) => void/);
+  assert.match(editedList, /file-close-x/);
+  assert.match(editedList, /edited-files-slot/);
+  assert.match(editedList, /Dismiss \$\{item\.name\}/);
+  assert.match(editedList, /holdEditStats/);
+  assert.match(editedList, /statForPath/);
+  assert.match(editedList, /editPathKey\(item\.path\)/);
+  assert.doesNotMatch(editedList, /onClose\?: \(\) => void/);
+  assert.match(editedList, /compact && edits\.length === 0/);
+  assert.match(editedList, /DiffStat/);
+  const viewer = readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8");
+  assert.match(viewer, /fileDiff/);
+  assert.match(viewer, /diff-line/);
+  assert.match(viewer, /DiffStat/);
+  assert.match(viewer, /sameEditPath/);
+  assert.match(viewer, /pathChanged/);
+  assert.match(viewer, /File not found/);
+  assert.match(viewer, /Escape/);
+  assert.doesNotMatch(viewer, /aria-label="Close"/);
+  assert.doesNotMatch(viewer, /file-close-x/);
+  assert.doesNotMatch(viewer, />Close</);
+  const homeCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(homeCss, /\.file-viewer/);
+  assert.match(homeCss, /\.file-close-x/);
+  assert.match(homeCss, /\.project-home-shell/);
+  assert.match(homeCss, /\.project-overview::-webkit-scrollbar-track/);
+  assert.doesNotMatch(homeCss, /\.project-home-pane/);
+  assert.doesNotMatch(homeCss, /\.main\.has-project-home/);
   const review = readFileSync(path.join(ROOT, "src", "ui", "FileReview.tsx"), "utf8");
   assert.match(review, /Source/);
   assert.match(review, /Diff/);
@@ -3184,24 +3586,58 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(review, /buildFileDiff/);
   assert.match(review, /sameEditPath/);
   assert.match(review, /mergeEdits\(files/);
+  assert.match(review, /DiffStat/);
+  assert.match(review, /statForPath/);
   assert.doesNotMatch(review, /\[file\.path, roots\]/);
+  const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
+  assert.match(diffStat, /diff-add/);
+  assert.match(diffStat, /diff-del/);
+  assert.match(diffStat, /requestAnimationFrame/);
+  assert.match(diffStat, /COUNT_MS/);
   assert.match(pane, /fileRoots = useMemo/);
-  assert.match(pane, /mergeEdits\(open \? \[open\]/);
   assert.match(pane, /fileRootKey/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.diff-line\.add/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.file-review-code/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.file-review\.overlay/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session-file/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session\.has-file/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
-  const overlayZ = Number(css.match(/\.file-review\.overlay\s*\{[^}]*z-index:\s*(\d+)/)?.[1] ?? 0);
-  const headerZ = Number(css.match(/\.session-header\s*\{[^}]*z-index:\s*(\d+)/)?.[1] ?? 0);
-  const composerZ = Number(css.match(/\.composer-wrap\s*\{[^}]*z-index:\s*(\d+)/)?.[1] ?? 0);
-  assert.ok(overlayZ > headerZ, `overlay ${overlayZ} should beat header ${headerZ}`);
-  assert.ok(overlayZ > composerZ, `overlay ${overlayZ} should beat composer ${composerZ}`);
+  const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
+  const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(sessionEdits, /padding:\s*0 48px;/);
+  assert.doesNotMatch(sessionEdits, /padding:\s*0 48px \d+px/);
+  assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
+  assert.match(composerWrap, /padding:\s*8px 48px 22px/);
+  assert.match(css, /\.session-edits-slot/);
+  assert.match(css, /grid-template-rows:\s*0fr/);
+  const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileClose, /width:\s*22px/);
+  assert.match(fileClose, /height:\s*22px/);
+  assert.match(fileClose, /aspect-ratio:\s*1/);
+  assert.match(fileClose, /font-size:\s*0/);
+  assert.match(css, /\.file-close-x::before/);
+  const filePane = css.match(/\.session-file\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(filePane, /border-left/);
+  assert.match(filePane, /file-pane-in/);
+  assert.match(filePane, /transform-origin:\s*top right/);
+  assert.doesNotMatch(filePane, /position:\s*absolute/);
+  assert.doesNotMatch(filePane, /inset:\s*0/);
+  assert.match(css, /@keyframes file-pane-in/);
+  assert.match(css, /@keyframes file-pane-out/);
+  assert.match(css, /translateX\(20px\)/);
+  assert.match(css.match(/@keyframes file-pane-in\s*\{[\s\S]*?\n\}/)?.[0] ?? "", /max-width:\s*0/);
+  assert.doesNotMatch(css.match(/@keyframes file-pane-in\s*\{[\s\S]*?\n\}/)?.[0] ?? "", /bounce|translateY/);
+  assert.match(css.match(/@keyframes file-pane-out\s*\{[\s\S]*?\n\}/)?.[0] ?? "", /max-width:\s*0/);
+  assert.doesNotMatch(css, /\.session-file \.file-review-modes/);
+  assert.doesNotMatch(css, /\.session-file \.file-close-x/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.file-review\.overlay/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:file-diff/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:read-file/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:resolve-file/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /fileDiff/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /readSourceFile/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /resolveFile/);
-  assert.match(home, /empty="No edits\."/);
+  assert.doesNotMatch(home, /No created or edited files/);
+  assert.doesNotMatch(home, /No references/);
   assert.match(home, /archiveProject/);
   assert.match(home, /deleteProject/);
   assert.match(home, /Move chats to Chats/);
@@ -3228,6 +3664,26 @@ test("delete project can keep chats in the loose list or remove them", () => {
   assert.equal(kept.length, 3);
   const gone = applyProjectChatFate(sessions, project.id, "remove");
   assert.deepEqual(gone.map((item) => item.id), ["loose"]);
+});
+
+test("diff counts ease from the last shown integer toward the new total", () => {
+  assert.equal(COUNT_MS, 320);
+  assert.equal(countAt(0, 102, 0), 0);
+  assert.equal(countAt(0, 102, 1), 102);
+  assert.equal(countAt(5, 5, 0.4), 5);
+  assert.equal(countAt(100, 0, 1), 0);
+  assert.ok(countAt(0, 102, 0.5) > 51);
+  assert.ok(countAt(0, 102, 0.5) < 102);
+  const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
+  assert.match(diffStat, /diff-add/);
+  assert.match(diffStat, /diff-del/);
+  assert.match(diffStat, /requestAnimationFrame/);
+  assert.match(diffStat, /COUNT_MS/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /DiffStat/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /holdEditStats/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /DiffStat/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /pathChanged/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileReview.tsx"), "utf8"), /DiffStat/);
 });
 
 test("file diffs count added and deleted lines from real before/after text", () => {
@@ -3548,6 +4004,13 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(pane, /canPlaceInProject/);
   assert.match(pane, /PlaceInProject/);
   assert.match(css, /\.project-chats/);
+  assert.match(css, /\.project-chats-slot/);
+  assert.match(sidebar, /project-chats-slot/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /createPortal/);
+  assert.match(css, /\.chat-menu\.floating/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /chat-move-toggle/);
+  assert.match(css, /\.chat-move\.open \.twist::before/);
+  assert.match(css, /\.chat-move-panel/);
   assert.match(css, /\.place-project/);
   assert.match(sidebar, /Show more/);
   assert.match(sidebar, /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
@@ -3557,6 +4020,17 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   const rows = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id: String(id) }));
   assert.deepEqual(visibleProjectChats(rows, false).map((item) => item.id), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(visibleProjectChats(rows, false, "7").map((item) => item.id), ["1", "2", "3", "4", "7"]);
+  assert.deepEqual(
+    visibleProjectChats(
+      [
+        ...[1, 2, 3, 4, 5, 6].map((id) => ({ id: String(id), workers: [] as Array<{ id: string }> })),
+        { id: "7", workers: [{ id: "fork_7" }] },
+      ],
+      false,
+      "fork_7",
+    ).map((item) => item.id),
+    ["1", "2", "3", "4", "7"],
+  );
   assert.equal(visibleProjectChats(rows, true).length, 7);
   assert.equal(hiddenProjectChatCount(7, false), 2);
 });
@@ -3743,7 +4217,7 @@ test("stretchBuckets follows today week month and all", () => {
   assert.match(mixedFill ?? "", /conic-gradient\(from -90deg/);
   assert.match(mixedFill ?? "", /var\(--grok\)/);
   assert.match(mixedFill ?? "", /var\(--claude\)/);
-  assert.match(mixedFill ?? "", /62\.5%/);
+  assert.doesNotMatch(mixedFill ?? "", /62\.5%, \S+ 62\.5%/);
   assert.match(cellDotBackground(todayDots.columns[12][0], 160, "week") ?? "", /conic-gradient\(from -90deg/);
   assert.match(cellDotBackground(todayDots.columns[12][0], 160, "month") ?? "", /conic-gradient\(from -90deg/);
   assert.match(cellDotBackground(todayDots.columns[12][0], 160, "all") ?? "", /conic-gradient\(from -90deg/);
@@ -3820,7 +4294,25 @@ test("stretchBuckets follows today week month and all", () => {
   const year = stretchHeatmap([sample(noon)], "all", noon);
   assert.equal(year.rows, 7);
   assert.ok(year.columns.length >= 48);
-  assert.ok(year.labels.length >= 11);
+  assert.deepEqual(
+    year.labels.map((item) => item.text),
+    [
+      "September",
+      "October",
+      "November",
+      "December",
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+    ],
+  );
+  const busy = year.columns.flat().find((cell) => cell.tokens === 100);
+  assert.equal(busy?.label, "Aug 12");
 });
 
 test("UsagePane ships the Figma fuel-ring overview, not the old token line", () => {
@@ -3850,6 +4342,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   assert.match(pane, /className=\{`usage-dot/);
   assert.match(pane, /usage-dot-fill/);
   assert.match(css, /\.usage-dot-fill/);
+  assert.match(css, /\.usage-dot\.ink\.pie \{[\s\S]*?background: transparent/);
   assert.doesNotMatch(pane, /label="Cache"/);
   assert.doesNotMatch(pane, /label="Context"/);
   assert.match(pane, /shortModelName/);
@@ -3976,6 +4469,228 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   assert.match(pane, /window\.innerWidth/);
   assert.match(pane, /deskUsageCards/);
   assert.match(pane, /dense/);
+});
+
+test("Profile horse fills with colors of bots you have used", () => {
+  const native = profileHorseInks([], normalizeSettings({}));
+  assert.deepEqual(
+    native.map((ink) => ink.color),
+    [...HORSE_NATIVE_INKS],
+  );
+  assert.equal(profileHorseTip(native).title, "Your Workhorse");
+  assert.match(profileHorseTip(native).blurb, /native mark/);
+  assert.deepEqual(profileHorseTip(native).parts, []);
+  assert.equal(profileHorseTip([]).title, "Your Workhorse");
+
+  const painted = normalizeSettings({
+    llms: {
+      grok: { connected: true, color: "#ff9f0a" },
+      claude: { connected: true, color: "#c96442" },
+    },
+    customBots: [
+      {
+        id: "bot_minimax",
+        name: "MiniMax",
+        color: "#30d158",
+        baseUrl: "https://example.com",
+        model: "MiniMax-M3",
+        apiKey: "k",
+        api: "anthropic-messages",
+        contextWindow: 200_000,
+        createdAt: 1,
+      },
+    ],
+  });
+  const inks = profileHorseInks(
+    [
+      {
+        id: "u1",
+        at: 1,
+        provider: "grok",
+        model: "grok-4.6",
+        inputTokens: 80,
+        outputTokens: 20,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u2",
+        at: 2,
+        provider: "custom",
+        customBotId: "bot_minimax",
+        model: "MiniMax-M3",
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u3",
+        at: 3,
+        provider: "cursor",
+        model: "composer-2.5",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    painted,
+  );
+  assert.deepEqual(
+    inks.map((ink) => ({ label: ink.label, color: ink.color })),
+    [
+      { label: "Grok", color: "#ff9f0a" },
+      { label: "MiniMax", color: "#30d158" },
+    ],
+  );
+  assert.equal(inks[0].share, 100 / 112);
+  assert.equal(inks[1].share, 12 / 112);
+  const grokMiniBlobs = profileHorseBlobs(inks);
+  assert.equal(grokMiniBlobs.length, HORSE_BLOB_COUNT);
+  const grokMiniColors = new Set(grokMiniBlobs.map((blob) => blob.color));
+  assert.equal(grokMiniColors.has("#ff9f0a"), true);
+  assert.equal(grokMiniColors.has("#30d158"), true);
+  assert.ok(grokMiniBlobs.filter((blob) => blob.color === "#ff9f0a").length > grokMiniBlobs.filter((blob) => blob.color === "#30d158").length);
+  assert.ok(new Set(grokMiniBlobs.slice(0, 8).map((blob) => blob.color)).size > 1);
+  assert.ok(new Set(grokMiniBlobs.map((blob) => Math.round(blob.left))).size > 12);
+  assert.ok(new Set(grokMiniBlobs.map((blob) => blob.size)).size > 6);
+  assert.ok(grokMiniBlobs.every((blob) => Math.abs(blob.driftX) >= 5 && Math.abs(blob.driftX) <= 9));
+  assert.ok(grokMiniBlobs.every((blob) => blob.size <= 22));
+  assert.equal(profileHorseTip(inks).title, "Your Workhorse");
+  assert.match(profileHorseTip(inks).blurb, /bots you have called/);
+  assert.deepEqual(
+    profileHorseTip(inks).parts.map((part) => part.label),
+    ["Grok", "MiniMax"],
+  );
+
+  const unpainted = profileHorseInks(
+    [
+      {
+        id: "u4",
+        at: 4,
+        provider: "claude",
+        model: "claude-opus",
+        inputTokens: 5,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    painted,
+  );
+  assert.equal(unpainted[0].color, "#c96442");
+  assert.equal(unpainted[0].share, 1);
+
+  const pale = profileHorseInks(
+    [
+      {
+        id: "u5",
+        at: 5,
+        provider: "grok",
+        model: "grok-4.6",
+        inputTokens: 3_300_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u6",
+        at: 6,
+        provider: "custom",
+        customBotId: "bot_minimax",
+        model: "MiniMax-M3",
+        inputTokens: 4_100_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u7",
+        at: 7,
+        provider: "codex",
+        model: "gpt-5",
+        inputTokens: 95_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      {
+        id: "u8",
+        at: 8,
+        provider: "cursor",
+        model: "composer-2.5",
+        inputTokens: 1_500,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    normalizeSettings({
+      llms: { grok: { connected: true, color: "#f5f5f7" } },
+      customBots: painted.customBots,
+    }),
+  );
+  assert.equal(pale.find((ink) => ink.label === "Grok")?.color, "#f5f5f7");
+  assert.equal(pale.find((ink) => ink.label === "MiniMax")?.color, "#30d158");
+  const visual = profileHorseVisualInks(pale);
+  assert.deepEqual(
+    visual.map((ink) => ink.label),
+    ["MiniMax", "Grok", "Codex"],
+  );
+  assert.ok(visual[0].share > 0.5);
+  assert.equal(visual[0].color, "#30d158");
+  const paleBlobs = profileHorseBlobs(visual);
+  assert.equal(paleBlobs.length, HORSE_BLOB_COUNT);
+  assert.ok(
+    paleBlobs.filter((blob) => blob.color === "#30d158").length >
+      paleBlobs.filter((blob) => blob.color === "#f5f5f7").length,
+  );
+  assert.ok(new Set(paleBlobs.slice(0, 8).map((blob) => blob.color)).size > 1);
+  assert.equal(profileHorseTip(pale).parts.length, 4);
+
+  const desk = profileHorseInks(
+    [
+      {
+        id: "u9",
+        at: 9,
+        provider: "grok",
+        model: "grok-4.6",
+        inputTokens: 3_300_000,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    ],
+    normalizeSettings({ llms: { grok: { connected: true } } }),
+  );
+  assert.equal(desk[0].color, "var(--grok)");
+
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const horse = readFileSync(path.join(ROOT, "src", "ui", "ProfileHorse.tsx"), "utf8");
+  assert.match(settings, /ProfileHorse/);
+  assert.match(settings, /section === "profile"/);
+  assert.match(horse, /go7-workhorse-transparent/);
+  assert.match(horse, /profileHorseInks/);
+  assert.match(horse, /profileHorseBlobs/);
+  assert.match(horse, /profileHorseVisualInks/);
+  assert.match(horse, /profile-horse-blob/);
+  assert.match(horse, /--drift-x/);
+  assert.match(horse, /Your Workhorse/);
+  assert.match(horse, /profile-horse-tip/);
+  assert.match(horse, /profile-horse-wrap/);
+  assert.doesNotMatch(horse, /profile-horse-still/);
+  assert.doesNotMatch(horse, /profileHorseWash/);
+  assert.doesNotMatch(horse, /profileHorseMix/);
+  assert.doesNotMatch(horse, /profileHorseBubbleSize/);
+  assert.doesNotMatch(css, /plus-lighter/);
+  assert.doesNotMatch(css, /soft-light/);
+  assert.match(css, /@keyframes horse-drift/);
+  assert.match(css, /--drift-x/);
+  assert.match(css, /\.profile-horse/);
+  assert.match(css, /\.profile-horse-wrap:hover/);
+  assert.match(css, /mask-mode: alpha/);
 });
 
 test("Usage rings include every desk LLM even with no spend", () => {
@@ -4252,14 +4967,23 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /subagent-model/);
   assert.match(popout, /subagent-scope/);
   assert.match(popout, /planStep\.title/);
-  assert.match(popout, /finished/);
+  assert.match(popout, /data-kind="thought"/);
+  assert.match(popout, /data-kind="tool"/);
+  assert.match(popout, /work-step/);
+  assert.match(popout, /groupWorkRows/);
+  assert.match(popout, /isActiveWorkRow/);
+  assert.match(popout, /foldOpen/);
+  assert.match(popout, /turnLive/);
+  assert.match(popout, /1 \? "tool" : "tools"/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);
   assert.match(popout, /spawn_agent/);
   assert.match(popout, /info\?\.kind === "ask" \|\| info\?\.kind === "call"/);
   assert.match(popout, /Other chats/);
   assert.doesNotMatch(popout, /Copy work/);
-  assert.match(popout, /<MessageBody text=\{unsquashSentences\(thought\)\}/);
+  assert.match(popout, /unsquashSentences\(text\)/);
+  assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "AgentThreadPane.tsx"), "utf8"), /displayWorkSteps\(block, \{ live \}\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
   assert.doesNotMatch(
@@ -4976,6 +5700,25 @@ test("Goal state set pause resume clear maps to display actions", () => {
     goal: { status: "paused", objective: "keep going" },
   });
   assert.deepEqual(persisted?.goal, { status: "paused", objective: "keep going" });
+  const finishedDesk = normalizeSession({
+    id: "goal_done",
+    projectId: null,
+    provider: "custom",
+    model: "MiniMax-M3",
+    effort: "high",
+    title: "allocated",
+    mode: "always-approve",
+    sandbox: "off",
+    status: "idle",
+    messages: [],
+    contextUsed: 0,
+    goal: { status: "active", objective: "please allocate the Darkest Dungeon game, its a steam game" },
+  });
+  assert.equal(finishedDesk?.goal, undefined);
+  assert.equal(
+    goalDisplayForSession(finishedDesk),
+    null,
+  );
   const bar = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
   assert.match(bar, /goalDisplayForSession/);
   const grokIdleActive = {
@@ -4986,14 +5729,16 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.equal(goalDisplayForSession(grokIdleActive), null);
   assert.ok(goalDisplayForSession({ ...grokIdleActive, status: "running" }));
   assert.equal(goalDisplayForSession({ ...grokIdleActive, goal: { status: "paused", objective: "prove native /goal" } })?.status, "paused");
-  assert.ok(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }));
+  assert.equal(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }), null);
+  assert.ok(goalDisplayForSession({ provider: "custom", status: "running", goal: { status: "active", objective: "desk" } }));
   assert.equal(grokGoalAfterTurnIdle("grok", { status: "active", objective: "prove native /goal" }), undefined);
   assert.deepEqual(grokGoalAfterTurnIdle("grok", { status: "paused", objective: "prove native /goal" }), {
     status: "paused",
     objective: "prove native /goal",
   });
-  assert.deepEqual(grokGoalAfterTurnIdle("custom", { status: "active", objective: "desk" }), {
-    status: "active",
+  assert.equal(grokGoalAfterTurnIdle("custom", { status: "active", objective: "desk" }), undefined);
+  assert.deepEqual(grokGoalAfterTurnIdle("custom", { status: "paused", objective: "desk" }), {
+    status: "paused",
     objective: "desk",
   });
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /grokGoalAfterTurnIdle/);
@@ -5243,7 +5988,7 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
     goalDisplayForSession({ provider: "grok", status: "idle", goal: { status: "paused", objective: "x" } })?.status,
     "paused",
   );
-  assert.ok(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }));
+  assert.equal(goalDisplayForSession({ provider: "custom", status: "idle", goal: { status: "active", objective: "desk" } }), null);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8"), /goalDisplayForSession/);
 });
 
@@ -5746,7 +6491,240 @@ test("thought rows stay distinct from assistant text", () => {
   if (grouped[1].type === "reply") {
     assert.equal(grouped[1].assistant.text, "Hello");
     assert.equal(grouped[1].thoughts[0]?.text, "hmm");
+    assert.deepEqual(workStepKinds(grouped[1].steps), ["thought"]);
   }
+});
+
+function ingestClassifiedStream(updates: Record<string, unknown>[]): {
+  trace: string[];
+  events: WorkStreamEvent[];
+  messages: ChatMessage[];
+} {
+  const trace: string[] = [];
+  const events: WorkStreamEvent[] = [];
+  for (const update of updates) {
+    const classified = classifyAcpUpdate(update);
+    trace.push(classified.kind);
+    if (classified.kind === "thought" && classified.text) events.push({ kind: "thought", text: classified.text });
+    else if (classified.kind === "tool") events.push({ kind: "tool", tool: classified.tool });
+    else if (classified.kind === "message" && classified.text) events.push({ kind: "message", text: classified.text });
+    else if (classified.kind === "compact") events.push({ kind: "compact", compact: classified.compact });
+  }
+  return { trace, events, messages: playWorkEvents(events) };
+}
+
+function replyWork(messages: ChatMessage[], live = false) {
+  const blocks = groupTranscript([{ id: "u", role: "user" as const, text: "go", createdAt: 0 }, ...messages]);
+  const reply = blocks.find((block) => block.type === "reply");
+  if (reply?.type !== "reply") throw new Error("expected reply");
+  const display = displayWorkSteps(reply, { live });
+  return { reply, display, kinds: workStepKinds(reply.steps), shown: workStepKinds(display) };
+}
+
+test("work popout keeps think, tool, think in stream order across vendors", () => {
+  const grok = ingestClassifiedStream([
+    { sessionUpdate: "agent_thought_chunk", content: { text: "I'll list the chats first." } },
+    { sessionUpdate: "agent_thought_chunk", content: { text: " Then I can name the live ones." } },
+    { sessionUpdate: "tool_call", toolCallId: "t1", title: "List chats", status: "in_progress" },
+    { sessionUpdate: "tool_call_update", toolCallId: "t1", title: "List chats", status: "completed" },
+    { sessionUpdate: "agent_thought_chunk", content: { text: "Three are live. I'll answer now." } },
+    { sessionUpdate: "agent_message_chunk", content: { text: "Here are the three live chats." } },
+  ]);
+  assert.deepEqual(grok.trace, ["thought", "thought", "tool", "tool", "thought", "message"]);
+  const grokWork = replyWork(grok.messages);
+  assert.deepEqual(grokWork.kinds, ["thought", "tool", "thought"]);
+  assert.deepEqual(grokWork.shown, ["thought", "tool", "thought"]);
+  assert.match(grokWork.display[0]?.type === "thought" ? grokWork.display[0].text : "", /list the chats/);
+  assert.doesNotMatch(grokWork.display[0]?.type === "thought" ? grokWork.display[0].text : "", /Here are the three/);
+  assert.equal(grokWork.reply.tools.length, 1);
+  assert.match(grokWork.reply.assistant.text, /three live chats/);
+
+  const claude = ingestClassifiedStream([
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "thinking", thinking: "I should read chats.ts before answering." },
+    },
+    { sessionUpdate: "tool_call", toolCallId: "c1", title: "Read", status: "completed", path: "src/lib/chats.ts" },
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "thinking", thinking: "The helper already groups by project." },
+      _meta: { claudeCode: { kind: "thinking" } },
+    },
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Chats already group by project." } },
+  ]);
+  assert.deepEqual(claude.trace, ["thought", "tool", "thought", "message"]);
+  assert.deepEqual(replyWork(claude.messages).shown, ["thought", "tool", "thought"]);
+  assert.match(replyWork(claude.messages).reply.assistant.text, /group by project/);
+
+  const codex = ingestClassifiedStream([
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "I'll scan the sidebar chats." },
+      _meta: { codex: { phase: "commentary" } },
+    },
+    { sessionUpdate: "tool_call", toolCallId: "x1", title: "List chats", status: "completed" },
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "reasoning", text: "Two archived rows can stay folded." },
+    },
+    {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "There are more chats below those." },
+      _meta: { codex: { phase: "final_answer" } },
+    },
+  ]);
+  assert.deepEqual(codex.trace, ["thought", "tool", "thought", "message"]);
+  const codexWork = replyWork(codex.messages);
+  assert.deepEqual(codexWork.shown, ["thought", "tool", "thought"]);
+  assert.equal(codexWork.reply.assistant.text, "There are more chats below those.");
+  assert.equal(
+    classifyAcpUpdate({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "I'll scan the sidebar chats." },
+      _meta: { codex: { phase: "final_answer" } },
+    }).kind,
+    "message",
+  );
+
+  const tagged = peelThinkTags(
+    "<think>I'll search the D drive first.</think>\n\nFound two folders.\n\n<mm:think>The Godot one is canonical.</mm:think>\nAllocated Space Battle.",
+  );
+  const mini = playWorkEvents([
+    { kind: "thought", text: "I'll search the D drive first." },
+    { kind: "tool", tool: { toolCallId: "m1", title: "Glob", status: "completed", detail: "D:\\Godot" } },
+    { kind: "thought", text: "The Godot one is canonical." },
+    { kind: "message", text: "Allocated Space Battle." },
+  ]);
+  assert.match(tagged.thought, /search the D drive/);
+  assert.match(tagged.thought, /canonical/);
+  assert.match(tagged.body, /Allocated Space Battle/);
+  assert.doesNotMatch(tagged.body, /search the D drive/);
+  const miniWork = replyWork(mini);
+  assert.deepEqual(miniWork.shown, ["thought", "tool", "thought"]);
+  assert.equal(miniWork.reply.assistant.text, "Allocated Space Battle.");
+
+  const leaked = classifyAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text: "I'll inspect the workspace and then edit the file." },
+  });
+  assert.equal(leaked.kind, "message");
+  const liveLeak = replyWork(
+    playWorkEvents([{ kind: "message", text: "I'll inspect the workspace and then edit the file." }]),
+    true,
+  );
+  assert.deepEqual(liveLeak.shown, ["thought"]);
+  assert.equal(liveLeak.reply.assistant.text, "I'll inspect the workspace and then edit the file.");
+
+  const toolWins = classifyAcpUpdate({
+    sessionUpdate: "tool_call",
+    toolCallId: "mix",
+    title: "Read",
+    content: { type: "thinking", thinking: "should not become a thought" },
+  });
+  assert.equal(toolWins.kind, "tool");
+
+  const persisted = groupTranscript([
+    { id: "u", role: "user", text: "hi", createdAt: 1 },
+    { id: "a", role: "assistant", text: "Done.", thought: "Checking the process tree.", createdAt: 2 },
+    { id: "t1", role: "system", kind: "tool", toolCallId: "1", text: "Read · completed — guide.md", createdAt: 3 },
+  ]);
+  assert.equal(persisted[1]?.type, "reply");
+  if (persisted[1]?.type === "reply") {
+    assert.deepEqual(workStepKinds(persisted[1].steps), ["tool"]);
+    assert.deepEqual(workStepKinds(displayWorkSteps(persisted[1])), ["thought", "tool"]);
+  }
+
+  const liveTail = replyWork(
+    playWorkEvents([
+      { kind: "thought", text: "I'll read chats.ts." },
+      { kind: "tool", tool: { toolCallId: "r1", title: "Read", status: "completed", detail: "chats.ts" } },
+      { kind: "thought", text: "Now I can summarize." },
+    ]),
+    true,
+  );
+  assert.equal(liveTail.display.at(-1)?.type, "thought");
+  assert.equal(liveTail.shown.at(-1), "thought");
+  assert.equal(liveTail.shown[1], "tool");
+
+  const seven = displayWorkSteps(
+    groupTranscript(
+      playWorkEvents([
+        { kind: "thought", text: "I'll look around the desk first." },
+        { kind: "tool", tool: { toolCallId: "a", title: "List tools", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "b", title: "List bots", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "c", title: "List projects", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "d", title: "List chats", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "e", title: "List skills", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "f", title: "Probe Runtime", status: "completed", detail: "" } },
+        { kind: "tool", tool: { toolCallId: "g", title: "list_dir", status: "completed", detail: "" } },
+        { kind: "thought", text: "Now I can summarize the interface." },
+        { kind: "message", text: "Workhorse is a desktop agent shell." },
+      ]),
+    ).find((block) => block.type === "reply") as Extract<ReturnType<typeof groupTranscript>[number], { type: "reply" }>,
+  );
+  const folded = groupWorkRows(seven);
+  assert.deepEqual(
+    folded.map((row) => row.type),
+    ["thought", "tools", "tools", "tools", "tools", "tools", "tools", "tools", "thought"],
+  );
+  assert.equal(folded.filter((row) => row.type === "tools").length, 7);
+  assert.equal(isActiveWorkRow(folded, 0, true), false);
+  assert.equal(isActiveWorkRow(folded, 7, true), false);
+  assert.equal(isActiveWorkRow(folded, 8, true), true);
+  assert.equal(isActiveWorkRow(folded, 8, false), false);
+
+  const midTools = groupWorkRows(
+    displayWorkSteps(
+      groupTranscript(
+        playWorkEvents([
+          { kind: "thought", text: "I'll look around the desk first." },
+          { kind: "tool", tool: { toolCallId: "a", title: "List tools", status: "completed", detail: "" } },
+          { kind: "tool", tool: { toolCallId: "b", title: "List bots", status: "completed", detail: "" } },
+        ]),
+      ).find((block) => block.type === "reply") as Extract<ReturnType<typeof groupTranscript>[number], { type: "reply" }>,
+    ),
+  );
+  assert.deepEqual(midTools.map((row) => row.type), ["thought", "tools", "tools"]);
+  assert.equal(isActiveWorkRow(midTools, 0, true), false);
+  assert.equal(isActiveWorkRow(midTools, 1, true), false);
+  assert.equal(isActiveWorkRow(midTools, 2, true), true);
+
+  const hop = groupWorkRows([
+    { type: "thought", id: "th1", text: "Hop to Alpha." },
+    { type: "tool", message: { id: "t1", role: "system", kind: "tool", text: "List projects · completed", toolStatus: "completed", createdAt: 1 } },
+    { type: "thought", id: "th2", text: "Now Beta." },
+    { type: "tool", message: { id: "t2", role: "system", kind: "tool", text: "List chats · in_progress", toolStatus: "in_progress", createdAt: 2 } },
+  ]);
+  assert.deepEqual(hop.map((row) => row.type), ["thought", "tools", "thought", "tools"]);
+  assert.equal(isActiveWorkRow(hop, 1, true), false);
+  assert.equal(isActiveWorkRow(hop, 3, true), true);
+
+  const parallel = groupWorkRows([
+    {
+      type: "tool",
+      message: { id: "p1", role: "system", kind: "tool", text: "Read · in_progress", toolStatus: "in_progress", createdAt: 1 },
+    },
+    {
+      type: "tool",
+      message: { id: "p2", role: "system", kind: "tool", text: "Read · in_progress", toolStatus: "in_progress", createdAt: 2 },
+    },
+  ]);
+  assert.equal(parallel.length, 1);
+  assert.equal(parallel[0]?.type === "tools" ? parallel[0].items.length : 0, 2);
+
+  const afterHop = groupWorkRows([
+    {
+      type: "tool",
+      message: { id: "h1", role: "system", kind: "tool", text: "List projects · completed", toolStatus: "completed", createdAt: 1 },
+    },
+    {
+      type: "tool",
+      message: { id: "h2", role: "system", kind: "tool", text: "List chats · in_progress", toolStatus: "in_progress", createdAt: 2 },
+    },
+  ]);
+  assert.equal(afterHop.length, 2);
+  assert.equal(isActiveWorkRow(afterHop, 0, true), false);
+  assert.equal(isActiveWorkRow(afterHop, 1, true), true);
 });
 
 test("vendor model caches drive the picker so Sol is first and new slugs need no hand edit", () => {
@@ -6173,17 +7151,17 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.doesNotMatch(WORKER_SPAWN_ERROR, /MiniMax|M3/);
   assert.equal(nestedSpawnError([
     { id: "root" },
-    { id: "worker", parentId: "root" },
+    { id: "worker", parentId: "root", hidden: true },
   ], "worker"), null);
   assert.equal(nestedSpawnError([
     { id: "root" },
-    { id: "worker", parentId: "root" },
-    { id: "helper", parentId: "worker" },
+    { id: "worker", parentId: "root", hidden: true },
+    { id: "helper", parentId: "worker", hidden: true },
   ], "worker"), WORKER_SPAWN_ERROR);
   assert.equal(nestedSpawnError([
     { id: "root" },
-    { id: "worker", parentId: "root" },
-    { id: "helper", parentId: "worker" },
+    { id: "worker", parentId: "root", hidden: true },
+    { id: "helper", parentId: "worker", hidden: true },
   ], "helper"), WORKER_SPAWN_ERROR);
 
   const spawnOnly = admitSpawn({
@@ -6205,6 +7183,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   assert.equal(deskRoleOf({ parentId: "p", hidden: true }), "worker");
   assert.equal(deskRoleOf({ parentId: null }), "orchestrator");
+  assert.equal(deskRoleOf({ parentId: "p" }), "orchestrator");
 
   const { customHttpTools } = await import("../electron/custom-tools");
   const customToolset = customHttpTools();
@@ -6920,6 +7899,9 @@ test("side panes clamp and persist so you can drag them to size", () => {
   assert.equal(clampPaneWidth(400, THREAD_PANE), 400);
   assert.equal(clampPaneWidth(100, THREAD_PANE), THREAD_PANE.min);
   assert.equal(clampPaneWidth(800, THREAD_PANE), THREAD_PANE.max);
+  assert.equal(clampPaneWidth(400, FILE_PANE), 400);
+  assert.equal(clampPaneWidth(100, FILE_PANE), FILE_PANE.min);
+  assert.equal(clampPaneWidth(800, FILE_PANE), FILE_PANE.max);
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /sidebarWidth: clampPaneWidth/);

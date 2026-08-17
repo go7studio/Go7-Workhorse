@@ -50,8 +50,8 @@ export function App() {
           {surface === "settings" && <Settings />}
           {surface === "add-bot" && <AddBot />}
           {surface === "welcome" && <Welcome />}
-          {surface === "project-home" && <ProjectHome />}
           {surface === "session" && <SessionPane />}
+          {surface === "project-home" && <ProjectHome />}
         </main>
       </div>
       <PermissionCard />

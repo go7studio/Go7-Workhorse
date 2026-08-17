@@ -31,7 +31,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { imageMime } from "../src/lib/images";
 import { listDropFiles } from "./drop-files";
 import { grokSessionDirs, mediaFileCandidates } from "./media-src";
-import { findSourceFile, listGitChanges, readEditStats, readFileDiff } from "./project-diff";
+import { findSourceFile, listGitChanges, readEditStats, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
   deleteDeskSkill,
@@ -86,6 +86,9 @@ export const CLAUDE_TOKEN_ID = "claude-oauth-token";
 const CLAUDE_AUTH_SESSION = "auth:claude";
 
 export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
+
+/** Union of written file versions for the review. Survives later deletes of created lines. */
+const fileInstances = new Map<string, string>();
 
 // Electron development shells must never request access to the installed
 // app's Keychain item. The name also controls Electron Safe Storage's service.
@@ -678,9 +681,26 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle("project:file-diff", (_event, filePath: string, roots: string[] = []) => {
+  ipcMain.handle("project:file-diff", (_event, filePath: string, roots: string[] = [], created = false) => {
     if (typeof filePath !== "string" || !filePath.trim()) return null;
-    return readFileDiff(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : []);
+    return readFileDiff(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [], {
+      created: created === true,
+      instances: fileInstances,
+    });
+  });
+
+  ipcMain.handle("project:record-write", (_event, filePath: string, roots: string[] = []) => {
+    if (typeof filePath !== "string" || !filePath.trim()) return "";
+    return recordFileInstance(
+      filePath,
+      Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [],
+      { instances: fileInstances },
+    );
+  });
+
+  ipcMain.handle("project:read-file", (_event, filePath: string, roots: string[] = []) => {
+    if (typeof filePath !== "string" || !filePath.trim()) return null;
+    return readSourceText(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : []);
   });
 
   ipcMain.handle("project:git-changes", (_event, cwd: unknown) =>
@@ -712,10 +732,11 @@ app.whenReady().then(async () => {
     return findSourceFile(filePath, folders);
   });
 
-  ipcMain.handle("project:edit-stats", (_event, paths: string[] = [], roots: string[] = []) => {
+  ipcMain.handle("project:edit-stats", (_event, paths: string[] = [], roots: string[] = [], createdPaths: string[] = []) => {
     const files = Array.isArray(paths) ? paths.filter((item) => typeof item === "string") : [];
     const folders = Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [];
-    return readEditStats(files, folders);
+    const created = Array.isArray(createdPaths) ? createdPaths.filter((item) => typeof item === "string") : [];
+    return readEditStats(files, folders, { instances: fileInstances }, created);
   });
 
   ipcMain.handle("project:ensure-worktree", (_event, raw: unknown) => {

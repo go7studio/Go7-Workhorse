@@ -1,7 +1,14 @@
 import { contextWindowFor, modelsFor, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
 import { vendorLabel, vendorTint } from "./settings";
-import { cursorWatchKeyLabel, cursorWatchLane, cursorUsageLane, isCursorWatchKey, type CursorUsageLane, type CursorWatchKey } from "./cursor-lane";
+import {
+  cursorUsageLane,
+  cursorWatchKeyLabel,
+  cursorWatchLane,
+  isCursorWatchKey,
+  type CursorUsageLane,
+  type CursorWatchKey,
+} from "./cursor-lane";
 import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange } from "./types";
 
 export type UsageTotals = {
@@ -35,6 +42,94 @@ const EMPTY: UsageTotals = {
 
 export function eventTotal(event: UsageEvent): number {
   return event.inputTokens + event.outputTokens + event.cacheWriteTokens;
+}
+
+/** Fallback when a vendor turn reports no billed tokens. ~4 characters per token. */
+export function estimateTurnTokens(userText: string, assistantText: string): { inputTokens: number; outputTokens: number } {
+  const tokens = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return 0;
+    return Math.max(1, Math.round(trimmed.length / 4));
+  };
+  return { inputTokens: tokens(userText), outputTokens: tokens(assistantText) };
+}
+
+type CursorTurnMessage = {
+  role?: string;
+  text?: string;
+  createdAt?: number;
+};
+
+export function completedCursorTurns(
+  messages: CursorTurnMessage[],
+): Array<{ userText: string; assistantText: string; at: number }> {
+  const turns: Array<{ userText: string; assistantText: string; at: number }> = [];
+  let pending: { text: string; at: number } | undefined;
+  for (const message of messages) {
+    const text = (message.text ?? "").trim();
+    if (message.role === "user" && text) {
+      pending = { text, at: typeof message.createdAt === "number" ? message.createdAt : 0 };
+      continue;
+    }
+    if (message.role === "assistant" && text && pending) {
+      turns.push({
+        userText: pending.text,
+        assistantText: text,
+        at: typeof message.createdAt === "number" && message.createdAt > 0 ? message.createdAt : pending.at,
+      });
+      pending = undefined;
+    }
+  }
+  return turns;
+}
+
+function cursorLaneFromRecord(record: Record<string, unknown>, model: string): CursorUsageLane {
+  const lane = record.lane;
+  if (
+    lane === "cursor-models" ||
+    lane === "other-models" ||
+    lane === "auto-cost" ||
+    lane === "auto-routed" ||
+    lane === "unknown"
+  ) {
+    return lane;
+  }
+  return cursorUsageLane(model);
+}
+
+/** Fill in Cursor turns that ACP never billed, or that hydrate used to drop. */
+export function backfillCursorUsage(
+  sessions: Array<Pick<Session, "id" | "provider" | "model" | "projectId" | "messages">>,
+  usage: UsageEvent[],
+): UsageEvent[] {
+  const extras: UsageEvent[] = [];
+  for (const session of sessions) {
+    if (session.provider !== "cursor") continue;
+    const turns = completedCursorTurns(session.messages);
+    const have = usage.filter((event) => event.sessionId === session.id).length;
+    if (have >= turns.length) continue;
+    const missing = turns.slice(0, turns.length - have);
+    for (const [index, turn] of missing.entries()) {
+      const estimated = estimateTurnTokens(turn.userText, turn.assistantText);
+      if (!usageHasBilledTokens(estimated)) continue;
+      const id = `use_cursor_${session.id}_${index}`;
+      if (usage.some((event) => event.id === id) || extras.some((event) => event.id === id)) continue;
+      extras.push({
+        id,
+        at: turn.at || Date.now(),
+        provider: "cursor",
+        model: session.model,
+        projectId: session.projectId ?? undefined,
+        sessionId: session.id,
+        lane: cursorUsageLane(session.model),
+        inputTokens: estimated.inputTokens,
+        outputTokens: estimated.outputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+    }
+  }
+  return extras;
 }
 
 export function contextFromEvent(event: { inputTokens: number; cacheReadTokens?: number }): number {
@@ -621,6 +716,145 @@ export function vendorInk(provider: ProviderId, color?: string): string {
   return color && color.trim() ? color : `var(--${provider})`;
 }
 
+/** Sunset, magenta, violet, blue — the layers in the Workhorse mark. */
+export const HORSE_NATIVE_INKS = ["#fc561e", "#f0245d", "#6f21e7", "#2040e0"] as const;
+
+export type ProfileHorseInk = {
+  key: string;
+  label: string;
+  color: string;
+  tokens: number;
+  share: number;
+};
+
+function withHorseShares(inks: Array<Omit<ProfileHorseInk, "share">>): ProfileHorseInk[] {
+  const total = inks.reduce((sum, ink) => sum + ink.tokens, 0) || 1;
+  return inks.map((ink) => ({ ...ink, share: ink.tokens / total }));
+}
+
+/** Unique inks for bots that have billed usage. Empty means show the native mark. */
+export function profileHorseInks(
+  usage: UsageEvent[],
+  settings: {
+    customBots: CustomBot[];
+    llms: Settings["llms"];
+  },
+): ProfileHorseInk[] {
+  const bots = heatCellBots(usage, settings.customBots, {
+    grok: settings.llms.grok,
+    claude: settings.llms.claude,
+    codex: settings.llms.codex,
+    cursor: settings.llms.cursor,
+  });
+  if (bots.length === 0) {
+    return withHorseShares(
+      HORSE_NATIVE_INKS.map((color, index) => ({
+        key: `horse-${index}`,
+        label: "Workhorse",
+        color,
+        tokens: 1,
+      })),
+    );
+  }
+  return withHorseShares(
+    [...bots]
+      .sort((a, b) => b.tokens - a.tokens)
+      .map((bot) => ({
+        key: bot.key ? `bot:${bot.key}` : bot.provider,
+        label: bot.label,
+        color: vendorInk(bot.provider, bot.color),
+        tokens: bot.tokens,
+      })),
+  );
+}
+
+/** Keep 1% bots as a speck; drop true trace spend. */
+export function profileHorseVisualInks(inks: ProfileHorseInk[]): ProfileHorseInk[] {
+  const used = inks.filter((ink) => !ink.key.startsWith("horse-"));
+  if (used.length === 0) return inks;
+  const visible = used.filter((ink) => ink.share >= 0.01);
+  const source = visible.length > 0 ? visible : used.slice(0, 1);
+  return withHorseShares(
+    source.map((ink) => ({
+      key: ink.key,
+      label: ink.label,
+      color: ink.color,
+      tokens: ink.tokens,
+    })),
+  );
+}
+
+export const HORSE_BLOB_COUNT = 64;
+
+export type ProfileHorseBlob = {
+  key: string;
+  color: string;
+  left: number;
+  top: number;
+  size: number;
+  delay: number;
+  duration: number;
+  driftX: number;
+  driftY: number;
+};
+
+/** Irregular drifting blobs. Count follows share; colors stay themselves. */
+export function profileHorseBlobs(inks: ProfileHorseInk[], count = HORSE_BLOB_COUNT): ProfileHorseBlob[] {
+  if (inks.length === 0) return [];
+  const picks: ProfileHorseInk[] = [];
+  const errors = inks.map(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    let best = 0;
+    for (let slot = 0; slot < inks.length; slot += 1) {
+      errors[slot] += inks[slot].share;
+      if (errors[slot] > errors[best]) best = slot;
+    }
+    errors[best] -= 1;
+    picks.push(inks[best]);
+  }
+  return picks.map((ink, index) => {
+    const radius = Math.sqrt((index + 0.5) / count) * 44;
+    const angle = index * 2.399963229728653;
+    const left = Math.min(92, Math.max(8, 50 + Math.cos(angle) * radius + (((index * 0.6180339887) % 1) - 0.5) * 16));
+    const top = Math.min(92, Math.max(8, 50 + Math.sin(angle) * radius * 1.08 + (((index * 0.4142135623) % 1) - 0.5) * 16));
+    const signX = index % 2 === 0 ? 1 : -1;
+    const signY = index % 3 === 0 ? -1 : 1;
+    return {
+      key: `${ink.key}-${index}`,
+      color: ink.color,
+      left,
+      top,
+      size: 8 + ((index * 17) % 15),
+      delay: -((index * 0.73) % 11),
+      duration: 2.8 + ((index * 13) % 70) / 10,
+      driftX: signX * (5 + ((index * 11) % 16) * 0.25),
+      driftY: signY * (4.5 + ((index * 7) % 14) * 0.25),
+    };
+  });
+}
+
+export type ProfileHorseTip = {
+  title: "Your Workhorse";
+  blurb: string;
+  parts: ProfileHorseInk[];
+};
+
+export function profileHorseTip(inks: ProfileHorseInk[]): ProfileHorseTip {
+  const used = inks.filter((ink) => !ink.key.startsWith("horse-"));
+  if (used.length === 0) {
+    return {
+      title: "Your Workhorse",
+      blurb: "The native mark. It fills with the bots you spend tokens on.",
+      parts: [],
+    };
+  }
+  return {
+    title: "Your Workhorse",
+    blurb: "Made from the bots you have called.",
+    parts: used,
+  };
+}
+
 function pct(value: number): number {
   return Math.round(Math.min(100, Math.max(0, value)) * 100) / 100;
 }
@@ -640,12 +874,26 @@ function heatSlices(bots: HeatBot[]): HeatSlice[] {
   });
 }
 
+/** Mix at each slice seam, in percent of the circle. */
+const PIE_SEAM = (2 / 360) * 100;
+
+function seamFade(span: number, neighbor: number): number {
+  return Math.min(PIE_SEAM, Math.max(0, span) / 2, Math.max(0, neighbor) / 2);
+}
+
 function conicPie(slices: HeatSlice[]): string {
-  const stops = slices.map((slice) => `${slice.color} ${pct(slice.start)}% ${pct(slice.end)}%`);
+  if (slices.length === 0) return "";
+  if (slices.length === 1) return `${slices[0].color} 0% 100%`;
+  const spans = slices.map((slice) => Math.max(0, slice.end - slice.start));
+  const stops = slices.map((slice, index) => {
+    const fadeIn = seamFade(spans[index], spans[(index + slices.length - 1) % slices.length]);
+    const fadeOut = seamFade(spans[index], spans[(index + 1) % slices.length]);
+    return `${slice.color} ${pct(slice.start + fadeIn)}% ${pct(slice.end - fadeOut)}%`;
+  });
   return `conic-gradient(from -90deg, ${stops.join(", ")})`;
 }
 
-/** Solid clock pie for every This-stretch range. */
+/** Clock pie for every This-stretch range, with a hairline blend at each seam. */
 export function cellDotBackground(
   cell: Pick<HeatCell, "tokens" | "bots" | "pad">,
   _peak: number,
@@ -677,6 +925,20 @@ export type StretchHeatmap = {
 };
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTH_FULL = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 function mondayOnOrBefore(date: Date): Date {
   const monday = startOfDay(date.getTime());
@@ -745,7 +1007,7 @@ function weekGrid(
       );
     }
     if (cursor.getMonth() !== lastMonth && cursor.getTime() + 6 * 24 * 60 * 60 * 1000 >= start) {
-      labels.push({ text: MONTH_SHORT[cursor.getMonth()] ?? "", column });
+      labels.push({ text: MONTH_FULL[cursor.getMonth()] ?? "", column });
       lastMonth = cursor.getMonth();
     }
     columns.push(cells);
@@ -916,7 +1178,7 @@ export function deskPulseLines(input: {
   }));
   const today = rollup(events.filter((event) => inRange(event, "today", now)));
   const all = rollup(events);
-  const chats = input.sessions.filter((session) => !session.hidden && !session.parentId && !session.archivedAt).length;
+  const chats = input.sessions.filter((session) => !session.hidden && !session.archivedAt).length;
   const lines: DeskPulseLine[] = [];
   if (today.totalTokens > 0) lines.push({ id: "today", text: `${formatTokens(today.totalTokens)} today` });
   if (all.totalTokens > 0) lines.push({ id: "tokens", text: `${formatTokens(all.totalTokens)} tokens` });
@@ -1190,8 +1452,8 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       record.provider !== "grok" &&
       record.provider !== "claude" &&
       record.provider !== "codex" &&
-      record.provider !== "cursor" &&
-      record.provider !== "custom"
+      record.provider !== "custom" &&
+      record.provider !== "cursor"
     ) {
       continue;
     }
@@ -1210,6 +1472,7 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       projectId: typeof record.projectId === "string" ? record.projectId : undefined,
       sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
       customBotId: typeof record.customBotId === "string" && record.customBotId ? record.customBotId : undefined,
+      lane: record.provider === "cursor" ? cursorLaneFromRecord(record, record.model) : undefined,
       inputTokens,
       outputTokens,
       cacheReadTokens,

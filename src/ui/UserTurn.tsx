@@ -7,6 +7,7 @@ import type { ChatMessage } from "../lib/types";
 import { ImageZoom } from "./ImageZoom";
 import { MessageBody } from "./MessageBody";
 import { copyText } from "../lib/copy-text";
+import { TimeStamp } from "./TimeStamp";
 import { TurnActions } from "./TurnActions";
 
 export function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
@@ -88,41 +89,44 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
               ]
         }
       />
-      <div className="say">
-        {peer ? <span className="peer-from">From {peer.fromTitle}</span> : null}
-        {message.images && message.images.length > 0 && (
-          <div className="say-images">
-            {groupAttachments(message.images).map((group) =>
-              group.type === "folder" ? (
-                <span
-                  key={`folder:${group.name}`}
-                  className="say-file folder"
-                  title={`${group.name} · ${group.files.length} files`}
-                >
-                  {group.name}
-                  <em>
-                    {group.files.length} file{group.files.length === 1 ? "" : "s"}
-                  </em>
-                </span>
-              ) : isPicture(group.file) ? (
-                <ImageZoom key={group.file.id} className="say-image" src={imageSrc(group.file)} alt={group.file.name} />
-              ) : (
-                <span key={group.file.id} className="say-file" title={group.file.name}>
-                  {group.file.name}
-                  <em>{attachmentLabel(group.file)}</em>
-                </span>
-              ),
-            )}
-          </div>
-        )}
-        {goal ? (
-          <p className="command-line">
-            <span className="chat-command">{goal.name}</span>
-            {goal.rest}
-          </p>
-        ) : visible.trim() ? (
-          <MessageBody text={visible} />
-        ) : null}
+      <div className="say-stack">
+        <TimeStamp at={message.createdAt} />
+        <div className="say">
+          {peer ? <span className="peer-from">From {peer.fromTitle}</span> : null}
+          {message.images && message.images.length > 0 && (
+            <div className="say-images">
+              {groupAttachments(message.images).map((group) =>
+                group.type === "folder" ? (
+                  <span
+                    key={`folder:${group.name}`}
+                    className="say-file folder"
+                    title={`${group.name} · ${group.files.length} files`}
+                  >
+                    {group.name}
+                    <em>
+                      {group.files.length} file{group.files.length === 1 ? "" : "s"}
+                    </em>
+                  </span>
+                ) : isPicture(group.file) ? (
+                  <ImageZoom key={group.file.id} className="say-image" src={imageSrc(group.file)} alt={group.file.name} />
+                ) : (
+                  <span key={group.file.id} className="say-file" title={group.file.name}>
+                    {group.file.name}
+                    <em>{attachmentLabel(group.file)}</em>
+                  </span>
+                ),
+              )}
+            </div>
+          )}
+          {goal ? (
+            <p className="command-line">
+              <span className="chat-command">{goal.name}</span>
+              {goal.rest}
+            </p>
+          ) : visible.trim() ? (
+            <MessageBody text={visible} />
+          ) : null}
+        </div>
       </div>
     </article>
   );

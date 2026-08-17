@@ -32,7 +32,13 @@ export function WatchBanners({
     return evaluateWatchHold({
       session,
       settings: store.settings,
-      plans: { grok: store.grokPlan, codex: store.codexPlan, claude: store.claudePlan, custom: store.customPlans },
+      plans: {
+        grok: store.grokPlan,
+        codex: store.codexPlan,
+        claude: store.claudePlan,
+        cursor: store.cursorPlan,
+        custom: store.customPlans,
+      },
       permits: store.watchPermits,
       usage: store.usage,
       dayMarks: store.watchDayMarks,
@@ -43,6 +49,7 @@ export function WatchBanners({
     store.grokPlan,
     store.codexPlan,
     store.claudePlan,
+    store.cursorPlan,
     store.customPlans,
     store.watchPermits,
     store.usage,

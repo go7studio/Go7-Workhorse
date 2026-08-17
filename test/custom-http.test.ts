@@ -240,6 +240,68 @@ test("MiniMax stream splits thinking from text and keeps a leftover SSE event", 
   );
 });
 
+test("Anthropic thinking, tool use, and text stay on their own channels", () => {
+  const pending: { id?: string; name?: string; json: string; block?: string } = { json: "" };
+  const trace: Array<{ kind: string; text?: string; tool?: string }> = [];
+  const handlers = {
+    onThought: (text: string) => trace.push({ kind: "thought", text }),
+    onChunk: (text: string) => trace.push({ kind: "message", text }),
+    onToolUse: (tool: { name: string }) => trace.push({ kind: "tool", tool: tool.name }),
+  };
+
+  applyAnthropicEvent(
+    { type: "content_block_start", content_block: { type: "thinking", thinking: "" } },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent(
+    { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "I should list the chats first." } },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent({ type: "content_block_stop" }, handlers, pending);
+  applyAnthropicEvent(
+    {
+      type: "content_block_start",
+      content_block: { type: "tool_use", id: "tu-list", name: "list_chats", input: {} },
+    },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent({ type: "content_block_stop" }, handlers, pending);
+  applyAnthropicEvent(
+    { type: "content_block_start", content_block: { type: "thinking" } },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent(
+    { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "Three are live." } },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent({ type: "content_block_stop" }, handlers, pending);
+  applyAnthropicEvent(
+    { type: "content_block_start", content_block: { type: "text" } },
+    handlers,
+    pending,
+  );
+  applyAnthropicEvent(
+    { type: "content_block_delta", delta: { type: "text_delta", text: "Here are the three live chats." } },
+    handlers,
+    pending,
+  );
+
+  assert.deepEqual(
+    trace.map((item) => item.kind),
+    ["thought", "tool", "thought", "message"],
+  );
+  assert.equal(trace[0]?.text, "I should list the chats first.");
+  assert.equal(trace[1]?.tool, "list_chats");
+  assert.equal(trace[2]?.text, "Three are live.");
+  assert.equal(trace[3]?.text, "Here are the three live chats.");
+  assert.equal(pending.block, "text");
+});
+
 test("custom streams finish on Anthropic message_stop even when the socket stays open", async () => {
   let cancelled = false;
   const body = new ReadableStream<Uint8Array>({

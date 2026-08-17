@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { estimateChatContext, type ChatContextStats, type ContextCategory } from "../lib/context-stats";
 import {
   contextWindowFor,
@@ -121,6 +121,7 @@ export function ContextMeter({
   const windowSize = session
     ? contextWindowFor(session.provider, session.model, customWindow)
     : 0;
+  const ink = session ? deskInk(session, store.settings) : undefined;
   const estimate = useMemo(() => {
     if (!session) return null;
     return estimateChatContext({
@@ -206,7 +207,11 @@ export function ContextMeter({
   const empty = stats.used === 0 && stats.occupying.length === 0;
 
   return (
-    <div className={`context-meter-wrap ${session.provider}${compact ? " compact" : ""}`} ref={root}>
+    <div
+      className={`context-meter-wrap ${session.provider}${compact ? " compact" : ""}`}
+      style={ink ? ({ ["--desk-ink"]: ink } as CSSProperties) : undefined}
+      ref={root}
+    >
       <button
         type="button"
         className={`context-meter ${session.provider}`}

@@ -91,7 +91,6 @@ function Stretch({
   const box = useRef<HTMLDivElement>(null);
   const peak = heatmapPeak(shown);
   const max = peak?.tokens ?? 1;
-  const labelSlots = shown.columns.map((_, index) => shown.labels.find((item) => item.column === index)?.text ?? "");
   const [tip, setTip] = useState<{ cell: HeatCell; left: number; top: number; place: "above" | "below" } | null>(
     null,
   );
@@ -211,9 +210,16 @@ function Stretch({
         ))}
       </div>
       <div className="usage-dot-labels">
-        {labelSlots.map((text, index) => (
-          <span key={`label-${index}`}>{text}</span>
-        ))}
+        {shown.labels.map((item, index) => {
+          const next = shown.labels[index + 1];
+          const start = item.column + 1;
+          const end = next ? next.column + 1 : shown.columns.length + 1;
+          return (
+            <span key={`label-${item.column}-${item.text}`} style={{ gridColumn: `${start} / ${end}` }}>
+              {item.text}
+            </span>
+          );
+        })}
       </div>
       {tip && (
         <div className={`usage-tip ${tip.place}`} style={{ left: tip.left, top: tip.top }}>
@@ -533,11 +539,13 @@ export function UsagePane({
               <div className="usage-limits-head">
                 <span className="sheet-label">Plan usage limits</span>
                 <div className="usage-limits-tools">
-                  <ContextMeter
-                    fallbackWindow={focusedBot?.contextWindow}
-                    matchProvider={focused.provider}
-                    matchBotId={focusedBot?.id}
-                  />
+                  {focused.provider !== "cursor" ? (
+                    <ContextMeter
+                      fallbackWindow={focusedBot?.contextWindow}
+                      matchProvider={focused.provider}
+                      matchBotId={focusedBot?.id}
+                    />
+                  ) : null}
                   <div className="actions usage-ranges">
                     {windowTabs.map((item) => (
                       <button
@@ -594,11 +602,13 @@ export function UsagePane({
                       ? "Loading weekly plan usage…"
                       : `Restart Workhorse to load ${planName} plan usage.`)}
                 </p>
-                <ContextMeter
-                  fallbackWindow={focusedBot?.contextWindow}
-                  matchProvider={focused.provider}
-                  matchBotId={focusedBot?.id}
-                />
+                {focused.provider !== "cursor" ? (
+                  <ContextMeter
+                    fallbackWindow={focusedBot?.contextWindow}
+                    matchProvider={focused.provider}
+                    matchBotId={focusedBot?.id}
+                  />
+                ) : null}
               </div>
             </div>
           )}

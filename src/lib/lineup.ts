@@ -456,10 +456,11 @@ export function applyLineupChildFinish(
 export function nestProjectChats<S extends { id: string; parentId?: string }>(
   chats: S[],
 ): Array<S & { workers: S[] }> {
+  const ids = new Set(chats.map((chat) => chat.id));
   const workers = new Map<string, S[]>();
   const roots: S[] = [];
   for (const chat of chats) {
-    if (chat.parentId) {
+    if (chat.parentId && ids.has(chat.parentId)) {
       const list = workers.get(chat.parentId) ?? [];
       list.push(chat);
       workers.set(chat.parentId, list);

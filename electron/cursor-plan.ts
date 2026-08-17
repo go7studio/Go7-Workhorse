@@ -160,11 +160,13 @@ function tokenFromUnknown(value: unknown, depth = 0): string | undefined {
   return undefined;
 }
 
-export function cursorStateDatabasePath(input: {
-  homedir?: string;
-  env?: NodeJS.Dict<string>;
-  platform?: NodeJS.Platform;
-} = {}): string {
+export function cursorStateDatabasePath(
+  input: {
+    homedir?: string;
+    env?: NodeJS.Dict<string>;
+    platform?: NodeJS.Platform;
+  } = {},
+): string {
   const env = input.env ?? process.env;
   const homedir = input.homedir ?? os.homedir();
   const platform = input.platform ?? process.platform;
@@ -243,13 +245,15 @@ function readTokenFromSqlite(filePath: string): string | undefined {
   }
 }
 
-export function readCursorAuthToken(input: {
-  env?: NodeJS.Dict<string>;
-  homedir?: string;
-  platform?: NodeJS.Platform;
-  readFile?: (filePath: string) => string;
-  readStateToken?: (filePath: string) => string | undefined;
-} = {}): string | undefined {
+export function readCursorAuthToken(
+  input: {
+    env?: NodeJS.Dict<string>;
+    homedir?: string;
+    platform?: NodeJS.Platform;
+    readFile?: (filePath: string) => string;
+    readStateToken?: (filePath: string) => string | undefined;
+  } = {},
+): string | undefined {
   const env = input.env ?? process.env;
   const fromEnv = env.CURSOR_API_KEY?.trim() || env.CURSOR_AUTH_TOKEN?.trim();
   if (fromEnv) return fromEnv;
@@ -281,13 +285,15 @@ const CURSOR_USAGE_REQUESTS: { method: "GET" | "POST"; url: string; body?: strin
   { method: "GET", url: "https://api2.cursor.sh/auth/usage" },
 ];
 
-export async function readOfficialCursorUsage(input: {
-  token?: string;
-  fetchImpl?: typeof fetch;
-  env?: NodeJS.Dict<string>;
-  homedir?: string;
-  platform?: NodeJS.Platform;
-} = {}): Promise<unknown> {
+export async function readOfficialCursorUsage(
+  input: {
+    token?: string;
+    fetchImpl?: typeof fetch;
+    env?: NodeJS.Dict<string>;
+    homedir?: string;
+    platform?: NodeJS.Platform;
+  } = {},
+): Promise<unknown> {
   const token =
     input.token?.trim() ||
     readCursorAuthToken({ env: input.env, homedir: input.homedir, platform: input.platform });
@@ -314,7 +320,7 @@ export async function readOfficialCursorUsage(input: {
   return undefined;
 }
 
-/** Documented Cursor usage JSON only. Missing payload stays unknown — never 0 or 100. */
+/** Official Cursor usage JSON only. Missing payload stays unknown — never 0 or 100. */
 export async function fetchCursorPlanUsage(input?: {
   readOfficial?: () => Promise<unknown>;
   fetchImpl?: typeof fetch;

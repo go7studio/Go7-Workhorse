@@ -2,6 +2,12 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { buildFileDiff, type FileDiff } from "../src/lib/file-diff";
+import {
+  instancePathKey,
+  rememberInstance,
+  reviewCreatedDiff,
+  type FileInstanceStore,
+} from "../src/lib/file-instances";
 
 export type FileDiffInput = {
   existsSync?: (filePath: string) => boolean;
@@ -9,6 +15,10 @@ export type FileDiffInput = {
   gitShow?: (repo: string, rel: string) => string | null;
   readdir?: (dir: string) => string[];
   isDir?: (dir: string) => boolean;
+  /** New file: empty before so the current text is all adds. Do not set for existing files on non-git trees. */
+  created?: boolean;
+  /** Per-path union of written versions. Created/untracked diffs paint against this, not HEAD. */
+  instances?: FileInstanceStore;
 };
 
 export type GitChange = { path: string; status: string };
@@ -258,20 +268,90 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
     null;
   const rel = repo ? path.relative(repo, abs) : path.basename(abs);
   const inRepo = Boolean(repo && rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+  const fromGit =
+    repo && inRepo && !gitIndexLocked(repo, existsSync) ? gitShow(repo, rel) : null;
+  const isNewFile = Boolean(input.created || (repo && inRepo && fromGit == null));
+  if (isNewFile && input.instances) {
+    const previous = input.instances.get(instancePathKey(abs));
+    if (previous == null) {
+      if (after) rememberInstance(input.instances, abs, after);
+      return buildFileDiff(abs, "", after);
+    }
+    const baseline = rememberInstance(input.instances, abs, after);
+    return reviewCreatedDiff(abs, baseline, after);
+  }
   const before =
-    repo && inRepo && !gitIndexLocked(repo, existsSync) ? gitShow(repo, rel) ?? "" : "";
+    fromGit != null ? fromGit : input.created ? "" : repo && inRepo ? "" : after;
   return buildFileDiff(abs, before, after);
+}
+
+/** Read the file after a write and grow the instance baseline. */
+export function recordFileInstance(filePath: string, roots: string[] = [], input: FileDiffInput = {}): string {
+  const existsSync = input.existsSync ?? ((item) => fs.existsSync(item));
+  const readFile = input.readFile ?? ((item) => fs.readFileSync(item, "utf8"));
+  const abs = resolveExistingFile(filePath, roots, existsSync, input);
+  let text = "";
+  try {
+    text = existsSync(abs) ? readFile(abs) : "";
+  } catch {
+    text = "";
+  }
+  if (!input.instances) return text;
+  return rememberInstance(input.instances, abs, text);
 }
 
 export function readEditStats(
   paths: string[],
   roots: string[] = [],
   input: FileDiffInput = {},
+  createdPaths: string[] = [],
 ): Record<string, { added: number; deleted: number }> {
+  const created = new Set(createdPaths.map((item) => item.replaceAll("\\", "/").toLowerCase()));
   const next: Record<string, { added: number; deleted: number }> = {};
   for (const item of paths) {
-    const diff = readFileDiff(item, roots, input);
+    const key = item.replaceAll("\\", "/").toLowerCase();
+    const diff = readFileDiff(item, roots, { ...input, created: input.created || created.has(key) });
     next[item] = { added: diff.added, deleted: diff.deleted };
   }
   return next;
+}
+
+export type SourceRead = {
+  path: string;
+  name: string;
+  text: string;
+  missing: boolean;
+  unreadable: boolean;
+};
+
+const MAX_SOURCE_CHARS = 1_500_000;
+
+function fileNameOf(filePath: string): string {
+  const parts = filePath.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+function looksBinary(text: string): boolean {
+  return text.slice(0, 8_000).includes("\0");
+}
+
+/** Current file bytes only. No git, no line-diff stats. */
+export function readSourceText(filePath: string, roots: string[] = [], input: FileDiffInput = {}): SourceRead {
+  const existsSync = input.existsSync ?? ((item) => fs.existsSync(item));
+  const readFile = input.readFile ?? ((item) => fs.readFileSync(item, "utf8"));
+  const abs = resolveExistingFile(filePath, roots, existsSync, input);
+  const name = fileNameOf(abs);
+  if (!existsSync(abs)) {
+    return { path: abs, name, text: "", missing: true, unreadable: false };
+  }
+  let text = "";
+  try {
+    text = readFile(abs);
+  } catch {
+    return { path: abs, name, text: "", missing: true, unreadable: false };
+  }
+  if (looksBinary(text) || text.length > MAX_SOURCE_CHARS) {
+    return { path: abs, name, text: "", missing: false, unreadable: true };
+  }
+  return { path: abs, name, text, missing: false, unreadable: false };
 }

@@ -1,18 +1,20 @@
 import { uid } from "./id";
-import type { ChatImage, ChatMessage, QueuedPrompt, Session } from "./types";
+import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment } from "./types";
 
 export const PROJECT_CHAT_LIMIT = 5;
 
-export function visibleProjectChats<T extends { id: string }>(
+export function visibleProjectChats<T extends { id: string; workers?: Array<{ id: string }> }>(
   chats: T[],
   expanded: boolean,
   activeId?: string | null,
   limit = PROJECT_CHAT_LIMIT,
 ): T[] {
   if (expanded || chats.length <= limit) return chats;
+  const holdsActive = (item: T) =>
+    item.id === activeId || Boolean(item.workers?.some((worker) => worker.id === activeId));
   const head = chats.slice(0, limit);
-  if (!activeId || head.some((item) => item.id === activeId)) return head;
-  const extra = chats.find((item) => item.id === activeId);
+  if (!activeId || head.some(holdsActive)) return head;
+  const extra = chats.find(holdsActive);
   return extra ? [...head.slice(0, limit - 1), extra] : head;
 }
 
@@ -69,7 +71,11 @@ export function deleteChat(sessions: Session[], id: string): Session[] | null {
 }
 
 export function deleteWorkerChats(sessions: Session[], parentId: string): Session[] | null {
-  const childIds = new Set(sessions.filter((session) => session.parentId === parentId).map((session) => session.id));
+  const childIds = new Set(
+    sessions
+      .filter((session) => session.parentId === parentId && (session.hidden || session.agentRun))
+      .map((session) => session.id),
+  );
   if (childIds.size === 0) return null;
   return sessions
     .filter((session) => !childIds.has(session.id))
@@ -413,8 +419,49 @@ export function appendUserMessage(
   );
 }
 
-export function lastUserMessage(session: Session) {
+export function lastUserMessage(session: Pick<Session, "messages">) {
   return [...session.messages].reverse().find((message) => message.role === "user");
+}
+
+export function lastTalkedAt(session: Pick<Session, "messages">): number | undefined {
+  const last = lastUserMessage(session);
+  return typeof last?.createdAt === "number" && last.createdAt > 0 ? last.createdAt : undefined;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function sameLocalDay(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function clockTime(at: number): string {
+  const date = new Date(at);
+  const hours = date.getHours() % 12 || 12;
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+export function formatLastTalked(at: number | undefined, now = Date.now()): string {
+  if (typeof at !== "number" || at <= 0) return "";
+  if (sameLocalDay(at, now)) return clockTime(at);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (sameLocalDay(at, yesterday.getTime())) return "Yesterday";
+  const date = new Date(at);
+  const stamp = `${MONTHS[date.getMonth()]} ${date.getDate()}`;
+  return date.getFullYear() === new Date(now).getFullYear() ? stamp : `${stamp}, ${date.getFullYear()}`;
+}
+
+export function formatLastTalkedFull(at: number | undefined): string {
+  if (typeof at !== "number" || at <= 0) return "";
+  const date = new Date(at);
+  const hour24 = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const meridiem = hour24 < 12 ? "AM" : "PM";
+  return `${WEEKDAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}, ${hour24 % 12 || 12}:${minutes} ${meridiem}`;
 }
 
 export function messagesThrough(messages: ChatMessage[], throughId: string): ChatMessage[] | null {
@@ -442,6 +489,7 @@ export function forkChat(
   sourceId: string,
   throughId: string,
   nextId: string,
+  options?: { environment?: SessionEnvironment },
 ): { sessions: Session[]; session: Session } | null {
   const source = sessions.find((item) => item.id === sourceId);
   if (!source) return null;
@@ -450,16 +498,22 @@ export function forkChat(
   const session: Session = {
     ...source,
     id: nextId,
+    parentId: source.id,
+    hidden: undefined,
     title: forkTitle(source.title),
     titleLocked: false,
     status: "idle",
     vendorSessionId: undefined,
+    vendorProvider: undefined,
     contextUsed: 0,
     grokCommands: undefined,
     messages: cloneMessages(kept),
     archivedAt: null,
     composerDraft: undefined,
     composerImages: undefined,
+    agentRun: undefined,
+    lineup: undefined,
+    environment: options?.environment ?? { kind: "local" },
   };
   return { sessions: [session, ...dropDrafts(sessions)], session };
 }

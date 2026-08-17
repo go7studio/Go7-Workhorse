@@ -13,15 +13,35 @@ import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
 
 function LooseChats() {
+  const store = useStore();
   const chats = useLooseSessions();
   const archived = useLooseSessions(true);
   const [showArchived, setShowArchived] = useState(false);
+  const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
+  const nested = nestProjectChats(chats);
+  useEffect(() => {
+    const active = store.sessions.find((item) => item.id === store.activeSessionId);
+    if (!active?.parentId) return;
+    setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
+  }, [store.activeSessionId, store.sessions]);
   if (chats.length === 0 && archived.length === 0) return null;
   return (
     <div className="loose-chats">
       <div className="section-label">Chats</div>
-      {chats.map((session) => (
-        <ChatRow key={session.id} session={session} />
+      {nested.map((session) => (
+        <div key={session.id} className="project-chat-block">
+          <ChatRow
+            session={session}
+            workerCount={session.workers.length}
+            workersOpen={Boolean(openCrew[session.id])}
+            onToggleWorkers={() =>
+              setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
+            }
+          />
+          {openCrew[session.id]
+            ? session.workers.map((worker) => <ChatRow key={worker.id} session={worker} nested />)
+            : null}
+        </div>
       ))}
       {archived.length > 0 && (
         <>
@@ -54,6 +74,11 @@ function ProjectFolder({
   const [showMore, setShowMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const active = store.sessions.find((item) => item.id === store.activeSessionId);
+    if (!active?.parentId) return;
+    setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
+  }, [store.activeSessionId, store.sessions]);
   const settingsOpen = store.panel === "settings" || store.panel === "add-bot";
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const nested = nestProjectChats(chats);
@@ -112,7 +137,7 @@ function ProjectFolder({
           +
         </button>
       </div>
-      {open && (
+      <div className="project-chats-slot" aria-hidden={!open}>
         <div className="project-chats">
           {chats.length === 0 && archived.length === 0 && (
             <p className="row-meta nest-empty">No chats yet.</p>
@@ -148,7 +173,7 @@ function ProjectFolder({
             </>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

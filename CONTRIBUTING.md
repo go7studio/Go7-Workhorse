@@ -31,8 +31,8 @@ commit as the feature.** A feature nobody documented is a feature nobody finds.
 
 [Semantic versioning](https://semver.org). While the major is `0`:
 
-- **PATCH** (`0.1.7` → `0.1.8`) — a fix. Nothing new to learn.
-- **MINOR** (`0.1.7` → `0.2.0`) — a new ability, or a change that alters how
+- **PATCH** (`0.1.8` → `0.1.9`) — a fix. Nothing new to learn.
+- **MINOR** (`0.1.8` → `0.2.0`) — a new ability, or a change that alters how
   something already worked.
 - **MAJOR** — held at `0` until the product boundary is stable.
 

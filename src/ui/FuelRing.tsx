@@ -80,8 +80,7 @@ export function FuelRing({
             cy={size / 2}
             r={radius}
             strokeWidth={stroke}
-            strokeDasharray={length}
-            strokeDashoffset={length * (1 - shown)}
+            strokeDasharray={shown >= 0.995 ? undefined : `${shown * length} ${length}`}
             transform={`rotate(-90 ${size / 2} ${size / 2})`}
           />
         )}

@@ -1,7 +1,7 @@
 import { isDefaultTitle } from "./titles";
 import type { Panel } from "./types";
 
-export type Surface = "settings" | "add-bot" | "welcome" | "project-home" | "session";
+export type Surface = "settings" | "add-bot" | "welcome" | "session" | "project-home";
 
 export function selectSurface(input: {
   panel: Panel;

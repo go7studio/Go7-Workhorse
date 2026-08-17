@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileDiff } from "../lib/file-diff";
-import { buildFileDiff, formatDiffStat } from "../lib/file-diff";
-import { editPathKey, mergeEdits, sameEditPath, type ProjectEdit } from "../lib/project-edits";
+import { buildFileDiff } from "../lib/file-diff";
+import { editPathKey, mergeEdits, sameEditPath, statForPath, type ProjectEdit } from "../lib/project-edits";
+import { DiffStat } from "./DiffStat";
 
 export function FileReview({
   file,
@@ -98,8 +99,9 @@ export function FileReview({
     if (sameEditPath(file.path, path)) onOpen(next[next.length - 1] ?? next[0]!);
   };
 
-  const added = diff?.added ?? stats[file.path]?.added ?? 0;
-  const deleted = diff?.deleted ?? stats[file.path]?.deleted ?? 0;
+  const held = statForPath(stats, file.path);
+  const added = diff?.added ?? held?.added;
+  const deleted = diff?.deleted ?? held?.deleted;
   const listed = useMemo(() => {
     const unique = mergeEdits(files, []);
     const q = filter.trim().toLowerCase();
@@ -113,7 +115,7 @@ export function FileReview({
       : (diff?.lines ?? []);
 
   return (
-    <section className={`file-review${overlay ? " overlay" : ""}`}>
+    <section className={`file-review${overlay ? " overlay" : ""}`} data-keep-keys={overlay ? "true" : undefined}>
       <header className="file-review-tabs">
         <div className="file-review-tab-row" role="tablist" aria-label="Open files">
           {tabs.map((tab) => (
@@ -156,10 +158,7 @@ export function FileReview({
           <div className="file-review-meta">
             <strong>{file.name}</strong>
             <span className="path">{diff?.path ?? file.path}</span>
-            <span className="file-diff-stat" aria-label={formatDiffStat(added, deleted)}>
-              <span className="diff-add">+{added}</span>
-              <span className="diff-del">−{deleted}</span>
-            </span>
+            {added != null && deleted != null ? <DiffStat added={added} deleted={deleted} /> : null}
           </div>
           <pre className={`file-review-code ${mode}`}>
             {!diff && <span className="row-meta">Reading file…</span>}
@@ -184,8 +183,9 @@ export function FileReview({
           />
           <ul className="file-review-list">
             {listed.map((item) => {
-              const plus = stats[item.path]?.added ?? 0;
-              const minus = stats[item.path]?.deleted ?? 0;
+              const line = statForPath(stats, item.path);
+              const plus = line?.added;
+              const minus = line?.deleted;
               return (
                 <li key={editPathKey(item.path)}>
                   <button
@@ -194,10 +194,7 @@ export function FileReview({
                     onClick={() => openFile(item)}
                   >
                     <strong>{item.name}</strong>
-                    <span className="file-diff-stat">
-                      <span className="diff-add">+{plus}</span>
-                      <span className="diff-del">−{minus}</span>
-                    </span>
+                    {plus != null && minus != null ? <DiffStat added={plus} deleted={minus} /> : null}
                   </button>
                 </li>
               );

@@ -72,10 +72,15 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
     "Grok 4.6 · Medium · Ask",
     "no routingMode at all reads as before",
   );
-  // The row passes the mode through, and the composer chip says Auto too.
+  // The row passes the mode through, and the composer chip — Composer's
+  // setup-trigger, the one that actually renders — says Auto too. (ModelMenu
+  // has an Auto label as well, but nothing mounts ModelMenu any more; only
+  // its ContextMeter is imported. Live testing found that.)
   assert.match(read("src/ui/ChatRow.tsx"), /routingMode: session\.routingMode/);
-  const menu = read("src/ui/ModelMenu.tsx");
-  assert.match(menu, /session\.routingMode === "auto"\s*\?\s*"Auto"/);
+  const composer = read("src/ui/Composer.tsx");
+  const chip = composer.slice(composer.indexOf('className={`setup-trigger'), composer.indexOf('className={`setup-trigger') + 1400);
+  assert.match(chip, /session\.routingMode === "auto"\s*\?\s*`Auto · \$\{shortModeLabel\(session\.mode\)\}`/);
+  assert.match(chip, /className="dot auto"/);
 });
 
 test("a routed pick does not become the default for the next new chat", () => {
@@ -123,11 +128,11 @@ test("Auto is a pick a person makes on the chat, not in Settings", () => {
   const setup = read("src/ui/SessionSetup.tsx");
   assert.match(setup, /onClick=\{\(\) => setSessionRoutingMode\("auto"\)\}/);
   assert.doesNotMatch(setup, /settings\.routing\.enabled \? setSessionRoutingMode/, "Auto no longer bounces to Settings");
-  const menu = read("src/ui/ModelMenu.tsx");
-  assert.match(menu, /setSessionRoutingMode\("auto"\);\s*setOpen\(false\);/, "the model menu offers Auto");
-  assert.match(menu, /picks bot and effort per message/);
-  // In Auto the effort is picked per message, so the slider steps aside.
-  assert.match(menu, /attached && session\.routingMode !== "auto" \? <BrainSlider \/> : null/);
+  // In Auto the effort is picked per message, so the reasoning slider in the
+  // setup panel steps aside and says so.
+  assert.match(setup, /session\.routingMode === "auto" && \(\s*<section className="setup-card setup-reasoning-card">/);
+  assert.match(setup, /Picked with the model for each message/);
+  assert.match(setup, /session\.routingMode !== "auto" && thinking\.length > 0 && \(/);
 });
 
 test("Settings → Routing is the desk's own routing for spawned work: on by default, off is a choice", () => {

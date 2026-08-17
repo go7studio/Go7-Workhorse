@@ -1,6 +1,10 @@
-# Go7 Workhorse
+<p align="center">
+  <img src="docs/media/logo.png" alt="Go7 Workhorse" width="128">
+</p>
 
-**One desk. Every Subscription.**
+<h1 align="center">Go7 Workhorse</h1>
+
+<p align="center"><strong>One desk. Every Subscription.</strong></p>
 
 Run Grok, Claude, Codex, Cursor, your own API keys and your local models in one
 window. Each keeps its own login. Usage and costs are all tracked.

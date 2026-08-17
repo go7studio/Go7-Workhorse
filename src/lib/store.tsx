@@ -1818,7 +1818,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const current = stateRef.current;
     let session = current.sessions.find((item) => item.id === targetSessionId);
     if (!session) return;
-    if (current.settings.routing.enabled && session.routingMode !== "manual" && !originalText.startsWith("/")) {
+    // A person's chat routes only when that chat is set to Auto. The Settings
+    // switch decides how a new chat starts; it does not reach into a chat the
+    // person has already set one way or the other.
+    if (session.routingMode === "auto" && !originalText.startsWith("/")) {
       const statuses = watchVendorStatuses({
         settings: current.settings,
         usage: current.usage,
@@ -1840,11 +1843,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         current.settings.routing,
       );
       if (decision) {
+        // Auto picks the effort with the model: a quick task at low, a deep
+        // one at high. Keeping the person's old effort here left Auto choosing
+        // half of what it was asked to choose.
         const routed = applySessionModelChange(session, {
           provider: decision.provider,
           model: decision.model,
           customBotId: decision.customBotId,
-          effort: withEffort(decision.provider, decision.model, session.effort),
+          effort: decision.effort ?? withEffort(decision.provider, decision.model, session.effort),
         });
         session = { ...routed, routingMode: "auto", routingDecision: decision };
         const routedSession = session;
@@ -3653,7 +3659,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? payload.route
               : undefined;
             const routeSpawn = shouldAutoRouteSpawn({
-              routingEnabled: latest.settings.routing.enabled,
               provider: payload.provider,
               model: payload.model,
               chat: payload.chat,

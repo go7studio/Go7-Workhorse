@@ -86,7 +86,10 @@ transcript rather than as a path.
   cancellation, changed-file review, and worktree isolation where the project
   supports it.
 - **Plans** — multi-step work that continues after a worker joins.
-- **Routing** — reasoning effort chosen per task rather than fixed per app.
+- **Routing** — off for your own chats until you set one to **Auto**. Auto
+  picks the bot and effort for each message. When a chat spawns a worker
+  without naming a bot, the desk picks one for the slice; a named bot is used
+  as named. Settings → Routing decides whether a new chat starts on Auto.
 
 ## Memory
 

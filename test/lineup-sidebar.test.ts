@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { sidebarKeepsChat } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
 import { formatChatSidebar } from "../src/lib/session";
+import { DEFAULT_SETTINGS } from "../src/lib/settings";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -84,4 +85,55 @@ test("a routed pick does not become the default for the next new chat", () => {
   const routed = store.slice(store.indexOf("const decision = chooseRoutingDecision("), store.indexOf("const decision = chooseRoutingDecision(") + 2400);
   assert.match(routed, /routingMode: "auto", routingDecision: decision/);
   assert.doesNotMatch(routed, /lastModel: presetFrom\(routedSession\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Who routes, and when. Two actors, two defaults.
+//
+//   A person's chat keeps the model they picked. Only a chat set to Auto hands
+//   model and effort to routing, and it does so on every message.
+//
+//   The system, when a chat spawns a worker, picks the bot for the slice
+//   unless the orchestrator named one. That is on regardless of any switch.
+//
+//   Settings → Routing decides one thing: whether a NEW chat starts on Auto.
+// ---------------------------------------------------------------------------
+
+test("a person's chat routes only when that chat is set to Auto", () => {
+  const store = read("src/lib/store.tsx");
+  const send = store.slice(store.indexOf("let session = current.sessions.find((item) => item.id === targetSessionId)"));
+  const gate = send.slice(0, send.indexOf("chooseRoutingDecision("));
+  assert.match(gate, /session\.routingMode === "auto"/, "the chat's own mode is the gate");
+  assert.doesNotMatch(gate, /settings\.routing\.enabled/, "the Settings switch does not reach into a chat");
+  // Auto picks the effort with the model.
+  const routed = send.slice(send.indexOf("if (decision) {"), send.indexOf("if (decision) {") + 600);
+  assert.match(routed, /effort: decision\.effort/);
+});
+
+test("Settings → Routing only decides how a new chat starts", () => {
+  const store = read("src/lib/store.tsx");
+  assert.match(store, /routingMode: current\.settings\.routing\.enabled \? "auto" : "manual"/, "newChat reads the switch");
+  const otherReads = store.split("settings.routing.enabled").length - 1;
+  assert.equal(otherReads, 1, "and nothing else in the store does");
+  assert.equal(DEFAULT_SETTINGS.routing.enabled, false, "off by default: a new chat keeps the person's pick");
+});
+
+test("Auto is a pick a person makes on the chat, not in Settings", () => {
+  const setup = read("src/ui/SessionSetup.tsx");
+  assert.match(setup, /onClick=\{\(\) => setSessionRoutingMode\("auto"\)\}/);
+  assert.doesNotMatch(setup, /settings\.routing\.enabled \? setSessionRoutingMode/, "Auto no longer bounces to Settings");
+  const menu = read("src/ui/ModelMenu.tsx");
+  assert.match(menu, /setSessionRoutingMode\("auto"\);\s*setOpen\(false\);/, "the model menu offers Auto");
+  assert.match(menu, /picks bot and effort per message/);
+  // In Auto the effort is picked per message, so the slider steps aside.
+  assert.match(menu, /attached && session\.routingMode !== "auto" \? <BrainSlider \/> : null/);
+});
+
+test("the system routes its own spawns unless the orchestrator names a bot", () => {
+  const store = read("src/lib/store.tsx");
+  const spawn = store.slice(store.indexOf("const routeSpawn = shouldAutoRouteSpawn({"), store.indexOf("const routeSpawn = shouldAutoRouteSpawn({") + 300);
+  assert.doesNotMatch(spawn, /routingEnabled/, "no human switch in the spawn gate");
+  assert.match(spawn, /provider: payload\.provider,\s*model: payload\.model,\s*chat: payload\.chat/);
+  // And it picks effort for the slice too, unless the orchestrator named one.
+  assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
 });

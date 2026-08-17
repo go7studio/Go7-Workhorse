@@ -180,7 +180,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
               className={session.routingMode === "auto" ? "on" : undefined}
               type="button"
               aria-selected={session.routingMode === "auto"}
-              onClick={() => settings.routing.enabled ? setSessionRoutingMode("auto") : openSettings("routing")}
+              onClick={() => setSessionRoutingMode("auto")}
             >
               <span className="setup-provider-dot" aria-hidden="true" />
               Auto

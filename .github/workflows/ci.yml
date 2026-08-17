@@ -75,6 +75,39 @@ jobs:
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs --platform ${{ matrix.platform }}
 
+  # release-please builds the changelog from commit subjects. A pull request
+  # where no subject carries a type merges cleanly and then never reaches a
+  # changelog, so the work ships unlisted and nobody finds out until someone
+  # reads a release and notices it is missing. Catch it while it is still one
+  # reword away.
+  commit-types:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: At least one commit carries a type
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+          subjects="$(git log --no-merges --format=%s "$BASE..$HEAD")"
+          if [ -z "$subjects" ]; then
+            echo "No commits to check."
+            exit 0
+          fi
+          echo "$subjects"
+          if grep -qE "^($types)(\([^)]+\))?!?: " <<< "$subjects"; then
+            echo "OK."
+            exit 0
+          fi
+          echo "::error::No commit here starts with a type, so release-please cannot see this work and it will ship unlisted. Reword one subject to start with 'fix: ' or 'feat: ' — see CONTRIBUTING.md."
+          exit 1
+
   audit:
     runs-on: ubuntu-latest
     steps:

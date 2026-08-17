@@ -51,6 +51,10 @@ flowchart TD
 
 Each adapter runs the vendor's own CLI, under the login you already hold.
 
+## Contributing
+
+Repository shape and versioning rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## What it does
 
 Every ability is listed in [docs/FEATURES.md](docs/FEATURES.md).

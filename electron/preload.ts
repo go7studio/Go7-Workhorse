@@ -160,7 +160,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   grokPlanUsage: () => ipcRenderer.invoke("grok:plan-usage"),
   codexPlanUsage: () => ipcRenderer.invoke("codex:plan-usage"),
   claudePlanUsage: () => ipcRenderer.invoke("claude:plan-usage"),
-  customPlanUsage: (input: { baseUrl: string; apiKey: string; model?: string }) =>
+  customPlanUsage: (input: { baseUrl: string; apiKey: string; model?: string; credentialId?: string }) =>
     ipcRenderer.invoke("custom:plan-usage", input),
   onPeerAsk: (
     handler: (payload: { id: string; childSessionId?: string } & import("./peer-inbox").PeerAsk) => void,

@@ -226,6 +226,7 @@ type WorkhorseBridge = {
     baseUrl: string;
     apiKey: string;
     model?: string;
+    credentialId?: string;
   }) => Promise<import("./lib/types").GrokPlanUsage | undefined>;
   grokAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   grokCancel: (sessionId: string) => Promise<void>;

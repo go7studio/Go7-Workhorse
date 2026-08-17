@@ -153,29 +153,67 @@ function parseOpenRouterKeyUsage(root: Record<string, unknown>): CustomPlanUsage
   };
 }
 
-/** Documented GET /v2/quotas: subscription.limit / requests leftover. Missing cap stays unknown. */
+/** Documented GET /v2/quotas leftover. Extra weekly/5h fields stay unknown if missing. */
 function parseSyntheticQuotas(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const weekly = asRecord(root.weeklyTokenLimit);
+  const fiveh = asRecord(root.rollingFiveHourLimit);
   const sub = asRecord(root.subscription);
-  const limit = numberVal(sub.limit);
-  const requests = numberVal(sub.requests);
-  if (!Number.isFinite(limit) || limit <= 0 || !Number.isFinite(requests) || requests < 0) return undefined;
-  const used = clampPercent((requests / limit) * 100);
-  const reset =
-    typeof sub.renewsAt === "string" ? sub.renewsAt : typeof sub.renewAt === "string" ? sub.renewAt : undefined;
+  const weeklyLeft = leftoverFromRemainingPercent(weekly.percentRemaining ?? weekly.percent_remaining);
+  const fivehLeft =
+    leftoverOf(fiveh, "remaining_percent", "percentRemaining") ??
+    (() => {
+      const remaining = numberVal(fiveh.remaining);
+      const max = numberVal(fiveh.max);
+      if (Number.isFinite(remaining) && Number.isFinite(max) && max > 0) return clampPercent((remaining / max) * 100);
+      return undefined;
+    })();
+  const subLimit = numberVal(sub.limit);
+  const subRequests = numberVal(sub.requests);
+  const subLeft =
+    Number.isFinite(subLimit) && subLimit > 0 && Number.isFinite(subRequests) && subRequests >= 0
+      ? clampPercent(100 - (subRequests / subLimit) * 100)
+      : undefined;
+  const sessionLeft = fivehLeft ?? subLeft;
+  const sessionReset =
+    typeof fiveh.nextTickAt === "string"
+      ? fiveh.nextTickAt
+      : typeof sub.renewsAt === "string"
+        ? sub.renewsAt
+        : typeof sub.renewAt === "string"
+          ? sub.renewAt
+          : undefined;
+  const weeklyReset =
+    typeof weekly.nextRegenAt === "string"
+      ? weekly.nextRegenAt
+      : sessionReset;
+  const products: CustomPlanUsage["products"] = [];
+  if (sessionLeft !== undefined) {
+    products.push({
+      product: "session",
+      label: "5h",
+      usagePercent: clampPercent(100 - sessionLeft),
+      resetsAt: sessionReset,
+    });
+  }
+  if (weeklyLeft !== undefined) {
+    products.push({
+      product: "weekly",
+      label: "Weekly",
+      usagePercent: clampPercent(100 - weeklyLeft),
+      resetsAt: weeklyReset,
+    });
+  }
+  const leftover = weeklyLeft ?? (products.length ? undefined : sessionLeft);
+  if (leftover === undefined && products.length === 0) return undefined;
+  const left = leftover ?? sessionLeft;
+  if (left === undefined) return undefined;
   return {
-    usedPercent: used,
-    leftPercent: clampPercent(100 - used),
+    usedPercent: clampPercent(100 - left),
+    leftPercent: left,
     period: "weekly",
-    resetsAt: reset,
+    resetsAt: weeklyReset ?? sessionReset,
     prepaidBalance: 0,
-    products: [
-      {
-        product: "session",
-        label: "5h",
-        usagePercent: used,
-        resetsAt: reset,
-      },
-    ],
+    products,
   };
 }
 

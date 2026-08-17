@@ -1125,6 +1125,16 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(synthetic?.products[0]?.product, "session");
   assert.equal(synthetic?.products[0]?.label, "5h");
   assert.equal(synthetic?.resetsAt, "2025-09-21T14:36:14.288Z");
+  const synWeekly = parseCustomPlanUsage({
+    subscription: { limit: 500, requests: 0, renewsAt: "2026-08-17T06:26:17.610Z" },
+    weeklyTokenLimit: { percentRemaining: 57.25, nextRegenAt: "2026-08-17T03:58:52.000Z" },
+    rollingFiveHourLimit: { remaining: 500, max: 500, nextTickAt: "2026-08-17T01:37:24.000Z" },
+  });
+  assert.equal(synWeekly?.leftPercent, 57.25);
+  assert.equal(synWeekly?.products[0]?.product, "session");
+  assert.equal(synWeekly?.products[0]?.usagePercent, 0);
+  assert.equal(synWeekly?.products[1]?.product, "weekly");
+  assert.equal(synWeekly?.products[1]?.usagePercent, 42.75);
   assert.equal(parseCustomPlanUsage({ subscription: { limit: 0, requests: 0 } }), undefined);
   assert.equal(parseCustomPlanUsage({ subscription: { requests: 3 } }), undefined);
   assert.equal(customPlanRemainsUrl("https://api.groq.com/openai/v1"), undefined);

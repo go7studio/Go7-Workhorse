@@ -5148,7 +5148,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.customPlanUsage) return;
     for (const bot of stateRef.current.settings.customBots) {
       void window.workhorse
-        .customPlanUsage({ baseUrl: bot.baseUrl, apiKey: bot.apiKey, model: bot.model })
+        .customPlanUsage({ baseUrl: bot.baseUrl, apiKey: bot.apiKey, model: bot.model, credentialId: bot.credentialId })
         .then((plan) => {
           setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
         })

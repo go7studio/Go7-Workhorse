@@ -83,7 +83,7 @@ export function citedAbsolutePaths(text: string): string[] {
 }
 
 function joinCited(dir: string, rel: string): string {
-  const win = dir.includes("\\") || /^[A-Za-z]:/.test(dir) || dir.startsWith("\\\\");
+  const win = dir.includes("\\") || dir.startsWith("\\\\") || /^[A-Za-z]:\\/.test(dir);
   const sep = win ? "\\" : "/";
   const base = dir.replace(/[\\/]+$/, "");
   const tail = rel.replace(/^[\\/]+/, "").replaceAll(win ? "/" : "\\", sep);

@@ -3530,6 +3530,15 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     harvestFilePath("foo.md (34441 chars)", "audio/", (item) => item === audioFile || item === path.join(gameRoot, "audio"), [gameRoot]),
     audioFile,
   );
+  assert.equal(
+    harvestFilePath(
+      "foo.md (34441 chars)",
+      "audio/",
+      (item) => item === "C:/game/audio/foo.md" || item === "C:/game/audio",
+      ["C:/game"],
+    ),
+    "C:/game/audio/foo.md",
+  );
   assert.deepEqual(editSearchRoots([gameRoot], "audio"), [gameRoot, path.join(gameRoot, "audio")]);
   assert.equal(isDirectoryEditPath(path.join(gameRoot), [gameRoot]), true);
   assert.equal(isDirectoryEditPath("game", [gameRoot]), true);

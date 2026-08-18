@@ -70,6 +70,21 @@ export function isAbsolutePath(filePath: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
 }
 
+/** Windows drive/UNC that POSIX `path.resolve` would prefix with cwd. */
+function keepCitedAbs(filePath: string): boolean {
+  return isAbsolutePath(filePath) && !path.isAbsolute(filePath);
+}
+
+function hostResolve(dir: string): string {
+  return keepCitedAbs(dir) ? dir : path.resolve(dir);
+}
+
+function hostJoin(dir: string, rel: string): string {
+  if (!keepCitedAbs(dir)) return path.resolve(dir, rel);
+  const sep = dir.includes("\\") ? "\\" : "/";
+  return `${dir.replace(/[\\/]+$/, "")}${sep}${rel.replace(/^[\\/]+/, "")}`;
+}
+
 function pathKey(filePath: string): string {
   return filePath.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
 }
@@ -176,26 +191,26 @@ export function findSourceFile(
     if (!dir) return;
     let resolved = dir;
     try {
-      resolved = path.resolve(dir);
+      resolved = hostResolve(dir);
     } catch {
       return;
     }
     if (resolved === path.parse(resolved).root) return;
     if (!existsSync(resolved) || !isDir(resolved)) return;
-    if (searchRoots.some((root) => path.resolve(root) === resolved)) return;
+    if (searchRoots.some((root) => hostResolve(root) === resolved)) return;
     searchRoots.push(resolved);
   };
   for (const root of roots) {
     if (!root.trim()) continue;
     let resolved: string;
     try {
-      resolved = path.resolve(root);
+      resolved = hostResolve(root);
     } catch {
       continue;
     }
     if (resolved === path.parse(resolved).root) continue;
     if (existsSync(resolved) && !isDir(resolved)) continue;
-    if (searchRoots.some((item) => path.resolve(item) === resolved)) continue;
+    if (searchRoots.some((item) => hostResolve(item) === resolved)) continue;
     searchRoots.push(resolved);
   }
   // Linked project folders are the only trees. Cwd/home steal same basenames.
@@ -211,11 +226,11 @@ export function findSourceFile(
   })();
   const searchName = isAbsolutePath(trimmed) ? relFromAbs : trimmed;
   for (const root of searchRoots) {
-    const joined = tryFile(path.resolve(root, searchName));
+    const joined = tryFile(hostJoin(root, searchName));
     if (joined) return joined;
     const baseName = path.posix.basename(searchName.replaceAll("\\", "/"));
     if (baseName && baseName !== searchName) {
-      const loose = tryFile(path.resolve(root, baseName));
+      const loose = tryFile(hostJoin(root, baseName));
       if (loose) return loose;
     }
   }

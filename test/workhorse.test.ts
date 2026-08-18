@@ -148,7 +148,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
@@ -370,6 +370,15 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_spawn_agent" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat", grants: ["workhorse"] }), "once");
+  assert.equal(permissionResumeStatus({ hasOtherPending: true }), "needs-input");
+  assert.equal(permissionResumeStatus({ hasOtherPending: false }), "running");
+  assert.equal(
+    permissionResumeStatus({
+      hasOtherPending: false,
+      agentRun: { status: "completed", startedAt: 1, isolation: "shared", finishedAt: 2 },
+    }),
+    "idle",
+  );
   assert.equal(permissionGrantKey("workhorse_list_references"), "workhorse");
   const queued = enqueuePermission(
     [{ id: "perm_1", sessionId: "sess_1", provider: "grok", tool: "a", detail: "a" }],

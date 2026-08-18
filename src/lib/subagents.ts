@@ -175,6 +175,11 @@ export function nextWorkerName(taken: Iterable<string>): string {
   }
 }
 
+/** Keep the worker identity, but show the slice it is doing now. */
+export function workerTaskTitle(workerName: string, taskTitle: string): string {
+  return `${workerName.trim()} · ${taskTitle.trim()}`;
+}
+
 export type WorkerRecord = {
   id: string;
   workerName?: string;

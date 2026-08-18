@@ -177,4 +177,5 @@ test("Cursor eval config covers authenticated ACP smoke and both usage pools", (
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-035"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-036"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-037"));
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-038"));
 });

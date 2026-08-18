@@ -336,6 +336,15 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["src/lib/lineup.ts", "src/lib/routing.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/routing.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-038",
+      "behavior": "A reused worker keeps its stable name but displays the current slice, and a late permission result cannot return a terminal worker to a visible running state.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S8", "ORC-S9"],
+      "rubric": ["ORC-16", "ORC-17"],
+      "sourceFiles": ["src/lib/permissions.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/worker-reuse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

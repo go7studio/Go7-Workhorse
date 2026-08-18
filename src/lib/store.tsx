@@ -51,6 +51,7 @@ import {
   classifyElevationInput,
   parseElevationInput,
   permissionPolicyAnswer,
+  permissionResumeStatus,
   securityPolicyAnswer,
 } from "./permissions";
 import {
@@ -189,6 +190,7 @@ import {
   spawnWaitsForReply,
   withSubagentStatus,
   workerStatusSnapshot,
+  workerTaskTitle,
 } from "./subagents";
 import {
   applySessionModelChange,
@@ -4289,7 +4291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: spec.model,
               customBotId: spec.customBotId,
               effort: spec.effort,
-              title: priorWorker?.title || `${workerName} · ${spec.title}`,
+              title: workerTaskTitle(workerName, spec.title),
               titleLocked: true,
               mode: parent.mode,
               sandbox: parent.sandbox,
@@ -5075,9 +5077,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               session.id === event.sessionId
                 ? {
                     ...session,
-                    status: current.pending.some((item) => item.sessionId === event.sessionId && item.id !== event.requestId)
-                      ? "needs-input"
-                      : "running",
+                    status: permissionResumeStatus({
+                      hasOtherPending: current.pending.some(
+                        (item) => item.sessionId === event.sessionId && item.id !== event.requestId,
+                      ),
+                      agentRun: session.agentRun,
+                    }),
                     messages:
                       allowed === "deny"
                         ? [

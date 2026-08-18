@@ -137,6 +137,16 @@ export function enqueuePermission(
   return [...pending.filter((item) => item.id !== request.id), request];
 }
 
+/** A late vendor permission result cannot make a finished worker look active again. */
+export function permissionResumeStatus(input: {
+  hasOtherPending: boolean;
+  agentRun?: Session["agentRun"];
+}): Session["status"] {
+  if (input.hasOtherPending) return "needs-input";
+  if (input.agentRun && input.agentRun.status !== "running") return "idle";
+  return "running";
+}
+
 /** Software fallback when the vendor kernel sandbox is a no-op (Windows). */
 export type ElevationNeed = {
   mode?: PermissionMode;

@@ -5,6 +5,7 @@ import {
   findReusableWorker,
   nextWorkerName,
   reserveWorkerName,
+  workerTaskTitle,
   workerIsFree,
   type WorkerRecord,
 } from "../src/lib/subagents";
@@ -37,6 +38,10 @@ test("a name is given once and kept", () => {
   assert.equal(nextWorkerName([WORKER_NAMES[0]]), WORKER_NAMES[1]);
   // Case and padding are how a duplicate sneaks in.
   assert.equal(nextWorkerName([" wren ", "DEXTER"]), WORKER_NAMES[2]);
+});
+
+test("a reused worker shows its current slice", () => {
+  assert.equal(workerTaskTitle("Dexter", "Add Software JSON-LD"), "Dexter · Add Software JSON-LD");
 });
 
 test("names never run out and never collide", () => {

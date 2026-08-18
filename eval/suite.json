@@ -1604,6 +1604,7 @@
           "profiles": ["grok-acp"],
           "steps": [
             "Run a mocked current/newer/malformed update check and inspect user-facing results.",
+            "When a newer build is ready, verify one Update now action appears above Settings, uses the existing installer, and stays hidden when no update exists.",
             "Build Windows x64 and macOS artifacts and verify both contain the real renderer, Electron main, icons, resources, and release version.",
             "Verify each packaged artifact launches on its claimed platform and the release contains the complete installers rather than archives of partial contents.",
             "Run the public repository shape gate and verify internal product-law or operator-memory files are absent.",
@@ -1678,8 +1679,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["REL-S1", "REL-S3"],
-          "passCriteria": "Artifact inventory meets declared contents and mocked update failures do not corrupt or strand the app.",
-          "evidence": "Artifact inventory, launch result, update fixture responses, and UI messages."
+          "passCriteria": "Artifact inventory meets declared contents; a newer release exposes one recoverable Update now action above Settings; no offer exposes no action; mocked failures do not corrupt or strand the app.",
+          "evidence": "Artifact inventory, launch result, update fixture responses, sidebar states, and UI messages."
         },
         {
           "id": "REL-06",

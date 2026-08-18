@@ -196,37 +196,35 @@ function SettingsPulse() {
   );
 }
 
-function UpdateChip() {
+function SidebarUpdate() {
   const store = useStore();
   const offer = store.appUpdate;
   if (!offer) return null;
-  const label = store.appUpdateBusy
-    ? `Installing Workhorse ${offer.version}`
-    : store.appUpdateError
-      ? store.appUpdateError
-      : `Install Workhorse ${offer.version}`;
+  const label = store.appUpdateBusy ? "Updating…" : store.appUpdateError ? "Try update again" : "Update now";
+  const detail = store.appUpdateError ? "Update failed" : `Workhorse ${offer.version}`;
+  const title = store.appUpdateError || `Update to Workhorse ${offer.version}`;
   return (
     <button
-      className={`brand-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
+      className={`row sidebar-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
       type="button"
-      aria-label={label}
-      title={label}
+      aria-label={`${label}. ${detail}`}
+      title={title}
       disabled={store.appUpdateBusy}
       onClick={() => {
         if (!store.appUpdate) return;
         void store.applyAppUpdate(offer.version);
       }}
     >
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path
-          d="M8 12.5V3.5M4.2 7 8 3.2 11.8 7"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <span className="sidebar-update-icon">
+        <svg viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M5.1 13.2h7.8a3 3 0 0 0 .2-6 4.4 4.4 0 0 0-8.4 1.2 2.4 2.4 0 0 0 .4 4.8Z" />
+          <path d="M9 8.7v5.1m-2-1.9 2 2 2-2" />
+        </svg>
+      </span>
+      <span>
+        <span className="row-title">{label}</span>
+        <span className="row-meta">{detail}</span>
+      </span>
     </button>
   );
 }
@@ -276,7 +274,6 @@ export function Sidebar() {
           </div>
           <p>One desk, every agent</p>
         </div>
-        <UpdateChip />
       </div>
 
       <button className="ghost open-project" type="button" onClick={() => store.openSheet("project")}>
@@ -361,6 +358,7 @@ export function Sidebar() {
         <LooseChats />
       </div>
       <footer className="sidebar-dock">
+        <SidebarUpdate />
         <button
           className={store.panel === "settings" || store.panel === "add-bot" ? "row active" : "row"}
           type="button"

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.2",
+  "contractVersion": "0.6.3",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -371,6 +371,15 @@
       "scenarios": ["REL-S1", "SEC-S4"],
       "rubric": ["REL-01", "REL-02", "SEC-07"],
       "sourceFiles": ["scripts/try-desk.ts", "src/lib/app-identity.ts", "electron/main.ts", "test/workhorse.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-042",
+      "behavior": "A newer release exposes one short Update now action above Settings, reuses the checked installer, shows bounded busy and retry states, and disappears when no update is available.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S3", "REL-S4"],
+      "rubric": ["REL-05", "REL-07"],
+      "sourceFiles": ["src/ui/Sidebar.tsx", "src/styles/app.css", "src/lib/store.tsx", "electron/app-update.ts", "test/app-update.test.ts"],
       "verification": ["verify"]
     }
   ]

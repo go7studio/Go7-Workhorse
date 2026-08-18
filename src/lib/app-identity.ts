@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export const WORKHORSE_APP_ID = "com.go7studio.workhorse";
 export const WORKHORSE_APP_NAME = "Go7 Workhorse";
 export const WORKHORSE_DEV_APP_NAME = "Go7 Workhorse Dev";
@@ -32,4 +34,36 @@ export function workhorseRuntimeIdentity(
         userDataDirectory: WORKHORSE_USER_DATA_DIR,
         volatileCredentials: false,
       };
+}
+
+export type WorkhorseInstallTarget = {
+  channel: WorkhorseBuildChannel;
+  appName: string;
+  dest: string;
+  userDataDirectory: string;
+  productionApp: string;
+};
+
+/** Install dest for a packaged desk. Callers inject the Applications folder. */
+export function productionAppPath(applicationsDir: string): string {
+  return path.join(applicationsDir, `${WORKHORSE_APP_NAME}.app`);
+}
+
+export function workhorseInstallTarget(input: {
+  channel: WorkhorseBuildChannel;
+  applicationsDir: string;
+}): WorkhorseInstallTarget {
+  const identity = workhorseRuntimeIdentity(true, input.channel);
+  const appName = `${identity.name}.app`;
+  return {
+    channel: input.channel,
+    appName,
+    dest: path.join(input.applicationsDir, appName),
+    userDataDirectory: identity.userDataDirectory,
+    productionApp: productionAppPath(input.applicationsDir),
+  };
+}
+
+export function tryInstallWouldReplaceProduction(dest: string, applicationsDir: string): boolean {
+  return path.normalize(dest) === path.normalize(productionAppPath(applicationsDir));
 }

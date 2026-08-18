@@ -1,11 +1,12 @@
 #!/bin/bash
-# Install the latest Go7 Workhorse release on macOS.
+# Install the latest Go7 Workhorse release on macOS. This is ship only.
 #
 #   curl -fsSL https://raw.githubusercontent.com/go7studio/Go7-Workhorse/main/scripts/install-mac.sh | bash
 #
 # Downloads the dmg from GitHub Releases, mounts it, copies the app to
-# /Applications, and unmounts. Nothing is installed system-wide and no
-# password is needed.
+# /Applications/Go7 Workhorse.app, and unmounts. It never writes the Dev app.
+# To judge this tree in a live window, use `npm run try` (see AGENTS.md).
+# Nothing is installed system-wide and no password is needed.
 set -euo pipefail
 
 REPO="go7studio/Go7-Workhorse"

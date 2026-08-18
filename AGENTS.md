@@ -56,3 +56,25 @@ breaking it cost real time.
   `node`. Say which platform a test means.
 - **Check the artifact, not the exit code.** A build can exit 0 and ship a
   hollow app. Count what should be inside before you install or publish.
+- **A test must not hang.** `--test-timeout` and the CI Test step limit stay.
+  A step that can sit for half an hour is not a test.
+- **Typing must not journal the whole desk on each key.** Drafts stay local
+  until send, leave, or Escape.
+
+## Try and ship
+
+Two mechanical passes. Do not mix them.
+
+**Try** — judge this tree in a live window. `npm run try:dry` prints the dest.
+`npm run try` packs a development desk and opens **Go7 Workhorse Dev**. It
+never writes `/Applications/Go7 Workhorse.app` and never uses the production
+userData directory (`Go7 Workhorse`). Hand-run Release installers (workflow
+dispatch) are also try: they attach to the run and cut no version. Local try
+packs are ad-hoc signed. That is allowed only for the Dev app.
+
+**Ship** — put what is already on `main` onto the production app. Pull latest
+`main`. Merge only the open `chore(main): release …` pull request if one
+exists. Wait for both signed installers. Install that one build (`npm run`
+does not ship). Ship takes every commit on `main` since the last tag,
+including other agents' already-merged work. Do not cherry-pick. Do not skip
+someone else's merged commit because it is not yours.

@@ -76,6 +76,21 @@ dmg, each marked latest, each broken for half the people who downloaded it.
 Run the Release workflow by hand to get installers to test. They attach to the
 run, so testing costs no version number and publishes nothing.
 
+## Try and ship
+
+**Try** is how you see a change in a live window without cutting a version.
+`npm run try:dry` prints the dest. `npm run try` packs this tree as a
+development app and opens **Go7 Workhorse Dev**. It does not replace
+`/Applications/Go7 Workhorse.app`. Production userData stays untouched.
+
+**Ship** is how the production app moves. Pull latest `main`, merge the open
+`chore(main): release …` pull request if it exists, wait for both signed
+installers, and install that build. That install is everything on `main`
+since the last tag — including work other agents already merged. Do not
+cherry-pick. `scripts/install-mac.sh` is ship only.
+
+A test must not hang. Typing must not journal the whole desk on each key.
+
 ## Before you push
 
 ```bash

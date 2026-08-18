@@ -1748,6 +1748,7 @@ html.pane-dragging * {
   justify-content: flex-end;
 }
 
+.turn.user .turn-actions,
 .turn.user:hover .turn-actions,
 .turn.user:focus-within .turn-actions,
 .turn.reply:hover .turn-actions,

@@ -120,7 +120,11 @@ import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
+  WORKHORSE_DEV_USER_DATA_DIR,
+  WORKHORSE_USER_DATA_DIR,
   parseWorkhorseBuildChannel,
+  tryInstallWouldReplaceProduction,
+  workhorseInstallTarget,
   workhorseRuntimeIdentity,
 } from "../src/lib/app-identity";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
@@ -283,6 +287,17 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(parseWorkhorseBuildChannel("broken"), "release");
   assert.equal(WORKHORSE_BUILD_MARKER, "workhorse-build.json");
   assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
+  const apps = path.join("C:", "Apps");
+  const development = workhorseInstallTarget({ channel: "development", applicationsDir: apps });
+  const release = workhorseInstallTarget({ channel: "release", applicationsDir: apps });
+  assert.equal(development.dest, path.join(apps, "Go7 Workhorse Dev.app"));
+  assert.equal(release.dest, path.join(apps, "Go7 Workhorse.app"));
+  assert.notEqual(development.dest, release.dest);
+  assert.equal(development.userDataDirectory, WORKHORSE_DEV_USER_DATA_DIR);
+  assert.equal(release.userDataDirectory, WORKHORSE_USER_DATA_DIR);
+  assert.notEqual(development.userDataDirectory, release.userDataDirectory);
+  assert.equal(tryInstallWouldReplaceProduction(development.dest, apps), false);
+  assert.equal(tryInstallWouldReplaceProduction(release.dest, apps), true);
 });
 
 test("filterCommands returns the shipped command list and filters it", () => {
@@ -8076,4 +8091,39 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(agents, /One tree per agent/);
   assert.match(agents, /Tests must not read the machine they run on/);
   assert.match(agents, /This repository is public/);
+  assert.match(agents, /A test must not hang/);
+  assert.match(agents, /Typing must not journal the whole desk on each key/);
+  assert.match(agents, /\*\*Try\*\*/);
+  assert.match(agents, /\*\*Ship\*\*/);
+  assert.match(agents, /including other agents' already-merged work/);
+  assert.match(agents, /Do not cherry-pick/);
+  assert.match(agents, /never writes `\/Applications\/Go7 Workhorse\.app`/);
+  const contributing = readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8");
+  assert.match(contributing, /\*\*Try\*\*/);
+  assert.match(contributing, /\*\*Ship\*\*/);
+  assert.match(contributing, /scripts\/install-mac\.sh` is ship only/);
+  const tryDesk = readFileSync(path.join(ROOT, "scripts", "try-desk.ts"), "utf8");
+  assert.match(tryDesk, /workhorseInstallTarget/);
+  assert.match(tryDesk, /tryInstallWouldReplaceProduction/);
+  assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
+  const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts as { try?: string; "try:dry"?: string };
+  assert.match(scripts.try ?? "", /try-desk\.ts/);
+  assert.match(scripts["try:dry"] ?? "", /--dry/);
+
+  const apps = mkdtempSync(path.join(os.tmpdir(), "wh-try-dest-"));
+  try {
+    const stdout = execFileSync(
+      process.execPath,
+      [path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), path.join(ROOT, "scripts", "try-desk.ts"), "--dry", "--applications-dir", apps],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+    assert.match(stdout, /Go7 Workhorse Dev\.app/);
+    assert.match(stdout, /userData Go7 Workhorse Dev/);
+    assert.match(stdout, /channel development/);
+    assert.match(stdout, /does not replace/);
+    assert.ok(stdout.includes(path.join(apps, "Go7 Workhorse Dev.app")));
+    assert.ok(!stdout.includes(`try desk → ${path.join(apps, "Go7 Workhorse.app")}`));
+  } finally {
+    rmSync(apps, { recursive: true, force: true });
+  }
 });

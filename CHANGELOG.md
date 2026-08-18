@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.4.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.4.0...v0.4.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* keep eval target synced with releases ([e494675](https://github.com/go7studio/Go7-Workhorse/commit/e4946755014f220ed882e512642395252fa17741))
+* keep release validation synchronized ([19c3687](https://github.com/go7studio/Go7-Workhorse/commit/19c368788da752f2c54123283466b47e8447d498))
+* let macOS updates recognize mounted disk images ([6dde2ca](https://github.com/go7studio/Go7-Workhorse/commit/6dde2ca401ad0353f32246d3d4885077d9e95d05))
+* mac updater recognizes the mounted disk image ([f88e8e2](https://github.com/go7studio/Go7-Workhorse/commit/f88e8e2731eb073d56066eaf309df1e9bc4689ad))
+* preserve the existing release tag format ([d11c133](https://github.com/go7studio/Go7-Workhorse/commit/d11c133ecb507069f0d0765227c8857e7a11c4e1))
+* preserve the existing release tag format ([e142073](https://github.com/go7studio/Go7-Workhorse/commit/e14207353bd13b717f48a20aaa8e888262944e6f))
+* restore the published release baseline ([a444eaa](https://github.com/go7studio/Go7-Workhorse/commit/a444eaaea070ff075d5a0db234c6e44c095ed472))
+* restore the published release baseline ([5c099b8](https://github.com/go7studio/Go7-Workhorse/commit/5c099b8350a11e9c66d6d3bb79493cfac890a8c9))
+
 ## [0.4.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.2...v0.4.0) (2026-08-18)
 
 

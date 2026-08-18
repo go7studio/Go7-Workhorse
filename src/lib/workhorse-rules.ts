@@ -7,7 +7,7 @@ export const WORKHORSE_SESSION_RULES =
   "Sequence: (1) workhorse_list_bots — if the model is already listed, tell the user to pick it under This chat → Vendor. (2) If they gave a base URL, model, and API key, call workhorse_setup_custom_bot with those fields. (3) If they did not give a key, tell them to use Add a bot and paste the URL and key — do not import or invent one. (4) workhorse_delete_bot removes a slot by name. After a successful setup, say the bot is on the desk and they can select it in This chat → Vendor. " +
   "Talking to an existing sidebar chat is always allowed — use workhorse_ask_chat. This chat’s Permission and Sandbox do not block desk talk. " +
   "When they ask to spawn, summon, or call agents or subagents: bind this chat’s project folder first (or search and attach one — do not spawn into an unbound working directory). Then workhorse_list_bots, then workhorse_spawn_agent on every row whose canCall is true — including custom bots and this chat’s own slot (provider custom, chat this bot’s name; the API key is already on the desk). If you are starting more than one worker, pass wait=false on each spawn so they all run at once. After the last spawn, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents. Do not ask the user to pick 1/2/3 because workers are still running. workhorse_await_agents without wait is a status snapshot. The desk joins reports later. Do not ask which vendor. Do not wait for Allow. Do not call workhorse_request_vendor. If canCall is false or the daily bank is spent, that vendor is a no-go — skip it in one line. If stock vendors are a no-go, spawn the callable custom bots. If they asked for multiple and only one vendor is callable, spawn several of that vendor with split tasks. Only say nothing to spawn when list_bots has zero canCall rows. Do not ask the user to do the review themselves. Give each spawn the review task, not a request to summon more agents. Workers have names. A spawn reply says which worker took the slice (Wren, Dexter). When more work of the same kind comes up, pass worker with that name so it goes back to the worker that already did it, with everything it learned. Starting a second identical bot from cold for the next slice on the same project is waste — the desk reuses an idle worker automatically, and naming one is how you choose which. A busy worker still gets a colleague; running several at once is the point. You are the orchestrator. A worker may create one bounded quick-route helper only when its assigned slice explicitly requires a second independent check; grandchildren cannot spawn. " +
-  "A user message that starts with /goal is Grok Build’s goal command, not a desk spawn. Do not call workhorse_spawn_agent for /goal even if the objective says spawn, skeptic, verifier, or subagents. Run Grok’s goal driver (update_goal, the workflow verifier, and Grok spawn_subagent). Desk spawn stays for prompts that are not /goal. " +
+  "A user message that starts with /goal runs Grok Build’s goal driver — update_goal and the workflow verifier — not an automatic desk fan-out. Do not spawn workers for a /goal that only names work. When the objective itself asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent: desk workers get names, keep their own usage rings, show in the sidebar, and survive a restart. Grok’s own subagents do none of that. " +
   "If a tool result starts with USER DECLINED, the user said no for this chat. Tell them they declined that vendor here, then stop. Do not retry. " +
   "workhorse_request_permission only RAISES access when Plan or Read-only/Strict is blocking a write you must do now. Never call it to lower Permission or Sandbox. Never offer to dial limits back. If the user asks what permissions you have, quote this turn’s Permission and Sandbox and stop. " +
   "If the user asks to create or allocate a project, that is a project on the desk — not a file on disk. Search likely folders first: D:\\ and C:\\, Godot\\Projects, the user’s Projects folder, names matching the request. If they name a drive (Look at the D drive), search that drive now — do not ask which copy. When you find a folder with project.godot, call workhorse_list_projects then workhorse_create_project with the exact name and that absolute path. That call puts THIS chat in the new project. Then list_projects again. Only tell the user it exists if that list shows the name and folder. Do not ask the user for a path when a matching folder exists. Do not invent success. Do not say you cannot drive the GUI. Do not scaffold a git repo unless they asked for files on disk. Call it a project. Do not call it a sidebar anything. " +
@@ -47,7 +47,7 @@ export const CURSOR_SESSION_RULES = WORKHORSE_SESSION_RULES.replace(
     "The shipped vendors are Grok, Codex, Claude, and Cursor, plus any custom bots already on the desk.",
   )
   .replace(
-    "A user message that starts with /goal is Grok Build’s goal command, not a desk spawn. Do not call workhorse_spawn_agent for /goal even if the objective says spawn, skeptic, verifier, or subagents. Run Grok’s goal driver (update_goal, the workflow verifier, and Grok spawn_subagent). Desk spawn stays for prompts that are not /goal. ",
+    "A user message that starts with /goal runs Grok Build’s goal driver — update_goal and the workflow verifier — not an automatic desk fan-out. Do not spawn workers for a /goal that only names work. When the objective itself asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent: desk workers get names, keep their own usage rings, show in the sidebar, and survive a restart. Grok’s own subagents do none of that. ",
     "",
   );
 
@@ -65,8 +65,35 @@ export const SPAWN_TURN_HINT =
 
 export type DeskRole = "orchestrator" | "worker";
 
-const SPAWN_ASK =
-  /\b(spawn|summon|sub-?agents?|fan-?out|call (a |an |the )?(grok|codex|claude|sol|terra|luna|agent|bot|vendor)|multiple (agents|sub-?agents|bots|vendors))\b/i;
+/** What the desk calls its own helpers. "worker" is the shipped word for one. */
+const SPAWN_TARGET = "(?:sub-?agents?|agents?|bots?|workers?|vendors?)";
+
+/**
+ * Asking for helpers, in the words people actually use.
+ *
+ * The old pattern only fired on spawn / summon / "call a bot" / "multiple
+ * bots", so every ordinary way of asking missed: "assign bots to audit this",
+ * "create and drive the bots", "have agents look at it", "put workers on each
+ * slice" — and "fan out" with a space, though "fan-out" was listed. A desk
+ * whose orchestrator only understands one phrasing is a desk that quietly
+ * does the work itself.
+ *
+ * Deliberately not here: "run" and "start", which own thread pools and test
+ * runners ("start the workers in the pool") far more often than they own the
+ * desk.
+ */
+const SPAWN_ASK = new RegExp(
+  "\\b(?:" +
+    // These stand alone: nobody writes "subagent" about anything but helpers.
+    // "agent", "bot" and "worker" do not — agents.md, the bot parser, and a
+    // thread-pool worker are all ordinary code talk — so those need a verb.
+    "spawn|summon|fan[-\\s]?out|sub-?agents?" +
+    `|(?:assign|create|drive|deploy|dispatch|send|put|have|get|use|call|spin\\s+up)\\s+` +
+    `(?:a|an|the|some|several|multiple|more|\\d+)?\\s*${SPAWN_TARGET}` +
+    `|multiple\\s+${SPAWN_TARGET}` +
+  ")\\b",
+  "i",
+);
 
 export function looksLikeWorkerBrief(text: string): boolean {
   const value = text.trim();
@@ -84,7 +111,12 @@ export function looksLikeGoalCommand(text: string): boolean {
 
 export function looksLikeSpawnRequest(text: string): boolean {
   if (looksLikeWorkerBrief(text)) return false;
-  if (looksLikeGoalCommand(text)) return false;
+  // A bare /goal is Grok's goal driver, not a desk fan-out — "/goal migrate
+  // auth" must never summon anybody. But the objective is still the user
+  // talking: when it asks for bots or workers, that is a request for desk
+  // workers, which have names, meter to their own rings and survive a
+  // restart. Blocking every /goal meant an objective reading "assign bots ...
+  // create and drive the bots" spawned nothing at all.
   return SPAWN_ASK.test(text.trim());
 }
 

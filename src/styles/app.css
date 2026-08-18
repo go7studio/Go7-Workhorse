@@ -1353,17 +1353,16 @@ html.pane-dragging * {
 }
 
 .session-edits .edited-block.compact:not(.open) {
-  width: fit-content;
+  position: relative;
+  width: 100%;
   max-width: 100%;
+  min-height: 32px;
   border-radius: 980px;
   overflow: hidden;
 }
 
-.session-edits .edited-block.compact:not(.open) .edited-files-slot,
-.session-edits .edited-block.compact:not(.open) .edited-files-slot > .file-list {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
+.session-edits .edited-bar {
+  width: 100%;
 }
 
 .session-edits .edited-block.compact.open {
@@ -1374,11 +1373,18 @@ html.pane-dragging * {
   width: min(420px, calc(100% - 44px));
 }
 
+.session-edits .edited-block.compact:not(.open) .edited-bar,
 .session-edits .edited-block.compact:not(.open) .edited-toggle {
-  flex: 0 0 auto;
-  justify-content: flex-start;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.session-edits .edited-block.compact:not(.open) .edited-toggle {
+  flex: 1 1 auto;
+  justify-content: flex-end;
   gap: 8px;
-  width: auto;
   padding: 6px 10px;
   border-radius: 980px;
 }

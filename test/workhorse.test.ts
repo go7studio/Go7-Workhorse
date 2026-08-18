@@ -5612,8 +5612,10 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /foldOpen/);
-  assert.match(popout, /<details className="work-pop">/);
+  assert.match(popout, /<details className="work-pop" onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
+  assert.match(popout, /bodyOpen && hasInner/);
+  assert.match(popout, /earlierOpen \?/);
   assert.match(popout, /1 \? "tool" : "tools"/);
   assert.match(popout, /packWorkRows/);
   assert.match(popout, /earlierWorkLabel/);

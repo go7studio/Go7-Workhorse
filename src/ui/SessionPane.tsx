@@ -71,6 +71,10 @@ export function SessionPane() {
     if (!session) return extraEdits;
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, session?.messages, roots, extraEdits]);
+  const blocks = useMemo(
+    () => (session ? groupTranscript(session.messages) : []),
+    [session?.messages],
+  );
   const hiddenPaths = session ? hiddenByChat[session.id] : undefined;
   const visible = useMemo(
     () => edits.filter((item) => !(hiddenPaths ?? []).some((path) => sameEditPath(path, item.path))),
@@ -183,7 +187,6 @@ export function SessionPane() {
     setFileOut(false);
     setOpen(file);
   };
-  const blocks = groupTranscript(session.messages);
   const liveIndex = working ? lastReplyIndex(blocks) : -1;
   const liveBlock = liveIndex >= 0 ? blocks[liveIndex] : undefined;
   const talking =

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -31,13 +31,29 @@ function foldOpen(active: boolean): { open?: true } {
   return active ? { open: true } : {};
 }
 
+function useFoldOpen(initial = false) {
+  const [open, setOpen] = useState(initial);
+  const onToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    setOpen(event.currentTarget.open);
+  };
+  return { open, onToggle };
+}
+
 function ThoughtBlock({ text, live, id }: { text: string; live: boolean; id: string }) {
+  const { open, onToggle } = useFoldOpen(live);
   return (
-    <details key={`${id}-${live ? "live" : "idle"}`} className={`work-fold${live ? " thought-live" : ""}`} {...foldOpen(live)}>
+    <details
+      key={`${id}-${live ? "live" : "idle"}`}
+      className={`work-fold${live ? " thought-live" : ""}`}
+      {...foldOpen(live)}
+      onToggle={onToggle}
+    >
       <summary className={live ? "thought-live-label" : undefined}>{live ? "Thinking" : "Thought"}</summary>
-      <div className="thought">
-        <MessageBody text={unsquashSentences(text)} />
-      </div>
+      {open || live ? (
+        <div className="thought">
+          <MessageBody text={unsquashSentences(text)} />
+        </div>
+      ) : null}
     </details>
   );
 }
@@ -244,6 +260,8 @@ export function WorkPopout({
   onOpenThread?: (id: string) => void;
 }) {
   const [now, setNow] = useState(Date.now());
+  const { open: bodyOpen, onToggle: onBodyToggle } = useFoldOpen(false);
+  const { open: earlierOpen, onToggle: onEarlierToggle } = useFoldOpen(false);
   const threads = steps.filter((step) => step.type === "subagent").map((step) => step.message);
   const tools = steps.filter((step) => step.type === "tool").map((step) => step.message);
   const anyChildLive = threads.some((marker) => {
@@ -301,16 +319,17 @@ export function WorkPopout({
   const packed = packWorkRows(rows);
 
   return (
-    <details className="work-pop">
+    <details className="work-pop" onToggle={onBodyToggle}>
       <summary>
         {summary}
         {stamp}
       </summary>
-      {hasInner ? (
+      {bodyOpen && hasInner ? (
         <div className="work-body">
           {packed.earlier.length > 0 ? (
-            <details className="work-fold work-step" data-kind="earlier">
+            <details className="work-fold work-step" data-kind="earlier" onToggle={onEarlierToggle}>
               <summary>{earlierWorkLabel(packed.earlier)}</summary>
+              {earlierOpen ? (
               <div className="work-fold-body">
                 {packed.earlier.map((row, rowIndex) => (
                   <WorkRow
@@ -326,6 +345,7 @@ export function WorkPopout({
                   />
                 ))}
               </div>
+              ) : null}
             </details>
           ) : null}
           {packed.tail.map((row, tailIndex) => {

@@ -1,6 +1,7 @@
 import type { ChatMessage, Session } from "./types";
 import { uid } from "./id";
 import { joinChatText } from "./markdown";
+import { SUBAGENT_SPAWN_TITLE, isSubagentSpawnTitle } from "./tool-labels";
 
 export type ToolRowInput = {
   toolCallId: string;
@@ -232,8 +233,18 @@ export function upsertToolMessage(messages: ChatMessage[], event: ToolRowInput, 
     ? messages.findIndex((message) => message.kind === "tool" && message.toolCallId === event.toolCallId)
     : -1;
   const previous = existing >= 0 ? messages[existing] : undefined;
-  const title = event.title.trim() || (previous ? titleFromToolLine(previous.text) : "use a tool");
-  const incoming = event.detail.trim();
+  // A vendor spawning its own subagent opens the row as `spawn_subagent`, then
+  // renames it to the task ("Audit GA4 iOS Play"). Letting the rename win threw
+  // away the only sign a helper had been started: four went out under one goal
+  // on 2026-08-18 and the transcript showed four ordinary tool rows. Keep the
+  // spawn as the title and let the task be the detail.
+  const wasSubagentSpawn = Boolean(previous && isSubagentSpawnTitle(titleFromToolLine(previous.text)));
+  const title = wasSubagentSpawn
+    ? SUBAGENT_SPAWN_TITLE
+    : event.title.trim() || (previous ? titleFromToolLine(previous.text) : "use a tool");
+  const incoming = wasSubagentSpawn
+    ? event.title.trim() || event.detail.trim()
+    : event.detail.trim();
   const usable =
     incoming && incoming.length <= TOOL_LINE_LIMIT && !hasLineBreak(incoming)
       ? incoming

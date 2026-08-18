@@ -5929,8 +5929,11 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   assert.equal(looksLikeSpawnRequest("please spawn subagents"), true);
   assert.equal(looksLikeSpawnRequest("Summon multiple subagents"), true);
   assert.equal(looksLikeSpawnRequest("/goal ship the backlog"), false);
-  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), false);
-  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents"), "/goal assign skeptic and spawn subagents");
+  // A goal whose objective asks for helpers is the user asking for desk
+  // workers. Blocking every /goal meant "assign bots ... create and drive the
+  // bots" ran solo: 504 tool calls, 0 workers, on 2026-08-18.
+  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), true);
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents").startsWith(SPAWN_TURN_HINT), true);
   assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
 
   const composed = composeVendorPrompt("/goal prove native /goal", WORKHORSE_SESSION_RULES, "session/load");
@@ -5948,8 +5951,11 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   assert.match(store, /prepareVendorSend\(/);
   assert.doesNotMatch(store, /if \(looksLikeSpawnRequest\(originalText\)\)/);
   assert.match(store, /grokGoalAfterTurnIdle/);
-  assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal is Grok Build/);
-  assert.match(WORKHORSE_SESSION_RULES, /Do not call workhorse_spawn_agent for \/goal/);
+  assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal runs Grok Build/);
+  // The rule must still hold both halves: no fan-out for a bare goal, and
+  // desk workers when the objective asks for them.
+  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn workers for a \/goal that only names work/);
+  assert.match(WORKHORSE_SESSION_RULES, /asks for bots, workers, agents, or subagents, spawn them with workhorse_spawn_agent/);
   assert.equal(buildGrokLaunchSpec({ model: "grok-4.6", effort: "medium", cwd: ROOT, mode: "ask" }).sessionParams._meta?.goalMode, true);
 
   assert.equal(
@@ -7009,8 +7015,11 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.equal(looksLikeSpawnRequest("rename the project"), false);
   assert.equal(looksLikeGoalCommand("/goal ship the backlog"), true);
   assert.equal(looksLikeSpawnRequest("/goal ship the backlog"), false);
-  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), false);
-  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents"), "/goal assign skeptic and spawn subagents");
+  // A goal whose objective asks for helpers is the user asking for desk
+  // workers. Blocking every /goal meant "assign bots ... create and drive the
+  // bots" ran solo: 504 tool calls, 0 workers, on 2026-08-18.
+  assert.equal(looksLikeSpawnRequest("/goal assign skeptic verifier subagents"), true);
+  assert.equal(withSpawnHint("/goal assign skeptic and spawn subagents").startsWith(SPAWN_TURN_HINT), true);
   assert.equal(withSpawnHint("Summon multiple subagents").startsWith(SPAWN_TURN_HINT), true);
   const spawnAsk = composeVendorPrompt("Summon multiple subagents", WORKHORSE_SESSION_RULES, "session/load");
   assert.match(spawnAsk, /canCall/);

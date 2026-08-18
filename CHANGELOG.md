@@ -8,14 +8,6 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
-## [0.4.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.4.0...v0.4.1) (2026-08-18)
-
-
-### Bug Fixes
-
-* let macOS updates recognize mounted disk images ([6dde2ca](https://github.com/go7studio/Go7-Workhorse/commit/6dde2ca401ad0353f32246d3d4885077d9e95d05))
-* mac updater recognizes the mounted disk image ([f88e8e2](https://github.com/go7studio/Go7-Workhorse/commit/f88e8e2731eb073d56066eaf309df1e9bc4689ad))
-
 ## [0.4.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.2...v0.4.0) (2026-08-18)
 
 

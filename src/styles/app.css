@@ -1343,7 +1343,7 @@ html.pane-dragging * {
   border-radius: 14px;
   opacity: 0;
   transform: translateY(6px);
-  transition: opacity 200ms var(--ease), transform 200ms var(--ease);
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), width 200ms var(--ease);
   pointer-events: auto;
 }
 
@@ -1359,6 +1359,7 @@ html.pane-dragging * {
   left: auto;
   z-index: 3;
   overflow: hidden;
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), width 200ms var(--ease);
 }
 
 .session-edits .edited-block.compact:not(.open):not(.closing) {

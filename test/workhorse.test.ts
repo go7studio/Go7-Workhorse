@@ -4064,6 +4064,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(editedList, /edited-toggle/);
   assert.match(editedList, /closing/);
   assert.match(editedList, /FOLD_MS/);
+  assert.match(editedList, /boxWidth/);
+  assert.match(editedList, /pillWidth/);
   assert.match(editedList, /startOpen/);
   assert.match(editedList, /showLineStats/);
   assert.match(editedList, /label = "Edited"/);
@@ -4134,6 +4136,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     css,
     /\.session-edits \.edited-block\.compact\s*\{[^}]*position:\s*absolute/,
   );
+  assert.match(css, /\.session-edits \.edited-block\.compact\s*\{[^}]*width 200ms/);
   assert.match(
     css,
     /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\)\s*\{[^}]*width:\s*fit-content/,

@@ -4924,7 +4924,7 @@ test("stretchBuckets follows today week month and all", () => {
   assert.equal(busy?.label, "Aug 12");
 });
 
-test("UsagePane ships the Figma fuel-ring overview, not the old token line", () => {
+test("UsagePane ships the Figma fuel-ring overview, not the old token line", async () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
@@ -4941,6 +4941,15 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   const ring = readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8");
   assert.match(ring, /easeOutCubic/);
   assert.match(ring, /strokeDashoffset/);
+  assert.match(ring, /sameFuelTarget/);
+  assert.match(ring, /shownRef\.current = next/);
+  assert.match(ring, /target === undefined/);
+  assert.match(pane, /value=\{ring\?\.value\}/);
+  assert.doesNotMatch(pane, /value=\{ring \? ring\.value : 0\}/);
+  const { sameFuelTarget } = await import("../src/ui/FuelRing");
+  assert.equal(sameFuelTarget(0.95, 0.951), true);
+  assert.equal(sameFuelTarget(0.2, 0.95), false);
+  assert.equal(sameFuelTarget(undefined, 0.95), false);
   assert.match(css, /@keyframes fuel-in/);
   assert.match(pane, /This stretch/);
   assert.match(pane, /usage-dots/);

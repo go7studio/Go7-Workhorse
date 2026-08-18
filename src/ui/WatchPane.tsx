@@ -87,7 +87,7 @@ export function WatchPane() {
                 }
               >
                 <FuelRing
-                  value={leftover != null ? leftover / 100 : 0}
+                  value={leftover != null ? leftover / 100 : undefined}
                   size={104}
                   tone={row.provider}
                   color={row.color}

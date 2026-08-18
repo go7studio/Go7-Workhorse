@@ -48,9 +48,10 @@ transcript rather than as a path.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work popout keeps thinking and tool calls in the order they
   happened: think, tools, think. Consecutive tool calls share one fold
-  labelled "3 tools"; expand it to see the calls listed underneath. A
-  later thought starts a new hop. The current hop stays open. Click a
-  finished dot to expand it again. The visible reply stays below that.
+  labelled "3 tools"; expand it to see the calls listed underneath, not
+  a row of "1 tool". A single call shows its name. A later thought
+  starts a new hop. The current hop stays open. Click a finished dot to
+  expand it again. The visible reply stays below that.
 
 ## Control
 

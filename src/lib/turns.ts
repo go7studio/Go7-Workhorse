@@ -213,7 +213,6 @@ export function displayWorkSteps(
         const text =
           stripOutputFromThought(collapseThoughtDisplay(raw), visible) || collapseThoughtDisplay(raw).trim();
         if (text) out.push({ type: "thought", id: step.message.id, text });
-        else out.push({ type: "thought", id: step.message.id, text: raw.trim() || "Thought" });
         continue;
       }
       pushThought(step.message.id, raw);

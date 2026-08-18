@@ -139,6 +139,7 @@ type WorkhorseBridge = {
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
   saveState: (state: Record<string, unknown>) => Promise<void>;
+  saveComposerDrafts?: (drafts: Record<string, { text?: string; images?: import("./lib/types").ChatImage[] }>) => Promise<void>;
   syncJobs?: (sessions: import("./lib/types").Session[]) => Promise<import("../electron/job-engine").DurableJobEvent[]>;
   onJobDue?: (handler: (events: import("../electron/job-engine").DurableJobEvent[]) => void) => () => void;
   quit: () => Promise<void>;

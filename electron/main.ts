@@ -51,7 +51,8 @@ import { CredentialStore, hydrateStateCredentials, protectStateCredentials } fro
 import { DurableJobEngine } from "./job-engine";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
-import { readVersionedState, writeVersionedState } from "./state-persistence";
+import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
+import { readComposerDraftFile, readVersionedState, writeComposerDraftFile, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -250,6 +251,10 @@ function readState(): Persistable {
     : hydrated;
   const ready = fillEmptyCustomBotKeys(detected);
   claimLinkedFolders(ready);
+  const drafts = readComposerDraftFile(statePath()) as Record<string, ComposerDraftSnap>;
+  if (Array.isArray(ready.sessions) && Object.keys(drafts).length > 0) {
+    return { ...ready, sessions: applyComposerDrafts(ready.sessions, drafts) };
+  }
   return ready;
 }
 
@@ -776,6 +781,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("state:load", () => readState());
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (state && typeof state === "object") writeState(state);
+  });
+  ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
+    if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
+    writeComposerDraftFile(statePath(), drafts);
   });
   ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 

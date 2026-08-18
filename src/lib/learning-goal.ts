@@ -33,3 +33,22 @@ export function settleBoundedGoal(state: GoalState | undefined, now = Date.now()
   }
   return state;
 }
+
+export function settleSessionGoals<T extends { goal?: GoalState; status: string }>(
+  sessions: T[],
+  now = Date.now(),
+): { sessions: T[]; changed: boolean } {
+  let changed = false;
+  const next = sessions.map((item) => {
+    const goal = settleBoundedGoal(item.goal, now);
+    if (goal === item.goal) return item;
+    changed = true;
+    const timedOut = goal?.terminal === "timed-out" && (item.status === "running" || item.status === "needs-input");
+    return {
+      ...item,
+      goal,
+      ...(timedOut ? { status: "idle" as T["status"] } : {}),
+    };
+  });
+  return { sessions: next, changed };
+}

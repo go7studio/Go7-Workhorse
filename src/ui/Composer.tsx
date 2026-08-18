@@ -122,7 +122,7 @@ export function Composer({
 
   useEffect(() => {
     return () => {
-      if (sessionId) setComposerDraft(sessionId, valueRef.current, imagesRef.current);
+      if (sessionId) setComposerDraft(sessionId, valueRef.current, imagesRef.current, true);
     };
   }, [sessionId, setComposerDraft]);
 
@@ -216,7 +216,7 @@ export function Composer({
     send(text, { images, steer: running && mode === "steer" });
     setValue("");
     setImages([]);
-    if (sessionId) setComposerDraft(sessionId, "", []);
+    if (sessionId) setComposerDraft(sessionId, "", [], true);
   };
 
   const pick = (command: typeof matches[number]) => {
@@ -232,7 +232,7 @@ export function Composer({
     send(value.startsWith(`${command.name} `) || value === command.name ? value : command.name);
     setValue("");
     setImages([]);
-    if (sessionId) setComposerDraft(sessionId, "", []);
+    if (sessionId) setComposerDraft(sessionId, "", [], true);
   };
 
   const applyMark = (mark: string) => {
@@ -408,7 +408,7 @@ export function Composer({
             if (event.key === "Escape") {
               setValue("");
               setImages([]);
-              if (sessionId) setComposerDraft(sessionId, "", []);
+              if (sessionId) setComposerDraft(sessionId, "", [], true);
             }
           }}
         />

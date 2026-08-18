@@ -29,6 +29,10 @@ import {
   isLooseDeleteScope,
   applyRenameDeskChat,
   listedChats,
+  applyComposerDrafts,
+  sameComposerDraft,
+  snapComposerDraft,
+  type ComposerDraftSnap,
   moveChat,
   resolveListedChat,
   openDraft,
@@ -229,7 +233,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { normalizeLearning } from "./learning-policy";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
-import { settleBoundedGoal } from "./learning-goal";
+import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
 import type {
   AppState,
@@ -311,7 +315,7 @@ export type Store = AppState & {
   setSessionEffort: (effort: EffortLevel) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
-  setComposerDraft: (id: string, text: string, images?: import("./types").ChatImage[]) => void;
+  setComposerDraft: (id: string, text: string, images?: import("./types").ChatImage[], commit?: boolean) => void;
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => void;
   deleteWorkers: (parentId: string) => void;
@@ -651,6 +655,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
   const [watchRestore, setWatchRestore] = useState<{ text: string; images?: import("./types").ChatImage[] } | null>(null);
   const persistTimer = useRef<number | null>(null);
+  const draftPersistTimer = useRef<number | null>(null);
+  const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
@@ -752,8 +758,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready || !window.workhorse) return;
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    const busy = state.sessions.some((session) => session.status === "running" || session.status === "needs-input");
     persistTimer.current = window.setTimeout(() => {
-      const saved = listedChats(state.sessions);
+      const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
       void window.workhorse
         ?.saveState({
           ...state,
@@ -764,7 +771,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : null,
         })
         .catch(() => undefined);
-    }, 200);
+    }, busy ? 2_000 : 400);
   }, [ready, state]);
 
   const createProject = useCallback((name: string, folderPaths: string[] = []) => {
@@ -1053,29 +1060,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setComposerDraft = useCallback((id: string, text: string, images?: import("./types").ChatImage[]) => {
+  const setComposerDraft = useCallback((id: string, text: string, images?: import("./types").ChatImage[], commit = false) => {
+    const snap = snapComposerDraft(text, images);
+    if (sameComposerDraft(composerDraftsRef.current[id], snap)) {
+      if (!commit) return;
+    } else {
+      composerDraftsRef.current[id] = snap;
+      if (draftPersistTimer.current) window.clearTimeout(draftPersistTimer.current);
+      draftPersistTimer.current = window.setTimeout(() => {
+        void window.workhorse?.saveComposerDrafts?.(composerDraftsRef.current);
+      }, 800);
+    }
+    if (!commit) return;
     setState((current) => {
       const session = current.sessions.find((item) => item.id === id);
       if (!session) return current;
-      const composerDraft = text.length > 0 ? text : undefined;
-      const composerImages = images && images.length > 0 ? images : undefined;
-      const sameText = (session.composerDraft ?? undefined) === composerDraft;
-      const was = session.composerImages ?? [];
-      const next = composerImages ?? [];
-      const sameImages =
-        was.length === next.length &&
-        was.every(
-          (item, index) =>
-            item.id === next[index]?.id &&
-            item.data === next[index]?.data &&
-            item.text === next[index]?.text &&
-            item.folder === next[index]?.folder,
-        );
-      if (sameText && sameImages) return current;
+      if (sameComposerDraft({ text: session.composerDraft, images: session.composerImages }, snap)) return current;
       return {
         ...current,
         sessions: current.sessions.map((item) =>
-          item.id === id ? { ...item, composerDraft, composerImages } : item,
+          item.id === id ? { ...item, composerDraft: snap.text, composerImages: snap.images } : item,
         ),
       };
     });
@@ -5889,20 +5893,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for (const session of due) {
         if (session.status === "running" || session.status === "needs-input") cancelVendorSession(session);
       }
-      setState((current) => ({
-        ...current,
-        sessions: current.sessions.map((item) => {
-          const goal = settleBoundedGoal(item.goal);
-          if (goal === item.goal) return item;
-          return {
-            ...item,
-            goal,
-            ...(goal?.terminal === "timed-out" && (item.status === "running" || item.status === "needs-input")
-              ? { status: "idle" as const }
-              : {}),
-          };
-        }),
-      }));
+      setState((current) => {
+        const settled = settleSessionGoals(current.sessions);
+        if (!settled.changed) return current;
+        return { ...current, sessions: settled.sessions };
+      });
     }, 1_000);
     return () => window.clearInterval(timer);
   }, []);

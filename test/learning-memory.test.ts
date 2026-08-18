@@ -30,7 +30,7 @@ import {
 import { InMemoryStore, boundedReplace } from "../src/lib/learning-store";
 import { stubCompile } from "../src/lib/learning-compiler";
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
-import { extractGoalBudget, settleBoundedGoal } from "../src/lib/learning-goal";
+import { extractGoalBudget, settleBoundedGoal, settleSessionGoals } from "../src/lib/learning-goal";
 import {
   BACKFILL_WINDOW_MS,
   backfillEventId,
@@ -435,6 +435,14 @@ test("bounded /goal review reaches a durable terminal state", () => {
   const timed = settleBoundedGoal(started, 1100);
   assert.equal(timed?.terminal, "timed-out");
   assert.equal(timed?.status, "paused");
+  const row = { goal: started, status: "idle" as const };
+  const idle = settleSessionGoals([row], 1000);
+  assert.equal(idle.changed, false);
+  assert.equal(idle.sessions[0], row);
+  const due = settleSessionGoals([{ goal: started, status: "running" }], 1100);
+  assert.equal(due.changed, true);
+  assert.equal(due.sessions[0]?.status, "idle");
+  assert.equal(due.sessions[0]?.goal?.terminal, "timed-out");
 });
 
 test("title-less learning calls never create Workhorse chats", async () => {

@@ -87,6 +87,28 @@ function rotateProtectedBackups(file: string, protect: (state: PersistableState)
   }
 }
 
+export function composerDraftsFile(stateFile: string): string {
+  return path.join(path.dirname(stateFile), "composer-drafts.json");
+}
+
+export function readComposerDraftFile(stateFile: string): Record<string, unknown> {
+  const parsed = parseObject(composerDraftsFile(stateFile));
+  return parsed ?? {};
+}
+
+export function writeComposerDraftFile(stateFile: string, drafts: unknown) {
+  const file = composerDraftsFile(stateFile);
+  if (!drafts || typeof drafts !== "object" || Array.isArray(drafts) || Object.keys(drafts).length === 0) {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* nothing to clear */
+    }
+    return;
+  }
+  atomicWriteJson(file, drafts);
+}
+
 export function writeVersionedState(
   file: string,
   state: PersistableState,

@@ -3,7 +3,13 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CURRENT_STATE_VERSION, readVersionedState, writeVersionedState } from "../electron/state-persistence";
+import {
+  CURRENT_STATE_VERSION,
+  readComposerDraftFile,
+  readVersionedState,
+  writeComposerDraftFile,
+  writeVersionedState,
+} from "../electron/state-persistence";
 
 const scrub = (state: Record<string, unknown>) => JSON.parse(
   JSON.stringify(state, (key, value) => key === "apiKey" ? undefined : value),
@@ -44,5 +50,15 @@ test("newer unknown state versions are skipped in favor of a compatible backup",
   fs.writeFileSync(file, JSON.stringify({ stateVersion: 999, sessions: [{ id: "future" }] }), "utf8");
   fs.writeFileSync(`${file}.bak`, JSON.stringify({ stateVersion: 2, sessions: [{ id: "known" }] }), "utf8");
   assert.equal(((readVersionedState(file).state.sessions as Array<{ id: string }>)[0]?.id), "known");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("composer drafts write a sidecar and vanish when empty", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-drafts-"));
+  const file = path.join(dir, "state.json");
+  writeComposerDraftFile(file, { sess_1: { text: "still typing" } });
+  assert.equal((readComposerDraftFile(file).sess_1 as { text?: string })?.text, "still typing");
+  writeComposerDraftFile(file, {});
+  assert.deepEqual(readComposerDraftFile(file), {});
   fs.rmSync(dir, { recursive: true, force: true });
 });

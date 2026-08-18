@@ -244,6 +244,53 @@ export function hasComposerDraft(session: Pick<Session, "composerDraft" | "compo
   return Array.isArray(session.composerImages) && session.composerImages.length > 0;
 }
 
+export type ComposerDraftSnap = {
+  text?: string;
+  images?: Session["composerImages"];
+};
+
+export function snapComposerDraft(text: string, images?: Session["composerImages"]): ComposerDraftSnap {
+  return {
+    ...(text.length > 0 ? { text } : {}),
+    ...(images && images.length > 0 ? { images } : {}),
+  };
+}
+
+export function sameComposerImages(left?: Session["composerImages"], right?: Session["composerImages"]): boolean {
+  const was = left ?? [];
+  const next = right ?? [];
+  return (
+    was.length === next.length &&
+    was.every(
+      (item, index) =>
+        item.id === next[index]?.id &&
+        item.data === next[index]?.data &&
+        item.text === next[index]?.text &&
+        item.folder === next[index]?.folder,
+    )
+  );
+}
+
+export function sameComposerDraft(left?: ComposerDraftSnap, right?: ComposerDraftSnap): boolean {
+  return (left?.text ?? undefined) === (right?.text ?? undefined) && sameComposerImages(left?.images, right?.images);
+}
+
+export function applyComposerDrafts<T extends { id: string; composerDraft?: string; composerImages?: Session["composerImages"] }>(
+  sessions: T[],
+  drafts: Record<string, ComposerDraftSnap>,
+): T[] {
+  if (Object.keys(drafts).length === 0) return sessions;
+  let changed = false;
+  const next = sessions.map((session) => {
+    const draft = drafts[session.id];
+    if (!draft) return session;
+    if (sameComposerDraft({ text: session.composerDraft, images: session.composerImages }, draft)) return session;
+    changed = true;
+    return { ...session, composerDraft: draft.text, composerImages: draft.images };
+  });
+  return changed ? next : sessions;
+}
+
 export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "composerDraft" | "composerImages">): boolean {
   if (typeof session.archivedAt === "number") return false;
   if (hasComposerDraft(session)) return false;

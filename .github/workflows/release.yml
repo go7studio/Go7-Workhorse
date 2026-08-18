@@ -37,7 +37,6 @@ jobs:
       - uses: googleapis/release-please-action@v5
         id: please
         with:
-          release-type: node
           skip-github-release: true
 
   # A version exists only after the release PR's package.json bump reaches main.

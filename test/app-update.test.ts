@@ -130,6 +130,7 @@ test("update check is wired through main, preload, and the desk banner", () => {
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const updater = readFileSync(path.join(ROOT, "electron", "app-update.ts"), "utf8");
   const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  const releaseConfig = readFileSync(path.join(ROOT, "release-please-config.json"), "utf8");
   assert.match(main, /app:check-update/);
   assert.match(main, /app:apply-update/);
   assert.match(main, /applyAppUpdate/);
@@ -155,7 +156,7 @@ test("update check is wired through main, preload, and the desk banner", () => {
   // to create one with installers in it. release-please prepares the version
   // bump from package.json, which is the version the desk compares against.
   assert.match(workflow, /release-please-action/);
-  assert.match(workflow, /release-type: node/);
+  assert.match(releaseConfig, /"release-type": "node"/);
   assert.match(workflow, /skip-github-release: true/);
   assert.match(workflow, /gh release create/);
   assert.match(workflow, /installers\/\*/);

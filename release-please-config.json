@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "skip-github-release": true,
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "eval/config.example.json",
+          "jsonpath": "$.source.expectedVersion"
+        }
+      ]
+    }
+  }
+}

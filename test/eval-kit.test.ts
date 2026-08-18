@@ -136,6 +136,7 @@ test("release automation keeps the eval target on the packaged version", () => {
   const manifest = json("package.json");
   const extraFile = releaseConfig.packages["."]["extra-files"][0];
   assert.equal(releaseManifest["."], manifest.version);
+  assert.equal(releaseConfig["include-component-in-tag"], false);
   assert.deepEqual(extraFile, {
     type: "json",
     path: "eval/config.example.json",

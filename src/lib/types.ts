@@ -162,7 +162,65 @@ export type DeskLineupRowStatus =
   | "failed"
   | "timed-out"
   /** The desk exited mid-run. The slice is unfinished but the worker can be resumed. */
-  | "interrupted";
+  | "interrupted"
+  /** External runtime task could not be reconciled after restart. */
+  | "unknown";
+
+export type AgentRuntimeId = "openclaw" | "hermes";
+
+export type ExternalAgentRef = {
+  runtimeId: AgentRuntimeId;
+  agentId: string;
+};
+
+export type AgentGrant = {
+  id: string;
+  waveId: string;
+  runtimeId?: AgentRuntimeId;
+  agentId?: string;
+  createdAt: number;
+  consumedAt?: number;
+};
+
+export type CorrelationOrigin = "workhorse" | "openclaw" | "hermes";
+
+export type CorrelationEnvelope = {
+  traceId: string;
+  idempotencyKey: string;
+  origin: CorrelationOrigin;
+  visitedSystems: CorrelationOrigin[];
+  hopCount: number;
+};
+
+export type ExternalTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
+
+export type ExternalTask = {
+  id: string;
+  ref: ExternalAgentRef;
+  status: ExternalTaskStatus;
+  startedAt: number;
+  finishedAt?: number;
+  workspace?: string;
+  result?: string;
+  evidence?: string;
+  envelope: CorrelationEnvelope;
+  grantId: string;
+};
+
+export type ExternalAgentRun = {
+  kind: "external";
+  taskId: string;
+  runtimeId: AgentRuntimeId;
+  agentId: string;
+  status: ExternalTaskStatus;
+  startedAt: number;
+  finishedAt?: number;
+  workspace?: string;
+  result?: string;
+  correlationId: string;
+};
+
+export type McpExposureProfile = "desk" | "worker" | "external-runtime";
 
 export type DeskLineupRow = {
   childId: string;
@@ -177,6 +235,11 @@ export type DeskLineupRow = {
   planStepId?: string;
   rationale?: string;
   constraints?: string[];
+  kind?: "workhorse" | "external";
+  runtimeId?: AgentRuntimeId;
+  agentId?: string;
+  workspace?: string;
+  correlationId?: string;
 };
 
 export type DeskLineup = {
@@ -214,6 +277,10 @@ export type AgentRun = {
   constraints?: string[];
   correlationId?: string;
 };
+
+export type WorkhorseWorkerRun = AgentRun & { kind?: "workhorse" };
+
+export type DeskRun = WorkhorseWorkerRun | ExternalAgentRun;
 
 export type PlanRunStatus =
   | "draft"
@@ -314,6 +381,7 @@ export type PlanRun = {
   pausedAt?: number;
   completedAt?: number;
   blockedReason?: string;
+  externalGrant?: AgentGrant;
 };
 
 export type Session = {
@@ -529,6 +597,13 @@ export type RoutingSettings = {
   allowLocal: boolean;
   /** Keep this percentage of a weekly allowance in reserve. */
   reservePercent: number;
+  /** Opt-in. Off never auto-picks OpenClaw or Hermes. */
+  includeExternalAgents?: boolean;
+};
+
+export type AgentSystemsSettings = {
+  inboundSessionId?: string;
+  inboundProjectId?: string;
 };
 
 export type RoutingDecision = {
@@ -585,6 +660,7 @@ export type Settings = {
   watch: WatchSettings;
   routing: RoutingSettings;
   learning: import("./learning-types").LearningSettings;
+  agentSystems?: AgentSystemsSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";
@@ -681,6 +757,7 @@ export type AppState = {
   watchDayMarks: WatchDayMarks;
   usage: UsageEvent[];
   usageRange: UsageRange;
+  externalTasks?: { byId: Record<string, ExternalTask>; byKey: Record<string, string> };
   deskPlans?: {
     grok?: GrokPlanUsage;
     codex?: GrokPlanUsage;

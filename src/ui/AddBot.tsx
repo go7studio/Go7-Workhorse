@@ -97,7 +97,7 @@ export function AddBot() {
             </div>
             <h2>New bot</h2>
             {draft.source === "openclaw" ? (
-              <p className="row-meta">Imported MiniMax from OpenClaw.</p>
+              <p className="row-meta">Imported MiniMax key from OpenClaw config.</p>
             ) : draft.source === "env" ? (
               <p className="row-meta">Imported MiniMax from the environment.</p>
             ) : null}

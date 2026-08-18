@@ -151,7 +151,7 @@ export function assembleCustomBotDraft(
     if (!usable && !input.apiKey?.trim()) {
       const error =
         importFrom === "openclaw"
-          ? "No MiniMax key in OpenClaw (~/.openclaw/openclaw.json)."
+          ? "No MiniMax key in OpenClaw config (~/.openclaw/openclaw.json)."
           : importFrom === "env"
             ? "MINIMAX_API_KEY is not set."
             : "No MiniMax key on this machine (OpenClaw or MINIMAX_API_KEY). Pass apiKey, or add one of those.";
@@ -159,7 +159,7 @@ export function assembleCustomBotDraft(
     }
     if (usable && detected) {
       if (importFrom === "openclaw" && detected.source !== "openclaw") {
-        return { draft: base, imported: false, error: "OpenClaw MiniMax was not found." };
+        return { draft: base, imported: false, error: "MiniMax key was not found in OpenClaw config." };
       }
       if (importFrom === "env" && detected.source !== "env") {
         return { draft: base, imported: false, error: "MINIMAX_API_KEY is not set." };
@@ -200,7 +200,7 @@ export function assembleCustomBotDraft(
     return {
       draft,
       imported,
-      error: "Need a base URL, model, and API key (or import MiniMax from OpenClaw).",
+      error: "Need a base URL, model, and API key (or import MiniMax key from OpenClaw config).",
     };
   }
   if (!draft.name?.trim()) draft.name = draft.model;

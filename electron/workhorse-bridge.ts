@@ -50,7 +50,11 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
             raw.action === "request-permission" ||
             raw.action === "request-vendor" ||
             raw.action === "await-agents" ||
-            raw.action === "plan"
+            raw.action === "plan" ||
+            raw.action === "agent-status" ||
+            raw.action === "cancel-agent" ||
+            raw.action === "list-agents" ||
+            raw.action === "list-external-agents"
               ? raw.action
               : bots
                 ? "list"

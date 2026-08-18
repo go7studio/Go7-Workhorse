@@ -1,3 +1,4 @@
+import { isExternalAgentAddress } from "./agent-runtime";
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import type { AgentRun, EffortLevel, ProviderId, Session } from "./types";
@@ -321,6 +322,9 @@ export function shouldAutoRouteSpawn(input: {
   model?: unknown;
   chat?: unknown;
 }): boolean {
+  if (isExternalAgentAddress(input.provider) || isExternalAgentAddress(input.model) || isExternalAgentAddress(input.chat)) {
+    return false;
+  }
   return input.routingEnabled && !input.provider && !input.model && !input.chat;
 }
 

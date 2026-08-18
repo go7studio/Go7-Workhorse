@@ -280,6 +280,16 @@ type WorkhorseBridge = {
   learningForget?: (target: import("./lib/learning-types").ForgetTarget) => Promise<{ tombstoned: number }>;
   learningPurge?: (target: import("./lib/learning-types").ForgetTarget) => Promise<import("./lib/learning-types").PurgeResult>;
   learningExport?: (dest: string) => Promise<{ ok: boolean; dest?: string; message?: string }>;
+  detectAgentRuntimes?: () => Promise<{
+    statuses: import("./lib/external-catalog").AgentRuntimeStatus[];
+    agents: import("./lib/external-catalog").ExternalAgent[];
+  }>;
+  installExternalMcp?: () => Promise<{ ok: boolean; message?: string }>;
+  startExternalRuntimeTask?: (request: {
+    ref: import("./lib/types").ExternalAgentRef;
+    prompt: string;
+    now?: number;
+  }) => Promise<import("./lib/types").ExternalTask | null>;
 };
 
 interface Window {

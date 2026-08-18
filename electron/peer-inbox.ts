@@ -21,13 +21,23 @@ export type PeerAction =
   | "record-write"
   | "request-permission"
   | "request-vendor"
-  | "plan";
+  | "plan"
+  | "agent-status"
+  | "cancel-agent"
+  | "list-agents"
+  | "list-external-agents";
 
 export type PeerAsk = {
   fromSessionId: string;
   toSessionId: string;
   message: string;
   mode?: "ask" | "spawn" | "bots";
+  exposureProfile?: import("../src/lib/types").McpExposureProfile;
+  traceId?: string;
+  idempotencyKey?: string;
+  origin?: import("../src/lib/types").CorrelationOrigin;
+  visitedSystems?: import("../src/lib/types").CorrelationOrigin[];
+  hopCount?: number;
   provider?: string;
   model?: string;
   description?: string;

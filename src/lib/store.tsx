@@ -103,16 +103,28 @@ import {
   firstAttachedChoice,
   isSettingsSection,
   normalizeSettings,
+  normalizeAgentSystems,
   normalizeRouting,
   vendorAttachedForSession,
 } from "./settings";
+import { checkEnvelope, createEnvelope, parseExternalAgentRef } from "./agent-runtime";
+import { inboundDeskAction, inboundSpawnParent, mcpExposureProfile } from "../../electron/mcp-exposure";
+import {
+  emptyTaskStore,
+  launchExternalAssignment,
+  normalizeTaskStore,
+  reconcileLineupOnRestart,
+  reconcileTaskStoreOnRestart,
+} from "./external-task";
 import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingProfileForModel } from "./routing";
+import type { AgentSystemsSettings } from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
   blockPlanRun,
   cancelPlanRun,
   completePlanRun,
+  grantExternalAgents,
   normalizePlanRun,
   pausePlanRun,
   readyPlanStepIds,
@@ -121,6 +133,7 @@ import {
   reopenPlanStep,
   revisePlanStep,
   resumePlanRun,
+  revokeExternalAgents,
   setPlanStepStatus,
   startPlanRun,
 } from "./plan";
@@ -285,6 +298,7 @@ const EMPTY: AppState = {
   sidebarWidth: SIDEBAR_PANE.fallback,
   threadWidth: THREAD_PANE.fallback,
   lastModel: DEFAULT_CHOICE,
+  externalTasks: emptyTaskStore(),
 };
 
 export type Store = AppState & {
@@ -383,6 +397,12 @@ export type Store = AppState & {
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
+  grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
+  agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
+  agentCatalog: import("./external-catalog").ExternalAgent[];
+  refreshAgentRuntimes: () => Promise<void>;
+  installExternalMcp: () => Promise<{ ok: boolean; message?: string }>;
   updateLearning: (patch: Partial<import("./learning-types").LearningSettings>) => void;
   watchNotices: WatchNotice[];
   watchHold: WatchHold | null;
@@ -478,7 +498,9 @@ function hydrate(value: unknown): AppState {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
       // unlocked vendor, manual, or already-reduced titles on launch.
       const suggested = suggestedTitleForSession(session);
-      return suggested ? { ...session, title: suggested } : session;
+      const titled = suggested ? { ...session, title: suggested } : session;
+      const lineup = reconcileLineupOnRestart(titled.lineup);
+      return lineup ? { ...titled, lineup } : titled;
     }),
   );
   const activeSessionId =
@@ -516,6 +538,7 @@ function hydrate(value: unknown): AppState {
     sidebarWidth: clampPaneWidth((record as { sidebarWidth?: unknown }).sidebarWidth, SIDEBAR_PANE),
     threadWidth: clampPaneWidth((record as { threadWidth?: unknown }).threadWidth, THREAD_PANE),
     lastModel: normalizeChoice(record.lastModel),
+    externalTasks: reconcileTaskStoreOnRestart(normalizeTaskStore((record as { externalTasks?: unknown }).externalTasks)),
     theme: isTheme(record.theme) ? record.theme : "system",
     themeReturn: isConcreteTheme(record.themeReturn) ? record.themeReturn : undefined,
     dismissedUpdateVersion:
@@ -3749,6 +3772,70 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
+            if (action === "list-agents") {
+              const catalog = deskCallCatalog({
+                settings: latest.settings,
+                usage: latest.usage,
+                plans: latest.deskPlans ?? plansRef.current,
+                permits: latest.watchPermits,
+                dayMarks: latest.watchDayMarks,
+              });
+              await replyAsk({
+                text: JSON.stringify(
+                  catalog.map((row) => ({
+                    id: row.id,
+                    name: row.name,
+                    provider: row.provider,
+                    canCall: row.canCall,
+                  })),
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "list-external-agents") {
+              const store = normalizeTaskStore(latest.externalTasks);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    agents: Object.values(store.byId).map((task) => ({
+                      id: `${task.ref.runtimeId}/${task.ref.agentId}`,
+                      status: task.status,
+                    })),
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "agent-status") {
+              const id = (payload.name || payload.message || "").trim();
+              const task = normalizeTaskStore(latest.externalTasks).byId[id];
+              if (!task) {
+                await replyAsk({ error: "unknown" });
+                return;
+              }
+              await replyAsk({ text: JSON.stringify({ ...task, status: task.status }, null, 2) });
+              return;
+            }
+            if (action === "cancel-agent") {
+              const id = (payload.name || payload.message || "").trim();
+              const store = normalizeTaskStore(latest.externalTasks);
+              const task = store.byId[id];
+              if (!task) {
+                await replyAsk({ error: "unknown" });
+                return;
+              }
+              const next = {
+                ...store,
+                byId: { ...store.byId, [id]: { ...task, status: "cancelled" as const, finishedAt: Date.now() } },
+              };
+              setState((current) => ({ ...current, externalTasks: next }));
+              await replyAsk({ text: JSON.stringify(next.byId[id], null, 2) });
+              return;
+            }
             if (action === "await-agents") {
               const parentId = payload.fromSessionId?.trim() || "";
               if (!parentId) {
@@ -3789,13 +3876,97 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             await replyAsk({ error: `Unknown bots action ${action}` });
             return;
           }
+          const exposure = mcpExposureProfile(payload.exposureProfile);
+          const runningVisible = latest.sessions.find((item) => item.status === "running" && !isHiddenSession(item));
+          if (payload.mode === "spawn") {
+            const parentHit = inboundSpawnParent({
+              profile: exposure,
+              fromSessionId: payload.fromSessionId,
+              defaultSessionId: latest.settings.agentSystems?.inboundSessionId,
+              runningVisibleSessionId: runningVisible?.id,
+            });
+            if ("code" in parentHit) {
+              await replyAsk({ error: "context_required" });
+              return;
+            }
+          }
           const caller =
             latest.sessions.find((item) => item.id === payload.fromSessionId) ??
-            latest.sessions.find((item) => item.status === "running" && !isHiddenSession(item));
+            (exposure === "external-runtime"
+              ? latest.sessions.find((item) => item.id === latest.settings.agentSystems?.inboundSessionId)
+              : runningVisible);
           const parent = caller;
           if (payload.mode === "spawn") {
             if (!caller) {
-              await replyAsk({ error: "no parent chat to attach this subagent to" });
+              await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
+              return;
+            }
+            if (exposure === "external-runtime") {
+              const inboundHop = checkEnvelope(
+                createEnvelope({
+                  origin: payload.origin ?? "openclaw",
+                  visitedSystems: payload.visitedSystems ?? ["openclaw"],
+                  hopCount: payload.hopCount ?? 1,
+                  traceId: payload.traceId,
+                  idempotencyKey: payload.idempotencyKey,
+                }),
+                "workhorse",
+              );
+              if (!inboundHop.ok) {
+                await replyAsk({ error: inboundHop.code });
+                return;
+              }
+              const gate = inboundDeskAction({
+                profile: exposure,
+                tool: "workhorse_spawn_agent",
+                spawnProvider: typeof payload.provider === "string" ? payload.provider : payload.chat,
+                fromSessionId: caller.id,
+              });
+              if (!gate.ok) {
+                await replyAsk({ error: gate.code });
+                return;
+              }
+            }
+            const externalRef = parseExternalAgentRef(payload.provider) ?? parseExternalAgentRef(payload.chat);
+            if (externalRef && exposure !== "external-runtime") {
+              const started = await launchExternalAssignment({
+                profile: exposure,
+                provider: payload.provider,
+                chat: payload.chat,
+                explicitTarget: externalRef,
+                grant: caller.planRun?.externalGrant,
+                routing: latest.settings.routing,
+                prompt: payload.message,
+                workspace: latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path,
+                store: normalizeTaskStore(latest.externalTasks) || emptyTaskStore(),
+                envelope: {
+                  origin: payload.origin ?? "workhorse",
+                  visitedSystems: payload.visitedSystems ?? ["workhorse"],
+                  hopCount: payload.hopCount ?? 0,
+                  traceId: payload.traceId,
+                  idempotencyKey: payload.idempotencyKey,
+                },
+                startRuntime: (request) =>
+                  window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
+              });
+              if (!started.ok) {
+                await replyAsk({ error: started.code });
+                return;
+              }
+              setState((current) => ({
+                ...current,
+                externalTasks: started.store,
+                sessions: current.sessions.map((session) =>
+                  session.id === caller.id
+                    ? {
+                        ...session,
+                        lineup: addLineupRow(session.lineup, started.row),
+                        ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
+                      }
+                    : session,
+                ),
+              }));
+              await replyAsk({ text: JSON.stringify(started.run, null, 2) });
               return;
             }
             const boundProject = latest.projects.find((item) => item.id === caller.projectId);
@@ -5711,6 +5882,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateAgentSystems = useCallback((patch: Partial<AgentSystemsSettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        agentSystems: normalizeAgentSystems({ ...current.settings.agentSystems, ...patch }),
+      },
+    }));
+  }, []);
+
+  const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) => {
+        if (session.id !== sessionId || !session.planRun) return session;
+        return {
+          ...session,
+          planRun: allow ? grantExternalAgents(session.planRun) : revokeExternalAgents(session.planRun),
+        };
+      }),
+    }));
+  }, []);
+
+  const [agentRuntimes, setAgentRuntimes] = useState<import("./external-catalog").AgentRuntimeStatus[]>([]);
+  const [agentCatalog, setAgentCatalog] = useState<import("./external-catalog").ExternalAgent[]>([]);
+
+  const refreshAgentRuntimes = useCallback(async () => {
+    const result = await window.workhorse?.detectAgentRuntimes?.();
+    if (!result) return;
+    setAgentRuntimes(result.statuses ?? []);
+    setAgentCatalog(result.agents ?? []);
+  }, []);
+
+  const installExternalMcp = useCallback(async () => {
+    const result = await window.workhorse?.installExternalMcp?.();
+    return result ?? { ok: false, message: "Workhorse desktop only." };
+  }, []);
+
   const updateLearning = useCallback((patch: Partial<import("./learning-types").LearningSettings>) => {
     setState((current) => ({
       ...current,
@@ -5990,6 +6199,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateAgentSystems,
+      grantPlanExternalAgents,
+      agentRuntimes,
+      agentCatalog,
+      refreshAgentRuntimes,
+      installExternalMcp,
       updateLearning,
       watchNotices,
       watchHold,
@@ -6102,6 +6317,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateAgentSystems,
+      grantPlanExternalAgents,
+      agentRuntimes,
+      agentCatalog,
+      refreshAgentRuntimes,
+      installExternalMcp,
       updateLearning,
       watchNotices,
       watchHold,

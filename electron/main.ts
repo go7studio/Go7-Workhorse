@@ -49,6 +49,9 @@ import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, type EnsureWorktreeInput } from "./worktree-host";
 import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
+import { spawnSync } from "node:child_process";
+import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
+import { installReportMessage, installWorkhorseExternalMcp } from "./mcp-install";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
@@ -585,6 +588,66 @@ app.whenReady().then(async () => {
   debugStartup("desk hooks ready");
   process.env.WORKHORSE_MCP_COMMAND = process.execPath;
   process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");
+
+  ipcMain.handle("agentRuntime:detect", () => {
+    const home = app.getPath("home");
+    const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
+    return detectRuntimesOnHost(
+      { home, pathEnv: process.env.PATH, platform },
+      {
+        existsSync: (file) => fs.existsSync(file),
+        execFile: (file, args) => {
+          const result = spawnSync(file, args, { encoding: "utf8", timeout: 8_000, windowsHide: true });
+          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+        },
+      },
+    );
+  });
+
+  ipcMain.handle("agentRuntime:installMcp", () => {
+    const home = app.getPath("home");
+    const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
+    const command = process.env.WORKHORSE_MCP_COMMAND || process.execPath;
+    const script = process.env.WORKHORSE_MCP_SCRIPT || path.join(__dirname, "workhorse-mcp.js");
+    const report = installWorkhorseExternalMcp({
+      home,
+      platform,
+      command,
+      script,
+      statePath: statePath(),
+      io: {
+        existsSync: (file) => fs.existsSync(file),
+        readFile: (file) => fs.readFileSync(file, "utf8"),
+        writeFile: (file, text) => {
+          fs.writeFileSync(file, text);
+        },
+        mkdirp: (dir) => {
+          fs.mkdirSync(dir, { recursive: true });
+        },
+        exec: (file, args) => {
+          const result = spawnSync(file, args, { encoding: "utf8", timeout: 15_000, windowsHide: true });
+          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+        },
+      },
+    });
+    return { ok: report.ok, message: installReportMessage(report) };
+  });
+
+  ipcMain.handle(
+    "agentRuntime:start",
+    async (
+      _event,
+      request: { ref: { runtimeId: "openclaw" | "hermes"; agentId: string }; prompt: string; now?: number },
+    ) => {
+      const io = {
+        exec: (file: string, args: string[]) => {
+          const result = spawnSync(file, args, { encoding: "utf8", timeout: 120_000, windowsHide: true });
+          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+        },
+      };
+      return startRuntimeTask(io, request);
+    },
+  );
 
   ipcMain.handle("grok:peer-result", (_event, payload: { id: string } & PeerAskResult) => {
     const waiter = peerWaiters.get(payload.id);

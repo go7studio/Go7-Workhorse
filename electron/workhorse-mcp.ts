@@ -40,6 +40,9 @@ import { listDeskSkills, publicDeskSkills, readDeskSkill } from "./desk-export-h
 import { resolveRequestedSkills } from "../src/lib/skills-catalog";
 import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
+import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
+import { normalizeTaskStore, reconcileExternalTask } from "../src/lib/external-task";
+import { assertMcpToolAllowed, inboundSessionIdFromState, mcpExposureProfile, resolveMcpSpawnFrom } from "./mcp-exposure";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -213,6 +216,35 @@ const TOOLS = [
         wait: { type: "boolean", description: "false (default) status now. true waits for terminal state." },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
       },
+    },
+  },
+  {
+    name: "workhorse_list_agents",
+    description:
+      "List callable Workhorse vendors (Grok, Claude, Codex, Cursor, Custom). OpenClaw and Hermes are not on this list.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_list_external_agents",
+    description: "List discovered OpenClaw and Hermes agents. Discovery is not permission to call them.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_agent_status",
+    description: "Status of an external OpenClaw/Hermes task or a Workhorse worker.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Task or worker id" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "workhorse_cancel_agent",
+    description: "Cancel an external OpenClaw/Hermes task.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Task id" } },
+      required: ["id"],
     },
   },
   {
@@ -637,6 +669,19 @@ function fromSessionId(override?: string): string {
   return override?.trim() || process.env.WORKHORSE_FROM_SESSION || "";
 }
 
+function configuredInboundParent(): string {
+  return inboundSessionIdFromState(readState());
+}
+
+export function resolveExternalSpawnFrom(from?: string): string {
+  const hit = resolveMcpSpawnFrom({
+    profile: currentMcpProfile(),
+    fromSessionId: fromSessionId(from),
+    inboundSessionId: configuredInboundParent(),
+  });
+  return "parentId" in hit ? hit.parentId : "";
+}
+
 function botsAsk(
   partial: Omit<PeerAsk, "fromSessionId" | "toSessionId" | "message"> & { message?: string; fromSessionId?: string },
   from?: string,
@@ -907,7 +952,11 @@ async function spawnAgent(
   from?: string,
 ): Promise<string> {
   if (!input.prompt.trim()) throw new Error("prompt is required");
-  const caller = callerSession(from);
+  const fromId = resolveExternalSpawnFrom(from);
+  if (currentMcpProfile() === "external-runtime" && !fromId) {
+    throw new Error("context_required");
+  }
+  const caller = callerSession(fromId);
   const isNested = deskRoleOf(caller) === "worker";
   if (isNested && caller?.id) {
     const state = readState();
@@ -963,7 +1012,8 @@ async function spawnAgent(
   const attachments = spawnAttachments(spawnInput.files, admitted.cwd);
   const first = await postBridge("/spawn", {
     toSessionId: "",
-    fromSessionId: fromSessionId(from),
+    fromSessionId: fromId,
+    exposureProfile: currentMcpProfile(),
     message: spawnInput.prompt,
     mode: "spawn",
     provider: spawnInput.provider,
@@ -992,7 +1042,8 @@ async function spawnAgent(
   if (grant?.retrySpawn || grant?.allowed) {
     return postBridge("/spawn", {
       toSessionId: "",
-      fromSessionId: fromSessionId(from),
+      fromSessionId: fromId,
+      exposureProfile: currentMcpProfile(),
       message: spawnInput.prompt,
       mode: "spawn",
       provider: spawnInput.provider,
@@ -1039,7 +1090,12 @@ async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolea
   );
 }
 
+function currentMcpProfile() {
+  return mcpExposureProfile(process.env.WORKHORSE_MCP_PROFILE);
+}
+
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
+  assertMcpToolAllowed(currentMcpProfile(), name);
   if (name === "workhorse_list_chats") {
     return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
   }
@@ -1083,7 +1139,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
       },
-      from,
+      typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );
   }
   if (name === "workhorse_await_agents") {
@@ -1095,6 +1151,28 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   }
   if (name === "workhorse_list_bots") {
     return listBots(from);
+  }
+  if (name === "workhorse_list_agents") {
+    const rows = filterWorkhorseVendorRows(deskRoster());
+    return formatDeskRoster(rows);
+  }
+  if (name === "workhorse_list_external_agents") {
+    const text = await postBridge("/bots", botsAsk({ action: "list-external-agents", message: "list-external-agents" }, from), {
+      timeoutMs: 8_000,
+      inbox: false,
+    }).catch(() => "");
+    return text || JSON.stringify({ agents: [] }, null, 2);
+  }
+  if (name === "workhorse_agent_status") {
+    const id = typeof args.id === "string" ? args.id : "";
+    const store = normalizeTaskStore((readState() as { externalTasks?: unknown }).externalTasks);
+    const task = store.byId[id];
+    if (task) return JSON.stringify(reconcileExternalTask(task, null), null, 2);
+    return postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id }, from), { timeoutMs: 8_000, inbox: false });
+  }
+  if (name === "workhorse_cancel_agent") {
+    const id = typeof args.id === "string" ? args.id : "";
+    return postBridge("/bots", botsAsk({ action: "cancel-agent", message: id, name: id }, from), { timeoutMs: 8_000, inbox: false });
   }
   if (name === "workhorse_probe_runtime") {
     return probeRuntime();
@@ -1511,7 +1589,8 @@ export async function handleWorkhorseRpc(
 }
 
 async function onMessage(message: JsonRpc, framing: McpFraming): Promise<void> {
-  const response = await handleWorkhorseRpc(message);
+  const from = resolveExternalSpawnFrom();
+  const response = await handleWorkhorseRpc(message, from ? { fromSessionId: from } : undefined);
   if (response) process.stdout.write(encodeMcpFrame(response, framing));
 }
 

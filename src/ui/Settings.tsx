@@ -342,6 +342,8 @@ export function Settings() {
           {typeof llmFocus === "string" && llmFocus.startsWith("bot:") && (
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
           )}
+
+          <AgentSystemsBlock />
         </>
       )}
 
@@ -682,6 +684,90 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
         </button>
       </div>
       <MassSend vendor="custom" customBotId={bot.id} botName={bot.name} />
+    </div>
+  );
+}
+
+function flagCopy(on: boolean, label: string): string {
+  return on ? label : `Not ${label.toLowerCase()}`;
+}
+
+function AgentSystemsBlock() {
+  const store = useStore();
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    void store.refreshAgentRuntimes();
+  }, []);
+  const chats = store.sessions.filter((session) => !session.hidden && !session.archivedAt);
+  return (
+    <div className="settings-group">
+      <div className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Agent systems</strong>
+          <span>
+            OpenClaw and Hermes are installed runtimes, not vendors. Install MCP writes this desk into OpenClaw, and
+            into Hermes if it is already installed. They launch the packaged helper. No token is stored.
+          </span>
+        </div>
+        <div className="settings-control">
+          <button className="tiny" type="button" onClick={() => void store.refreshAgentRuntimes()}>
+            Recheck
+          </button>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
+              void store.installExternalMcp().then((result) => {
+                setNote(
+                  result.message ||
+                    (result.ok
+                      ? "Wrote the Workhorse MCP into OpenClaw and Hermes. They launch this app’s helper. No token stored."
+                      : "Could not install."),
+                );
+              });
+            }}
+          >
+            Install MCP
+          </button>
+        </div>
+      </div>
+      {(store.agentRuntimes.length ? store.agentRuntimes : [
+        { runtimeId: "openclaw" as const, binaryPresent: false, configPresent: false, authenticated: false, reachable: false },
+        { runtimeId: "hermes" as const, binaryPresent: false, configPresent: false, authenticated: false, reachable: false },
+      ]).map((runtime) => (
+        <p key={runtime.runtimeId} className="row-meta">
+          {runtime.runtimeId === "openclaw" ? "OpenClaw" : "Hermes"} · {flagCopy(runtime.binaryPresent, "binary")} ·{" "}
+          {flagCopy(runtime.configPresent, "config")}
+          {runtime.version ? ` · ${runtime.version}` : ""} · {flagCopy(runtime.authenticated, "authenticated")} ·{" "}
+          {flagCopy(runtime.reachable, "reachable")}
+        </p>
+      ))}
+      {store.agentCatalog.length > 0 ? (
+        <p className="row-meta">Agents: {store.agentCatalog.map((agent) => agent.name).join(", ")}</p>
+      ) : (
+        <p className="row-meta">No agents discovered.</p>
+      )}
+      <label className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Inbound parent</strong>
+          <span>OpenClaw and Hermes spawn Workhorse workers on this chat. Empty rejects spawn with context_required.</span>
+        </div>
+        <div className="settings-control">
+          <select
+            value={store.settings.agentSystems?.inboundSessionId ?? ""}
+            onChange={(event) => store.updateAgentSystems({ inboundSessionId: event.target.value || undefined })}
+            aria-label="Inbound parent chat"
+          >
+            <option value="">None</option>
+            {chats.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title || session.id}
+              </option>
+            ))}
+          </select>
+        </div>
+      </label>
+      {note ? <p className="row-meta">{note}</p> : null}
     </div>
   );
 }

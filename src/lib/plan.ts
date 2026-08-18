@@ -1,4 +1,5 @@
 import type {
+  AgentGrant,
   PlanConstraints,
   PlanAssignment,
   PlanEvent,
@@ -12,6 +13,7 @@ import type {
   EffortLevel,
 } from "./types";
 import { isProviderId } from "./providers";
+import { createWaveGrant } from "./agent-runtime";
 
 export type PlanTransition = { ok: true; plan: PlanRun } | { ok: false; error: string };
 
@@ -340,7 +342,37 @@ export function normalizePlanRun(raw: unknown): PlanRun | undefined {
     ...(finite(record.pausedAt) !== undefined ? { pausedAt: finite(record.pausedAt) } : {}),
     ...(finite(record.completedAt) !== undefined ? { completedAt: finite(record.completedAt) } : {}),
     ...(clean(record.blockedReason) ? { blockedReason: clean(record.blockedReason) } : {}),
+    ...(normalizeGrant(record.externalGrant) ? { externalGrant: normalizeGrant(record.externalGrant) } : {}),
   };
+}
+
+function normalizeGrant(raw: unknown): AgentGrant | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Partial<AgentGrant>;
+  const id = clean(record.id);
+  const waveId = clean(record.waveId);
+  if (!id || !waveId) return undefined;
+  return {
+    id,
+    waveId,
+    createdAt: finite(record.createdAt) ?? 0,
+    ...(record.runtimeId === "openclaw" || record.runtimeId === "hermes" ? { runtimeId: record.runtimeId } : {}),
+    ...(clean(record.agentId) ? { agentId: clean(record.agentId) } : {}),
+    ...(finite(record.consumedAt) !== undefined ? { consumedAt: finite(record.consumedAt) } : {}),
+  };
+}
+
+export function grantExternalAgents(plan: PlanRun, now = Date.now()): PlanRun {
+  return {
+    ...plan,
+    updatedAt: now,
+    externalGrant: createWaveGrant({ waveId: plan.id, now, id: `grant_${plan.id}` }),
+  };
+}
+
+export function revokeExternalAgents(plan: PlanRun, now = Date.now()): PlanRun {
+  const { externalGrant: _drop, ...rest } = plan;
+  return { ...rest, updatedAt: now };
 }
 
 function appendEvent(plan: PlanRun, event: Omit<PlanEvent, "id" | "at"> & { id?: string; at?: number }): PlanRun {

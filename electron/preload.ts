@@ -76,6 +76,13 @@ contextBridge.exposeInMainWorld("workhorse", {
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
   saveComposerDrafts: (drafts: Record<string, { text?: string; images?: import("../src/lib/types").ChatImage[] }>) =>
     ipcRenderer.invoke("state:save-drafts", drafts),
+  detectAgentRuntimes: () => ipcRenderer.invoke("agentRuntime:detect"),
+  installExternalMcp: () => ipcRenderer.invoke("agentRuntime:installMcp"),
+  startExternalRuntimeTask: (request: {
+    ref: import("../src/lib/types").ExternalAgentRef;
+    prompt: string;
+    now?: number;
+  }) => ipcRenderer.invoke("agentRuntime:start", request) as Promise<import("../src/lib/types").ExternalTask | null>,
   syncJobs: (sessions: import("../src/lib/types").Session[]) =>
     ipcRenderer.invoke("jobs:sync", sessions) as Promise<import("./job-engine").DurableJobEvent[]>,
   onJobDue: (handler: (events: import("./job-engine").DurableJobEvent[]) => void) => {

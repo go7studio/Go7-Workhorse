@@ -2,7 +2,7 @@ import { customBotEnabled, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./cus
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
-import type { BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
+import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: Settings = {
     preferExcess: true,
     allowLocal: true,
     reservePercent: 15,
+    includeExternalAgents: false,
   },
   learning: { ...DEFAULT_LEARNING },
 };
@@ -42,6 +43,18 @@ export function normalizeRouting(raw: unknown): RoutingSettings {
     preferExcess: record.preferExcess !== false,
     allowLocal: record.allowLocal !== false,
     reservePercent: Number.isFinite(reserve) ? Math.min(50, Math.max(0, Math.round(reserve))) : 15,
+    includeExternalAgents: record.includeExternalAgents === true,
+  };
+}
+
+export function normalizeAgentSystems(raw: unknown): AgentSystemsSettings {
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as AgentSystemsSettings;
+  const inboundSessionId = typeof record.inboundSessionId === "string" ? record.inboundSessionId.trim() : "";
+  const inboundProjectId = typeof record.inboundProjectId === "string" ? record.inboundProjectId.trim() : "";
+  return {
+    ...(inboundSessionId ? { inboundSessionId } : {}),
+    ...(inboundProjectId ? { inboundProjectId } : {}),
   };
 }
 
@@ -266,6 +279,7 @@ export function normalizeSettings(raw: unknown): Settings {
     watch: normalizeWatch(record.watch),
     routing: normalizeRouting(record.routing),
     learning: normalizeLearning((record as { learning?: unknown }).learning),
+    agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
   };
 }
 

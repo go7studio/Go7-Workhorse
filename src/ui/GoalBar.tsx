@@ -18,6 +18,18 @@ export function GoalBar() {
         <span title={view?.objective ?? plan?.objective}>{view?.objective ?? plan?.objective}</span>
       </div>
       <div className="goal-bar-actions">
+        {plan ? (
+          <label className="row-meta">
+            <input
+              type="checkbox"
+              checked={Boolean(plan.externalGrant && !plan.externalGrant.consumedAt)}
+              onChange={(event) => {
+                if (session) store.grantPlanExternalAgents(session.id, event.target.checked);
+              }}
+            />
+            Allow OpenClaw/Hermes agents for this plan
+          </label>
+        ) : null}
         {(view?.actions ?? []).map((action) => (
           <button
             key={action}
@@ -30,6 +42,21 @@ export function GoalBar() {
           </button>
         ))}
       </div>
+      {session?.lineup?.rows.some((row) => row.kind === "external") ? (
+        <div className="goal-bar-copy">
+          {session.lineup.rows
+            .filter((row) => row.kind === "external")
+            .map((row) => (
+              <span key={row.childId}>
+                {row.runtimeId}/{row.agentId} · {row.status}
+                {row.workspace ? ` · ${row.workspace}` : ""}
+                {row.finishedAt ? ` · ${Math.max(0, row.finishedAt - row.startedAt)}ms` : ""}
+                {row.report ? ` · ${row.report}` : ""}
+                {row.correlationId ? ` · ${row.correlationId}` : ""}
+              </span>
+            ))}
+        </div>
+      ) : null}
     </div>
   );
 }

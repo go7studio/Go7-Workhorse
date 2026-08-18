@@ -6,7 +6,7 @@ import { isVendorRateLimitError } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
-const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted"];
+const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted", "unknown"];
 
 export function emptyLineup(folder: string, now = Date.now(), userText?: string): DeskLineup {
   return {
@@ -61,6 +61,11 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ...(typeof record.report === "string" && record.report.trim() ? { report: record.report } : {}),
     ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
     ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
+    ...(record.kind === "external" || record.kind === "workhorse" ? { kind: record.kind } : {}),
+    ...(record.runtimeId === "openclaw" || record.runtimeId === "hermes" ? { runtimeId: record.runtimeId } : {}),
+    ...(typeof record.agentId === "string" && record.agentId.trim() ? { agentId: record.agentId.trim() } : {}),
+    ...(typeof record.workspace === "string" && record.workspace.trim() ? { workspace: record.workspace.trim() } : {}),
+    ...(typeof record.correlationId === "string" && record.correlationId.trim() ? { correlationId: record.correlationId.trim() } : {}),
   };
 }
 
@@ -145,7 +150,11 @@ export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { con
     "REPORTS",
   ];
   (lineup?.rows ?? []).forEach((row, index) => {
-    lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}`);
+    const extra =
+      row.kind === "external"
+        ? `  kind=external  agent=${row.runtimeId ?? ""}/${row.agentId ?? ""}  correlation=${row.correlationId ?? ""}`
+        : "";
+    lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}${extra}`);
     lines.push((row.report ?? "").trim() || "(no report)");
     lines.push("");
   });

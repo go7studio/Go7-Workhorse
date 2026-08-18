@@ -66,6 +66,12 @@ export function RoutingPane() {
           onChange={(on) => set({ enabled: on })}
         />
         <SwitchRow
+          label="Include external agents"
+          copy="When Routing is on, OpenClaw and Hermes may be chosen after a grant. Off, only an explicit name starts one."
+          on={routing.includeExternalAgents === true}
+          onChange={(on) => set({ includeExternalAgents: on })}
+        />
+        <SwitchRow
           label="Allow local models"
           copy="A local bot may win. It costs nothing and never leaves this machine."
           on={routing.allowLocal}

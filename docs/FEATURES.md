@@ -16,6 +16,15 @@ When you add a feature, add it here in the same commit.
 Each vendor runs under its own login. Subscriptions, context and sandboxes are
 never pooled.
 
+OpenClaw and Hermes are **agent systems**, not vendors. Settings → LLMs shows
+whether each runtime is installed. A plan can grant them for one wave, or you
+can name `openclaw/main` or `hermes/<profile>`. Those tasks join the lineup.
+They do not get a Usage ring. Settings → LLMs → Install MCP writes a restricted
+Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
+if Hermes is already installed. Those apps launch the packaged helper. No token
+is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
+chat you pick. Delete, rename, credentials, and elevate stay blocked.
+
 ## Files you can hand a chat
 
 Drag them onto the window, or paste them in.

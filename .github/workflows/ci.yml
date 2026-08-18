@@ -42,6 +42,7 @@ jobs:
         run: npm run probe:sqlite
 
       - name: Test
+        timeout-minutes: 6
         run: npm test
 
   # A build can exit 0 and ship an app that cannot read its own files. Pack it

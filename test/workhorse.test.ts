@@ -2471,16 +2471,22 @@ test("create-project writes the exact name locally and fails fast without a rend
     process.env.WORKHORSE_BRIDGE_URL = "http://127.0.0.1:9";
     process.env.WORKHORSE_BRIDGE_TOKEN = "dead";
     const failStart = Date.now();
-    const failed = await handleWorkhorseRpc({
-      jsonrpc: "2.0",
-      id: 4,
-      method: "tools/call",
-      params: { name: "workhorse_create_project", arguments: { name: "Workhorse Dev" } },
-    });
+    // Port 9 can black-hole a SYN on some Mac runners. The production default
+    // abort is ten minutes, which is how a release Test step sat for half an
+    // hour. This call must fail fast.
+    const failed = await handleWorkhorseRpc(
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "workhorse_create_project", arguments: { name: "Workhorse Dev" } },
+      },
+      { timeoutMs: 1_500 },
+    );
     const failElapsed = Date.now() - failStart;
     const message = (failed as { error?: { message?: string } })?.error?.message ?? "";
     assert.match(message, /failed|bridge is not running|Do not tell the user the project exists/i);
-    assert.ok(failElapsed < 8_000);
+    assert.ok(failElapsed < 4_000);
   } finally {
     if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
     else process.env.WORKHORSE_STATE_PATH = previous.state;
@@ -8012,6 +8018,7 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
 
 test("packages use platform Electron and mac release builds require a stable signature", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    scripts?: { test?: string };
     build?: { afterPack?: string; electronDist?: string; mac?: { extendInfo?: Record<string, string> } };
   };
   assert.equal(pkg.build?.electronDist, undefined);
@@ -8031,6 +8038,11 @@ test("packages use platform Electron and mac release builds require a stable sig
   assert.match(workflow, /secrets\.MAC_CSC_LINK/);
   assert.match(workflow, /secrets\.MAC_CSC_NAME/);
   assert.match(workflow, /secrets\.MAC_APP_SPECIFIC_PASSWORD/);
+  // 0.5.1's Mac Test sat on a dead 127.0.0.1:9 fetch whose abort is ten
+  // minutes. The suite must time a test out, and the job must kill the step.
+  assert.match(pkg.scripts?.test ?? "", /--test-timeout=30000/);
+  assert.match(workflow, /timeout-minutes: 6/);
+  assert.match(readFileSync(path.join(ROOT, "test", "workhorse.test.ts"), "utf8"), /timeoutMs: 1_500/);
   assert.match(pkg.build?.mac?.extendInfo?.NSDocumentsFolderUsageDescription ?? "", /project folders you link/);
 });
 

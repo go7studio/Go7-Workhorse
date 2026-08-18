@@ -101,6 +101,7 @@ jobs:
         run: npm run build
 
       - name: Test
+        timeout-minutes: 6
         run: npm test
 
       - name: Build installer

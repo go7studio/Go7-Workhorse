@@ -934,11 +934,12 @@
         },
         {
           "id": "ORC-S9",
-          "name": "Run a goal loop with a permissioned external agent system",
+          "name": "Run a goal loop with a permissioned harness",
           "executor": "provider",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
+            "Tell the harness to work with Workhorse without naming a tool; verify it discovers workhorse_delegate or workhorse_list_bots plus workhorse_spawn_agent, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
             "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
             "Verify both Workhorse calls run the assigned provider, preserve the supplied trace and parent identity, and return real replies before the external goal completes.",
@@ -1139,14 +1140,14 @@
         },
         {
           "id": "ORC-17",
-          "criterion": "OpenClaw and Hermes remain permissioned external agent systems and can exchange correlated messages with Workhorse without becoming providers.",
+          "criterion": "OpenClaw and Hermes remain permissioned harnesses and can delegate to and exchange correlated messages with Workhorse without becoming providers.",
           "weight": 3,
           "type": "roundtrip",
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S9"],
-          "passCriteria": "A named or granted OpenClaw or Hermes agent receives one bounded traced task, uses one real Workhorse result to choose a second order, can spawn and resume a named Workhorse worker under the explicit parent, and reaches a truthful terminal goal; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
-          "evidence": "External catalog and grant, exact CLI invocation, MCP tool transcript with two dependent orders, parent and trace fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
+          "passCriteria": "An explicit request to work with Workhorse attempts Workhorse delegation before direct execution and reports the exact Workhorse error before fallback when blocked; a named or granted OpenClaw or Hermes agent receives one bounded traced task, uses one real Workhorse result to choose a second order, can spawn and resume a named Workhorse worker under the explicit parent, and reaches a truthful terminal goal; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
+          "evidence": "Tool discovery and ordering transcript, exact blocked-delegation error, harness catalog and grant, exact CLI invocation, MCP transcript with two dependent orders, parent and trace fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
         }
       ]
     },
@@ -1166,6 +1167,7 @@
             "Route equivalent quick, balanced, and deep prompts and capture every ranked candidate, reasoning effort, and reason.",
             "Repeat with automatic routing disabled and verify the selected provider and model remain pinned.",
             "Spawn a child with automatic quick routing, then repeat with an explicit provider and model override.",
+            "Exclude one provider, model, or bot by name and verify it cannot win automatic routing even when it has more spare capacity.",
             "Verify quick, balanced, and deep default to low, medium, and high reasoning when supported; explicit effort overrides win; transcript, launch, runtime, and usage agree."
           ]
         },

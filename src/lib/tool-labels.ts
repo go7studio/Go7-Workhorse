@@ -23,6 +23,7 @@ const TOOL_NAMES: Record<string, { title: string; kind?: PeerToolKind; verb?: st
   get_command_or_subagent_output: { title: "Read subagent output", kind: "read", verb: "Reading" },
   await_agents: { title: "Wait for agents", kind: "call", verb: "Waiting" },
   list_bots: { title: "List bots" },
+  delegate: { title: "Delegate" },
   list_tools: { title: "List tools" },
   detect_custom: { title: "Detect custom bot" },
   setup_custom_bot: { title: "Set up custom bot" },

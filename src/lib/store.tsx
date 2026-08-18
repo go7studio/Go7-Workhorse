@@ -4016,7 +4016,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(
                   routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  { prompt: payload.message, attachments: payload.attachments, tier: routeTier ?? (isNested ? "quick" : undefined) },
+                  {
+                    prompt: payload.message,
+                    attachments: payload.attachments,
+                    tier: routeTier ?? (isNested ? "quick" : undefined),
+                    exclude: payload.exclude,
+                  },
                   latest.settings.routing,
                 )
               : null;

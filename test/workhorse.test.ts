@@ -2295,6 +2295,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   const listedTools = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const names = ((listedTools as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
   assert.deepEqual(names, [
+    "workhorse_delegate",
     "workhorse_list_chats",
     "workhorse_read_chat",
     "workhorse_ask_chat",

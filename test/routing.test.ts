@@ -129,6 +129,18 @@ test("Watch-held candidates cannot win automatic routing", () => {
   assert.equal(decision?.model, "gpt-5.6-terra");
 });
 
+test("explicit provider, model, and bot exclusions are hard routing bounds", () => {
+  const decision = chooseRoutingDecision(
+    [
+      candidate("MiniMax-M3", 5, { provider: "custom", customBotId: "minimax", label: "MiniMax M3" }),
+      candidate("gpt-5.6-luna", 30),
+    ],
+    { prompt: "Quickly inspect one manifest", tier: "quick", exclude: ["MiniMax"] },
+    settings,
+  );
+  assert.equal(decision?.model, "gpt-5.6-luna");
+});
+
 test("the Routing pane shows the two settings that hang off leftover weighing as dependent", () => {
   // preferExcess and reservePercent are only read inside the capacityAware
   // branch of rankRoutingCandidates, so with it off they do nothing. The pane

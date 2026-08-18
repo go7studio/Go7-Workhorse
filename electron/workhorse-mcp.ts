@@ -39,7 +39,6 @@ import { listDeskSkills, publicDeskSkills, readDeskSkill } from "./desk-export-h
 import { resolveRequestedSkills } from "../src/lib/skills-catalog";
 import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
-import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 import { normalizeTaskStore, reconcileExternalTask } from "../src/lib/external-task";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 
@@ -49,6 +48,9 @@ type JsonRpc = {
   method?: string;
   params?: unknown;
 };
+
+export const WORKHORSE_MCP_INSTRUCTIONS =
+  "Workhorse is an execution desk. When the user asks to work with Workhorse, first use workhorse_list_chats to choose an explicit parent, then delegate before doing the task directly: use workhorse_delegate for one routed worker, or workhorse_list_bots then workhorse_spawn_agent for selected workers. Use workhorse_ask_chat for an existing chat. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -136,6 +138,25 @@ export function consumeMcpFrames(buffer: string): { frames: McpFrame[]; rest: st
 
 const TOOLS = [
   {
+    name: "workhorse_delegate",
+    description:
+      "Execute a task through a routed Workhorse worker. Use when the user says to work with Workhorse, delegate to Workhorse, or call proper models. Call workhorse_list_chats first and pass its explicit parent id. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "Complete task for the Workhorse worker" },
+        description: { type: "string", description: "Short 3–5 word label" },
+        route: { type: "string", description: "auto (default), quick, balanced, or deep" },
+        exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms routing must avoid" },
+        folder: { type: "string", description: "Optional absolute working folder" },
+        wait: { type: "boolean", description: "true (default) returns the real worker result; false starts it for later joining" },
+        fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
+        traceId: { type: "string", description: "Trace id for this orchestration loop" },
+      },
+      required: ["task", "fromSessionId"],
+    },
+  },
+  {
     name: "workhorse_list_chats",
     description:
       "List live sidebar chats in this window (id, title, project, sidebar, preview). Archived and deleted chats are omitted. sidebar is the visible subtitle (model · effort · mode). preview is the last user/assistant snippet — that is what “the preview” means. Use this before reading or asking another chat.",
@@ -193,6 +214,7 @@ const TOOLS = [
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
+        exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms routing must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Optional override; otherwise derived from quick, balanced, or deep" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
@@ -229,7 +251,7 @@ const TOOLS = [
   {
     name: "workhorse_list_agents",
     description:
-      "List callable Workhorse vendors (Grok, Claude, Codex, Cursor, Custom). OpenClaw and Hermes are not on this list.",
+      "Compatibility alias for workhorse_list_bots. Lists callable Workhorse vendors and custom bots; prefer workhorse_list_bots for routing.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -966,6 +988,7 @@ async function spawnAgent(
     capabilities?: string[];
     tools?: string[];
     constraints?: string[];
+    exclude?: string[];
     files?: string[];
     traceId?: string;
   },
@@ -1055,6 +1078,7 @@ async function spawnAgent(
     capabilities: spawnInput.capabilities,
     tools: spawnInput.tools,
     constraints: spawnInput.constraints,
+    exclude: spawnInput.exclude,
     files: spawnInput.files,
     attachments,
     ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -1087,6 +1111,7 @@ async function spawnAgent(
       capabilities: spawnInput.capabilities,
       tools: spawnInput.tools,
       constraints: spawnInput.constraints,
+      exclude: spawnInput.exclude,
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
@@ -1121,6 +1146,25 @@ function currentMcpProfile() {
 
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   assertMcpToolAllowed(profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from))), name);
+  if (name === "workhorse_delegate") {
+    const task = typeof args.task === "string" ? args.task : "";
+    const route =
+      args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
+        ? args.route
+        : "auto";
+    return spawnAgent(
+      {
+        prompt: task,
+        description: typeof args.description === "string" ? args.description : undefined,
+        route,
+        exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        folder: typeof args.folder === "string" ? args.folder : undefined,
+        wait: args.wait === false ? false : true,
+        traceId: typeof args.traceId === "string" ? args.traceId : undefined,
+      },
+      typeof args.fromSessionId === "string" ? args.fromSessionId : from,
+    );
+  }
   if (name === "workhorse_list_chats") {
     return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
   }
@@ -1164,6 +1208,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
+        exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
       },
@@ -1183,8 +1228,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     return listBots(from);
   }
   if (name === "workhorse_list_agents") {
-    const rows = filterWorkhorseVendorRows(deskRoster());
-    return formatDeskRoster(rows);
+    return listBots(from);
   }
   if (name === "workhorse_list_external_agents") {
     const text = await postBridge("/bots", botsAsk({ action: "list-external-agents", message: "list-external-agents" }, from), {
@@ -1587,6 +1631,7 @@ export async function handleWorkhorseRpc(
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: { name: "go7-workhorse", version: APP_VERSION },
+        instructions: WORKHORSE_MCP_INSTRUCTIONS,
       },
     };
   }
@@ -1609,10 +1654,22 @@ export async function handleWorkhorseRpc(
       const text = await callTool(params.name ?? "", params.arguments ?? {}, ctx?.fromSessionId);
       return { jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } };
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const delegation = currentMcpProfile() === "external-runtime" &&
+        (params.name === "workhorse_delegate" || params.name === "workhorse_spawn_agent");
+      const delegationDetail = detail.trim().replace(/[.\s]+$/, "");
       return {
         jsonrpc: "2.0",
         id: message.id,
-        error: { code: -32000, message: error instanceof Error ? error.message : String(error) },
+        error: {
+          code: -32000,
+          message: delegation
+            ? `Workhorse delegation failed: ${delegationDetail}. Report this exact Workhorse error before any direct fallback.`
+            : detail,
+          ...(delegation
+            ? { data: { tool: params.name, workhorseExecution: "failed", fallback: "report-before-direct-execution" } }
+            : {}),
+        },
       };
     }
   }

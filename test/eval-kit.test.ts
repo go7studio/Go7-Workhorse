@@ -126,12 +126,15 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.lifecycleStates.includes("interrupted"));
   assert.ok(orchestration.lifecycleStates.includes("unknown"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_ask_chat"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_delegate"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
   assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
   assert.equal(providers.profiles.some((profile: any) => ["openclaw", "hermes"].includes(profile.id)), false);
   assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);
   assert.match(orchestration.cascadeLimits.ordinaryLineupFanout, /one worker per callable bot/i);
   assert.match(capabilities.routing.rules.join(" "), /person-selected chat pinned/i);
+  assert.match(capabilities.routing.rules.join(" "), /explicitly excluded providers, models, and bots/i);
   for (const id of ["custom-openai", "custom-kimi", "custom-anthropic"]) {
     const profile = providers.profiles.find((item: any) => item.id === id);
     assert.match(profile.discovery.join(" "), /user-approved/i);
@@ -171,4 +174,5 @@ test("Cursor eval config covers authenticated ACP smoke and both usage pools", (
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-002"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-033"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-034"));
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-035"));
 });

@@ -16,7 +16,7 @@ import {
   resolveInboundParent,
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
-import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
   hermesConfigPath,
@@ -33,8 +33,10 @@ import {
 import { usageEventForWorkhorseWorker } from "../src/lib/external-task";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 
-test("external-runtime allows list/read/ask/list-agents/spawn/await/status/cancel", () => {
+test("external-runtime allows execution discovery, delegation, chat, and worker lifecycle", () => {
   for (const tool of [
+    "workhorse_delegate",
+    "workhorse_list_bots",
     "workhorse_list_chats",
     "workhorse_read_chat",
     "workhorse_ask_chat",
@@ -141,6 +143,8 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     // will refuse only spends schema tokens and invites the attempt.
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
     assert.ok(names.includes("workhorse_list_agents"));
+    assert.ok(names.includes("workhorse_list_bots"));
+    assert.ok(names.includes("workhorse_delegate"));
     for (const toolName of ["workhorse_ask_chat", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_agent_status", "workhorse_cancel_agent"]) {
       const properties = listed.result?.tools?.find((tool) => tool.name === toolName)?.inputSchema?.properties ?? {};
       assert.ok("fromSessionId" in properties, `${toolName} publishes fromSessionId`);
@@ -159,11 +163,22 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       method: "tools/call",
       params: { name: "workhorse_spawn_agent", arguments: { prompt: "hi", provider: "codex" } },
     })) as { error?: { message?: string } };
-    assert.match(spawned.error?.message ?? "", /context_required/);
+    assert.match(spawned.error?.message ?? "", /Workhorse delegation failed: context_required/);
+    assert.match(spawned.error?.message ?? "", /before any direct fallback/);
   } finally {
     if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
     else process.env.WORKHORSE_MCP_PROFILE = previous;
   }
+});
+
+test("MCP initialize identifies Workhorse as an execution desk", async () => {
+  const initialized = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 9, method: "initialize" })) as {
+    result?: { instructions?: string; capabilities?: { tools?: unknown } };
+  };
+  assert.equal(initialized.result?.instructions, WORKHORSE_MCP_INSTRUCTIONS);
+  assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
+  assert.match(initialized.result?.instructions ?? "", /delegate before doing the task directly/);
+  assert.ok(initialized.result?.capabilities?.tools);
 });
 
 test("external-runtime spawn uses Settings inbound parent when MCP passes no fromSessionId", async () => {
@@ -194,10 +209,16 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   let seenFrom = "";
   let seenTrace = "";
   let seenWorker = "";
+  let seenMessage = "";
+  let seenRoute = "";
+  let seenExclude: string[] = [];
   setWorkhorseDeskAsk(async (ask) => {
     seenFrom = ask.fromSessionId;
     seenTrace = ask.traceId ?? "";
     seenWorker = ask.worker ?? "";
+    seenMessage = ask.message;
+    seenRoute = ask.route ?? "";
+    seenExclude = ask.exclude ?? [];
     return { text: JSON.stringify({ ok: true, parent: ask.fromSessionId }) };
   });
   try {
@@ -212,6 +233,23 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenTrace, "trace_harness_1");
     assert.equal(seenWorker, "Wren");
     assert.match(spawned.result?.content?.[0]?.text ?? "", /parent_chat/);
+
+    const delegated = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: { task: "Verify analytics wiring", exclude: ["MiniMax"], folder: dir, fromSessionId: "parent_chat", traceId: "trace_delegate_1" },
+      },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    assert.equal(seenFrom, "parent_chat");
+    assert.equal(seenTrace, "trace_delegate_1");
+    assert.equal(seenMessage, "Verify analytics wiring");
+    assert.equal(seenRoute, "auto");
+    assert.deepEqual(seenExclude, ["MiniMax"]);
+    assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

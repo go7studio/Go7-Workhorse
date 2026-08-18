@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.5.0",
+  "contractVersion": "0.6.0",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -308,6 +308,15 @@
       "scenarios": ["ORC-S9"],
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/agent-runtime-host.ts", "electron/hermes-adapter.ts", "electron/openclaw-adapter.ts", "electron/workhorse-mcp.ts", "electron/peer-inbox.ts", "src/lib/external-task.ts", "src/lib/store.tsx", "test/hermes-adapter.test.ts", "test/mcp-exposure.test.ts", "test/bidirectional-loop.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-035",
+      "behavior": "An explicit request to work with Workhorse discovers executable delegation, lists callable bots from a harness profile, attempts Workhorse before direct work, honors structured provider/model/bot exclusions, and reports the exact Workhorse error before fallback when blocked.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/mcp-exposure.ts", "electron/workhorse-mcp.ts", "electron/mcp-install.ts", "src/lib/routing.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/routing.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]

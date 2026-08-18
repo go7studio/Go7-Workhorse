@@ -24,6 +24,8 @@ Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
 if Hermes is already installed. Those apps launch the packaged helper. No token
 is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
 chat you pick. Delete, rename, credentials, and elevate stay blocked.
+An explicit request to work with Workhorse delegates before direct execution;
+blocked delegation returns the Workhorse error before any fallback.
 
 ## Files you can hand a chat
 

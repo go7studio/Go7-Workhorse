@@ -27,15 +27,13 @@ function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
   );
 }
 
-function foldOpen(active: boolean, turnLive: boolean): { open?: boolean } {
-  if (active) return { open: true };
-  if (turnLive) return { open: false };
-  return {};
+function foldOpen(active: boolean): { open?: true } {
+  return active ? { open: true } : {};
 }
 
-function ThoughtBlock({ text, live, turnLive }: { text: string; live: boolean; turnLive: boolean }) {
+function ThoughtBlock({ text, live, id }: { text: string; live: boolean; id: string }) {
   return (
-    <details className={`work-fold${live ? " thought-live" : ""}`} {...foldOpen(live, turnLive)}>
+    <details key={`${id}-${live ? "live" : "idle"}`} className={`work-fold${live ? " thought-live" : ""}`} {...foldOpen(live)}>
       <summary className={live ? "thought-live-label" : undefined}>{live ? "Thinking" : "Thought"}</summary>
       <div className="thought">
         <MessageBody text={unsquashSentences(text)} />
@@ -139,7 +137,7 @@ export function WorkPopout({
             if (row.type === "thought") {
               return (
                 <div key={row.step.id} className="work-step" data-kind="thought">
-                  <ThoughtBlock text={row.step.text} live={active} turnLive={live} />
+                  <ThoughtBlock text={row.step.text} live={active} id={row.step.id} />
                 </div>
               );
             }
@@ -219,10 +217,10 @@ export function WorkPopout({
             const firstId = row.items[0]?.step.message.id ?? `tools-${rowIndex}`;
             return (
               <details
-                key={firstId}
+                key={`${firstId}-${active ? "live" : "idle"}`}
                 className="work-fold work-step"
                 data-kind="tool"
-                {...foldOpen(active, live)}
+                {...foldOpen(active)}
               >
                 <summary>
                   {count} {count === 1 ? "tool" : "tools"}
@@ -246,7 +244,7 @@ export function WorkPopout({
                         return earlier?.kind === "ask" || earlier?.kind === "call";
                       });
                     return (
-                      <div key={step.message.id} className="work-step" data-kind="tool">
+                      <div key={step.message.id}>
                         {peer &&
                         !visible.slice(0, index).some((prev) => prev.type === "tool" && isPeerTool(prev.message)) ? (
                           <div className="peer-work">

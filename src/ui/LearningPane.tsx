@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
-import type { LearningMode, MemoryItem } from "../lib/learning-types";
-import { modelsFor } from "../lib/models";
-import { attachedCustomBots, attachedStockVendors } from "../lib/settings";
+import {
+  BACKFILL_COMPILE_RUN_CAP,
+  backfillHumanPromptEvents,
+  compileBatchSettled,
+  describeBackfillResult,
+  describeCompileResult,
+} from "../lib/learning-backfill";
+import { eligibleLearningCompilers, isEligibleLearningCompiler } from "../lib/learning-policy";
+import type { CompileResult, LearningEvent, LearningMode, MemoryItem } from "../lib/learning-types";
+import { attachedCustomBots } from "../lib/settings";
 
 const MODES: { id: LearningMode; label: string; hint: string }[] = [
   { id: "off", label: "Off", hint: "Learning is off. Nothing is recorded." },
@@ -11,27 +18,80 @@ const MODES: { id: LearningMode; label: string; hint: string }[] = [
   { id: "automatic", label: "Automatic", hint: "Promote statements that pass evidence gates." },
 ];
 
+const ACP_COMPILER_HINT = "The compiler must be a custom bot. ACP cannot do a title-less call.";
+
 export function LearningPane() {
   const store = useStore();
   const learning = store.settings.learning;
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [events, setEvents] = useState<LearningEvent[]>([]);
+  const [showSources, setShowSources] = useState(false);
   const [note, setNote] = useState("");
   const [forgetOpen, setForgetOpen] = useState(false);
 
-  const refresh = () => {
+  const refreshMemories = () => {
     void window.workhorse?.learningMemories?.().then((rows) => setMemories(rows ?? [])).catch(() => undefined);
+  };
+
+  const refreshEvents = async () => {
+    try {
+      const rows = [...((await window.workhorse?.learningEvents?.()) ?? [])].reverse();
+      setEvents(rows);
+      return rows;
+    } catch {
+      setEvents([]);
+      return [];
+    }
+  };
+
+  const refresh = () => {
+    refreshMemories();
+    void refreshEvents();
   };
 
   useEffect(() => {
     refresh();
   }, [learning.mode]);
 
-  const stock = attachedStockVendors(store.settings);
   const bots = attachedCustomBots(store.settings);
-  const compilerOptions: Array<{ provider: typeof stock[number] | "custom"; model: string; label: string; customBotId?: string }> = [
-    ...stock.flatMap((provider) => modelsFor(provider).map((model) => ({ provider, model: model.id, label: `${provider} · ${model.name}` }))),
-    ...bots.map((bot) => ({ provider: "custom" as const, model: bot.model, customBotId: bot.id, label: bot.name })),
-  ];
+  const compilerOptions = eligibleLearningCompilers(bots);
+  const acpAssigned = Boolean(learning.compilerProvider && !isEligibleLearningCompiler(learning.compilerProvider));
+  const compilerValue = isEligibleLearningCompiler(learning.compilerProvider)
+    ? (learning.compilerCustomBotId ?? "")
+    : "";
+  const assignedBot = compilerOptions.find((item) => item.customBotId === compilerValue);
+  const compilerHint = !bots.length || acpAssigned ? ACP_COMPILER_HINT : "Turns captured events into memories.";
+
+  const botNameFor = (result?: CompileResult) => {
+    const id = result?.customBotId ?? assignedBot?.customBotId;
+    return (
+      compilerOptions.find((item) => item.customBotId === id)?.label ??
+      assignedBot?.label ??
+      (result?.provider === "custom" ? result.model : undefined)
+    );
+  };
+
+  const runCompile = async (): Promise<CompileResult | undefined> => {
+    const result = await window.workhorse?.learningCompile?.();
+    return result;
+  };
+
+  const compileUntilSettled = async (): Promise<CompileResult> => {
+    let last: CompileResult = { ran: false, skipped: "empty" };
+    let memoriesWritten = 0;
+    let ran = false;
+    for (let i = 0; i < BACKFILL_COMPILE_RUN_CAP; i += 1) {
+      const result = await runCompile();
+      if (!result) break;
+      last = result;
+      if (result.ran) {
+        ran = true;
+        memoriesWritten += result.memories ?? 0;
+      }
+      if (compileBatchSettled(result)) break;
+    }
+    return { ...last, ran, memories: ran ? memoriesWritten : last.memories };
+  };
 
   const exportLearning = async () => {
     // pickExportFolder returns a PickedFolder now, not a bare path: macOS needs
@@ -48,6 +108,32 @@ export function LearningPane() {
       : await window.workhorse?.learningForget?.({ all: true });
     setForgetOpen(false);
     setNote(permanent ? (result && "verifiedAbsent" in result && result.verifiedAbsent ? "Purged." : "Purge failed.") : "Forgotten.");
+    refresh();
+  };
+
+  const compileBrief = async () => {
+    const result = await runCompile();
+    if (result) setNote(describeCompileResult(result, botNameFor(result)));
+    refresh();
+  };
+
+  const showCapturedSources = async () => {
+    setShowSources(true);
+    const rows = (await refreshEvents()) ?? [];
+    refreshMemories();
+    setNote(rows.length ? `${rows.length} captured events.` : "No captured events.");
+  };
+
+  const backfillLastDay = async () => {
+    const drafts = backfillHumanPromptEvents({ sessions: store.sessions, now: Date.now() });
+    let recorded = 0;
+    for (const draft of drafts) {
+      const result = await window.workhorse?.learningRecord?.(draft);
+      if (result?.inserted) recorded += 1;
+    }
+    const compiled = await compileUntilSettled();
+    setShowSources(true);
+    setNote(describeBackfillResult({ recorded, compile: compiled, botName: botNameFor(compiled) }));
     refresh();
   };
 
@@ -79,13 +165,13 @@ export function LearningPane() {
         <label className="settings-row">
           <div className="settings-row-copy">
             <strong>Compiler model</strong>
-            <span>Turns captured events into memories.</span>
+            <span>{compilerHint}</span>
           </div>
           <div className="settings-control">
             <select
-              value={learning.compilerCustomBotId ?? `${learning.compilerProvider ?? ""}:${learning.compilerModel ?? ""}`}
+              value={compilerValue}
               onChange={(event) => {
-                const option = compilerOptions.find((item) => (item.customBotId ?? `${item.provider}:${item.model}`) === event.target.value);
+                const option = compilerOptions.find((item) => item.customBotId === event.target.value);
                 store.updateLearning({
                   compilerProvider: option?.provider,
                   compilerModel: option?.model,
@@ -93,9 +179,9 @@ export function LearningPane() {
                 });
               }}
             >
-              <option value="">Policy selects an eligible model</option>
+              <option value="">Policy selects an eligible custom bot</option>
               {compilerOptions.map((item) => (
-                <option key={item.customBotId ?? `${item.provider}:${item.model}`} value={item.customBotId ?? `${item.provider}:${item.model}`}>
+                <option key={item.customBotId} value={item.customBotId}>
                   {item.label}
                 </option>
               ))}
@@ -109,11 +195,14 @@ export function LearningPane() {
           </div>
           <div className="settings-control">
             <div className="actions">
-              <button className="tiny" type="button" onClick={() => void window.workhorse?.learningCompile?.().then(refresh)}>
+              <button className="tiny" type="button" onClick={() => void compileBrief()}>
                 Learning brief
               </button>
-              <button className="tiny" type="button" onClick={refresh}>
+              <button className="tiny" type="button" onClick={() => void showCapturedSources()}>
                 Sources
+              </button>
+              <button className="tiny" type="button" onClick={() => void backfillLastDay()}>
+                Backfill last day
               </button>
               <button className="tiny" type="button" onClick={() => void exportLearning()}>
                 Export
@@ -163,6 +252,25 @@ export function LearningPane() {
           </div>
         ))}
       </div>
+      {showSources && events.length > 0 ? (
+        <div className="usage-brains">
+          {events.map((event) => {
+            const project = event.projectId
+              ? store.projects.find((item) => item.id === event.projectId)?.name
+              : undefined;
+            const summary = typeof event.payload.summary === "string" ? event.payload.summary : "";
+            return (
+              <div className="usage-brain" key={event.id}>
+                <span>{event.kind}</span>
+                <span>{summary || event.kind}</span>
+                <em>
+                  {[project ?? "loose", event.localDay].filter(Boolean).join(" · ")}
+                </em>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </>
   );
 }

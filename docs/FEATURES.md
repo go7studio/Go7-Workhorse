@@ -96,6 +96,7 @@ transcript rather than as a path.
 ## Memory
 
 - A private learning store on your own disk, in SQLite.
+- The compiler is a custom bot. Settings → Learning can backfill the last day of prompts from saved chats, then compile them.
 - Export it, or wipe it, from Settings.
 - Nothing is sent anywhere to hold it.
 

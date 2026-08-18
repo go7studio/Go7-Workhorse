@@ -5663,7 +5663,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void window.workhorse?.learningConfigure?.(state.settings);
-  }, [state.settings.learning]);
+  }, [state.settings.learning, state.settings.customBots]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

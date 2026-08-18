@@ -239,6 +239,16 @@ export type AuxiliaryCallResult = {
 
 export type AuxiliaryCaller = (request: AuxiliaryCallRequest) => Promise<AuxiliaryCallResult>;
 
+export type CompileResult = {
+  ran: boolean;
+  skipped?: string;
+  runId?: string;
+  memories?: number;
+  provider?: ProviderId;
+  model?: string;
+  customBotId?: string;
+};
+
 export type CompilerPolicy = {
   minEligibleEvents: number;
   quietMs: number;

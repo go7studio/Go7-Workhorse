@@ -67,7 +67,7 @@ import { LearningService } from "./learning-service";
 import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
-import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary } from "./learning-aux";
+import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {
   WORKHORSE_APP_ID,
@@ -487,7 +487,7 @@ app.whenReady().then(async () => {
           provider: "custom" as const,
           model: bot.model,
           customBotId: bot.id,
-          connected: true,
+          connected: Boolean(bot.apiKey?.trim() || bot.credentialId),
           ephemeral: providerAllowsEphemeralAuxiliary("custom"),
           ...routingProfileForModel("custom", bot.model, bot.routingProfile),
         });
@@ -498,12 +498,11 @@ app.whenReady().then(async () => {
       if (request.provider !== "custom" || !providerAllowsEphemeralAuxiliary("custom")) {
         throw new Error("no-ephemeral-provider");
       }
-      const bot = liveSettings.customBots.find((item) => item.id === request.customBotId) ?? liveSettings.customBots[0];
-      if (!bot) throw new Error("no-ephemeral-provider");
-      return ephemeralCustomAuxiliary(
-        { baseUrl: bot.baseUrl, apiKey: bot.apiKey, model: request.model || bot.model, api: bot.api },
-        request,
+      const config = resolveCompilerBotConfig(liveSettings.customBots, request, (credentialId) =>
+        credentialStore().get(credentialId),
       );
+      if (!config) throw new Error("no-ephemeral-provider");
+      return ephemeralCustomAuxiliary(config, request);
     },
     idle: { setTimeout, clearTimeout: (id) => clearTimeout(id as NodeJS.Timeout) },
   });

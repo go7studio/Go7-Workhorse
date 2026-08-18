@@ -125,7 +125,7 @@ export function WorkPopout({
   const rows = groupWorkRows(visible);
 
   return (
-    <details className="work-pop" open={live}>
+    <details className="work-pop">
       <summary>
         {summary}
         {stamp}

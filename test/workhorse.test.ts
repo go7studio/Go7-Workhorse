@@ -122,6 +122,7 @@ import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
+  WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
   parseWorkhorseBuildChannel,
@@ -8702,7 +8703,11 @@ test("the repo tracks no symlinks and states its working rules", () => {
   const tryDesk = readFileSync(path.join(ROOT, "scripts", "try-desk.ts"), "utf8");
   assert.match(tryDesk, /workhorseInstallTarget/);
   assert.match(tryDesk, /tryInstallWouldReplaceProduction/);
+  assert.match(tryDesk, /stampDevBundle/);
+  assert.match(tryDesk, /\/usr\/bin\/ditto/);
+  assert.match(tryDesk, /codesign/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
+  assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);
   const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts as { try?: string; "try:dry"?: string };
   assert.match(scripts.try ?? "", /try-desk\.ts/);
   assert.match(scripts["try:dry"] ?? "", /--dry/);

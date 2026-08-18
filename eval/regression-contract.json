@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.1",
+  "contractVersion": "0.6.2",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -363,6 +363,15 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/workhorse-mcp.ts", "src/lib/routing.ts", "src/lib/subagents.ts", "test/mcp-exposure.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-041",
+      "behavior": "The packaged development desk has a distinct app id, display name, user data, and volatile credential namespace while retaining Electron's internal helper name; copied framework links stay inside the installed bundle, so it launches beside production without replacing, waking, or crashing into a temporary build.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S1", "SEC-S4"],
+      "rubric": ["REL-01", "REL-02", "SEC-07"],
+      "sourceFiles": ["scripts/try-desk.ts", "src/lib/app-identity.ts", "electron/main.ts", "test/workhorse.test.ts"],
+      "verification": ["verify"]
     }
   ]
 }

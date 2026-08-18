@@ -1580,6 +1580,8 @@
             "Record repository commit, package version, build platform, and installed app version before launch.",
             "Build or obtain the approved package without overwriting the existing install.",
             "Inspect packaged contents for renderer, Electron main, icons, and required resources.",
+            "Launch the development bundle beside production and verify its app id, display name, user data, and credential namespace are distinct while Electron's internal helper name stays stable.",
+            "Verify copied framework links stay inside the installed bundle and never point back to a temporary build folder.",
             "Launch with isolated state and verify the UI can identify its version/build channel."
           ]
         },

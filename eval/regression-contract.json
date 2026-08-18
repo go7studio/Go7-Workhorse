@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.3.0",
+  "contractVersion": "0.4.0",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-17",
   "regressions": [
@@ -290,6 +290,15 @@
       "scenarios": ["PRJ-S3", "PRJ-S4"],
       "rubric": ["PRJ-06", "PRJ-07"],
       "sourceFiles": ["src/lib/chats.ts", "src/ui/Composer.tsx", "src/ui/EditedList.tsx", "electron/project-diff.ts", "test/workhorse.test.ts", "test/project-diff.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-033",
+      "behavior": "OpenClaw launches with its supported message flag, maps current completion JSON to a terminal task, and can round-trip with a Workhorse chat through restricted MCP.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/openclaw-adapter.ts", "electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/agent-runtime.ts", "src/lib/external-task.ts", "test/openclaw-adapter.test.ts", "test/bidirectional-loop.test.ts", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
       "verification": ["eval:validate"]
     }
   ]

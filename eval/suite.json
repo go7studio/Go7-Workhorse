@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "b1b5dfff894c3e66e2b0d80a71838e76fbc7a062",
+  "baselineRef": "429525976a66c68cc63d2245ccc2ff45d32b3e76",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -931,6 +931,21 @@
             "Change parent, project, provider, model, effort, or custom connection and verify each incompatible dispatch creates or selects a different worker.",
             "Interrupt an active worker, restart, and resume that same worker without losing duration, transcript, evidence, or plan linkage."
           ]
+        },
+        {
+          "id": "ORC-S9",
+          "name": "Round-trip with a permissioned external agent system",
+          "executor": "provider",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
+            "Name one external agent or consume one bounded wave grant, then launch it with a unique trace and idempotency key.",
+            "Have the external agent use the restricted MCP profile to list chats and ask one existing Workhorse chat for a nonce reply.",
+            "Verify the Workhorse chat runs its assigned provider and returns a real correlated reply to the external agent.",
+            "Verify the external CLI uses its supported prompt flag and its current completion payload closes the external task, run, and worker row with one trace.",
+            "Reject a missing grant and unnamed target, duplicate idempotency key, repeated system, parentless inbound spawn, forbidden MCP mutation, and any hop beyond two before a provider call.",
+            "Restart an unfinished external task and report unknown until reconciled; never invent completion or book external-system usage as a Workhorse provider."
+          ]
         }
       ],
       "rubric": [
@@ -1119,6 +1134,17 @@
           "scenarios": ["ORC-S8"],
           "passCriteria": "Names are unique and addressable; compatible idle follow-up reuses the same worker id, folder, and transcript; busy, archived, visible, cross-parent, cross-project, or configuration-mismatched workers are never silently reused; interrupted work resumes explicitly.",
           "evidence": "Worker roster, names and ids, reuse decision, compatibility fields, transcript and folder continuity, restart state, and dispatch counts."
+        },
+        {
+          "id": "ORC-17",
+          "criterion": "OpenClaw and Hermes remain permissioned external agent systems and can exchange correlated messages with Workhorse without becoming providers.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S9"],
+          "passCriteria": "A named or granted external agent receives one bounded task, asks an existing Workhorse chat through the restricted MCP profile, returns the chat's real reply, and closes under one trace; cycles, excess hops, duplicates, forbidden tools, and parentless spawns stop before a provider call; external execution creates no Workhorse provider identity or usage event.",
+          "evidence": "External catalog and grant, CLI invocation, MCP tool transcript, both agent-system and Workhorse replies, task/run/row terminal states, trace envelope, rejection ledger, provider catalog, and usage ledger."
         }
       ]
     },

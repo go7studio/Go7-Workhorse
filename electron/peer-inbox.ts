@@ -252,6 +252,12 @@ export function watchPeerInbox(inbox: string, handler: (ask: PeerAsk) => Promise
     }
   };
   const watcher = fs.watch(inbox, scan);
+  const fallback = setInterval(scan, 250);
+  watcher.unref();
+  fallback.unref();
   scan();
-  return () => watcher.close();
+  return () => {
+    clearInterval(fallback);
+    watcher.close();
+  };
 }

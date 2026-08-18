@@ -118,10 +118,21 @@ export function taskFromOpenClawJson(text: string, ref: ExternalAgentRef, now = 
   let id = newId("oc", now);
   let status: ExternalTask["status"] = "running";
   let result: string | undefined;
+  let durationMs = 0;
   try {
-    const parsed = JSON.parse(text) as { id?: unknown; taskId?: unknown; status?: unknown; result?: unknown; text?: unknown };
-    if (typeof parsed.id === "string" && parsed.id.trim()) id = parsed.id.trim();
-    else if (typeof parsed.taskId === "string" && parsed.taskId.trim()) id = parsed.taskId.trim();
+    const parsed = JSON.parse(text) as {
+      id?: unknown;
+      taskId?: unknown;
+      runId?: unknown;
+      status?: unknown;
+      summary?: unknown;
+      result?: unknown;
+      text?: unknown;
+    };
+    const externalId = [parsed.id, parsed.taskId, parsed.runId].find(
+      (value): value is string => typeof value === "string" && Boolean(value.trim()),
+    );
+    if (externalId) id = externalId.trim();
     if (
       parsed.status === "queued" ||
       parsed.status === "running" ||
@@ -130,9 +141,33 @@ export function taskFromOpenClawJson(text: string, ref: ExternalAgentRef, now = 
       parsed.status === "cancelled"
     ) {
       status = parsed.status;
+    } else if (parsed.status === "error") {
+      status = "failed";
+    } else if (parsed.status === "ok" || parsed.summary === "completed") {
+      status = "completed";
     }
     if (typeof parsed.result === "string") result = parsed.result;
-    else if (typeof parsed.text === "string") result = parsed.text;
+    else if (parsed.result && typeof parsed.result === "object") {
+      const resultRecord = parsed.result as { payloads?: unknown; meta?: unknown };
+      const payloads = resultRecord.payloads;
+      const meta = resultRecord.meta;
+      if (meta && typeof meta === "object") {
+        const rawDuration = (meta as { durationMs?: unknown }).durationMs;
+        if (typeof rawDuration === "number" && Number.isFinite(rawDuration) && rawDuration > 0) {
+          durationMs = rawDuration;
+        }
+      }
+      if (Array.isArray(payloads)) {
+        const textParts = payloads
+          .map((payload) =>
+            payload && typeof payload === "object" && typeof (payload as { text?: unknown }).text === "string"
+              ? (payload as { text: string }).text.trim()
+              : "",
+          )
+          .filter(Boolean);
+        if (textParts.length > 0) result = textParts.join("\n");
+      }
+    } else if (typeof parsed.text === "string") result = parsed.text;
   } catch {
     result = text.trim() || undefined;
   }
@@ -141,6 +176,7 @@ export function taskFromOpenClawJson(text: string, ref: ExternalAgentRef, now = 
     ref,
     status,
     startedAt: now,
+    ...(["completed", "failed", "cancelled"].includes(status) ? { finishedAt: now + durationMs } : {}),
     envelope: createEnvelope({ origin: "workhorse" }, now),
     grantId: "",
     ...(result ? { result } : {}),
@@ -151,8 +187,22 @@ export async function startOpenClawTask(
   io: OpenClawIo,
   request: { ref: ExternalAgentRef; prompt: string; now?: number },
 ): Promise<ExternalTask> {
-  const result = await io.exec(binary(io), ["agent", "--agent", request.ref.agentId, request.prompt, "--json"]);
-  return taskFromOpenClawJson(result.stdout || result.stderr, request.ref, request.now);
+  const result = await io.exec(binary(io), [
+    "agent",
+    "--agent",
+    request.ref.agentId,
+    "--message",
+    request.prompt,
+    "--json",
+  ]);
+  const task = taskFromOpenClawJson(result.stdout || result.stderr, request.ref, request.now);
+  if (result.status === 0) return task;
+  return {
+    ...task,
+    status: "failed",
+    finishedAt: request.now ?? Date.now(),
+    result: (result.stderr || result.stdout).trim() || `OpenClaw exited ${result.status}`,
+  };
 }
 
 export { formatExternalAgentRef };

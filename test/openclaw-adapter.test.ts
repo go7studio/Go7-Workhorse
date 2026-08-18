@@ -38,6 +38,50 @@ test("OpenClaw list and start use injected exec, never the machine PATH", async 
   assert.equal(task.id, "task_1");
   assert.equal(task.status, "running");
   assert.ok(calls.every((row) => row[0] === "/opt/openclaw"));
+  assert.deepEqual(calls.at(-1), [
+    "/opt/openclaw",
+    "agent",
+    "--agent",
+    "main",
+    "--message",
+    "review",
+    "--json",
+  ]);
+});
+
+test("OpenClaw current CLI completion payload becomes a terminal task", async () => {
+  const task = await startOpenClawTask(
+    {
+      exec: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          runId: "run_1",
+          status: "ok",
+          summary: "completed",
+          result: {
+            payloads: [{ text: "WALT_ACK" }, { text: "WORKHORSE_ACK" }],
+            meta: { durationMs: 1250 },
+          },
+        }),
+        stderr: "",
+      }),
+    },
+    { ref: { runtimeId: "openclaw", agentId: "main" }, prompt: "smoke", now: 10 },
+  );
+  assert.equal(task.id, "run_1");
+  assert.equal(task.status, "completed");
+  assert.equal(task.finishedAt, 1260);
+  assert.equal(task.result, "WALT_ACK\nWORKHORSE_ACK");
+});
+
+test("OpenClaw process failures cannot remain running", async () => {
+  const task = await startOpenClawTask(
+    { exec: () => ({ status: 2, stdout: "", stderr: "bad arguments" }) },
+    { ref: { runtimeId: "openclaw", agentId: "main" }, prompt: "smoke", now: 11 },
+  );
+  assert.equal(task.status, "failed");
+  assert.equal(task.finishedAt, 11);
+  assert.equal(task.result, "bad arguments");
 });
 
 test("explicit openclaw/main plus grant starts one ExternalAgentRun and writes no UsageEvent", () => {

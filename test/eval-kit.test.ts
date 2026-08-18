@@ -101,6 +101,9 @@ test("observed regressions stay mapped to live suite coverage", () => {
     "test/repo-shape.test.ts",
     "test/learning-memory.test.ts",
     "test/project-diff.test.ts",
+    "test/openclaw-adapter.test.ts",
+    "test/bidirectional-loop.test.ts",
+    "test/mcp-exposure.test.ts",
   ]) {
     assert.ok(mappedSources.has(source), source);
   }
@@ -117,9 +120,14 @@ test("eval baseline and contracts track the current product generation", () => {
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
   assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
   assert.equal(config.source.expectedVersion, manifest.version);
-  for (const id of ["PRJ-S4", "CON-S4", "ORC-S8", "CAP-S7", "USG-S5", "REL-S4", "LRN-S3"]) assert.ok(scenario.has(id), id);
-  for (const id of ["PRJ-07", "CON-07", "ORC-16", "CAP-13", "USG-08", "REL-07", "LRN-06"]) assert.ok(rubric.has(id), id);
+  for (const id of ["PRJ-S4", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["PRJ-07", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "LRN-06"]) assert.ok(rubric.has(id), id);
   assert.ok(orchestration.lifecycleStates.includes("interrupted"));
+  assert.ok(orchestration.lifecycleStates.includes("unknown"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_ask_chat"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
+  assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
+  assert.equal(providers.profiles.some((profile: any) => ["openclaw", "hermes"].includes(profile.id)), false);
   assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);
   assert.match(orchestration.cascadeLimits.ordinaryLineupFanout, /one worker per callable bot/i);
   assert.match(capabilities.routing.rules.join(" "), /person-selected chat pinned/i);
@@ -158,4 +166,5 @@ test("Cursor eval config covers authenticated ACP smoke and both usage pools", (
   assert.match(cursor.expectedModelEvidence.join(" "), /Composer or API usage lane/);
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-001"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-002"));
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-033"));
 });

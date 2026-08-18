@@ -2230,8 +2230,12 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     const record = writeBridgeRecord(stateFile, { url: "http://127.0.0.1:9", token: "abc" });
     assert.equal(readBridgeRecord(stateFile)?.token, "abc");
     const stop = watchPeerInbox(record.inbox, async (ask) => ({ text: `got:${ask.message}` }));
-    const replied = await askViaInbox(record.inbox, { fromSessionId: "a", toSessionId: "b", message: "hi" }, 4000);
-    stop();
+    let replied: string;
+    try {
+      replied = await askViaInbox(record.inbox, { fromSessionId: "a", toSessionId: "b", message: "hi" }, 4000);
+    } finally {
+      stop();
+    }
     assert.equal(replied, "got:hi");
   } finally {
     rmSync(inboxRoot, { recursive: true, force: true });

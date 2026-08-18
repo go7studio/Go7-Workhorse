@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.7.0",
+  "contractVersion": "0.8.0",
   "title": "Multi-agent, cross-chat, and goal orchestration contract",
   "referenceWalk": {
     "product": "Cursor",
@@ -35,13 +35,31 @@
       "workhorse_list_skills",
       "workhorse_read_skill"
     ],
+    "externalRuntimeTools": [
+      "workhorse_list_chats",
+      "workhorse_read_chat",
+      "workhorse_ask_chat",
+      "workhorse_list_projects",
+      "workhorse_list_agents",
+      "workhorse_list_external_agents",
+      "workhorse_spawn_agent",
+      "workhorse_await_agents",
+      "workhorse_agent_status",
+      "workhorse_cancel_agent"
+    ],
     "sourceFiles": [
+      "electron/agent-runtime-host.ts",
+      "electron/mcp-exposure.ts",
+      "electron/mcp-install.ts",
+      "electron/openclaw-adapter.ts",
       "electron/workhorse-mcp.ts",
       "electron/peer-inbox.ts",
       "src/lib/session-bridge.ts",
       "src/lib/skills-catalog.ts",
       "src/lib/subagents.ts",
       "src/lib/custom-history.ts",
+      "src/lib/external-task.ts",
+      "src/lib/agent-runtime.ts",
       "src/lib/goal.ts",
       "src/lib/plan.ts",
       "src/lib/turns.ts",
@@ -68,6 +86,7 @@
     "resumePlan": "Continue the same plan and task attempts after pause or restart without dispatching completed work again.",
     "workerReuse": "A named or automatic follow-up may reuse only an idle, hidden, unarchived worker under the same parent and project with matching provider, model, effort, and custom connection; busy or incompatible work gets a distinct worker.",
     "waveJoin": "A completed worker wave wakes and joins its accountable parent exactly once; later waves can continue the same orchestration."
+    ,"externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned external systems, never providers, custom bots, usage rings, or bridge chats. A named target or one bounded grant is required; inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops."
   },
   "cascadeLimits": {
     "model": "Automatic children use the capacity-aware quick tier; explicit assignments win",
@@ -133,6 +152,7 @@
     "cancelled",
     "timed-out",
     "budget-exceeded"
+    ,"unknown"
   ],
   "requiredRubric": [
     "ORC-01",
@@ -150,6 +170,7 @@
     "ORC-13",
     "ORC-14",
     "ORC-15",
-    "ORC-16"
+    "ORC-16",
+    "ORC-17"
   ]
 }

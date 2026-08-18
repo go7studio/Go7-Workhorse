@@ -50,7 +50,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder; do not choose a provider, model, effort, or worker unless the user explicitly assigned one. Workhorse auto-routes from task fit and current capacity and returns its decision. Delegation returns a worker id promptly; poll workhorse_agent_status until it returns a terminal status and report. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and still leave routing fields unset for every unassigned slice. Use workhorse_ask_chat with wait=false for a follow-up to the returned worker, then poll the same worker id. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Delegation returns a worker id promptly; poll workhorse_agent_status until it returns a terminal status and report. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. Use workhorse_ask_chat with wait=false for a follow-up to the returned worker, then poll the same worker id. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -140,12 +140,22 @@ const TOOLS = [
   {
     name: "workhorse_delegate",
     description:
-      "Execute one task through Workhorse intelligent routing. Use when the user says to work with Workhorse, delegate to Workhorse, or call proper models. Call workhorse_list_chats first and pass its explicit parent id. Supply the task and constraints, not a provider, model, effort, or worker; the desk selects from task fit and current capacity and returns its rationale. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
+      "Execute one task through Workhorse. Leave initialBrain unset for full Auto; set it only for the first coordinator. Descendants route independently unless a slice is explicitly assigned. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "Complete task for the Workhorse worker" },
         description: { type: "string", description: "Short 3–5 word label" },
+        initialBrain: {
+          type: "object",
+          description: "Optional first coordinating brain; descendants stay independently routed",
+          properties: {
+            provider: { type: "string", description: "First coordinator vendor" },
+            model: { type: "string", description: "First coordinator model" },
+            effort: { type: "string", description: "First coordinator reasoning level" },
+          },
+          additionalProperties: false,
+        },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         constraints: { type: "array", items: { type: "string" }, description: "Task boundaries and acceptance requirements" },
@@ -1196,6 +1206,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   assertMcpToolAllowed(profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from))), name);
   if (name === "workhorse_delegate") {
     const task = typeof args.task === "string" ? args.task : "";
+    const initialBrain = args.initialBrain && typeof args.initialBrain === "object" && !Array.isArray(args.initialBrain)
+      ? args.initialBrain as Record<string, unknown>
+      : {};
     const route =
       args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
         ? args.route
@@ -1204,6 +1217,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
       {
         prompt: task,
         description: typeof args.description === "string" ? args.description : undefined,
+        provider: typeof initialBrain.provider === "string" ? initialBrain.provider : undefined,
+        model: typeof initialBrain.model === "string" ? initialBrain.model : undefined,
+        effort: typeof initialBrain.effort === "string" ? initialBrain.effort : undefined,
         route,
         exclude: mergedDelegateExclusions(task, args.exclude),
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,

@@ -26,6 +26,7 @@ is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
 chat you pick. Delete, rename, credentials, and elevate stay blocked.
 An explicit request to work with Workhorse delegates before direct execution;
 blocked delegation returns the Workhorse error before any fallback.
+A harness may choose the first coordinating brain; unassigned workers still route independently.
 
 ## Files you can hand a chat
 

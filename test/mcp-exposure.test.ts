@@ -146,7 +146,7 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     assert.ok(names.includes("workhorse_list_bots"));
     assert.ok(names.includes("workhorse_delegate"));
     const delegateFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_delegate")?.inputSchema?.properties ?? {};
-    for (const field of ["task", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
+    for (const field of ["task", "initialBrain", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
       assert.ok(field in delegateFields, `workhorse_delegate publishes ${field}`);
     }
     for (const field of ["provider", "model", "effort", "worker", "chat"]) {
@@ -185,7 +185,8 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.equal(initialized.result?.instructions, WORKHORSE_MCP_INSTRUCTIONS);
   assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
-  assert.match(initialized.result?.instructions ?? "", /do not choose a provider, model, effort, or worker/);
+  assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
+  assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
   assert.ok(initialized.result?.capabilities?.tools);
 });
@@ -226,6 +227,9 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   let seenFrom = "";
   let seenTrace = "";
   let seenWorker = "";
+  let seenProvider = "";
+  let seenModel = "";
+  let seenEffort = "";
   let seenMessage = "";
   let seenRoute = "";
   let seenExclude: string[] = [];
@@ -238,6 +242,9 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     seenFrom = ask.fromSessionId;
     seenTrace = ask.traceId ?? "";
     seenWorker = ask.worker ?? "";
+    seenProvider = ask.provider ?? "";
+    seenModel = ask.model ?? "";
+    seenEffort = ask.effort ?? "";
     seenMessage = ask.message;
     seenRoute = ask.route ?? "";
     seenExclude = ask.exclude ?? [];
@@ -285,6 +292,9 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenTrace, "trace_delegate_1");
     assert.equal(seenMessage, "Verify analytics wiring");
     assert.equal(seenRoute, "auto");
+    assert.equal(seenProvider, "");
+    assert.equal(seenModel, "");
+    assert.equal(seenEffort, "");
     assert.deepEqual(seenExclude, ["MiniMax"]);
     assert.deepEqual(seenConstraints, ["Read only", "Return evidence"]);
     assert.deepEqual(seenCapabilities, ["analytics"]);
@@ -293,9 +303,28 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenWait, false);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
 
-    const collapsed = (await handleWorkhorseRpc({
+    const explicit = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 6,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Coordinate the release audit",
+          initialBrain: { provider: "codex", model: "gpt-5.6-terra", effort: "medium" },
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(explicit.error, undefined, explicit.error?.message);
+    assert.equal(seenProvider, "codex");
+    assert.equal(seenModel, "gpt-5.6-terra");
+    assert.equal(seenEffort, "medium");
+
+    const collapsed = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 7,
       method: "tools/call",
       params: {
         name: "workhorse_delegate",
@@ -307,6 +336,9 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
       },
     })) as { error?: { message?: string } };
     assert.equal(collapsed.error, undefined, collapsed.error?.message);
+    assert.equal(seenProvider, "", "the prior coordinating brain never leaks into later Auto work");
+    assert.equal(seenModel, "");
+    assert.equal(seenEffort, "");
     assert.deepEqual(seenExclude, ["Vendor Alpha", "model/x-2.7"]);
   } finally {
     setWorkhorseDeskAsk(null);

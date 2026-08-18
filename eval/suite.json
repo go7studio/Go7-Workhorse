@@ -939,7 +939,8 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
-            "Tell the harness to work with Workhorse without naming a tool; verify it uses workhorse_delegate for an ordinary task, supplies only objective and constraints, leaves provider/model/effort/worker unset, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
+            "Tell the harness to work with Workhorse without naming a tool; verify it uses workhorse_delegate for an ordinary task, leaves initialBrain unset, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
+            "Repeat with an explicit initialBrain and verify only the first coordinator uses it; every unassigned descendant returns to independent task- and capacity-aware routing.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
             "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
             "Verify both Workhorse calls run the assigned provider, preserve the supplied trace and parent identity, and return real replies before the external goal completes.",

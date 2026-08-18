@@ -11,6 +11,7 @@ export type BackfillMessage = {
   text: string;
   createdAt: number;
   kind?: string;
+  correlationId?: string;
 };
 
 export type BackfillSession = {
@@ -33,6 +34,7 @@ export type BackfillEventDraft = {
   provider?: ProviderId;
   model?: string;
   effort?: EffortLevel | null;
+  correlationId?: string;
   payload: { summary: string };
 };
 
@@ -80,6 +82,7 @@ export function backfillHumanPromptEvents(input: {
         provider: session.provider,
         model: session.model,
         effort: session.effort,
+        correlationId: message.correlationId,
         payload: { summary: message.text.trim().slice(0, BACKFILL_SUMMARY_CHARS) },
       });
     }
@@ -100,6 +103,8 @@ export function describeCompileResult(result: CompileResult, botName?: string): 
   if (result.skipped === "no-ephemeral-provider") return "Skipped. The compiler bot has no key, or ACP cannot do a title-less call.";
   if (result.skipped === "invalid-brief") return "Skipped. The compiler bot did not return a learning brief.";
   if (result.skipped === "empty-explicit-brief") return "Skipped. The compiler bot missed an explicit human rule; it was not marked analyzed.";
+  if (result.skipped === "cross-lane-output") return "Skipped. The compiler mixed intelligence lanes, so its output was rejected.";
+  if (result.skipped === "invalid-source-evidence") return "Skipped. The compiler cited evidence outside this intelligence lane.";
   if (result.skipped === "empty") return "Skipped. No new events.";
   if (result.skipped === "threshold") return "Skipped. Below the event threshold.";
   if (result.skipped === "duplicate") return "Skipped. Same events already compiled.";

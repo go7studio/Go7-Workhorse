@@ -112,7 +112,7 @@ export function LearningPane() {
   };
 
   const compileBrief = async () => {
-    const result = await runCompile();
+    const result = await compileUntilSettled();
     if (result) setNote(describeCompileResult(result, botNameFor(result)));
     refresh();
   };
@@ -255,11 +255,12 @@ export function LearningPane() {
             {indexStats.indexedHumanEvents} human inputs indexed · {indexStats.compiledEvents} analyzed
           </p>
           <p className="row-meta">
-            {indexStats.memories} intelligence records · {indexStats.completedRuns} completed compiler runs
+            {indexStats.indexedAgentEvents} agent evidence events indexed · {indexStats.compiledAgentEvents} analyzed
           </p>
           <p className="row-meta">
-            {indexStats.indexedEvents - indexStats.indexedHumanEvents} agent or system events stored separately
+            {indexStats.memories} human records · {indexStats.agentMemories} agent findings · {indexStats.mismatchMemories} mismatches
           </p>
+          <p className="row-meta">{indexStats.completedRuns} completed compiler runs</p>
           <p className="row-meta">Prompt text stays in SQLite and is not shown here.</p>
         </div>
       ) : null}

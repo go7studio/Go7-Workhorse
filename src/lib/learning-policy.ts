@@ -8,6 +8,7 @@ import type {
   LearningEvent,
   LearningMode,
   LearningSettings,
+  IntelligenceLane,
   MemoryItem,
   OutcomeMetric,
   RankedMemory,
@@ -16,6 +17,8 @@ import type {
 import { boundStatement } from "./learning-redact";
 
 export const HUMAN_INTELLIGENCE_LANE = "human-intent" as const;
+export const AGENT_INTELLIGENCE_LANE = "agent-performance" as const;
+export const MISMATCH_INTELLIGENCE_LANE = "intent-performance-mismatch" as const;
 
 export const DEFAULT_LEARNING: LearningSettings = {
   mode: "off",
@@ -145,15 +148,23 @@ export function outcomeIsVerified(signals: OutcomeSignals): boolean {
 }
 
 export function memoryVisibleTo(item: MemoryItem, query: RetrievalQuery, now = query.now ?? Date.now()): boolean {
-  if (item.intelligenceLane !== HUMAN_INTELLIGENCE_LANE) return false;
+  const lane = query.intelligenceLane ?? HUMAN_INTELLIGENCE_LANE;
+  if (item.intelligenceLane !== lane) return false;
   if (item.status === "deleted" || item.deletedAt) return false;
   if (item.status === "superseded" || item.supersededAt) return false;
   if (item.status === "proposed") return false;
   if (item.status !== "active" && item.status !== "approved") return false;
   if (item.expiresAt && item.expiresAt <= now) return false;
-  if (item.memoryClass === "intent") {
+  if (lane === HUMAN_INTELLIGENCE_LANE && item.memoryClass === "intent") {
     if (item.scope === "project") return Boolean(query.projectId && item.projectId === query.projectId);
     return query.allowGlobal === true && item.scope === "global-user";
+  }
+  if (lane === AGENT_INTELLIGENCE_LANE) {
+    if (!query.projectId || item.projectId !== query.projectId) return false;
+    return !item.providerScope || Boolean(query.provider && item.providerScope === query.provider);
+  }
+  if (lane === MISMATCH_INTELLIGENCE_LANE) {
+    return Boolean(query.projectId && item.projectId === query.projectId);
   }
   return Boolean(query.provider && item.providerScope === query.provider);
 }
@@ -170,6 +181,7 @@ export function rankMemories(items: MemoryItem[], query: RetrievalQuery): Ranked
     if (item.verification === "tested" || item.verification === "artifact" || item.verification === "accepted") score += 12;
     if (item.lastConfirmedAt) score += Math.max(0, 8 - Math.floor((now - item.lastConfirmedAt) / (7 * 24 * 60 * 60 * 1000)));
     score += Math.min(8, item.sourceEventIds.length);
+    score += Math.min(6, item.sourceMemoryIds?.length ?? 0);
     if (needle) {
       const hay = `${item.statement} ${(item.tags ?? []).join(" ")}`.toLowerCase();
       if (hay.includes(needle)) score += 18;
@@ -289,12 +301,16 @@ function normalizeProposal(raw: unknown): LearningBriefProposal | null {
   const sourceEventIds = Array.isArray(record.sourceEventIds)
     ? record.sourceEventIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
     : [];
+  const sourceMemoryIds = Array.isArray(record.sourceMemoryIds)
+    ? record.sourceMemoryIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+    : [];
   return {
     action,
     memoryClass,
     scope: record.scope === "global-user" ? "global-user" : "project",
     statement,
     sourceEventIds,
+    ...(sourceMemoryIds.length > 0 ? { sourceMemoryIds } : {}),
     ...(typeof record.projectId === "string" ? { projectId: record.projectId } : {}),
     ...(record.providerScope === "grok" ||
     record.providerScope === "claude" ||
@@ -329,7 +345,11 @@ export function parseBriefText(text: string): LearningBrief | null {
   return null;
 }
 
-export function compilerInputHash(events: LearningEvent[], memories: MemoryItem[], intelligenceLane = HUMAN_INTELLIGENCE_LANE): string {
+export function compilerInputHash(
+  events: LearningEvent[],
+  memories: MemoryItem[],
+  intelligenceLane: Exclude<IntelligenceLane, "legacy-unclassified"> = HUMAN_INTELLIGENCE_LANE,
+): string {
   const material = JSON.stringify({
     intelligenceLane,
     events: events.map((event) => event.id),
@@ -482,6 +502,61 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
   ].join("\n");
 }
 
+export function agentCompilerPrompt(events: LearningEvent[], memories: MemoryItem[]): string {
+  return [
+    "Compile agent-authored Workhorse evidence into an agent-performance JSON object with keys intent and operations.",
+    "Intent must always be empty. Each operations item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?}.",
+    "Capture observable performance: completed or failed model calls, tool behavior, retries, errors, tests, artifacts, latency, usage, and missing verification.",
+    "Never infer a human goal, preference, complaint, or acceptance criterion. Human-authored events must never appear in this input.",
+    "Distinguish an agent claim from verified evidence. A successful terminal event alone does not prove the requested outcome was correct.",
+    "State facts compactly, including the provider when useful. Do not copy raw output, secrets, commands, or paths into the statement.",
+    'Use this exact shape: {"intent":[],"operations":[{"action":"add","memoryClass":"operations","scope":"project","statement":"...","sourceEventIds":["event-id"]}]}',
+    "Every item must cite one or more exact event ids from the Agent events input.",
+    "Return at most 12 items total. Keep statements under 180 characters and return JSON only.",
+    "",
+    "Existing agent-performance records:",
+    JSON.stringify(
+      memories.map((item) => ({ id: item.id, statement: item.statement, status: item.status, provider: item.providerScope })),
+    ),
+    "",
+    "Agent events:",
+    JSON.stringify(
+      events.map((event) => ({
+        id: event.id,
+        kind: event.kind,
+        provider: event.provider,
+        projectId: event.projectId,
+        correlationId: event.correlationId,
+        payload: event.payload,
+      })),
+    ),
+  ].join("\n");
+}
+
+export function mismatchCompilerPrompt(memories: MemoryItem[]): string {
+  return [
+    "Reconcile human-intent records against agent-performance records and return only real mismatches.",
+    "You are not receiving a raw transcript. Treat the two derived lanes as separate reference points joined only by correlationIds.",
+    "Each mismatch must say what the human requested, what the agent evidence shows, and what result or verification is missing.",
+    "Do not rewrite either source lane. Do not invent intent from performance or excuse performance from intent.",
+    'Return {"intent":[],"operations":[{"action":"add","memoryClass":"operations","scope":"project","statement":"...","sourceEventIds":[],"sourceMemoryIds":["human-memory-id","agent-memory-id"]}]}',
+    "Every item must cite at least one human-intent and one agent-performance memory id that share a correlation id.",
+    "Return empty arrays when the evidence demonstrates alignment or is insufficient. Keep statements under 180 characters. Return JSON only.",
+    "",
+    "Derived records:",
+    JSON.stringify(
+      memories.map((item) => ({
+        id: item.id,
+        lane: item.intelligenceLane,
+        projectId: item.projectId,
+        provider: item.providerScope,
+        statement: item.statement,
+        correlationIds: item.correlationIds ?? [],
+      })),
+    ),
+  ].join("\n");
+}
+
 const EXPLICIT_DURABLE_RULE = /\b(?:prefer|always|never|must|make sure|remember|do not|don't|verify)\b/i;
 
 export function eventsRequireMemory(events: LearningEvent[]): boolean {
@@ -492,17 +567,27 @@ export function eventsRequireMemory(events: LearningEvent[]): boolean {
   });
 }
 
+export function eventsRequireAgentMemory(events: LearningEvent[]): boolean {
+  return events.some((event) => {
+    if (event.actorClass !== "agent") return false;
+    const status = String(event.payload.status ?? event.payload.outcome ?? "").toLowerCase();
+    return event.kind === "outcome" || (event.kind === "tool" && /fail|error|denied|cancel/.test(status));
+  });
+}
+
 export function boundedCompilerBatch(
   events: LearningEvent[],
   memories: MemoryItem[],
   maxPayloadChars: number,
+  intelligenceLane: typeof HUMAN_INTELLIGENCE_LANE | typeof AGENT_INTELLIGENCE_LANE = HUMAN_INTELLIGENCE_LANE,
 ): LearningEvent[] {
+  const promptFor = intelligenceLane === AGENT_INTELLIGENCE_LANE ? agentCompilerPrompt : compilerPrompt;
   const selected: LearningEvent[] = [];
   for (const event of events) {
     const candidate = [...selected, event];
-    if (selected.length > 0 && compilerPrompt(candidate, memories).length > maxPayloadChars) break;
+    if (selected.length > 0 && promptFor(candidate, memories).length > maxPayloadChars) break;
     selected.push(event);
-    if (compilerPrompt(selected, memories).length >= maxPayloadChars) break;
+    if (promptFor(selected, memories).length >= maxPayloadChars) break;
   }
   return selected;
 }

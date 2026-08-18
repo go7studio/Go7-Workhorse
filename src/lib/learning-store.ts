@@ -7,7 +7,7 @@ import {
   matchesForgetTarget,
   rankMemories,
 } from "./learning-policy";
-import { boundStatement} from "./learning-redact";
+import { boundStatement } from "./learning-redact";
 import type {
   CompilerRun,
   EventFilter,
@@ -73,6 +73,20 @@ export function removeSidecars(dbPath: string, existsSync: (file: string) => boo
     removed = true;
   }
   return removed;
+}
+
+export function expandDependentMemoryIds(memories: MemoryItem[], seed: Set<string>): Set<string> {
+  const expanded = new Set(seed);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const memory of memories) {
+      if (expanded.has(memory.id) || !memory.sourceMemoryIds?.some((id) => expanded.has(id))) continue;
+      expanded.add(memory.id);
+      changed = true;
+    }
+  }
+  return expanded;
 }
 
 export interface MemoryStore {
@@ -189,16 +203,14 @@ export class InMemoryStore implements MemoryStore {
       event.tombstone = true;
       count += 1;
     }
-    for (const memory of this.state.memories.values()) {
-      if (
-        !matchesForgetTarget(
-          { id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope },
-          target,
-        ) &&
-        !memory.sourceEventIds.some((id) => this.state.events.get(id)?.tombstone)
-      ) {
-        continue;
-      }
+    const memories = [...this.state.memories.values()];
+    const direct = new Set(memories.filter((memory) =>
+      matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) ||
+      memory.sourceEventIds.some((id) => this.state.events.get(id)?.tombstone),
+    ).map((memory) => memory.id));
+    const dropMemories = expandDependentMemoryIds(memories, direct);
+    for (const memory of memories) {
+      if (!dropMemories.has(memory.id)) continue;
       memory.status = "deleted";
       memory.deletedAt = at;
       count += 1;
@@ -211,7 +223,7 @@ export class InMemoryStore implements MemoryStore {
     const events = [...this.state.events.values()];
     const memories = [...this.state.memories.values()];
     const dropEvents = new Set(events.filter((event) => matchesForgetTarget(event, target)).map((event) => event.id));
-    const dropMemories = new Set(
+    const directMemories = new Set(
       memories
         .filter(
           (memory) =>
@@ -220,6 +232,7 @@ export class InMemoryStore implements MemoryStore {
         )
         .map((memory) => memory.id),
     );
+    const dropMemories = expandDependentMemoryIds(memories, directMemories);
     for (const id of dropEvents) this.state.events.delete(id);
     for (const id of dropMemories) this.state.memories.delete(id);
     for (const [id, audit] of [...this.state.audits.entries()]) {
@@ -247,12 +260,21 @@ export class InMemoryStore implements MemoryStore {
       intelligenceLane: item.intelligenceLane ?? "legacy-unclassified",
       statement: boundStatement(item.statement),
       sourceEventIds: [...item.sourceEventIds],
+      sourceMemoryIds: item.sourceMemoryIds ? [...item.sourceMemoryIds] : undefined,
+      correlationIds: item.correlationIds ? [...item.correlationIds] : undefined,
     });
   }
 
   getMemory(id: string): MemoryItem | undefined {
     const item = this.state.memories.get(id);
-    return item ? { ...item, sourceEventIds: [...item.sourceEventIds] } : undefined;
+    return item
+      ? {
+          ...item,
+          sourceEventIds: [...item.sourceEventIds],
+          sourceMemoryIds: item.sourceMemoryIds ? [...item.sourceMemoryIds] : undefined,
+          correlationIds: item.correlationIds ? [...item.correlationIds] : undefined,
+        }
+      : undefined;
   }
 
   listMemories(filter: MemoryFilter = {}): MemoryItem[] {
@@ -266,7 +288,12 @@ export class InMemoryStore implements MemoryStore {
         if (filter.statuses && !filter.statuses.includes(item.status)) return false;
         return true;
       })
-      .map((item) => ({ ...item, sourceEventIds: [...item.sourceEventIds] }));
+      .map((item) => ({
+        ...item,
+        sourceEventIds: [...item.sourceEventIds],
+        sourceMemoryIds: item.sourceMemoryIds ? [...item.sourceMemoryIds] : undefined,
+        correlationIds: item.correlationIds ? [...item.correlationIds] : undefined,
+      }));
   }
 
   searchMemories(query: RetrievalQuery): RankedMemory[] {
@@ -283,6 +310,7 @@ export class InMemoryStore implements MemoryStore {
       ...run,
       intelligenceLane: run.intelligenceLane ?? "legacy-unclassified",
       outputMemoryIds: run.outputMemoryIds ? [...run.outputMemoryIds] : undefined,
+      inputMemoryIds: run.inputMemoryIds ? [...run.inputMemoryIds] : undefined,
     });
   }
 

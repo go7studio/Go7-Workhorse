@@ -25,3 +25,49 @@ export function stubCompile(events: LearningEvent[], _memories: MemoryItem[] = [
   }
   return validateBrief({ intent, operations }) ?? { intent: [], operations: [] };
 }
+
+export function stubCompileAgent(events: LearningEvent[], _memories: MemoryItem[] = []): LearningBrief {
+  const operations: LearningBrief["operations"] = [];
+  for (const event of events) {
+    if (event.tombstone || event.purged || event.actorClass !== "agent") continue;
+    if (event.kind !== "outcome" && event.kind !== "tool") continue;
+    const status = String(event.payload.status ?? event.payload.outcome ?? "").trim();
+    const summary = boundStatement(String(event.payload.summary ?? event.payload.error ?? `${event.provider ?? "Agent"} ${status}`));
+    if (!summary) continue;
+    operations.push({
+      action: "add",
+      memoryClass: "operations",
+      scope: "project",
+      projectId: event.projectId,
+      providerScope: event.provider,
+      statement: summary,
+      sourceEventIds: [event.id],
+      tags: ["agent-performance", event.kind],
+    });
+  }
+  return validateBrief({ intent: [], operations }) ?? { intent: [], operations: [] };
+}
+
+export function stubReconcile(memories: MemoryItem[]): LearningBrief {
+  const humans = memories.filter((item) => item.intelligenceLane === "human-intent");
+  const agents = memories.filter((item) => item.intelligenceLane === "agent-performance");
+  const operations: LearningBrief["operations"] = [];
+  for (const human of humans) {
+    for (const agent of agents) {
+      const correlations = (human.correlationIds ?? []).filter((id) => agent.correlationIds?.includes(id));
+      if (correlations.length === 0 || !/fail|error|missing|without|unverified|denied|cancel|pause/i.test(agent.statement)) continue;
+      operations.push({
+        action: "add",
+        memoryClass: "operations",
+        scope: "project",
+        projectId: human.projectId ?? agent.projectId,
+        providerScope: agent.providerScope,
+        statement: boundStatement(`Requested: ${human.statement}; observed: ${agent.statement}`),
+        sourceEventIds: [],
+        sourceMemoryIds: [human.id, agent.id],
+        tags: ["mismatch"],
+      });
+    }
+  }
+  return validateBrief({ intent: [], operations }) ?? { intent: [], operations: [] };
+}

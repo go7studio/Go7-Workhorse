@@ -11,7 +11,7 @@ import {
   rankMemories,
 } from "../src/lib/learning-policy";
 import { LEARNING_SCHEMA_VERSION, type CompilerRun, type EventFilter, type ForgetTarget, type LearningEvent, type LearningExportPayload, type LearningProbeResult, type MemoryFilter, type MemoryItem, type PurgeResult, type RankedMemory, type RetrievalAudit, type RetrievalQuery } from "../src/lib/learning-types";
-import { boundedReplace, removeSidecars, type MemoryStore } from "../src/lib/learning-store";
+import { boundedReplace, expandDependentMemoryIds, removeSidecars, type MemoryStore } from "../src/lib/learning-store";
 
 const BUSY_MS = 5_000;
 
@@ -67,6 +67,8 @@ const MIGRATIONS: string[] = [
      statement TEXT NOT NULL,
      tags TEXT,
      source_event_ids TEXT NOT NULL,
+     source_memory_ids TEXT,
+     correlation_ids TEXT,
      compiler_run_id TEXT,
      confidence REAL,
      verification TEXT NOT NULL,
@@ -85,6 +87,8 @@ const MIGRATIONS: string[] = [
      input_from INTEGER,
      input_to INTEGER,
      event_watermark TEXT,
+     memory_watermark TEXT,
+     input_memory_ids TEXT,
      provider TEXT,
      model TEXT,
      effort TEXT,
@@ -154,6 +158,8 @@ function rowMemory(row: Record<string, unknown>): MemoryItem {
     statement: String(row.statement),
     tags: parseJson<string[]>(row.tags, undefined as unknown as string[]),
     sourceEventIds: parseJson<string[]>(row.source_event_ids, []),
+    sourceMemoryIds: parseJson<string[]>(row.source_memory_ids, undefined as unknown as string[]),
+    correlationIds: parseJson<string[]>(row.correlation_ids, undefined as unknown as string[]),
     compilerRunId: row.compiler_run_id ? String(row.compiler_run_id) : undefined,
     confidence: typeof row.confidence === "number" ? row.confidence : undefined,
     verification: row.verification as MemoryItem["verification"],
@@ -175,6 +181,8 @@ function rowRun(row: Record<string, unknown>): CompilerRun {
     inputFrom: row.input_from == null ? undefined : Number(row.input_from),
     inputTo: row.input_to == null ? undefined : Number(row.input_to),
     eventWatermark: row.event_watermark ? String(row.event_watermark) : undefined,
+    memoryWatermark: row.memory_watermark ? String(row.memory_watermark) : undefined,
+    inputMemoryIds: parseJson<string[]>(row.input_memory_ids, undefined as unknown as string[]),
     provider: row.provider ? (String(row.provider) as CompilerRun["provider"]) : undefined,
     model: row.model ? String(row.model) : undefined,
     effort: row.effort == null ? undefined : (String(row.effort) as CompilerRun["effort"]),
@@ -253,6 +261,18 @@ export class SqliteMemoryStore implements MemoryStore {
       }
       if (!columns("compiler_runs").has("intelligence_lane")) {
         db.exec("ALTER TABLE compiler_runs ADD COLUMN intelligence_lane TEXT NOT NULL DEFAULT 'legacy-unclassified'");
+      }
+      if (!columns("memory_items").has("source_memory_ids")) {
+        db.exec("ALTER TABLE memory_items ADD COLUMN source_memory_ids TEXT");
+      }
+      if (!columns("memory_items").has("correlation_ids")) {
+        db.exec("ALTER TABLE memory_items ADD COLUMN correlation_ids TEXT");
+      }
+      if (!columns("compiler_runs").has("memory_watermark")) {
+        db.exec("ALTER TABLE compiler_runs ADD COLUMN memory_watermark TEXT");
+      }
+      if (!columns("compiler_runs").has("input_memory_ids")) {
+        db.exec("ALTER TABLE compiler_runs ADD COLUMN input_memory_ids TEXT");
       }
       db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
       db.exec("COMMIT");
@@ -402,11 +422,14 @@ export class SqliteMemoryStore implements MemoryStore {
       for (const event of events) {
         db.prepare("UPDATE learning_events SET tombstone = 1 WHERE id = ?").run(event.id);
       }
-      const memories = this.listMemories({ includeDeleted: true }).filter(
+      const allMemories = this.listMemories({ includeDeleted: true });
+      const directMemoryIds = new Set(allMemories.filter(
         (memory) =>
           matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) ||
           memory.sourceEventIds.some((id) => events.some((event) => event.id === id)),
-      );
+      ).map((memory) => memory.id));
+      const memoryIds = expandDependentMemoryIds(allMemories, directMemoryIds);
+      const memories = allMemories.filter((memory) => memoryIds.has(memory.id));
       for (const memory of memories) {
         db.prepare("UPDATE memory_items SET status = 'deleted', deleted_at = ? WHERE id = ?").run(at, memory.id);
         this.unindex(memory.id);
@@ -426,12 +449,13 @@ export class SqliteMemoryStore implements MemoryStore {
       this.close();
       this.reopen();
       for (const event of snapshot.events.filter((event) => !dropEvents.has(event.id))) this.recordEvent(event);
-      const keepMemories = snapshot.memories.filter(
+      const directMemoryIds = new Set(snapshot.memories.filter(
         (memory) =>
-          !matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) &&
-          !memory.sourceEventIds.some((id) => dropEvents.has(id)),
-      );
-      const dropMemoryIds = new Set(snapshot.memories.filter((memory) => !keepMemories.some((item) => item.id === memory.id)).map((item) => item.id));
+          matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) ||
+          memory.sourceEventIds.some((id) => dropEvents.has(id)),
+      ).map((memory) => memory.id));
+      const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
+      const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
       for (const memory of keepMemories) this.putMemory(memory);
       for (const run of snapshot.compilerRuns.filter((item) => !item.outputMemoryIds?.some((id) => dropMemoryIds.has(id)))) this.putCompilerRun(run);
       for (const audit of snapshot.audits.filter((item) => !item.selectedIds.some((id) => dropMemoryIds.has(id)))) this.putRetrievalAudit(audit);
@@ -449,12 +473,13 @@ export class SqliteMemoryStore implements MemoryStore {
     this.close();
     const keepEvents = snapshot.events.filter((event) => !matchesForgetTarget(event, target));
     const dropEventIds = new Set(snapshot.events.filter((event) => matchesForgetTarget(event, target)).map((event) => event.id));
-    const keepMemories = snapshot.memories.filter(
+    const directMemoryIds = new Set(snapshot.memories.filter(
       (memory) =>
-        !matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) &&
-        !memory.sourceEventIds.some((id) => dropEventIds.has(id)),
-    );
-    const dropMemoryIds = new Set(snapshot.memories.filter((memory) => !keepMemories.some((item) => item.id === memory.id)).map((item) => item.id));
+        matchesForgetTarget({ id: memory.id, projectId: memory.projectId, providerScope: memory.providerScope }, target) ||
+        memory.sourceEventIds.some((id) => dropEventIds.has(id)),
+    ).map((memory) => memory.id));
+    const dropMemoryIds = expandDependentMemoryIds(snapshot.memories, directMemoryIds);
+    const keepMemories = snapshot.memories.filter((memory) => !dropMemoryIds.has(memory.id));
     const keepRuns = snapshot.compilerRuns.filter((run) => !run.outputMemoryIds?.some((id) => dropMemoryIds.has(id)));
     const keepAudits = snapshot.audits.filter((audit) => !audit.selectedIds.some((id) => dropMemoryIds.has(id)));
     let walRemoved = false;
@@ -512,9 +537,10 @@ export class SqliteMemoryStore implements MemoryStore {
     const db = this.conn();
     db.prepare(
       `INSERT OR REPLACE INTO memory_items (
-        id, intelligence_lane, memory_class, scope, project_id, provider_scope, statement, tags, source_event_ids, compiler_run_id, confidence,
+        id, intelligence_lane, memory_class, scope, project_id, provider_scope, statement, tags, source_event_ids, source_memory_ids,
+        correlation_ids, compiler_run_id, confidence,
         verification, created_at, last_confirmed_at, superseded_at, expires_at, deleted_at, supersedes_id, contradicts_id, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       item.id,
       item.intelligenceLane ?? "legacy-unclassified",
@@ -525,6 +551,8 @@ export class SqliteMemoryStore implements MemoryStore {
       item.statement,
       item.tags ? json(item.tags) : null,
       json(item.sourceEventIds),
+      item.sourceMemoryIds ? json(item.sourceMemoryIds) : null,
+      item.correlationIds ? json(item.correlationIds) : null,
       item.compilerRunId ?? null,
       item.confidence ?? null,
       item.verification,
@@ -608,9 +636,10 @@ export class SqliteMemoryStore implements MemoryStore {
     this.conn()
       .prepare(
         `INSERT OR REPLACE INTO compiler_runs (
-          id, intelligence_lane, input_from, input_to, event_watermark, provider, model, effort, rationale, status, attempt, started_at, ended_at,
+          id, intelligence_lane, input_from, input_to, event_watermark, memory_watermark, input_memory_ids, provider, model, effort, rationale,
+          status, attempt, started_at, ended_at,
           input_tokens, output_tokens, cost_usd, error_class, output_memory_ids, input_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -618,6 +647,8 @@ export class SqliteMemoryStore implements MemoryStore {
         run.inputFrom ?? null,
         run.inputTo ?? null,
         run.eventWatermark ?? null,
+        run.memoryWatermark ?? null,
+        run.inputMemoryIds ? json(run.inputMemoryIds) : null,
         run.provider ?? null,
         run.model ?? null,
         run.effort ?? null,

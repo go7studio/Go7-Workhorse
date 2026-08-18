@@ -1,6 +1,6 @@
 import type { EffortLevel, ProviderId } from "./types";
 
-export const LEARNING_SCHEMA_VERSION = 2;
+export const LEARNING_SCHEMA_VERSION = 3;
 export const LEARNING_REDACTION_VERSION = 1;
 export const LEARNING_DIR_NAME = "learning";
 export const LEARNING_DB_FILE = "learning.sqlite";
@@ -86,6 +86,8 @@ export type MemoryItem = {
   statement: string;
   tags?: string[];
   sourceEventIds: string[];
+  sourceMemoryIds?: string[];
+  correlationIds?: string[];
   compilerRunId?: string;
   confidence?: number;
   verification: VerificationState;
@@ -105,6 +107,8 @@ export type CompilerRun = {
   inputFrom?: number;
   inputTo?: number;
   eventWatermark?: string;
+  memoryWatermark?: string;
+  inputMemoryIds?: string[];
   provider?: ProviderId;
   model?: string;
   effort?: EffortLevel | null;
@@ -169,6 +173,7 @@ export type RetrievalQuery = {
   projectId?: string;
   sessionId?: string;
   provider?: ProviderId;
+  intelligenceLane?: Exclude<IntelligenceLane, "legacy-unclassified">;
   text?: string;
   taskClass?: string;
   skillIds?: string[];
@@ -190,6 +195,7 @@ export type LearningBriefProposal = {
   statement: string;
   tags?: string[];
   sourceEventIds: string[];
+  sourceMemoryIds?: string[];
   confidence?: number;
   supersedesId?: string;
   contradictsId?: string;
@@ -203,8 +209,12 @@ export type LearningBrief = {
 export type LearningIndexStats = {
   indexedEvents: number;
   indexedHumanEvents: number;
+  indexedAgentEvents: number;
   compiledEvents: number;
+  compiledAgentEvents: number;
   memories: number;
+  agentMemories: number;
+  mismatchMemories: number;
   completedRuns: number;
   latestEventAt?: number;
   latestCompileAt?: number;
@@ -265,6 +275,7 @@ export type CompileResult = {
   provider?: ProviderId;
   model?: string;
   customBotId?: string;
+  intelligenceLane?: Exclude<IntelligenceLane, "legacy-unclassified">;
 };
 
 export type CompilerPolicy = {

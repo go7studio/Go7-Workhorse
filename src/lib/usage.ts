@@ -1397,6 +1397,12 @@ export function finalizeTurnUsage(drafts: UsageDraft[]): UsageDraft {
   if (drafts.length === 0) {
     return { provider: "grok", model: "", inputTokens: 0, outputTokens: 0 };
   }
+  // A subagent is already-billed work from a separate child session. It is
+  // recorded on its own, so it must never enter the fold: the fold returns a
+  // single draft, and four children finishing in one turn would collapse to
+  // one — or displace the parent's own turn.
+  drafts = drafts.filter((draft) => draft.source !== "subagent");
+  if (drafts.length === 0) return { provider: "grok", model: "", inputTokens: 0, outputTokens: 0 };
   if (drafts.some((draft) => draft.source)) {
     const contextUsed = lastDefined(drafts, (draft) => draft.contextUsed);
     const costUsd = lastDefined(drafts, (draft) => draft.costUsd);

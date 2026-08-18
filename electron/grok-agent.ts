@@ -11,6 +11,7 @@ import { describePeerTool, prettyToolTitle } from "../src/lib/tool-labels";
 import type { ChatImage, Command } from "../src/lib/types";
 import { isCursorInnerTask } from "../src/lib/cursor-lane";
 export { applyCompactUsage } from "../src/lib/grok-events";
+import { parseSubagentFinished, subagentUsageDraft } from "../src/lib/grok-events";
 
 export function cursorExtensionResult(method: string): { outcome: { outcome: string; reason?: string } } | null {
   if (method === "cursor/ask_question") return { outcome: { outcome: "skipped" } };
@@ -227,6 +228,12 @@ export function classifyAcpUpdate(update: Record<string, unknown>): ClassifiedAc
   }
   if (MESSAGE_UPDATE_KINDS.has(name) || (!name && text)) return { kind: "message", text };
   if (THOUGHT_UPDATE_KINDS.has(name)) return { kind: "thought", text };
+  const subagent = parseSubagentFinished(update);
+  if (subagent) {
+    // A finished child, billed to this same Grok subscription. Its tokens are
+    // absent from the parent's own totals, so without this they are free.
+    return { kind: "usage", usage: subagentUsageDraft(subagent) };
+  }
   if (USAGE_UPDATE_KINDS.has(name)) {
     const usage = parseGrokUsage(update) ?? parseGrokUsage(update.usage);
     if (usage) return { kind: "usage", usage: { ...usage, source: acpUpdateUsageSource(name, usage) } };

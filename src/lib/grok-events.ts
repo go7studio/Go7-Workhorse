@@ -190,6 +190,91 @@ export function applyFailedPeerAsk(
   });
 }
 
+/**
+ * What a vendor's own subagent spent.
+ *
+ * Grok fans a `/goal` out to its own subagents and reports each one on
+ * `_x.ai/session/update` as `subagent_finished`. Those children run as separate
+ * Grok sessions with separate ledgers, so the parent's turn totals do not
+ * include them: on 2026-08-18 a four-way fan-out spent 404,686 tokens that the
+ * desk never counted — 30% of the run, on our own subscription, invisible.
+ */
+export type SubagentReport = {
+  subagentId: string;
+  childSessionId?: string;
+  description?: string;
+  status?: string;
+  toolCalls?: number;
+  turns?: number;
+  durationMs?: number;
+  /** Grok's own figure for the child. Verified against a child's own ledger to 0.18%. */
+  tokensUsed: number;
+};
+
+function positiveInt(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+}
+
+function trimmed(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export function parseSubagentFinished(update: unknown): SubagentReport | null {
+  if (!update || typeof update !== "object") return null;
+  const record = update as Record<string, unknown>;
+  const kind = trimmed(record.sessionUpdate) ?? trimmed(record.update);
+  if (kind !== "subagent_finished") return null;
+  const subagentId = trimmed(record.subagent_id) ?? trimmed(record.subagentId);
+  if (!subagentId) return null;
+  const tokensUsed = positiveInt(record.tokens_used ?? record.tokensUsed);
+  if (tokensUsed === undefined) return null;
+  return {
+    subagentId,
+    tokensUsed,
+    ...(trimmed(record.child_session_id ?? record.childSessionId)
+      ? { childSessionId: trimmed(record.child_session_id ?? record.childSessionId)! }
+      : {}),
+    ...(trimmed(record.description) ? { description: trimmed(record.description)! } : {}),
+    ...(trimmed(record.status) ? { status: trimmed(record.status)! } : {}),
+    ...(positiveInt(record.tool_calls ?? record.toolCalls) !== undefined
+      ? { toolCalls: positiveInt(record.tool_calls ?? record.toolCalls)! }
+      : {}),
+    ...(positiveInt(record.turns) !== undefined ? { turns: positiveInt(record.turns)! } : {}),
+    ...(positiveInt(record.duration_ms ?? record.durationMs) !== undefined
+      ? { durationMs: positiveInt(record.duration_ms ?? record.durationMs)! }
+      : {}),
+  };
+}
+
+/**
+ * Book a subagent's spend.
+ *
+ * `tokens_used` is one number: Grok does not split it into prompt and
+ * completion, and inventing a split would be a guess. It goes in whole as
+ * input, so the chat's total is right even though the shape is unknown.
+ *
+ * The `subagent` source keeps it out of the turn fold. `finalizeTurnUsage`
+ * keeps only the last `turn` draft, so a subagent queued as a turn would
+ * either be dropped or would replace the parent's own — both wrong. This is a
+ * finished child, already billed, and is recorded on its own.
+ */
+export function subagentUsageDraft(report: SubagentReport): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  source: "subagent";
+} {
+  return {
+    inputTokens: report.tokensUsed,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    source: "subagent",
+  };
+}
+
 export function splitToolLine(text: string): { title: string; status: string; detail: string } {
   const [head, detail = ""] = text.split(" — ");
   const [title, status = ""] = head.split(" · ");

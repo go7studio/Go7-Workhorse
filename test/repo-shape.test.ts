@@ -21,6 +21,7 @@ function tracked(): { mode: string; file: string }[] {
 const TOP_LEVEL = new Set([
   ".github",
   ".gitignore",
+  ".release-please-manifest.json",
   "AGENTS.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
@@ -36,6 +37,7 @@ const TOP_LEVEL = new Set([
   "llms.txt",
   "package-lock.json",
   "package.json",
+  "release-please-config.json",
   "scripts",
   "skills",
   "src",

@@ -82,10 +82,10 @@ export function addLineupRow(
   joinOwner?: DeskLineup["joinOwner"],
 ): DeskLineup {
   const base = lineup ?? emptyLineup(row.folder, row.startedAt, undefined, joinOwner);
-  if (base.rows.some((item) => item.childId === row.childId)) return base;
   if (base.notifiedAt) {
     return { ...emptyLineup(row.folder || base.folder, row.startedAt, undefined, joinOwner), rows: [row] };
   }
+  if (base.rows.some((item) => item.childId === row.childId)) return base;
   const { notifiedAt: _previousNotification, ...openWave } = base;
   return {
     ...openWave,

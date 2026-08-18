@@ -327,6 +327,15 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["src/lib/lineup.ts", "src/lib/subagents.ts", "src/lib/routing.ts", "src/lib/store.tsx", "src/lib/titles.ts", "src/lib/types.ts", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/routing.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-037",
+      "behavior": "A completed wait=true spawn returns its worker id and authoritative route with the report; reusing a worker opens a new externally owned wave; hidden worker briefs and joins preserve the assigned provider, model, and effort instead of re-running Auto routing.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["src/lib/lineup.ts", "src/lib/routing.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/routing.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

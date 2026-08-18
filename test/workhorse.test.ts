@@ -8236,6 +8236,19 @@ test("desk builds one named join prompt and syncs idle children", () => {
     false,
     "an external harness never races a second desk orchestration turn",
   );
+  const reusedExternal = addLineupRow(externalParent?.lineup, {
+    childId: "c1",
+    title: "One again",
+    slice: "One again",
+    folder,
+    vendor: "Grok",
+    status: "running",
+    startedAt: 20,
+  }, "external-runtime");
+  assert.equal(reusedExternal.rows.length, 1, "reusing an old worker opens a new wave");
+  assert.equal(reusedExternal.rows[0]?.childId, "c1");
+  assert.equal(reusedExternal.joinOwner, "external-runtime");
+  assert.equal(reusedExternal.notifiedAt, undefined);
   // The queued join is behind a cool-down. The drainer must arm a wake for it,
   // and once the clock passes it must want to run now — with no user click.
   const idleOrch = { ...afterParent!, status: "idle" as const };

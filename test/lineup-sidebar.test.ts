@@ -110,7 +110,7 @@ test("a person's chat routes only when that chat is set to Auto", () => {
   const store = read("src/lib/store.tsx");
   const send = store.slice(store.indexOf("let session = current.sessions.find((item) => item.id === targetSessionId)"));
   const gate = send.slice(0, send.indexOf("chooseRoutingDecision("));
-  assert.match(gate, /session\.routingMode === "auto"/, "the chat's own mode is the gate");
+  assert.match(gate, /shouldRouteSessionTurn\(\{ routingMode: session\.routingMode/, "the chat's own mode is the gate");
   assert.doesNotMatch(gate, /settings\.routing\.enabled/, "the Settings switch does not reach into a person's chat");
   // Auto picks the effort with the model.
   const routed = send.slice(send.indexOf("if (decision) {"), send.indexOf("if (decision) {") + 600);

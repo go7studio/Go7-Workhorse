@@ -44,6 +44,14 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   capacityDelta?: number;
 };
 
+export function shouldRouteSessionTurn(input: {
+  routingMode?: "auto" | "manual";
+  text: string;
+  hideUser?: boolean;
+}): boolean {
+  return input.routingMode === "auto" && !input.hideUser && !input.text.startsWith("/");
+}
+
 export function routingIdentityExcluded(
   identity: Pick<RoutingCandidate, "provider" | "model"> & Partial<Pick<RoutingCandidate, "label" | "customBotId">>,
   exclude: string[] = [],

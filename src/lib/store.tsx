@@ -116,7 +116,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel } from "./routing";
+import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
 import type { AgentSystemsSettings } from "./types";
 import {
   approvePlanRun,
@@ -1876,7 +1876,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // A person's chat routes only when that chat is set to Auto. The Settings
     // switch decides how a new chat starts; it does not reach into a chat the
     // person has already set one way or the other.
-    if (session.routingMode === "auto" && !originalText.startsWith("/")) {
+    if (shouldRouteSessionTurn({ routingMode: session.routingMode, text: originalText, hideUser })) {
       const statuses = watchVendorStatuses({
         settings: current.settings,
         usage: current.usage,
@@ -4500,7 +4500,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               throw error;
             }
             if (!fallback) return;
-            await replyAsk({ text: fallback });
+            const finished = stateRef.current.sessions.find((item) => item.id === childId);
+            await replyAsk({
+              text: JSON.stringify(
+                {
+                  completed: true,
+                  childSessionId: childId,
+                  worker: finished?.workerName ?? workerName,
+                  title: finished?.title ?? spec.title,
+                  provider: finished?.provider ?? spec.provider,
+                  model: finished?.model ?? spec.model,
+                  effort: finished?.effort ?? null,
+                  exclusions: finished?.agentRun?.exclusions ?? effectiveExclusions,
+                  report: fallback,
+                },
+                null,
+                2,
+              ),
+            });
             return;
           }
 

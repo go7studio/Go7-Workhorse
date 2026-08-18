@@ -10,6 +10,7 @@ import {
   rankRoutingCandidates,
   routingIdentityExcluded,
   routingProfileForModel,
+  shouldRouteSessionTurn,
   weeklyDrawState,
   type RoutingCandidate,
 } from "../src/lib/routing";
@@ -51,6 +52,13 @@ test("routing tiers keep quick work light and deep work strong", () => {
   assert.equal(deep?.effort, "high");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-terra", "balanced"), "medium");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-luna", "quick", "high"), "high");
+});
+
+test("automatic routing applies only to a person's visible turn", () => {
+  assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "Review this", hideUser: false }), true);
+  assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "ORCHESTRATION CALL", hideUser: true }), false);
+  assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "/goal status", hideUser: false }), false);
+  assert.equal(shouldRouteSessionTurn({ routingMode: "manual", text: "Review this", hideUser: false }), false);
 });
 
 test("routing exclusions match provider, model, label, and bot identity", () => {

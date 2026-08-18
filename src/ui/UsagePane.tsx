@@ -502,7 +502,7 @@ export function UsagePane({
                     onClick={() => setFocus(row.focus)}
                   >
                     <FuelRing
-                      value={ring ? ring.value : 0}
+                      value={ring?.value}
                       size={104}
                       tone={row.provider}
                       color={row.color}
@@ -599,7 +599,7 @@ export function UsagePane({
           ) : (
             <div className="usage-plan">
               <FuelRing
-                value={plan ? plan.leftPercent / 100 : 0}
+                value={plan ? plan.leftPercent / 100 : undefined}
                 size={120}
                 tone={focused.provider}
                 color={focused.color}

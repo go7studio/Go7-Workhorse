@@ -1309,23 +1309,34 @@ html.pane-dragging * {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 200ms var(--ease);
+  pointer-events: none;
+  overflow: visible;
 }
 
 .session-edits-slot.open {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--composer-input, 80px) + 8px);
+  z-index: 32;
   grid-template-rows: 1fr;
+  min-height: 40px;
+  max-height: 40px;
+  overflow: visible;
 }
 
 .session-edits {
   flex-shrink: 0;
   width: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
   padding: 0 22px;
+  pointer-events: none;
 }
 
 .session-edits .edited-block {
@@ -1336,7 +1347,8 @@ html.pane-dragging * {
   border-radius: 14px;
   opacity: 0;
   transform: translateY(6px);
-  transition: opacity 200ms var(--ease), transform 200ms var(--ease);
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), width 200ms var(--ease);
+  pointer-events: auto;
 }
 
 .session-edits-slot.open .edited-block {
@@ -1344,17 +1356,48 @@ html.pane-dragging * {
   transform: translateY(0);
 }
 
-.session-edits .edited-block.compact:not(.open) {
+.session-edits .edited-block.compact {
+  position: absolute;
+  right: 22px;
+  bottom: 0;
+  left: auto;
+  z-index: 3;
+  overflow: hidden;
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease), width 200ms var(--ease);
+}
+
+.session-edits .edited-block.compact:not(.open):not(.closing) {
   width: fit-content;
-  max-width: 100%;
+  max-width: calc(100% - 44px);
   border-radius: 980px;
 }
 
-.session-edits .edited-block.compact.open {
-  width: min(420px, 100%);
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot,
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot > .file-list {
+  width: 0;
+  min-width: 0;
+  height: 0;
+  overflow: hidden;
 }
 
-.session-edits .edited-block.compact:not(.open) .edited-toggle {
+.session-edits .edited-bar {
+  width: auto;
+}
+
+.session-edits .edited-block.compact.open,
+.session-edits .edited-block.compact.closing {
+  width: min(420px, calc(100% - 44px));
+  max-width: calc(100% - 16px);
+  container-type: inline-size;
+  container-name: changes;
+}
+
+.session-edits .edited-block.compact.open .edited-bar,
+.session-edits .edited-block.compact.closing .edited-bar {
+  width: 100%;
+}
+
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-toggle {
   flex: 0 0 auto;
   justify-content: flex-start;
   gap: 8px;
@@ -1374,6 +1417,57 @@ html.pane-dragging * {
 
 .session-edits .file-row {
   min-height: 40px;
+  gap: 8px;
+}
+
+.session-edits .file-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-edits .edited-toggle {
+  min-width: 0;
+}
+
+.session-edits .edited-toggle .row-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container changes (max-width: 300px) {
+  .file-when,
+  .file-row .row-meta {
+    display: none;
+  }
+
+  .file-meta {
+    gap: 6px;
+  }
+
+  .file-row {
+    min-height: 36px;
+    padding-inline: 8px;
+  }
+}
+
+@container changes (max-width: 220px) {
+  .edited-toggle .row-meta .file-diff-stat {
+    display: none;
+  }
+}
+
+@container session (max-width: 360px) {
+  .session-edits .edited-block.compact {
+    right: 8px;
+  }
+
+  .session-edits .edited-block.compact.open,
+  .session-edits .edited-block.compact.closing {
+    width: min(420px, calc(100% - 16px));
+  }
 }
 
 .edited-bar {
@@ -1496,9 +1590,10 @@ html.pane-dragging * {
 
 .turn.user {
   display: flex;
+  flex-direction: column;
   justify-content: flex-end;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .turn-meta {
@@ -1649,10 +1744,11 @@ html.pane-dragging * {
 
 .turn.user .turn-actions {
   flex-shrink: 0;
-  margin-top: 8px;
+  margin-top: 2px;
   justify-content: flex-end;
 }
 
+.turn.user .turn-actions,
 .turn.user:hover .turn-actions,
 .turn.user:focus-within .turn-actions,
 .turn.reply:hover .turn-actions,

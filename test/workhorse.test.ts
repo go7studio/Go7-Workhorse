@@ -160,7 +160,7 @@ import { citedAbsolutePaths, editSearchRoots, fileFolderFromPath, formatEditWhen
 import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
-import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus } from "../src/ui/Composer";
+import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus, pinComposerInput } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
   applyCut,
@@ -2332,6 +2332,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(userTurn, /peer \? " peer"/);
   assert.match(userTurn, /from \"\.\/TurnActions\"/);
+  assert.match(userTurn, /<\/div>\s*<TurnActions/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "TurnActions.tsx"), "utf8"), /export function copyText/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "copy-text.ts"), "utf8"), /export function copyText/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.turn\.user\.peer \.say/);
@@ -2894,6 +2895,18 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(css, /\.composer-tools/);
   assert.match(pane, /ResizeObserver/);
   assert.match(pane, /composer-wrap/);
+  assert.match(composer, /pinComposerInput/);
+  assert.match(css, /--composer-input/);
+  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ 8px\)/);
+  const col = {
+    getBoundingClientRect: () => ({ bottom: 800 }),
+    style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
+  };
+  const form = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, form), 80);
+  assert.equal(col.style.value, "--composer-input:80px");
+  const withThumbs = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, withThumbs), 80);
 });
 
 test("session setup is a compact right-side model and access inspector", () => {
@@ -4062,6 +4075,10 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.doesNotMatch(pane, /onClose=\{\(\) => setEditsHidden/);
   const editedList = readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8");
   assert.match(editedList, /edited-toggle/);
+  assert.match(editedList, /closing/);
+  assert.match(editedList, /FOLD_MS/);
+  assert.match(editedList, /boxWidth/);
+  assert.match(editedList, /pillWidth/);
   assert.match(editedList, /startOpen/);
   assert.match(editedList, /showLineStats/);
   assert.match(editedList, /label = "Edited"/);
@@ -4125,16 +4142,28 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(sessionEdits, /padding:\s*0 22px;/);
   assert.match(sessionEdits, /align-items:\s*flex-end/);
+  assert.match(sessionEdits, /pointer-events:\s*none/);
   assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
   assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
   assert.match(
     css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\)\s*\{[^}]*width:\s*fit-content/,
+    /\.session-edits \.edited-block\.compact\s*\{[^}]*position:\s*absolute/,
   );
-  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, 100%\)/);
+  assert.match(css, /\.session-edits \.edited-block\.compact\s*\{[^}]*width 200ms/);
   assert.match(
     css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*flex:\s*0 0 auto/,
+    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\)\s*\{[^}]*width:\s*fit-content/,
+  );
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact\.open,\s*\.session-edits \.edited-block\.compact\.closing\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/,
+  );
+  assert.match(css, /container-name:\s*changes/);
+  assert.match(css, /@container changes \(max-width: 300px\)[\s\S]*\.file-when/);
+  assert.match(css, /\.session-edits \.file-row strong[\s\S]*text-overflow:\s*ellipsis/);
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\) \.edited-toggle\s*\{[^}]*width:\s*auto/,
   );
   assert.match(composerWrap, /padding:\s*8px 22px 16px/);
   assert.match(composerWrap, /flex:\s*0 0 auto/);
@@ -4895,7 +4924,7 @@ test("stretchBuckets follows today week month and all", () => {
   assert.equal(busy?.label, "Aug 12");
 });
 
-test("UsagePane ships the Figma fuel-ring overview, not the old token line", () => {
+test("UsagePane ships the Figma fuel-ring overview, not the old token line", async () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
@@ -4912,6 +4941,15 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", () 
   const ring = readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8");
   assert.match(ring, /easeOutCubic/);
   assert.match(ring, /strokeDashoffset/);
+  assert.match(ring, /sameFuelTarget/);
+  assert.match(ring, /shownRef\.current = next/);
+  assert.match(ring, /target === undefined/);
+  assert.match(pane, /value=\{ring\?\.value\}/);
+  assert.doesNotMatch(pane, /value=\{ring \? ring\.value : 0\}/);
+  const { sameFuelTarget } = await import("../src/ui/FuelRing");
+  assert.equal(sameFuelTarget(0.95, 0.951), true);
+  assert.equal(sameFuelTarget(0.2, 0.95), false);
+  assert.equal(sameFuelTarget(undefined, 0.95), false);
   assert.match(css, /@keyframes fuel-in/);
   assert.match(pane, /This stretch/);
   assert.match(pane, /usage-dots/);

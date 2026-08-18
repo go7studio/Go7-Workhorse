@@ -296,6 +296,55 @@ export function resolveExistingFile(
   return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
 }
 
+/**
+ * Resolve a path for +/- stats only. Never walks the tree — a 23-file
+ * harvest must not freeze the desk while findSourceFile scans .import noise.
+ * The viewer still uses findSourceFile when a row is opened.
+ */
+export function resolveStatFile(
+  filePath: string,
+  roots: string[] = [],
+  existsSync: (filePath: string) => boolean = (item) => fs.existsSync(item),
+  input: FileDiffInput = {},
+): string {
+  const isDir =
+    input.isDir ??
+    ((dir: string) => {
+      try {
+        return fs.statSync(dir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  const tryFile = (candidate: string): string | null => {
+    if (!candidate) return null;
+    try {
+      if (existsSync(candidate) && !isDir(candidate)) return candidate;
+    } catch {
+      return null;
+    }
+    return null;
+  };
+  const trimmed = cleanSearchPath(filePath);
+  if (!trimmed) return trimmed;
+  if (isAbsolutePath(trimmed)) {
+    const exact = tryFile(trimmed);
+    if (exact) return exact;
+    return trimmed;
+  }
+  const baseName = path.posix.basename(trimmed.replaceAll("\\", "/"));
+  for (const root of roots) {
+    if (!root.trim()) continue;
+    const joined = tryFile(hostJoin(root, trimmed));
+    if (joined) return joined;
+    if (baseName && baseName !== trimmed) {
+      const loose = tryFile(hostJoin(root, baseName));
+      if (loose) return loose;
+    }
+  }
+  return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
+}
+
 function gitIndexLocked(repo: string, existsSync: (filePath: string) => boolean): boolean {
   return existsSync(path.join(repo, ".git", "index.lock")) || existsSync(path.join(repo, "index.lock"));
 }
@@ -552,7 +601,7 @@ function addEditStatPath(
 ): "created" | "edited" | "other" {
   const key = item.replaceAll("\\", "/").toLowerCase();
   const isCreated = Boolean(input.created || created.has(key));
-  const abs = resolveExistingFile(item, roots, existsSync, input);
+  const abs = resolveStatFile(item, roots, existsSync, input);
   if (isCreated) {
     work.next[item] = createdLineStat(abs, existsSync, readFile, countLinesAt, input.instances);
     return "created";

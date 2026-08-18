@@ -121,14 +121,15 @@ export function SessionPane() {
   }, [visible, edits.length]);
 
   useEffect(() => {
-    if (!window.workhorse?.editStats || edits.length === 0) return;
+    const api = window.workhorse;
+    if (!api?.editStats || edits.length === 0) return;
     const paths = edits.map((item) => item.path);
     return startEditStatsHarvest({
       items: edits,
       getFetched: () => fetchedStats.current,
       rootKey: fileRootKey,
       roots: fileRoots,
-      editStats: (files, folders, created) => window.workhorse.editStats(files, folders, created),
+      editStats: (files, folders, created) => api.editStats(files, folders, created),
       onChunk: (next, stale) => {
         fetchedStats.current = markStatsFetched(fetchedStats.current, stale, fileRootKey);
         setStats((previous) => holdEditStats(previous, next, paths));

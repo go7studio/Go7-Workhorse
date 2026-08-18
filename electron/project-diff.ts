@@ -576,7 +576,7 @@ function applyNumstat(
   return work.next;
 }
 
-function editStatContext(roots: string[], input: FileDiffInput, createdPaths: string[]) {
+function editStatContext(input: FileDiffInput, createdPaths: string[]) {
   const existsSync = input.existsSync ?? ((item: string) => fs.existsSync(item));
   const readFile = input.readFile ?? ((item: string) => fs.readFileSync(item, "utf8"));
   return {
@@ -598,7 +598,7 @@ export function readEditStats(
   input: FileDiffInput = {},
   createdPaths: string[] = [],
 ): Record<string, { added: number; deleted: number }> {
-  const ctx = editStatContext(roots, input, createdPaths);
+  const ctx = editStatContext(input, createdPaths);
   for (const item of paths) {
     addEditStatPath(item, roots, input, ctx.created, ctx.existsSync, ctx.readFile, ctx.countLinesAt, ctx.work);
   }
@@ -612,7 +612,7 @@ export async function readEditStatsAsync(
   input: FileDiffInput = {},
   createdPaths: string[] = [],
 ): Promise<Record<string, { added: number; deleted: number }>> {
-  const ctx = editStatContext(roots, input, createdPaths);
+  const ctx = editStatContext(input, createdPaths);
   for (const item of paths) {
     const kind = addEditStatPath(
       item,

@@ -333,18 +333,6 @@ export function peelThinkTags(text: string): { thought: string; body: string } {
 
 type ReplyUnit = { text: string; para: number; kind: "thought" | "answer" };
 
-function splitPlanningSentences(para: string): { thought: string; body: string } {
-  const parts = splitReplySentences(para);
-  if (parts.length < 2) {
-    return isProcessSentence(para) && !isConclusionParagraph(para)
-      ? { thought: para, body: "" }
-      : { thought: "", body: para };
-  }
-  const thought = parts.filter((item) => isProcessSentence(item) && !isConclusionParagraph(item));
-  const body = parts.filter((item) => !isProcessSentence(item) || isConclusionParagraph(item));
-  return { thought: thought.join(" "), body: body.join(" ") };
-}
-
 function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
   if (isLockedAnswerParagraph(para) && !PROCESS_NARRATION.test(para)) {
     return [{ text: para, para: paraIndex, kind: "answer" }];

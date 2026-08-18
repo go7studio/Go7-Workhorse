@@ -73,14 +73,15 @@ export function ProjectHome() {
   }, [visible]);
 
   useEffect(() => {
-    if (!window.workhorse?.editStats || listed.length === 0) return;
+    const api = window.workhorse;
+    if (!api?.editStats || listed.length === 0) return;
     const paths = listed.map((item) => item.path);
     return startEditStatsHarvest({
       items: listed,
       getFetched: () => fetchedStats.current,
       rootKey,
       roots,
-      editStats: (files, folders, created) => window.workhorse.editStats(files, folders, created),
+      editStats: (files, folders, created) => api.editStats(files, folders, created),
       onChunk: (next, stale) => {
         fetchedStats.current = markStatsFetched(fetchedStats.current, stale, rootKey);
         setStats((previous) => holdEditStats(previous, next, paths));

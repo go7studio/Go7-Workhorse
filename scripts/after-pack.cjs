@@ -1,5 +1,8 @@
 const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
+
+const BUILD_MARKER_FILE = "workhorse-build.json";
 
 /** Ad-hoc only when no release identity will stamp the same Team ID again. */
 function shouldAdHocSign(env = process.env) {
@@ -41,16 +44,28 @@ function assertStableReleaseIdentity(env = process.env) {
   }
 }
 
+function writeBuildMarker(appPath, env = process.env) {
+  const marker = {
+    channel: requiresStableIdentity(env) ? "release" : "development",
+  };
+  const markerPath = path.join(appPath, "Contents", "Resources", BUILD_MARKER_FILE);
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, `${JSON.stringify(marker)}\n`, { mode: 0o644 });
+  return marker;
+}
+
 async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return;
   assertStableReleaseIdentity();
-  if (!shouldAdHocSign()) return;
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const appPath = path.join(context.appOutDir, appName);
+  writeBuildMarker(appPath);
+  if (!shouldAdHocSign()) return;
 
-  // Complete local packages so they launch and use secure storage. A
-  // certificate-backed signing stage replaces this when CSC_* is set.
+  // Complete local packages so they launch under the hardened runtime. They
+  // are marked development above and therefore never open production Safe
+  // Storage; a certificate-backed signing stage replaces this for releases.
   execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", appPath], {
     stdio: "inherit",
   });
@@ -60,4 +75,6 @@ module.exports = afterPack;
 module.exports.shouldAdHocSign = shouldAdHocSign;
 module.exports.requiresStableIdentity = requiresStableIdentity;
 module.exports.assertStableReleaseIdentity = assertStableReleaseIdentity;
+module.exports.BUILD_MARKER_FILE = BUILD_MARKER_FILE;
+module.exports.writeBuildMarker = writeBuildMarker;
 module.exports.afterPack = afterPack;

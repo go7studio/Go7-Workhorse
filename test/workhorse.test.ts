@@ -117,7 +117,12 @@ import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalActi
 import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, modelName, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
-import { WORKHORSE_APP_ID, workhorseRuntimeIdentity } from "../src/lib/app-identity";
+import {
+  WORKHORSE_APP_ID,
+  WORKHORSE_BUILD_MARKER,
+  parseWorkhorseBuildChannel,
+  workhorseRuntimeIdentity,
+} from "../src/lib/app-identity";
 import { applyWorkhorseToggle, isTheme, nextTheme, resolvedTheme, SETTINGS_THEME_CHOICES } from "../src/lib/theme";
 import { listVendorModels, parseCodexModelsCache, parseCursorModelsOutput, parseGrokModelsCache, reconcileCursorModels } from "../electron/vendor-models";
 import { applyFailedPeerAsk, collapseThoughtDisplay, collapseToolText, failPeerAskMessages, finishOpenToolMessages, formatToolLine, mergeThoughtText, shortDisplayPath, toolIsFinished, upsertCompactMessage, upsertThoughtMessage, upsertToolMessage } from "../src/lib/grok-events";
@@ -258,8 +263,25 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
   assert.equal(workhorseVolatileCredentials([], { WORKHORSE_VOLATILE_CREDENTIALS: "true" }), true);
   assert.equal(workhorseVolatileCredentials([], {}), false);
-  assert.deepEqual(workhorseRuntimeIdentity(true), { name: "Go7 Workhorse", userDataDirectory: "Go7 Workhorse" });
-  assert.deepEqual(workhorseRuntimeIdentity(false), { name: "Go7 Workhorse Dev", userDataDirectory: "Go7 Workhorse Dev" });
+  assert.deepEqual(workhorseRuntimeIdentity(true), {
+    name: "Go7 Workhorse",
+    userDataDirectory: "Go7 Workhorse",
+    volatileCredentials: false,
+  });
+  assert.deepEqual(workhorseRuntimeIdentity(false), {
+    name: "Go7 Workhorse Dev",
+    userDataDirectory: "Go7 Workhorse Dev",
+    volatileCredentials: false,
+  });
+  assert.deepEqual(workhorseRuntimeIdentity(true, "development"), {
+    name: "Go7 Workhorse Dev",
+    userDataDirectory: "Go7 Workhorse Dev",
+    volatileCredentials: true,
+  });
+  assert.equal(parseWorkhorseBuildChannel('{"channel":"development"}'), "development");
+  assert.equal(parseWorkhorseBuildChannel('{"channel":"release"}'), "release");
+  assert.equal(parseWorkhorseBuildChannel("broken"), "release");
+  assert.equal(WORKHORSE_BUILD_MARKER, "workhorse-build.json");
   assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
 });
 
@@ -455,9 +477,10 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarStyle:\s*"hidden"/);
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
-  assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged\)/);
+  assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged, packagedBuildChannel\(\)\)/);
   assert.match(main, /app\.setName\(runtimeIdentity\.name\)/);
   assert.match(main, /runtimeIdentity\.userDataDirectory/);
+  assert.match(main, /runtimeIdentity\.volatileCredentials \|\| workhorseVolatileCredentials\(\)/);
   assert.match(main, /app\.setPath\("userData"/);
   assert.equal(selectSurface({ panel: "settings", hasProject: true, hasSession: true }), "settings");
   assert.equal(selectSurface({ panel: "add-bot", hasProject: true, hasSession: true }), "add-bot");

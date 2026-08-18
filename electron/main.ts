@@ -71,8 +71,10 @@ import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary } from "./le
 import type { Settings } from "../src/lib/types";
 import {
   WORKHORSE_APP_ID,
+  WORKHORSE_BUILD_MARKER,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
+  parseWorkhorseBuildChannel,
   workhorseRuntimeIdentity,
 } from "../src/lib/app-identity";
 
@@ -91,10 +93,29 @@ export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
 /** Union of written file versions for the review. Survives later deletes of created lines. */
 const fileInstances = new Map<string, string>();
 
-// Electron development shells must never request access to the installed
-// app's Keychain item. The name also controls Electron Safe Storage's service.
-const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged);
+function packagedBuildChannel() {
+  if (!app.isPackaged || process.platform !== "darwin") return app.isPackaged ? "release" : "development";
+  try {
+    return parseWorkhorseBuildChannel(
+      fs.readFileSync(path.join(process.resourcesPath, WORKHORSE_BUILD_MARKER), "utf8"),
+    );
+  } catch {
+    // Releases before the marker shipped are production builds. Defaulting to
+    // release preserves their existing user data and Safe Storage item.
+    return "release";
+  }
+}
+
+// Development shells and ad-hoc packages must never request access to the
+// installed app's Keychain item. The name controls Electron Safe Storage's
+// service, while ad-hoc packages use memory-only credentials because their
+// code requirement changes on every rebuild.
+const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged, packagedBuildChannel());
 app.setName(runtimeIdentity.name);
+
+function useVolatileCredentials() {
+  return runtimeIdentity.volatileCredentials || workhorseVolatileCredentials();
+}
 
 function pinUserData() {
   const isolated = workhorseUserDataOverride();
@@ -146,7 +167,7 @@ function credentialStore(): CredentialStore {
   credentials ??= new CredentialStore(
     path.join(app.getPath("userData"), "credentials.json"),
     safeStorage,
-    workhorseVolatileCredentials(),
+    useVolatileCredentials(),
   );
   return credentials;
 }
@@ -225,7 +246,7 @@ function readState(): Persistable {
     // recovered state in memory, but never persist a plaintext replacement.
   }
   const hydrated = hydrateStateCredentials(state, credentialStore());
-  const detected = workhorseVolatileCredentials()
+  const detected = useVolatileCredentials()
     ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
     : hydrated;
   const ready = fillEmptyCustomBotKeys(detected);

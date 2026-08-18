@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -12,13 +12,16 @@ import {
   mergeFolderBookmarks,
   rememberFolderBookmark,
 } from "../electron/folder-access";
+import { WORKHORSE_BUILD_MARKER } from "../src/lib/app-identity";
 import { asPickedFolder, folderFromPath, normalizeProject } from "../src/lib/project";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const afterPack = require("../scripts/after-pack.cjs") as {
+  BUILD_MARKER_FILE: string;
   shouldAdHocSign: (env?: NodeJS.Dict<string>) => boolean;
   assertStableReleaseIdentity: (env?: NodeJS.Dict<string>) => void;
+  writeBuildMarker: (appPath: string, env?: NodeJS.Dict<string>) => { channel: string };
 };
 const afterSign = require("../scripts/after-sign.cjs") as {
   readAuthorities: (output: string) => string[];
@@ -34,6 +37,23 @@ test("ad-hoc mac signature is skipped when a release identity will stamp the app
   assert.equal(afterPack.shouldAdHocSign({ CSC_IDENTITY_AUTO_DISCOVERY: "false" }), true);
   assert.equal(afterPack.shouldAdHocSign({ CSC_NAME: "Developer ID Application: Moonlight" }), false);
   assert.equal(afterPack.shouldAdHocSign({ CSC_LINK: "/secrets/cert.p12" }), false);
+});
+
+test("mac packages mark whether they may use the production credential vault", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-build-marker-"));
+  const appPath = path.join(root, "Go7 Workhorse.app");
+  mkdirSync(path.join(appPath, "Contents", "Resources"), { recursive: true });
+  assert.equal(afterPack.BUILD_MARKER_FILE, WORKHORSE_BUILD_MARKER);
+
+  assert.deepEqual(afterPack.writeBuildMarker(appPath, {}), { channel: "development" });
+  const markerPath = path.join(appPath, "Contents", "Resources", afterPack.BUILD_MARKER_FILE);
+  assert.deepEqual(JSON.parse(readFileSync(markerPath, "utf8")), { channel: "development" });
+
+  assert.deepEqual(afterPack.writeBuildMarker(appPath, { WORKHORSE_RELEASE_BUILD: "1" }), {
+    channel: "release",
+  });
+  assert.deepEqual(JSON.parse(readFileSync(markerPath, "utf8")), { channel: "release" });
+  rmSync(root, { recursive: true, force: true });
 });
 
 test("mac release packaging refuses an identity that would retrigger Keychain approval", () => {

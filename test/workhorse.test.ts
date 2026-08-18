@@ -6444,6 +6444,7 @@ test("vendor session id and sandbox survive normalizeSession", () => {
     mode: "plan",
     sandbox: "workspace",
     vendorSessionId: "acp-abc",
+    workerName: "Dexter",
     status: "idle",
     messages: [{ id: "m", role: "user", text: "hi", createdAt: 1 }],
     contextUsed: 12,
@@ -6453,9 +6454,11 @@ test("vendor session id and sandbox survive normalizeSession", () => {
   assert.equal(session.vendorSessionId, "acp-abc");
   assert.equal(session.sandbox, "workspace");
   assert.equal(session.mode, "plan");
+  assert.equal(session.workerName, "Dexter");
   const again = normalizeSession(JSON.parse(JSON.stringify(session)));
   assert.equal(again?.vendorSessionId, "acp-abc");
   assert.equal(again?.sandbox, "workspace");
+  assert.equal(again?.workerName, "Dexter");
   const recovered = normalizeSession({ ...saved, status: "running" });
   assert.equal(recovered?.status, "idle");
 });

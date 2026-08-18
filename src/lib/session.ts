@@ -188,6 +188,8 @@ export function normalizeSession(raw: unknown): Session | null {
     projectId: typeof record.projectId === "string" && record.projectId ? record.projectId : null,
     parentId: typeof record.parentId === "string" && record.parentId.trim() ? record.parentId.trim() : undefined,
     hidden: record.hidden === true || undefined,
+    workerName:
+      typeof record.workerName === "string" && record.workerName.trim() ? record.workerName.trim() : undefined,
     provider,
     model,
     customBotId:

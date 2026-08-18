@@ -8,6 +8,7 @@ export function stubCompile(events: LearningEvent[], _memories: MemoryItem[] = [
   const operations: LearningBrief["operations"] = [];
   for (const event of events) {
     if (event.tombstone || event.purged) continue;
+    if (event.actorClass !== "human") continue;
     if (event.kind === "human-prompt" || event.kind === "human-edit" || event.kind === "human-correction") {
       const text = boundStatement(String(event.payload.summary ?? event.payload.text ?? ""));
       if (!text) continue;
@@ -19,20 +20,6 @@ export function stubCompile(events: LearningEvent[], _memories: MemoryItem[] = [
         statement: text,
         sourceEventIds: [event.id],
         tags: ["intent"],
-      });
-    }
-    if (event.kind === "outcome" || event.kind === "routing" || event.kind === "skill") {
-      const text = boundStatement(String(event.payload.summary ?? event.payload.reason ?? event.payload.skill ?? event.kind));
-      if (!text || !event.provider) continue;
-      operations.push({
-        action: "add",
-        memoryClass: "operations",
-        scope: "project",
-        projectId: event.projectId,
-        providerScope: event.provider,
-        statement: text,
-        sourceEventIds: [event.id],
-        tags: event.skillIds,
       });
     }
   }

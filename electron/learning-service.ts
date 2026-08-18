@@ -9,6 +9,7 @@ import {
   effectiveLearningMode,
   eventsRequireMemory,
   frameRetrievedMemories,
+  HUMAN_INTELLIGENCE_LANE,
   learningCaptures,
   learningCompiles,
   learningAutoPromotes,
@@ -141,7 +142,7 @@ export class LearningService {
   }
 
   memories() {
-    return this.options.store.listMemories({ includeDeleted: false });
+    return this.options.store.listMemories({ includeDeleted: false, intelligenceLane: HUMAN_INTELLIGENCE_LANE });
   }
 
   events(limit = 200): LearningEvent[] {
@@ -151,15 +152,18 @@ export class LearningService {
 
   indexStats(): LearningIndexStats {
     const events = this.options.store.listEvents();
-    const memories = this.options.store.listMemories({ includeDeleted: false });
-    const completed = this.options.store.listCompilerRuns().filter((run) => run.status === "completed");
+    const humanEvents = events.filter((event) => event.actorClass === "human");
+    const memories = this.options.store.listMemories({ includeDeleted: false, intelligenceLane: HUMAN_INTELLIGENCE_LANE });
+    const completed = this.options.store
+      .listCompilerRuns()
+      .filter((run) => run.intelligenceLane === HUMAN_INTELLIGENCE_LANE && run.status === "completed");
     const last = completed.at(-1);
     const watermarkIndex = last?.eventWatermark
-      ? events.findIndex((event) => event.id === last.eventWatermark)
+      ? humanEvents.findIndex((event) => event.id === last.eventWatermark)
       : -1;
     return {
       indexedEvents: events.length,
-      indexedHumanEvents: events.filter((event) => event.actorClass === "human").length,
+      indexedHumanEvents: humanEvents.length,
       compiledEvents: watermarkIndex + 1,
       memories: memories.length,
       completedRuns: completed.length,
@@ -210,7 +214,13 @@ export class LearningService {
   }
 
   async recover(): Promise<CompileResult> {
-    const unfinished = this.options.store.unfinishedCompilerRun();
+    const unfinished = this.options.store
+      .listCompilerRuns()
+      .find(
+        (run) =>
+          run.intelligenceLane === HUMAN_INTELLIGENCE_LANE &&
+          (run.status === "running" || run.status === "interrupted" || run.status === "pending"),
+      );
     if (unfinished) return this.compile({ resume: unfinished.id });
     return this.compileIfDue();
   }
@@ -227,10 +237,11 @@ export class LearningService {
   private eligibleEvents(): LearningEvent[] {
     const last = this.options.store
       .listCompilerRuns()
-      .filter((run) => run.status === "completed")
+      .filter((run) => run.intelligenceLane === HUMAN_INTELLIGENCE_LANE && run.status === "completed")
       .at(-1);
     return this.options.store.listEvents({
       afterWatermark: last?.eventWatermark,
+      actorClass: "human",
       limit: this.policy().maxEventsPerRun,
     });
   }
@@ -241,13 +252,22 @@ export class LearningService {
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };
     const pendingEvents = this.eligibleEvents();
     if (pendingEvents.length === 0) return { ran: false, skipped: "empty" };
-    const memories = this.options.store.listMemories({ statuses: ["active", "approved", "proposed"] });
+    const memories = this.options.store.listMemories({
+      intelligenceLane: HUMAN_INTELLIGENCE_LANE,
+      statuses: ["active", "approved", "proposed"],
+    });
     const events = boundedCompilerBatch(pendingEvents, memories, this.policy().maxPayloadChars);
-    const inputHash = compilerInputHash(events, memories);
-    const existing = this.options.store.listCompilerRuns().find((run) => run.inputHash === inputHash && run.status === "completed");
+    const inputHash = compilerInputHash(events, memories, HUMAN_INTELLIGENCE_LANE);
+    const existing = this.options.store
+      .listCompilerRuns()
+      .find(
+        (run) =>
+          run.intelligenceLane === HUMAN_INTELLIGENCE_LANE && run.inputHash === inputHash && run.status === "completed",
+      );
     if (existing && !input.resume) return { ran: false, skipped: "duplicate", runId: existing.id };
 
-    const resumed = input.resume ? this.options.store.getCompilerRun(input.resume) : undefined;
+    const resumable = input.resume ? this.options.store.getCompilerRun(input.resume) : undefined;
+    const resumed = resumable?.intelligenceLane === HUMAN_INTELLIGENCE_LANE ? resumable : undefined;
     if (resumed && resumed.attempt >= this.policy().maxAttempts) {
       this.options.store.putCompilerRun({ ...resumed, status: "failed", errorClass: "max-attempts", endedAt: this.now() });
       return { ran: false, skipped: "max-attempts", runId: resumed.id };
@@ -270,6 +290,7 @@ export class LearningService {
     this.compiling = true;
     this.options.store.putCompilerRun({
       id: runId,
+      intelligenceLane: HUMAN_INTELLIGENCE_LANE,
       status: "running",
       attempt,
       startedAt: this.now(),
@@ -298,14 +319,14 @@ export class LearningService {
         }
         const parsed = parseBriefText(result.text);
         this.options.store.putCompilerRun({
-          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
           costUsd: result.costUsd,
         });
         if (!parsed) {
           this.options.store.putCompilerRun({
-            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
             status: "failed",
             errorClass: "invalid-brief",
             endedAt: this.now(),
@@ -317,7 +338,7 @@ export class LearningService {
         }
         if (parsed.intent.length + parsed.operations.length === 0 && eventsRequireMemory(events)) {
           this.options.store.putCompilerRun({
-            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
             status: "failed",
             errorClass: "empty-explicit-brief",
             endedAt: this.now(),
@@ -327,10 +348,27 @@ export class LearningService {
           });
           return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
         }
+        const inputEventIds = new Set(events.map((event) => event.id));
+        const hasInvalidEvidence = [...parsed.intent, ...parsed.operations].some(
+          (proposal) =>
+            proposal.sourceEventIds.length === 0 || proposal.sourceEventIds.some((eventId) => !inputEventIds.has(eventId)),
+        );
+        if (hasInvalidEvidence) {
+          this.options.store.putCompilerRun({
+            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
+            status: "failed",
+            errorClass: "invalid-source-evidence",
+            endedAt: this.now(),
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costUsd: result.costUsd,
+          });
+          return { ran: false, skipped: "invalid-source-evidence", runId, ...route };
+        }
         brief = parsed;
       } else if (!this.options.allowStub && selection.provider) {
         this.options.store.putCompilerRun({
-          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
           status: "failed",
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
@@ -338,7 +376,7 @@ export class LearningService {
         return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
       } else if (!this.options.allowStub && !selection.provider) {
         this.options.store.putCompilerRun({
-          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
           status: "failed",
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
@@ -347,7 +385,7 @@ export class LearningService {
       }
       if (!brief) {
         this.options.store.putCompilerRun({
-          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
           status: "failed",
           errorClass: "invalid-brief",
           endedAt: this.now(),
@@ -362,19 +400,20 @@ export class LearningService {
         const status = promoteProposal(proposal, mode, verified || learningAutoPromotes(mode) && proposal.memoryClass === "intent");
         if (proposal.supersedesId) {
           const previous = this.options.store.getMemory(proposal.supersedesId);
-          if (previous) {
+          if (previous?.intelligenceLane === HUMAN_INTELLIGENCE_LANE) {
             this.options.store.putMemory({ ...previous, status: "superseded", supersededAt: this.now() });
           }
         }
         if (proposal.contradictsId) {
           const previous = this.options.store.getMemory(proposal.contradictsId);
-          if (previous) {
+          if (previous?.intelligenceLane === HUMAN_INTELLIGENCE_LANE) {
             this.options.store.putMemory({ ...previous, status: "superseded", supersededAt: this.now() });
           }
         }
         const id = newMemoryId();
         this.options.store.putMemory({
           id,
+          intelligenceLane: HUMAN_INTELLIGENCE_LANE,
           memoryClass: proposal.memoryClass,
           scope: proposal.scope,
           projectId: proposal.projectId,
@@ -395,7 +434,7 @@ export class LearningService {
       for (const proposal of brief.intent) apply(proposal);
       for (const proposal of brief.operations) apply(proposal);
       this.options.store.putCompilerRun({
-        ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+        ...(this.options.store.getCompilerRun(runId) ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
         status: "completed",
         endedAt: this.now(),
         outputMemoryIds: outputIds,
@@ -405,7 +444,7 @@ export class LearningService {
     } catch (error) {
       const current = this.options.store.getCompilerRun(runId);
       this.options.store.putCompilerRun({
-        ...(current ?? { id: runId, status: "running", attempt, inputHash }),
+        ...(current ?? { id: runId, intelligenceLane: HUMAN_INTELLIGENCE_LANE, status: "running", attempt, inputHash }),
         status: attempt >= this.policy().maxAttempts ? "failed" : "interrupted",
         errorClass: error instanceof Error ? error.message : "compile-failed",
         endedAt: this.now(),

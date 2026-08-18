@@ -59,6 +59,7 @@ const MIGRATIONS: string[] = [
    );
    CREATE TABLE IF NOT EXISTS memory_items (
      id TEXT PRIMARY KEY,
+     intelligence_lane TEXT NOT NULL DEFAULT 'legacy-unclassified',
      memory_class TEXT NOT NULL,
      scope TEXT NOT NULL,
      project_id TEXT,
@@ -80,6 +81,7 @@ const MIGRATIONS: string[] = [
    );
    CREATE TABLE IF NOT EXISTS compiler_runs (
      id TEXT PRIMARY KEY,
+     intelligence_lane TEXT NOT NULL DEFAULT 'legacy-unclassified',
      input_from INTEGER,
      input_to INTEGER,
      event_watermark TEXT,
@@ -144,6 +146,7 @@ function rowEvent(row: Record<string, unknown>): LearningEvent {
 function rowMemory(row: Record<string, unknown>): MemoryItem {
   return {
     id: String(row.id),
+    intelligenceLane: row.intelligence_lane ? (String(row.intelligence_lane) as MemoryItem["intelligenceLane"]) : "legacy-unclassified",
     memoryClass: row.memory_class as MemoryItem["memoryClass"],
     scope: row.scope as MemoryItem["scope"],
     projectId: row.project_id ? String(row.project_id) : undefined,
@@ -168,6 +171,7 @@ function rowMemory(row: Record<string, unknown>): MemoryItem {
 function rowRun(row: Record<string, unknown>): CompilerRun {
   return {
     id: String(row.id),
+    intelligenceLane: row.intelligence_lane ? (String(row.intelligence_lane) as CompilerRun["intelligenceLane"]) : "legacy-unclassified",
     inputFrom: row.input_from == null ? undefined : Number(row.input_from),
     inputTo: row.input_to == null ? undefined : Number(row.input_to),
     eventWatermark: row.event_watermark ? String(row.event_watermark) : undefined,
@@ -242,10 +246,15 @@ export class SqliteMemoryStore implements MemoryStore {
     db.exec("BEGIN");
     try {
       for (const sql of MIGRATIONS) db.exec(sql);
-      const version = db.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as { value?: string } | undefined;
-      if (!version) {
-        db.prepare("INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
+      const columns = (table: string) =>
+        new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((row) => row.name));
+      if (!columns("memory_items").has("intelligence_lane")) {
+        db.exec("ALTER TABLE memory_items ADD COLUMN intelligence_lane TEXT NOT NULL DEFAULT 'legacy-unclassified'");
       }
+      if (!columns("compiler_runs").has("intelligence_lane")) {
+        db.exec("ALTER TABLE compiler_runs ADD COLUMN intelligence_lane TEXT NOT NULL DEFAULT 'legacy-unclassified'");
+      }
+      db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -361,6 +370,10 @@ export class SqliteMemoryStore implements MemoryStore {
     if (filter.provider) {
       clauses.push("provider = ?");
       params.push(filter.provider);
+    }
+    if (filter.actorClass) {
+      clauses.push("actor_class = ?");
+      params.push(filter.actorClass);
     }
     if (filter.afterWatermark) {
       const watermark = database
@@ -499,11 +512,12 @@ export class SqliteMemoryStore implements MemoryStore {
     const db = this.conn();
     db.prepare(
       `INSERT OR REPLACE INTO memory_items (
-        id, memory_class, scope, project_id, provider_scope, statement, tags, source_event_ids, compiler_run_id, confidence,
+        id, intelligence_lane, memory_class, scope, project_id, provider_scope, statement, tags, source_event_ids, compiler_run_id, confidence,
         verification, created_at, last_confirmed_at, superseded_at, expires_at, deleted_at, supersedes_id, contradicts_id, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       item.id,
+      item.intelligenceLane ?? "legacy-unclassified",
       item.memoryClass,
       item.scope,
       item.projectId ?? null,
@@ -554,6 +568,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const rows = this.conn().prepare("SELECT * FROM memory_items").all() as Record<string, unknown>[];
     return rows.map(rowMemory).filter((item) => {
       if (!filter.includeDeleted && (item.status === "deleted" || item.deletedAt)) return false;
+      if (filter.intelligenceLane && item.intelligenceLane !== filter.intelligenceLane) return false;
       if (filter.memoryClass && item.memoryClass !== filter.memoryClass) return false;
       if (filter.projectId && item.projectId !== filter.projectId && item.scope !== "global-user") return false;
       if (filter.provider && item.memoryClass === "operations" && item.providerScope !== filter.provider) return false;
@@ -593,12 +608,13 @@ export class SqliteMemoryStore implements MemoryStore {
     this.conn()
       .prepare(
         `INSERT OR REPLACE INTO compiler_runs (
-          id, input_from, input_to, event_watermark, provider, model, effort, rationale, status, attempt, started_at, ended_at,
+          id, intelligence_lane, input_from, input_to, event_watermark, provider, model, effort, rationale, status, attempt, started_at, ended_at,
           input_tokens, output_tokens, cost_usd, error_class, output_memory_ids, input_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
+        run.intelligenceLane ?? "legacy-unclassified",
         run.inputFrom ?? null,
         run.inputTo ?? null,
         run.eventWatermark ?? null,

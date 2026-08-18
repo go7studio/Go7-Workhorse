@@ -96,8 +96,8 @@ transcript rather than as a path.
 ## Memory
 
 - A private learning store on your own disk, in SQLite.
-- The compiler is a custom bot. Settings → Learning can backfill the last day of prompts from saved chats, then compile them.
-- Settings shows index counts and inferred memories, not the raw prompt text.
+- The compiler is a custom bot. Settings → Learning can backfill the last day of human prompts from saved chats, then compile only human intent; agent evidence remains separate.
+- Settings shows index counts and inferred memories, not raw prompt text or internal provenance ids.
 - Export it, or wipe it, from Settings.
 - Nothing is sent anywhere to hold it.
 

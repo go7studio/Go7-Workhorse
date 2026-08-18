@@ -168,6 +168,7 @@ export class InMemoryStore implements MemoryStore {
         if (!filter.includeTombstones && (event.tombstone || event.purged)) return false;
         if (filter.projectId && event.projectId !== filter.projectId) return false;
         if (filter.provider && event.provider !== filter.provider) return false;
+        if (filter.actorClass && event.actorClass !== filter.actorClass) return false;
         if (filter.kinds && !filter.kinds.includes(event.kind)) return false;
         if (
           watermark &&
@@ -241,7 +242,12 @@ export class InMemoryStore implements MemoryStore {
 
   putMemory(item: MemoryItem): void {
     this.assertOpen();
-    this.state.memories.set(item.id, { ...item, statement: boundStatement(item.statement), sourceEventIds: [...item.sourceEventIds] });
+    this.state.memories.set(item.id, {
+      ...item,
+      intelligenceLane: item.intelligenceLane ?? "legacy-unclassified",
+      statement: boundStatement(item.statement),
+      sourceEventIds: [...item.sourceEventIds],
+    });
   }
 
   getMemory(id: string): MemoryItem | undefined {
@@ -253,6 +259,7 @@ export class InMemoryStore implements MemoryStore {
     return [...this.state.memories.values()]
       .filter((item) => {
         if (!filter.includeDeleted && (item.status === "deleted" || item.deletedAt)) return false;
+        if (filter.intelligenceLane && item.intelligenceLane !== filter.intelligenceLane) return false;
         if (filter.memoryClass && item.memoryClass !== filter.memoryClass) return false;
         if (filter.projectId && item.projectId !== filter.projectId && item.scope !== "global-user") return false;
         if (filter.provider && item.memoryClass === "operations" && item.providerScope !== filter.provider) return false;
@@ -272,7 +279,11 @@ export class InMemoryStore implements MemoryStore {
 
   putCompilerRun(run: CompilerRun): void {
     this.assertOpen();
-    this.state.runs.set(run.id, { ...run, outputMemoryIds: run.outputMemoryIds ? [...run.outputMemoryIds] : undefined });
+    this.state.runs.set(run.id, {
+      ...run,
+      intelligenceLane: run.intelligenceLane ?? "legacy-unclassified",
+      outputMemoryIds: run.outputMemoryIds ? [...run.outputMemoryIds] : undefined,
+    });
   }
 
   getCompilerRun(id: string): CompilerRun | undefined {

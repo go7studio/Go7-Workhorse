@@ -1,6 +1,6 @@
 import type { EffortLevel, ProviderId } from "./types";
 
-export const LEARNING_SCHEMA_VERSION = 1;
+export const LEARNING_SCHEMA_VERSION = 2;
 export const LEARNING_REDACTION_VERSION = 1;
 export const LEARNING_DIR_NAME = "learning";
 export const LEARNING_DB_FILE = "learning.sqlite";
@@ -14,6 +14,12 @@ export type MemoryScope = "project" | "global-user";
 export type MemoryStatus = "proposed" | "approved" | "active" | "superseded" | "deleted";
 
 export type ActorClass = "human" | "agent" | "system";
+
+export type IntelligenceLane =
+  | "human-intent"
+  | "agent-performance"
+  | "intent-performance-mismatch"
+  | "legacy-unclassified";
 
 export type SensitivityLabel = "normal" | "sensitive" | "secret";
 
@@ -72,6 +78,7 @@ export type LearningEvent = {
 
 export type MemoryItem = {
   id: string;
+  intelligenceLane: IntelligenceLane;
   memoryClass: MemoryClass;
   scope: MemoryScope;
   projectId?: string;
@@ -94,6 +101,7 @@ export type MemoryItem = {
 
 export type CompilerRun = {
   id: string;
+  intelligenceLane: IntelligenceLane;
   inputFrom?: number;
   inputTo?: number;
   eventWatermark?: string;
@@ -270,6 +278,7 @@ export type CompilerPolicy = {
 export type EventFilter = {
   projectId?: string;
   provider?: ProviderId;
+  actorClass?: ActorClass;
   includeTombstones?: boolean;
   afterWatermark?: string;
   kinds?: LearningEventKind[];
@@ -279,6 +288,7 @@ export type EventFilter = {
 export type MemoryFilter = {
   projectId?: string;
   provider?: ProviderId;
+  intelligenceLane?: IntelligenceLane;
   memoryClass?: MemoryClass;
   statuses?: MemoryStatus[];
   includeDeleted?: boolean;

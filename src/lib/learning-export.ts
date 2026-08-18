@@ -23,7 +23,7 @@ export function exportMarkdown(payload: LearningExportPayload): string {
     "## Memories",
   ];
   for (const memory of payload.memories) {
-    lines.push(`- \`${memory.id}\` (${memory.memoryClass}, ${memory.scope}, ${memory.status}): ${memory.statement}`);
+    lines.push(`- \`${memory.id}\` (${memory.intelligenceLane}, ${memory.memoryClass}, ${memory.scope}, ${memory.status}): ${memory.statement}`);
   }
   lines.push("", "## Events");
   for (const event of payload.events) {

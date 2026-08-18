@@ -15,6 +15,8 @@ import type {
 } from "./learning-types";
 import { boundStatement } from "./learning-redact";
 
+export const HUMAN_INTELLIGENCE_LANE = "human-intent" as const;
+
 export const DEFAULT_LEARNING: LearningSettings = {
   mode: "off",
   autoRetrieve: false,
@@ -143,6 +145,7 @@ export function outcomeIsVerified(signals: OutcomeSignals): boolean {
 }
 
 export function memoryVisibleTo(item: MemoryItem, query: RetrievalQuery, now = query.now ?? Date.now()): boolean {
+  if (item.intelligenceLane !== HUMAN_INTELLIGENCE_LANE) return false;
   if (item.status === "deleted" || item.deletedAt) return false;
   if (item.status === "superseded" || item.supersededAt) return false;
   if (item.status === "proposed") return false;
@@ -326,8 +329,9 @@ export function parseBriefText(text: string): LearningBrief | null {
   return null;
 }
 
-export function compilerInputHash(events: LearningEvent[], memories: MemoryItem[]): string {
+export function compilerInputHash(events: LearningEvent[], memories: MemoryItem[], intelligenceLane = HUMAN_INTELLIGENCE_LANE): string {
   const material = JSON.stringify({
+    intelligenceLane,
     events: events.map((event) => event.id),
     memories: memories.map((item) => item.id),
   });
@@ -448,11 +452,11 @@ export function selectAdaptiveRoute(input: {
 
 export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]): string {
   return [
-    "Compile Workhorse learning events into a JSON object with keys intent and operations.",
+    "Compile human-authored Workhorse events into a human-intent JSON object with keys intent and operations.",
     "Each item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?, supersedesId?, contradictsId?}.",
-    "Intent is a durable human preference. Operations are provider-scoped workflow facts.",
-    "Human-authored events are authoritative. Convert explicit durable language such as prefer, always, must, should, or verify into a memory.",
-    "Agent and usage events are supporting evidence only; never invent a human preference from them alone.",
+    "Intent captures goals, requests, desired outputs, complaints, corrections, and acceptance criteria. Operations captures how the human wants work handled.",
+    "Every event in this input is human-authored and authoritative. Convert explicit durable language such as prefer, always, must, should, or verify into a memory.",
+    "This compiler must never receive or reason from agent outputs, tool calls, model calls, usage, or performance evidence.",
     "Do not return empty arrays when a human event contains an explicit durable preference or recurring verification rule.",
     'Use this exact shape: {"intent":[{"action":"add","memoryClass":"intent","scope":"global-user","statement":"...","sourceEventIds":["event-id"]}],"operations":[]}.',
     "Every item must cite one or more exact event ids from the Events input in sourceEventIds.",

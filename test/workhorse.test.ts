@@ -5138,7 +5138,6 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /foldOpen/);
-  assert.match(popout, /turnLive/);
   assert.match(popout, /1 \? "tool" : "tools"/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);
@@ -6625,15 +6624,13 @@ test("work popout keeps think, tool, think in stream order across vendors", () =
     ).find((block) => block.type === "reply") as Extract<ReturnType<typeof groupTranscript>[number], { type: "reply" }>,
   );
   const folded = groupWorkRows(seven);
-  assert.deepEqual(
-    folded.map((row) => row.type),
-    ["thought", "tools", "tools", "tools", "tools", "tools", "tools", "tools", "thought"],
-  );
-  assert.equal(folded.filter((row) => row.type === "tools").length, 7);
+  assert.deepEqual(folded.map((row) => row.type), ["thought", "tools", "thought"]);
+  assert.equal(folded.filter((row) => row.type === "tools").length, 1);
+  assert.equal(folded[1]?.type === "tools" ? folded[1].items.length : 0, 7);
   assert.equal(isActiveWorkRow(folded, 0, true), false);
-  assert.equal(isActiveWorkRow(folded, 7, true), false);
-  assert.equal(isActiveWorkRow(folded, 8, true), true);
-  assert.equal(isActiveWorkRow(folded, 8, false), false);
+  assert.equal(isActiveWorkRow(folded, 1, true), false);
+  assert.equal(isActiveWorkRow(folded, 2, true), true);
+  assert.equal(isActiveWorkRow(folded, 2, false), false);
 
   const midTools = groupWorkRows(
     displayWorkSteps(
@@ -6646,10 +6643,10 @@ test("work popout keeps think, tool, think in stream order across vendors", () =
       ).find((block) => block.type === "reply") as Extract<ReturnType<typeof groupTranscript>[number], { type: "reply" }>,
     ),
   );
-  assert.deepEqual(midTools.map((row) => row.type), ["thought", "tools", "tools"]);
+  assert.deepEqual(midTools.map((row) => row.type), ["thought", "tools"]);
+  assert.equal(midTools[1]?.type === "tools" ? midTools[1].items.length : 0, 2);
   assert.equal(isActiveWorkRow(midTools, 0, true), false);
-  assert.equal(isActiveWorkRow(midTools, 1, true), false);
-  assert.equal(isActiveWorkRow(midTools, 2, true), true);
+  assert.equal(isActiveWorkRow(midTools, 1, true), true);
 
   const hop = groupWorkRows([
     { type: "thought", id: "th1", text: "Hop to Alpha." },
@@ -6684,9 +6681,9 @@ test("work popout keeps think, tool, think in stream order across vendors", () =
       message: { id: "h2", role: "system", kind: "tool", text: "List chats · in_progress", toolStatus: "in_progress", createdAt: 2 },
     },
   ]);
-  assert.equal(afterHop.length, 2);
-  assert.equal(isActiveWorkRow(afterHop, 0, true), false);
-  assert.equal(isActiveWorkRow(afterHop, 1, true), true);
+  assert.equal(afterHop.length, 1);
+  assert.equal(afterHop[0]?.type === "tools" ? afterHop[0].items.length : 0, 2);
+  assert.equal(isActiveWorkRow(afterHop, 0, true), true);
 });
 
 test("vendor model caches drive the picker so Sol is first and new slugs need no hand edit", () => {

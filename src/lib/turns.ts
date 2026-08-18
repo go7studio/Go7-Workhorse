@@ -1,7 +1,6 @@
 import {
   collapseThoughtDisplay,
   mergeThoughtText,
-  toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
   upsertToolMessage,
@@ -239,7 +238,7 @@ export type GroupedWorkRow =
   | { type: "compact"; step: Extract<DisplayWorkStep, { type: "compact" }>; index: number }
   | { type: "subagent"; step: Extract<DisplayWorkStep, { type: "subagent" }>; index: number };
 
-/** Consecutive in-flight tools share a fold. A finished run starts a new fold when the next call begins. */
+/** Consecutive tools share one fold. A thought, compact, or subagent starts a new hop. */
 export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
   const rows: GroupedWorkRow[] = [];
   for (let index = 0; index < steps.length; index += 1) {
@@ -247,13 +246,8 @@ export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
     if (!step) continue;
     if (step.type === "tool") {
       const last = rows.at(-1);
-      if (last?.type === "tools") {
-        const prevDone = last.items.every((item) => toolIsFinished(item.step.message.toolStatus));
-        if (prevDone) rows.push({ type: "tools", items: [{ step, index }] });
-        else last.items.push({ step, index });
-      } else {
-        rows.push({ type: "tools", items: [{ step, index }] });
-      }
+      if (last?.type === "tools") last.items.push({ step, index });
+      else rows.push({ type: "tools", items: [{ step, index }] });
       continue;
     }
     if (step.type === "thought") rows.push({ type: "thought", step, index });

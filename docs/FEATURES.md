@@ -47,9 +47,10 @@ transcript rather than as a path.
   `25m`, `2h`, or `3d`. Hover the stamp for the full time.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work popout keeps thinking and tool calls in the order they
-  happened: think, tool, think. Each finished tool run closes when the
-  next thought or tool run starts, so the open fold is the current hop.
-  Click a finished dot to expand it again. The visible reply stays below that.
+  happened: think, tools, think. Consecutive tool calls share one fold
+  labelled "3 tools"; expand it to see the calls listed underneath. A
+  later thought starts a new hop. The current hop stays open. Click a
+  finished dot to expand it again. The visible reply stays below that.
 
 ## Control
 

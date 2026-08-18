@@ -134,13 +134,18 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
   process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
   try {
     const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as {
-      result?: { tools?: Array<{ name: string }> };
+      result?: { tools?: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }> };
     };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
     // The list a caller sees is the list it may call. Listing a tool the call
     // will refuse only spends schema tokens and invites the attempt.
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
     assert.ok(names.includes("workhorse_list_agents"));
+    for (const toolName of ["workhorse_ask_chat", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_agent_status", "workhorse_cancel_agent"]) {
+      const properties = listed.result?.tools?.find((tool) => tool.name === toolName)?.inputSchema?.properties ?? {};
+      assert.ok("fromSessionId" in properties, `${toolName} publishes fromSessionId`);
+      assert.ok("traceId" in properties, `${toolName} publishes traceId`);
+    }
     const deleted = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 2,
@@ -187,8 +192,12 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
   process.env.WORKHORSE_STATE_PATH = statePath;
   let seenFrom = "";
+  let seenTrace = "";
+  let seenWorker = "";
   setWorkhorseDeskAsk(async (ask) => {
     seenFrom = ask.fromSessionId;
+    seenTrace = ask.traceId ?? "";
+    seenWorker = ask.worker ?? "";
     return { text: JSON.stringify({ ok: true, parent: ask.fromSessionId }) };
   });
   try {
@@ -196,10 +205,12 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "workhorse_spawn_agent", arguments: { prompt: "review this", provider: "codex", folder: dir } },
+      params: { name: "workhorse_spawn_agent", arguments: { prompt: "review this", provider: "codex", worker: "Wren", folder: dir, fromSessionId: "parent_chat", traceId: "trace_harness_1" } },
     })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
     assert.equal(spawned.error, undefined, spawned.error?.message);
     assert.equal(seenFrom, "parent_chat");
+    assert.equal(seenTrace, "trace_harness_1");
+    assert.equal(seenWorker, "Wren");
     assert.match(spawned.result?.content?.[0]?.text ?? "", /parent_chat/);
   } finally {
     setWorkhorseDeskAsk(null);

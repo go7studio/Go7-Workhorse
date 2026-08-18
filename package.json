@@ -45,6 +45,7 @@
     "eval:device-probes": "node scripts/workhorse-eval-device-probes.mjs",
     "eval:godot-suite": "node scripts/workhorse-eval-godot-suite.mjs",
     "eval:real-plan-smoke": "tsx test/real-world-plan-smoke.ts",
+    "eval:harness-smoke": "tsx test/external-harness-live-smoke.ts",
     "eval:fixture": "node scripts/workhorse-eval-fixture.mjs",
     "eval:fixture-check": "node scripts/workhorse-eval-fixture.mjs --self-test",
     "eval:media-fixtures": "node scripts/workhorse-eval-media-fixtures.mjs",

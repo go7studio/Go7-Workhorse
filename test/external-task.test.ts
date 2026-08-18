@@ -85,7 +85,7 @@ test("blanket plan grant plus a name starts a task and calls the runtime starter
           binary: "/opt/openclaw",
           exec: () => ({ status: 0, stdout: JSON.stringify({ id: "oc-live", status: "running", text: "ack" }), stderr: "" }),
         },
-        { ref: request.ref, prompt: request.prompt, now: request.now },
+        request,
       );
       return live;
     },

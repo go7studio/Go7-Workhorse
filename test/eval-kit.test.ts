@@ -70,6 +70,7 @@ test("plan and device contracts map to suite rubrics and commands", () => {
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
   assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
+  assert.ok(manifest.scripts["eval:harness-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
 });
@@ -169,4 +170,5 @@ test("Cursor eval config covers authenticated ACP smoke and both usage pools", (
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-001"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-002"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-033"));
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-034"));
 });

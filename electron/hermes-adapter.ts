@@ -12,6 +12,14 @@ function binary(io: HermesIo): string {
   return io.binary?.trim() || "hermes";
 }
 
+function cleanTerminalText(text: string): string {
+  return text
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\r/g, "")
+    .trim();
+}
+
 export function parseHermesProfiles(text: string): ExternalAgent[] {
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -25,10 +33,12 @@ export function parseHermesProfiles(text: string): ExternalAgent[] {
     const agents = parseCatalogAgents("hermes", Array.isArray(list) ? list : []);
     return agents.length > 0 ? agents : [{ runtimeId: "hermes", agentId: "default", name: "hermes/default" }];
   } catch {
-    const names = text
+    const names = cleanTerminalText(text)
       .split(/\r?\n/)
-      .map((line) => line.replace(/^\s*-\s*/, "").trim())
-      .filter((line) => line && !line.startsWith("#"));
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && !/^[-─\s]+$/.test(line))
+      .map((line) => line.replace(/^[◆*]\s*/, "").split(/\s{2,}/)[0]?.trim() ?? "")
+      .filter((name) => name && name.toLowerCase() !== "profile");
     if (names.length === 0) return [{ runtimeId: "hermes", agentId: "default", name: "hermes/default" }];
     return names.map((name) => ({ runtimeId: "hermes" as const, agentId: name, name: `hermes/${name}` }));
   }
@@ -74,46 +84,67 @@ export function parseHermesInspect(text: string): AgentCapabilities {
 }
 
 export async function listHermesAgents(io: HermesIo): Promise<ExternalAgent[]> {
-  const result = await io.exec(binary(io), ["profiles", "--json"]);
-  if (result.status !== 0) {
-    const fallback = await io.exec(binary(io), ["status"]);
-    return parseHermesProfiles(fallback.stdout || "");
-  }
-  return parseHermesProfiles(result.stdout);
+  const current = await io.exec(binary(io), ["profile", "list"]);
+  if (current.status === 0) return parseHermesProfiles(current.stdout);
+  const legacy = await io.exec(binary(io), ["profiles", "--json"]);
+  if (legacy.status === 0) return parseHermesProfiles(legacy.stdout);
+  const fallback = await io.exec(binary(io), ["status"]);
+  return parseHermesProfiles(fallback.stdout || "");
 }
 
 export async function startHermesTask(
   io: HermesIo,
   request: { ref: ExternalAgentRef; prompt: string; now?: number },
 ): Promise<ExternalTask> {
-  const result = await io.exec(binary(io), ["chat", "--profile", request.ref.agentId, "--json", request.prompt]);
-  const now = request.now ?? Date.now();
+  const invokedAt = Date.now();
+  const now = request.now ?? invokedAt;
+  const result = await io.exec(binary(io), [
+    "-p",
+    request.ref.agentId,
+    "chat",
+    "-Q",
+    "--source",
+    "tool",
+    "--max-turns",
+    "32",
+    "-q",
+    request.prompt,
+  ]);
+  const finishedAt = now + Math.max(0, Date.now() - invokedAt);
   let id = newId("hm", now);
-  let status: ExternalTask["status"] = "running";
+  let status: ExternalTask["status"] = result.status === 0 ? "completed" : "failed";
   let text: string | undefined;
   try {
-    const parsed = JSON.parse(result.stdout || "{}") as { id?: unknown; status?: unknown; text?: unknown };
+    const parsed = JSON.parse(result.stdout || "{}") as {
+      id?: unknown;
+      sessionId?: unknown;
+      status?: unknown;
+      text?: unknown;
+      result?: unknown;
+    };
     if (typeof parsed.id === "string" && parsed.id.trim()) id = parsed.id.trim();
-    if (
-      parsed.status === "queued" ||
-      parsed.status === "running" ||
-      parsed.status === "completed" ||
-      parsed.status === "failed" ||
-      parsed.status === "cancelled"
-    ) {
+    else if (typeof parsed.sessionId === "string" && parsed.sessionId.trim()) id = parsed.sessionId.trim();
+    if (parsed.status === "completed" || parsed.status === "failed" || parsed.status === "cancelled") {
       status = parsed.status;
     }
     if (typeof parsed.text === "string") text = parsed.text;
+    else if (typeof parsed.result === "string") text = parsed.result;
   } catch {
-    text = result.stdout.trim() || undefined;
+    const output = cleanTerminalText(result.status === 0 ? result.stdout : result.stderr || result.stdout);
+    const session = output.match(/(?:^|\n)Session:\s*([^\s]+)\s*$/i);
+    if (session?.[1]) id = session[1];
+    text = output.replace(/(?:^|\n)Session:\s*[^\s]+\s*$/i, "").trim() || undefined;
   }
+  if (result.status !== 0) status = "failed";
+  if (!text && result.status !== 0) text = cleanTerminalText(result.stderr || result.stdout) || undefined;
   return {
     id,
     ref: request.ref,
     status,
     startedAt: now,
+    finishedAt,
     envelope: createEnvelope({ origin: "workhorse" }, now),
     grantId: "",
-    ...(text ? { result: text } : {}),
+    ...(text ? { result: text } : result.status !== 0 ? { result: `Hermes exited ${result.status}` } : {}),
   };
 }

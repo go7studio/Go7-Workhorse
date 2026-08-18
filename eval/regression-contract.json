@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.4.0",
+  "contractVersion": "0.5.0",
   "title": "Observed production regression coverage",
-  "observedThrough": "2026-08-17",
+  "observedThrough": "2026-08-18",
   "regressions": [
     {
       "id": "REG-001",
@@ -300,6 +300,15 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/openclaw-adapter.ts", "electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/agent-runtime.ts", "src/lib/external-task.ts", "test/openclaw-adapter.test.ts", "test/bidirectional-loop.test.ts", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
       "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-034",
+      "behavior": "OpenClaw and Hermes can own a bounded dependent goal loop, preserve the Workhorse task trace and parent across MCP calls, resume a named worker, and terminate truthfully without becoming providers.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/agent-runtime-host.ts", "electron/hermes-adapter.ts", "electron/openclaw-adapter.ts", "electron/workhorse-mcp.ts", "electron/peer-inbox.ts", "src/lib/external-task.ts", "src/lib/store.tsx", "test/hermes-adapter.test.ts", "test/mcp-exposure.test.ts", "test/bidirectional-loop.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

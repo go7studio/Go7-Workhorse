@@ -637,7 +637,7 @@ app.whenReady().then(async () => {
     "agentRuntime:start",
     async (
       _event,
-      request: { ref: { runtimeId: "openclaw" | "hermes"; agentId: string }; prompt: string; now?: number },
+      request: import("../src/lib/external-task").RuntimeStartRequest,
     ) => {
       const io = {
         exec: (file: string, args: string[]) => {

@@ -64,6 +64,7 @@
       "electron/agent-runtime-host.ts",
       "electron/mcp-exposure.ts",
       "electron/mcp-install.ts",
+      "electron/hermes-adapter.ts",
       "electron/openclaw-adapter.ts",
       "electron/workhorse-mcp.ts",
       "electron/peer-inbox.ts",
@@ -99,7 +100,7 @@
     "resumePlan": "Continue the same plan and task attempts after pause or restart without dispatching completed work again.",
     "workerReuse": "A named or automatic follow-up may reuse only an idle, hidden, unarchived worker under the same parent and project with matching provider, model, effort, and custom connection; busy or incompatible work gets a distinct worker.",
     "waveJoin": "A completed worker wave wakes and joins its accountable parent exactly once; later waves can continue the same orchestration."
-    ,"externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned external systems, never providers, custom bots, usage rings, or bridge chats. A named target or one bounded grant is required; inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops."
+    ,"externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned external systems, never providers, custom bots, usage rings, or bridge chats. A named target or one bounded grant is required. Each task supplies its task id, trace id, and explicit parent; dependent MCP orders preserve those fields. Inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops."
   },
   "cascadeLimits": {
     "model": "Automatic children use the capacity-aware quick tier; explicit assignments win",

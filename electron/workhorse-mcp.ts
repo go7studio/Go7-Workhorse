@@ -163,6 +163,8 @@ const TOOLS = [
       properties: {
         chat: { type: "string", description: "Session id or title to ask" },
         message: { type: "string", description: "Question or request for that chat" },
+        fromSessionId: { type: "string", description: "Parent Workhorse chat id for this orchestration loop." },
+        traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
       },
       required: ["chat", "message"],
     },
@@ -201,6 +203,11 @@ const TOOLS = [
           type: "boolean",
           description: "true (default) wait for this worker. false start it and return so you can spawn more, then workhorse_await_agents.",
         },
+        fromSessionId: {
+          type: "string",
+          description: "Parent Workhorse chat id from workhorse_list_chats. Reuse it for spawn, await, status, and cancel in one orchestration loop.",
+        },
+        traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
       },
       required: ["prompt"],
     },
@@ -214,6 +221,8 @@ const TOOLS = [
       properties: {
         wait: { type: "boolean", description: "false (default) status now. true waits for terminal state." },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
+        fromSessionId: { type: "string", description: "Parent Workhorse chat id used for the spawn." },
+        traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
       },
     },
   },
@@ -233,7 +242,11 @@ const TOOLS = [
     description: "Status of an external OpenClaw/Hermes task or a Workhorse worker.",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string", description: "Task or worker id" } },
+      properties: {
+        id: { type: "string", description: "Task or worker id" },
+        fromSessionId: { type: "string", description: "Parent Workhorse chat id for a worker status request." },
+        traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
+      },
       required: ["id"],
     },
   },
@@ -242,7 +255,11 @@ const TOOLS = [
     description: "Cancel an external OpenClaw/Hermes task.",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string", description: "Task id" } },
+      properties: {
+        id: { type: "string", description: "Task id" },
+        fromSessionId: { type: "string", description: "Parent Workhorse chat id for a worker cancellation." },
+        traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
+      },
       required: ["id"],
     },
   },
@@ -838,7 +855,7 @@ function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boole
   return null;
 }
 
-async function askChat(chat: string, message: string, from?: string): Promise<string> {
+async function askChat(chat: string, message: string, from?: string, traceId?: string): Promise<string> {
   const state = readState();
   const listed = catalogSessions(state, { fromSessionId: fromSessionId(from) });
   const match = findSession(listed, chat);
@@ -853,6 +870,7 @@ async function askChat(chat: string, message: string, from?: string): Promise<st
     fromSessionId: fromSessionId(from),
     message,
     mode: "ask",
+    ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -862,6 +880,7 @@ async function askChat(chat: string, message: string, from?: string): Promise<st
       fromSessionId: fromSessionId(from),
       message,
       mode: "ask",
+      ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
     });
   }
   return first;
@@ -933,6 +952,7 @@ async function spawnAgent(
     provider?: string;
     model?: string;
     chat?: string;
+    worker?: string;
     effort?: string;
     timeoutSeconds?: number;
     tokenBudget?: number;
@@ -947,6 +967,7 @@ async function spawnAgent(
     tools?: string[];
     constraints?: string[];
     files?: string[];
+    traceId?: string;
   },
   from?: string,
 ): Promise<string> {
@@ -1019,6 +1040,7 @@ async function spawnAgent(
     model: spawnInput.model,
     description: spawnInput.description,
     chat: spawnInput.chat,
+    worker: spawnInput.worker,
     effort: spawnInput.effort,
     timeoutSeconds: spawnInput.timeoutSeconds,
     tokenBudget: spawnInput.tokenBudget,
@@ -1035,6 +1057,7 @@ async function spawnAgent(
     constraints: spawnInput.constraints,
     files: spawnInput.files,
     attachments,
+    ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
@@ -1049,6 +1072,7 @@ async function spawnAgent(
       model: spawnInput.model,
       description: spawnInput.description,
       chat: spawnInput.chat,
+      worker: spawnInput.worker,
       effort: spawnInput.effort,
       timeoutSeconds: spawnInput.timeoutSeconds,
       tokenBudget: spawnInput.tokenBudget,
@@ -1065,12 +1089,13 @@ async function spawnAgent(
       constraints: spawnInput.constraints,
       files: spawnInput.files,
       attachments,
+      ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
     });
   }
   return first;
 }
 
-async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolean): Promise<string> {
+async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolean, traceId?: string): Promise<string> {
   const timeoutMs = wait
     ? Math.max(30, Math.min(3_600, timeoutSeconds ?? 600)) * 1_000 + 5_000
     : 15_000;
@@ -1082,6 +1107,7 @@ async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolea
         message: "await-agents",
         timeoutSeconds,
         wait,
+        ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
       },
       from,
     ),
@@ -1109,7 +1135,8 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const chat = typeof args.chat === "string" ? args.chat : "";
     const message = typeof args.message === "string" ? args.message : "";
     if (!message.trim()) throw new Error("message is required");
-    return askChat(chat, message, from);
+    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
+    return askChat(chat, message, parent, typeof args.traceId === "string" ? args.traceId : undefined);
   }
   if (name === "workhorse_spawn_agent") {
     const prompt = typeof args.prompt === "string" ? args.prompt : typeof args.message === "string" ? args.message : "";
@@ -1120,6 +1147,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         provider: typeof args.provider === "string" ? args.provider : undefined,
         model: typeof args.model === "string" ? args.model : undefined,
         chat: typeof args.chat === "string" ? args.chat : undefined,
+        worker: typeof args.worker === "string" ? args.worker : undefined,
         effort: typeof args.effort === "string" ? args.effort : undefined,
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
@@ -1137,15 +1165,18 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
+        traceId: typeof args.traceId === "string" ? args.traceId : undefined,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );
   }
   if (name === "workhorse_await_agents") {
+    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
     return awaitAgents(
-      from,
+      parent,
       typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       args.wait === true,
+      typeof args.traceId === "string" ? args.traceId : undefined,
     );
   }
   if (name === "workhorse_list_bots") {
@@ -1167,11 +1198,13 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const store = normalizeTaskStore((readState() as { externalTasks?: unknown }).externalTasks);
     const task = store.byId[id];
     if (task) return JSON.stringify(reconcileExternalTask(task, null), null, 2);
-    return postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id }, from), { timeoutMs: 8_000, inbox: false });
+    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
+    return postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id, traceId: typeof args.traceId === "string" ? args.traceId : undefined }, parent), { timeoutMs: 8_000, inbox: false });
   }
   if (name === "workhorse_cancel_agent") {
     const id = typeof args.id === "string" ? args.id : "";
-    return postBridge("/bots", botsAsk({ action: "cancel-agent", message: id, name: id }, from), { timeoutMs: 8_000, inbox: false });
+    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
+    return postBridge("/bots", botsAsk({ action: "cancel-agent", message: id, name: id, traceId: typeof args.traceId === "string" ? args.traceId : undefined }, parent), { timeoutMs: 8_000, inbox: false });
   }
   if (name === "workhorse_probe_runtime") {
     return probeRuntime();

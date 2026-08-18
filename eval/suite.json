@@ -934,15 +934,17 @@
         },
         {
           "id": "ORC-S9",
-          "name": "Round-trip with a permissioned external agent system",
+          "name": "Run a goal loop with a permissioned external agent system",
           "executor": "provider",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
-            "Name one external agent or consume one bounded wave grant, then launch it with a unique trace and idempotency key.",
-            "Have the external agent use the restricted MCP profile to list chats and ask one existing Workhorse chat for a nonce reply.",
-            "Verify the Workhorse chat runs its assigned provider and returns a real correlated reply to the external agent.",
-            "Verify the external CLI uses its supported prompt flag and its current completion payload closes the external task, run, and worker row with one trace.",
+            "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
+            "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
+            "Verify both Workhorse calls run the assigned provider, preserve the supplied trace and parent identity, and return real replies before the external goal completes.",
+            "Spawn one bounded Workhorse worker with the same parent and trace, receive its terminal result, then address the returned worker name for compatible follow-up work without creating a cold duplicate.",
+            "Run the contract once through OpenClaw and once through Hermes; use each current CLI shape, source-tag programmatic Hermes sessions, and close the task, run, and row with nonzero duration.",
+            "If a harness binary, login, or model is missing, stop at authenticated preflight and report not_run; never substitute another harness, vendor, credential, or model.",
             "Reject a missing grant and unnamed target, duplicate idempotency key, repeated system, parentless inbound spawn, forbidden MCP mutation, and any hop beyond two before a provider call.",
             "Restart an unfinished external task and report unknown until reconciled; never invent completion or book external-system usage as a Workhorse provider."
           ]
@@ -1143,8 +1145,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S9"],
-          "passCriteria": "A named or granted external agent receives one bounded task, asks an existing Workhorse chat through the restricted MCP profile, returns the chat's real reply, and closes under one trace; cycles, excess hops, duplicates, forbidden tools, and parentless spawns stop before a provider call; external execution creates no Workhorse provider identity or usage event.",
-          "evidence": "External catalog and grant, CLI invocation, MCP tool transcript, both agent-system and Workhorse replies, task/run/row terminal states, trace envelope, rejection ledger, provider catalog, and usage ledger."
+          "passCriteria": "A named or granted OpenClaw or Hermes agent receives one bounded traced task, uses one real Workhorse result to choose a second order, can spawn and resume a named Workhorse worker under the explicit parent, and reaches a truthful terminal goal; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
+          "evidence": "External catalog and grant, exact CLI invocation, MCP tool transcript with two dependent orders, parent and trace fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
         }
       ]
     },

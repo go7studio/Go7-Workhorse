@@ -2,7 +2,12 @@ import { detectAllRuntimes, catalogFromStatuses, type CatalogPaths, type DetectI
 import { installWorkhorseExternalMcp, type InstallIo } from "./mcp-install";
 import { listOpenClawAgents, startOpenClawTask, type OpenClawIo } from "./openclaw-adapter";
 import { listHermesAgents, startHermesTask, type HermesIo } from "./hermes-adapter";
-import type { ExternalAgentRef } from "../src/lib/types";
+import type { RuntimeStartRequest } from "../src/lib/external-task";
+
+export function runtimeTaskPrompt(request: Pick<RuntimeStartRequest, "prompt" | "taskId" | "envelope" | "parentSessionId">): string {
+  const parent = request.parentSessionId ? ` Parent chat: ${request.parentSessionId}.` : "";
+  return `Workhorse task ${request.taskId}. Trace: ${request.envelope.traceId}.${parent} Pass traceId and fromSessionId on Workhorse MCP calls.\n\n${request.prompt}`;
+}
 
 export function detectRuntimesOnHost(paths: CatalogPaths, io: DetectIo) {
   const statuses = detectAllRuntimes(paths, io);
@@ -19,9 +24,10 @@ export async function listRuntimeAgents(
 
 export async function startRuntimeTask(
   io: OpenClawIo & HermesIo,
-  request: { ref: ExternalAgentRef; prompt: string; now?: number },
+  request: RuntimeStartRequest,
 ) {
-  return request.ref.runtimeId === "openclaw" ? startOpenClawTask(io, request) : startHermesTask(io, request);
+  const correlated = { ...request, prompt: runtimeTaskPrompt(request) };
+  return request.ref.runtimeId === "openclaw" ? startOpenClawTask(io, correlated) : startHermesTask(io, correlated);
 }
 
 export function installExternalMcpConfig(

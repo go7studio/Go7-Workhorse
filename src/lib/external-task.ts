@@ -238,6 +238,7 @@ export type RuntimeStartRequest = {
   prompt: string;
   envelope: CorrelationEnvelope;
   taskId: string;
+  parentSessionId?: string;
   now?: number;
 };
 
@@ -285,6 +286,7 @@ export async function launchExternalAssignment(input: LaunchExternalInput): Prom
     prompt: input.prompt,
     envelope: started.task.envelope,
     taskId: started.task.id,
+    ...(input.fromSessionId ? { parentSessionId: input.fromSessionId } : {}),
     now: started.task.startedAt,
   });
   if (!live) return started;

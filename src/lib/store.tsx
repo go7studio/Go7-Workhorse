@@ -3939,6 +3939,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 grant: caller.planRun?.externalGrant,
                 routing: latest.settings.routing,
                 prompt: payload.message,
+                fromSessionId: caller.id,
                 workspace: latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path,
                 store: normalizeTaskStore(latest.externalTasks) || emptyTaskStore(),
                 envelope: {
@@ -4219,7 +4220,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               isolation = "shared";
             }
             grokAssistantId.current[childId] = assistantId;
-            const childCorrelationId = learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
+            const childCorrelationId = payload.traceId || learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
             learningTurns.current[childId] = { correlationId: childCorrelationId, agentRunId: assistantId, toolIds: [] };
             emitLearningEvent({
               id: learningEvidenceId("execution", assistantId),
@@ -4279,7 +4280,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedCapabilities.length > 0 ? { capabilities: assignedCapabilities } : {}),
                 ...(assignedTools.length > 0 ? { tools: assignedTools } : {}),
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
-                ...(payload.id ? { correlationId: payload.id } : {}),
+                correlationId: childCorrelationId,
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
@@ -4318,6 +4319,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               vendor: spec.title,
                               status: "running",
                               startedAt,
+                              correlationId: childCorrelationId,
                               ...(planStepId ? { planStepId } : {}),
                               ...(rationale ? { rationale } : {}),
                             },
@@ -4337,6 +4339,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             toolStatus: "running",
                             text: spec.title,
                             createdAt: startedAt,
+                            correlationId: childCorrelationId,
                           },
                         ],
                       }
@@ -4544,7 +4547,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const assistantId = uid("msg");
           grokAssistantId.current[target.id] = assistantId;
           const startedAt = Date.now();
-          const peerCorrelationId = (from ? learningTurns.current[from.id]?.correlationId : undefined) || payload.id || uid("corr");
+          const peerCorrelationId = payload.traceId || (from ? learningTurns.current[from.id]?.correlationId : undefined) || payload.id || uid("corr");
           learningTurns.current[target.id] = { correlationId: peerCorrelationId, agentRunId: assistantId, toolIds: [] };
           emitLearningEvent({
             id: learningEvidenceId("execution", assistantId),

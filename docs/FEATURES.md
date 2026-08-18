@@ -16,7 +16,7 @@ When you add a feature, add it here in the same commit.
 Each vendor runs under its own login. Subscriptions, context and sandboxes are
 never pooled.
 
-OpenClaw and Hermes are **agent systems**, not vendors. Settings → LLMs shows
+OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
 whether each runtime is installed. A plan can grant them for one wave, or you
 can name `openclaw/main` or `hermes/<profile>`. Those tasks join the lineup.
 They do not get a Usage ring. Settings → LLMs → Install MCP writes a restricted

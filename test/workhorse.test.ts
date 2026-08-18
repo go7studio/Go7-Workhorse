@@ -2332,7 +2332,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_setup_custom_bot/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /importFrom=auto/);
-  assert.match(WORKHORSE_SESSION_RULES, /do not spawn OpenClaw or Hermes from that list/);
+  assert.match(WORKHORSE_SESSION_RULES, /OpenClaw and Hermes are harnesses; do not spawn them from that list/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_add_reference/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_create_project/);
   assert.match(WORKHORSE_SESSION_RULES, /workhorse_move_chat/);
@@ -8069,7 +8069,7 @@ test("custom bot setup imports a detected MiniMax configuration without overwrit
   const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
   assert.match(addBot, /!draft\.apiKey\.trim\(\) && !draft\.baseUrl\.trim\(\)/);
   assert.match(addBot, /store\.refreshCustomLogin\(\)/);
-  assert.match(addBot, /Imported MiniMax key from OpenClaw config/);
+  assert.match(addBot, /Imported MiniMax key from OpenClaw config. This is not harness integration./);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Stored only on this computer/);
 });
 

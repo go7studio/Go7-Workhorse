@@ -121,18 +121,25 @@ test("shouldAutoRouteSpawn treats an external address as an explicit target", ()
 
 test("session rules never spawn OpenClaw or Hermes from canCall", () => {
   const rules = readFileSync(path.join(ROOT, "src", "lib", "workhorse-rules.ts"), "utf8");
-  assert.match(rules, /do not spawn OpenClaw or Hermes from (that list|canCall)/i);
+  assert.match(rules, /OpenClaw and Hermes are harnesses; do not spawn them from that list/);
   assert.match(rules, /canCall is Workhorse vendors only/i);
 });
 
-test("Settings keeps seven tabs; Agent systems live under LLMs; include defaults off", () => {
+test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off", () => {
   assert.equal(DEFAULT_SETTINGS.routing.includeExternalAgents, false);
   const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   assert.match(settingsUi, /id: "llms", label: "LLMs"/);
-  assert.match(settingsUi, /Agent systems/);
+  assert.match(settingsUi, /<strong>Harnesses<\/strong>/);
   assert.doesNotMatch(settingsUi, /id: "agents"/);
+  assert.doesNotMatch(settingsUi, /id: "harnesses"/);
   const routingUi = readFileSync(path.join(ROOT, "src", "ui", "RoutingPane.tsx"), "utf8");
-  assert.match(routingUi, /Include external agents/);
+  assert.match(routingUi, /Include harnesses/);
+  const grant = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
+  assert.match(grant, /Allow OpenClaw\/Hermes for this plan/);
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors\./);
+  const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");
+  assert.match(addBot, /Imported MiniMax key from OpenClaw config\. This is not harness integration\./);
   const picker = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   assert.doesNotMatch(picker, /openclaw|hermes/);
 });

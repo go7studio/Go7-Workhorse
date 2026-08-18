@@ -703,9 +703,9 @@ function AgentSystemsBlock() {
     <div className="settings-group">
       <div className="settings-row">
         <div className="settings-row-copy">
-          <strong>Agent systems</strong>
+          <strong>Harnesses</strong>
           <span>
-            OpenClaw and Hermes are installed runtimes, not vendors. Install MCP writes this desk into OpenClaw, and
+            OpenClaw and Hermes are installed harnesses, not vendors. Install MCP writes this desk into OpenClaw, and
             into Hermes if it is already installed. They launch the packaged helper. No token is stored.
           </span>
         </div>

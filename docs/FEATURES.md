@@ -127,6 +127,9 @@ With no spend yet, it keeps the native sunset-to-blue blobs.
 Settings can export a support report that excludes prompts, messages, file
 contents, environment variables, URLs and credential values.
 
+Settings → Profile can check GitHub for a newer desk. A Mac installer
+downloads that release's disk image and replaces the app.
+
 ## Platforms
 
 Windows and macOS. Both installers are built and tested on their own machine

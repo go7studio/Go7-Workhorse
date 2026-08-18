@@ -96,6 +96,8 @@ export function Settings() {
   const [usageTick, setUsageTick] = useState(0);
   const [usageHome, setUsageHome] = useState(0);
   const [supportNote, setSupportNote] = useState("");
+  const [updateNote, setUpdateNote] = useState("");
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   const openSection = (id: SettingsSection) => {
     if (id === "usage") {
@@ -191,12 +193,43 @@ export function Settings() {
             <div className="settings-row">
               <div className="settings-row-copy">
                 <strong>Updates</strong>
-                <span>Workhorse build v{APP_VERSION}</span>
+                <span>
+                  {store.appUpdateBusy
+                    ? `Installing Workhorse ${store.appUpdate?.version ?? ""}`.trim()
+                    : store.appUpdateError
+                      ? store.appUpdateError
+                      : updateNote || `Workhorse build v${APP_VERSION}`}
+                </span>
               </div>
               <div className="settings-control">
-                <button className="tiny" type="button" onClick={() => void store.checkAppUpdate()}>
-                  Check now
+                <button
+                  className="tiny"
+                  type="button"
+                  disabled={updateChecking || store.appUpdateBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setUpdateChecking(true);
+                      setUpdateNote("Checking…");
+                      const result = await store.checkAppUpdate({ reveal: true });
+                      setUpdateChecking(false);
+                      if (result.error) setUpdateNote(result.error);
+                      else if (result.offer) setUpdateNote(`Workhorse ${result.offer.version} is ready.`);
+                      else setUpdateNote("This is the latest build.");
+                    })();
+                  }}
+                >
+                  {updateChecking ? "Checking…" : "Check now"}
                 </button>
+                {store.appUpdate ? (
+                  <button
+                    className="tiny"
+                    type="button"
+                    disabled={store.appUpdateBusy}
+                    onClick={() => void store.applyAppUpdate(store.appUpdate?.version)}
+                  >
+                    {store.appUpdateBusy ? "Installing…" : `Install ${store.appUpdate.version}`}
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="settings-row">

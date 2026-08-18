@@ -75,7 +75,7 @@ import {
 } from "./models";
 import { joinChatText, mergeStreamedText } from "./markdown";
 import { APP_VERSION } from "./app-info";
-import type { AppUpdateOffer } from "./app-update";
+import type { AppUpdateCheckResult, AppUpdateOffer } from "./app-update";
 import {
   applyArchiveProject,
   applyCreateWorkhorseProject,
@@ -399,7 +399,7 @@ export type Store = AppState & {
   appUpdate: AppUpdateOffer | null;
   appUpdateBusy: boolean;
   appUpdateError: string | null;
-  checkAppUpdate: () => Promise<void>;
+  checkAppUpdate: (opts?: { reveal?: boolean }) => Promise<AppUpdateCheckResult>;
   applyAppUpdate: (version?: string) => Promise<void>;
 };
 
@@ -5621,14 +5621,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse?.quit();
   }, []);
 
-  const checkAppUpdate = useCallback(async () => {
-    if (!window.workhorse?.checkAppUpdate) return;
-    const offer = await window.workhorse.checkAppUpdate();
+  const checkAppUpdate = useCallback(async (opts?: { reveal?: boolean }): Promise<AppUpdateCheckResult> => {
+    if (!window.workhorse?.checkAppUpdate) {
+      return { offer: null, error: "Restart Workhorse once so it can check for updates." };
+    }
+    const result = await window.workhorse.checkAppUpdate();
+    if (result.error) {
+      setAppUpdate(null);
+      return result;
+    }
+    const offer = result.offer && result.offer.version !== APP_VERSION ? result.offer : null;
     setAppUpdate(() => {
-      const dismissed = stateRef.current.dismissedUpdateVersion;
-      if (!offer || offer.version === dismissed || offer.version === APP_VERSION) return null;
+      if (!offer) return null;
+      if (!opts?.reveal && offer.version === stateRef.current.dismissedUpdateVersion) return null;
       return offer;
     });
+    return { offer };
   }, []);
 
   const applyAppUpdate = useCallback(async (version?: string) => {
@@ -5648,8 +5656,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    void checkAppUpdate();
-    const timer = window.setInterval(() => void checkAppUpdate(), 6 * 60 * 60 * 1000);
+    void checkAppUpdate().catch(() => {});
+    const timer = window.setInterval(() => void checkAppUpdate().catch(() => {}), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, [ready, checkAppUpdate]);
 

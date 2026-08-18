@@ -83,7 +83,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   },
   quit: () => ipcRenderer.invoke("app:quit"),
   checkAppUpdate: () =>
-    ipcRenderer.invoke("app:check-update") as Promise<import("../src/lib/app-update").AppUpdateOffer | null>,
+    ipcRenderer.invoke("app:check-update") as Promise<import("../src/lib/app-update").AppUpdateCheckResult>,
   applyAppUpdate: (version: string) =>
     ipcRenderer.invoke("app:apply-update", version) as Promise<import("../src/lib/app-update").AppUpdateApplyResult>,
   notifyDesktop: (input: { title: string; body?: string }) =>

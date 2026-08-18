@@ -6,9 +6,16 @@ import { test } from "node:test";
 import {
   compareVersions,
   isNewerVersion,
+  macBundleFromExecPath,
+  macInstallerArch,
+  macReplaceScript,
   offerFromRelease,
+  packagedUpdateMissingMessage,
+  parseHdiutilAttach,
   pickLatestTagOffer,
+  pickMacDmgAsset,
   releaseTag,
+  updateInstallKind,
   versionFromRef,
 } from "../src/lib/app-update";
 
@@ -33,11 +40,87 @@ test("semver compare treats a GitHub tag as newer than the running desk", () => 
   assert.equal(pickLatestTagOffer([{ name: "v0.1.1" }, { name: "v0.2.0" }], "0.1.0")?.version, "0.2.0");
 });
 
+test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", () => {
+  assert.equal(macInstallerArch("arm64"), "arm64");
+  assert.equal(macInstallerArch("x86_64"), "x64");
+  assert.equal(macInstallerArch("x64"), "x64");
+  assert.equal(macInstallerArch("ppc"), null);
+  assert.equal(
+    macBundleFromExecPath("/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse"),
+    "/Applications/Go7 Workhorse.app",
+  );
+  assert.equal(macBundleFromExecPath("/usr/local/bin/workhorse"), null);
+
+  const release = {
+    assets: [
+      {
+        name: "Go7-Workhorse-0.3.2-mac-arm64.dmg",
+        browser_download_url: "https://github.com/go7studio/Go7-Workhorse/releases/download/v0.3.2/Go7-Workhorse-0.3.2-mac-arm64.dmg",
+      },
+      {
+        name: "Go7-Workhorse-0.3.2-mac-x64.dmg",
+        browser_download_url: "https://github.com/go7studio/Go7-Workhorse/releases/download/v0.3.2/Go7-Workhorse-0.3.2-mac-x64.dmg",
+      },
+      {
+        name: "Go7-Workhorse-Setup-0.3.2.exe",
+        browser_download_url: "https://github.com/go7studio/Go7-Workhorse/releases/download/v0.3.2/Go7-Workhorse-Setup-0.3.2.exe",
+      },
+    ],
+  };
+  assert.equal(pickMacDmgAsset(release, "arm64")?.name, "Go7-Workhorse-0.3.2-mac-arm64.dmg");
+  assert.equal(pickMacDmgAsset(release, "x64")?.name, "Go7-Workhorse-0.3.2-mac-x64.dmg");
+  assert.equal(
+    pickMacDmgAsset(
+      { assets: [{ name: "Workhorse-0.1.9-mac.dmg", browser_download_url: "https://example.com/Workhorse-0.1.9-mac.dmg" }] },
+      "arm64",
+    )?.name,
+    "Workhorse-0.1.9-mac.dmg",
+  );
+  assert.equal(
+    pickMacDmgAsset(
+      { assets: [{ name: "Workhorse-0.1.9-mac.dmg", browser_download_url: "https://example.com/Workhorse-0.1.9-mac.dmg" }] },
+      "x64",
+    ),
+    null,
+  );
+  assert.equal(pickMacDmgAsset({ assets: [{ name: "notes.txt", browser_download_url: "https://example.com/notes.txt" }] }, "arm64"), null);
+
+  const tmp = "/var/folders/xx/tmp/workhorse-update-1";
+  const attached = [
+    "/dev/disk4              GUID_partition_scheme",
+    `/dev/disk4s1            Apple_HFS                       ${tmp}/dmg.1234`,
+  ].join("\n");
+  assert.deepEqual(parseHdiutilAttach(attached, tmp), { device: "/dev/disk4", mount: `${tmp}/dmg.1234` });
+  assert.equal(parseHdiutilAttach("nothing useful", tmp), null);
+
+  assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: false }), "mac-dmg");
+  assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: true }), "mac-dmg");
+  assert.equal(updateInstallKind({ platform: "darwin", packaged: false, hasGitCheckout: true }), "git-checkout");
+  assert.equal(updateInstallKind({ platform: "win32", packaged: true, hasGitCheckout: false }), "none");
+  assert.equal(updateInstallKind({ platform: "win32", packaged: false, hasGitCheckout: true }), "git-checkout");
+  assert.match(packagedUpdateMissingMessage("win32"), /Windows installer/);
+
+  const script = macReplaceScript({
+    pid: 4242,
+    srcApp: "/tmp/mnt/Go7 Workhorse.app",
+    destApp: "/Applications/Go7 Workhorse.app",
+    device: "/dev/disk4s1",
+    tmp,
+  });
+  assert.match(script, /kill -0 "\$pid"/);
+  assert.match(script, /cp -R "\$src" "\$dest"/);
+  assert.match(script, /hdiutil detach "\$device"/);
+  assert.match(script, /open "\$dest"/);
+  assert.match(script, /4242/);
+});
+
 test("update check is wired through main, preload, and the desk banner", () => {
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const sidebar = readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
+  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const updater = readFileSync(path.join(ROOT, "electron", "app-update.ts"), "utf8");
   const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
   assert.match(main, /app:check-update/);
   assert.match(main, /app:apply-update/);
@@ -47,6 +130,19 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(store, /applyAppUpdate/);
   assert.match(sidebar, /brand-update/);
   assert.match(sidebar, /UpdateChip/);
+  // Check now used to return null on every GitHub error and every current
+  // build, so the button did nothing a person could see. A miss has to say
+  // so, and a packaged Mac has to install the dmg, not hunt for a checkout.
+  assert.match(settings, /This is the latest build/);
+  assert.match(settings, /Workhorse \$\{result\.offer\.version\} is ready/);
+  assert.match(settings, /Install \$\{store\.appUpdate\.version\}/);
+  assert.match(updater, /updateInstallKind/);
+  assert.match(updater, /installMacDmg/);
+  assert.match(updater, /pickMacDmgAsset/);
+  assert.match(updater, /hdiutil/);
+  assert.doesNotMatch(updater, /hdiutil attach[^\n]*-quiet/);
+  assert.match(updater, /error: message\.slice/);
+  assert.doesNotMatch(updater, /catch \{\s*return null;\s*\}/);
   // The desk offers an update by reading GitHub releases, so the workflow has
   // to create one with installers in it. release-please prepares the version
   // bump from package.json, which is the version the desk compares against.

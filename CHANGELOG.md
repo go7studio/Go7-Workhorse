@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.5.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.5.0...v0.5.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* a goal that asks for bots gets desk workers ([56ddcc0](https://github.com/go7studio/Go7-Workhorse/commit/56ddcc0fd99975a588c736b46b46e256164065ad))
+* a goal that asks for bots gets desk workers, and vendor subagents are named ([be02c25](https://github.com/go7studio/Go7-Workhorse/commit/be02c257815d0833ef066d3b578fb7c022756692))
+* contain live work and changes ([ec3edf9](https://github.com/go7studio/Go7-Workhorse/commit/ec3edf90e747a20443a216ecffe967cab593e567))
+* keep consecutive tool calls in one work fold ([51e6425](https://github.com/go7studio/Go7-Workhorse/commit/51e6425c96ae7007e6b71fadce2e8f92d400a3c1))
+* keep consecutive tool calls in one work fold ([7f690f6](https://github.com/go7studio/Go7-Workhorse/commit/7f690f6b2f56c9c0f320b390200532adf084d333))
+* name a vendor's own subagent instead of losing it ([ae6da98](https://github.com/go7studio/Go7-Workhorse/commit/ae6da982515ffac35f97f5b254955d50ae594692))
+* typing no longer rewrites every saved chat ([2bed53a](https://github.com/go7studio/Go7-Workhorse/commit/2bed53a95e5f4094f76bb8b804511333ed0ed72f))
+* typing no longer rewrites every saved chat ([4e8012d](https://github.com/go7studio/Go7-Workhorse/commit/4e8012d7bbc4fad95ed600291ad36a52ffc5d6f8))
+
 ## [0.5.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.4.1...v0.5.0) (2026-08-18)
 
 

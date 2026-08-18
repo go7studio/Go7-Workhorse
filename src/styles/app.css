@@ -6047,6 +6047,118 @@ html.pane-dragging * {
   text-wrap: pretty;
 }
 
+/* A group's first row can carry the group's name and its actions. */
+.settings-group-head {
+  align-items: flex-start;
+}
+
+.settings-group-head .settings-control {
+  padding-top: 2px;
+}
+
+.settings-row-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+/*
+ * Harnesses: OpenClaw and Hermes are runtimes, not vendors, so they do not
+ * get a ring. A square monogram tile keeps them apart from the vendor circles
+ * above at a glance.
+ */
+.runtime-row {
+  gap: 14px;
+}
+
+.runtime-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg);
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  color: var(--text-tertiary);
+}
+
+.runtime-tile.on {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.runtime-row .settings-row-copy strong small {
+  margin-left: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.agent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.agent-chip {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Four flags, four chips. Each fails for its own reason. */
+.status-chips {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 340px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.status-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+}
+
+.status-chip.on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+.status-chip.on::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .settings-search {
   width: 100%;
   margin: 0 0 12px;

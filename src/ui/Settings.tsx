@@ -6,7 +6,8 @@ import { vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
+import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
 import { SkillsPane } from "./SkillsPane";
@@ -688,9 +689,34 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
   );
 }
 
-function flagCopy(on: boolean, label: string): string {
-  return on ? label : `Not ${label.toLowerCase()}`;
+type RuntimeFlag = { on: boolean; yes: string; no: string };
+
+/**
+ * The four flags stay four. Binary, config, sign-in and reachability fail
+ * for different reasons and are fixed in different places, so one
+ * "connected" light would hide which one to go and fix.
+ */
+function runtimeFlags(runtime: AgentRuntimeStatus): RuntimeFlag[] {
+  return [
+    { on: runtime.binaryPresent, yes: "Binary", no: "No binary" },
+    { on: runtime.configPresent, yes: "Config", no: "No config" },
+    { on: runtime.authenticated, yes: "Signed in", no: "Not signed in" },
+    { on: runtime.reachable, yes: "Reachable", no: "Not reachable" },
+  ];
 }
+
+const RUNTIME_LABEL: Record<AgentRuntimeId, { name: string; mark: string }> = {
+  openclaw: { name: "OpenClaw", mark: "OC" },
+  hermes: { name: "Hermes", mark: "H" },
+};
+
+const EMPTY_RUNTIMES: AgentRuntimeStatus[] = (["openclaw", "hermes"] as const).map((runtimeId) => ({
+  runtimeId,
+  binaryPresent: false,
+  configPresent: false,
+  authenticated: false,
+  reachable: false,
+}));
 
 function AgentSystemsBlock() {
   const store = useStore();
@@ -698,16 +724,25 @@ function AgentSystemsBlock() {
   useEffect(() => {
     void store.refreshAgentRuntimes();
   }, []);
+  const runtimes = store.agentRuntimes.length ? store.agentRuntimes : EMPTY_RUNTIMES;
   const chats = store.sessions.filter((session) => !session.hidden && !session.archivedAt);
+  // The picker groups chats by project, the way the sidebar does, so a chat
+  // called "Full repo review" can be told apart from another with that name.
+  const groups = store.projects
+    .map((project) => ({ project, chats: chats.filter((session) => session.projectId === project.id) }))
+    .filter((group) => group.chats.length > 0);
+  const loose = chats.filter((session) => !session.projectId);
   return (
     <div className="settings-group">
-      <div className="settings-row">
+      <div className="settings-row settings-group-head">
         <div className="settings-row-copy">
           <strong>Harnesses</strong>
           <span>
-            OpenClaw and Hermes are installed harnesses, not vendors. Install MCP writes this desk into OpenClaw, and
-            into Hermes if it is already installed. They launch the packaged helper. No token is stored.
+            OpenClaw and Hermes are installed runtimes, not vendors. A plan can hand them a slice after a grant, and
+            through the MCP they can read this desk and spawn a worker on it. Install MCP writes that server into
+            whichever is installed. No token is stored.
           </span>
+          {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
         <div className="settings-control">
           <button className="tiny" type="button" onClick={() => void store.refreshAgentRuntimes()}>
@@ -731,26 +766,49 @@ function AgentSystemsBlock() {
           </button>
         </div>
       </div>
-      {(store.agentRuntimes.length ? store.agentRuntimes : [
-        { runtimeId: "openclaw" as const, binaryPresent: false, configPresent: false, authenticated: false, reachable: false },
-        { runtimeId: "hermes" as const, binaryPresent: false, configPresent: false, authenticated: false, reachable: false },
-      ]).map((runtime) => (
-        <p key={runtime.runtimeId} className="row-meta">
-          {runtime.runtimeId === "openclaw" ? "OpenClaw" : "Hermes"} · {flagCopy(runtime.binaryPresent, "binary")} ·{" "}
-          {flagCopy(runtime.configPresent, "config")}
-          {runtime.version ? ` · ${runtime.version}` : ""} · {flagCopy(runtime.authenticated, "authenticated")} ·{" "}
-          {flagCopy(runtime.reachable, "reachable")}
-        </p>
-      ))}
-      {store.agentCatalog.length > 0 ? (
-        <p className="row-meta">Agents: {store.agentCatalog.map((agent) => agent.name).join(", ")}</p>
-      ) : (
-        <p className="row-meta">No agents discovered.</p>
-      )}
+      {runtimes.map((runtime) => {
+        const label = RUNTIME_LABEL[runtime.runtimeId];
+        const agents = store.agentCatalog.filter((agent) => agent.runtimeId === runtime.runtimeId);
+        const live = runtime.reachable && runtime.authenticated;
+        return (
+          <div className="settings-row runtime-row" key={runtime.runtimeId}>
+            <span className={`runtime-tile${live ? " on" : ""}`} aria-hidden="true">
+              {label.mark}
+            </span>
+            <div className="settings-row-copy">
+              <strong>
+                {label.name}
+                {runtime.version ? <small>{runtime.version}</small> : null}
+              </strong>
+              {agents.length > 0 ? (
+                <span className="agent-chips">
+                  {agents.map((agent) => (
+                    <code className="agent-chip" key={agent.agentId} title={agent.workspace ?? agent.name}>
+                      {agent.name}
+                    </code>
+                  ))}
+                </span>
+              ) : (
+                <span>No agents found.</span>
+              )}
+            </div>
+            <div className="settings-control status-chips" role="list" aria-label={`${label.name} status`}>
+              {runtimeFlags(runtime).map((flag) => (
+                <span className={`status-chip${flag.on ? " on" : ""}`} role="listitem" key={flag.yes}>
+                  {flag.on ? flag.yes : flag.no}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
       <label className="settings-row">
         <div className="settings-row-copy">
           <strong>Inbound parent</strong>
-          <span>OpenClaw and Hermes spawn Workhorse workers on this chat. Empty rejects spawn with context_required.</span>
+          <span>
+            When OpenClaw or Hermes spawns a worker here without naming a chat, it lands under this one. None turns
+            such spawns away with context_required.
+          </span>
         </div>
         <div className="settings-control">
           <select
@@ -759,15 +817,27 @@ function AgentSystemsBlock() {
             aria-label="Inbound parent chat"
           >
             <option value="">None</option>
-            {chats.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.title || session.id}
-              </option>
+            {groups.map((group) => (
+              <optgroup key={group.project.id} label={group.project.name}>
+                {group.chats.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.title || session.id}
+                  </option>
+                ))}
+              </optgroup>
             ))}
+            {loose.length > 0 ? (
+              <optgroup label="Chats">
+                {loose.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.title || session.id}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         </div>
       </label>
-      {note ? <p className="row-meta">{note}</p> : null}
     </div>
   );
 }

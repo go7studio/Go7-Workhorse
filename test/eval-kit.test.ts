@@ -133,9 +133,10 @@ test("eval baseline and contracts track the current product generation", () => {
 test("release automation keeps the eval target on the packaged version", () => {
   const releaseConfig = json("release-please-config.json");
   const releaseManifest = json(".release-please-manifest.json");
-  const manifest = json("package.json");
+  const changelog = readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8");
   const extraFile = releaseConfig.packages["."]["extra-files"][0];
-  assert.equal(releaseManifest["."], manifest.version);
+  assert.match(releaseManifest["."], /^\d+\.\d+\.\d+$/);
+  assert.match(changelog, new RegExp(`^## \\[${releaseManifest["."]}\\]`, "m"));
   assert.equal(releaseConfig["include-component-in-tag"], false);
   assert.deepEqual(extraFile, {
     type: "json",

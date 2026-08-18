@@ -1314,8 +1314,12 @@ html.pane-dragging * {
 }
 
 .session-edits-slot.open {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--composer-input, 80px);
+  z-index: 32;
   grid-template-rows: 1fr;
-  position: relative;
   min-height: 40px;
   max-height: 40px;
   overflow: visible;

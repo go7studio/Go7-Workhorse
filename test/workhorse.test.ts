@@ -160,7 +160,7 @@ import { citedAbsolutePaths, editSearchRoots, fileFolderFromPath, formatEditWhen
 import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
-import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus } from "../src/ui/Composer";
+import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus, pinComposerInput } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
   applyCut,
@@ -2894,6 +2894,18 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(css, /\.composer-tools/);
   assert.match(pane, /ResizeObserver/);
   assert.match(pane, /composer-wrap/);
+  assert.match(composer, /pinComposerInput/);
+  assert.match(css, /--composer-input/);
+  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*var\(--composer-input/);
+  const col = {
+    getBoundingClientRect: () => ({ bottom: 800 }),
+    style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
+  };
+  const form = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, form), 80);
+  assert.equal(col.style.value, "--composer-input:80px");
+  const withThumbs = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, withThumbs), 80);
 });
 
 test("session setup is a compact right-side model and access inspector", () => {

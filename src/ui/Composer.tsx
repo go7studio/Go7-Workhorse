@@ -48,6 +48,13 @@ export function composerMaxHeightPx(paneHeight: number): number {
   return Math.max(24, Math.round(paneHeight * 0.5));
 }
 
+/** Distance from the session column bottom to the top of the message field. Thumbs do not change it. */
+export function pinComposerInput(col: { getBoundingClientRect: () => { bottom: number }; style: { setProperty: (name: string, value: string) => void } }, form: { getBoundingClientRect: () => { top: number } }): number {
+  const bottom = Math.max(0, Math.round(col.getBoundingClientRect().bottom - form.getBoundingClientRect().top));
+  col.style.setProperty("--composer-input", `${bottom}px`);
+  return bottom;
+}
+
 export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHeight?: number): void {
   if (!value) {
     el.style.height = "";
@@ -104,6 +111,20 @@ export function Composer({
   useEffect(() => {
     setActive(0);
   }, [value]);
+
+  useEffect(() => {
+    const dock = wrap.current;
+    const col = dock?.closest(".session-col");
+    const form = dock?.querySelector(".composer");
+    if (!(col instanceof HTMLElement) || !(form instanceof HTMLElement)) return;
+    const pin = () => pinComposerInput(col, form);
+    pin();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(pin);
+    observer.observe(form);
+    observer.observe(col);
+    return () => observer.disconnect();
+  }, [sessionId]);
 
   useEffect(() => {
     if (!watchRestore) return;

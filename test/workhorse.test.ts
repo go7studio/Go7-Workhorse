@@ -4157,6 +4157,9 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     css,
     /\.session-edits \.edited-block\.compact\.open,\s*\.session-edits \.edited-block\.compact\.closing\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/,
   );
+  assert.match(css, /container-name:\s*changes/);
+  assert.match(css, /@container changes \(max-width: 300px\)[\s\S]*\.file-when/);
+  assert.match(css, /\.session-edits \.file-row strong[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(
     css,
     /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\) \.edited-toggle\s*\{[^}]*width:\s*auto/,

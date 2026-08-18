@@ -1387,6 +1387,9 @@ html.pane-dragging * {
 .session-edits .edited-block.compact.open,
 .session-edits .edited-block.compact.closing {
   width: min(420px, calc(100% - 44px));
+  max-width: calc(100% - 16px);
+  container-type: inline-size;
+  container-name: changes;
 }
 
 .session-edits .edited-block.compact.open .edited-bar,
@@ -1414,6 +1417,57 @@ html.pane-dragging * {
 
 .session-edits .file-row {
   min-height: 40px;
+  gap: 8px;
+}
+
+.session-edits .file-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-edits .edited-toggle {
+  min-width: 0;
+}
+
+.session-edits .edited-toggle .row-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container changes (max-width: 300px) {
+  .file-when,
+  .file-row .row-meta {
+    display: none;
+  }
+
+  .file-meta {
+    gap: 6px;
+  }
+
+  .file-row {
+    min-height: 36px;
+    padding-inline: 8px;
+  }
+}
+
+@container changes (max-width: 220px) {
+  .edited-toggle .row-meta .file-diff-stat {
+    display: none;
+  }
+}
+
+@container session (max-width: 360px) {
+  .session-edits .edited-block.compact {
+    right: 8px;
+  }
+
+  .session-edits .edited-block.compact.open,
+  .session-edits .edited-block.compact.closing {
+    width: min(420px, calc(100% - 16px));
+  }
 }
 
 .edited-bar {

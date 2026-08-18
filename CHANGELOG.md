@@ -8,6 +8,29 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.0...v0.6.1) (2026-08-18)
+
+
+### Features
+
+* count what a vendor's own subagent spends ([fc6364a](https://github.com/go7studio/Go7-Workhorse/commit/fc6364a6aaf3a898bc32ff170a7dbf49f0f82f45))
+* count what a vendor's own subagent spends ([f7973f2](https://github.com/go7studio/Go7-Workhorse/commit/f7973f2456c765fca0132cccf3667efececbbd73))
+* FileViewer and Changes stay honest ([68a7606](https://github.com/go7studio/Go7-Workhorse/commit/68a760648f269f1927d6166d543fa24837dc7327))
+* keep FileViewer and Changes honest so the desk can ship as 0.5.1 ([4e8b49c](https://github.com/go7studio/Go7-Workhorse/commit/4e8b49cca9640ed51b4f343bdd5c6428ded878a3))
+
+
+### Bug Fixes
+
+* a worker is launched with worker rules and offered only worker tools ([1b3e7a2](https://github.com/go7studio/Go7-Workhorse/commit/1b3e7a2afbc56e063e02092a15a62590add21c89))
+* a worker is launched with worker rules and offered only worker tools ([cf75122](https://github.com/go7studio/Go7-Workhorse/commit/cf75122e5b9469b916f7b529cd68ca9f1487355e))
+* keep pre-1.0 releases on patch cadence ([b2f069e](https://github.com/go7studio/Go7-Workhorse/commit/b2f069e230a48c1604ae95d9fecf17949e84ea89))
+* keep pre-1.0 releases on patch cadence ([2ef8aff](https://github.com/go7studio/Go7-Workhorse/commit/2ef8affd4a1c1b9b8a7f8f4650462a46b040674e))
+* keep Windows-cited paths intact on POSIX hosts ([820ed31](https://github.com/go7studio/Go7-Workhorse/commit/820ed31bf091a44c6098c1fc910c232a7f464205))
+* make harness delegation execution-first ([58c9d35](https://github.com/go7studio/Go7-Workhorse/commit/58c9d35a3326131645023f90769a83b040adfc2f))
+* roll long work timelines into an Earlier fold ([ff8e729](https://github.com/go7studio/Go7-Workhorse/commit/ff8e7298786ba3753d080943a22f186c6ff18a59))
+* show tool names instead of a stack of 1 tool folds ([331d87d](https://github.com/go7studio/Go7-Workhorse/commit/331d87d64e8230d14f69bc0d7785cdda8bb52e01))
+* typecheck FileViewer after rebase onto main ([f6b5d38](https://github.com/go7studio/Go7-Workhorse/commit/f6b5d38d886c3551e6dced4e1e12fcd909a6334e))
+
 ## [0.6.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.5.1...v0.6.0) (2026-08-18)
 
 

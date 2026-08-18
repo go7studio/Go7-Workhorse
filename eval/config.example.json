@@ -6,7 +6,7 @@
     "channel": "source",
     "repository": "https://github.com/go7studio/Go7-Workhorse.git",
     "ref": "origin/main",
-    "expectedVersion": "0.4.1"
+    "expectedVersion": "0.5.0"
   },
   "install": {
     "existingAppPath": "",
@@ -56,14 +56,25 @@
     "primaryModel": "MiniMax-M3",
     "internalToolCallingModel": "MiniMax-M3",
     "providerSmokeExceptions": {
-      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-kimi", "custom-anthropic"],
+      "profiles": [
+        "grok-acp",
+        "codex-acp",
+        "claude-acp",
+        "cursor-acp",
+        "custom-kimi",
+        "custom-anthropic"
+      ],
       "maxCallsPerProfile": 1,
       "requireAdapterEvidence": true,
       "allowCascading": false
     },
     "cascade": {
-      "profiles": ["custom-openai"],
-      "models": ["MiniMax-M3"],
+      "profiles": [
+        "custom-openai"
+      ],
+      "models": [
+        "MiniMax-M3"
+      ],
       "effort": "low",
       "maxDepth": 2,
       "maxConcurrentChildren": 2,

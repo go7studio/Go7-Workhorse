@@ -8,6 +8,21 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.5.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.4.1...v0.5.0) (2026-08-18)
+
+
+### Features
+
+* add agent and mismatch intelligence lanes ([77b601e](https://github.com/go7studio/Go7-Workhorse/commit/77b601e6bd9956fc8508457efd820776ffc11ce0))
+
+
+### Bug Fixes
+
+* make chat timestamps compact ([2285547](https://github.com/go7studio/Go7-Workhorse/commit/2285547309b5d7fedf62dff17d530cae7b685558))
+* make learning consume the private event index ([6146f4b](https://github.com/go7studio/Go7-Workhorse/commit/6146f4bafdc66ee69fdb25204c045b9c209cc637))
+* reject empty intelligence for explicit rules ([b562ac5](https://github.com/go7studio/Go7-Workhorse/commit/b562ac56ba7a9161353bef79697e467d39d62071))
+* separate human intelligence from agent evidence ([bcac556](https://github.com/go7studio/Go7-Workhorse/commit/bcac556e552379113369676126408498dfefdf0e))
+
 ## [0.4.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.4.0...v0.4.1) (2026-08-18)
 
 

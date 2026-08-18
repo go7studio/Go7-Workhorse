@@ -99,6 +99,7 @@ export function describeCompileResult(result: CompileResult, botName?: string): 
   }
   if (result.skipped === "no-ephemeral-provider") return "Skipped. The compiler bot has no key, or ACP cannot do a title-less call.";
   if (result.skipped === "invalid-brief") return "Skipped. The compiler bot did not return a learning brief.";
+  if (result.skipped === "empty-explicit-brief") return "Skipped. The compiler bot missed an explicit human rule; it was not marked analyzed.";
   if (result.skipped === "empty") return "Skipped. No new events.";
   if (result.skipped === "threshold") return "Skipped. Below the event threshold.";
   if (result.skipped === "duplicate") return "Skipped. Same events already compiled.";

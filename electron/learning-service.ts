@@ -7,6 +7,7 @@ import {
   DEFAULT_COMPILER_POLICY,
   effectiveCompilerAssignment,
   effectiveLearningMode,
+  eventsRequireMemory,
   frameRetrievedMemories,
   learningCaptures,
   learningCompiles,
@@ -313,6 +314,18 @@ export class LearningService {
             costUsd: result.costUsd,
           });
           return { ran: false, skipped: "invalid-brief", runId, ...route };
+        }
+        if (parsed.intent.length + parsed.operations.length === 0 && eventsRequireMemory(events)) {
+          this.options.store.putCompilerRun({
+            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+            status: "failed",
+            errorClass: "empty-explicit-brief",
+            endedAt: this.now(),
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costUsd: result.costUsd,
+          });
+          return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
         }
         brief = parsed;
       } else if (!this.options.allowStub && selection.provider) {

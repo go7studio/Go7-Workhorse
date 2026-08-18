@@ -478,6 +478,16 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
   ].join("\n");
 }
 
+const EXPLICIT_DURABLE_RULE = /\b(?:prefer|always|never|must|make sure|remember|do not|don't|verify)\b/i;
+
+export function eventsRequireMemory(events: LearningEvent[]): boolean {
+  return events.some((event) => {
+    if (event.actorClass !== "human") return false;
+    const summary = typeof event.payload.summary === "string" ? event.payload.summary : "";
+    return EXPLICIT_DURABLE_RULE.test(summary);
+  });
+}
+
 export function boundedCompilerBatch(
   events: LearningEvent[],
   memories: MemoryItem[],

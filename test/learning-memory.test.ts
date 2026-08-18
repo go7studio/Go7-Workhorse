@@ -306,7 +306,20 @@ test("interrupted compiler resumes once and creates no chats", async () => {
     caller: async () => {
       calls += 1;
       if (calls === 1) throw new Error("crash");
-      return { text: JSON.stringify({ intent: [], operations: [] }), createdWorkhorseChat: false, leftoverVendorThread: false };
+      return {
+        text: JSON.stringify({
+          intent: [{
+            action: "add",
+            memoryClass: "intent",
+            scope: "project",
+            statement: "Prefer conventional commits",
+            sourceEventIds: ["lev_resume"],
+          }],
+          operations: [],
+        }),
+        createdWorkhorseChat: false,
+        leftoverVendorThread: false,
+      };
     },
     candidates: () => [
       { provider: "custom", model: "fixture", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 2 },
@@ -701,6 +714,37 @@ test("custom ephemeral compile stores memories; ACP-only assignment skips", asyn
   assert.equal(skipped.skipped, "no-ephemeral-provider");
   assert.equal(acp.memories().length, 0);
   assert.match(describeCompileResult(skipped), /ACP cannot do a title-less call/);
+});
+
+test("an empty brief cannot mark an explicit human rule analyzed", async () => {
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => ({
+      text: JSON.stringify({ intent: [], operations: [] }),
+      createdWorkhorseChat: false,
+      leftoverVendorThread: false,
+    }),
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  service.record(eventDraft("lev_explicit_empty"));
+  const compiled = await service.compile();
+  assert.equal(compiled.ran, false);
+  assert.equal(compiled.skipped, "empty-explicit-brief");
+  assert.equal(service.indexStats().compiledEvents, 0);
+  assert.equal(service.indexStats().completedRuns, 0);
+  assert.equal(store.listCompilerRuns()[0]?.errorClass, "empty-explicit-brief");
+  assert.match(describeCompileResult(compiled), /not marked analyzed/);
 });
 
 test("ephemeral custom HTTP compile stores the model brief, not the stub prompt copy", async () => {

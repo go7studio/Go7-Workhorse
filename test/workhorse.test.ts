@@ -178,11 +178,13 @@ import {
 } from "../src/lib/tool-labels";
 import {
   displayWorkSteps,
+  earlierWorkLabel,
   formatWorked,
   groupTranscript,
   groupWorkRows,
   isActiveWorkRow,
   lastReplyIndex,
+  packWorkRows,
   playWorkEvents,
   resolveWorkedMs,
   thoughtForReply,
@@ -5138,6 +5140,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /foldOpen/);
+  assert.match(popout, /packWorkRows/);
+  assert.match(popout, /earlierWorkLabel/);
+  assert.match(popout, /data-kind="earlier"/);
   assert.match(popout, /count === 1/);
   assert.match(popout, /\{count\} tools/);
   assert.match(popout, /peer-work/);
@@ -6699,6 +6704,27 @@ test("work popout keeps think, tool, think in stream order across vendors", () =
   );
   assert.equal(blankBetween.length, 1);
   assert.equal(blankBetween[0]?.type === "tools" ? blankBetween[0].items.length : 0, 2);
+
+  const longHops: Parameters<typeof groupWorkRows>[0] = [];
+  for (let i = 0; i < 8; i += 1) {
+    longHops.push({ type: "thought", id: `th${i}`, text: `Hop ${i}.` });
+    longHops.push({
+      type: "tool",
+      message: {
+        id: `t${i}`,
+        role: "system",
+        kind: "tool",
+        text: `Read · completed — f${i}.ts`,
+        toolStatus: "completed",
+        createdAt: i,
+      },
+    });
+  }
+  const packed = packWorkRows(groupWorkRows(longHops));
+  assert.equal(packed.earlier.length, 13);
+  assert.equal(packed.tail.length, 3);
+  assert.match(earlierWorkLabel(packed.earlier), /Earlier · 7 thoughts · 6 tools/);
+  assert.deepEqual(packWorkRows(groupWorkRows(longHops.slice(0, 4))).earlier, []);
 });
 
 test("vendor model caches drive the picker so Sol is first and new slugs need no hand edit", () => {

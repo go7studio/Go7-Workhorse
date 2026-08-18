@@ -50,8 +50,9 @@ transcript rather than as a path.
   happened: think, tools, think. Consecutive tool calls share one fold
   labelled "3 tools"; expand it to see the calls listed underneath, not
   a row of "1 tool". A single call shows its name. A later thought
-  starts a new hop. The current hop stays open. Click a finished dot to
-  expand it again. The visible reply stays below that.
+  starts a new hop. When a turn runs long, earlier thoughts and tools
+  roll into an Earlier fold you can open again. The current hop stays
+  open. The visible reply stays below that.
 
 ## Control
 

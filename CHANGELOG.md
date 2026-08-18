@@ -8,6 +8,24 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.1...v0.6.2) (2026-08-18)
+
+
+### Features
+
+* put user copy, fork and edit under the bubble and keep them visible
+
+
+### Bug Fixes
+
+* make the whole Changes capsule the expand target
+* keep Changes clipped while it folds, then ease width on close
+* pin Changes above the message field so image thumbs do not lift it
+* hide extra Changes metadata when the card is squeezed
+* score Changes +/- without walking the project tree
+* play each usage ring intro only once
+
+
 ## [0.6.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.0...v0.6.1) (2026-08-18)
 
 

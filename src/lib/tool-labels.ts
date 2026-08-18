@@ -16,6 +16,11 @@ const TOOL_NAMES: Record<string, { title: string; kind?: PeerToolKind; verb?: st
   read_chat: { title: "Read chat", kind: "read", verb: "Reading" },
   ask_chat: { title: "Ask chat", kind: "ask", verb: "Asking" },
   spawn_agent: { title: "Call agent", kind: "call", verb: "Calling" },
+  // A vendor's own subagent, not a desk worker: it has no Workhorse session,
+  // so it never reaches the sidebar and keeps no ring of its own. Naming it is
+  // how the desk stays honest about who is out.
+  spawn_subagent: { title: "Call subagent", kind: "call", verb: "Calling" },
+  get_command_or_subagent_output: { title: "Read subagent output", kind: "read", verb: "Reading" },
   await_agents: { title: "Wait for agents", kind: "call", verb: "Waiting" },
   list_bots: { title: "List bots" },
   list_tools: { title: "List tools" },
@@ -37,6 +42,21 @@ const TOOL_NAMES: Record<string, { title: string; kind?: PeerToolKind; verb?: st
   request_permission: { title: "Request access" },
   request_vendor: { title: "Request vendor" },
 };
+
+export const SUBAGENT_SPAWN_TITLE = "Call subagent";
+
+/**
+ * Is this row a vendor spawning its own subagent?
+ *
+ * Grok opens the call titled `spawn_subagent`, then updates the same
+ * toolCallId with the task text ("Audit GA4 iOS Play"). Both spellings mean
+ * the same row, so both answer true.
+ */
+export function isSubagentSpawnTitle(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  return trimmed === SUBAGENT_SPAWN_TITLE || toolNameKey(trimmed) === "spawn_subagent";
+}
 
 export function toolNameKey(raw: string): string {
   return raw

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { upsertToolMessage } from "../src/lib/grok-events";
+import type { ChatMessage } from "../src/lib/types";
 import {
   CURSOR_SESSION_RULES,
   SPAWN_TURN_HINT,
@@ -12,15 +14,16 @@ import {
 /**
  * 2026-08-18, the run this test exists for.
  *
- * Steve typed this objective into a Grok desk chat and watched it for an hour.
+ * Steve typed this objective into a Grok desk chat and watched it run.
  * The desk rule said a /goal is never a desk spawn "even if the objective says
  * spawn", so the orchestrator quoted that rule in its first thought and then
- * did every slice itself: 504 tool calls, 209 file reads, 0 desk workers.
+ * did every slice itself: 519 tool calls, 270 reads, 44 edits, 0 desk workers.
  *
- * Grok's own subagents did run — three of them — but a Grok-native subagent has
+ * Grok's own subagents did run — four of them — but a Grok-native subagent has
  * no Workhorse session, so it never reaches the sidebar, never meters to its
- * own ring, and does not survive a restart. From the desk it looked like
- * nothing was delegated at all.
+ * own ring, and does not survive a restart. Worse, each one renamed its row to
+ * its task, so the transcript did not even say a subagent had started. From
+ * the desk it looked like nothing was delegated at all.
  */
 const REAL_OBJECTIVE =
   "/goal get acquainted with pathogeneer repo, assign bots to look at the way analystics is setup " +
@@ -76,6 +79,48 @@ test("ordinary code talk about agents, bots and workers starts nobody", () => {
     assert.equal(looksLikeSpawnRequest(ordinary), false, `should stay solo: ${ordinary}`);
   }
   assert.equal(looksLikeSpawnRequest("assign skeptic verifier subagents"), true);
+});
+
+test("a vendor's own subagent is named, not renamed away", () => {
+  // Replays exactly what Grok sent on 2026-08-18: the call opens as
+  // `spawn_subagent`, then the same toolCallId is updated to the task text.
+  // The update used to win, so four subagents left four rows that looked like
+  // any other tool call and the desk could not say anybody was out.
+  let messages: ChatMessage[] = [];
+  const slices = ["Audit GA4 iOS Play", "Audit referral system", "Compare Go7 Passport plan", "Verify monitoring changes"];
+  slices.forEach((slice, index) => {
+    const toolCallId = `call-cd9f0422-${index}`;
+    messages = upsertToolMessage(messages, { toolCallId, title: "spawn_subagent", status: "pending", detail: "" });
+    messages = upsertToolMessage(messages, { toolCallId, title: slice, status: "completed", detail: "" });
+  });
+
+  assert.equal(messages.length, 4, "one row per subagent, not two");
+  for (const [index, slice] of slices.entries()) {
+    const text = messages[index]!.text ?? "";
+    assert.match(text, /^Call subagent · completed/, `row ${index} still says who it is: ${text}`);
+    assert.ok(text.includes(slice), `row ${index} keeps its slice: ${text}`);
+  }
+  assert.equal(
+    messages.filter((message) => (message.text ?? "").startsWith("Call subagent")).length,
+    4,
+    "the desk can count who is out",
+  );
+});
+
+test("an ordinary tool row is still free to rename itself", () => {
+  // Grok opens an edit as `search_replace` and renames it to "Edit `path`".
+  // That rename is the useful one — only the subagent spawn is pinned.
+  let messages: ChatMessage[] = [];
+  messages = upsertToolMessage(messages, { toolCallId: "c1", title: "search_replace", status: "pending", detail: "" });
+  messages = upsertToolMessage(messages, {
+    toolCallId: "c1",
+    title: "Edit `/BioCascade/game/scripts/autoload/analytics_director.gd`",
+    status: "completed",
+    detail: "",
+  });
+  assert.equal(messages.length, 1);
+  assert.match(messages[0]!.text ?? "", /^Edit /);
+  assert.doesNotMatch(messages[0]!.text ?? "", /Call subagent/);
 });
 
 test("the rule keeps both halves, and Cursor never sees it", () => {

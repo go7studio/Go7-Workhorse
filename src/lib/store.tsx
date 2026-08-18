@@ -181,7 +181,8 @@ import {
   rootSpawnError,
   resolveSpawnSpec,
   findReusableWorker,
-  nextWorkerName,
+  reserveWorkerName,
+  type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
   spawnWaitsForReply,
@@ -683,6 +684,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
+  const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
   const grokChunkQueue = useRef<Record<string, string>>({});
@@ -4232,13 +4234,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRunId: assistantId,
               payload: { summary: `${spec.provider} ${spec.model} worker call started`, status: "started", hiddenWorker: true },
             });
-            const workerName =
-              priorWorker?.workerName ||
-              nextWorkerName(
-                latest.sessions
-                  .filter((item) => item.parentId === parent.id && item.workerName)
-                  .map((item) => item.workerName as string),
+            let workerName = priorWorker?.workerName;
+            if (!workerName) {
+              const reserved = reserveWorkerName(
+                workerNameReservations.current,
+                stateRef.current.sessions,
+                { workerId: childId, parentId: parent.id },
               );
+              workerNameReservations.current = reserved.reservations;
+              workerName = reserved.name;
+            }
             const child: Session = {
               // A reused worker keeps everything it already is — most of all
               // vendorSessionId, which IS its memory of the last slice. Only

@@ -4,6 +4,7 @@ import {
   WORKER_NAMES,
   findReusableWorker,
   nextWorkerName,
+  reserveWorkerName,
   workerIsFree,
   type WorkerRecord,
 } from "../src/lib/subagents";
@@ -42,6 +43,38 @@ test("names never run out and never collide", () => {
   const all = [...WORKER_NAMES];
   assert.equal(nextWorkerName(all), `${WORKER_NAMES[0]} 2`);
   assert.equal(nextWorkerName([...all, `${WORKER_NAMES[0]} 2`]), `${WORKER_NAMES[1]} 2`);
+});
+
+test("concurrent bot launches reserve distinct names before sessions commit", () => {
+  const committed = [worker({ id: "w1", workerName: "Wren", status: "running" })];
+  let reservations: ReturnType<typeof reserveWorkerName>["reservations"] = [];
+
+  const codex = reserveWorkerName(reservations, committed, { workerId: "w2", parentId: "boss" });
+  reservations = codex.reservations;
+  const claude = reserveWorkerName(reservations, committed, { workerId: "w3", parentId: "boss" });
+  reservations = claude.reservations;
+  const cursor = reserveWorkerName(reservations, committed, { workerId: "w4", parentId: "boss" });
+
+  assert.deepEqual([codex.name, claude.name, cursor.name], ["Dexter", "Marlow", "Piper"]);
+});
+
+test("committed workers replace temporary name reservations", () => {
+  const first = reserveWorkerName([], [worker()], { workerId: "w2", parentId: "boss" });
+  assert.equal(first.name, "Dexter");
+
+  const committed = [worker(), worker({ id: "w2", workerName: "Dexter", provider: "codex" })];
+  const second = reserveWorkerName(first.reservations, committed, { workerId: "w3", parentId: "boss" });
+
+  assert.equal(second.name, "Marlow");
+  assert.deepEqual(second.reservations, [{ workerId: "w3", parentId: "boss", name: "Marlow" }]);
+});
+
+test("worker names remain local to one orchestrator crew", () => {
+  const first = reserveWorkerName([], [], { workerId: "w1", parentId: "boss-a" });
+  const otherCrew = reserveWorkerName(first.reservations, [], { workerId: "w2", parentId: "boss-b" });
+
+  assert.equal(first.name, "Wren");
+  assert.equal(otherCrew.name, "Wren");
 });
 
 test("the idle worker on the same bot takes the next slice", () => {

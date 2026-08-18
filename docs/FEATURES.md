@@ -46,11 +46,10 @@ transcript rather than as a path.
 - Each chat row shows how old the last prompt is in a compact form such as
   `25m`, `2h`, or `3d`. Hover the stamp for the full time.
 - User and assistant turns in the transcript use the same clock.
-- A turn’s work popout keeps thinking and tool calls in the order they
-  happened: think, tools, think. Consecutive tool calls share one fold
-  labelled "3 tools"; expand it to see the calls listed underneath. A
-  later thought starts a new hop. The current hop stays open. Click a
-  finished dot to expand it again. The visible reply stays below that.
+- A turn’s work stays on one compact line while it runs. Open it when you
+  want the ordered detail: think, tools, think. Consecutive tool calls share
+  one fold labelled "3 tools"; a later thought starts a new hop. The visible
+  reply stays below that.
 
 ## Control
 
@@ -61,7 +60,8 @@ transcript rather than as a path.
 - **Execution directory** — a chat runs in a linked folder or in a managed git
   worktree, isolated from your working copy.
 - **Terminal** — chat-scoped, in that same directory.
-- **Git review** — see changed files and diffs for the work a chat did.
+- **Git review** — a compact Changes control beside the composer opens the
+  changed files and diffs for the work a chat did.
 - **Change instances** — a created file’s lines stay green. A later prompt that
   deletes some of them keeps those lines as red instances in the review, instead
   of shrinking the green count against empty / HEAD.

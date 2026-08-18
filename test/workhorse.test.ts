@@ -3743,8 +3743,18 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(sessionEdits, /padding:\s*0 22px;/);
+  assert.match(sessionEdits, /align-items:\s*flex-end/);
   assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
   assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact:not\(\.open\)\s*\{[^}]*width:\s*fit-content/,
+  );
+  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, 100%\)/);
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*flex:\s*0 0 auto/,
+  );
   assert.match(composerWrap, /padding:\s*8px 22px 16px/);
   assert.match(composerWrap, /flex:\s*0 0 auto/);
   assert.match(css, /\.session-edits-slot/);
@@ -5138,6 +5148,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /foldOpen/);
+  assert.match(popout, /<details className="work-pop">/);
+  assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
   assert.match(popout, /1 \? "tool" : "tools"/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);

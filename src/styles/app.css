@@ -1337,6 +1337,7 @@ html.pane-dragging * {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
   padding: 0 22px;
 }
@@ -1355,6 +1356,25 @@ html.pane-dragging * {
 .session-edits-slot.open .edited-block {
   opacity: 1;
   transform: translateY(0);
+}
+
+.session-edits .edited-block.compact:not(.open) {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 980px;
+}
+
+.session-edits .edited-block.compact.open {
+  width: min(420px, 100%);
+}
+
+.session-edits .edited-block.compact:not(.open) .edited-toggle {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  gap: 8px;
+  width: auto;
+  padding: 6px 10px;
+  border-radius: 980px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4062,6 +4062,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.doesNotMatch(pane, /onClose=\{\(\) => setEditsHidden/);
   const editedList = readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8");
   assert.match(editedList, /edited-toggle/);
+  assert.match(editedList, /closing/);
+  assert.match(editedList, /FOLD_MS/);
   assert.match(editedList, /startOpen/);
   assert.match(editedList, /showLineStats/);
   assert.match(editedList, /label = "Edited"/);
@@ -4134,12 +4136,15 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   );
   assert.match(
     css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\)\s*\{[^}]*width:\s*fit-content/,
+    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\)\s*\{[^}]*width:\s*fit-content/,
   );
-  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/);
   assert.match(
     css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*width:\s*auto/,
+    /\.session-edits \.edited-block\.compact\.open,\s*\.session-edits \.edited-block\.compact\.closing\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/,
+  );
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\) \.edited-toggle\s*\{[^}]*width:\s*auto/,
   );
   assert.match(composerWrap, /padding:\s*8px 22px 16px/);
   assert.match(composerWrap, /flex:\s*0 0 auto/);

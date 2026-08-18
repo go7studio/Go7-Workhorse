@@ -1361,14 +1361,14 @@ html.pane-dragging * {
   overflow: hidden;
 }
 
-.session-edits .edited-block.compact:not(.open) {
+.session-edits .edited-block.compact:not(.open):not(.closing) {
   width: fit-content;
   max-width: calc(100% - 44px);
   border-radius: 980px;
 }
 
-.session-edits .edited-block.compact:not(.open) .edited-files-slot,
-.session-edits .edited-block.compact:not(.open) .edited-files-slot > .file-list {
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot,
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-files-slot > .file-list {
   width: 0;
   min-width: 0;
   height: 0;
@@ -1379,15 +1379,17 @@ html.pane-dragging * {
   width: auto;
 }
 
-.session-edits .edited-block.compact.open {
+.session-edits .edited-block.compact.open,
+.session-edits .edited-block.compact.closing {
   width: min(420px, calc(100% - 44px));
 }
 
-.session-edits .edited-block.compact.open .edited-bar {
+.session-edits .edited-block.compact.open .edited-bar,
+.session-edits .edited-block.compact.closing .edited-bar {
   width: 100%;
 }
 
-.session-edits .edited-block.compact:not(.open) .edited-toggle {
+.session-edits .edited-block.compact:not(.open):not(.closing) .edited-toggle {
   flex: 0 0 auto;
   justify-content: flex-start;
   gap: 8px;

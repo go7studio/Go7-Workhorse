@@ -1,4 +1,6 @@
-import { memo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+
+const FOLD_MS = 200;
 import { formatDiffStat } from "../lib/file-diff";
 import {
   editPathKey,
@@ -36,6 +38,8 @@ export const EditedList = memo(function EditedList({
 }) {
   const store = useStore();
   const [open, setOpen] = useState(startOpen ?? !compact);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const heldStats = useRef(stats);
   heldStats.current = holdEditStats(
     heldStats.current,
@@ -43,6 +47,23 @@ export const EditedList = memo(function EditedList({
     edits.map((item) => item.path),
   );
   const shownStats = heldStats.current;
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  const toggleOpen = () => {
+    if (!compact) {
+      setOpen((value) => !value);
+      return;
+    }
+    if (open) {
+      setOpen(false);
+      setClosing(true);
+      clearTimeout(closeTimer.current);
+      closeTimer.current = setTimeout(() => setClosing(false), FOLD_MS);
+      return;
+    }
+    clearTimeout(closeTimer.current);
+    setClosing(false);
+    setOpen(true);
+  };
   if (compact && edits.length === 0) return null;
   const totalAdded = edits.reduce((sum, item) => sum + (statForPath(shownStats, item.path)?.added ?? 0), 0);
   const totalDeleted = edits.reduce((sum, item) => sum + (statForPath(shownStats, item.path)?.deleted ?? 0), 0);
@@ -60,14 +81,14 @@ export const EditedList = memo(function EditedList({
   );
 
   return (
-    <div className={`link-block edited-block${compact ? " compact" : ""}${compact && open ? " open" : ""}`}>
+    <div className={`link-block edited-block${compact ? " compact" : ""}${compact && open ? " open" : ""}${compact && closing ? " closing" : ""}`}>
       {compact ? (
         <div className="edited-bar">
           <button
             className="edited-toggle"
             type="button"
             aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
+            onClick={toggleOpen}
           >
             <span className="section-label" style={{ margin: 0 }}>
               {label}
@@ -85,7 +106,7 @@ export const EditedList = memo(function EditedList({
       )}
       {edits.length === 0 && empty ? <p className="row-meta">{empty}</p> : null}
       {edits.length > 0 ? (
-        <div className="edited-files-slot" aria-hidden={compact && !open}>
+        <div className="edited-files-slot" aria-hidden={compact && !open && !closing}>
           <ul className="file-list">
           {edits.map((item) => {
             const line = statForPath(shownStats, item.path);

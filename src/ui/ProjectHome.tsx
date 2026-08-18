@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
-import { holdEditStats, projectFileChanges, sameEditPath, type ProjectEdit } from "../lib/project-edits";
+import {
+  editListKey,
+  holdEditStats,
+  markStatsFetched,
+  projectFileChanges,
+  projectWritesKey,
+  sameEditList,
+  sameEditPath,
+  startEditStatsHarvest,
+  type ProjectEdit,
+} from "../lib/project-edits";
 import { useActiveProject, useStore } from "../lib/store";
 import { EditedList } from "./EditedList";
 import { FileViewer } from "./FileViewer";
@@ -17,7 +27,12 @@ export function ProjectHome() {
   const [hidden, setHidden] = useState<string[]>([]);
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const [heldVisible, setHeldVisible] = useState<ProjectEdit[]>([]);
+  const fetchedStats = useRef<Record<string, string>>({});
   const roots = useMemo(() => project?.folders.map((folder) => folder.path) ?? [], [project]);
+  const writesKey = useMemo(
+    () => (project ? projectWritesKey(store.sessions, project.id) : ""),
+    [project?.id, store.sessions],
+  );
   const changes = useMemo(
     () =>
       project
@@ -26,7 +41,7 @@ export function ProjectHome() {
             roots,
           )
         : { created: [], edited: [] },
-    [project, store.sessions, roots],
+    [writesKey, roots, project],
   );
   const listed = useMemo(() => [...changes.created, ...changes.edited], [changes]);
   const visible = useMemo(
@@ -34,7 +49,7 @@ export function ProjectHome() {
     [listed, hidden],
   );
   const display = visible.length > 0 ? visible : listed.length > 0 ? [] : heldVisible;
-  const editKey = listed.map((item) => `${item.path}:${item.edits}:${item.at}`).join("\n");
+  const editKey = editListKey(listed);
   const liveOpen = open ? (display.find((item) => sameEditPath(item.path, open.path)) ?? open) : null;
   const rootKey = roots.join("\n");
 
@@ -45,25 +60,34 @@ export function ProjectHome() {
     setHidden([]);
     setHeldVisible([]);
     setStats({});
+    fetchedStats.current = {};
   }, [project?.id]);
 
   useEffect(() => {
-    if (visible.length > 0) setHeldVisible(visible);
+    fetchedStats.current = {};
+  }, [rootKey]);
+
+  useEffect(() => {
+    if (visible.length === 0) return;
+    setHeldVisible((previous) => (sameEditList(previous, visible) ? previous : visible));
   }, [visible]);
 
   useEffect(() => {
-    if (!window.workhorse?.editStats || listed.length === 0) return;
+    const api = window.workhorse;
+    if (!api?.editStats || listed.length === 0) return;
     const paths = listed.map((item) => item.path);
-    const created = changes.created.map((item) => item.path);
-    let cancelled = false;
-    void window.workhorse.editStats(paths, roots, created).then((next) => {
-      if (cancelled) return;
-      setStats((previous) => holdEditStats(previous, next, paths));
+    return startEditStatsHarvest({
+      items: listed,
+      getFetched: () => fetchedStats.current,
+      rootKey,
+      roots,
+      editStats: (files, folders, created) => api.editStats(files, folders, created),
+      onChunk: (next, stale) => {
+        fetchedStats.current = markStatsFetched(fetchedStats.current, stale, rootKey);
+        setStats((previous) => holdEditStats(previous, next, paths));
+      },
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [editKey, rootKey, listed, roots, changes.created]);
+  }, [editKey, rootKey, project?.id]);
 
   if (!project) return null;
 

@@ -5,9 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { applyLineDiff, splitLines } from "../src/lib/file-diff";
-import { growInstanceBaseline, rememberInstance, reviewCreatedDiff } from "../src/lib/file-instances";
-import { findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance } from "../electron/project-diff";
+import { applyLineDiff, countLineChanges, countLineDelta, countLines, lineDiff, splitLines } from "../src/lib/file-diff";
+import { countCreatedReview, growInstanceBaseline, instancePathKey, rememberInstance, reviewCreatedDiff } from "../src/lib/file-instances";
+import { countMotion } from "../src/lib/count";
+import { editListKey, markStatsFetched, planEditStatsHarvest, projectWritesKey, startEditStatsHarvest, takeEditStatsChunk } from "../src/lib/project-edits";
+import { countFileLines, dottedConfigAlt, findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance, resolveExistingFile } from "../electron/project-diff";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -114,6 +116,9 @@ test("Project Home lists +/- stats and FileViewer colors add/del lines", () => {
   assert.match(home, /FileViewer/);
   assert.match(home, /editStats/);
   assert.match(home, /holdEditStats/);
+  assert.match(home, /startEditStatsHarvest/);
+  assert.match(home, /projectWritesKey/);
+  assert.match(home, /\[editKey, rootKey, project\?\.id\]/);
   assert.doesNotMatch(home, /showLineStats=\{false\}/);
   assert.doesNotMatch(home, /FileReview/);
   const viewer = readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8");
@@ -121,10 +126,16 @@ test("Project Home lists +/- stats and FileViewer colors add/del lines", () => {
   assert.match(viewer, /diff-line/);
   assert.match(viewer, /sameEditPath/);
   assert.match(viewer, /pathChanged/);
-  assert.doesNotMatch(viewer, /file-close-x/);
+  assert.match(viewer, /file-close-x/);
+  assert.match(viewer, /viewOnly/);
+  assert.match(viewer, /showDiffStat/);
+  assert.match(viewer, /diff\.added > 0 \|\| diff\.deleted > 0/);
+  assert.match(viewer, /editSearchRoots/);
+  assert.match(viewer, /Folder\./);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
-  assert.match(pane, /item\.edits/);
-  assert.match(pane, /item\.at/);
+  assert.match(pane, /editListKey\(edits\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "project-edits.ts"), "utf8"), /item\.edits/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "project-edits.ts"), "utf8"), /item\.at/);
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /readSourceText/);
   assert.match(main, /findSourceFile/);
@@ -133,6 +144,293 @@ test("Project Home lists +/- stats and FileViewer colors add/del lines", () => {
   assert.match(main, /fileInstances/);
   assert.match(viewer, /file\.edits/);
   assert.match(viewer, /file\.at/);
+});
+
+test("home edit stats count a large created batch once and do not grow instances", () => {
+  const root = path.join("C:", "game");
+  const paths = Array.from({ length: 14 }, (_, index) => path.join(root, `file-${index}.gd`));
+  const body = `${Array.from({ length: 1678 }, (_, index) => `line ${index}`).join("\n")}\n`;
+  const files = new Map(paths.map((item) => [item, body]));
+  const instances = new Map<string, string>();
+  let reads = 0;
+  const input = {
+    instances,
+    existsSync: (item: string) => files.has(item),
+    readFile: (item: string) => {
+      reads += 1;
+      return files.get(item) ?? "";
+    },
+    isDir: () => false,
+    gitShow: () => null,
+  };
+  const first = readEditStats(paths, [root], input, paths);
+  assert.equal(first[paths[0]!]?.added, 1678);
+  assert.equal(first[paths[0]!]?.deleted, 0);
+  assert.equal(first[paths[13]!]?.added, 1678);
+  assert.equal(instances.size, 0);
+  assert.equal(reads, 14);
+  const painted = rememberInstance(instances, paths[0]!, body);
+  assert.equal(instancePathKey(paths[0]!), instancePathKey(path.join("C:", "game", "file-0.gd")));
+  const afterRemember = readEditStats([paths[0]!], [root], input, [paths[0]!]);
+  assert.deepEqual(afterRemember[paths[0]!], { added: 1678, deleted: 0 });
+  assert.equal(instances.get(instancePathKey(paths[0]!)), painted);
+  assert.deepEqual(countCreatedReview(body, body), { added: 1678, deleted: 0 });
+  files.set(paths[0]!, `${body}extra\n`);
+  const later = readEditStats([paths[0]!], [root], input, [paths[0]!]);
+  assert.deepEqual(later[paths[0]!], { added: 1679, deleted: 0 });
+  assert.equal(instances.get(instancePathKey(paths[0]!)), painted);
+});
+
+test("Project Home list stats stay cheap after they are known", () => {
+  const root = path.join("C:", "game");
+  const gitDir = path.join(root, ".git");
+  const paths = Array.from({ length: 14 }, (_, index) => path.join(root, `file-${index}.gd`));
+  const after = `${Array.from({ length: 1678 }, (_, index) => `line ${index}`).join("\n")}\n`;
+  const before = `${Array.from({ length: 1600 }, (_, index) => `old ${index}`).join("\n")}\n`;
+  const files = new Map(paths.map((item) => [item, after]));
+  let gitShows = 0;
+  let reads = 0;
+  let numstats = 0;
+  let walks = 0;
+  const created = paths.slice(0, 10);
+  const edited = paths.slice(10);
+  const input = {
+    existsSync: (item: string) => item === gitDir || item === root || files.has(item),
+    isDir: (item: string) => item === root || item === gitDir,
+    readdir: () => {
+      walks += 1;
+      return [];
+    },
+    readFile: (item: string) => {
+      reads += 1;
+      return files.get(item) ?? "";
+    },
+    gitShow: () => {
+      gitShows += 1;
+      return before;
+    },
+    gitNumstat: () => {
+      numstats += 1;
+      return Object.fromEntries(edited.map((item) => [item, { added: 12, deleted: 2 }]));
+    },
+  };
+
+  const first = readEditStats(paths, [root], input, created);
+  assert.equal(first[paths[0]!]?.added, 1678);
+  assert.equal(first[paths[0]!]?.deleted, 0);
+  assert.deepEqual(first[paths[10]!], { added: 12, deleted: 2 });
+  assert.equal(gitShows, 0);
+  assert.equal(walks, 0);
+  assert.equal(numstats, 1);
+  assert.equal(reads, created.length);
+
+  const listed = paths.map((item, index) => ({
+    path: item,
+    edits: 1,
+    at: 1_000 + index,
+    kind: index < 10 ? ("created" as const) : ("edited" as const),
+  }));
+  let fetched = markStatsFetched({}, listed, root);
+  let harvests = 0;
+  const tick = () => {
+    const plan = planEditStatsHarvest(
+      listed.map((item) => ({ ...item })),
+      fetched,
+      root,
+    );
+    if (!plan) return;
+    harvests += 1;
+    readEditStats(
+      plan.stale.map((item) => item.path),
+      [root],
+      input,
+      plan.created,
+    );
+    fetched = markStatsFetched(fetched, plan.stale, root);
+  };
+  for (let index = 0; index < 20; index += 1) tick();
+  assert.equal(harvests, 0);
+  assert.equal(gitShows, 0);
+  assert.equal(editListKey(listed), editListKey(listed.map((item) => ({ ...item }))));
+  assert.equal(
+    projectWritesKey([
+      {
+        id: "s1",
+        projectId: "p1",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "high",
+        title: "Game",
+        mode: "ask",
+        sandbox: "off",
+        status: "idle",
+        contextUsed: 0,
+        messages: [
+          { id: "t1", role: "system", kind: "tool", text: "Write · completed — file-0.gd", createdAt: 10 },
+        ],
+      },
+    ], "p1"),
+    projectWritesKey([
+      {
+        id: "s1",
+        projectId: "p1",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "high",
+        title: "Game",
+        mode: "ask",
+        sandbox: "off",
+        status: "running",
+        contextUsed: 99,
+        messages: [
+          { id: "t1", role: "system", kind: "tool", text: "Write · completed — file-0.gd", createdAt: 10 },
+        ],
+      },
+    ], "p1"),
+  );
+
+  assert.equal(countLines(after), 1678);
+  assert.deepEqual(countLineDelta("", after), { added: 1678, deleted: 0 });
+  assert.deepEqual(countLineDelta("keep\nold\n", "keep\nnew\n"), countLineChanges(lineDiff("keep\nold\n", "keep\nnew\n")));
+  assert.equal(countMotion(0, 1678), "snap");
+  assert.equal(countMotion(0, 40), "ease");
+  assert.equal(countMotion(12, 12), "same");
+
+  const statsSrc = readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8");
+  const statsFn = statsSrc.slice(statsSrc.indexOf("export function readEditStats"), statsSrc.indexOf("export function readSourceText"));
+  assert.doesNotMatch(statsFn, /\blineDiff\b/);
+  assert.doesNotMatch(statsFn, /\bbuildFileDiff\b/);
+  assert.doesNotMatch(statsFn, /\breadFileDiff\b/);
+  assert.doesNotMatch(statsFn, /gitShow/);
+  const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
+  assert.match(home, /startEditStatsHarvest/);
+  assert.match(home, /projectWritesKey/);
+  const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
+  assert.match(diffStat, /countMotion/);
+  assert.doesNotMatch(diffStat, /requestAnimationFrame\(tick\).*countMotion/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.project-overview \.edited-block\.compact \.edited-files-slot[\s\S]*?transition:\s*none/);
+});
+
+test("first harvest does not do N sync full-file reads on the first call", async () => {
+  const root = path.join("C:", "game");
+  const paths = Array.from({ length: 14 }, (_, index) => path.join(root, `ship-${index}.gd`));
+  const body = `${Array.from({ length: 1678 }, (_, index) => `line ${index}`).join("\n")}\n`;
+  const files = new Map(paths.map((item) => [item, body]));
+  let reads = 0;
+  let counts = 0;
+  const listed = paths.map((item, index) => ({
+    path: item,
+    edits: 1,
+    at: 1_000 + index,
+    kind: "created" as const,
+  }));
+  const firstChunk = takeEditStatsChunk(listed, {}, root);
+  assert.ok(firstChunk);
+  assert.equal(firstChunk.stale.length, 1);
+  assert.equal(firstChunk.created.length, 1);
+  assert.notEqual(firstChunk.stale.length, paths.length);
+
+  const input = {
+    existsSync: (item: string) => item === root || files.has(item),
+    isDir: (item: string) => item === root,
+    readdir: () => [] as string[],
+    readFile: (item: string) => {
+      reads += 1;
+      return files.get(item) ?? "";
+    },
+    countLinesAt: (item: string) => {
+      counts += 1;
+      return countLines(files.get(item) ?? "");
+    },
+    gitShow: () => null,
+  };
+  const first = readEditStats(
+    firstChunk.stale.map((item) => item.path),
+    [root],
+    input,
+    firstChunk.created,
+  );
+  assert.equal(first[paths[0]!]?.added, 1678);
+  assert.ok(reads <= 1);
+  assert.ok(counts <= 1);
+  assert.ok(reads + counts <= 1);
+
+  reads = 0;
+  counts = 0;
+  const queued: Array<() => void> = [];
+  let fetched: Record<string, string> = {};
+  const cancel = startEditStatsHarvest({
+    items: listed,
+    getFetched: () => fetched,
+    rootKey: root,
+    roots: [root],
+    editStats: async (stale, folders, created) =>
+      readEditStats(
+        stale,
+        folders,
+        {
+          ...input,
+          readFile: (item: string) => {
+            reads += 1;
+            return files.get(item) ?? "";
+          },
+          countLinesAt: (item: string) => {
+            counts += 1;
+            return countLines(files.get(item) ?? "");
+          },
+        },
+        created,
+      ),
+    onChunk: (_next, stale) => {
+      fetched = markStatsFetched(fetched, stale, root);
+    },
+    schedule: (work) => {
+      queued.push(work);
+      return () => {};
+    },
+  });
+  assert.equal(reads, 0);
+  assert.equal(counts, 0);
+  assert.equal(queued.length, 1);
+  queued.shift()!();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(reads < paths.length);
+  assert.ok(counts < paths.length);
+  assert.ok(reads <= 1);
+  assert.equal(takeEditStatsChunk(listed, fetched, root)?.stale.length, 1);
+  cancel();
+
+  const batchedReads = { n: 0 };
+  const all = readEditStats(
+    paths,
+    [root],
+    {
+      existsSync: (item: string) => files.has(item),
+      isDir: () => false,
+      readFile: () => {
+        batchedReads.n += 1;
+        return body;
+      },
+      countLinesAt: () => 1678,
+    },
+    paths,
+  );
+  assert.equal(all[paths[13]!]?.added, 1678);
+  assert.equal(batchedReads.n, 0);
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-count-lines-"));
+  const sample = path.join(tmp, "ship.gd");
+  writeFileSync(sample, body);
+  assert.equal(countFileLines(sample), 1678);
+  assert.equal(countFileLines(path.join(tmp, "missing.gd")), 0);
+  rmSync(tmp, { recursive: true, force: true });
+
+  const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
+  assert.match(home, /startEditStatsHarvest/);
+  assert.doesNotMatch(home, /await window\.workhorse\.editStats/);
+  assert.match(home, /<EditedList[\s\S]*stats=\{stats\}/);
 });
 
 test("non-git existing file is not a fake whole-file add; created is all adds", () => {
@@ -307,4 +605,84 @@ test("findSourceFile walks .walk and skips .git; created stats are non-zero", ()
   const stats = readEditStats(["audit.mjs"], [root], input, ["audit.mjs"]);
   assert.ok(stats["audit.mjs"].added > 0);
   assert.equal(stats["audit.mjs"].deleted, 0);
+});
+
+test("absolute cite outside the project is not joined onto the project folder", () => {
+  const project = path.join("C:", "Users", "lgovo", "Projects", "talk-in-talk-in");
+  const real = path.join("C:", "Users", "lgovo", "openclaw", "openclaw.json");
+  const decoy = path.join(project, "openclaw.json");
+  const files = new Set([real]);
+  const dirs = new Set([project, path.dirname(real), path.dirname(project)]);
+  const input = {
+    existsSync: (item: string) => files.has(item) || dirs.has(item),
+    isDir: (item: string) => dirs.has(item),
+    readdir: () => [] as string[],
+    readFile: (item: string) => (item === real ? '{"gateway":true}\n' : ""),
+  };
+  assert.equal(findSourceFile(real, [project], input), real);
+  assert.equal(findSourceFile("openclaw.json", [project], input), null);
+  assert.equal(resolveExistingFile(real, [project], input.existsSync, input), real);
+  assert.notEqual(path.normalize(real), path.normalize(decoy));
+  const read = readSourceText(real, [project], input);
+  assert.equal(read.missing, false);
+  assert.equal(read.path, real);
+  assert.match(read.text, /gateway/);
+  const missing = readSourceText(real, [project], {
+    ...input,
+    existsSync: (item: string) => dirs.has(item),
+  });
+  assert.equal(missing.missing, true);
+  assert.equal(missing.path, real);
+
+  const dotted = path.join("C:", "Users", "lgovo", ".openclaw", "openclaw.json");
+  const citedMissing = path.join("C:", "Users", "lgovo", "openclaw", "openclaw.json");
+  const key = (item: string) => item.replaceAll("\\", "/").toLowerCase();
+  assert.equal(key(dottedConfigAlt(citedMissing)), key(dotted));
+  const hidden = {
+    existsSync: (item: string) => key(item) === key(dotted),
+    isDir: () => false,
+    readdir: () => [] as string[],
+    readFile: (item: string) => (key(item) === key(dotted) ? '{"gateway":true}\n' : ""),
+  };
+  assert.equal(key(findSourceFile(citedMissing, [project], hidden) ?? ""), key(dotted));
+  const hiddenRead = readSourceText(citedMissing, [project], hidden);
+  assert.equal(hiddenRead.missing, false);
+  assert.equal(key(hiddenRead.path), key(dotted));
+});
+
+test("findSourceFile strips char suffixes and prefers an existing folder-tag file", () => {
+  const root = path.join("C:", "game");
+  const audioDir = path.join(root, "audio");
+  const real = path.join(audioDir, "foo.md");
+  const catalog = path.join(audioDir, "audio_catalog.gd");
+  const bogus = path.join(root, "foo.md (34441 chars)");
+  const dirs = new Set([root, audioDir].map((item) => path.normalize(item)));
+  const files = new Set([real, catalog].map((item) => path.normalize(item)));
+  const input = {
+    existsSync: (item: string) => dirs.has(path.normalize(item)) || files.has(path.normalize(item)),
+    isDir: (item: string) => dirs.has(path.normalize(item)),
+    readdir: (dir: string) => {
+      const norm = path.normalize(dir);
+      if (norm === path.normalize(root)) return ["audio"];
+      if (norm === path.normalize(audioDir)) return ["foo.md", "audio_catalog.gd"];
+      return [];
+    },
+    readFile: (item: string) => (files.has(path.normalize(item)) ? "ok\n" : ""),
+  };
+  assert.equal(path.normalize(findSourceFile("foo.md (34441 chars)", [root], input) ?? ""), path.normalize(real));
+  assert.equal(path.normalize(findSourceFile(bogus, [root], input) ?? ""), path.normalize(real));
+  assert.equal(path.normalize(findSourceFile(path.join(root, "foo.md"), [root], input) ?? ""), path.normalize(real));
+  assert.equal(
+    path.normalize(findSourceFile(path.join(root, "audio_catalog.gd"), [root], input) ?? ""),
+    path.normalize(catalog),
+  );
+  assert.equal(findSourceFile(root, [root], input), null);
+  const folder = readSourceText(root, [root], input);
+  assert.equal(folder.directory, true);
+  assert.equal(folder.missing, false);
+  const painted = readFileDiff(root, [root], input);
+  assert.equal(painted.directory, true);
+  const text = readSourceText("foo.md (34441 chars)", [root], input);
+  assert.equal(text.missing, false);
+  assert.equal(path.normalize(text.path), path.normalize(real));
 });

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
-import { fileFolderFromPath, fileNameFromPath, holdEditStats, mergeEdits, projectEdits, sameEditPath, type ProjectEdit } from "../lib/project-edits";
+import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { brainCaption, brainStamp, messageBrain } from "../lib/session";
@@ -43,6 +43,7 @@ export function SessionPane() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [hiddenByChat, setHiddenByChat] = useState<Record<string, string[]>>({});
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
+  const fetchedStats = useRef<Record<string, string>>({});
   const [heldEdits, setHeldEdits] = useState<ProjectEdit[]>([]);
   const [editsBarOpen, setEditsBarOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -76,7 +77,7 @@ export function SessionPane() {
     [edits, hiddenPaths],
   );
   const displayEdits = visible.length > 0 ? visible : heldEdits;
-  const editKey = edits.map((item) => `${item.path}:${item.edits}:${item.at}`).join("\n");
+  const editKey = editListKey(edits);
   const liveOpen = open
     ? (displayEdits.find((item) => sameEditPath(item.path, open.path)) ?? open)
     : null;
@@ -91,7 +92,12 @@ export function SessionPane() {
     setHeldEdits([]);
     setEditsBarOpen(false);
     setStats({});
+    fetchedStats.current = {};
   }, [session?.id]);
+
+  useEffect(() => {
+    fetchedStats.current = {};
+  }, [fileRootKey]);
 
   useEffect(() => {
     if (visible.length > 0) {
@@ -115,18 +121,21 @@ export function SessionPane() {
   }, [visible, edits.length]);
 
   useEffect(() => {
-    if (!window.workhorse?.editStats || edits.length === 0) return;
+    const api = window.workhorse;
+    if (!api?.editStats || edits.length === 0) return;
     const paths = edits.map((item) => item.path);
-    const created = edits.filter((item) => item.kind === "created").map((item) => item.path);
-    let cancelled = false;
-    void window.workhorse.editStats(paths, fileRoots, created).then((next) => {
-      if (cancelled) return;
-      setStats((previous) => holdEditStats(previous, next, paths));
+    return startEditStatsHarvest({
+      items: edits,
+      getFetched: () => fetchedStats.current,
+      rootKey: fileRootKey,
+      roots: fileRoots,
+      editStats: (files, folders, created) => api.editStats(files, folders, created),
+      onChunk: (next, stale) => {
+        fetchedStats.current = markStatsFetched(fetchedStats.current, stale, fileRootKey);
+        setStats((previous) => holdEditStats(previous, next, paths));
+      },
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [editKey, fileRootKey]);
+  }, [editKey, fileRootKey, session?.id]);
 
   useEffect(() => {
     followBottom.current = true;
@@ -184,6 +193,7 @@ export function SessionPane() {
     <FileOpenProvider
       roots={fileRoots}
       provider={session.provider}
+      nearby={session.messages.map((message) => message.text).join("\n")}
       onOpen={(file) => {
         const known = edits.find((item) => sameEditPath(item.path, file.path));
         const next = known ? { ...file, kind: file.kind ?? known.kind } : file;
@@ -223,6 +233,7 @@ export function SessionPane() {
                       edits: 1,
                       at: Date.now(),
                       provider: session.provider,
+                      customBotId: session.customBotId,
                     }));
                     setExtraEdits((current) => mergeEdits(current, found));
                     if (found[0]) {
@@ -268,7 +279,7 @@ export function SessionPane() {
           const assistantText = block.assistant.text ?? "";
           const peeled = peelPlanningPreamble(assistantText, live);
           const steps = displayWorkSteps(block, { live });
-          const body = unsquashSentences(peeled.body || (!live ? assistantText : ""));
+          const body = unsquashSentences(peeled.body);
           const who = brainCaption(
             messageBrain(block.assistant, brainStamp(session)),
             store.settings.customBots,

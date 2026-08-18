@@ -59,8 +59,14 @@ transcript rather than as a path.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share
-  one fold labelled "3 tools"; a later thought starts a new hop. The visible
-  reply stays below that.
+  one fold labelled "3 tools"; expand it to see the calls listed underneath, not
+  a row of "1 tool". A single call shows its name. A later thought starts a new
+  hop. When a turn runs long, earlier thoughts and tools roll into an Earlier
+  fold you can open again. The current hop stays open. The visible reply stays
+  below that.
+- Grok tables keep their real columns. Empty `| |` / `|---|` chrome is
+  dropped, and a path with a size suffix such as `foo.md (34441 chars)`
+  still opens.
 
 ## Control
 
@@ -72,10 +78,15 @@ transcript rather than as a path.
   worktree, isolated from your working copy.
 - **Terminal** — chat-scoped, in that same directory.
 - **Git review** — a compact Changes control beside the composer opens the
-  changed files and diffs for the work a chat did.
+  changed files and diffs for the work a chat did. Click a row to open the
+  file beside the chat or as the project-home pane. +0/−0 stays hidden.
+  Line stats load in the background and do not re-diff the list once they
+  are known.
 - **Change instances** — a created file’s lines stay green. A later prompt that
   deletes some of them keeps those lines as red instances in the review, instead
-  of shrinking the green count against empty / HEAD.
+  of shrinking the green count against empty / HEAD. Paths such as
+  OpenClaw configs outside the project folder still resolve from the
+  cite in the transcript.
 
 ## Spend
 

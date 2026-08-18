@@ -42,12 +42,19 @@ export function shortDisplayPath(value: string): string {
   return /^[A-Za-z]:[\\/]/.test(trimmed) ? tail.replace(/\//g, "\\") : tail;
 }
 
+/** Tool titles often keep `Wrote path (34441 chars)` — that suffix is not the file. */
+const PATH_SIZE_SUFFIX = /\s+\((?:\d{1,3}(?:,\d{3})*|\d+)\s*chars\)$/i;
+
+export function stripPathSizeSuffix(value: string): string {
+  return value.replace(PATH_SIZE_SUFFIX, "").trim();
+}
+
 export function pathFromToolText(text: string): string {
   const { title, detail } = splitToolLine(text);
   const tick = title.match(/`([^`]+)`/)?.[1] ?? "";
   const win = title.match(/[A-Za-z]:[\\/][^\s`]+/)?.[0] ?? "";
   for (const raw of [detail, tick, win]) {
-    const value = raw.trim().replace(/^`+|`+$/g, "");
+    const value = stripPathSizeSuffix(raw.trim().replace(/^`+|`+$/g, ""));
     if (!value || hasLineBreak(value)) continue;
     if (/^[A-Za-z]:[\\/]/.test(value) || value.includes("/") || value.includes("\\") || /\.[a-z0-9]{1,8}$/i.test(value)) {
       return value;

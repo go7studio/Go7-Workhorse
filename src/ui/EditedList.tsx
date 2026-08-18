@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { formatDiffStat } from "../lib/file-diff";
 import {
   editPathKey,
@@ -7,10 +7,11 @@ import {
   statForPath,
   type ProjectEdit,
 } from "../lib/project-edits";
-import { providerById } from "../lib/providers";
+import { deskInk, deskLabel } from "../lib/settings";
+import { useStore } from "../lib/store";
 import { DiffStat } from "./DiffStat";
 
-export function EditedList({
+export const EditedList = memo(function EditedList({
   edits,
   stats,
   empty,
@@ -33,6 +34,7 @@ export function EditedList({
   onOpen: (file: ProjectEdit) => void;
   onDismiss?: (file: ProjectEdit) => void;
 }) {
+  const store = useStore();
   const [open, setOpen] = useState(startOpen ?? !compact);
   const heldStats = useRef(stats);
   heldStats.current = holdEditStats(
@@ -92,6 +94,8 @@ export function EditedList({
             const showRowStat = showLineStats && added != null && deleted != null && (added > 0 || deleted > 0);
             const kindLabel = item.kind === "created" ? "Created" : "Edited";
             const count = `${item.edits} ${unit}${item.edits === 1 || unit === "new" ? "" : "s"}`;
+            const ink = deskInk(item, store.settings);
+            const who = deskLabel(item, store.settings);
             return (
               <li key={editPathKey(item.path)} className={onDismiss ? "file-item" : undefined}>
                 <button
@@ -123,8 +127,11 @@ export function EditedList({
                   <span className="file-meta">
                     {showRowStat ? <DiffStat added={added ?? 0} deleted={deleted ?? 0} /> : null}
                     <span className="file-when">
-                      <i className={`dot ${item.provider}`} />
-                      {providerById(item.provider).name}
+                      <i
+                        className={`dot ${item.provider}`}
+                        style={ink ? { background: ink, color: ink } : undefined}
+                      />
+                      {who}
                       <span aria-hidden="true">·</span>
                       {formatEditWhen(item.at)}
                     </span>
@@ -148,4 +155,4 @@ export function EditedList({
       ) : null}
     </div>
   );
-}
+});

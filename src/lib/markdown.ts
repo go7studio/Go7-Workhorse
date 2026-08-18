@@ -131,7 +131,13 @@ export function unsquashSentences(text: string): string {
 }
 
 const PLANNING_LEAD =
-  /^(I'|I'll|I will|I am|I'm|Let me|Looking|Checking|First[, ]|The (user|sidebar|connected)|Here are the ones|No "|OK[,—]|Okay[,—]|Excellent|Then (I |let |determine)|But —|Wait[, ]|Actually[, ]|Hmm|I (should|notice|noticed|can't|cannot|need to))/i;
+  /^(I'|I'll|I[’']ll|I will|I am|I'm|I[’']m|Let me|Looking|Checking|Listing|Joining|Sending|Confirming|Binding|First[, ]|The (user|sidebar|connected|shell|file|write_file|tool|Set-Content|append|current file|previous)|Here are the ones|No "|OK[,—]|Okay[,—]|Excellent|Then (I |let |determine)|But —|Wait[, ]|Actually[, ]|Hmm|I (should|notice|noticed|can't|can[’']t|cannot|need to)|Now (I |I'll |I[’']ll |let |write )|Confirmed:|Good[ —–,.]|Plan:|Better plan|Approach:|File got|OK that|Quick sanity|Final verification|Project should |Project is already |Project is bound )/i;
+
+const PROCESS_NARRATION =
+  /\b(write_file|read_file|run_command|findstr|Set-Content|Get-Content|Add-Content|AppendAllText|Out-File|PLACEHOLDER_TAIL|truncated mid-sentence|char limit|em-dashes?)\b/i;
+
+const PROCESS_SENTENCE =
+  /^(I['’]ll |I will |I am going to |I['’]m going to |Let me |Looking |Checking |Listing |Joining |Sending |Confirming |Binding |Project should |Project is already |Project is bound )/i;
 
 const USER_LEAD =
   /^(I want to|What I can do|The honest answer|If you|There are more|This chat|Here(?:'s| is)|Done\b|Sure[—,]|Sorry[, ]|No files were|Yes\s*[—–-])/i;
@@ -146,7 +152,88 @@ function firstLine(text: string): string {
 function isPlanningParagraph(text: string): boolean {
   const first = firstLine(text);
   if (USER_LEAD.test(first)) return false;
-  return PLANNING_LEAD.test(first) || /\s{2,}>\s/.test(text);
+  if (/^#{1,6}\s/.test(first) || isTableLine(first)) return false;
+  if (OUTPUT_LINE.test(first) && !PROCESS_NARRATION.test(text)) return false;
+  return (
+    PLANNING_LEAD.test(first) ||
+    PROCESS_SENTENCE.test(first) ||
+    PROCESS_NARRATION.test(text) ||
+    /\s{2,}>\s/.test(text)
+  );
+}
+
+function containsMarkdownTable(text: string): boolean {
+  return text.split("\n").some((line) => isTableLine(line));
+}
+
+function isLockedAnswerParagraph(text: string): boolean {
+  const first = firstLine(text);
+  if (!first) return false;
+  if (/^#{1,6}\s/.test(first) || isTableLine(first) || containsMarkdownTable(text) || /^>\s+\S/.test(first) || /^Preview:/i.test(first)) {
+    return true;
+  }
+  if (OUTPUT_LINE.test(first) && !PROCESS_NARRATION.test(text)) return true;
+  return USER_LEAD.test(first);
+}
+
+/** True when a cut lead is only mid-turn process — never a report that happens to contain an I'll. */
+function leadIsOnlyProcess(lead: string): boolean {
+  const trimmed = lead.trim();
+  if (!trimmed) return false;
+  if (containsMarkdownTable(trimmed) || /^#{1,6}\s/m.test(trimmed)) return false;
+  const sentences = splitReplySentences(trimmed);
+  if (sentences.length === 0) return false;
+  return sentences.every((sentence) => isProcessSentence(sentence) || Boolean(polarityKey(sentence)));
+}
+
+/** Short reasoning that starts like a hidden draft, not a user-facing report. */
+function shouldCutLead(lead: string): boolean {
+  if (leadIsOnlyProcess(lead)) return true;
+  const trimmed = lead.trim();
+  if (!trimmed || containsMarkdownTable(trimmed) || /^#{1,6}\s/m.test(trimmed)) return false;
+  if (trimmed.length > 500) return false;
+  return /^(The user|I should |Let me |I'll |I['’]ll )/i.test(firstLine(trimmed));
+}
+
+function isProcessSentence(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (isLockedAnswerParagraph(trimmed) && !PROCESS_NARRATION.test(trimmed)) return false;
+  return isPlanningParagraph(trimmed) || PROCESS_SENTENCE.test(trimmed);
+}
+
+function splitReplySentences(text: string): string[] {
+  const parts = String(text ?? "")
+    .replace(/\r\n/g, "\n")
+    .split(
+      /(?<=[.!?:])\s+(?=(?:[A-Z*>]|I['’]ll |I will |Let me |Looking |Checking |Listing |Sending |Joining |Not |No\.|Yes\.))/,
+    )
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : text.trim() ? [text.trim()] : [];
+}
+
+function polarityKey(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (/^(yes|no)\.?$/i.test(trimmed)) return "polarity";
+  if (/^(not intentional|that wasn['’]?t intentional)\.?$/i.test(trimmed)) return "polarity";
+  return undefined;
+}
+
+function sentenceWords(text: string): string[] {
+  return normalizeOverlap(text)
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3);
+}
+
+function isRestatementOf(earlier: string, later: string): boolean {
+  if (polarityKey(earlier) && polarityKey(later)) return true;
+  const words = sentenceWords(earlier);
+  if (words.length < 3) return false;
+  const laterWords = new Set(sentenceWords(later));
+  const overlap = words.filter((word) => laterWords.has(word)).length;
+  return overlap / words.length >= 0.72;
 }
 
 function isConclusionParagraph(text: string): boolean {
@@ -244,61 +331,114 @@ export function peelThinkTags(text: string): { thought: string; body: string } {
   return { thought: thoughts.join("\n\n"), body };
 }
 
-function splitPlanningSentences(para: string): { thought: string; body: string } {
-  const parts = para
-    .split(/(?<=[.!?:])\s+(?=(?:Let me|I'll |I will |Looking |Checking |OK,|Okay,|Excellent|I should |I notice|I noticed|Then I |But —))/i)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (parts.length < 2) {
-    return isPlanningParagraph(para) && !isConclusionParagraph(para)
-      ? { thought: para, body: "" }
-      : { thought: "", body: para };
+type ReplyUnit = { text: string; para: number; kind: "thought" | "answer" };
+
+function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
+  if (isLockedAnswerParagraph(para) && !PROCESS_NARRATION.test(para)) {
+    return [{ text: para, para: paraIndex, kind: "answer" }];
   }
-  const thought = parts.filter((item) => isPlanningParagraph(item) && !isConclusionParagraph(item));
-  const body = parts.filter((item) => !isPlanningParagraph(item) || isConclusionParagraph(item));
-  return { thought: thought.join(" "), body: body.join(" ") };
+  const parts = splitReplySentences(para);
+  if (parts.length <= 1) {
+    const process = isProcessSentence(para) && !isConclusionParagraph(para);
+    return [{ text: para, para: paraIndex, kind: process ? "thought" : "answer" }];
+  }
+  return parts.map((text) => ({
+    text,
+    para: paraIndex,
+    kind: isProcessSentence(text) && !isConclusionParagraph(text) ? "thought" : "answer",
+  }));
 }
+
+function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
+  const answers = units.filter((unit) => unit.kind === "answer");
+  const drop = new Set<number>();
+  for (let i = 0; i < answers.length; i += 1) {
+    const earlier = answers[i];
+    if (!earlier) continue;
+    for (let j = i + 1; j < answers.length; j += 1) {
+      const later = answers[j];
+      if (later && isRestatementOf(earlier.text, later.text)) {
+        drop.add(i);
+        break;
+      }
+    }
+  }
+  let seen = 0;
+  return units.map((unit) => {
+    if (unit.kind !== "answer") return unit;
+    const index = seen;
+    seen += 1;
+    return drop.has(index) ? { ...unit, kind: "thought" } : unit;
+  });
+}
+
+function joinUnits(units: ReplyUnit[], kind: ReplyUnit["kind"]): string {
+  const wanted = units.filter((unit) => unit.kind === kind);
+  if (wanted.length === 0) return "";
+  const paras: string[] = [];
+  let currentPara = wanted[0]?.para;
+  let bucket: string[] = [];
+  const flush = () => {
+    if (bucket.length) paras.push(bucket.join(" "));
+    bucket = [];
+  };
+  for (const unit of wanted) {
+    if (unit.para !== currentPara) {
+      flush();
+      currentPara = unit.para;
+    }
+    bucket.push(unit.text);
+  }
+  flush();
+  return paras.join("\n\n");
+}
+
+function peelPlanningUnits(
+  source: string,
+  extraThought = "",
+  live = false,
+): { thought: string; body: string } {
+  const paras = source.split(/\n\n+/).map((item) => item.trim()).filter(Boolean);
+  const units = dropRestatedAnswers(paras.flatMap((para, index) => unitsFromParagraph(para, index)));
+  const thoughtParas = [extraThought, joinUnits(units, "thought")].filter((item) => item.trim());
+  const bodyParas = joinUnits(units, "answer");
+  if (live && !bodyParas) {
+    return { thought: thoughtParas.join("\n\n") || source.trim(), body: "" };
+  }
+  if (!bodyParas) {
+    const sentences = splitReplySentences(source);
+    if (!live && sentences.length <= 1 && source.trim().length < 420) {
+      return { thought: extraThought, body: source };
+    }
+    return { thought: thoughtParas.join("\n\n"), body: "" };
+  }
+  return { thought: thoughtParas.join("\n\n"), body: bodyParas };
+}
+
+const LOCKED_TAIL =
+  /(?<=[.!?])\s+(?=(?:This chat|Here(?:'s| is)|I want to|What I can do|The honest answer|There are more|Done\b|Sure[—,]|Sorry[, ]|No files were|Yes\s*[—–-]))/i;
 
 export function peelPlanningPreamble(text: string, live = false): { thought: string; body: string } {
   if (!text) return { thought: "", body: text ?? "" };
   const tagged = peelThinkTags(text);
   const source = tagged.body || text;
-  const match = source.match(/\n(?=#{1,6}\s+|[-*•●]\s+\S|\s*\|.+\|)/);
-  if (match && match.index !== undefined && match.index >= 40) {
-    const thought = source.slice(0, match.index).trim();
-    const body = source.slice(match.index).trim();
-    if (isPlanningParagraph(thought) || /^(I'|I |Let me|Looking|The |I'll)/i.test(thought)) {
-      return { thought: [tagged.thought, thought].filter(Boolean).join("\n\n"), body };
+  const locked = source.match(LOCKED_TAIL);
+  if (locked && locked.index !== undefined && locked.index >= 20) {
+    const lead = source.slice(0, locked.index).trim();
+    const rest = source.slice(locked.index + locked[0].length).trim();
+    if (lead && shouldCutLead(lead)) {
+      return peelPlanningUnits(rest, [tagged.thought, lead].filter(Boolean).join("\n\n"), live);
     }
   }
-  const paras = source.split(/\n\n+/).map((item) => item.trim()).filter(Boolean);
-  const units = paras.flatMap((para) => {
-    const split = splitPlanningSentences(para);
-    return [split.thought, split.body].filter(Boolean);
-  });
-  const thoughtParas: string[] = tagged.thought ? [tagged.thought] : [];
-  const bodyParas: string[] = [];
-  let seenUser = false;
-  for (const unit of units) {
-    const user = isConclusionParagraph(unit) || OUTPUT_LINE.test(unit);
-    const planning = isPlanningParagraph(unit);
-    if (user) {
-      bodyParas.push(unit);
-      seenUser = true;
-    } else if (planning || !seenUser) {
-      thoughtParas.push(unit);
-    } else {
-      bodyParas.push(unit);
+  const heading = source.match(/\n(?=#{1,6}\s+|[-*•●]\s+\S|\s*\|.+\|)/);
+  if (heading && heading.index !== undefined && heading.index >= 40) {
+    const lead = source.slice(0, heading.index).trim();
+    const rest = source.slice(heading.index).trim();
+    if (shouldCutLead(lead)) {
+      return peelPlanningUnits(rest, [tagged.thought, lead].filter(Boolean).join("\n\n"), live);
     }
   }
-  if (live && bodyParas.length === 0) {
-    return { thought: thoughtParas.join("\n\n") || source.trim(), body: "" };
-  }
-  if (bodyParas.length === 0) {
-    if (paras.length === 1 && source.trim().length < 420) return { thought: tagged.thought, body: source };
-    return { thought: thoughtParas.join("\n\n"), body: "" };
-  }
-  return { thought: thoughtParas.join("\n\n"), body: bodyParas.join("\n\n") };
+  return peelPlanningUnits(source, tagged.thought, live);
 }
 
 function normalizeOverlap(text: string): string {
@@ -376,6 +516,28 @@ export function isTableRule(cell: string): boolean {
   return /^:?-{3,}:?$/.test(cell.trim());
 }
 
+function isEmptyOrRuleCell(cell: string): boolean {
+  const trimmed = cell.trim();
+  return !trimmed || isTableRule(trimmed);
+}
+
+/** Empty pipe rows and orphan `|---` that Grok's terminal dumps around a real table. */
+export function isTableChromeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|")) return false;
+  const cells = splitTableCells(trimmed);
+  return cells.length > 0 && cells.every(isEmptyOrRuleCell);
+}
+
+function isHollowTableLine(line: string): boolean {
+  if (!isTableChromeLine(line)) return false;
+  return splitTableCells(line).every((cell) => !cell.trim());
+}
+
+function isTableRelatedLine(line: string): boolean {
+  return isTableLine(line) || isTableChromeLine(line);
+}
+
 export function splitTableCells(line: string): string[] {
   let trimmed = line.trim();
   if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
@@ -399,7 +561,10 @@ function parseAlign(cell: string): MdAlign {
 }
 
 export function parseMarkdownTable(rawLines: string[]): Extract<MdBlock, { type: "table" }> | null {
-  const lines = rawLines.flatMap(expandMashedRows).filter((line) => isTableLine(line));
+  const lines = rawLines
+    .flatMap(expandMashedRows)
+    .filter((line) => isTableRelatedLine(line) && !isHollowTableLine(line));
+  while (lines.length > 0 && isTableChromeLine(lines[0] ?? "")) lines.shift();
   if (lines.length < 2) return null;
   const grid = lines.map(splitTableCells);
   let aligns: MdAlign[] = grid[0].map(() => "left");
@@ -415,10 +580,11 @@ export function parseMarkdownTable(rawLines: string[]): Extract<MdBlock, { type:
     while (next.length < width) next.push("");
     return next;
   });
+  const body = padded.slice(1).filter((row) => !row.every(isEmptyOrRuleCell));
   return {
     type: "table",
     headers: padded[0].map((cell) => parseInline(cell)),
-    rows: padded.slice(1).map((row) => row.map((cell) => parseInline(cell))),
+    rows: body.map((row) => row.map((cell) => parseInline(cell))),
     aligns,
   };
 }
@@ -456,9 +622,9 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       i += 1;
       continue;
     }
-    if (isTableLine(lines[i])) {
+    if (isTableRelatedLine(lines[i])) {
       const chunk: string[] = [];
-      while (i < lines.length && (isTableLine(lines[i]) || !lines[i].trim())) {
+      while (i < lines.length && (isTableRelatedLine(lines[i]) || !lines[i].trim())) {
         if (lines[i].trim()) chunk.push(lines[i]);
         i += 1;
       }
@@ -467,6 +633,7 @@ export function parseChatMarkdown(source: string): MdBlock[] {
         blocks.push(table);
         continue;
       }
+      if (chunk.every((line) => isTableChromeLine(line))) continue;
       blocks.push({ type: "p", children: parseInline(chunk.join(" ")) });
       continue;
     }
@@ -509,7 +676,7 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       !/^\s*[-*]\s+/.test(lines[i]) &&
       !/^\s*\d+\.\s+/.test(lines[i]) &&
       !/^(#{1,6})\s+/.test(lines[i]) &&
-      !isTableLine(lines[i])
+      !isTableRelatedLine(lines[i])
     ) {
       para.push(lines[i]);
       i += 1;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { buildFileDiff, type FileDiff } from "../lib/file-diff";
-import { sameEditPath, type ProjectEdit } from "../lib/project-edits";
+import { editSearchRoots, sameEditPath, type ProjectEdit } from "../lib/project-edits";
 import { DiffStat } from "./DiffStat";
 
 export function FileViewer({
@@ -17,6 +17,7 @@ export function FileViewer({
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [missing, setMissing] = useState(false);
   const [unreadable, setUnreadable] = useState(false);
+  const [directory, setDirectory] = useState(false);
   const shownPath = useRef(file.path);
   const rootKey = roots.join("\n");
   const created = file.kind === "created";
@@ -37,8 +38,9 @@ export function FileViewer({
       setDiff(null);
       setMissing(false);
       setUnreadable(false);
+      setDirectory(false);
     }
-    const searchRoots = rootKey ? rootKey.split("\n") : [];
+    const searchRoots = editSearchRoots(rootKey ? rootKey.split("\n") : [], file.folder);
     const stillThisFile = () => sameEditPath(shownPath.current, requestPath);
     if (window.workhorse?.fileDiff) {
       void window.workhorse
@@ -47,7 +49,8 @@ export function FileViewer({
           if (!stillThisFile()) return;
           const resolved = next ?? buildFileDiff(requestPath, "", "");
           setDiff(resolved);
-          setMissing(!resolved.after && !resolved.before);
+          setDirectory(Boolean(resolved.directory));
+          setMissing(!resolved.directory && !resolved.after && !resolved.before);
         })
         .catch(() => {
           if (!stillThisFile()) return;
@@ -65,6 +68,11 @@ export function FileViewer({
       .readSourceFile(requestPath, searchRoots)
       .then((source) => {
         if (!stillThisFile()) return;
+        if (source?.directory) {
+          setDiff(buildFileDiff(source.path || requestPath, "", ""));
+          setDirectory(true);
+          return;
+        }
         if (!source || source.missing) {
           setDiff(buildFileDiff(requestPath, "", ""));
           setMissing(true);
@@ -82,11 +90,13 @@ export function FileViewer({
         setDiff(buildFileDiff(requestPath, "", ""));
         setMissing(true);
       });
-  }, [file.path, file.name, file.edits, file.at, created, rootKey]);
+  }, [file.path, file.name, file.folder, file.edits, file.at, created, rootKey]);
 
   const rows = diff?.lines ?? [];
   const shownFilePath = diff?.path || file.path;
   const shownName = diff?.name || file.name;
+  const viewOnly = !file.kind && file.edits < 1;
+  const showDiffStat = Boolean(!viewOnly && diff && (diff.added > 0 || diff.deleted > 0));
 
   return (
     <section className={docked ? "file-viewer docked" : "file-review file-viewer"}>
@@ -94,13 +104,15 @@ export function FileViewer({
         <div className="file-review-meta">
           <strong>{shownName}</strong>
           <span className="path">{shownFilePath}</span>
-          {diff ? <DiffStat added={diff.added} deleted={diff.deleted} /> : null}
+          {showDiffStat && diff ? <DiffStat added={diff.added} deleted={diff.deleted} /> : null}
         </div>
+        <button className="file-close-x" type="button" aria-label="Close file" onClick={onClose} />
       </header>
       <div className="file-review-body">
         <div className="file-review-main">
           <pre className="file-review-code source">
             {!diff ? <span className="row-meta">Reading file…</span> : null}
+            {directory ? <span className="row-meta">Folder.</span> : null}
             {missing ? <span className="row-meta">File not found.</span> : null}
             {unreadable ? <span className="row-meta">Can't display this file.</span> : null}
             {rows.map((line, index) => (

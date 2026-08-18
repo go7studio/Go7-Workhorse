@@ -181,7 +181,7 @@ export function displayWorkSteps(
   const live = Boolean(input.live);
   const assistantText = block.assistant.text ?? "";
   const peeled = peelPlanningPreamble(assistantText, live);
-  const visible = peeled.body || (!live ? assistantText : "");
+  const visible = peeled.body;
   const out: DisplayWorkStep[] = [];
 
   const pushThought = (id: string, raw: string) => {
@@ -213,7 +213,6 @@ export function displayWorkSteps(
         const text =
           stripOutputFromThought(collapseThoughtDisplay(raw), visible) || collapseThoughtDisplay(raw).trim();
         if (text) out.push({ type: "thought", id: step.message.id, text });
-        else out.push({ type: "thought", id: step.message.id, text: raw.trim() || "Thought" });
         continue;
       }
       pushThought(step.message.id, raw);
@@ -255,6 +254,34 @@ export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
     else rows.push({ type: "subagent", step, index });
   }
   return rows;
+}
+
+export const WORK_PACK_AFTER = 4;
+export const WORK_TAIL = 3;
+
+export function workRowToolCount(row: GroupedWorkRow): number {
+  return row.type === "tools" ? row.items.length : 0;
+}
+
+export function earlierWorkLabel(rows: GroupedWorkRow[]): string {
+  const thoughts = rows.filter((row) => row.type === "thought").length;
+  const tools = rows.reduce((count, row) => count + workRowToolCount(row), 0);
+  const parts = ["Earlier"];
+  if (thoughts) parts.push(`${thoughts} ${thoughts === 1 ? "thought" : "thoughts"}`);
+  if (tools) parts.push(`${tools} ${tools === 1 ? "tool" : "tools"}`);
+  return parts.join(" · ");
+}
+
+/** Keep the latest hops in view. Older thoughts and tools roll into one Earlier fold. */
+export function packWorkRows(
+  rows: GroupedWorkRow[],
+  input: { after?: number; keep?: number } = {},
+): { earlier: GroupedWorkRow[]; tail: GroupedWorkRow[] } {
+  const after = input.after ?? WORK_PACK_AFTER;
+  const keep = input.keep ?? WORK_TAIL;
+  if (rows.length <= after) return { earlier: [], tail: rows };
+  const tailCount = Math.min(keep, rows.length);
+  return { earlier: rows.slice(0, rows.length - tailCount), tail: rows.slice(rows.length - tailCount) };
 }
 
 /** The last thought or tool run stays open while the turn is live. Earlier folds close when the next phase starts. */
@@ -302,7 +329,7 @@ export function thoughtForReply(input: {
   ];
   let merged = "";
   for (const part of parts) merged = mergeThoughtText(merged, collapseThoughtDisplay(part));
-  const visible = peeled.body || (!input.live ? input.assistantText ?? "" : "");
+  const visible = peeled.body;
   return stripOutputFromThought(collapseThoughtDisplay(merged), visible);
 }
 

@@ -137,6 +137,17 @@ export function SessionPane() {
     if (el && followBottom.current) el.scrollTop = el.scrollHeight;
   }, [session?.messages, session?.status]);
 
+  useEffect(() => {
+    const thread = scroller.current;
+    const wrap = pane.current?.querySelector(".composer-wrap");
+    if (!thread || !(wrap instanceof HTMLElement) || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (followBottom.current) thread.scrollTop = thread.scrollHeight;
+    });
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [session?.id]);
+
   if (!session) return null;
   const closeFilePane = () => {
     if (!open || fileOut) return;

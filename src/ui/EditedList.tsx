@@ -44,11 +44,11 @@ export function EditedList({
   if (compact && edits.length === 0) return null;
   const totalAdded = edits.reduce((sum, item) => sum + (statForPath(shownStats, item.path)?.added ?? 0), 0);
   const totalDeleted = edits.reduce((sum, item) => sum + (statForPath(shownStats, item.path)?.deleted ?? 0), 0);
-  const hasLineStats = showLineStats && edits.some((item) => statForPath(shownStats, item.path));
+  const showTotalStat = showLineStats && (totalAdded > 0 || totalDeleted > 0);
   const summary = (
     <>
       {edits.length === 0 ? "None yet" : `${edits.length} file${edits.length === 1 ? "" : "s"}`}
-      {hasLineStats ? (
+      {showTotalStat ? (
         <>
           {"  ·  "}
           <DiffStat added={totalAdded} deleted={totalDeleted} />
@@ -89,6 +89,7 @@ export function EditedList({
             const line = statForPath(shownStats, item.path);
             const added = line?.added;
             const deleted = line?.deleted;
+            const showRowStat = showLineStats && added != null && deleted != null && (added > 0 || deleted > 0);
             const kindLabel = item.kind === "created" ? "Created" : "Edited";
             const count = `${item.edits} ${unit}${item.edits === 1 || unit === "new" ? "" : "s"}`;
             return (
@@ -98,8 +99,8 @@ export function EditedList({
                   type="button"
                   onClick={() => onOpen(item)}
                   aria-label={
-                    showLineStats && added != null && deleted != null
-                      ? `${item.name}, ${kindLabel}, ${formatDiffStat(added, deleted)}`
+                    showRowStat
+                      ? `${item.name}, ${kindLabel}, ${formatDiffStat(added ?? 0, deleted ?? 0)}`
                       : `${item.name}, ${kindLabel}`
                   }
                 >
@@ -120,13 +121,13 @@ export function EditedList({
                     </span>
                   </span>
                   <span className="file-meta">
-                    {showLineStats && added != null && deleted != null ? (
-                      <DiffStat added={added} deleted={deleted} />
-                    ) : null}
-                    <i className={`dot ${item.provider}`} />
-                    {providerById(item.provider).name}
-                    {"  ·  "}
-                    {formatEditWhen(item.at)}
+                    {showRowStat ? <DiffStat added={added ?? 0} deleted={deleted ?? 0} /> : null}
+                    <span className="file-when">
+                      <i className={`dot ${item.provider}`} />
+                      {providerById(item.provider).name}
+                      <span aria-hidden="true">·</span>
+                      {formatEditWhen(item.at)}
+                    </span>
                   </span>
                 </button>
                 {onDismiss ? (

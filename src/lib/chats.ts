@@ -451,29 +451,22 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const COUNT_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 
-function sameLocalDay(left: number, right: number): boolean {
-  const a = new Date(left);
-  const b = new Date(right);
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+function counted(n: number, singular: string, plural: string): string {
+  const word = n >= 1 && n <= COUNT_WORDS.length ? COUNT_WORDS[n - 1]! : String(n);
+  return n === 1 ? `one ${singular}` : `${word} ${plural}`;
 }
 
-function clockTime(at: number): string {
-  const date = new Date(at);
-  const hours = date.getHours() % 12 || 12;
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
-}
-
+/** Short age for a chat or turn: minutes, one hour, two days. */
 export function formatLastTalked(at: number | undefined, now = Date.now()): string {
   if (typeof at !== "number" || at <= 0) return "";
-  if (sameLocalDay(at, now)) return clockTime(at);
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (sameLocalDay(at, yesterday.getTime())) return "Yesterday";
-  const date = new Date(at);
-  const stamp = `${MONTHS[date.getMonth()]} ${date.getDate()}`;
-  return date.getFullYear() === new Date(now).getFullYear() ? stamp : `${stamp}, ${date.getFullYear()}`;
+  const age = Math.max(0, now - at);
+  const minutes = Math.floor(age / 60_000);
+  if (minutes < 60) return "minutes";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return counted(hours, "hour", "hours");
+  return counted(Math.floor(hours / 24), "day", "days");
 }
 
 export function formatLastTalkedFull(at: number | undefined): string {

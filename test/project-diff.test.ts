@@ -258,3 +258,53 @@ test("instance store is injected and does not read the home directory", () => {
   assert.equal(painted.added, 2);
   assert.equal(painted.deleted, 1);
 });
+
+test("findSourceFile walks .walk and skips .git; created stats are non-zero", () => {
+  const root = path.join(os.tmpdir(), "wh-walk-dot-dirs");
+  const walkDir = path.join(root, ".walk");
+  const gitDir = path.join(root, ".git");
+  const githubDir = path.join(root, ".github");
+  const walkFile = path.join(walkDir, "audit.mjs");
+  const gitDecoy = path.join(gitDir, "audit.mjs");
+  const dirs = new Set([root, walkDir, gitDir, githubDir].map((item) => path.normalize(item)));
+  const files = new Map<string, string>([
+    [path.normalize(walkFile), "export const n = 1;\nexport const m = 2;\n"],
+    [path.normalize(gitDecoy), "stolen from git\n"],
+  ]);
+  const input = {
+    existsSync: (item: string) => dirs.has(path.normalize(item)) || files.has(path.normalize(item)),
+    isDir: (item: string) => dirs.has(path.normalize(item)),
+    readdir: (dir: string) => {
+      const norm = path.normalize(dir);
+      if (norm === path.normalize(root)) return [".git", ".github", ".walk", "src"];
+      if (norm === path.normalize(walkDir)) return ["audit.mjs"];
+      if (norm === path.normalize(gitDir)) return ["audit.mjs", "objects"];
+      if (norm === path.normalize(githubDir)) return ["workflows"];
+      return [];
+    },
+    readFile: (item: string) => files.get(path.normalize(item)) ?? "",
+    gitShow: () => null,
+  };
+  const found = findSourceFile("audit.mjs", [root], input);
+  assert.equal(path.normalize(found ?? ""), path.normalize(walkFile));
+
+  const gitOnlyRoot = path.join(os.tmpdir(), "wh-walk-git-only");
+  const gitOnlyDir = path.join(gitOnlyRoot, ".git");
+  const gitOnlyFile = path.join(gitOnlyDir, "audit.mjs");
+  const gitOnlyDirs = new Set([gitOnlyRoot, gitOnlyDir].map((item) => path.normalize(item)));
+  const gitOnly = findSourceFile("audit.mjs", [gitOnlyRoot], {
+    existsSync: (item: string) => gitOnlyDirs.has(path.normalize(item)) || path.normalize(item) === path.normalize(gitOnlyFile),
+    isDir: (item: string) => gitOnlyDirs.has(path.normalize(item)),
+    readdir: (dir: string) => {
+      const norm = path.normalize(dir);
+      if (norm === path.normalize(gitOnlyRoot)) return [".git"];
+      if (norm === path.normalize(gitOnlyDir)) return ["audit.mjs"];
+      return [];
+    },
+  });
+  assert.equal(gitOnly, null);
+
+  const stats = readEditStats(["audit.mjs"], [root], input, ["audit.mjs"]);
+  assert.ok(stats["audit.mjs"].added > 0);
+  assert.equal(stats["audit.mjs"].deleted, 0);
+});

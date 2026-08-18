@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,11 +11,15 @@ import { containsSecret, prepareEvent, redactText } from "../src/lib/learning-re
 import {
   composeSkillBudget,
   DEFAULT_LEARNING,
+  effectiveCompilerAssignment,
+  eligibleLearningCompilers,
   frameRetrievedMemories,
+  isEligibleLearningCompiler,
   memoryCannotEscalate,
   memoryVisibleTo,
   normalizeLearning,
   outcomeIsVerified,
+  parseBriefText,
   selectAdaptiveRoute,
   UNTRUSTED_MEMORY_FRAME,
 } from "../src/lib/learning-policy";
@@ -22,6 +27,14 @@ import { InMemoryStore, boundedReplace } from "../src/lib/learning-store";
 import { stubCompile } from "../src/lib/learning-compiler";
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import { extractGoalBudget, settleBoundedGoal } from "../src/lib/learning-goal";
+import {
+  BACKFILL_WINDOW_MS,
+  backfillEventId,
+  backfillHumanPromptEvents,
+  compileBatchSettled,
+  describeCompileResult,
+} from "../src/lib/learning-backfill";
+import { ephemeralCustomAuxiliary, resolveCompilerBotConfig } from "../electron/learning-aux";
 import { LearningService } from "../electron/learning-service";
 import { SqliteMemoryStore } from "../electron/learning-sqlite";
 import { runLearningSmoke } from "../electron/learning-smoke";
@@ -57,6 +70,7 @@ test("learning defaults off and stays in Settings", () => {
   const sidebar = fs.readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
   assert.match(settingsUi, /id: "learning"/);
   assert.match(pane, /Learning is off/);
+  assert.match(pane, /Private memory, on this disk only/);
   assert.doesNotMatch(sidebar, /setSettingsSection\("learning"\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /generate-title|generateTitle/);
 });
@@ -452,4 +466,306 @@ test("eval contract and packaged smoke script exist for both OS gates", () => {
   assert.match(ci, /pack:mac/);
   assert.match(fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /workhorse-learning-smoke/);
   assert.match(fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /app\.getPath\("userData"\)/);
+});
+
+test("compiler picker only lists attached custom bots", () => {
+  const pane = fs.readFileSync(path.join(ROOT, "src", "ui", "LearningPane.tsx"), "utf8");
+  assert.match(pane, /attachedCustomBots/);
+  assert.match(pane, /eligibleLearningCompilers/);
+  assert.match(pane, /ACP cannot do a title-less call/);
+  assert.match(pane, /Private memory, on this disk only/);
+  assert.doesNotMatch(pane, /attachedStockVendors/);
+  assert.doesNotMatch(pane, /modelsFor\(/);
+  assert.doesNotMatch(pane, /minimax\.io|api\.minimax/i);
+  const main = fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /allowStub:\s*false/);
+  assert.match(fs.readFileSync(path.join(ROOT, "electron", "learning-ipc.ts"), "utf8"), /learning:events/);
+  assert.match(fs.readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /learningEvents/);
+  const options = eligibleLearningCompilers([
+    { id: "bot_desk", name: "Desk bot", model: "fixture-model" },
+  ]);
+  assert.equal(options.length, 1);
+  assert.equal(options[0]?.provider, "custom");
+  assert.equal(options[0]?.customBotId, "bot_desk");
+  assert.equal(options.some((item) => item.provider === "grok" || item.provider === "cursor"), false);
+  assert.equal(isEligibleLearningCompiler("grok"), false);
+  assert.equal(isEligibleLearningCompiler("cursor"), false);
+  assert.equal(isEligibleLearningCompiler("claude"), false);
+  assert.equal(isEligibleLearningCompiler("codex"), false);
+  assert.equal(isEligibleLearningCompiler("custom"), true);
+  const acp = effectiveCompilerAssignment({
+    compilerProvider: "cursor",
+    compilerModel: "auto",
+  });
+  assert.equal(acp.provider, undefined);
+  const custom = effectiveCompilerAssignment({
+    compilerProvider: "custom",
+    compilerModel: "fixture-model",
+    compilerCustomBotId: "bot_desk",
+  });
+  assert.equal(custom.provider, "custom");
+  assert.equal(custom.customBotId, "bot_desk");
+});
+
+test("backfill last day records user prompts, ignores older rows, and is idempotent", () => {
+  const now = 1_700_000_000_000;
+  const sessions = [
+    {
+      id: "sess_live",
+      projectId: "proj_a",
+      provider: "grok" as const,
+      model: "grok-4.6",
+      effort: null,
+      messages: [
+        { id: "msg_fresh", role: "user" as const, text: "Prefer conventional commits", createdAt: now - 1_000 },
+        { id: "msg_old", role: "user" as const, text: "Too old to backfill", createdAt: now - BACKFILL_WINDOW_MS - 1 },
+        { id: "msg_empty", role: "user" as const, text: "   ", createdAt: now - 500 },
+        { id: "msg_asst", role: "assistant" as const, text: "Sure", createdAt: now - 400 },
+        { id: "msg_tool", role: "assistant" as const, text: "{}", createdAt: now - 300, kind: "tool" },
+        { id: "msg_thought", role: "assistant" as const, text: "thinking", createdAt: now - 200, kind: "thought" },
+        { id: "msg_peer", role: "user" as const, text: "Ask the other chat", createdAt: now - 150, kind: "peer" },
+        { id: "msg_sys", role: "system" as const, text: "system note", createdAt: now - 100 },
+      ],
+    },
+    {
+      id: "sess_hidden",
+      hidden: true,
+      provider: "custom" as const,
+      model: "fixture",
+      effort: null,
+      messages: [{ id: "msg_hidden", role: "user" as const, text: "Worker prompt", createdAt: now - 50 }],
+    },
+  ];
+  const drafts = backfillHumanPromptEvents({ sessions, now });
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.id, backfillEventId("msg_fresh"));
+  assert.equal(drafts[0]?.kind, "human-prompt");
+  assert.equal(drafts[0]?.payload.summary, "Prefer conventional commits");
+  assert.equal(drafts[0]?.projectId, "proj_a");
+  const again = backfillHumanPromptEvents({ sessions, now });
+  assert.equal(again[0]?.id, drafts[0]?.id);
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({ mode: "capture", autoRetrieve: false }),
+    allowStub: true,
+  });
+  assert.equal(service.record(drafts[0]!).inserted, true);
+  assert.equal(service.record(again[0]!).inserted, false);
+  assert.equal(store.listEvents().length, 1);
+  assert.equal(service.events().some((event) => event.id === drafts[0]!.id), true);
+  assert.equal(compileBatchSettled({ ran: true }), false);
+  assert.equal(compileBatchSettled({ ran: false, skipped: "empty" }), true);
+  assert.equal(compileBatchSettled({ ran: false, skipped: "threshold" }), true);
+  assert.equal(compileBatchSettled({ ran: false, skipped: "duplicate" }), true);
+});
+
+test("custom ephemeral compile stores memories; ACP-only assignment skips", async () => {
+  const customStore = new InMemoryStore(":memory:");
+  const custom = new LearningService({
+    store: customStore,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => ({
+      text: JSON.stringify({
+        intent: [
+          {
+            action: "add",
+            memoryClass: "intent",
+            scope: "project",
+            statement: "Prefer conventional commits",
+            sourceEventIds: ["lev_custom"],
+          },
+        ],
+        operations: [],
+      }),
+      createdWorkhorseChat: false,
+      leftoverVendorThread: false,
+    }),
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  custom.record(eventDraft("lev_custom"));
+  const compiled = await custom.compile();
+  assert.equal(compiled.ran, true);
+  assert.ok((compiled.memories ?? 0) > 0);
+  assert.equal(compiled.provider, "custom");
+  assert.ok(custom.memories().some((item) => item.statement.includes("conventional")));
+  assert.match(describeCompileResult(compiled, "Desk bot"), /Compiled/);
+  assert.match(describeCompileResult(compiled, "Desk bot"), /Desk bot/);
+
+  const acpStore = new InMemoryStore(":memory:");
+  const acp = new LearningService({
+    store: acpStore,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "cursor",
+      compilerModel: "auto",
+    }),
+    allowStub: false,
+    caller: async () => {
+      throw new Error("ACP must not be called");
+    },
+    candidates: () => [
+      { provider: "cursor", model: "auto", connected: true, ephemeral: false, intelligence: 5, speed: 4, cost: 2 },
+    ],
+  });
+  acp.record(eventDraft("lev_acp"));
+  const skipped = await acp.compile();
+  assert.equal(skipped.ran, false);
+  assert.equal(skipped.skipped, "no-ephemeral-provider");
+  assert.equal(acp.memories().length, 0);
+  assert.match(describeCompileResult(skipped), /ACP cannot do a title-less call/);
+});
+
+test("ephemeral custom HTTP compile stores the model brief, not the stub prompt copy", async () => {
+  const brief = {
+    intent: [
+      {
+        action: "add",
+        memoryClass: "intent",
+        scope: "project",
+        projectId: "proj_a",
+        statement: "Keep diffs small",
+        sourceEventIds: ["lev_http"],
+      },
+    ],
+    operations: [],
+  };
+  const server = http.createServer((req, res) => {
+    assert.equal(req.method, "POST");
+    assert.match(req.url ?? "", /\/v1\/messages$/);
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { messages?: Array<{ content?: unknown }> };
+      assert.match(JSON.stringify(body), /lev_http/);
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: JSON.stringify(brief) } })}\n\n`);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture-model",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: (request) =>
+      ephemeralCustomAuxiliary(
+        {
+          baseUrl: `http://127.0.0.1:${address.port}`,
+          apiKey: "sk-test",
+          model: request.model,
+          api: "anthropic-messages",
+        },
+        request,
+      ),
+    candidates: () => [
+      {
+        provider: "custom",
+        model: "fixture-model",
+        customBotId: "bot_desk",
+        connected: true,
+        ephemeral: true,
+        intelligence: 4,
+        speed: 4,
+        cost: 1,
+      },
+    ],
+  });
+  try {
+    service.record(eventDraft("lev_http", { payload: { summary: "Use tabs in this project" } }));
+    const compiled = await service.compile();
+    assert.equal(compiled.ran, true);
+    assert.equal(compiled.provider, "custom");
+    assert.equal(compiled.customBotId, "bot_desk");
+    assert.equal(service.createdChats.length, 0);
+    const memories = service.memories();
+    assert.equal(memories.some((item) => item.statement.includes("Keep diffs small")), true);
+    assert.equal(memories.some((item) => item.statement.includes("Use tabs")), false);
+  } finally {
+    service.close();
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
+test("compiler bot uses the vaulted desk key and never another bot or OpenClaw", () => {
+  const aux = fs.readFileSync(path.join(ROOT, "electron", "learning-aux.ts"), "utf8");
+  const main = fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  const callerStart = main.indexOf("caller: async (request)");
+  const callerEnd = main.indexOf("idle:", callerStart);
+  assert.ok(callerStart >= 0 && callerEnd > callerStart);
+  const caller = main.slice(callerStart, callerEnd);
+  assert.match(caller, /resolveCompilerBotConfig/);
+  assert.match(caller, /credentialStore\(\)\.get/);
+  assert.doesNotMatch(caller, /detectCustomLogin|openClawKeyForBaseUrl|fillEmptyCustomBotKeys|customBots\[0\]/);
+  assert.doesNotMatch(aux, /detectCustomLogin|fillEmptyCustomBotKeys|openClawKeyForBaseUrl/);
+  const vault = new Map([["cred_m3", "sk-desk-bot"]]);
+  const bots = [
+    { id: "bot_other", baseUrl: "https://example.invalid/other", model: "other", apiKey: "sk-other" },
+    {
+      id: "bot_m3",
+      baseUrl: "https://example.invalid/m3",
+      model: "MiniMax-M3",
+      apiKey: "",
+      credentialId: "cred_m3",
+      api: "anthropic-messages" as const,
+    },
+  ];
+  const config = resolveCompilerBotConfig(bots, { customBotId: "bot_m3", model: "MiniMax-M3" }, (id) => vault.get(id) ?? "");
+  assert.equal(config?.apiKey, "sk-desk-bot");
+  assert.equal(config?.model, "MiniMax-M3");
+  assert.equal(config?.baseUrl, "https://example.invalid/m3");
+  assert.equal(resolveCompilerBotConfig(bots, { customBotId: "bot_missing" }, (id) => vault.get(id) ?? ""), null);
+  assert.equal(resolveCompilerBotConfig(bots, { model: "MiniMax-M3" }, (id) => vault.get(id) ?? ""), null);
+  const wrapped = parseBriefText(
+    'Here is the brief:\n{"intent":[{"action":"add","memoryClass":"intent","scope":"project","statement":"Keep diffs small","sourceEventIds":["a"]}],"operations":[]}',
+  );
+  assert.equal(wrapped?.intent[0]?.statement, "Keep diffs small");
+  assert.equal(parseBriefText("I cannot produce that."), null);
+});
+
+test("a live compiler that does not return a brief does not stub-copy prompts", async () => {
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({
+      mode: "automatic",
+      autoRetrieve: false,
+      compilerProvider: "custom",
+      compilerModel: "fixture",
+      compilerCustomBotId: "bot_desk",
+    }),
+    allowStub: false,
+    caller: async () => ({
+      text: "I copied the prompt back because I could not emit JSON.",
+      createdWorkhorseChat: false,
+      leftoverVendorThread: false,
+    }),
+    candidates: () => [
+      { provider: "custom", model: "fixture", customBotId: "bot_desk", connected: true, ephemeral: true, intelligence: 4, speed: 4, cost: 1 },
+    ],
+  });
+  service.record(eventDraft("lev_stubtrap", { payload: { summary: "Run it now." } }));
+  const compiled = await service.compile();
+  assert.equal(compiled.ran, false);
+  assert.equal(compiled.skipped, "invalid-brief");
+  assert.equal(service.memories().length, 0);
+  assert.match(describeCompileResult(compiled), /did not return a learning brief/);
 });

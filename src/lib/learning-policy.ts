@@ -95,6 +95,39 @@ export function learningAutoPromotes(mode: LearningMode): boolean {
   return mode === "automatic";
 }
 
+/** Only custom HTTP bots can compile. ACP would open a chat. */
+export function isEligibleLearningCompiler(provider?: ProviderId | null): boolean {
+  return provider === "custom";
+}
+
+export function effectiveCompilerAssignment(
+  settings: Pick<LearningSettings, "compilerProvider" | "compilerModel" | "compilerCustomBotId" | "compilerEffort">,
+): {
+  provider?: ProviderId;
+  model?: string;
+  customBotId?: string;
+  effort?: EffortLevel | null;
+} {
+  if (!isEligibleLearningCompiler(settings.compilerProvider)) return {};
+  return {
+    provider: "custom",
+    model: settings.compilerModel,
+    customBotId: settings.compilerCustomBotId,
+    effort: settings.compilerEffort,
+  };
+}
+
+export function eligibleLearningCompilers(
+  bots: Array<{ id: string; name: string; model: string }>,
+): Array<{ provider: "custom"; model: string; customBotId: string; label: string }> {
+  return bots.map((bot) => ({
+    provider: "custom",
+    model: bot.model,
+    customBotId: bot.id,
+    label: bot.name,
+  }));
+}
+
 export type OutcomeSignals = {
   userAccepted?: boolean;
   userRejected?: boolean;
@@ -276,13 +309,21 @@ function normalizeProposal(raw: unknown): LearningBriefProposal | null {
 
 export function parseBriefText(text: string): LearningBrief | null {
   const trimmed = text.trim();
+  if (!trimmed) return null;
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const body = (fenced?.[1] ?? trimmed).trim();
-  try {
-    return validateBrief(JSON.parse(body));
-  } catch {
-    return null;
+  const attempts = [body];
+  const embedded = body.match(/\{[\s\S]*\}/);
+  if (embedded && embedded[0] !== body) attempts.push(embedded[0]);
+  for (const attempt of attempts) {
+    try {
+      const parsed = validateBrief(JSON.parse(attempt));
+      if (parsed) return parsed;
+    } catch {
+      /* try the next shape */
+    }
   }
+  return null;
 }
 
 export function compilerInputHash(events: LearningEvent[], memories: MemoryItem[]): string {
@@ -409,8 +450,8 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
   return [
     "Compile Workhorse learning events into a JSON object with keys intent and operations.",
     "Each item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?, supersedesId?, contradictsId?}.",
-    "Intent is human preference. Operations are provider-scoped workflow facts.",
-    "Do not copy secrets, raw tool output, or another vendor's private context.",
+    "Intent is a durable human preference. Operations are provider-scoped workflow facts.",
+    "Do not copy the event summary as the statement. Do not copy secrets, raw tool output, or another vendor's private context.",
     "Return JSON only.",
     "",
     "Existing memories:",

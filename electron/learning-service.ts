@@ -4,6 +4,7 @@ import {
   compilerInputHash,
   compilerPrompt,
   DEFAULT_COMPILER_POLICY,
+  effectiveCompilerAssignment,
   effectiveLearningMode,
   frameRetrievedMemories,
   learningCaptures,
@@ -19,6 +20,7 @@ import { prepareEvent } from "../src/lib/learning-redact";
 import { newAuditId, newMemoryId, newRunId, type MemoryStore } from "../src/lib/learning-store";
 import type {
   AuxiliaryCaller,
+  CompileResult,
   CompilerPolicy,
   ForgetTarget,
   LearningEvent,
@@ -139,6 +141,11 @@ export class LearningService {
     return this.options.store.listMemories({ includeDeleted: false });
   }
 
+  events(limit = 200): LearningEvent[] {
+    const rows = this.options.store.listEvents();
+    return rows.slice(-Math.max(0, limit));
+  }
+
   approve(id: string): MemoryItem | undefined {
     const item = this.options.store.getMemory(id);
     if (!item) return undefined;
@@ -180,13 +187,13 @@ export class LearningService {
     this.idleTimer = null;
   }
 
-  async recover(): Promise<{ ran: boolean; skipped?: string; runId?: string; memories?: number }> {
+  async recover(): Promise<CompileResult> {
     const unfinished = this.options.store.unfinishedCompilerRun();
     if (unfinished) return this.compile({ resume: unfinished.id });
     return this.compileIfDue();
   }
 
-  async compileIfDue(): Promise<{ ran: boolean; skipped?: string; runId?: string }> {
+  async compileIfDue(): Promise<CompileResult> {
     if (this.paused || this.sleeping) return { ran: false, skipped: "paused" };
     const mode = this.mode();
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };
@@ -206,7 +213,7 @@ export class LearningService {
     });
   }
 
-  async compile(input: { resume?: string } = {}): Promise<{ ran: boolean; skipped?: string; runId?: string; memories?: number }> {
+  async compile(input: { resume?: string } = {}): Promise<CompileResult> {
     if (this.compiling) return { ran: false, skipped: "busy" };
     const mode = this.mode();
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };
@@ -225,16 +232,16 @@ export class LearningService {
     const settings = this.options.settings();
     const selection = selectAdaptiveRoute({
       candidates: this.options.candidates?.() ?? [],
-      explicit: {
-        provider: settings.compilerProvider,
-        model: settings.compilerModel,
-        customBotId: settings.compilerCustomBotId,
-        effort: settings.compilerEffort,
-      },
+      explicit: effectiveCompilerAssignment(settings),
       outcomes: this.options.outcomes?.(),
       taskClass: "learning-compile",
       capacityAware: true,
     });
+    const route = {
+      provider: selection.provider,
+      model: selection.model,
+      customBotId: selection.customBotId,
+    };
     const runId = resumed?.id ?? newRunId();
     const attempt = (resumed?.attempt ?? 0) + 1;
     this.compiling = true;
@@ -253,7 +260,7 @@ export class LearningService {
       rationale: selection.reason,
     });
     try {
-      let brief = stubCompile(events, memories);
+      let brief = this.options.allowStub ? stubCompile(events, memories) : null;
       const caller = this.options.caller;
       if (caller && selection.provider && selection.model) {
         const result = await caller({
@@ -267,13 +274,25 @@ export class LearningService {
           throw new Error("auxiliary-pollution");
         }
         const parsed = parseBriefText(result.text);
-        if (parsed) brief = parsed;
         this.options.store.putCompilerRun({
           ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,
           costUsd: result.costUsd,
         });
+        if (!parsed) {
+          this.options.store.putCompilerRun({
+            ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+            status: "failed",
+            errorClass: "invalid-brief",
+            endedAt: this.now(),
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costUsd: result.costUsd,
+          });
+          return { ran: false, skipped: "invalid-brief", runId, ...route };
+        }
+        brief = parsed;
       } else if (!this.options.allowStub && selection.provider) {
         this.options.store.putCompilerRun({
           ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
@@ -281,7 +300,7 @@ export class LearningService {
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
         });
-        return { ran: false, skipped: "no-ephemeral-provider", runId };
+        return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
       } else if (!this.options.allowStub && !selection.provider) {
         this.options.store.putCompilerRun({
           ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
@@ -289,7 +308,16 @@ export class LearningService {
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
         });
-        return { ran: false, skipped: "no-ephemeral-provider", runId };
+        return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
+      }
+      if (!brief) {
+        this.options.store.putCompilerRun({
+          ...(this.options.store.getCompilerRun(runId) ?? { id: runId, status: "running", attempt, inputHash }),
+          status: "failed",
+          errorClass: "invalid-brief",
+          endedAt: this.now(),
+        });
+        return { ran: false, skipped: "invalid-brief", runId, ...route };
       }
       const outputIds: string[] = [];
       const apply = (proposal: (typeof brief.intent)[number]) => {
@@ -338,7 +366,7 @@ export class LearningService {
         outputMemoryIds: outputIds,
         eventWatermark: events.at(-1)?.id,
       });
-      return { ran: true, runId, memories: outputIds.length };
+      return { ran: true, runId, memories: outputIds.length, ...route };
     } catch (error) {
       const current = this.options.store.getCompilerRun(runId);
       this.options.store.putCompilerRun({

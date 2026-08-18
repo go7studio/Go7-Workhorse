@@ -153,7 +153,7 @@ import { fileFolderFromPath, formatEditWhen, holdEditStats, isWriteToolTitle, lo
 import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
-import { isComposerTypeToFocus } from "../src/ui/Composer";
+import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
   applyCut,
@@ -630,11 +630,15 @@ test("sidebar last-talked clock uses the latest user prompt, not later assistant
   assert.equal(lastTalkedAt(empty), undefined);
   assert.equal(lastTalkedAt(assistantOnly), undefined);
   assert.equal(lastTalkedAt(talked), new Date(2026, 7, 17, 0, 18, 0).getTime());
-  assert.equal(formatLastTalked(lastTalkedAt(talked), now), "12:18");
-  assert.equal(formatLastTalked(new Date(2026, 7, 17, 15, 5, 0).getTime(), now), "3:05");
-  assert.equal(formatLastTalked(new Date(2026, 7, 16, 23, 59, 0).getTime(), now), "Yesterday");
-  assert.equal(formatLastTalked(new Date(2026, 7, 10, 9, 0, 0).getTime(), now), "Aug 10");
-  assert.equal(formatLastTalked(new Date(2025, 7, 16, 9, 0, 0).getTime(), now), "Aug 16, 2025");
+  assert.equal(formatLastTalked(lastTalkedAt(talked), now), "eleven hours");
+  assert.equal(formatLastTalked(now - 4 * 60_000, now), "minutes");
+  assert.equal(formatLastTalked(now - 60 * 60_000, now), "one hour");
+  assert.equal(formatLastTalked(now + 5 * 60_000, now), "minutes");
+  assert.equal(formatLastTalked(new Date(2026, 7, 16, 23, 59, 0).getTime(), now), "twelve hours");
+  assert.equal(formatLastTalked(new Date(2026, 7, 16, 12, 0, 0).getTime(), now), "one day");
+  assert.equal(formatLastTalked(new Date(2026, 7, 15, 12, 0, 0).getTime(), now), "two days");
+  assert.equal(formatLastTalked(new Date(2026, 7, 10, 9, 0, 0).getTime(), now), "seven days");
+  assert.equal(formatLastTalked(new Date(2025, 7, 16, 9, 0, 0).getTime(), now), "366 days");
   assert.equal(formatLastTalked(undefined, now), "");
   const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
   assert.match(row, /row-talked/);
@@ -651,6 +655,7 @@ test("sidebar last-talked clock uses the latest user prompt, not later assistant
   assert.match(popout, /TimeStamp/);
   const stamp = readFileSync(path.join(ROOT, "src", "ui", "TimeStamp.tsx"), "utf8");
   assert.match(stamp, /formatLastTalked/);
+  assert.match(stamp, /setInterval/);
   assert.match(stamp, /<time/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /\.row-talked\s*\{/);
@@ -2722,6 +2727,31 @@ test("typing outside an input focuses the composer", () => {
   assert.equal(isComposerTypeToFocus({ key: "v", ctrlKey: false, metaKey: true, altKey: false }), false);
 });
 
+test("composer field grows to half the session pane then collapses", () => {
+  assert.equal(composerMaxHeightPx(0), 24);
+  assert.equal(composerMaxHeightPx(-4), 24);
+  assert.equal(composerMaxHeightPx(Number.NaN), 24);
+  assert.equal(composerMaxHeightPx(800), 400);
+  const tall = { style: { height: "99px" }, scrollHeight: 900 } as HTMLTextAreaElement;
+  fitComposerField(tall, "", 800);
+  assert.equal(tall.style.height, "");
+  fitComposerField(tall, "a long draft", 800);
+  assert.equal(tall.style.height, "400px");
+  const short = { style: { height: "" }, scrollHeight: 48 } as HTMLTextAreaElement;
+  fitComposerField(short, "hi", 800);
+  assert.equal(short.style.height, "48px");
+  const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(composer, /data-composer-field/);
+  assert.match(composer, /fitComposerField/);
+  assert.doesNotMatch(composer, /Math\.min\(el\.scrollHeight, 220\)/);
+  assert.match(css, /\.composer textarea[\s\S]*max-height:\s*50cqh/);
+  assert.match(css, /\.composer-tools/);
+  assert.match(pane, /ResizeObserver/);
+  assert.match(pane, /composer-wrap/);
+});
+
 test("session setup is a compact right-side model and access inspector", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
@@ -3675,6 +3705,9 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(editedList, /holdEditStats/);
   assert.match(editedList, /statForPath/);
   assert.match(editedList, /editPathKey\(item\.path\)/);
+  assert.match(editedList, /file-when/);
+  assert.match(editedList, /totalAdded > 0 \|\| totalDeleted > 0/);
+  assert.match(editedList, /added > 0 \|\| deleted > 0/);
   assert.doesNotMatch(editedList, /onClose\?: \(\) => void/);
   assert.match(editedList, /compact && edits\.length === 0/);
   assert.match(editedList, /DiffStat/);
@@ -3709,10 +3742,11 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
-  assert.match(sessionEdits, /padding:\s*0 48px;/);
-  assert.doesNotMatch(sessionEdits, /padding:\s*0 48px \d+px/);
+  assert.match(sessionEdits, /padding:\s*0 22px;/);
+  assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
   assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
-  assert.match(composerWrap, /padding:\s*8px 48px 22px/);
+  assert.match(composerWrap, /padding:\s*8px 22px 16px/);
+  assert.match(composerWrap, /flex:\s*0 0 auto/);
   assert.match(css, /\.session-edits-slot/);
   assert.match(css, /grid-template-rows:\s*0fr/);
   const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
@@ -3721,6 +3755,24 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(fileClose, /aspect-ratio:\s*1/);
   assert.match(fileClose, /font-size:\s*0/);
   assert.match(css, /\.file-close-x::before/);
+  const fileMeta = css.match(/(?:^|\n)\.file-meta\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileMeta, /gap:\s*12px/);
+  assert.match(fileMeta, /flex-shrink:\s*0/);
+  assert.doesNotMatch(fileMeta, /white-space:\s*pre/);
+  const fileDiffStat = css.match(/(?:^|\n)\.file-diff-stat\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileDiffStat, /gap:\s*10px/);
+  assert.match(fileDiffStat, /font-variant-numeric:\s*tabular-nums/);
+  assert.match(css, /\.file-row > span:first-child/);
+  const fileNameCol = css.match(/\.file-row > span:first-child\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileNameCol, /min-width:\s*0/);
+  assert.match(fileNameCol, /flex:\s*1/);
+  assert.match(css, /\.file-when/);
+  const compactList = css.match(/\.edited-block\.compact \.file-list\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(compactList, /max-height:\s*148px/);
+  assert.match(compactList, /scrollbar-gutter:\s*stable/);
+  const overviewList = css.match(/\.project-overview \.edited-block\.compact \.file-list[\s\S]*?\}/)?.[0] ?? "";
+  assert.match(overviewList, /max-height:\s*none/);
+  assert.match(overviewList, /overflow:\s*visible/);
   const filePane = css.match(/\.session-file\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(filePane, /border-left/);
   assert.match(filePane, /file-pane-in/);
@@ -3946,7 +3998,8 @@ test("empty chats stay drafts until the first send names them", () => {
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
   assert.match(composer, /Queue for next/);
-  assert.match(composer, /if \(!value\) \{\s*el\.style\.height = ""/);
+  assert.match(composer, /fitComposerField/);
+  assert.match(composer, /composer-tools/);
   assert.match(
     readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"),
     /textarea:placeholder-shown \{[\s\S]*text-overflow: ellipsis/,

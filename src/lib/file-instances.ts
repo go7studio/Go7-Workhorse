@@ -1,4 +1,4 @@
-import { buildFileDiff, countLineChanges, lineDiff, type FileDiff } from "./file-diff";
+import { buildFileDiff, countLineChanges, countLineDelta, countLines, lineDiff, type FileDiff } from "./file-diff";
 
 export type FileInstanceStore = Map<string, string>;
 
@@ -26,6 +26,14 @@ export function rememberInstance(store: FileInstanceStore, filePath: string, tex
   const grown = growInstanceBaseline(previous ?? "", text);
   store.set(key, grown);
   return grown;
+}
+
+/** +/- for current-vs-union without allocating a painted FileDiff. */
+export function countCreatedReview(baseline: string, current: string): { added: number; deleted: number } {
+  if (!baseline || baseline === current) {
+    return { added: countLines(current), deleted: 0 };
+  }
+  return { added: countLines(current), deleted: countLineDelta(baseline, current).deleted };
 }
 
 /** Current-vs-union, with surviving created lines still painted as adds. */

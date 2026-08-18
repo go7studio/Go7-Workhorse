@@ -2,6 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { isHollowHref, looksLikeImageHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
 import { safeExternalUrl } from "../lib/open-external";
 import { copyText } from "../lib/copy-text";
+import { harvestFilePath } from "../lib/project-edits";
 import { editFromMention, isOpenableSource, useFileOpen } from "./FileOpen";
 import { ImageZoom } from "./ImageZoom";
 
@@ -70,17 +71,20 @@ function CodeBlock({ text }: { text: string }) {
 
 function Inlines({
   parts,
+  nearby = "",
   cwd,
   vendorSessionId,
 }: {
   parts: Inline[];
+  nearby?: string;
   cwd?: string;
   vendorSessionId?: string;
 }) {
   const fileOpen = useFileOpen();
   const openSource = (value: string) => {
     if (!fileOpen || !isOpenableSource(value)) return false;
-    fileOpen.open(editFromMention(value, fileOpen.provider, fileOpen.roots));
+    const path = harvestFilePath(value, nearby);
+    fileOpen.open(editFromMention(path, fileOpen.provider, fileOpen.roots));
     return true;
   };
   const onLink = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
@@ -157,7 +161,7 @@ export function MessageBody({
             <ul key={index}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
-                  <Inlines parts={item} cwd={cwd} vendorSessionId={vendorSessionId} />
+                  <Inlines parts={item} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
                 </li>
               ))}
             </ul>
@@ -168,7 +172,7 @@ export function MessageBody({
             <ol key={index}>
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
-                  <Inlines parts={item} cwd={cwd} vendorSessionId={vendorSessionId} />
+                  <Inlines parts={item} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
                 </li>
               ))}
             </ol>
@@ -178,7 +182,7 @@ export function MessageBody({
           const Tag = (block.level <= 2 ? "h3" : "h4") as "h3" | "h4";
           return (
             <Tag key={index} className={`md-h md-h${block.level}`}>
-              <Inlines parts={block.children} cwd={cwd} vendorSessionId={vendorSessionId} />
+              <Inlines parts={block.children} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
             </Tag>
           );
         }
@@ -190,7 +194,7 @@ export function MessageBody({
                   <tr>
                     {block.headers.map((cell, cellIndex) => (
                       <th key={cellIndex} style={{ textAlign: block.aligns[cellIndex] ?? "left" }}>
-                        <Inlines parts={cell} cwd={cwd} vendorSessionId={vendorSessionId} />
+                        <Inlines parts={cell} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
                       </th>
                     ))}
                   </tr>
@@ -200,7 +204,7 @@ export function MessageBody({
                     <tr key={rowIndex}>
                       {row.map((cell, cellIndex) => (
                         <td key={cellIndex} style={{ textAlign: block.aligns[cellIndex] ?? "left" }}>
-                          <Inlines parts={cell} cwd={cwd} vendorSessionId={vendorSessionId} />
+                          <Inlines parts={cell} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
                         </td>
                       ))}
                     </tr>
@@ -220,7 +224,7 @@ export function MessageBody({
                 <div key={row.label} className="fact">
                   <dt>{row.label}</dt>
                   <dd>
-                    <Inlines parts={parseInline(row.value)} cwd={cwd} vendorSessionId={vendorSessionId} />
+                    <Inlines parts={parseInline(row.value)} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
                   </dd>
                 </div>
               ))}
@@ -229,7 +233,7 @@ export function MessageBody({
         }
         return (
           <p key={index}>
-            <Inlines parts={block.children} cwd={cwd} vendorSessionId={vendorSessionId} />
+            <Inlines parts={block.children} nearby={text} cwd={cwd} vendorSessionId={vendorSessionId} />
           </p>
         );
       })}

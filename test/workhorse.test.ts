@@ -138,6 +138,7 @@ import {
   mergeStreamedText,
   unsquashSentences,
   parseMarkdownTable,
+  isTableChromeLine,
   peelAskMarkup,
   peelPlanningPreamble,
   peelThinkTags,
@@ -148,12 +149,12 @@ import {
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer } from "../src/lib/permissions";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
-import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
+import { applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
-import { COUNT_MS, countAt } from "../src/lib/count";
+import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
 import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
-import { fileFolderFromPath, formatEditWhen, holdEditStats, isWriteToolTitle, looksLikeSourceFile, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, projectEdits, projectFileChanges, sameEditPath, statForPath, writeChangeKind } from "../src/lib/project-edits";
+import { citedAbsolutePaths, editSearchRoots, fileFolderFromPath, formatEditWhen, harvestFilePath, holdEditStats, isDirectoryEditPath, isWriteToolTitle, looksLikeSourceFile, markStatsFetched, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, pathsNeedingStats, planEditStatsHarvest, projectEdits, projectFileChanges, projectWritesKey, sameEditPath, startEditStatsHarvest, statForPath, stripPathSizeSuffix, takeEditStatsChunk, writeChangeKind } from "../src/lib/project-edits";
 import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
@@ -1949,7 +1950,10 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.equal(safeExternalUrl("file:///etc/passwd"), null);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /openWebUrl/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-file/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /FileOpenProvider/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{session\.messages/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileOpen.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWindowOpenHandler/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /shell\.openExternal/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /shell:open/);
@@ -2072,6 +2076,34 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.doesNotMatch(mmShown.body, /<\/?mm:think>/i);
   assert.doesNotMatch(mmShown.body, /Sweeping the D drive/);
   assert.match(mmShown.body, /Done\. Allocated/);
+  const otisLeak = [
+    "The shell seems to be rejecting findstr. Let me try a different approach using the read_file tool.",
+    "",
+    "- `chaff_pod.gd` has PAYLOAD_CHAFF / PAYLOAD_FLARE.",
+    "- `craft_definition.gd` has ZONE_* identifiers.",
+    "",
+    "Now I have full ground truth. Let me look at one more thing — write_file truncated mid-sentence.",
+    "",
+    "The Set-Content still has UTF-8 encoding issues. Plan: append via Add-Content.",
+    "",
+    "Wait — that file is 34,000 chars. The write_file tool may have a char limit.",
+    "",
+    "# REPORT",
+    "",
+    "## (4) Files written",
+    "",
+    "- **`scripts/audio/AUDIO_EVENTS.md`** -- new canonical catalog.",
+  ].join("\n");
+  const otis = peelPlanningPreamble(otisLeak);
+  assert.match(otis.body, /chaff_pod\.gd/);
+  assert.match(otis.body, /AUDIO_EVENTS\.md/);
+  assert.match(otis.body, /# REPORT/);
+  assert.doesNotMatch(otis.body, /findstr/);
+  assert.doesNotMatch(otis.body, /write_file/);
+  assert.doesNotMatch(otis.body, /Set-Content/);
+  assert.doesNotMatch(otis.body, /truncated mid-sentence/);
+  assert.match(otis.thought, /findstr/);
+  assert.match(otis.thought, /write_file/);
   const drafted = [
     "The user is asking if I can see the chats. I should call workhorse_list_chats to show the chats in the sidebar. Let me count: 29 entries total. Let me list them in a clean way, grouped by provider/model since that's what shows what bots are on the desk. Provider breakdown:",
     "- custom (MiniMax-M3): many chats",
@@ -2114,6 +2146,66 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.ok(include.length >= 3);
   assert.ok(include.some((block) => block.type === "p"));
   assert.ok(include.some((block) => block.type === "h"));
+});
+
+test("chat markdown drops Grok terminal table chrome before a real table", () => {
+  const cellText = (cell: { type: string; text?: string }[]) =>
+    cell.map((part) => ("text" in part ? String(part.text ?? "") : "")).join("");
+
+  assert.equal(isTableChromeLine("| |"), true);
+  assert.equal(isTableChromeLine("|---|"), true);
+  assert.equal(isTableChromeLine("| | |---|"), true);
+  assert.equal(isTableChromeLine("| Name | URL | Model | API | Context |"), false);
+
+  const leaked = parseChatMarkdown(
+    [
+      "Here are the connected endpoints.",
+      "",
+      "| |",
+      "|---|",
+      "| Name | URL | Model | API | Context |",
+      "| --- | --- | --- | --- | --- |",
+      "| Synthetic | https://api.synthetic.dev | llama | OpenAI | 128k |",
+    ].join("\n"),
+  );
+  assert.equal(leaked[0]?.type, "p");
+  const leakedTable = leaked.find((block) => block.type === "table");
+  if (!leakedTable || leakedTable.type !== "table") throw new Error("expected table");
+  assert.deepEqual(leakedTable.headers.map(cellText), ["Name", "URL", "Model", "API", "Context"]);
+  assert.equal(leakedTable.rows.length, 1);
+  assert.deepEqual(leakedTable.rows[0].map(cellText), ["Synthetic", "https://api.synthetic.dev", "llama", "OpenAI", "128k"]);
+  assert.equal(leaked.filter((block) => block.type === "p").length, 1);
+  assert.doesNotMatch(JSON.stringify(leaked), /\| \||\|---\|/);
+
+  const mashedChrome = parseChatMarkdown(
+    [
+      "| | |---|",
+      "| Name | URL | Model | API | Context |",
+      "|---|---|---|---|---|",
+      "| Synthetic | https://api.synthetic.dev | llama | OpenAI | 128k |",
+    ].join("\n"),
+  );
+  const mashedTable = mashedChrome.find((block) => block.type === "table");
+  if (!mashedTable || mashedTable.type !== "table") throw new Error("expected mashed table");
+  assert.deepEqual(mashedTable.headers.map(cellText), ["Name", "URL", "Model", "API", "Context"]);
+  assert.equal(mashedTable.rows.length, 1);
+  assert.equal(mashedChrome.some((block) => block.type === "p"), false);
+
+  const chromeOnly = parseChatMarkdown("| |\n|---|");
+  assert.equal(chromeOnly.length, 0);
+  const fenced = parseChatMarkdown("```\n| |\n|---|\n```");
+  assert.equal(fenced[0]?.type, "pre");
+  if (fenced[0]?.type !== "pre") throw new Error("expected pre");
+  assert.match(fenced[0].text, /\|---\|/);
+
+  const realEmptyCell = parseChatMarkdown(
+    ["| Name | URL |", "|---|---|", "| Synthetic | |"].join("\n"),
+  );
+  const kept = realEmptyCell.find((block) => block.type === "table");
+  if (!kept || kept.type !== "table") throw new Error("expected kept table");
+  assert.equal(kept.rows.length, 1);
+  assert.equal(cellText(kept.rows[0][0]), "Synthetic");
+  assert.equal(cellText(kept.rows[0][1]), "");
 });
 
 test("session bridge lists, finds, and reads chats for peer tools", async () => {
@@ -3389,6 +3481,116 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(isWriteToolTitle("Edit File"), true);
   assert.equal(pathFromNearbyWrite("Created a minimal markdown file named nothing.md."), "nothing.md");
   assert.equal(pathFromNearbyWrite("Created `another-one.md` in the project folder."), "another-one.md");
+  assert.equal(
+    harvestFilePath("openclaw.json", "Chat found OpenClaw at `C:\\Users\\lgovo\\openclaw`"),
+    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+  );
+  assert.equal(
+    harvestFilePath(
+      "openclaw.json",
+      "Project folder `C:\\Users\\lgovo\\Projects\\talk-in-talk-in`. OpenClaw is at `C:\\Users\\lgovo\\openclaw`.",
+    ),
+    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+  );
+  assert.equal(
+    harvestFilePath(
+      "openclaw.json",
+      "Slice 1 found the live Open Claw config at `C:\\Users\\lgovo\\.openclaw\\openclaw.json`.",
+    ),
+    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+  );
+  assert.equal(
+    harvestFilePath("C:\\Users\\lgovo\\openclaw\\openclaw.json", "project folder C:\\Users\\lgovo\\Projects\\talk-in-talk-in"),
+    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+  );
+  const openclawAbs = "C:\\Users\\lgovo\\openclaw\\openclaw.json";
+  const openclawDir = "C:\\Users\\lgovo\\openclaw";
+  assert.equal(
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", (file) => file === openclawAbs || file === openclawDir),
+    openclawAbs,
+  );
+  assert.equal(
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", (file) => file === "C:\\Users\\lgovo\\.openclaw\\openclaw.json"),
+    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+  );
+  assert.equal(
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", () => false),
+    "openclaw.json",
+  );
+  assert.equal(harvestFilePath("nothing.md", "Wrote `C:\\proj\\nothing.md`"), "C:\\proj\\nothing.md");
+  assert.equal(stripPathSizeSuffix("foo.md (34441 chars)"), "foo.md");
+  assert.equal(harvestFilePath("foo.md (34441 chars)"), "foo.md");
+  assert.equal(harvestFilePath("AUDIO_EVENTS.md (33808 chars)"), "AUDIO_EVENTS.md");
+  assert.equal(pathFromWriteTool("Write · completed — AUDIO_EVENTS.md (34441 chars)"), "AUDIO_EVENTS.md");
+  assert.equal(pathFromWriteTool("Write · completed — audio/AUDIO_EVENTS.md (33808 chars)"), "audio/AUDIO_EVENTS.md");
+  assert.equal(sameEditPath("AUDIO_EVENTS.md (33808 chars)", "AUDIO_EVENTS.md (34441 chars)"), true);
+  const gameRoot = path.join("C:", "game");
+  const audioFile = path.join(gameRoot, "audio", "foo.md");
+  assert.equal(
+    harvestFilePath("foo.md (34441 chars)", "audio/", (item) => item === audioFile || item === path.join(gameRoot, "audio"), [gameRoot]),
+    audioFile,
+  );
+  assert.deepEqual(editSearchRoots([gameRoot], "audio"), [gameRoot, path.join(gameRoot, "audio")]);
+  assert.equal(isDirectoryEditPath(path.join(gameRoot), [gameRoot]), true);
+  assert.equal(isDirectoryEditPath("game", [gameRoot]), true);
+  assert.equal(isDirectoryEditPath("foo.md", [gameRoot]), false);
+  const sizedWrites = projectEdits(
+    [
+      {
+        id: "s-chars",
+        projectId: "p1",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "high",
+        title: "Audio",
+        mode: "ask",
+        sandbox: "off",
+        status: "idle",
+        contextUsed: 0,
+        messages: [
+          {
+            id: "w1",
+            role: "system",
+            kind: "tool",
+            text: "Write · completed — AUDIO_EVENTS.md (33808 chars)",
+            createdAt: 100,
+          },
+          {
+            id: "w2",
+            role: "system",
+            kind: "tool",
+            text: "Write · completed — AUDIO_EVENTS.md (34441 chars)",
+            createdAt: 200,
+          },
+          {
+            id: "w3",
+            role: "system",
+            kind: "tool",
+            text: `Write · completed — ${gameRoot}`,
+            createdAt: 300,
+          },
+        ],
+      },
+    ],
+    [gameRoot],
+  );
+  assert.equal(sizedWrites.length, 1);
+  assert.equal(sizedWrites[0]?.name, "AUDIO_EVENTS.md");
+  assert.equal(sizedWrites[0]?.path.includes("chars"), false);
+  assert.deepEqual(citedAbsolutePaths("Applying patch · completed — test/workhorse.test.ts"), []);
+  assert.equal(pathFromWriteTool("Applying patch · completed — test/workhorse.test.ts"), "test/workhorse.test.ts");
+  assert.equal(
+    pathFromWriteTool("Write · completed — openclaw.json", "OpenClaw lives at `C:\\Users\\lgovo\\openclaw`"),
+    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+  );
+  assert.equal(
+    pathFromWriteTool("Write `C:\\Users\\lgovo\\.openclaw\\openclaw.json` · completed — .openclaw\\openclaw.json"),
+    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+  );
+  assert.equal(
+    pathFromNearbyWrite("Found OpenClaw at `C:\\Users\\lgovo\\openclaw`. Config is `openclaw.json`."),
+    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+  );
   assert.equal(isWriteToolTitle("Read"), false);
   assert.equal(isWriteToolTitle("Applying patch"), true);
   assert.equal(isWriteToolTitle("apply_patch · completed"), true);
@@ -3457,6 +3659,39 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     pathFromWriteTool("Write `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed"),
     "C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md",
   );
+  const openclawEdits = projectEdits(
+    [
+      {
+        id: "s-openclaw",
+        projectId: "p1",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "high",
+        title: "OpenClaw",
+        mode: "ask",
+        sandbox: "off",
+        status: "idle",
+        contextUsed: 0,
+        messages: [
+          {
+            id: "a1",
+            role: "assistant",
+            text: "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`. Config is `openclaw.json`.",
+            createdAt: noon,
+          },
+          {
+            id: "t-oc",
+            role: "system",
+            kind: "tool",
+            text: "Write · completed — openclaw.json",
+            createdAt: noon,
+          },
+        ],
+      },
+    ],
+    ["C:\\Users\\lgovo\\Projects\\talk-in-talk-in"],
+  );
+  assert.equal(openclawEdits[0]?.path, "C:\\Users\\lgovo\\openclaw\\openclaw.json");
   assert.equal(edits.length, 4);
   assert.equal(edits[0].name, "WALK-TEST-EDIT.md");
   assert.equal(edits[1].name, "UsagePane.tsx");
@@ -3521,6 +3756,31 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     { "src/foo.ts": { added: 0, deleted: 0 } },
   );
   assert.deepEqual(holdEditStats(prior, {}, []), prior);
+  const batch = Array.from({ length: 14 }, (_, index) => ({
+    path: path.join("C:", "game", `file-${index}.gd`),
+    edits: 1,
+    at: noon + index,
+  }));
+  const fetched = markStatsFetched({}, batch, "C:/game");
+  assert.equal(pathsNeedingStats(batch, fetched, "C:/game").length, 0);
+  assert.deepEqual(
+    pathsNeedingStats(batch, {}, "C:/game").map((item) => item.path),
+    batch.map((item) => item.path),
+  );
+  const bumped = { ...batch[0]!, at: noon + 90 };
+  assert.deepEqual(
+    pathsNeedingStats([bumped, ...batch.slice(1)], fetched, "C:/game").map((item) => item.path),
+    [batch[0]!.path],
+  );
+  assert.equal(pathsNeedingStats(batch, fetched, "C:/other").length, 14);
+  assert.equal(planEditStatsHarvest(batch, fetched, "C:/game"), null);
+  assert.equal(planEditStatsHarvest(batch, {}, "C:/game")?.stale.length, 14);
+  assert.equal(takeEditStatsChunk(batch, fetched, "C:/game"), null);
+  assert.equal(takeEditStatsChunk(batch, {}, "C:/game")?.stale.length, 14);
+  const createdBatch = batch.map((item) => ({ ...item, kind: "created" as const }));
+  assert.equal(takeEditStatsChunk(createdBatch, {}, "C:/game")?.stale.length, 1);
+  assert.equal(typeof startEditStatsHarvest, "function");
+  assert.equal(projectWritesKey([], "p1"), "");
   const twins = projectEdits(
     [
       {
@@ -3557,6 +3817,47 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(twins.length, 1);
   assert.equal(twins[0]?.name, "app-update.ts");
   assert.equal(edits[3].provider, "claude");
+  const minimaxEdits = projectEdits(
+    [
+      {
+        id: "s-mini",
+        projectId: "p1",
+        provider: "custom",
+        customBotId: "bot_minimax",
+        model: "MiniMax-M3",
+        effort: "medium",
+        title: "Audio event map",
+        mode: "ask",
+        sandbox: "off",
+        status: "idle",
+        contextUsed: 0,
+        messages: [
+          {
+            id: "t-mini",
+            role: "system",
+            kind: "tool",
+            text: "Write · completed — scripts/audio/AUDIO_EVENTS.md",
+            createdAt: noon,
+          },
+        ],
+      },
+    ],
+    ["C:/proj"],
+  );
+  assert.equal(minimaxEdits[0]?.provider, "custom");
+  assert.equal(minimaxEdits[0]?.customBotId, "bot_minimax");
+  const remixed = mergeEdits(minimaxEdits, [
+    {
+      path: "scripts/audio/AUDIO_EVENTS.md",
+      name: "AUDIO_EVENTS.md",
+      folder: "scripts/audio",
+      edits: 1,
+      at: noon + 20,
+      provider: "grok",
+    },
+  ]);
+  assert.equal(remixed[0]?.provider, "grok");
+  assert.equal(remixed[0]?.customBotId, undefined);
   assert.equal(formatEditWhen(noon - 86_400_000, noon), "yesterday");
   const split = projectFileChanges(
     [
@@ -3668,6 +3969,11 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(home, /EditedList/);
   assert.match(home, /editStats/);
   assert.match(home, /holdEditStats/);
+  assert.match(home, /startEditStatsHarvest/);
+  assert.match(home, /projectWritesKey/);
+  assert.match(home, /markStatsFetched/);
+  assert.match(home, /\[editKey, rootKey, project\?\.id\]/);
+  assert.doesNotMatch(home, /listed, roots, changes\.created/);
   assert.match(home, /label="Changes"/);
   assert.match(home, /onDismiss=\{dismissFile\}/);
   assert.match(home, /sameEditPath/);
@@ -3702,6 +4008,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /FILE_PANE/);
   assert.match(pane, /Resize file pane/);
   assert.match(pane, /projectEdits\(\[session\]/);
+  assert.match(pane, /customBotId: session.customBotId/);
   assert.match(pane, /sameEditPath/);
   assert.match(pane, /\{project \? \(/);
   assert.match(pane, /project && terminalOpen && cwd/);
@@ -3713,6 +4020,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /session-edits-slot/);
   assert.match(pane, /editsBarOpen/);
   assert.match(pane, /holdEditStats/);
+  assert.match(pane, /startEditStatsHarvest/);
+  assert.match(pane, /markStatsFetched/);
   assert.match(pane, /heldEditsRef/);
   assert.match(pane, /hiddenByChat/);
   assert.match(pane, /label="Changes"/);
@@ -3737,6 +4046,10 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(editedList, /statForPath/);
   assert.match(editedList, /editPathKey\(item\.path\)/);
   assert.match(editedList, /file-when/);
+  assert.match(editedList, /deskInk/);
+  assert.match(editedList, /deskLabel/);
+  assert.match(editedList, /background: ink/);
+  assert.doesNotMatch(editedList, /providerById\(item\.provider\)\.name/);
   assert.match(editedList, /totalAdded > 0 \|\| totalDeleted > 0/);
   assert.match(editedList, /added > 0 \|\| deleted > 0/);
   assert.doesNotMatch(editedList, /onClose\?: \(\) => void/);
@@ -3749,9 +4062,14 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(viewer, /sameEditPath/);
   assert.match(viewer, /pathChanged/);
   assert.match(viewer, /File not found/);
+  assert.match(viewer, /Folder\./);
+  assert.match(viewer, /editSearchRoots/);
   assert.match(viewer, /Escape/);
-  assert.doesNotMatch(viewer, /aria-label="Close"/);
-  assert.doesNotMatch(viewer, /file-close-x/);
+  assert.match(viewer, /file-close-x/);
+  assert.match(viewer, /aria-label="Close file"/);
+  assert.match(viewer, /viewOnly/);
+  assert.match(viewer, /showDiffStat/);
+  assert.match(viewer, /diff\.added > 0 \|\| diff\.deleted > 0/);
   assert.doesNotMatch(viewer, />Close</);
   const homeCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(homeCss, /\.file-viewer/);
@@ -3763,6 +4081,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
   assert.match(diffStat, /diff-add/);
   assert.match(diffStat, /diff-del/);
+  assert.match(diffStat, /plus > 0/);
+  assert.match(diffStat, /minus > 0/);
   assert.match(diffStat, /requestAnimationFrame/);
   assert.match(diffStat, /COUNT_MS/);
   assert.match(pane, /fileRoots = useMemo/);
@@ -3793,8 +4113,12 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(fileClose, /width:\s*22px/);
   assert.match(fileClose, /height:\s*22px/);
+  assert.match(fileClose, /flex-shrink:\s*0/);
+  assert.match(fileClose, /flex:\s*0 0 22px/);
   assert.match(fileClose, /aspect-ratio:\s*1/);
   assert.match(fileClose, /font-size:\s*0/);
+  assert.match(fileClose, /overflow:\s*visible/);
+  assert.doesNotMatch(fileClose, /overflow:\s*hidden/);
   assert.match(css, /\.file-close-x::before/);
   const fileMeta = css.match(/(?:^|\n)\.file-meta\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(fileMeta, /gap:\s*12px/);
@@ -3828,6 +4152,20 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(css.match(/@keyframes file-pane-out\s*\{[\s\S]*?\n\}/)?.[0] ?? "", /max-width:\s*0/);
   assert.doesNotMatch(css, /\.session-file \.file-review-modes/);
   assert.doesNotMatch(css, /\.session-file \.file-close-x/);
+  assert.match(css, /\.file-review-meta strong/);
+  assert.match(css, /\.file-review-meta \.path/);
+  const fileMetaTitle = css.match(/(?:^|\n)\.file-review-meta strong\s*\{[^}]+\}/)?.[0] ?? "";
+  const fileMetaPath = css.match(/(?:^|\n)\.file-review-meta \.path\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileMetaTitle, /min-width:\s*0/);
+  assert.match(fileMetaTitle, /text-overflow:\s*ellipsis/);
+  assert.match(fileMetaPath, /min-width:\s*0/);
+  assert.match(fileMetaPath, /text-overflow:\s*ellipsis/);
+  const fileTabs = css.match(/(?:^|\n)\.file-review-tabs\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(fileTabs, /min-width:\s*0/);
+  assert.match(fileTabs, /padding:\s*8px 22px 0 16px/);
+  assert.match(css, /\.session-file \.file-review-tabs/);
+  const sessionTabs = css.match(/\.session-file \.file-review-tabs\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(sessionTabs, /22px/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:file-diff/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:read-file/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /project:resolve-file/);
@@ -3866,6 +4204,11 @@ test("delete project can keep chats in the loose list or remove them", () => {
 
 test("diff counts ease from the last shown integer toward the new total", () => {
   assert.equal(COUNT_MS, 320);
+  assert.equal(COUNT_SNAP, 80);
+  assert.equal(shouldSnapCount(0, 80), false);
+  assert.equal(shouldSnapCount(0, 81), true);
+  assert.equal(countToward(0, 1678, 0), 1678);
+  assert.equal(countToward(0, 40, 0), 0);
   assert.equal(countAt(0, 102, 0), 0);
   assert.equal(countAt(0, 102, 1), 102);
   assert.equal(countAt(5, 5, 0.4), 5);
@@ -3875,11 +4218,16 @@ test("diff counts ease from the last shown integer toward the new total", () => 
   const diffStat = readFileSync(path.join(ROOT, "src", "ui", "DiffStat.tsx"), "utf8");
   assert.match(diffStat, /diff-add/);
   assert.match(diffStat, /diff-del/);
+  assert.match(diffStat, /plus > 0/);
+  assert.match(diffStat, /minus > 0/);
   assert.match(diffStat, /requestAnimationFrame/);
   assert.match(diffStat, /COUNT_MS/);
+  assert.match(diffStat, /countMotion/);
+  assert.equal(countMotion(0, 1678), "snap");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /DiffStat/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "EditedList.tsx"), "utf8"), /holdEditStats/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /DiffStat/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /showDiffStat/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileViewer.tsx"), "utf8"), /pathChanged/);
 });
 
@@ -3892,6 +4240,9 @@ test("file diffs count added and deleted lines from real before/after text", () 
   assert.equal(changed.some((line) => line.kind === "add" && line.text === "new"), true);
   assert.deepEqual(countLineChanges(changed), { added: 1, deleted: 1 });
   assert.equal(formatDiffStat(2, 1), "+2  −1");
+  assert.equal(formatDiffStat(325, 0), "+325");
+  assert.equal(formatDiffStat(0, 4), "−4");
+  assert.equal(formatDiffStat(0, 0), "");
 
   const built = buildFileDiff(path.join("proj", "WALK-TEST-EDIT.md"), "", "Walk Test edit landed.\n");
   assert.equal(built.name, "WALK-TEST-EDIT.md");
@@ -4937,10 +5288,24 @@ test("Usage rings include every desk LLM even with no spend", () => {
   );
   assert.equal(cards.find((card) => card.label === "Claude")?.totalTokens, 0);
   assert.equal(cards.find((card) => card.label === "MiniMax")?.color, "#30d158");
-  const claude = leftoverForCard(cards.find((card) => card.label === "Claude")!, {
+  const claudeCard = {
+    key: "claude",
+    focus: "claude" as const,
+    label: "Claude",
+    provider: "claude" as const,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    costKnown: false,
+    events: 0,
+  };
+  const claude = leftoverForCard(claudeCard, {
     claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
   });
-  assert.equal(planRingView(cards.find((card) => card.label === "Claude")!, {
+  assert.equal(planRingView(claudeCard, {
     claude: { usedPercent: 7, leftPercent: 93, period: "weekly", prepaidBalance: 0, products: [{ product: "weekly_all", label: "All models", usagePercent: 7 }] },
   })?.label, "93%");
   assert.equal(leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, {}), undefined);
@@ -4986,11 +5351,11 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(pickClaudeWindow(claudePlan, "session")?.usagePercent, 23);
   assert.equal(pickClaudeWindow(claudePlan, "weekly_scoped")?.label, "Fable");
   assert.equal(
-    planRingView(cards.find((card) => card.label === "Claude")!, { claude: claudePlan }, "session")?.label,
+    planRingView(claudeCard, { claude: claudePlan }, "session")?.label,
     "77%",
   );
   assert.equal(
-    planRingView(cards.find((card) => card.label === "Claude")!, { claude: claudePlan })?.label,
+    planRingView(claudeCard, { claude: claudePlan })?.label,
     "93%",
   );
   assert.equal(
@@ -5197,6 +5562,11 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /unsquashSentences\(peeled\.body\)/);
+  assert.doesNotMatch(
+    readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"),
+    /peeled\.body \|\| \(!live \? assistantText/,
+  );
   assert.doesNotMatch(
     readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8"),
     /fromResult \|\| thoughts/,
@@ -5455,6 +5825,13 @@ test("subagent pane groups child thought tools and usage like the usual chat", (
     { customBots: [bot], llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } } },
   );
   assert.equal(ink, "#3dff7a");
+  assert.equal(
+    deskLabel(
+      { provider: "custom", customBotId: "bot_minimax" },
+      { customBots: [bot], llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } } },
+    ),
+    "MiniMax",
+  );
   assert.notEqual(who.color, undefined);
 });
 

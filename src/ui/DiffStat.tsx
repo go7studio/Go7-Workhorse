@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { COUNT_MS, countAt } from "../lib/count";
+import { COUNT_MS, countAt, countMotion } from "../lib/count";
 import { formatDiffStat } from "../lib/file-diff";
 
 function useCount(target: number, ms = COUNT_MS): number {
@@ -9,7 +9,7 @@ function useCount(target: number, ms = COUNT_MS): number {
   useEffect(() => {
     const reduce =
       typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || target === shownRef.current) {
+    if (reduce || countMotion(shownRef.current, target) !== "ease") {
       shownRef.current = target;
       setShown(target);
       return;
@@ -35,8 +35,8 @@ export function DiffStat({ added, deleted }: { added: number; deleted: number })
   const minus = useCount(deleted);
   return (
     <span className="file-diff-stat" aria-label={formatDiffStat(added, deleted)}>
-      <span className="diff-add">+{plus}</span>
-      <span className="diff-del">−{minus}</span>
+      {plus > 0 ? <span className="diff-add">+{plus}</span> : null}
+      {minus > 0 ? <span className="diff-del">−{minus}</span> : null}
     </span>
   );
 }

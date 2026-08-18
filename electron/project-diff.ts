@@ -1,8 +1,13 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { buildFileDiff, type FileDiff } from "../src/lib/file-diff";
+import { promisify } from "node:util";
+import { buildFileDiff, countLines, type FileDiff } from "../src/lib/file-diff";
+
+const execFileAsync = promisify(execFile);
+import { sameEditPath, stripPathSizeSuffix } from "../src/lib/project-edits";
 import {
+  countCreatedReview,
   instancePathKey,
   rememberInstance,
   reviewCreatedDiff,
@@ -13,12 +18,18 @@ export type FileDiffInput = {
   existsSync?: (filePath: string) => boolean;
   readFile?: (filePath: string) => string;
   gitShow?: (repo: string, rel: string) => string | null;
+  /** One repo call for list +/-. List stats must not git-show file bodies. */
+  gitNumstat?: (repo: string, rels: string[]) => Record<string, { added: number; deleted: number }>;
+  /** Newline count without loading the whole file as a string. */
+  countLinesAt?: (filePath: string) => number;
   readdir?: (dir: string) => string[];
   isDir?: (dir: string) => boolean;
   /** New file: empty before so the current text is all adds. Do not set for existing files on non-git trees. */
   created?: boolean;
   /** Per-path union of written versions. Created/untracked diffs paint against this, not HEAD. */
   instances?: FileInstanceStore;
+  /** Grow the instance union. Stats harvests leave this off. */
+  recordInstance?: boolean;
 };
 
 export type GitChange = { path: string; status: string };
@@ -57,6 +68,32 @@ function sourceWalkOrder(left: string, right: string): number {
 export function isAbsolutePath(filePath: string): boolean {
   if (path.isAbsolute(filePath)) return true;
   return /^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith("\\\\");
+}
+
+function pathKey(filePath: string): string {
+  return filePath.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function pathUnderRoot(filePath: string, root: string): boolean {
+  const file = pathKey(filePath);
+  const base = pathKey(root);
+  return Boolean(base) && (file === base || file.startsWith(`${base}/`));
+}
+
+function cleanSearchPath(filePath: string): string {
+  return stripPathSizeSuffix(filePath.trim().replace(/^file:\/\//i, "").replace(/^[`'"]+|[`'"]+$/g, ""));
+}
+
+/** `C:\Users\me\openclaw\file.json` → `C:\Users\me\.openclaw\file.json` when the agent omitted the dot. */
+export function dottedConfigAlt(filePath: string): string {
+  const sep = filePath.includes("/") && !filePath.includes("\\") ? "/" : filePath.includes("\\") ? "\\" : "/";
+  const parts = filePath.replace(/[\\/]+$/, "").split(/[\\/]/);
+  if (parts.length < 2) return "";
+  const folderIndex = parts.length - (parts[parts.length - 1]?.includes(".") ? 2 : 1);
+  const folder = parts[folderIndex] ?? "";
+  if (!folder || folder.startsWith(".")) return "";
+  parts[folderIndex] = `.${folder}`;
+  return parts.join(sep);
 }
 
 export function listGitChanges(cwd: string): GitChange[] {
@@ -111,14 +148,28 @@ export function findSourceFile(
         return false;
       }
     });
-  const trimmed = filePath.trim().replace(/^file:\/\//i, "").replace(/^[`'"]+|[`'"]+$/g, "");
+  const trimmed = cleanSearchPath(filePath);
   if (!trimmed) return null;
-  if (isAbsolutePath(trimmed)) {
-    if (existsSync(trimmed) && !isDir(trimmed)) {
-      if (roots.length === 0 || roots.some((root) => isPathInsideRoot(trimmed, root))) return trimmed;
-    } else if (roots.length > 0) {
+  const tryFile = (candidate: string): string | null => {
+    if (!candidate) return null;
+    try {
+      if (existsSync(candidate) && !isDir(candidate)) return candidate;
+    } catch {
       return null;
     }
+    return null;
+  };
+  if (isAbsolutePath(trimmed)) {
+    // Agent-cited absolute files open as themselves — do not join the basename onto a project folder.
+    const exact = tryFile(trimmed);
+    if (exact) return exact;
+    const dotted = dottedConfigAlt(trimmed);
+    if (dotted) {
+      const hidden = tryFile(dotted);
+      if (hidden) return hidden;
+    }
+    const underLinked = roots.some((root) => pathUnderRoot(trimmed, root));
+    if (!underLinked && roots.length > 0) return null;
   }
   const searchRoots: string[] = [];
   const addRoot = (dir: string) => {
@@ -149,11 +200,26 @@ export function findSourceFile(
   }
   // Linked project folders are the only trees. Cwd/home steal same basenames.
   if (searchRoots.length === 0 && roots.length === 0) addRoot(process.cwd());
+  const relFromAbs = (() => {
+    if (!isAbsolutePath(trimmed)) return trimmed;
+    for (const root of roots) {
+      if (!pathUnderRoot(trimmed, root)) continue;
+      const rel = pathKey(trimmed).slice(pathKey(root).length + 1);
+      if (rel) return rel;
+    }
+    return path.posix.basename(trimmed.replaceAll("\\", "/"));
+  })();
+  const searchName = isAbsolutePath(trimmed) ? relFromAbs : trimmed;
   for (const root of searchRoots) {
-    const abs = path.resolve(root, trimmed);
-    if (existsSync(abs) && !isDir(abs)) return abs;
+    const joined = tryFile(path.resolve(root, searchName));
+    if (joined) return joined;
+    const baseName = path.posix.basename(searchName.replaceAll("\\", "/"));
+    if (baseName && baseName !== searchName) {
+      const loose = tryFile(path.resolve(root, baseName));
+      if (loose) return loose;
+    }
   }
-  const needle = trimmed.replaceAll("\\", "/").replace(/^\.\//, "");
+  const needle = searchName.replaceAll("\\", "/").replace(/^\.\//, "");
   const base = path.posix.basename(needle).toLowerCase();
   const wantPath = needle.includes("/");
   if (!base) return null;
@@ -191,19 +257,6 @@ export function findSourceFile(
   return null;
 }
 
-function isPathInsideRoot(filePath: string, root: string): boolean {
-  let resolvedRoot: string;
-  let resolvedFile: string;
-  try {
-    resolvedRoot = path.resolve(root);
-    resolvedFile = path.resolve(filePath);
-  } catch {
-    return false;
-  }
-  const rel = path.relative(resolvedRoot, resolvedFile);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-}
-
 function gitRootFrom(start: string, existsSync: (filePath: string) => boolean): string | null {
   let dir = start;
   for (let i = 0; i < 12; i += 1) {
@@ -223,7 +276,7 @@ export function resolveExistingFile(
 ): string {
   const found = findSourceFile(filePath, roots, { ...input, existsSync });
   if (found) return found;
-  const trimmed = filePath.trim();
+  const trimmed = cleanSearchPath(filePath);
   if (!trimmed) return trimmed;
   return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
 }
@@ -254,7 +307,19 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
   const existsSync = input.existsSync ?? ((item) => fs.existsSync(item));
   const readFile = input.readFile ?? ((item) => fs.readFileSync(item, "utf8"));
   const gitShow = input.gitShow ?? defaultGitShow;
+  const isDir =
+    input.isDir ??
+    ((dir) => {
+      try {
+        return fs.statSync(dir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
   const abs = resolveExistingFile(filePath, roots, existsSync, input);
+  if (existsSync(abs) && isDir(abs)) {
+    return { ...buildFileDiff(abs, "", ""), directory: true };
+  }
   let after = "";
   try {
     after = existsSync(abs) ? readFile(abs) : "";
@@ -274,10 +339,11 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
   if (isNewFile && input.instances) {
     const previous = input.instances.get(instancePathKey(abs));
     if (previous == null) {
-      if (after) rememberInstance(input.instances, abs, after);
+      if (after && input.recordInstance !== false) rememberInstance(input.instances, abs, after);
       return buildFileDiff(abs, "", after);
     }
-    const baseline = rememberInstance(input.instances, abs, after);
+    const baseline =
+      input.recordInstance === false ? previous : rememberInstance(input.instances, abs, after);
     return reviewCreatedDiff(abs, baseline, after);
   }
   const before =
@@ -300,20 +366,277 @@ export function recordFileInstance(filePath: string, roots: string[] = [], input
   return rememberInstance(input.instances, abs, text);
 }
 
+function parseNumstat(raw: string, repo: string): Record<string, { added: number; deleted: number }> {
+  const next: Record<string, { added: number; deleted: number }> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+    if (!match || match[1] === "-" || match[2] === "-") continue;
+    let rel = match[3] ?? "";
+    const renamed = rel.match(/^.+ => (.+)$/);
+    if (renamed) rel = renamed[1] ?? rel;
+    const stat = { added: Number(match[1]), deleted: Number(match[2]) };
+    const posix = rel.replaceAll("\\", "/");
+    next[posix] = stat;
+    next[posix.toLowerCase()] = stat;
+    try {
+      const abs = path.resolve(repo, rel);
+      next[abs] = stat;
+      next[abs.replaceAll("\\", "/").toLowerCase()] = stat;
+    } catch {
+      /* skip */
+    }
+  }
+  return next;
+}
+
+const NUMSTAT_ARGS = (repo: string, files: string[]) =>
+  ["-C", repo, "--no-optional-locks", "diff", "--numstat", "HEAD", "--", ...files] as const;
+
+const NUMSTAT_OPTS = {
+  encoding: "utf8" as const,
+  windowsHide: true,
+  timeout: 1_500,
+  killSignal: "SIGKILL" as NodeJS.Signals,
+  stdio: ["ignore", "pipe", "ignore"] as ["ignore", "pipe", "ignore"],
+};
+
+function defaultGitNumstat(repo: string, rels: string[]): Record<string, { added: number; deleted: number }> {
+  const files = rels.map((item) => item.replaceAll("\\", "/")).filter(Boolean);
+  if (files.length === 0) return {};
+  try {
+    return parseNumstat(execFileSync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS), repo);
+  } catch {
+    return {};
+  }
+}
+
+async function defaultGitNumstatAsync(
+  repo: string,
+  rels: string[],
+): Promise<Record<string, { added: number; deleted: number }>> {
+  const files = rels.map((item) => item.replaceAll("\\", "/")).filter(Boolean);
+  if (files.length === 0) return {};
+  try {
+    const { stdout } = await execFileAsync("git", [...NUMSTAT_ARGS(repo, files)], NUMSTAT_OPTS);
+    return parseNumstat(String(stdout), repo);
+  } catch {
+    return {};
+  }
+}
+
+/** Count lines by streaming bytes. Does not allocate the file as one string. */
+export function countFileLines(filePath: string): number {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return 0;
+  }
+  try {
+    const buf = Buffer.allocUnsafe(64 * 1024);
+    let lines = 0;
+    let pendingCr = false;
+    let bytes = 0;
+    let last = 0;
+    let n = 0;
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+      bytes += n;
+      for (let i = 0; i < n; i += 1) {
+        const byte = buf[i]!;
+        last = byte;
+        if (pendingCr) {
+          pendingCr = false;
+          if (byte === 10) continue;
+        }
+        if (byte === 13) {
+          lines += 1;
+          pendingCr = true;
+        } else if (byte === 10) {
+          lines += 1;
+        }
+      }
+    }
+    if (bytes === 0) return 0;
+    if (last === 10 || last === 13) return lines;
+    return lines + 1;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function lookupNumstat(
+  table: Record<string, { added: number; deleted: number }>,
+  filePath: string,
+  abs: string,
+  rel: string,
+): { added: number; deleted: number } | undefined {
+  const keys = [filePath, abs, rel, rel.replaceAll("\\", "/"), rel.replaceAll("\\", "/").toLowerCase()];
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(table, key)) return table[key];
+  }
+  for (const [key, value] of Object.entries(table)) {
+    if (sameEditPath(key, filePath) || sameEditPath(key, abs) || sameEditPath(key, rel)) return value;
+  }
+  return undefined;
+}
+
+function readListedText(
+  abs: string,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+): string {
+  try {
+    return existsSync(abs) ? readFile(abs) : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveCountLinesAt(
+  input: FileDiffInput,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+): (filePath: string) => number {
+  if (input.countLinesAt) return input.countLinesAt;
+  if (input.readFile) return (filePath) => countLines(readListedText(filePath, existsSync, readFile));
+  return countFileLines;
+}
+
+function createdLineStat(
+  abs: string,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+  countLinesAt: (filePath: string) => number,
+  instances: FileInstanceStore | undefined,
+): { added: number; deleted: number } {
+  const previous = instances?.get(instancePathKey(abs));
+  if (previous != null) return countCreatedReview(previous, readListedText(abs, existsSync, readFile));
+  try {
+    if (!existsSync(abs)) return { added: 0, deleted: 0 };
+  } catch {
+    return { added: 0, deleted: 0 };
+  }
+  return { added: countLinesAt(abs), deleted: 0 };
+}
+
+type StatWork = {
+  next: Record<string, { added: number; deleted: number }>;
+  editedRelsByRepo: Map<string, { item: string; abs: string; rel: string }[]>;
+};
+
+function addEditStatPath(
+  item: string,
+  roots: string[],
+  input: FileDiffInput,
+  created: Set<string>,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+  countLinesAt: (filePath: string) => number,
+  work: StatWork,
+): "created" | "edited" | "other" {
+  const key = item.replaceAll("\\", "/").toLowerCase();
+  const isCreated = Boolean(input.created || created.has(key));
+  const abs = resolveExistingFile(item, roots, existsSync, input);
+  if (isCreated) {
+    work.next[item] = createdLineStat(abs, existsSync, readFile, countLinesAt, input.instances);
+    return "created";
+  }
+  const start = existsSync(abs) ? path.dirname(abs) : roots[0] ?? process.cwd();
+  const repo =
+    gitRootFrom(start, existsSync) ??
+    roots.map((root) => gitRootFrom(root, existsSync)).find((found): found is string => Boolean(found)) ??
+    null;
+  const rel = repo ? path.relative(repo, abs) : path.basename(abs);
+  const inRepo = Boolean(repo && rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+  if (!repo || !inRepo || gitIndexLocked(repo, existsSync)) {
+    // Same before/after is always 0/0 — do not read the file to prove it.
+    work.next[item] = { added: 0, deleted: 0 };
+    return "other";
+  }
+  const bucket = work.editedRelsByRepo.get(repo) ?? [];
+  bucket.push({ item, abs, rel });
+  work.editedRelsByRepo.set(repo, bucket);
+  return "edited";
+}
+
+function applyNumstat(
+  work: StatWork,
+  gitNumstat: (repo: string, rels: string[]) => Record<string, { added: number; deleted: number }>,
+): Record<string, { added: number; deleted: number }> {
+  for (const [repo, rows] of work.editedRelsByRepo) {
+    const table = gitNumstat(
+      repo,
+      rows.map((row) => row.rel),
+    );
+    for (const row of rows) {
+      work.next[row.item] = lookupNumstat(table, row.item, row.abs, row.rel) ?? { added: 0, deleted: 0 };
+    }
+  }
+  return work.next;
+}
+
+function editStatContext(roots: string[], input: FileDiffInput, createdPaths: string[]) {
+  const existsSync = input.existsSync ?? ((item: string) => fs.existsSync(item));
+  const readFile = input.readFile ?? ((item: string) => fs.readFileSync(item, "utf8"));
+  return {
+    existsSync,
+    readFile,
+    countLinesAt: resolveCountLinesAt(input, existsSync, readFile),
+    created: new Set(createdPaths.map((item) => item.replaceAll("\\", "/").toLowerCase())),
+    work: {
+      next: {} as Record<string, { added: number; deleted: number }>,
+      editedRelsByRepo: new Map<string, { item: string; abs: string; rel: string }[]>(),
+    },
+  };
+}
+
+/** +/- only. Does not grow instance baselines, git-show bodies, or allocate a painted FileDiff. */
 export function readEditStats(
   paths: string[],
   roots: string[] = [],
   input: FileDiffInput = {},
   createdPaths: string[] = [],
 ): Record<string, { added: number; deleted: number }> {
-  const created = new Set(createdPaths.map((item) => item.replaceAll("\\", "/").toLowerCase()));
-  const next: Record<string, { added: number; deleted: number }> = {};
+  const ctx = editStatContext(roots, input, createdPaths);
   for (const item of paths) {
-    const key = item.replaceAll("\\", "/").toLowerCase();
-    const diff = readFileDiff(item, roots, { ...input, created: input.created || created.has(key) });
-    next[item] = { added: diff.added, deleted: diff.deleted };
+    addEditStatPath(item, roots, input, ctx.created, ctx.existsSync, ctx.readFile, ctx.countLinesAt, ctx.work);
   }
-  return next;
+  return applyNumstat(ctx.work, input.gitNumstat ?? defaultGitNumstat);
+}
+
+/** Same counts as `readEditStats`, but git numstat is async and created files yield. */
+export async function readEditStatsAsync(
+  paths: string[],
+  roots: string[] = [],
+  input: FileDiffInput = {},
+  createdPaths: string[] = [],
+): Promise<Record<string, { added: number; deleted: number }>> {
+  const ctx = editStatContext(roots, input, createdPaths);
+  for (const item of paths) {
+    const kind = addEditStatPath(
+      item,
+      roots,
+      input,
+      ctx.created,
+      ctx.existsSync,
+      ctx.readFile,
+      ctx.countLinesAt,
+      ctx.work,
+    );
+    if (kind === "created") await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  if (input.gitNumstat) return applyNumstat(ctx.work, input.gitNumstat);
+  for (const [repo, rows] of ctx.work.editedRelsByRepo) {
+    const table = await defaultGitNumstatAsync(
+      repo,
+      rows.map((row) => row.rel),
+    );
+    for (const row of rows) {
+      ctx.work.next[row.item] = lookupNumstat(table, row.item, row.abs, row.rel) ?? { added: 0, deleted: 0 };
+    }
+  }
+  return ctx.work.next;
 }
 
 export type SourceRead = {
@@ -322,6 +645,7 @@ export type SourceRead = {
   text: string;
   missing: boolean;
   unreadable: boolean;
+  directory?: boolean;
 };
 
 const MAX_SOURCE_CHARS = 1_500_000;
@@ -339,8 +663,20 @@ function looksBinary(text: string): boolean {
 export function readSourceText(filePath: string, roots: string[] = [], input: FileDiffInput = {}): SourceRead {
   const existsSync = input.existsSync ?? ((item) => fs.existsSync(item));
   const readFile = input.readFile ?? ((item) => fs.readFileSync(item, "utf8"));
+  const isDir =
+    input.isDir ??
+    ((dir) => {
+      try {
+        return fs.statSync(dir).isDirectory();
+      } catch {
+        return false;
+      }
+    });
   const abs = resolveExistingFile(filePath, roots, existsSync, input);
   const name = fileNameOf(abs);
+  if (existsSync(abs) && isDir(abs)) {
+    return { path: abs, name, text: "", missing: false, unreadable: false, directory: true };
+  }
   if (!existsSync(abs)) {
     return { path: abs, name, text: "", missing: true, unreadable: false };
   }

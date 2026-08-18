@@ -15,6 +15,8 @@ export type FileDiff = {
   before: string;
   after: string;
   lines: DiffLine[];
+  /** Linked folder or other directory — not a file to preview. */
+  directory?: boolean;
 };
 
 export function splitLines(text: string): string[] {
@@ -22,6 +24,80 @@ export function splitLines(text: string): string[] {
   const parts = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   if (parts[parts.length - 1] === "") parts.pop();
   return parts;
+}
+
+/** Line count matching `splitLines(text).length` without allocating the array. */
+export function countLines(text: string): number {
+  if (!text) return 0;
+  let lines = 1;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code === 13) {
+      lines += 1;
+      if (text.charCodeAt(index + 1) === 10) index += 1;
+    } else if (code === 10) {
+      lines += 1;
+    }
+  }
+  const last = text.charCodeAt(text.length - 1);
+  if (last === 10 || last === 13) lines -= 1;
+  return lines;
+}
+
+function countPrefixSuffix(before: string[], after: string[]): { added: number; deleted: number } {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+  let endOld = before.length;
+  let endNew = after.length;
+  while (endOld > start && endNew > start && before[endOld - 1] === after[endNew - 1]) {
+    endOld -= 1;
+    endNew -= 1;
+  }
+  return { added: endNew - start, deleted: endOld - start };
+}
+
+function countLcsDelta(before: string[], after: string[]): { added: number; deleted: number } {
+  const rows = before.length + 1;
+  const cols = after.length + 1;
+  const dp = new Int16Array(rows * cols);
+  const at = (i: number, j: number) => i * cols + j;
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      dp[at(i, j)] =
+        before[i] === after[j] ? dp[at(i + 1, j + 1)] + 1 : Math.max(dp[at(i + 1, j)], dp[at(i, j + 1)]);
+    }
+  }
+  let added = 0;
+  let deleted = 0;
+  let i = 0;
+  let j = 0;
+  while (i < before.length && j < after.length) {
+    if (before[i] === after[j]) {
+      i += 1;
+      j += 1;
+    } else if (dp[at(i + 1, j)] >= dp[at(i, j + 1)]) {
+      deleted += 1;
+      i += 1;
+    } else {
+      added += 1;
+      j += 1;
+    }
+  }
+  deleted += before.length - i;
+  added += after.length - j;
+  return { added, deleted };
+}
+
+/** +/- only. Never allocates DiffLine objects or a painted FileDiff. */
+export function countLineDelta(before: string, after: string): { added: number; deleted: number } {
+  if (before === after) return { added: 0, deleted: 0 };
+  if (!before) return { added: countLines(after), deleted: 0 };
+  if (!after) return { added: 0, deleted: countLines(before) };
+  const a = splitLines(before);
+  const b = splitLines(after);
+  if (a.length === 0 && b.length === 0) return { added: 0, deleted: 0 };
+  if (a.length * b.length > 1_500_000) return countPrefixSuffix(a, b);
+  return countLcsDelta(a, b);
 }
 
 export function countLineChanges(lines: DiffLine[]): { added: number; deleted: number } {
@@ -35,7 +111,10 @@ export function countLineChanges(lines: DiffLine[]): { added: number; deleted: n
 }
 
 export function formatDiffStat(added: number, deleted: number): string {
-  return `+${added}  −${deleted}`;
+  const parts: string[] = [];
+  if (added > 0) parts.push(`+${added}`);
+  if (deleted > 0) parts.push(`−${deleted}`);
+  return parts.join("  ");
 }
 
 function fallbackDiff(before: string[], after: string[]): DiffLine[] {

@@ -181,7 +181,7 @@ export function displayWorkSteps(
   const live = Boolean(input.live);
   const assistantText = block.assistant.text ?? "";
   const peeled = peelPlanningPreamble(assistantText, live);
-  const visible = peeled.body || (!live ? assistantText : "");
+  const visible = peeled.body;
   const out: DisplayWorkStep[] = [];
 
   const pushThought = (id: string, raw: string) => {
@@ -329,7 +329,7 @@ export function thoughtForReply(input: {
   ];
   let merged = "";
   for (const part of parts) merged = mergeThoughtText(merged, collapseThoughtDisplay(part));
-  const visible = peeled.body || (!input.live ? input.assistantText ?? "" : "");
+  const visible = peeled.body;
   return stripOutputFromThought(collapseThoughtDisplay(merged), visible);
 }
 

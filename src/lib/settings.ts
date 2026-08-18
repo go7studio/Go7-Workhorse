@@ -194,6 +194,20 @@ export function deskInk(
   return undefined;
 }
 
+/** Name on a change row: MiniMax, not Custom, when the desk already has that bot. */
+export function deskLabel(
+  session: { provider: ProviderId; customBotId?: string },
+  settings: { customBots: CustomBot[]; llms: Settings["llms"] },
+): string {
+  if (session.customBotId) {
+    const bot = settings.customBots.find((item) => item.id === session.customBotId);
+    const name = bot?.name.trim();
+    if (name) return name;
+  }
+  if (session.provider !== "custom") return vendorLabel(session.provider, settings.llms[session.provider]);
+  return providerById("custom").name;
+}
+
 export function applyUpdateStockBot(
   link: LlmLink,
   patch: Partial<Pick<LlmLink, "name" | "color">>,

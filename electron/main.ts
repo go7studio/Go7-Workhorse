@@ -32,7 +32,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { imageMime } from "../src/lib/images";
 import { listDropFiles } from "./drop-files";
 import { grokSessionDirs, mediaFileCandidates } from "./media-src";
-import { findSourceFile, listGitChanges, readEditStats, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
+import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
   deleteDeskSkill,
@@ -824,7 +824,7 @@ app.whenReady().then(async () => {
     const files = Array.isArray(paths) ? paths.filter((item) => typeof item === "string") : [];
     const folders = Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [];
     const created = Array.isArray(createdPaths) ? createdPaths.filter((item) => typeof item === "string") : [];
-    return readEditStats(files, folders, { instances: fileInstances }, created);
+    return readEditStatsAsync(files, folders, { instances: fileInstances }, created);
   });
 
   ipcMain.handle("project:ensure-worktree", (_event, raw: unknown) => {

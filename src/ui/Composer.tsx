@@ -42,6 +42,23 @@ export function isComposerTypeToFocus(event: {
   return event.key.length === 1;
 }
 
+/** Half the session pane; empty or unknown height stays one line. */
+export function composerMaxHeightPx(paneHeight: number): number {
+  if (!Number.isFinite(paneHeight) || paneHeight <= 0) return 24;
+  return Math.max(24, Math.round(paneHeight * 0.5));
+}
+
+export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHeight?: number): void {
+  if (!value) {
+    el.style.height = "";
+    return;
+  }
+  const pane = paneHeight ?? (el.closest(".session-col") as HTMLElement | null)?.clientHeight ?? 0;
+  const cap = composerMaxHeightPx(pane);
+  el.style.height = "0px";
+  el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
+}
+
 export function Composer({
   setupOpen,
   onToggleSetup,
@@ -135,12 +152,12 @@ export function Composer({
   useEffect(() => {
     const el = field.current;
     if (!el) return;
-    if (!value) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+    fitComposerField(el, value);
+    const pane = el.closest(".session-col");
+    if (!(pane instanceof HTMLElement) || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => fitComposerField(el, valueRef.current));
+    observer.observe(pane);
+    return () => observer.disconnect();
   }, [value]);
 
   const addFiles = async (files: Array<File | DroppedFile>) => {
@@ -406,6 +423,7 @@ export function Composer({
             event.target.value = "";
           }}
         />
+        <div className="composer-tools">
         <button
           className="composer-attach"
           type="button"
@@ -440,6 +458,7 @@ export function Composer({
             <span className="caret" aria-hidden="true" />
           </button>
         )}
+        <span className="composer-tools-spacer" aria-hidden="true" />
         {running && canSend ? (
           <button
             className="send-steer"
@@ -488,6 +507,7 @@ export function Composer({
             </svg>
           </button>
         )}
+        </div>
         </form>
       </div>
     </div>

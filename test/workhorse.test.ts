@@ -153,7 +153,7 @@ import { fileFolderFromPath, formatEditWhen, holdEditStats, isWriteToolTitle, lo
 import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
-import { isComposerTypeToFocus } from "../src/ui/Composer";
+import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus } from "../src/ui/Composer";
 import { selectSurface, titlebarLabel } from "../src/lib/surface";
 import {
   applyCut,
@@ -2727,6 +2727,31 @@ test("typing outside an input focuses the composer", () => {
   assert.equal(isComposerTypeToFocus({ key: "v", ctrlKey: false, metaKey: true, altKey: false }), false);
 });
 
+test("composer field grows to half the session pane then collapses", () => {
+  assert.equal(composerMaxHeightPx(0), 24);
+  assert.equal(composerMaxHeightPx(-4), 24);
+  assert.equal(composerMaxHeightPx(Number.NaN), 24);
+  assert.equal(composerMaxHeightPx(800), 400);
+  const tall = { style: { height: "99px" }, scrollHeight: 900 } as HTMLTextAreaElement;
+  fitComposerField(tall, "", 800);
+  assert.equal(tall.style.height, "");
+  fitComposerField(tall, "a long draft", 800);
+  assert.equal(tall.style.height, "400px");
+  const short = { style: { height: "" }, scrollHeight: 48 } as HTMLTextAreaElement;
+  fitComposerField(short, "hi", 800);
+  assert.equal(short.style.height, "48px");
+  const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(composer, /data-composer-field/);
+  assert.match(composer, /fitComposerField/);
+  assert.doesNotMatch(composer, /Math\.min\(el\.scrollHeight, 220\)/);
+  assert.match(css, /\.composer textarea[\s\S]*max-height:\s*50cqh/);
+  assert.match(css, /\.composer-tools/);
+  assert.match(pane, /ResizeObserver/);
+  assert.match(pane, /composer-wrap/);
+});
+
 test("session setup is a compact right-side model and access inspector", () => {
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   const setup = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
@@ -3717,10 +3742,11 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const sessionEdits = css.match(/\.session-edits\s*\{[^}]+\}/)?.[0] ?? "";
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
-  assert.match(sessionEdits, /padding:\s*0 48px;/);
-  assert.doesNotMatch(sessionEdits, /padding:\s*0 48px \d+px/);
+  assert.match(sessionEdits, /padding:\s*0 22px;/);
+  assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
   assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
-  assert.match(composerWrap, /padding:\s*8px 48px 22px/);
+  assert.match(composerWrap, /padding:\s*8px 22px 16px/);
+  assert.match(composerWrap, /flex:\s*0 0 auto/);
   assert.match(css, /\.session-edits-slot/);
   assert.match(css, /grid-template-rows:\s*0fr/);
   const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
@@ -3972,7 +3998,8 @@ test("empty chats stay drafts until the first send names them", () => {
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
   assert.match(composer, /Queue for next/);
-  assert.match(composer, /if \(!value\) \{\s*el\.style\.height = ""/);
+  assert.match(composer, /fitComposerField/);
+  assert.match(composer, /composer-tools/);
   assert.match(
     readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"),
     /textarea:placeholder-shown \{[\s\S]*text-overflow: ellipsis/,

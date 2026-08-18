@@ -1338,7 +1338,7 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 0 48px;
+  padding: 0 22px;
 }
 
 .session-edits .edited-block {
@@ -1473,7 +1473,7 @@ html.pane-dragging * {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 28px 48px 20px;
+  padding: 28px 22px 20px;
   overscroll-behavior: contain;
 }
 
@@ -2189,7 +2189,8 @@ html.pane-dragging * {
 .composer-wrap {
   position: relative;
   z-index: 30;
-  padding: 8px 48px 22px;
+  flex: 0 0 auto;
+  padding: 8px 22px 16px;
   overflow: visible;
 }
 
@@ -2491,10 +2492,11 @@ html.pane-dragging * {
 
 .composer {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   min-height: 52px;
-  padding: 8px 8px 8px 14px;
+  padding: 10px 10px 8px 14px;
   background: var(--bg-solid);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -2502,16 +2504,29 @@ html.pane-dragging * {
 }
 
 .composer textarea {
-  flex: 1;
+  flex: 0 0 auto;
+  width: 100%;
   min-width: 0;
   min-height: 24px;
-  max-height: 220px;
+  max-height: 50cqh;
   overflow-y: auto;
   resize: none;
   border: 0;
   outline: none;
   background: transparent;
   line-height: 1.4;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-tools-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .composer textarea:placeholder-shown {
@@ -7111,7 +7126,7 @@ html.pane-dragging * {
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  margin: 0 48px 8px;
+  margin: 0 22px 8px;
   padding: 8px 9px 8px 11px;
   border-radius: 11px;
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-solid));
@@ -7191,7 +7206,7 @@ html.pane-dragging * {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: 0 48px 8px;
+  padding: 0 22px 8px;
 }
 
 .watch-stack {
@@ -7305,7 +7320,7 @@ html.pane-dragging * {
 }
 
 .composer-attach {
-  align-self: center;
+  flex-shrink: 0;
   border: 0;
   background: transparent;
   color: var(--text-secondary);

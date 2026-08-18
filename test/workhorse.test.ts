@@ -2332,6 +2332,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(userTurn, /peer \? " peer"/);
   assert.match(userTurn, /from \"\.\/TurnActions\"/);
+  assert.match(userTurn, /<\/div>\s*<TurnActions/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "TurnActions.tsx"), "utf8"), /export function copyText/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "copy-text.ts"), "utf8"), /export function copyText/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.turn\.user\.peer \.say/);

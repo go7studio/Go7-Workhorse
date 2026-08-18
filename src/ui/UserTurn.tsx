@@ -78,17 +78,6 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
   const goal = splitGoalCommand(visible);
   return (
     <article className={`turn user chat${peer ? " peer" : ""}`}>
-      <TurnActions
-        actions={
-          readOnly
-            ? [{ id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) }]
-            : [
-                ...(peer ? [] : [{ id: "edit", label: "Edit", run: () => store.requestEditMessage(message.id) }]),
-                { id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) },
-                { id: "fork", label: "Fork", run: () => store.forkFrom(message.id) },
-              ]
-        }
-      />
       <div className="say-stack">
         <TimeStamp at={message.createdAt} />
         <div className="say">
@@ -128,6 +117,17 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
           ) : null}
         </div>
       </div>
+      <TurnActions
+        actions={
+          readOnly
+            ? [{ id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) }]
+            : [
+                ...(peer ? [] : [{ id: "edit", label: "Edit", run: () => store.requestEditMessage(message.id) }]),
+                { id: "copy", label: "Copy", run: () => copyText(peer?.text ?? message.text) },
+                { id: "fork", label: "Fork", run: () => store.forkFrom(message.id) },
+              ]
+        }
+      />
     </article>
   );
 }

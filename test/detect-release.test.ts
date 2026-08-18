@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 // @ts-expect-error — plain .mjs release script, no types
-import { releaseDecision, versionFrom } from "../scripts/detect-release.mjs";
+import { manifestVersionFrom, releaseDecision, versionFrom } from "../scripts/detect-release.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -54,4 +54,21 @@ test("the workflow asks the script, and the old heuristic is gone", () => {
   const detect = workflow.slice(workflow.indexOf("  detect-release:"), workflow.indexOf("  installers:"));
   assert.match(detect, /fetch-depth: 2/);
   assert.match(detect, /GH_TOKEN/);
+});
+
+test("a version that moved without the manifest was typed by hand, and does not cut", () => {
+  // 2026-08-18: `chore: release 0.6.2` bumped package.json on main by hand.
+  // detect-release published v0.6.2; the manifest stayed at 0.6.1; the next
+  // release pull request proposed 0.6.2 again, for a version that existed.
+  const hand = releaseDecision({ version: "0.6.2", previousVersion: "0.6.1", alreadyReleased: false, manifestVersion: "0.6.1" });
+  assert.equal(hand.cut, false);
+  assert.equal(hand.byHand, true);
+  assert.match(hand.why, /manifest.*0\.6\.1/);
+  // The release pull request moves both, and that still cuts.
+  const pr = releaseDecision({ version: "0.6.3", previousVersion: "0.6.2", alreadyReleased: false, manifestVersion: "0.6.3" });
+  assert.equal(pr.cut, true);
+  // A repository with no manifest is not held to one.
+  assert.equal(releaseDecision({ version: "0.6.3", previousVersion: "0.6.2", alreadyReleased: false, manifestVersion: undefined }).cut, true);
+  assert.equal(manifestVersionFrom('{ ".": "0.6.2" }'), "0.6.2");
+  assert.equal(manifestVersionFrom("nope"), undefined);
 });

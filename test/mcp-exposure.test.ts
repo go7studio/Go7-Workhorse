@@ -16,7 +16,7 @@ import {
   resolveInboundParent,
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
-import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
   hermesConfigPath,
@@ -190,6 +190,14 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.ok(initialized.result?.capabilities?.tools);
 });
 
+test("delegate normalizes a harness-collapsed exclusion clause without provider-specific logic", async () => {
+  assert.deepEqual(
+    inlineExclusionTerms("Do the task. Excluded: Vendor Alpha, model/x-2.7, `Local Beta`. Do not choose a model."),
+    ["Vendor Alpha", "model/x-2.7", "Local Beta"],
+  );
+  assert.deepEqual(inlineExclusionTerms("Excluded: Vendor Alpha, vendor alpha; Model Y"), ["Vendor Alpha", "Model Y"]);
+});
+
 test("external-runtime spawn uses Settings inbound parent when MCP passes no fromSessionId", async () => {
   assert.equal(inboundSessionIdFromState({ settings: { agentSystems: { inboundSessionId: "parent_chat" } } }), "parent_chat");
   const named = resolveMcpSpawnFrom({
@@ -284,6 +292,22 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenTimeout, 420);
     assert.equal(seenWait, false);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
+
+    const collapsed = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Reply briefly. Excluded: Vendor Alpha, model/x-2.7. Do not choose a model.",
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(collapsed.error, undefined, collapsed.error?.message);
+    assert.deepEqual(seenExclude, ["Vendor Alpha", "model/x-2.7"]);
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

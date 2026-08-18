@@ -946,6 +946,7 @@
             "Spawn one bounded Workhorse worker with the same parent and trace, receive its terminal result, then address the returned worker name for compatible follow-up work without creating a cold duplicate.",
             "Verify an externally owned wave returns reports only to the harness: Workhorse must not queue or run a second desk synthesis, spawn unsolicited workers, or exceed the harness concurrency order.",
             "Exclude one provider, model, or bot at the root and verify the structured exclusion persists through restart, is inherited by a nested helper, and rejects an explicitly named excluded descendant before a provider call.",
+            "Repeat with the harness collapsing that same exclusion into a labeled Excluded clause inside the task; verify Workhorse normalizes it before routing and never calls the excluded provider.",
             "Query worker status by returned Workhorse session id and verify authoritative provider, actual model, effort, lifecycle, and exclusions; confirm the parent title stays stable after its initial vendor title.",
             "Keep ordinary delegate and follow-up calls below the harness MCP client timeout by returning a worker id promptly; poll status to terminal and require the final report there instead of replaying the task through a fallback session.",
             "For wait=true, require a structured completion envelope with worker session id, authoritative provider/model/effort, exclusions, and report; reusing a worker from a finished wave must open a fresh externally owned wave.",

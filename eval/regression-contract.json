@@ -348,7 +348,7 @@
     },
     {
       "id": "REG-039",
-      "behavior": "A harness delegates ordinary work by supplying the task and constraints without first choosing a provider, model, effort, or worker; Workhorse auto-routing selects them from task fit and capacity, returns a worker id promptly, and exposes the scored rationale and final report through status polling. Explicit user assignments remain authoritative.",
+      "behavior": "A harness delegates ordinary work by supplying the task and constraints without first choosing a provider, model, effort, or worker; Workhorse auto-routing selects them from task fit and capacity, returns a worker id promptly, and exposes the scored rationale and final report through status polling. Structured exclusions and a harness-collapsed Excluded clause are both enforced before routing. Explicit user assignments remain authoritative.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S9"],
       "rubric": ["ORC-17"],

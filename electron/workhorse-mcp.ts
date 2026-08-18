@@ -887,6 +887,42 @@ function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boole
   return null;
 }
 
+export function inlineExclusionTerms(text: string): string[] {
+  const found: string[] = [];
+  const labels = [...text.matchAll(/\bExcluded?\s*:\s*/gi)];
+  for (const label of labels) {
+    const start = (label.index ?? 0) + label[0].length;
+    const line = text.slice(start).split(/\r?\n/, 1)[0] ?? "";
+    const clause = line.split(/\.\s+(?=[A-Z])/u, 1)[0] ?? "";
+    for (const raw of clause.split(/[,;]/)) {
+      const term = raw.trim().replace(/^[`'\"]+|[`'\"]+$/g, "");
+      if (term && term.length <= 120) found.push(term);
+    }
+  }
+  const seen = new Set<string>();
+  return found.filter((term) => {
+    const key = term.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 32);
+}
+
+function mergedDelegateExclusions(task: string, value: unknown): string[] | undefined {
+  const structured = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : [];
+  const merged = [...structured, ...inlineExclusionTerms(task)];
+  const seen = new Set<string>();
+  const unique = merged.filter((term) => {
+    const key = term.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return unique.length > 0 ? unique : undefined;
+}
+
 async function askChat(chat: string, message: string, from?: string, traceId?: string, wait = true): Promise<string> {
   const state = readState();
   const listed = catalogSessions(state, { fromSessionId: fromSessionId(from) });
@@ -1169,7 +1205,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         prompt: task,
         description: typeof args.description === "string" ? args.description : undefined,
         route,
-        exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        exclude: mergedDelegateExclusions(task, args.exclude),
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
         capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
         skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,

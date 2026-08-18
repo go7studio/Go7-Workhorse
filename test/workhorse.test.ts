@@ -142,7 +142,7 @@ import {
   wrapMarkdown,
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer } from "../src/lib/permissions";
-import { appendUserMessage, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { applyUpdateStockBot, deskInk, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
@@ -6017,6 +6017,15 @@ test("vendor session id and sandbox survive normalizeSession", () => {
   assert.equal(recovered?.status, "idle");
 });
 
+test("composer draft overlays do not copy a session that did not change", () => {
+  const session = { id: "sess_1", composerDraft: "hi" };
+  const same = applyComposerDrafts([session], { sess_1: { text: "hi" } });
+  assert.equal(same[0], session);
+  const next = applyComposerDrafts([session], { sess_1: { text: "hello" } });
+  assert.equal(next[0]?.composerDraft, "hello");
+  assert.notEqual(next[0], session);
+});
+
 test("unsent composer text and images survive normalizeSession", () => {
   const saved = {
     id: "sess_draft",
@@ -6043,6 +6052,17 @@ test("unsent composer text and images survive normalizeSession", () => {
   assert.match(composer, /setComposerDraft/);
   assert.match(composer, /composerDraft/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /key=\{session\.id\}/);
+  // Typing used to write the draft into the live store every 120ms, which
+  // rebuilt the desk and serialized every chat (megabytes) through IPC.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /saveComposerDrafts/);
+  assert.match(store, /commit = false/);
+  assert.match(store, /if \(!commit\) return;/);
+  assert.match(store, /settleSessionGoals/);
+  assert.match(store, /if \(!settled\.changed\) return current;/);
+  assert.match(store, /busy \? 2_000 : 400/);
+  assert.match(composer, /setComposerDraft\(sessionId, value, images\)/);
+  assert.match(composer, /setComposerDraft\(sessionId, valueRef\.current, imagesRef\.current, true\)/);
 });
 
 test("turns keep the bot that ran them after a switch", () => {

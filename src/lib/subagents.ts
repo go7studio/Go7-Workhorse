@@ -420,20 +420,41 @@ export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
 }
 
 export function parentHasRunningChildren(
-  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
+  sessions: Array<Pick<Session, "id" | "parentId" | "status" | "agentRun" | "hidden">>,
   parentId: string,
+  childIds?: ReadonlySet<string>,
 ): boolean {
   return sessions.some(
     (session) =>
       session.parentId === parentId &&
+      (!childIds || childIds.has(session.id)) &&
       isWorkerSession(session) &&
       (session.agentRun?.status === "running" || session.status === "running"),
   );
 }
 
+export function scopedChildAgentIds(
+  sessions: Session[],
+  parentId: string,
+  input: { workerIds?: string[]; traceId?: string; lineupChildIds?: string[] } = {},
+): string[] {
+  const children = sessions.filter((session) => session.parentId === parentId && isWorkerSession(session));
+  const childIds = new Set(children.map((session) => session.id));
+  const requested = [...new Set((input.workerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (requested.length > 0) return requested.filter((id) => childIds.has(id));
+  const traceId = input.traceId?.trim();
+  if (traceId) {
+    return children.filter((session) => session.agentRun?.correlationId === traceId).map((session) => session.id);
+  }
+  const lineup = [...new Set((input.lineupChildIds ?? []).map((id) => id.trim()).filter(Boolean))]
+    .filter((id) => childIds.has(id));
+  return lineup.length > 0 ? lineup : children.map((session) => session.id);
+}
+
 export function collectChildAgentReports(
   sessions: Session[],
   parentId: string,
+  childIds?: ReadonlySet<string>,
 ): Array<{
   title: string;
   status: string;
@@ -445,7 +466,7 @@ export function collectChildAgentReports(
   exclusions?: string[];
 }> {
   return sessions
-    .filter((session) => session.parentId === parentId && isWorkerSession(session))
+    .filter((session) => session.parentId === parentId && (!childIds || childIds.has(session.id)) && isWorkerSession(session))
     .map((session) => {
       const reply = [...session.messages]
         .reverse()
@@ -516,6 +537,7 @@ export type WorkerBriefInput = {
   constraints?: string[];
   skills?: Array<{ name: string; file: string }>;
   capabilities?: string[];
+  mission?: boolean;
 };
 
 export function stripSpawnPreamble(text: string): string {
@@ -563,7 +585,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const vendor = input.vendor?.trim();
   const task = stripSpawnPreamble(input.text) || input.text.trim();
   const lines = [
-    "ROLE: worker",
+    input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
     `PROJECT: ${project || "(none — stop and say so)"}`,
     `FOLDER: ${folder || "(none — stop and say so)"}`,
@@ -574,6 +596,12 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
   if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
+  if (input.mission) {
+    lines.push("Choose a focused or split execution strategy from task coupling, risk, skills, and useful concurrency.");
+    lines.push("Focused is valid when one worker can safely own the coupled change; split is valid when an independent slice adds value.");
+    lines.push("If split, dispatch one bounded helper before the main work. Do not fan out for appearance.");
+    lines.push("Explain the strategy and report every worker used. Workhorse attaches the actual model and effort to the result.");
+  }
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
   if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");
   lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");

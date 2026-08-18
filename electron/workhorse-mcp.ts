@@ -257,12 +257,13 @@ const TOOLS = [
   {
     name: "workhorse_await_agents",
     description:
-      "Status of this chat’s worker lineup. Default returns immediately. wait=true only if the user asked you to sit until they finish. Never treat a timeout as a bot-setup failure.",
+      "Status of one worker wave. Pass the worker ids returned by delegate/spawn. Default returns immediately. wait=true only when the user asked you to sit until they finish.",
     inputSchema: {
       type: "object",
       properties: {
         wait: { type: "boolean", description: "false (default) status now. true waits for terminal state." },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
+        workerIds: { type: "array", items: { type: "string" }, description: "Worker ids returned by this wave's delegate/spawn calls." },
         fromSessionId: { type: "string", description: "Parent Workhorse chat id used for the spawn." },
         traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
       },
@@ -1039,6 +1040,7 @@ async function spawnAgent(
     isolation?: "worktree" | "shared";
     folder?: string;
     wait?: boolean;
+    mission?: boolean;
     route?: "auto" | "quick" | "balanced" | "deep";
     planStepId?: string;
     rationale?: string;
@@ -1128,6 +1130,7 @@ async function spawnAgent(
     isolation: spawnInput.isolation,
     folder: admitted.cwd,
     wait: spawnInput.wait,
+    mission: spawnInput.mission,
     route: spawnInput.route,
     planStepId: spawnInput.planStepId,
     rationale: spawnInput.rationale,
@@ -1161,6 +1164,7 @@ async function spawnAgent(
       isolation: spawnInput.isolation,
       folder: admitted.cwd,
       wait: spawnInput.wait,
+      mission: spawnInput.mission,
       route: spawnInput.route,
       planStepId: spawnInput.planStepId,
       rationale: spawnInput.rationale,
@@ -1178,7 +1182,13 @@ async function spawnAgent(
   return first;
 }
 
-async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolean, traceId?: string): Promise<string> {
+async function awaitAgents(
+  from?: string,
+  timeoutSeconds?: number,
+  wait?: boolean,
+  traceId?: string,
+  workerIds?: string[],
+): Promise<string> {
   const timeoutMs = wait
     ? Math.max(30, Math.min(3_600, timeoutSeconds ?? 600)) * 1_000 + 5_000
     : 15_000;
@@ -1190,6 +1200,7 @@ async function awaitAgents(from?: string, timeoutSeconds?: number, wait?: boolea
         message: "await-agents",
         timeoutSeconds,
         wait,
+        ...(workerIds?.length ? { workerIds } : {}),
         ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
       },
       from,
@@ -1233,6 +1244,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: args.wait === true,
+        mission: true,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
@@ -1296,6 +1308,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
       typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       args.wait === true,
       typeof args.traceId === "string" ? args.traceId : undefined,
+      Array.isArray(args.workerIds) ? args.workerIds.filter((item): item is string => typeof item === "string") : undefined,
     );
   }
   if (name === "workhorse_list_bots") {

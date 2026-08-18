@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.3",
+  "contractVersion": "0.6.4",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -381,6 +381,15 @@
       "rubric": ["REL-05", "REL-07"],
       "sourceFiles": ["src/ui/Sidebar.tsx", "src/styles/app.css", "src/lib/store.tsx", "electron/app-update.ts", "test/app-update.test.ts"],
       "verification": ["verify"]
+    },
+    {
+      "id": "REG-043",
+      "behavior": "Harness delegation makes a model-decided focused-or-split execution strategy visible, preserves Workhorse's automatic provider/model/effort choice, and scopes await results to the requested worker ids, trace, or active wave instead of every historical child on the parent.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

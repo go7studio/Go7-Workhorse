@@ -83,6 +83,7 @@ import {
   maxRootWorkers,
   MIN_ROOT_WORKERS,
   rootSpawnError,
+  scopedChildAgentIds,
   resolveModelHint,
   resolveSpawnSpec,
   shouldSpawnInsteadOfAsk,
@@ -7767,6 +7768,21 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   };
   assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch"), true);
   assert.equal(parentHasRunningChildren([kidDone], "orch"), false);
+  assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch", new Set([kidDone.id])), false);
+  const oldDone = {
+    ...kidDone,
+    id: "kid_old",
+    agentRun: { ...kidDone.agentRun!, correlationId: "trace_old" },
+  };
+  const waveDone = {
+    ...kidDone,
+    id: "kid_wave",
+    agentRun: { ...kidDone.agentRun!, correlationId: "trace_wave" },
+  };
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { lineupChildIds: [waveDone.id] }), [waveDone.id]);
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { traceId: "trace_wave" }), [waveDone.id]);
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { workerIds: [oldDone.id] }), [oldDone.id]);
+  assert.deepEqual(collectChildAgentReports([oldDone, waveDone], "orch", new Set([waveDone.id])).map((row) => row.childSessionId), [waveDone.id]);
   assert.equal(rootSpawnError([kidRunning], "orch"), null);
   // A seven-bot desk gets a seven-worker lineup. The old flat cap of 2 rejected
   // the third spawn of the seven the desk skill asks for.
@@ -8160,6 +8176,17 @@ test("desk builds one named join prompt and syncs idle children", () => {
     readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
     /formatWorkerPrompt\(\{[\s\S]*?folder: childCwd,/,
   );
+  const missionBrief = formatWorkerPrompt({
+    fromTitle: "Walt",
+    text: "Implement and verify the Mission Control fixes.",
+    folder,
+    mission: true,
+  });
+  assert.match(missionBrief, /ROLE: mission coordinator/);
+  assert.match(missionBrief, /focused or split execution strategy/);
+  assert.match(missionBrief, /task coupling, risk, skills, and useful concurrency/);
+  assert.match(missionBrief, /Do not fan out for appearance/);
+  assert.match(missionBrief, /Workhorse attaches the actual model and effort/);
   assert.equal(looksLikePermissionQuestion("what sandbox do you have?"), true);
   assert.equal(
     looksLikePermissionQuestion("Permission / Sandbox are workspace facts on this turn."),

@@ -157,6 +157,8 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       assert.ok("fromSessionId" in properties, `${toolName} publishes fromSessionId`);
       assert.ok("traceId" in properties, `${toolName} publishes traceId`);
     }
+    const awaitFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_await_agents")?.inputSchema?.properties ?? {};
+    assert.ok("workerIds" in awaitFields, "workhorse_await_agents publishes wave worker ids");
     const deleted = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 2,
@@ -238,6 +240,8 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   let seenTools: string[] = [];
   let seenTimeout = 0;
   let seenWait: boolean | undefined;
+  let seenMission = false;
+  let seenWorkerIds: string[] = [];
   setWorkhorseDeskAsk(async (ask) => {
     seenFrom = ask.fromSessionId;
     seenTrace = ask.traceId ?? "";
@@ -253,6 +257,8 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     seenTools = ask.tools ?? [];
     seenTimeout = ask.timeoutSeconds ?? 0;
     seenWait = ask.wait;
+    seenMission = ask.mission === true;
+    seenWorkerIds = ask.workerIds ?? [];
     return { text: JSON.stringify({ ok: true, parent: ask.fromSessionId }) };
   });
   try {
@@ -301,7 +307,20 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.deepEqual(seenTools, ["browser"]);
     assert.equal(seenTimeout, 420);
     assert.equal(seenWait, false);
+    assert.equal(seenMission, true);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
+
+    const awaited = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 51,
+      method: "tools/call",
+      params: {
+        name: "workhorse_await_agents",
+        arguments: { fromSessionId: "parent_chat", traceId: "trace_delegate_1", workerIds: ["worker_new"] },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(awaited.error, undefined, awaited.error?.message);
+    assert.deepEqual(seenWorkerIds, ["worker_new"]);
 
     const explicit = (await handleWorkhorseRpc({
       jsonrpc: "2.0",

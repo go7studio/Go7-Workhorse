@@ -183,6 +183,7 @@ import {
   resolveSpawnSpec,
   findReusableWorker,
   reserveWorkerName,
+  scopedChildAgentIds,
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
@@ -3862,6 +3863,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
               const parentLive = stateRef.current.sessions.find((item) => item.id === parentId);
+              const requestedWorkerIds = Array.isArray(payload.workerIds)
+                ? [...new Set(payload.workerIds.map((id) => id.trim()).filter(Boolean))]
+                : [];
+              const waveIds = scopedChildAgentIds(stateRef.current.sessions, parentId, {
+                workerIds: requestedWorkerIds,
+                traceId: payload.traceId,
+                lineupChildIds: parentLive?.lineup?.rows.map((row) => row.childId),
+              });
+              if (requestedWorkerIds.length > 0 && waveIds.length !== requestedWorkerIds.length) {
+                await replyAsk({ error: "unknown worker in this parent chat" });
+                return;
+              }
+              if (requestedWorkerIds.length === 0 && payload.traceId?.trim() && waveIds.length === 0) {
+                await replyAsk({ error: "unknown worker trace in this parent chat" });
+                return;
+              }
+              const waveIdSet = new Set(waveIds);
               const shouldWait = awaitAgentsWaits({ wait: payload.wait, parentStatus: parentLive?.status });
               if (shouldWait) {
                 const timeoutMs =
@@ -3869,7 +3887,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
                     : 10 * 60 * 1_000;
                 const deadline = Date.now() + timeoutMs;
-                while (parentHasRunningChildren(stateRef.current.sessions, parentId) && Date.now() < deadline) {
+                while (parentHasRunningChildren(stateRef.current.sessions, parentId, waveIdSet) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, 400));
                 }
               }
@@ -3882,10 +3900,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
               const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
-              const reports = collectChildAgentReports(stateRef.current.sessions, parentId);
+              const reports = collectChildAgentReports(stateRef.current.sessions, parentId, waveIdSet);
+              const scopedLineup = parentNow?.lineup
+                ? { ...parentNow.lineup, rows: parentNow.lineup.rows.filter((row) => waveIdSet.has(row.childId)) }
+                : undefined;
               await replyAsk({
                 text: formatAwaitAgentsSnapshot({
-                  lineup: parentNow?.lineup,
+                  lineup: scopedLineup,
                   reports,
                   wait: shouldWait,
                 }),
@@ -4411,6 +4432,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   constraints: assignedConstraints,
                   skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
                   capabilities: assignedCapabilities,
+                  mission: payload.mission === true,
                 }),
                 latest.settings.mcpServers,
                 spawnImages,

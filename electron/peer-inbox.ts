@@ -61,6 +61,10 @@ export type PeerAsk = {
   onlyThis?: boolean;
   scope?: string;
   wait?: boolean;
+  /** Delegate calls ask the first worker to make and report a bounded execution strategy. */
+  mission?: boolean;
+  /** Restrict await aggregation to these workers instead of the parent's full history. */
+  workerIds?: string[];
   route?: "auto" | "quick" | "balanced" | "deep";
   planStepId?: string;
   planTitle?: string;

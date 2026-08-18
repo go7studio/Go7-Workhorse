@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.3.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.1...v0.3.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* a Mac installer can install the GitHub update it found ([1004e41](https://github.com/go7studio/Go7-Workhorse/commit/1004e41dbc71e7d8b04662e83d512bdf17c90227))
+* a Mac installer can install the GitHub update it found ([c678eaa](https://github.com/go7studio/Go7-Workhorse/commit/c678eaae5854632234196e32fc4071bab7f96514))
+* keep development runs out of Keychain ([ef4f0e5](https://github.com/go7studio/Go7-Workhorse/commit/ef4f0e53a2de54fd42c542ba558cd8df1a8a067c))
+* local packages stop opening the production Keychain ([e26dd7b](https://github.com/go7studio/Go7-Workhorse/commit/e26dd7b3ea101892e1042b681b534eef40756e54))
+
 ## [0.3.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.0...v0.3.1) (2026-08-17)
 
 

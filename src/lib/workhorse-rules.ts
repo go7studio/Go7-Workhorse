@@ -67,6 +67,21 @@ export const SPAWN_TURN_HINT =
 
 export type DeskRole = "orchestrator" | "worker";
 
+/**
+ * The rules a vendor CLI is launched with, by role. Every launcher used to
+ * bake the orchestrator bible into session meta whatever the role, so a worker
+ * carried ~2,150 tokens of spawn-and-join law on top of the ~130-token worker
+ * rules its preface already gave it — and, worse, two rule sets that disagreed
+ * about whether it may list bots. One role, one rule set.
+ *
+ * Cursor's orchestrator rules are the same bible with two identity sentences
+ * changed, so a Cursor worker takes the same worker rules as everyone else.
+ */
+export function sessionRulesFor(role: DeskRole | undefined, provider: "grok" | "claude" | "codex" | "cursor" = "grok"): string {
+  if (role === "worker") return WORKER_SESSION_RULES;
+  return provider === "cursor" ? CURSOR_SESSION_RULES : WORKHORSE_SESSION_RULES;
+}
+
 /** What the desk calls its own helpers. "worker" is the shipped word for one. */
 const SPAWN_TARGET = "(?:sub-?agents?|agents?|bots?|workers?|vendors?)";
 

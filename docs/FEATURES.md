@@ -94,7 +94,10 @@ transcript rather than as a path.
 - **Goals** — long-running intent that survives the chat that started it.
 - **Subagents** — lifecycle records, runtime and token ceilings, cascading
   cancellation, changed-file review, and worktree isolation where the project
-  supports it.
+  supports it. A worker gets a worker's context: the short worker rules and
+  only the desk tools it may call — read and ask chats, one bounded helper,
+  ask to raise a block, read skills and references. It cannot create, rename,
+  move or delete anything on the desk, and is not shown those tools.
 - **Plans** — multi-step work that continues after a worker joins.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. The desk routes

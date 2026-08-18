@@ -1,4 +1,5 @@
 import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from "../src/lib/agent-runtime";
+import { WORKER_DESK_TOOLS } from "../src/lib/subagents";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 
 export const EXTERNAL_RUNTIME_ALLOW = [
@@ -36,14 +37,28 @@ export const EXTERNAL_RUNTIME_FORBIDDEN = [
   "workhorse_list_bots",
 ] as const;
 
+
 export function mcpExposureProfile(raw: unknown): McpExposureProfile {
   if (raw === "worker" || raw === "external-runtime" || raw === "desk") return raw;
   return "desk";
 }
 
 export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boolean {
-  if (profile !== "external-runtime") return true;
+  if (profile === "desk") return true;
+  if (profile === "worker") return (WORKER_DESK_TOOLS as readonly string[]).includes(tool);
   return (EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool);
+}
+
+/**
+ * The profile a call runs under. The process env names the transport the
+ * server was launched for (an external runtime gets `external-runtime`); a
+ * Workhorse worker chat is a `worker` whatever transport it arrived on, because
+ * the caller session decides what the caller is, not the pipe.
+ */
+export function profileForCaller(envProfile: McpExposureProfile, callerRole: "orchestrator" | "worker" | undefined): McpExposureProfile {
+  if (envProfile === "external-runtime") return envProfile;
+  if (callerRole === "worker") return "worker";
+  return envProfile;
 }
 
 export function assertMcpToolAllowed(profile: McpExposureProfile, tool: string): void {

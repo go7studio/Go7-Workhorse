@@ -6,7 +6,7 @@ import {
   workhorseMcpServer,
   type GrokLaunchSpec,
 } from "./grok-launch";
-import { CURSOR_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import { normalizeModelId } from "../src/lib/models";
 import {
   detectCursorLogin,
@@ -25,6 +25,8 @@ export type CursorLaunchInput = {
   sandbox?: SandboxProfile;
   mcpServers?: McpServerConfig[];
   detect?: CursorLoginDetectInput;
+  /** Which rules the CLI is launched with. A worker gets worker rules. */
+  role?: DeskRole;
 };
 
 const DEFAULT_MODEL = "composer-2.5";
@@ -89,7 +91,7 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
       cwd: input.cwd,
       mcpServers,
       _meta: {
-        rules: CURSOR_SESSION_RULES,
+        rules: sessionRulesFor(input.role, "cursor"),
         model,
         effort,
         permissionMode,

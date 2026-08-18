@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { WORKHORSE_SESSION_RULES } from "../src/lib/workhorse-rules";
+import { WORKHORSE_SESSION_RULES, sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
 import { APP_VERSION } from "../src/lib/app-info";
 
@@ -22,6 +22,8 @@ export type GrokLaunchInput = {
   mode: PermissionMode;
   sandbox?: SandboxProfile;
   mcpServers?: McpServerConfig[];
+  /** Which rules the CLI is launched with. A worker gets worker rules. */
+  role?: DeskRole;
 };
 
 export type GrokMcpEnvVar = { name: string; value: string };
@@ -242,7 +244,7 @@ export function buildGrokLaunchSpec(input: GrokLaunchInput): GrokLaunchSpec {
   if (alwaysApprove) argv.push("--always-approve");
   argv.push("--model", model, "--reasoning-effort", effort, "stdio");
 
-  const meta: GrokSessionMeta = { rules: WORKHORSE_SESSION_RULES, goalMode: true };
+  const meta: GrokSessionMeta = { rules: sessionRulesFor(input.role, "grok"), goalMode: true };
   if (alwaysApprove) meta.yoloMode = true;
   else if (input.mode === "plan") meta.planMode = true;
   const builtIn = workhorseMcpServer(input.sessionId);

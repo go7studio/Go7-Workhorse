@@ -4,17 +4,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
-  assertMcpToolAllowed,
+  EXTERNAL_RUNTIME_ALLOW,
   EXTERNAL_RUNTIME_FORBIDDEN,
+  assertMcpToolAllowed,
   inboundDeskAction,
   inboundSessionIdFromState,
   inboundSpawnParent,
   isMcpToolAllowed,
   mcpExposureProfile,
+  profileForCaller,
   resolveInboundParent,
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
 import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
   hermesConfigPath,
   installWorkhorseExternalMcp,
@@ -134,7 +137,9 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       result?: { tools?: Array<{ name: string }> };
     };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
-    assert.ok(names.includes("workhorse_delete_chat"), "forbidden tools stay listed");
+    // The list a caller sees is the list it may call. Listing a tool the call
+    // will refuse only spends schema tokens and invites the attempt.
+    assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
     assert.ok(names.includes("workhorse_list_agents"));
     const deleted = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -303,4 +308,115 @@ test("MCP install writes official OpenClaw and Hermes config, not a sidecar", ()
   });
   const merged = mergeExternalMcpServer({}, entry);
   assert.equal(mcpConfigContainsBearer(merged), false);
+});
+
+test("a worker is offered only the desk tools it may call, and a hidden name is refused, not just unlisted", async () => {
+  // Seven workers in the cross-vendor context review each carried ~3k tokens
+  // of schemas for tools their brief forbade — and could have called them,
+  // because tools/list hid three names while tools/call checked only the
+  // process profile. Now list = call for every caller.
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-worker-profile-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      settings: {},
+      sessions: [
+        { id: "orch_1", title: "Orchestrator", provider: "grok", projectId: null },
+        { id: "worker_1", title: "Dexter · review", provider: "claude", projectId: null, parentId: "orch_1", hidden: true },
+      ],
+    }),
+  );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  delete process.env.WORKHORSE_MCP_PROFILE; // a Workhorse-spawned CLI: desk transport
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  try {
+    const list = async (from: string) => {
+      const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { fromSessionId: from })) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      return (listed.result?.tools ?? []).map((tool) => tool.name).sort();
+    };
+    const orchestrator = await list("orch_1");
+    const worker = await list("worker_1");
+    assert.ok(orchestrator.includes("workhorse_delete_project"), "the orchestrator keeps the whole desk");
+    assert.ok(orchestrator.includes("workhorse_list_bots"));
+    assert.deepEqual(worker, [...WORKER_DESK_TOOLS].sort(), "a worker sees exactly its allowlist");
+    // The Bible: one bounded helper is the ceiling — spawn and await stay.
+    assert.ok(worker.includes("workhorse_spawn_agent"));
+    assert.ok(worker.includes("workhorse_await_agents"));
+    // Reshaping the desk does not.
+    for (const name of ["workhorse_delete_project", "workhorse_create_project", "workhorse_setup_custom_bot", "workhorse_delete_bot", "workhorse_list_bots", "workhorse_plan", "workhorse_request_vendor"]) {
+      assert.ok(!worker.includes(name), `${name} is not offered to a worker`);
+    }
+    // Knowing the name is not enough.
+    const called = (await handleWorkhorseRpc(
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "workhorse_delete_project", arguments: { project: "x" } } },
+      { fromSessionId: "worker_1" },
+    )) as { error?: { message?: string } };
+    assert.match(called.error?.message ?? "", /profile_forbidden/);
+    // Schema weight: what the change is for.
+    const listedFull = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 3, method: "tools/list" }, { fromSessionId: "orch_1" })) as { result?: { tools?: unknown[] } };
+    const listedWorker = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 4, method: "tools/list" }, { fromSessionId: "worker_1" })) as { result?: { tools?: unknown[] } };
+    const size = (tools: unknown[] | undefined) => JSON.stringify(tools ?? []).length;
+    assert.ok(size(listedWorker.result?.tools) < size(listedFull.result?.tools) / 2, "a worker carries less than half the schema weight");
+  } finally {
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the worker allowlist is one list, and the profile follows the caller, not the pipe", () => {
+  // src/lib/subagents (HTTP bots) and electron/mcp-exposure (MCP) read the
+  // same list, so the two surfaces cannot drift apart.
+  for (const name of WORKER_DESK_TOOLS) {
+    assert.equal(isMcpToolAllowed("worker", name), true, name);
+    assert.equal(isWorkerOmittedTool(name), false, name);
+  }
+  // Every desk tool a worker may not call is refused on both surfaces alike.
+  for (const name of ["workhorse_delete_project", "workhorse_list_bots", "workhorse_plan", "workhorse_request_vendor", "workhorse_setup_custom_bot"]) {
+    assert.equal(isMcpToolAllowed("worker", name), false, name);
+    assert.equal(isWorkerOmittedTool(name), true, name);
+  }
+  assert.equal(isMcpToolAllowed("worker", "workhorse_delete_project"), false);
+  assert.equal(isMcpToolAllowed("desk", "workhorse_delete_project"), true);
+  // A worker calling over the desk transport is a worker.
+  assert.equal(profileForCaller("desk", "worker"), "worker");
+  assert.equal(profileForCaller("desk", "orchestrator"), "desk");
+  assert.equal(profileForCaller("desk", undefined), "desk");
+  // An external runtime never widens to worker just because it names a worker session.
+  assert.equal(profileForCaller("external-runtime", "worker"), "external-runtime");
+  // Non-desk tools (file, shell, bridged MCP) are not governed here.
+  assert.equal(isWorkerOmittedTool("list_dir"), false);
+  assert.equal(isWorkerOmittedTool("read_file"), false);
+  assert.equal(isWorkerOmittedTool("workhorse_delete_project"), true);
+});
+
+test("a worker's CLI is launched with worker rules, an orchestrator's with the bible", async () => {
+  const { buildGrokLaunchSpec } = await import("../electron/grok-launch");
+  const { buildClaudeLaunchSpec } = await import("../electron/claude-launch");
+  const { buildCodexLaunchSpec } = await import("../electron/codex-launch");
+  const { buildCursorLaunchSpec } = await import("../electron/cursor-launch");
+  const { WORKER_SESSION_RULES, WORKHORSE_SESSION_RULES, CURSOR_SESSION_RULES, sessionRulesFor } = await import("../src/lib/workhorse-rules");
+  const base = { model: "m", effort: null, cwd: process.cwd(), mode: "always-approve" as const, sandbox: "off" as const };
+  const rulesOf = (spec: { sessionParams: { _meta?: unknown } }) =>
+    ((spec.sessionParams._meta ?? {}) as { rules?: string }).rules ?? "";
+  // Each launcher used to bake the 2,150-token orchestrator bible into every
+  // session's meta, so a worker carried it beside the 130-token worker rules
+  // its preface gave it — two rule sets that disagreed on whether it may list
+  // bots. Seven workers in one review paid ~15k tokens for that.
+  assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
+  assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "orchestrator" })), WORKHORSE_SESSION_RULES);
+  assert.equal(rulesOf(buildGrokLaunchSpec(base)), WORKHORSE_SESSION_RULES, "no role means the root chat");
+  assert.equal(rulesOf(buildClaudeLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
+  assert.equal(rulesOf(buildCodexLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
+  // Cursor's orchestrator rules are the bible with two identity sentences
+  // changed; nothing Cursor-mechanical, so a Cursor worker takes worker rules too.
+  assert.equal(rulesOf(buildCursorLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
+  assert.equal(rulesOf(buildCursorLaunchSpec(base)), CURSOR_SESSION_RULES);
+  assert.equal(sessionRulesFor("worker", "cursor"), WORKER_SESSION_RULES);
+  assert.ok(WORKER_SESSION_RULES.length * 10 < WORKHORSE_SESSION_RULES.length, "the worker rules are an order of magnitude smaller");
 });

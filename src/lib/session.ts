@@ -9,7 +9,7 @@ import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
 import { normalizePlanRun } from "./plan";
-import { normalizeAgentRun } from "./subagents";
+import { normalizeAgentRun, workerNameFromTitle } from "./subagents";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
@@ -189,7 +189,11 @@ export function normalizeSession(raw: unknown): Session | null {
     parentId: typeof record.parentId === "string" && record.parentId.trim() ? record.parentId.trim() : undefined,
     hidden: record.hidden === true || undefined,
     workerName:
-      typeof record.workerName === "string" && record.workerName.trim() ? record.workerName.trim() : undefined,
+      typeof record.workerName === "string" && record.workerName.trim()
+        ? record.workerName.trim()
+        : record.hidden === true || record.agentRun
+          ? workerNameFromTitle(typeof record.title === "string" ? record.title : "")
+          : undefined,
     provider,
     model,
     customBotId:

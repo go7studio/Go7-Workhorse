@@ -7,6 +7,7 @@ import {
   reserveWorkerName,
   workerTaskTitle,
   workerIsFree,
+  workerNameFromTitle,
   type WorkerRecord,
 } from "../src/lib/subagents";
 
@@ -42,6 +43,9 @@ test("a name is given once and kept", () => {
 
 test("a reused worker shows its current slice", () => {
   assert.equal(workerTaskTitle("Dexter", "Add Software JSON-LD"), "Dexter · Add Software JSON-LD");
+  assert.equal(workerNameFromTitle("Dexter · Add Software JSON-LD"), "Dexter");
+  assert.equal(workerNameFromTitle("Wren 2 · Audit"), "Wren 2");
+  assert.equal(workerNameFromTitle("Production chat"), undefined);
 });
 
 test("names never run out and never collide", () => {

@@ -180,6 +180,15 @@ export function workerTaskTitle(workerName: string, taskTitle: string): string {
   return `${workerName.trim()} · ${taskTitle.trim()}`;
 }
 
+/** Recover names written by builds that only persisted them in the title. */
+export function workerNameFromTitle(title: string): string | undefined {
+  const candidate = title.split("·", 1)[0]?.trim();
+  if (!candidate) return undefined;
+  return WORKER_NAMES.some((name) => candidate === name || new RegExp(`^${name} \\d+$`).test(candidate))
+    ? candidate
+    : undefined;
+}
+
 export type WorkerRecord = {
   id: string;
   workerName?: string;
@@ -455,11 +464,12 @@ export function collectChildAgentReports(
 }
 
 export function workerStatusSnapshot(
-  worker: Pick<Session, "id" | "title" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun">,
+  worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision">,
 ): Record<string, unknown> {
   return {
     id: worker.id,
     title: worker.title,
+    ...(worker.workerName ? { worker: worker.workerName } : {}),
     parentId: worker.parentId,
     status: worker.agentRun?.status ?? worker.status,
     provider: worker.provider,
@@ -469,6 +479,8 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.finishedAt ? { finishedAt: worker.agentRun.finishedAt } : {}),
     ...(worker.agentRun?.error ? { error: worker.agentRun.error } : {}),
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
+    routingMode: worker.routingMode ?? "manual",
+    ...(worker.routingDecision ? { routingDecision: worker.routingDecision } : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { withSubagentStatus } from "./subagents";
+import { withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
@@ -321,6 +321,13 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
     const parent = next.find((session) => session.id === child.parentId);
     const row = parent?.lineup?.rows.find((item) => item.childId === child.id);
     if (!row) continue;
+    const workerName = child.workerName ?? workerNameFromTitle(child.title);
+    const title = workerName ? workerTaskTitle(workerName, row.title) : child.title;
+    if (workerName && (workerName !== child.workerName || title !== child.title)) {
+      next = next.map((session) =>
+        session.id === child.id ? { ...session, workerName, title } : session,
+      );
+    }
     // A row written by an older build says "failed" for the same interruption
     // its worker now reports as interrupted. Heal that too, or the wave and
     // the worker disagree about what happened.

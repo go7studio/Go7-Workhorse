@@ -343,7 +343,16 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S8", "ORC-S9"],
       "rubric": ["ORC-16", "ORC-17"],
-      "sourceFiles": ["src/lib/permissions.ts", "src/lib/session.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/worker-reuse.test.ts"],
+      "sourceFiles": ["src/lib/lineup.ts", "src/lib/permissions.ts", "src/lib/session.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/worker-reuse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-039",
+      "behavior": "A harness supplies the task and constraints without choosing a model; Workhorse auto-routing selects provider, model, and effort from task fit and capacity, then returns its scored rationale in spawn and status results.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["src/lib/routing.ts", "src/lib/store.tsx", "src/lib/subagents.ts", "electron/workhorse-mcp.ts", "test/routing.test.ts", "test/workhorse.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]

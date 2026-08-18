@@ -6461,6 +6461,14 @@ test("vendor session id and sandbox survive normalizeSession", () => {
   assert.equal(again?.workerName, "Dexter");
   const recovered = normalizeSession({ ...saved, status: "running" });
   assert.equal(recovered?.status, "idle");
+  const legacyWorker = normalizeSession({
+    ...saved,
+    workerName: undefined,
+    hidden: true,
+    title: "Dexter · Add Software JSON-LD",
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared" },
+  });
+  assert.equal(legacyWorker?.workerName, "Dexter");
 });
 
 test("composer draft overlays do not copy a session that did not change", () => {
@@ -7752,7 +7760,36 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     startedAt: 1,
     finishedAt: 2,
     exclusions: ["MiniMax M3"],
+    routingMode: "manual",
   });
+  const autoDecision = {
+    at: 1,
+    taskTier: "balanced" as const,
+    provider: "codex" as const,
+    model: "gpt-5.4",
+    effort: "medium" as const,
+    score: 118,
+    reason: "Balanced · medium effort · spare capacity",
+    usedPercent: 24,
+    expectedUsedPercent: 57,
+  };
+  assert.deepEqual(
+    workerStatusSnapshot({ ...kidDone, workerName: "Dexter", routingMode: "auto", routingDecision: autoDecision }),
+    {
+      id: kidDone.id,
+      title: kidDone.title,
+      worker: "Dexter",
+      parentId: kidDone.parentId,
+      status: "completed",
+      provider: kidDone.provider,
+      model: kidDone.model,
+      effort: kidDone.effort,
+      startedAt: 1,
+      finishedAt: 2,
+      routingMode: "auto",
+      routingDecision: autoDecision,
+    },
+  );
   const { groupFanOutToolUses } = await import("../electron/custom-tools");
   assert.deepEqual(
     groupFanOutToolUses([

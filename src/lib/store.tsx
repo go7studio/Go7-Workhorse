@@ -4484,6 +4484,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
+                    routingMode: routeDecision ? "auto" : "manual",
+                    ...(routeDecision ? { routingDecision: routeDecision } : {}),
                     howToUse:
                       `Worker is running in its own chat. ${priorWorker ? `${workerName} picked this up with what it already knew.` : `${workerName} is new to this work.`} For the next slice of the same kind pass worker="${workerName}" and it goes back to the same worker. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`,
                   },
@@ -4514,6 +4516,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   model: finished?.model ?? spec.model,
                   effort: finished?.effort ?? null,
                   exclusions: finished?.agentRun?.exclusions ?? effectiveExclusions,
+                  routingMode: finished?.routingMode ?? (routeDecision ? "auto" : "manual"),
+                  ...(finished?.routingDecision ?? routeDecision
+                    ? { routingDecision: finished?.routingDecision ?? routeDecision }
+                    : {}),
                   report: fallback,
                 },
                 null,

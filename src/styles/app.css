@@ -1317,7 +1317,7 @@ html.pane-dragging * {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: var(--composer-input, 80px);
+  bottom: calc(var(--composer-input, 80px) + 8px);
   z-index: 32;
   grid-template-rows: 1fr;
   min-height: 40px;

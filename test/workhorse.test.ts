@@ -2896,7 +2896,7 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(pane, /composer-wrap/);
   assert.match(composer, /pinComposerInput/);
   assert.match(css, /--composer-input/);
-  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*var\(--composer-input/);
+  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ 8px\)/);
   const col = {
     getBoundingClientRect: () => ({ bottom: 800 }),
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },

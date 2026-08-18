@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.2.0",
+  "contractVersion": "0.3.0",
   "title": "Intelligent routing and multimodal attachment contract",
   "routing": {
     "referenceSource": "https://developers.openai.com/api/docs/guides/latest-model",
@@ -17,6 +17,8 @@
     "rules": [
       "Reject routes that lack a required input capability.",
       "Keep explicit user model selection authoritative.",
+      "Keep a person-selected chat pinned until that person explicitly selects Auto; Settings Routing does not rewrite manual chats.",
+      "Apply Settings Routing to unassigned desk spawns, and let any explicit spawn provider, model, or target chat win.",
       "Penalize weekly overdraw and protected reserve only when capacity routing is enabled.",
       "Prefer capable spare capacity only when spare preference is enabled.",
       "Use local models only when local routing is enabled.",
@@ -61,6 +63,9 @@
   "smokeCommands": ["eval:smoke", "eval:capability-smoke", "eval:fixture", "eval:fixture-check", "eval:plan-fixture-check", "eval:device-probes", "eval:godot-suite", "eval:media-fixtures", "eval:real-plan-smoke"],
   "sourceFiles": [
     "src/lib/routing.ts",
+    "src/lib/subagents.ts",
+    "src/lib/usage.ts",
+    "src/lib/custom-history.ts",
     "src/lib/images.ts",
     "src/lib/turns.ts",
     "src/ui/RoutingPane.tsx",
@@ -79,7 +84,9 @@
     "eval/fixtures/plans/production-go-time.fixture.md",
     "eval/fixtures/device-capabilities.json",
     "test/capability-live-smoke.ts",
-    "test/real-world-plan-smoke.ts"
+    "test/real-world-plan-smoke.ts",
+    "test/lineup-sidebar.test.ts",
+    "test/usage-metering.test.ts"
   ],
-  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08", "CAP-09", "CAP-10", "CAP-11", "CAP-12"]
+  "requiredRubric": ["CAP-01", "CAP-02", "CAP-03", "CAP-04", "CAP-05", "CAP-06", "CAP-07", "CAP-08", "CAP-09", "CAP-10", "CAP-11", "CAP-12", "CAP-13"]
 }

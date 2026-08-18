@@ -46,10 +46,10 @@
       "provider": "custom",
       "transport": "http",
       "apiShape": "openai-completions",
-      "discovery": ["provider preset", "base URL", "models endpoint probe"],
+      "discovery": ["provider preset", "base URL", "models endpoint probe", "user-approved model subset and default"],
       "launchBoundary": "electron/custom-http.ts",
-      "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
+      "expectedModelEvidence": ["connection id", "approved configured model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row"],
+      "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -57,10 +57,10 @@
       "provider": "custom",
       "transport": "http",
       "apiShape": "openai-completions",
-      "discovery": ["configured visual bot", "base URL", "models endpoint probe"],
+      "discovery": ["configured visual bot", "base URL", "models endpoint probe", "user-approved Kimi K3 model"],
       "launchBoundary": "electron/custom-http.ts",
-      "expectedModelEvidence": ["configured Kimi K3 model id", "outbound image request", "response model when supplied", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "manifest", "video": "frames" } },
+      "expectedModelEvidence": ["connection id", "approved Kimi K3 model id", "outbound image request", "response model when supplied", "message stamp", "connection ring and model usage row"],
+      "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {
@@ -68,10 +68,10 @@
       "provider": "custom",
       "transport": "http",
       "apiShape": "anthropic-messages",
-      "discovery": ["manual base URL", "models endpoint probe when supported"],
+      "discovery": ["manual base URL", "models endpoint probe when supported", "user-approved model subset and default"],
       "launchBoundary": "electron/custom-http.ts",
-      "expectedModelEvidence": ["configured model", "outbound request body", "response model when supplied", "message stamp", "usage bucket"],
-      "capabilities": { "resume": "workhorse", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "workhorse", "routing": "workhorse", "inputs": { "images": "native", "documents": "pdf-native", "audio": "manifest", "video": "frames" } },
+      "expectedModelEvidence": ["connection id", "approved configured model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row"],
+      "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "routing": "workhorse", "inputs": { "images": "native", "documents": "pdf-native", "audio": "manifest", "video": "frames" } },
       "baselineStatus": "unrun"
     }
   ],

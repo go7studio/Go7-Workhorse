@@ -12,6 +12,7 @@ const orchestrationPath = path.join(evalDir, "orchestration-contract.json");
 const capabilityPath = path.join(evalDir, "capability-contract.json");
 const executionPlanPath = path.join(evalDir, "execution-plan-contract.json");
 const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json");
+const learningMemoryPath = path.join(evalDir, "learning-memory-contract.json");
 const regressionPath = path.join(evalDir, "regression-contract.json");
 const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
@@ -66,7 +67,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -74,6 +75,7 @@ async function validate() {
     json(capabilityPath),
     json(executionPlanPath),
     json(deviceCapabilityPath),
+    json(learningMemoryPath),
     json(regressionPath),
     json(configExamplePath),
     json(packagePath),
@@ -90,10 +92,19 @@ async function validate() {
     capabilities.schemaVersion !== 1 ||
     executionPlan.schemaVersion !== 1 ||
     deviceCapabilities.schemaVersion !== 1 ||
+    learningMemory.schemaVersion !== 1 ||
     regressions.schemaVersion !== 1 ||
     configExample.schemaVersion !== 1
   ) {
     problems.push("all eval manifests must use schemaVersion 1");
+  }
+  if (!/^[a-f0-9]{40}$/.test(suite.baselineRef ?? "")) {
+    problems.push("suite baselineRef must be a full lowercase Git commit");
+  }
+  if (configExample.source?.expectedVersion !== packageManifest.version) {
+    problems.push(
+      `config expectedVersion must match package version (${configExample.source?.expectedVersion ?? "missing"} != ${packageManifest.version})`,
+    );
   }
 
   const profileIds = providers.profiles.map((profile) => profile.id);
@@ -240,6 +251,23 @@ async function validate() {
   for (const rubric of deviceRubric) {
     if (!rubricSet.has(rubric)) problems.push(`device-capability contract references missing rubric ${rubric}`);
   }
+  const learningRubric = rubricIds.filter((id) => id.startsWith("LRN-"));
+  if (!sameMembers(learningMemory.requiredRubric ?? [], learningRubric)) {
+    problems.push(
+      "learning-memory requiredRubric does not match the LRN rubric " +
+      `(contract: ${(learningMemory.requiredRubric ?? []).join(", ")}; suite: ${learningRubric.join(", ")})`,
+    );
+  }
+  for (const command of [learningMemory.packagedSmokeCommand, learningMemory.sqliteProbeCommand].filter(Boolean)) {
+    if (!packageManifest.scripts?.[command]) problems.push(`learning-memory command is missing: ${command}`);
+  }
+  for (const file of learningMemory.sourceFiles ?? []) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`learning-memory source file is missing: ${file}`);
+    }
+  }
   for (const file of [executionPlan.fixture?.source, executionPlan.fixture?.oracle, deviceCapabilities.fixture].filter(Boolean)) {
     try {
       await readFile(path.join(root, file), "utf8");
@@ -293,7 +321,7 @@ async function validate() {
       `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles, ` +
       `${regressionIds.length} regression contracts.`,
   );
-  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, regressions };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, regressions };
 }
 
 function list({ suite, commands, providers }) {

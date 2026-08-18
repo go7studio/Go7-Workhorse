@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.1.0",
+  "contractVersion": "0.3.0",
   "title": "Observed production regression coverage",
-  "observedThrough": "2026-08-16",
+  "observedThrough": "2026-08-17",
   "regressions": [
     {
       "id": "REG-001",
@@ -174,6 +174,123 @@
       "rubric": ["SET-07", "MOD-01"],
       "sourceFiles": ["electron/cursor-launch.ts", "electron/vendor-models.ts", "src/lib/models.ts", "src/lib/session.ts", "src/lib/vendor-bridge.ts", "test/cursor-adapter.test.ts"],
       "verification": ["eval:validate", "eval:smoke"]
+    },
+    {
+      "id": "REG-020",
+      "behavior": "Official leftover meters stay provider- and lane-specific, and unavailable sources remain unknown.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
+      "scenarios": ["USG-S2", "USG-S4"],
+      "rubric": ["USG-03", "USG-07"],
+      "sourceFiles": ["src/lib/usage.ts", "src/lib/cursor-lane.ts", "electron/claude-plan.ts", "electron/custom-plan.ts", "test/vendor-meter.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-021",
+      "behavior": "Turn, request, gauge, estimate, cache, and unknown usage finalize without inflation and book under the actual worker.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["USG-S1", "USG-S5"],
+      "rubric": ["USG-01", "USG-02", "USG-08"],
+      "sourceFiles": ["src/lib/usage.ts", "test/usage-metering.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-022",
+      "behavior": "Manual chats stay pinned until Auto is selected, while Settings Routing applies to unassigned desk spawns.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CAP-S1", "CAP-S7"],
+      "rubric": ["CAP-01", "CAP-05", "CAP-13"],
+      "sourceFiles": ["src/lib/routing.ts", "src/lib/subagents.ts", "test/lineup-sidebar.test.ts"],
+      "verification": ["eval:fixture-check"]
+    },
+    {
+      "id": "REG-023",
+      "behavior": "Empty, stopped, thought-only, and tool-only responses are labeled truthfully without inventing assistant text.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S7"],
+      "rubric": ["ORC-15"],
+      "sourceFiles": ["src/lib/turns.ts", "test/empty-reply.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-024",
+      "behavior": "One custom connection exposes only user-approved models, one connection ring, and separate model rows.",
+      "profiles": ["custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["SET-S2", "USG-S5"],
+      "rubric": ["SET-03", "USG-08"],
+      "sourceFiles": ["src/lib/custom-bots.ts", "src/lib/usage.ts", "test/custom-multi-model.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-025",
+      "behavior": "Workers receive stable names and reuse only compatible idle sessions in the same parent and project scope.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S8"],
+      "rubric": ["ORC-16"],
+      "sourceFiles": ["src/lib/subagents.ts", "test/worker-reuse.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-026",
+      "behavior": "Interrupted workers release capacity, remain resumable, preserve evidence and duration, and never strand an orchestration wave.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S6", "ORC-S7", "ORC-S8"],
+      "rubric": ["ORC-09", "ORC-13", "ORC-15", "ORC-16"],
+      "sourceFiles": ["src/lib/subagents.ts", "test/interrupted-workers.test.ts"],
+      "verification": ["eval:plan-fixture-check"]
+    },
+    {
+      "id": "REG-027",
+      "behavior": "Custom HTTP history replays only safe complete conversation text and never duplicates the current user turn.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["CON-S4"],
+      "rubric": ["CON-07"],
+      "sourceFiles": ["src/lib/custom-history.ts", "electron/custom-http.ts", "test/custom-history.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-028",
+      "behavior": "Every exported product view is mounted or intentionally excluded, with no duplicate toolbar or abandoned controls.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["SET-S3"],
+      "rubric": ["SET-05"],
+      "sourceFiles": ["src/App.tsx", "test/dead-ui.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-029",
+      "behavior": "Packaged macOS updates select the running architecture's disk image, preserve app identity and state, and fail recoverably.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S3", "REL-S4"],
+      "rubric": ["REL-02", "REL-05", "REL-07"],
+      "sourceFiles": ["src/lib/app-update.ts", "electron/app-update.ts", "test/app-update.test.ts"],
+      "verification": ["eval:validate"]
+    },
+    {
+      "id": "REG-030",
+      "behavior": "Public release gates build whole Windows and macOS installers and reject internal product-law files.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S3"],
+      "rubric": ["REL-01", "REL-05", "REL-06"],
+      "sourceFiles": ["package.json", "test/detect-release.test.ts", "test/repo-shape.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-031",
+      "behavior": "Learning backfill captures one day of visible human prompts idempotently and compiles only through the selected custom bot and its own vaulted key.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["LRN-S3"],
+      "rubric": ["LRN-04", "LRN-06"],
+      "sourceFiles": ["src/lib/learning-backfill.ts", "src/lib/learning-policy.ts", "electron/learning-aux.ts", "electron/learning-service.ts", "test/learning-memory.test.ts"],
+      "verification": ["eval:validate", "eval:learning-smoke"]
+    },
+    {
+      "id": "REG-032",
+      "behavior": "Relative chat ages, half-pane composer growth, and real change counts stay readable and truthful.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["PRJ-S3", "PRJ-S4"],
+      "rubric": ["PRJ-06", "PRJ-07"],
+      "sourceFiles": ["src/lib/chats.ts", "src/ui/Composer.tsx", "src/ui/EditedList.tsx", "electron/project-diff.ts", "test/workhorse.test.ts", "test/project-diff.test.ts"],
+      "verification": ["eval:validate"]
     }
   ]
 }

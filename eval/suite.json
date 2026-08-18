@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "5d02f78e79a688b316aba9d4f6575df909b2a52b",
+  "baselineRef": "b1b5dfff894c3e66e2b0d80a71838e76fbc7a062",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -37,7 +37,9 @@
             "Open Settings to the connected-LLM surface from both onboarding and /settings.",
             "Inspect detected Grok, Codex, Claude, and Cursor rows without changing their vendor-owned login state.",
             "Create one OpenAI Chat Completions bot and one Anthropic Messages bot using local fixture endpoints or approved endpoints.",
-            "Probe models where supported, save, disable, re-enable, edit, and remove one bot.",
+            "Probe one model catalog, approve a subset, select a default, and verify later catalog changes do not silently approve or retarget models.",
+            "Switch between two approved models on one custom connection and verify one connection card and usage ring retain separate model rows.",
+            "Save, disable, re-enable, edit, and remove one bot.",
             "Verify secrets are masked and never copied into ordinary persisted state or support exports."
           ]
         },
@@ -50,7 +52,8 @@
             "Walk Profile, LLMs, Skills, Routing, Learning, Usage, and Watch from the Settings header.",
             "Change profile, appearance, and one safe preference; leave and return.",
             "Restart Workhorse and confirm the values persist without altering vendor credentials.",
-            "Verify Back returns to the prior product context and Usage remains inside Settings."
+            "Verify Back returns to the prior product context and Usage remains inside Settings.",
+            "Verify the shell has one toolbar, no duplicate controls, and every exported product view is reachable or intentionally excluded from production."
           ]
         },
         {
@@ -100,8 +103,8 @@
           "testability": "auto",
           "profiles": ["custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S2"],
-          "passCriteria": "Both API shapes persist their explicit URL/model/schema, probe errors are clear, and deletion does not silently retarget existing chats.",
-          "evidence": "Before/after screenshots, probe transcript, saved public bot card, and affected-chat state."
+          "passCriteria": "Both API shapes persist their explicit URL/schema, the user approves discovered models, one connection can expose multiple approved models with one connection ring and separate model rows, probe errors are clear, and deletion does not silently retarget existing chats.",
+          "evidence": "Before/after screenshots, discovery and approval transcript, saved connection card, model rows, and affected-chat state."
         },
         {
           "id": "SET-04",
@@ -188,8 +191,22 @@
             "Search by project name, chat title, and distinctive transcript text.",
             "Open the matched message and return to the project.",
             "Populate an earlier-sorted fixture directory with more than 800 decoy entries, then resolve a basename-only source path located later in the workspace tree.",
-            "Review Git edits and open the chat-scoped terminal in the local fixture workspace.",
+            "Review Git edits and verify each change instance reports real files plus added and removed line counts, including a zero-duration provider call.",
+            "Open the chat-scoped terminal in the local fixture workspace.",
             "Confirm archived chats and attention items remain scoped to their projects."
+          ]
+        },
+        {
+          "id": "PRJ-S4",
+          "name": "Keep chat age, composer growth, and change counts readable",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Fixture last user prompts from minutes ago, one hour ago, and two days ago, then append later assistant replies.",
+            "Verify sidebar and transcript ages follow the last user prompt and hover reveals the full timestamp.",
+            "Paste a long multi-line prompt and verify the composer grows no higher than half the session pane, then collapses after send or clear.",
+            "Create, edit, and delete fixture files and verify the Changes list shows exact added and removed lines without crowding the row.",
+            "Verify animated count changes settle on the exact underlying totals and never replace file identity or status."
           ]
         }
       ],
@@ -259,6 +276,17 @@
           "scenarios": ["PRJ-S3"],
           "passCriteria": "Search finds title and transcript matches across projects; basename-only source resolution remains deterministic in a workspace with more than 800 unrelated entries; review/terminal resolve to the selected chat's local folder or managed worktree.",
           "evidence": "Search results, selected chat identity, review root, and terminal cwd."
+        },
+        {
+          "id": "PRJ-07",
+          "criterion": "Relative chat ages, composer growth, and change counts stay truthful and readable in dense project work.",
+          "weight": 2,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["PRJ-S4"],
+          "passCriteria": "Ages derive from the last user prompt with full-time hover, the composer stops at half the pane and collapses, and each change row settles on exact real added and removed line counts without losing its file label.",
+          "evidence": "Clock-controlled chat rows, transcript stamps, composer measurements, file snapshots, change rows, and final diff arithmetic."
         }
       ]
     },
@@ -688,6 +716,18 @@
             "Rewind where available or use Workhorse lineage where not.",
             "Compact and verify both branches retain correct ancestry and no canceled response is later appended."
           ]
+        },
+        {
+          "id": "CON-S4",
+          "name": "Replay safe custom-model conversation history",
+          "executor": "provider",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "steps": [
+            "Build a long custom-model transcript containing user and assistant text plus thoughts, tools, desk notices, and a trailing current user message.",
+            "Send the next turn through both compatible HTTP schemas and inspect the serialized history.",
+            "Verify only complete user and assistant text is replayed, the current user message appears once, and newest complete turns win when trimming.",
+            "Verify trimmed history starts with a user turn and preserves the selected custom connection and model."
+          ]
         }
       ],
       "rubric": [
@@ -756,6 +796,17 @@
           "scenarios": ["CON-S2", "CON-S3"],
           "passCriteria": "Latest-reply copy is exact, export marks provider/model transitions, and hidden prompts/tool credentials are absent.",
           "evidence": "Clipboard/export artifact and secret/hidden-context scan."
+        },
+        {
+          "id": "CON-07",
+          "criterion": "Custom HTTP history replays safe conversational text without duplicating the current prompt or exposing desk internals.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "scenarios": ["CON-S4"],
+          "passCriteria": "Both HTTP schemas receive only user/assistant text, exclude thought/tool/desk rows, omit the trailing current user from history, trim newest-first, and begin on a user turn.",
+          "evidence": "Source transcript, serialized request bodies, trim boundary, selected connection/model, and duplicate-message assertion."
         }
       ]
     },
@@ -771,12 +822,13 @@
           "executor": "electron",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
-            "Create an isolated parent chat with a bounded goal and ask it to delegate two independent read-only investigations in parallel.",
-            "Require distinct child titles, explicit provider/model/effort, a short rationale, and no file changes.",
+            "Create an isolated parent chat with a bounded goal and ask it to delegate independent read-only investigations in parallel across the callable roster.",
+            "Verify ordinary lineup fan-out can start one worker per callable bot while a plan-specific concurrency limit affects only that plan.",
+            "Require distinct worker names, explicit provider/model/effort, a short rationale, and no file changes.",
             "In the OpenAI-compatible lane, require two argument-bearing spawn calls whose name and JSON arguments arrive in separate streaming chunks; verify each call is assembled by id/index before either is executed.",
             "While both children run, inspect parent and child status, transcript links, identifiers, stop controls, budgets, and usage.",
             "Open each child, verify its self-contained task and real response, then return to the parent.",
-            "Verify the parent waits for both, cites their immutable session links, resolves disagreement, and produces one synthesis without inventing a child reply."
+            "Verify the parent joins each released wave exactly once, cites immutable session links, resolves disagreement, and produces one synthesis without inventing a child reply."
           ]
         },
         {
@@ -865,6 +917,19 @@
             "Verify recovered and completed calls retain truthful duration and terminal workers stop animating or consuming slots.",
             "Complete an internal Codex worker and verify its native thread is archived while the Workhorse transcript remains inspectable and user-facing Codex chats remain listed.",
             "Resume the plan and verify it continues through later waves to a real terminal state."
+          ]
+        },
+        {
+          "id": "ORC-S8",
+          "name": "Name, reuse, and resume workers without collapsing parallel work",
+          "executor": "restart",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Spawn two same-configuration workers concurrently and verify stable distinct names and immutable session ids.",
+            "Finish one worker, address it by name, and dispatch compatible follow-up work from the same parent and project.",
+            "Verify the idle worker resumes with the same id, folder, transcript, provider, model, effort, and connection while the busy colleague is not reused.",
+            "Change parent, project, provider, model, effort, or custom connection and verify each incompatible dispatch creates or selects a different worker.",
+            "Interrupt an active worker, restart, and resume that same worker without losing duration, transcript, evidence, or plan linkage."
           ]
         }
       ],
@@ -1043,6 +1108,17 @@
           "scenarios": ["ORC-S7"],
           "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; internal Codex worker threads are archived without hiding user-facing chats or Workhorse transcripts; later plan waves dispatch.",
           "evidence": "Sidebar and child screenshots, activity animation state, runtime identities, effort values, timestamps, native thread listings, Workhorse transcripts, restart reconciliation, slot counts, and terminal plan record."
+        },
+        {
+          "id": "ORC-16",
+          "criterion": "Workers have stable names and reuse only an idle compatible session in the same parent and project scope.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S8"],
+          "passCriteria": "Names are unique and addressable; compatible idle follow-up reuses the same worker id, folder, and transcript; busy, archived, visible, cross-parent, cross-project, or configuration-mismatched workers are never silently reused; interrupted work resumes explicitly.",
+          "evidence": "Worker roster, names and ids, reuse decision, compatibility fields, transcript and folder continuity, restart state, and dispatch counts."
         }
       ]
     },
@@ -1127,6 +1203,19 @@
             "Verify supported effort differs when task risk and complexity differ; all-high is a failure without evidence.",
             "Repeat under low remaining capacity and verify effort or model changes are explained separately.",
             "Apply an explicit effort override and verify selection, launch, transcript, and usage agree."
+          ]
+        },
+        {
+          "id": "CAP-S7",
+          "name": "Keep manual chats pinned while routing unassigned work",
+          "executor": "unit",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Start a person-facing chat with an explicit provider, model, and effort while Settings Routing is enabled.",
+            "Send multiple turns and verify the chat remains pinned until the person explicitly selects Auto.",
+            "Enable Auto for that chat and verify each automatic route records the selected provider, model, effort, and reason.",
+            "Spawn unassigned desk work with Settings Routing enabled and verify automatic routing applies only to the spawn.",
+            "Repeat with Settings Routing disabled and with an explicit spawn assignment; verify the setting and explicit choice each win in their documented scope."
           ]
         }
       ],
@@ -1262,6 +1351,17 @@
           "scenarios": ["CAP-S6"],
           "passCriteria": "Low-risk checks use the lowest sufficient supported effort, deeper tasks may escalate with a concise reason, capacity changes remain auditable, and an explicit effort override wins.",
           "evidence": "Task features, ranked routes, effort rationale, capacity snapshot, launch arguments, runtime observation, transcript, and usage."
+        },
+        {
+          "id": "CAP-13",
+          "criterion": "Person-selected chats stay pinned unless Auto is selected, while Settings Routing governs only unassigned desk work.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["CAP-S7"],
+          "passCriteria": "Manual chat turns never reroute because of the global setting; Auto is an explicit per-chat mode; unassigned spawns use Settings Routing; explicit spawn provider, model, or chat assignment wins.",
+          "evidence": "Session routing mode, Settings state, spawn payloads, route decisions, launch identity, transcript stamps, and usage rows."
         }
       ]
     },
@@ -1279,7 +1379,9 @@
           "steps": [
             "Record the empty baseline, then send one deterministic prompt per profile.",
             "Capture raw provider/API usage events and the finalized Workhorse usage row.",
+            "Classify each event as authoritative turn, billable request, context gauge, estimate, or unknown before finalization.",
             "Switch models once and send again.",
+            "Run one child turn and verify usage belongs to the worker's actual bot, model, and custom connection rather than the parent.",
             "Reconcile provider totals, model totals, input/output/cache tokens, context, and cost without double counting."
           ]
         },
@@ -1289,7 +1391,8 @@
           "executor": "electron",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "steps": [
-            "Load each available vendor plan/remains source and capture timestamp/source.",
+            "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic; capture lane, timestamp, and source.",
+            "Return a missing, unauthorized, rate-limited, and stale source and verify every affected ring remains unknown rather than inferred.",
             "Set a small fixture budget or deterministic Watch threshold.",
             "Trigger a hold without spending live money and verify the reason plus override scope.",
             "Restart and verify durable marks/permits behave as documented."
@@ -1317,6 +1420,19 @@
             "Apply distinct fixture usage to each pool and verify one cannot change the other.",
             "Run a bounded Cursor ACP turn with no usage event and verify Workhorse records unknown rather than invented tokens.",
             "Restart and verify both pool histories and unknown turn usage remain truthful."
+          ]
+        },
+        {
+          "id": "USG-S5",
+          "name": "Attribute multi-model and worker usage to its real owner",
+          "executor": "unit",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Feed authoritative turn, multiple request, context-gauge, estimate, and legacy untagged fixtures into finalization.",
+            "Verify an authoritative turn replaces lower-quality token evidence, requests sum once, gauges book no tokens, and estimate is used only as fallback.",
+            "Run a routed worker and verify its usage home is the worker's actual bot rather than the orchestrator.",
+            "Use two approved models on one custom connection and verify one connection ring retains separate truthful model rows.",
+            "Verify canceled-before-send, failed preflight, and missing-usage ACP turns never invent tokens."
           ]
         }
       ],
@@ -1351,8 +1467,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "scenarios": ["USG-S2"],
-          "passCriteria": "Each number has provider/model, unit, time/source, and unknown/unlimited behavior; stale data is visibly stale.",
-          "evidence": "Plan payload, model context source, Usage/Watch UI, and timestamps."
+          "passCriteria": "Each official leftover has provider lane, unit, time/source, and unknown behavior; missing, unauthorized, rate-limited, malformed, or stale sources stay unknown; context occupancy and local budgets remain separate.",
+          "evidence": "Official plan payloads, failure fixtures, model context source, Usage/Watch UI, and timestamps."
         },
         {
           "id": "USG-04",
@@ -1397,6 +1513,17 @@
           "scenarios": ["USG-S4"],
           "passCriteria": "Composer and API rings use independent source records, totals, thresholds, and Watch decisions; an ACP turn without a usage event creates no synthetic token count.",
           "evidence": "Cursor plan payloads, lane keys, Usage and Watch screenshots, raw ACP events, finalized usage row, and restart state."
+        },
+        {
+          "id": "USG-08",
+          "criterion": "Usage evidence is source-aware and attributed to the actual worker, connection, and model without synthetic or duplicate tokens.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["USG-S1", "USG-S5"],
+          "passCriteria": "Authoritative turn usage wins, request usage sums once, gauges book no tokens, estimates are fallback only, unknown remains unknown, workers book under their actual bot, and custom models remain separate beneath one connection ring.",
+          "evidence": "Raw events with source classes, finalization trace, worker lineage, connection/model keys, Usage rows, and independent arithmetic."
         }
       ]
     },
@@ -1437,9 +1564,24 @@
           "profiles": ["grok-acp"],
           "steps": [
             "Run a mocked current/newer/malformed update check and inspect user-facing results.",
-            "Verify the release artifact contains expected files and launches on its claimed platform.",
+            "Build Windows x64 and macOS artifacts and verify both contain the real renderer, Electron main, icons, resources, and release version.",
+            "Verify each packaged artifact launches on its claimed platform and the release contains the complete installers rather than archives of partial contents.",
+            "Run the public repository shape gate and verify internal product-law or operator-memory files are absent.",
             "Run the free structural/unit/build verification lane.",
             "Record dependency audit findings separately from product verdicts and do not auto-fix breaking updates."
+          ]
+        },
+        {
+          "id": "REL-S4",
+          "name": "Install a packaged macOS update without changing app identity",
+          "executor": "package",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Run a packaged macOS build from an isolated install and offer a mocked newer release with Intel and Apple-silicon disk images.",
+            "Verify Workhorse selects the running architecture's disk image, validates the mounted app, replaces the same app path, and relaunches.",
+            "Verify the signed application identity and credential-store service remain stable so approved credentials do not prompt again.",
+            "Run unavailable, malformed, wrong-architecture, mount, copy, and relaunch failures and verify the existing app and user state remain usable.",
+            "Verify source checkouts use the documented development update path and never impersonate the packaged updater."
           ]
         }
       ],
@@ -1509,6 +1651,17 @@
           "scenarios": ["REL-S3"],
           "passCriteria": "npm run verify passes; eval drift fails the gate; dependency audit findings are captured without an automatic breaking fix.",
           "evidence": "Exact command outputs, test counts, build artifact inventory, and dependency-audit summary."
+        },
+        {
+          "id": "REL-07",
+          "criterion": "Packaged macOS updates use the architecture-matched disk image, preserve application identity and user state, and fail recoverably.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S4"],
+          "passCriteria": "A packaged build selects the correct release asset, validates and replaces the installed app at its original path, relaunches, preserves signed identity and credential access, and leaves the old app usable on every failure path.",
+          "evidence": "Release metadata, architecture and asset decision, mounted bundle identity, install path, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
         }
       ]
     },
@@ -1538,6 +1691,19 @@
             "Count packaged artifact contents for the target OS rather than trusting process exit code.",
             "Launch the packaged app with --workhorse-learning-smoke and isolated userData.",
             "Require node:sqlite, FTS5 or lexical fallback, restart, stub compile, retrieve, export, and purge."
+          ]
+        },
+        {
+          "id": "LRN-S3",
+          "name": "Backfill one day and compile with the selected custom bot",
+          "executor": "electron",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "steps": [
+            "Select an attached custom bot as the compiler and seed recent and older visible chats plus hidden worker, peer, tool, thought, assistant, empty, and system rows.",
+            "Run Backfill last day and verify only recent human prompts from visible chats become redacted, project- and provider-scoped events with stable ids.",
+            "Run backfill again and verify it is idempotent, then compile until the selected batch settles.",
+            "Verify the exact selected custom connection, approved model, and vaulted key are used in a title-less ephemeral call with no Workhorse or vendor chat.",
+            "Verify ACP-only assignments are ineligible, another bot or OpenClaw key is never borrowed, and invalid compiler output creates no memory."
           ]
         }
       ],
@@ -1577,14 +1743,14 @@
         },
         {
           "id": "LRN-04",
-          "criterion": "Adaptive compiler and routing selection follows policy, capability, capacity, cost, and outcomes rather than hard-coded model names.",
+          "criterion": "Compiler selection uses eligible attached custom bots, policy, capacity, cost, and outcomes rather than hard-coded model names or borrowed credentials.",
           "weight": 2,
           "type": "rule",
           "testability": "auto",
-          "profiles": ["grok-acp", "codex-acp", "custom-openai"],
-          "scenarios": ["LRN-S1"],
-          "passCriteria": "The same task can choose a different valid route when capacity or verified history changes, while identical inputs stay deterministic.",
-          "evidence": "Adaptive selection unit fixtures and recorded rationales."
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "scenarios": ["LRN-S1", "LRN-S3"],
+          "passCriteria": "Only attached custom bots eligible for title-less ephemeral calls are offered; an explicit custom bot wins; identical inputs stay deterministic; capacity or verified outcomes can change an automatic choice; credentials never come from another bot or import source.",
+          "evidence": "Eligible compiler list, adaptive selection fixtures, selected custom bot id, rationale, credential id, and auxiliary-call record."
         },
         {
           "id": "LRN-05",
@@ -1596,6 +1762,17 @@
           "scenarios": ["LRN-S1"],
           "passCriteria": "A budgeted review goal reaches a terminal state; oversized required skill context blocks instead of shrinking the skill.",
           "evidence": "Goal budget fixtures and skill-integrity fixtures."
+        },
+        {
+          "id": "LRN-06",
+          "criterion": "Backfill captures only the last day's visible human prompts, is idempotent, and compiles through the selected custom bot without side chats.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto-partial",
+          "profiles": ["custom-openai", "custom-anthropic"],
+          "scenarios": ["LRN-S3"],
+          "passCriteria": "Older, hidden-worker, peer, assistant, tool, thought, system, and empty rows are excluded; stable event ids prevent duplicates; the selected custom bot produces a valid brief through its own vaulted credential; invalid output stores no memory and no chat is created.",
+          "evidence": "Source chat fixture, backfill event ids and scopes, second-run insert count, compiler route and credential id, ephemeral-call flags, memory rows, and chat inventories."
         }
       ]
     }

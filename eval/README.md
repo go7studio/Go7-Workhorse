@@ -25,9 +25,24 @@ task and immutable session identity → selected skills/tools/runtime → child
 evidence → parent synthesis. Reading a prior chat, delivering a peer message,
 resuming a child, and spawning a new agent are separate operations.
 
+The current worker lane also proves stable names, compatible idle reuse,
+explicit interrupted recovery, truthful live activity, and one join per wave.
+Ordinary lineup fan-out may use one worker per callable bot; the two-root limit
+belongs to the production-plan fixture.
+
 Routing adds a third chain: task tier → input capability → capacity state →
 selected model → runtime identity → usage. Attachments add kind → persisted
 metadata → provider representation → model-visible evidence.
+
+Manual chats stay pinned until Auto is selected. Settings Routing applies to
+unassigned desk work, and explicit spawn assignments win. Usage evidence is
+classified as turn, request, gauge, estimate, or unknown and is attributed to
+the actual worker, connection, and model.
+
+Learning adds a fourth chain: visible recent human prompt → redacted stable
+event → selected custom compiler bot and its credential → ephemeral brief →
+scoped memory. Backfill is limited to one day, is idempotent, and creates no
+Workhorse or vendor chat.
 
 The seven profiles remain in the compatibility contract. MiniMax-M3 through
 MiniMax's OpenAI-compatible endpoint is the primary evaluator and the only
@@ -66,8 +81,10 @@ The validator checks:
   mapped;
 - every routing/media source boundary in eval/capability-contract.json exists
   and every CAP rubric item is mapped;
+- learning-memory commands and every LRN rubric item remain mapped;
 - every observed regression maps to valid profiles, scenarios, rubrics,
   source boundaries, and verification commands;
+- the baseline is a full commit and the example version matches package.json;
 - config profiles, native-command profiles, and provider profiles agree;
 - the Settings section inventory still matches the product.
 
@@ -106,13 +123,14 @@ withheld below 60% coverage.
    local endpoints before any paid endpoint.
 5. **Installed stock harnesses:** enable one profile at a time and collect
    sanitized launch/runtime evidence.
-6. **Cross-provider journeys:** goal, schedule, plan, compact, switching,
-   permissions, continuity, usage, and recovery.
+6. **Cross-provider journeys:** goal, schedule, plan, compact, custom history,
+   switching, permissions, continuity, usage, learning backfill, and recovery.
 7. **Orchestration lane:** import and approve the plan, then test routing,
-   concurrency, peer correlation, restart, and resume.
+   naming, reuse, concurrency, peer correlation, interruption, join, and resume.
 8. **Capability lane:** test Watch fallback, Kimi visual work, media, Godot,
    adb/Saga, and iOS simulator readiness.
-9. **Packaged/install lane:** compare source, package, and running build.
+9. **Packaged/install lane:** compare source, package, running build, Windows
+   installer, macOS installer, and architecture-matched macOS update.
 10. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
 11. **Score and defect ledger:** retain exact reproductions separately from
@@ -126,8 +144,8 @@ withheld below 60% coverage.
   calling, and all child-agent cascades.
 - Existing provider/API or OAuth profiles may be enabled for a minimal adapter
   smoke call with a per-profile ceiling; those calls cannot spawn children.
-- Cascades use MiniMax-M3, low effort, depth two, two root children, a
-  10,000-token worker ceiling, and a 5,000-token helper ceiling.
+- Eval cascades use MiniMax-M3, low effort, depth two, a plan-specific two-root
+  limit, a 10,000-token worker ceiling, and a 5,000-token helper ceiling.
 - liveApiAllowed defaults to false and the approved budget defaults to zero.
 - Direct API keys are environment-variable references, never JSON values.
 - All file/tool probes stay inside the fixture workspace unless a boundary
@@ -145,7 +163,7 @@ The same change must update this kit when it:
 - adds a provider, transport, API schema, or provider-native command;
 - changes model/effort selection, title behavior, usage attribution, security,
   persistence, recovery, or packaging;
-- introduces a new standard user journey.
+- introduces a new standard user journey;
 - changes subagent, peer-chat, session-link, skill/tool routing, isolation,
   concurrency, budget, or goal-orchestrator behavior.
 

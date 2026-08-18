@@ -86,6 +86,48 @@ test("observed regressions stay mapped to live suite coverage", () => {
     for (const id of regression.rubric) assert.ok(rubric.has(id), `${regression.id}:${id}`);
     for (const command of regression.verification) assert.ok(manifest.scripts[command], `${regression.id}:${command}`);
   }
+  const mappedSources = new Set(regressions.regressions.flatMap((item: any) => item.sourceFiles));
+  for (const source of [
+    "test/vendor-meter.test.ts",
+    "test/usage-metering.test.ts",
+    "test/lineup-sidebar.test.ts",
+    "test/empty-reply.test.ts",
+    "test/custom-multi-model.test.ts",
+    "test/interrupted-workers.test.ts",
+    "test/worker-reuse.test.ts",
+    "test/custom-history.test.ts",
+    "test/dead-ui.test.ts",
+    "test/app-update.test.ts",
+    "test/repo-shape.test.ts",
+    "test/learning-memory.test.ts",
+    "test/project-diff.test.ts",
+  ]) {
+    assert.ok(mappedSources.has(source), source);
+  }
+});
+
+test("eval baseline and contracts track the current product generation", () => {
+  const suite = json("eval/suite.json");
+  const config = json("eval/config.example.json");
+  const manifest = json("package.json");
+  const orchestration = json("eval/orchestration-contract.json");
+  const capabilities = json("eval/capability-contract.json");
+  const providers = json("eval/provider-matrix.json");
+  const scenario = new Set(suite.areas.flatMap((area: any) => area.scenarios.map((item: any) => item.id)));
+  const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
+  assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
+  assert.equal(config.source.expectedVersion, manifest.version);
+  for (const id of ["PRJ-S4", "CON-S4", "ORC-S8", "CAP-S7", "USG-S5", "REL-S4", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["PRJ-07", "CON-07", "ORC-16", "CAP-13", "USG-08", "REL-07", "LRN-06"]) assert.ok(rubric.has(id), id);
+  assert.ok(orchestration.lifecycleStates.includes("interrupted"));
+  assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);
+  assert.match(orchestration.cascadeLimits.ordinaryLineupFanout, /one worker per callable bot/i);
+  assert.match(capabilities.routing.rules.join(" "), /person-selected chat pinned/i);
+  for (const id of ["custom-openai", "custom-kimi", "custom-anthropic"]) {
+    const profile = providers.profiles.find((item: any) => item.id === id);
+    assert.match(profile.discovery.join(" "), /user-approved/i);
+    assert.match(profile.capabilities.usage, /one connection ring/i);
+  }
 });
 
 test("Cursor eval config covers authenticated ACP smoke and both usage pools", () => {

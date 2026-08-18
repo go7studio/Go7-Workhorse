@@ -1,4 +1,5 @@
 import path from "node:path";
+import { deskRoleOf } from "../src/lib/subagents";
 import { GrokAgent, spawnGrokProcess, type GrokPromptResult, type GrokSpawnFn, type GrokToolEvent } from "./grok-agent";
 import { buildGrokLaunchSpec } from "./grok-launch";
 import { readGrokGeneratedTitle, titleFromRecord } from "./grok-title";
@@ -256,6 +257,7 @@ export class GrokSessionHost {
     slot?.agent.dispose();
     const spec = buildGrokLaunchSpec({
       sessionId: input.sessionId,
+      role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
       cwd: input.cwd,

@@ -1,7 +1,7 @@
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
+import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import {
   WORKHORSE_CLIENT_CAPABILITIES,
-  WORKHORSE_SESSION_RULES,
   mergeMcpServers,
   workhorseMcpServer,
   type GrokLaunchSpec,
@@ -29,6 +29,8 @@ export type CodexLaunchInput = {
   securityPolicy?: SessionSecurityPolicy;
   mcpServers?: McpServerConfig[];
   detect?: CodexLoginDetectInput;
+  /** Which rules the CLI is launched with. A worker gets worker rules. */
+  role?: DeskRole;
 };
 
 export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
@@ -114,7 +116,7 @@ export function buildCodexLaunchSpec(input: CodexLaunchInput): CodexLaunchSpec {
     reasoningEffort: effort,
     sandboxMode,
     approvalPolicy,
-    rules: WORKHORSE_SESSION_RULES,
+    rules: sessionRulesFor(input.role, "codex"),
   };
   if (alwaysApprove) meta.yoloMode = true;
   else if (input.mode === "accept-edits") meta.autoMode = true;

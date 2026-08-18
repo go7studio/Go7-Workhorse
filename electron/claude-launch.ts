@@ -1,7 +1,7 @@
 import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile } from "../src/lib/types";
+import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
 import {
   WORKHORSE_CLIENT_CAPABILITIES,
-  WORKHORSE_SESSION_RULES,
   mergeMcpServers,
   workhorseMcpServer,
   type GrokLaunchSpec,
@@ -31,6 +31,8 @@ export type ClaudeLaunchInput = {
   sandbox?: SandboxProfile;
   mcpServers?: McpServerConfig[];
   detect?: ClaudeLoginDetectInput;
+  /** Which rules the CLI is launched with. A worker gets worker rules. */
+  role?: DeskRole;
 };
 
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan";
@@ -137,7 +139,7 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
     effort,
     permissionMode,
     sandbox,
-    rules: WORKHORSE_SESSION_RULES,
+    rules: sessionRulesFor(input.role, "claude"),
     claudeCode: {
       options: {
         thinking: { type: "adaptive", display: "summarized" },

@@ -35,6 +35,19 @@
       "workhorse_list_skills",
       "workhorse_read_skill"
     ],
+    "workerTools": [
+      "workhorse_list_chats",
+      "workhorse_read_chat",
+      "workhorse_ask_chat",
+      "workhorse_spawn_agent",
+      "workhorse_await_agents",
+      "workhorse_agent_status",
+      "workhorse_request_permission",
+      "workhorse_list_references",
+      "workhorse_list_skills",
+      "workhorse_read_skill",
+      "workhorse_probe_runtime"
+    ],
     "externalRuntimeTools": [
       "workhorse_list_chats",
       "workhorse_read_chat",

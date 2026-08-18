@@ -283,10 +283,31 @@ export function findReusableWorker(
   return sameBot.length ? sameBot[sameBot.length - 1] : null;
 }
 
-export const WORKER_OMIT_TOOLS = [
-  "workhorse_request_vendor",
-  "workhorse_list_bots",
-  "workhorse_plan",
+/**
+ * The desk tools a worker may call. A worker does its slice in the bound
+ * folder: read and ask other chats, spawn one bounded helper and wait for it,
+ * ask to raise a block for work it must do now, read the skills and references
+ * it was pointed at. It does not reshape the desk. Only `workhorse_*` names
+ * are governed here; a worker keeps its file, shell and bridged MCP tools.
+ *
+ * An allowlist, because the old three-name denylist left every new desk tool
+ * open to workers by default and only hid names from the list — a worker that
+ * knew a name could still call it. Seven workers each carried ~3k tokens of
+ * schemas for tools their brief forbade. electron/mcp-exposure.ts mirrors this
+ * for the MCP transport; the two lists are asserted equal.
+ */
+export const WORKER_DESK_TOOLS = [
+  "workhorse_list_chats",
+  "workhorse_read_chat",
+  "workhorse_ask_chat",
+  "workhorse_spawn_agent",
+  "workhorse_await_agents",
+  "workhorse_agent_status",
+  "workhorse_request_permission",
+  "workhorse_list_references",
+  "workhorse_list_skills",
+  "workhorse_read_skill",
+  "workhorse_probe_runtime",
 ] as const;
 
 export function agentDepth(
@@ -405,7 +426,8 @@ export function collectChildAgentReports(
 
 export function isWorkerOmittedTool(name: string): boolean {
   const key = name.trim();
-  return (WORKER_OMIT_TOOLS as readonly string[]).includes(key);
+  if (!key.startsWith("workhorse_")) return false;
+  return !(WORKER_DESK_TOOLS as readonly string[]).includes(key);
 }
 
 export function workerOmittedToolError(name: string): string {

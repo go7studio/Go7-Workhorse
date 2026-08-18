@@ -24,7 +24,6 @@ import {
   isSpawnOnlyPrompt,
   nestedSpawnError,
   shouldSpawnInsteadOfAsk,
-  toolsForDeskRole,
   SPAWN_ONLY_PROMPT_ERROR,
 } from "../src/lib/subagents";
 import { detectCustomLogin } from "./custom-login";
@@ -42,7 +41,7 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 import { normalizeTaskStore, reconcileExternalTask } from "../src/lib/external-task";
-import { assertMcpToolAllowed, inboundSessionIdFromState, mcpExposureProfile, resolveMcpSpawnFrom } from "./mcp-exposure";
+import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -1095,7 +1094,7 @@ function currentMcpProfile() {
 }
 
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
-  assertMcpToolAllowed(currentMcpProfile(), name);
+  assertMcpToolAllowed(profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from))), name);
   if (name === "workhorse_list_chats") {
     return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
   }
@@ -1561,8 +1560,10 @@ export async function handleWorkhorseRpc(
   if (message.method === "notifications/initialized" || message.method === "initialized") return undefined;
   if (message.method === "tools/list") {
     if (message.id === undefined) return undefined;
-    const role = deskRoleOf(callerSession(ctx?.fromSessionId));
-    return { jsonrpc: "2.0", id: message.id, result: { tools: toolsForDeskRole(TOOLS, role) } };
+    // The list a caller sees is the list it may call — same gate as tools/call,
+    // so a worker cannot learn a name here and use it there.
+    const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(ctx?.fromSessionId)));
+    return { jsonrpc: "2.0", id: message.id, result: { tools: TOOLS.filter((tool) => isMcpToolAllowed(profile, tool.name)) } };
   }
   if (message.method === "ping") {
     if (message.id === undefined) return undefined;

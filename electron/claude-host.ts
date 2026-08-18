@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { deskRoleOf } from "../src/lib/subagents";
 import fs from "node:fs";
 import path from "node:path";
 import { GrokAgent, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
@@ -158,6 +159,7 @@ export class ClaudeSessionHost {
     slot?.agent.dispose();
     const spec = buildClaudeLaunchSpec({
       sessionId: input.sessionId,
+      role: input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden }),
       model: input.model,
       effort: input.effort,
       cwd: input.cwd,

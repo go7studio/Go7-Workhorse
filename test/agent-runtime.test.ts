@@ -130,6 +130,18 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   assert.match(settingsUi, /id: "llms", label: "LLMs"/);
   assert.match(settingsUi, /<strong>Harnesses<\/strong>/);
+  // Four flags, four chips. Binary, config, sign-in and reachability fail
+  // for different reasons; one "connected" light would hide which to fix.
+  for (const flag of ["binaryPresent", "configPresent", "authenticated", "reachable"]) {
+    assert.match(settingsUi, new RegExp(`on: runtime\\.${flag}`));
+  }
+  assert.match(settingsUi, /status-chip/);
+  assert.match(settingsUi, /runtime-tile/);
+  assert.doesNotMatch(settingsUi, /llm-mark[^"]*"[^>]*runtime/);
+  // Inbound parent offers chats only: inboundProjectId is normalised but not
+  // read on the inbound path, so a project option would be a lie.
+  assert.doesNotMatch(settingsUi, /inboundProjectId/);
+  assert.match(settingsUi, /<optgroup/);
   assert.doesNotMatch(settingsUi, /id: "agents"/);
   assert.doesNotMatch(settingsUi, /id: "harnesses"/);
   const routingUi = readFileSync(path.join(ROOT, "src", "ui", "RoutingPane.tsx"), "utf8");

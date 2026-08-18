@@ -1,6 +1,6 @@
 import type { EffortLevel, ProviderId } from "./types";
 
-export const LEARNING_SCHEMA_VERSION = 1;
+export const LEARNING_SCHEMA_VERSION = 3;
 export const LEARNING_REDACTION_VERSION = 1;
 export const LEARNING_DIR_NAME = "learning";
 export const LEARNING_DB_FILE = "learning.sqlite";
@@ -14,6 +14,12 @@ export type MemoryScope = "project" | "global-user";
 export type MemoryStatus = "proposed" | "approved" | "active" | "superseded" | "deleted";
 
 export type ActorClass = "human" | "agent" | "system";
+
+export type IntelligenceLane =
+  | "human-intent"
+  | "agent-performance"
+  | "intent-performance-mismatch"
+  | "legacy-unclassified";
 
 export type SensitivityLabel = "normal" | "sensitive" | "secret";
 
@@ -72,6 +78,7 @@ export type LearningEvent = {
 
 export type MemoryItem = {
   id: string;
+  intelligenceLane: IntelligenceLane;
   memoryClass: MemoryClass;
   scope: MemoryScope;
   projectId?: string;
@@ -79,6 +86,8 @@ export type MemoryItem = {
   statement: string;
   tags?: string[];
   sourceEventIds: string[];
+  sourceMemoryIds?: string[];
+  correlationIds?: string[];
   compilerRunId?: string;
   confidence?: number;
   verification: VerificationState;
@@ -94,9 +103,12 @@ export type MemoryItem = {
 
 export type CompilerRun = {
   id: string;
+  intelligenceLane: IntelligenceLane;
   inputFrom?: number;
   inputTo?: number;
   eventWatermark?: string;
+  memoryWatermark?: string;
+  inputMemoryIds?: string[];
   provider?: ProviderId;
   model?: string;
   effort?: EffortLevel | null;
@@ -161,6 +173,7 @@ export type RetrievalQuery = {
   projectId?: string;
   sessionId?: string;
   provider?: ProviderId;
+  intelligenceLane?: Exclude<IntelligenceLane, "legacy-unclassified">;
   text?: string;
   taskClass?: string;
   skillIds?: string[];
@@ -182,6 +195,7 @@ export type LearningBriefProposal = {
   statement: string;
   tags?: string[];
   sourceEventIds: string[];
+  sourceMemoryIds?: string[];
   confidence?: number;
   supersedesId?: string;
   contradictsId?: string;
@@ -190,6 +204,20 @@ export type LearningBriefProposal = {
 export type LearningBrief = {
   intent: LearningBriefProposal[];
   operations: LearningBriefProposal[];
+};
+
+export type LearningIndexStats = {
+  indexedEvents: number;
+  indexedHumanEvents: number;
+  indexedAgentEvents: number;
+  compiledEvents: number;
+  compiledAgentEvents: number;
+  memories: number;
+  agentMemories: number;
+  mismatchMemories: number;
+  completedRuns: number;
+  latestEventAt?: number;
+  latestCompileAt?: number;
 };
 
 export type AdaptiveSelection = {
@@ -247,6 +275,7 @@ export type CompileResult = {
   provider?: ProviderId;
   model?: string;
   customBotId?: string;
+  intelligenceLane?: Exclude<IntelligenceLane, "legacy-unclassified">;
 };
 
 export type CompilerPolicy = {
@@ -260,6 +289,7 @@ export type CompilerPolicy = {
 export type EventFilter = {
   projectId?: string;
   provider?: ProviderId;
+  actorClass?: ActorClass;
   includeTombstones?: boolean;
   afterWatermark?: string;
   kinds?: LearningEventKind[];
@@ -269,6 +299,7 @@ export type EventFilter = {
 export type MemoryFilter = {
   projectId?: string;
   provider?: ProviderId;
+  intelligenceLane?: IntelligenceLane;
   memoryClass?: MemoryClass;
   statuses?: MemoryStatus[];
   includeDeleted?: boolean;

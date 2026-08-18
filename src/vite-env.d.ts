@@ -274,7 +274,7 @@ type WorkhorseBridge = {
   }>;
   learningCompile?: () => Promise<import("./lib/learning-types").CompileResult>;
   learningMemories?: () => Promise<import("./lib/learning-types").MemoryItem[]>;
-  learningEvents?: () => Promise<import("./lib/learning-types").LearningEvent[]>;
+  learningStats?: () => Promise<import("./lib/learning-types").LearningIndexStats>;
   learningApprove?: (id: string) => Promise<import("./lib/learning-types").MemoryItem | undefined>;
   learningForget?: (target: import("./lib/learning-types").ForgetTarget) => Promise<{ tombstoned: number }>;
   learningPurge?: (target: import("./lib/learning-types").ForgetTarget) => Promise<import("./lib/learning-types").PurgeResult>;

@@ -228,7 +228,9 @@ import {
 } from "./watch";
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { normalizeLearning } from "./learning-policy";
+import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleBoundedGoal } from "./learning-goal";
+import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
 import type {
   AppState,
   CustomBot,
@@ -415,7 +417,15 @@ type SendOptions = {
   afterGoalHalt?: boolean;
 };
 
+type LearningTurnLink = {
+  correlationId: string;
+  agentRunId: string;
+  toolIds: string[];
+};
+
 function emitLearningEvent(draft: {
+  id?: string;
+  createdAt?: number;
   kind: import("./learning-types").LearningEventKind;
   projectId?: string | null;
   sessionId?: string;
@@ -424,10 +434,13 @@ function emitLearningEvent(draft: {
   effort?: EffortLevel | null;
   payload: Record<string, unknown>;
   actorClass?: "human" | "agent" | "system";
+  correlationId?: string;
+  agentRunId?: string;
+  toolIds?: string[];
 }) {
   void window.workhorse?.learningRecord?.({
-    id: uid("lev"),
-    createdAt: Date.now(),
+    id: draft.id ?? uid("lev"),
+    createdAt: draft.createdAt ?? Date.now(),
     kind: draft.kind,
     actorClass: draft.actorClass ?? "system",
     projectId: draft.projectId ?? undefined,
@@ -435,6 +448,9 @@ function emitLearningEvent(draft: {
     provider: draft.provider,
     model: draft.model,
     effort: draft.effort,
+    correlationId: draft.correlationId,
+    agentRunId: draft.agentRunId,
+    toolIds: draft.toolIds,
     payload: draft.payload,
   });
 }
@@ -644,6 +660,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
+  const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
@@ -1822,6 +1839,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const current = stateRef.current;
     let session = current.sessions.find((item) => item.id === targetSessionId);
     if (!session) return;
+    const turnCorrelationId = hideUser && learningTurns.current[session.id]
+      ? learningTurns.current[session.id]!.correlationId
+      : uid("corr");
     // A person's chat routes only when that chat is set to Auto. The Settings
     // switch decides how a new chat starts; it does not reach into a chat the
     // person has already set one way or the other.
@@ -1860,6 +1880,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const routedSession = session;
         emitLearningEvent({
           kind: "routing",
+          correlationId: turnCorrelationId,
           projectId: routedSession.projectId,
           sessionId: routedSession.id,
           provider: decision.provider,
@@ -1907,16 +1928,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       return false;
     }
-    emitLearningEvent({
-      kind: originalText !== text || options?.replaceUserId ? "human-edit" : "human-prompt",
-      actorClass: "human",
-      projectId: session.projectId,
-      sessionId: session.id,
-      provider: session.provider,
-      model: session.model,
-      effort: session.effort,
-      payload: { summary: originalText.slice(0, 800) },
-    });
+    const userMessageId = !hideUser && !options?.replaceUserId ? uid("msg") : undefined;
+    const userMessageCreatedAt = Date.now();
+    if (!hideUser) {
+      emitLearningEvent({
+        id: userMessageId ? backfillEventId(userMessageId) : undefined,
+        createdAt: userMessageCreatedAt,
+        kind: originalText !== text || options?.replaceUserId ? "human-edit" : "human-prompt",
+        actorClass: "human",
+        projectId: session.projectId,
+        sessionId: session.id,
+        provider: session.provider,
+        model: session.model,
+        effort: session.effort,
+        correlationId: turnCorrelationId,
+        payload: { summary: originalText.slice(0, BACKFILL_SUMMARY_CHARS) },
+      });
+    }
     const project = current.projects.find((item) => item.id === session.projectId);
     let working = session.messages;
     let vendorSessionId = vendorSessionForSend(session);
@@ -1951,6 +1979,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       delete grokUsagePending.current[session.id];
       delete grokContextSeen.current[session.id];
+      learningTurns.current[session.id] = {
+        correlationId: turnCorrelationId,
+        agentRunId: assistantId,
+        toolIds: [],
+      };
+      emitLearningEvent({
+        id: learningEvidenceId("execution", assistantId),
+        kind: "execution",
+        actorClass: "agent",
+        projectId: session.projectId,
+        sessionId: session.id,
+        provider: session.provider,
+        model: session.model,
+        effort: session.effort,
+        correlationId: turnCorrelationId,
+        agentRunId: assistantId,
+        payload: {
+          summary: `${session.provider} ${session.model} model call started`,
+          status: "started",
+          mode: session.mode,
+          sandbox: session.sandbox,
+          hiddenWorker: Boolean(session.hidden),
+        },
+      });
       const cwd = sessionExecutionCwd(session.environment, project?.folders[0]?.path ?? "");
       setState((latest) => {
         const queued = grokChunkQueue.current[session.id] ?? "";
@@ -1977,11 +2029,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         ? []
                         : [
                             {
-                              id: uid("msg"),
+                              id: userMessageId!,
                               role: "user" as const,
                               text: originalText,
                               ...(images.length > 0 ? { images } : {}),
-                              createdAt: Date.now(),
+                              createdAt: userMessageCreatedAt,
+                              correlationId: turnCorrelationId,
                               ...brainStamp(session),
                             },
                           ]),
@@ -1990,6 +2043,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         role: "assistant",
                         text: queued,
                         createdAt: Date.now(),
+                        correlationId: turnCorrelationId,
                         ...brainStamp(session),
                       },
                     ],
@@ -2235,12 +2289,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }));
       })().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
+        const failedSession = stateRef.current.sessions.find((item) => item.id === session.id);
+        const turn = learningTurns.current[session.id];
         const joinTurn = looksLikeJoinPrompt(text) || isJoinAssistantTurn(
           stateRef.current.sessions.find((item) => item.id === session.id)?.messages ?? [],
           assistantId,
         );
         const attempt = options?.joinAttempt ?? 1;
         if (joinTurn && isVendorRateLimitError(message) && attempt < JOIN_MAX_ATTEMPTS) {
+          if (turn) {
+            emitLearningEvent({
+              id: learningEvidenceId("retry", assistantId, String(attempt)),
+              kind: "execution",
+              actorClass: "agent",
+              projectId: failedSession?.projectId,
+              sessionId: session.id,
+              provider: failedSession?.provider ?? session.provider,
+              model: failedSession?.model ?? session.model,
+              effort: failedSession?.effort ?? session.effort,
+              correlationId: turn.correlationId,
+              agentRunId: assistantId,
+              payload: { summary: "Model call rate-limited; retry queued", status: "retry", attempt, error: message },
+            });
+          }
           setState((latest) => ({
             ...latest,
             sessions: applyJoinRateLimitRetry(latest.sessions, session.id, {
@@ -2250,6 +2321,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }),
           }));
           return;
+        }
+        if (turn && failedSession) {
+          const evidence = agentTurnEvidence({
+            messages: finishOpenToolMessages(failedSession.messages, "failed", message),
+            assistantId,
+            outcome: "failed",
+            queuedText: grokChunkQueue.current[session.id],
+            error: message,
+            workedMs: Math.max(0, Date.now() - (failedSession.messages.find((entry) => entry.id === assistantId)?.createdAt ?? Date.now())),
+          });
+          emitLearningEvent({
+            id: learningEvidenceId("outcome", assistantId),
+            kind: "outcome",
+            actorClass: "agent",
+            projectId: failedSession.projectId,
+            sessionId: failedSession.id,
+            provider: failedSession.provider,
+            model: failedSession.model,
+            effort: failedSession.effort,
+            correlationId: turn.correlationId,
+            agentRunId: assistantId,
+            toolIds: evidence.toolIds,
+            payload: evidence.payload,
+          });
+          delete learningTurns.current[session.id];
         }
         setState((latest) => ({
           ...latest,
@@ -2596,6 +2692,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
+    const turn = draft.sessionId ? learningTurns.current[draft.sessionId] : undefined;
     emitLearningEvent({
       kind: "usage",
       actorClass: "agent",
@@ -2603,6 +2700,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       sessionId: draft.sessionId,
       provider: draft.provider,
       model: draft.model,
+      correlationId: turn?.correlationId,
+      agentRunId: turn?.agentRunId,
+      toolIds: turn?.toolIds,
       payload: {
         summary: `${draft.provider} usage`,
         inputTokens: draft.inputTokens,
@@ -3942,6 +4042,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               isolation = "shared";
             }
             grokAssistantId.current[childId] = assistantId;
+            const childCorrelationId = learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
+            learningTurns.current[childId] = { correlationId: childCorrelationId, agentRunId: assistantId, toolIds: [] };
+            emitLearningEvent({
+              id: learningEvidenceId("execution", assistantId),
+              kind: "execution",
+              actorClass: "agent",
+              projectId: parent.projectId,
+              sessionId: childId,
+              provider: spec.provider,
+              model: spec.model,
+              effort: spec.effort,
+              correlationId: childCorrelationId,
+              agentRunId: assistantId,
+              payload: { summary: `${spec.provider} ${spec.model} worker call started`, status: "started", hiddenWorker: true },
+            });
             const workerName =
               priorWorker?.workerName ||
               nextWorkerName(
@@ -3998,9 +4113,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   text: payload.message.trim(),
                   ...(spawnImages.length ? { images: spawnImages } : {}),
                   createdAt: startedAt,
+                  correlationId: childCorrelationId,
                   ...brainStamp(spec),
                 },
-                { id: assistantId, role: "assistant", text: "", createdAt: startedAt, ...brainStamp(spec) },
+                { id: assistantId, role: "assistant", text: "", createdAt: startedAt, correlationId: childCorrelationId, ...brainStamp(spec) },
               ],
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
@@ -4248,6 +4364,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const assistantId = uid("msg");
           grokAssistantId.current[target.id] = assistantId;
           const startedAt = Date.now();
+          const peerCorrelationId = (from ? learningTurns.current[from.id]?.correlationId : undefined) || payload.id || uid("corr");
+          learningTurns.current[target.id] = { correlationId: peerCorrelationId, agentRunId: assistantId, toolIds: [] };
+          emitLearningEvent({
+            id: learningEvidenceId("execution", assistantId),
+            kind: "execution",
+            actorClass: "agent",
+            projectId: target.projectId,
+            sessionId: target.id,
+            provider: target.provider,
+            model: target.model,
+            effort: target.effort,
+            correlationId: peerCorrelationId,
+            agentRunId: assistantId,
+            payload: { summary: `${target.provider} ${target.model} peer call started`, status: "started", peerCall: true },
+          });
           setState((current) => ({
             ...current,
             sessions: current.sessions.map((item) => {
@@ -4282,12 +4413,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     kind: "peer" as const,
                     fromTitle,
                     peerFromSessionId: from?.id,
-                    correlationId: payload.id,
+                    correlationId: peerCorrelationId,
                     text: payload.message.trim(),
                     createdAt: startedAt,
                     ...brainStamp(target),
                   },
-                  { id: assistantId, role: "assistant", text: "", createdAt: startedAt, ...brainStamp(target) },
+                  { id: assistantId, role: "assistant", text: "", createdAt: startedAt, correlationId: peerCorrelationId, ...brainStamp(target) },
                 ],
               };
             }),
@@ -4517,6 +4648,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "tool") {
+        const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        const turn = learningTurns.current[event.sessionId];
+        if (turn && event.toolCallId && !turn.toolIds.includes(event.toolCallId)) turn.toolIds.push(event.toolCallId);
+        if (turn && toolIsFinished(event.status)) {
+          const category = /\b(test|verify|check|lint|build)\b/i.test(`${event.title} ${event.detail}`)
+            ? "verification"
+            : /\b(write|edit|create|patch|render|export|save|screenshot)\b/i.test(event.title)
+              ? "artifact"
+              : "tool";
+          emitLearningEvent({
+            id: learningEvidenceId("tool", turn.agentRunId, event.toolCallId),
+            kind: "tool",
+            actorClass: "agent",
+            projectId: owner?.projectId,
+            sessionId: event.sessionId,
+            provider: owner?.provider,
+            model: owner?.model,
+            effort: owner?.effort,
+            correlationId: turn.correlationId,
+            agentRunId: turn.agentRunId,
+            toolIds: [event.toolCallId],
+            payload: {
+              summary: `${event.title} ${event.status}`,
+              title: event.title,
+              status: event.status,
+              detail: event.detail,
+              category,
+            },
+          });
+        }
         setState((current) => ({
           ...current,
           sessions: current.sessions.map((session) =>
@@ -4828,6 +4989,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
         }
+        const turn = learningTurns.current[event.sessionId];
+        const assistantId = grokAssistantId.current[event.sessionId];
+        if (turn && session && assistantId) {
+          const evidence = agentTurnEvidence({
+            messages: finishOpenToolMessages(session.messages, safetyPaused ? "failed" : "completed"),
+            assistantId,
+            outcome: safetyPaused ? "safety-paused" : "completed",
+            queuedText: grokChunkQueue.current[event.sessionId],
+            stopReason: event.stopReason,
+            workedMs: Math.max(0, Date.now() - (session.messages.find((message) => message.id === assistantId)?.createdAt ?? Date.now())),
+          });
+          emitLearningEvent({
+            id: learningEvidenceId("outcome", assistantId),
+            kind: "outcome",
+            actorClass: "agent",
+            projectId: session.projectId,
+            sessionId: session.id,
+            provider: session.provider,
+            model: session.model,
+            effort: session.effort,
+            correlationId: turn.correlationId,
+            agentRunId: assistantId,
+            toolIds: evidence.toolIds,
+            payload: evidence.payload,
+          });
+          delete learningTurns.current[event.sessionId];
+        }
         if (session?.provider === "cursor") {
           void window.workhorse?.cursorPlanUsage?.()
             .then((plan) => setCursorPlan(plan ?? undefined))
@@ -4917,6 +5105,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
         }
         const assistantId = grokAssistantId.current[event.sessionId];
+        const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        const turn = learningTurns.current[event.sessionId];
+        if (turn && failedSession && assistantId) {
+          const evidence = agentTurnEvidence({
+            messages: finishOpenToolMessages(failedSession.messages, "failed", event.message),
+            assistantId,
+            outcome: "failed",
+            queuedText: grokChunkQueue.current[event.sessionId],
+            error: event.message,
+            workedMs: Math.max(0, Date.now() - (failedSession.messages.find((message) => message.id === assistantId)?.createdAt ?? Date.now())),
+          });
+          emitLearningEvent({
+            id: learningEvidenceId("outcome", assistantId),
+            kind: "outcome",
+            actorClass: "agent",
+            projectId: failedSession.projectId,
+            sessionId: failedSession.id,
+            provider: failedSession.provider,
+            model: failedSession.model,
+            effort: failedSession.effort,
+            correlationId: turn.correlationId,
+            agentRunId: assistantId,
+            toolIds: evidence.toolIds,
+            payload: evidence.payload,
+          });
+          delete learningTurns.current[event.sessionId];
+        }
         setState((current) => {
           let sessions = withSubagentStatus(
             current.sessions.map((session) =>

@@ -8,7 +8,7 @@ import {
   describeCompileResult,
 } from "../lib/learning-backfill";
 import { eligibleLearningCompilers, isEligibleLearningCompiler } from "../lib/learning-policy";
-import type { CompileResult, LearningEvent, LearningMode, MemoryItem } from "../lib/learning-types";
+import type { CompileResult, LearningIndexStats, LearningMode, MemoryItem } from "../lib/learning-types";
 import { attachedCustomBots } from "../lib/settings";
 
 const MODES: { id: LearningMode; label: string; hint: string }[] = [
@@ -24,7 +24,7 @@ export function LearningPane() {
   const store = useStore();
   const learning = store.settings.learning;
   const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [events, setEvents] = useState<LearningEvent[]>([]);
+  const [indexStats, setIndexStats] = useState<LearningIndexStats | null>(null);
   const [showSources, setShowSources] = useState(false);
   const [note, setNote] = useState("");
   const [forgetOpen, setForgetOpen] = useState(false);
@@ -33,20 +33,20 @@ export function LearningPane() {
     void window.workhorse?.learningMemories?.().then((rows) => setMemories(rows ?? [])).catch(() => undefined);
   };
 
-  const refreshEvents = async () => {
+  const refreshIndexStats = async () => {
     try {
-      const rows = [...((await window.workhorse?.learningEvents?.()) ?? [])].reverse();
-      setEvents(rows);
-      return rows;
+      const stats = (await window.workhorse?.learningStats?.()) ?? null;
+      setIndexStats(stats);
+      return stats;
     } catch {
-      setEvents([]);
-      return [];
+      setIndexStats(null);
+      return null;
     }
   };
 
   const refresh = () => {
     refreshMemories();
-    void refreshEvents();
+    void refreshIndexStats();
   };
 
   useEffect(() => {
@@ -112,16 +112,16 @@ export function LearningPane() {
   };
 
   const compileBrief = async () => {
-    const result = await runCompile();
+    const result = await compileUntilSettled();
     if (result) setNote(describeCompileResult(result, botNameFor(result)));
     refresh();
   };
 
   const showCapturedSources = async () => {
     setShowSources(true);
-    const rows = (await refreshEvents()) ?? [];
+    const stats = await refreshIndexStats();
     refreshMemories();
-    setNote(rows.length ? `${rows.length} captured events.` : "No captured events.");
+    setNote(stats?.indexedEvents ? `${stats.indexedEvents} private source events indexed.` : "No captured events.");
   };
 
   const backfillLastDay = async () => {
@@ -191,7 +191,7 @@ export function LearningPane() {
         <div className="settings-row">
           <div className="settings-row-copy">
             <strong>Store</strong>
-            <span>Read the brief and its sources, take a copy, or forget it.</span>
+            <span>Read the intelligence brief, check the private index, take a copy, or forget it.</span>
           </div>
           <div className="settings-control">
             <div className="actions">
@@ -199,7 +199,7 @@ export function LearningPane() {
                 Learning brief
               </button>
               <button className="tiny" type="button" onClick={() => void showCapturedSources()}>
-                Sources
+                Index
               </button>
               <button className="tiny" type="button" onClick={() => void backfillLastDay()}>
                 Backfill last day
@@ -231,44 +231,37 @@ export function LearningPane() {
         </div>
       ) : null}
       {note ? <p className="row-meta">{note}</p> : null}
-      <div className="usage-brains">
+      <div className="settings-group">
         {memories.map((memory) => (
-          <div className="usage-brain" key={memory.id}>
-            <span className="llm-mark on">{memory.memoryClass === "intent" ? "I" : "O"}</span>
-            <span>{memory.statement}</span>
-            <em>
-              {memory.scope} · {memory.sourceEventIds.length} · {memory.status}
-              {memory.lastConfirmedAt ? ` · ${new Date(memory.lastConfirmedAt).toISOString().slice(0, 10)}` : ""}
-            </em>
+          <div className="settings-row" key={memory.id}>
+            <div className="settings-row-copy">
+              <strong>{memory.statement}</strong>
+              <span>{memory.memoryClass === "intent" ? "What you want" : "How you want work handled"}</span>
+            </div>
             {memory.status === "proposed" ? (
-              <button className="tiny" type="button" onClick={() => void window.workhorse?.learningApprove?.(memory.id).then(refresh)}>
-                Approve
-              </button>
+              <div className="settings-control">
+                <button className="tiny" type="button" onClick={() => void window.workhorse?.learningApprove?.(memory.id).then(refresh)}>
+                  Approve
+                </button>
+              </div>
             ) : null}
-            <details>
-              <summary>Provenance</summary>
-              <p className="row-meta">{memory.sourceEventIds.join(", ") || "none"}</p>
-            </details>
           </div>
         ))}
       </div>
-      {showSources && events.length > 0 ? (
-        <div className="usage-brains">
-          {events.map((event) => {
-            const project = event.projectId
-              ? store.projects.find((item) => item.id === event.projectId)?.name
-              : undefined;
-            const summary = typeof event.payload.summary === "string" ? event.payload.summary : "";
-            return (
-              <div className="usage-brain" key={event.id}>
-                <span>{event.kind}</span>
-                <span>{summary || event.kind}</span>
-                <em>
-                  {[project ?? "loose", event.localDay].filter(Boolean).join(" · ")}
-                </em>
-              </div>
-            );
-          })}
+      {showSources && indexStats ? (
+        <div className="link-block" aria-label="Private learning index">
+          <strong>Private source index</strong>
+          <p className="row-meta">
+            {indexStats.indexedHumanEvents} human inputs indexed · {indexStats.compiledEvents} analyzed
+          </p>
+          <p className="row-meta">
+            {indexStats.indexedAgentEvents} agent evidence events indexed · {indexStats.compiledAgentEvents} analyzed
+          </p>
+          <p className="row-meta">
+            {indexStats.memories} human records · {indexStats.agentMemories} agent findings · {indexStats.mismatchMemories} mismatches
+          </p>
+          <p className="row-meta">{indexStats.completedRuns} completed compiler runs</p>
+          <p className="row-meta">Prompt text stays in SQLite and is not shown here.</p>
         </div>
       ) : null}
     </>

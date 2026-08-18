@@ -939,7 +939,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
-            "Tell the harness to work with Workhorse without naming a tool; verify it discovers workhorse_delegate or workhorse_list_bots plus workhorse_spawn_agent, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
+            "Tell the harness to work with Workhorse without naming a tool; verify it uses workhorse_delegate for an ordinary task, supplies only objective and constraints, leaves provider/model/effort/worker unset, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
             "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
             "Verify both Workhorse calls run the assigned provider, preserve the supplied trace and parent identity, and return real replies before the external goal completes.",
@@ -947,6 +947,7 @@
             "Verify an externally owned wave returns reports only to the harness: Workhorse must not queue or run a second desk synthesis, spawn unsolicited workers, or exceed the harness concurrency order.",
             "Exclude one provider, model, or bot at the root and verify the structured exclusion persists through restart, is inherited by a nested helper, and rejects an explicitly named excluded descendant before a provider call.",
             "Query worker status by returned Workhorse session id and verify authoritative provider, actual model, effort, lifecycle, and exclusions; confirm the parent title stays stable after its initial vendor title.",
+            "Keep ordinary delegate and follow-up calls below the harness MCP client timeout by returning a worker id promptly; poll status to terminal and require the final report there instead of replaying the task through a fallback session.",
             "For wait=true, require a structured completion envelope with worker session id, authoritative provider/model/effort, exclusions, and report; reusing a worker from a finished wave must open a fresh externally owned wave.",
             "Verify hidden worker briefs and desk joins preserve the assigned worker route and never trigger a second Auto model/effort selection.",
             "Run the contract once through OpenClaw and once through Hermes; use each current CLI shape, source-tag programmatic Hermes sessions, and close the task, run, and row with nonzero duration.",

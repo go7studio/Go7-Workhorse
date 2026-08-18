@@ -145,6 +145,13 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     assert.ok(names.includes("workhorse_list_agents"));
     assert.ok(names.includes("workhorse_list_bots"));
     assert.ok(names.includes("workhorse_delegate"));
+    const delegateFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_delegate")?.inputSchema?.properties ?? {};
+    for (const field of ["task", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
+      assert.ok(field in delegateFields, `workhorse_delegate publishes ${field}`);
+    }
+    for (const field of ["provider", "model", "effort", "worker", "chat"]) {
+      assert.ok(!(field in delegateFields), `workhorse_delegate leaves ${field} to Workhorse routing`);
+    }
     for (const toolName of ["workhorse_ask_chat", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_agent_status", "workhorse_cancel_agent"]) {
       const properties = listed.result?.tools?.find((tool) => tool.name === toolName)?.inputSchema?.properties ?? {};
       assert.ok("fromSessionId" in properties, `${toolName} publishes fromSessionId`);
@@ -177,7 +184,9 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   };
   assert.equal(initialized.result?.instructions, WORKHORSE_MCP_INSTRUCTIONS);
   assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
-  assert.match(initialized.result?.instructions ?? "", /delegate before doing the task directly/);
+  assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
+  assert.match(initialized.result?.instructions ?? "", /do not choose a provider, model, effort, or worker/);
+  assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
   assert.ok(initialized.result?.capabilities?.tools);
 });
 
@@ -212,6 +221,11 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   let seenMessage = "";
   let seenRoute = "";
   let seenExclude: string[] = [];
+  let seenConstraints: string[] = [];
+  let seenCapabilities: string[] = [];
+  let seenTools: string[] = [];
+  let seenTimeout = 0;
+  let seenWait: boolean | undefined;
   setWorkhorseDeskAsk(async (ask) => {
     seenFrom = ask.fromSessionId;
     seenTrace = ask.traceId ?? "";
@@ -219,6 +233,11 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     seenMessage = ask.message;
     seenRoute = ask.route ?? "";
     seenExclude = ask.exclude ?? [];
+    seenConstraints = ask.constraints ?? [];
+    seenCapabilities = ask.capabilities ?? [];
+    seenTools = ask.tools ?? [];
+    seenTimeout = ask.timeoutSeconds ?? 0;
+    seenWait = ask.wait;
     return { text: JSON.stringify({ ok: true, parent: ask.fromSessionId }) };
   });
   try {
@@ -240,7 +259,17 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
       method: "tools/call",
       params: {
         name: "workhorse_delegate",
-        arguments: { task: "Verify analytics wiring", exclude: ["MiniMax"], folder: dir, fromSessionId: "parent_chat", traceId: "trace_delegate_1" },
+        arguments: {
+          task: "Verify analytics wiring",
+          exclude: ["MiniMax"],
+          constraints: ["Read only", "Return evidence"],
+          capabilities: ["analytics"],
+          tools: ["browser"],
+          timeoutSeconds: 420,
+          folder: dir,
+          fromSessionId: "parent_chat",
+          traceId: "trace_delegate_1",
+        },
       },
     })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
     assert.equal(delegated.error, undefined, delegated.error?.message);
@@ -249,6 +278,11 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenMessage, "Verify analytics wiring");
     assert.equal(seenRoute, "auto");
     assert.deepEqual(seenExclude, ["MiniMax"]);
+    assert.deepEqual(seenConstraints, ["Read only", "Return evidence"]);
+    assert.deepEqual(seenCapabilities, ["analytics"]);
+    assert.deepEqual(seenTools, ["browser"]);
+    assert.equal(seenTimeout, 420);
+    assert.equal(seenWait, false);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
   } finally {
     setWorkhorseDeskAsk(null);

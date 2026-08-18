@@ -50,7 +50,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse, first use workhorse_list_chats to choose an explicit parent, then delegate before doing the task directly: use workhorse_delegate for one routed worker, or workhorse_list_bots then workhorse_spawn_agent for selected workers. Use workhorse_ask_chat for an existing chat. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder; do not choose a provider, model, effort, or worker unless the user explicitly assigned one. Workhorse auto-routes from task fit and current capacity and returns its decision. Delegation returns a worker id promptly; poll workhorse_agent_status until it returns a terminal status and report. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and still leave routing fields unset for every unassigned slice. Use workhorse_ask_chat with wait=false for a follow-up to the returned worker, then poll the same worker id. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -140,7 +140,7 @@ const TOOLS = [
   {
     name: "workhorse_delegate",
     description:
-      "Execute a task through a routed Workhorse worker. Use when the user says to work with Workhorse, delegate to Workhorse, or call proper models. Call workhorse_list_chats first and pass its explicit parent id. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
+      "Execute one task through Workhorse intelligent routing. Use when the user says to work with Workhorse, delegate to Workhorse, or call proper models. Call workhorse_list_chats first and pass its explicit parent id. Supply the task and constraints, not a provider, model, effort, or worker; the desk selects from task fit and current capacity and returns its rationale. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
     inputSchema: {
       type: "object",
       properties: {
@@ -148,8 +148,17 @@ const TOOLS = [
         description: { type: "string", description: "Short 3–5 word label" },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
+        constraints: { type: "array", items: { type: "string" }, description: "Task boundaries and acceptance requirements" },
+        capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
+        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names from workhorse_list_skills" },
+        tools: { type: "array", items: { type: "string" }, description: "Tools the task requires" },
+        files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
+        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
+        tokenBudget: { type: "number", description: "Optional total token ceiling" },
+        isolation: { type: "string", description: "worktree (default) or shared" },
+        planStepId: { type: "string", description: "Optional executable plan step id" },
         folder: { type: "string", description: "Optional absolute working folder" },
-        wait: { type: "boolean", description: "true (default) returns the real worker result; false starts it for later joining" },
+        wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
         fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
         traceId: { type: "string", description: "Trace id for this orchestration loop" },
       },
@@ -178,7 +187,7 @@ const TOOLS = [
   {
     name: "workhorse_ask_chat",
     description:
-      "Ask an existing sidebar chat a question and return its reply. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox. Pass the visible title.",
+      "Send a follow-up to an existing Workhorse chat. For harness work, use wait=false and poll workhorse_agent_status with this worker id so long work cannot exceed the MCP client limit. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox.",
     inputSchema: {
       type: "object",
       properties: {
@@ -186,6 +195,7 @@ const TOOLS = [
         message: { type: "string", description: "Question or request for that chat" },
         fromSessionId: { type: "string", description: "Parent Workhorse chat id for this orchestration loop." },
         traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
+        wait: { type: "boolean", description: "false (default for harnesses) returns promptly; true waits for a short reply" },
       },
       required: ["chat", "message"],
     },
@@ -193,7 +203,7 @@ const TOOLS = [
   {
     name: "workhorse_spawn_agent",
     description:
-      "Spawn another vendor in this conversation. If workhorse_list_bots said that vendor is not callable (Watch hold, turned off, or not attached), do not call this — it fails immediately and will not start Grok/Codex/Claude.",
+      "Dispatch a bounded Workhorse worker. For an unassigned slice, leave provider, model, effort, chat, and worker unset so the desk auto-selects from task fit and current capacity. Explicit user assignments win. Use workhorse_delegate for an ordinary single task. If workhorse_list_bots said an explicitly assigned vendor is not callable, do not call it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -204,8 +214,8 @@ const TOOLS = [
           description:
             "Name of a worker you already used (Wren, Dexter). Sends this slice back to that worker with everything it learned. Leave empty and the desk reuses an idle worker on the same bot, or starts a new one.",
         },
-        provider: { type: "string", description: "grok, codex, claude, or custom" },
-        model: { type: "string", description: "Optional model id such as gpt-5.6-terra" },
+        provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
+        model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
@@ -216,7 +226,7 @@ const TOOLS = [
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
-        effort: { type: "string", description: "Optional override; otherwise derived from quick, balanced, or deep" },
+        effort: { type: "string", description: "Explicit user override only; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },
@@ -288,7 +298,7 @@ const TOOLS = [
   {
     name: "workhorse_list_bots",
     description:
-      "List every attached desk bot (Grok, Codex, Claude, and custom slots) with leftover/Watch status. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. Name every attached bot. Only refuse to spawn or ask one if the summary says it is not callable.",
+      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -877,7 +887,7 @@ function parseVendorGrant(text: string): { allowed?: boolean; retrySpawn?: boole
   return null;
 }
 
-async function askChat(chat: string, message: string, from?: string, traceId?: string): Promise<string> {
+async function askChat(chat: string, message: string, from?: string, traceId?: string, wait = true): Promise<string> {
   const state = readState();
   const listed = catalogSessions(state, { fromSessionId: fromSessionId(from) });
   const match = findSession(listed, chat);
@@ -892,6 +902,7 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
     fromSessionId: fromSessionId(from),
     message,
     mode: "ask",
+    wait,
     ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
   });
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
@@ -902,6 +913,7 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
       fromSessionId: fromSessionId(from),
       message,
       mode: "ask",
+      wait,
       ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),
     });
   }
@@ -1158,8 +1170,17 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         description: typeof args.description === "string" ? args.description : undefined,
         route,
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
+        constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
+        capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
+        skills: Array.isArray(args.skills) ? args.skills.filter((item): item is string => typeof item === "string") : undefined,
+        tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
+        files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
+        timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
+        tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
+        isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
+        planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
-        wait: args.wait === false ? false : true,
+        wait: args.wait === true,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
@@ -1180,7 +1201,8 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const message = typeof args.message === "string" ? args.message : "";
     if (!message.trim()) throw new Error("message is required");
     const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
-    return askChat(chat, message, parent, typeof args.traceId === "string" ? args.traceId : undefined);
+    const wait = args.wait === true || (args.wait !== false && currentMcpProfile() !== "external-runtime");
+    return askChat(chat, message, parent, typeof args.traceId === "string" ? args.traceId : undefined, wait);
   }
   if (name === "workhorse_spawn_agent") {
     const prompt = typeof args.prompt === "string" ? args.prompt : typeof args.message === "string" ? args.message : "";

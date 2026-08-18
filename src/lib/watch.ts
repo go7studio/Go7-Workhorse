@@ -1008,7 +1008,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   }
   if (callable.length > 0) {
     lines.push(
-      `Callable now: ${callable.map((row) => row.name).join(", ")}. Spawn these, including custom bots with a key. Only say nothing to spawn if this list is empty.`,
+      `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Use a named row only for an explicit user assignment or requested full lineup.`,
     );
   } else {
     lines.push("Nothing is callable right now.");
@@ -1021,7 +1021,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
       leftoverMeans: "Weekly plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
       bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
-      routingRule: "Choose from callable bots, state the fit, and preserve user assignments.",
+      routingRule: "Workhorse chooses from callable bots by task fit and capacity. Explicit user assignments win.",
     },
     null,
     2,

@@ -93,7 +93,7 @@
   "semantics": {
     "attachContext": "Read or summarize a prior chat into the current agent without waking or modifying the source chat.",
     "messageExistingChat": "Deliver a peer turn to one existing live Workhorse chat, preserve sender and target identities, run that chat's assigned provider/model, and return its real reply.",
-    "spawnAgent": "Dispatch a bounded child task with explicit or inherited provider, model, effort, budget, timeout, and isolation; resume a compatible named or idle worker only when reuse rules allow it.",
+    "spawnAgent": "Dispatch a bounded child task; when the user did not explicitly assign provider, model, effort, or worker, leave them unset so Workhorse selects from task fit and capacity. Resume a compatible named or idle worker only when reuse rules allow it.",
     "orchestrateGoal": "Keep one parent responsible for an active goal, choose useful next work, delegate where justified, reconcile child evidence, and stop only at a real terminal state.",
     "identityRule": "Visible titles are convenient selectors; immutable Workhorse session IDs are the durable address and must be copyable, linkable, and never guessed.",
     "truthRule": "A context attachment is not a message, a resumed child is not a new agent, and a catalog or requested model is not runtime proof.",

@@ -464,8 +464,12 @@ export function collectChildAgentReports(
 }
 
 export function workerStatusSnapshot(
-  worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision">,
+  worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
 ): Record<string, unknown> {
+  const report = [...worker.messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.text.trim())
+    ?.text.trim();
   return {
     id: worker.id,
     title: worker.title,
@@ -479,6 +483,8 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.finishedAt ? { finishedAt: worker.agentRun.finishedAt } : {}),
     ...(worker.agentRun?.error ? { error: worker.agentRun.error } : {}),
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
+    ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
+    ...(worker.agentRun?.status !== "running" && report ? { report } : {}),
     routingMode: worker.routingMode ?? "manual",
     ...(worker.routingDecision ? { routingDecision: worker.routingDecision } : {}),
   };

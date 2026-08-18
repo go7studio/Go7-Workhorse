@@ -536,6 +536,8 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.equal(callableDeskRows(rows).some((row) => row.id === "grok"), false);
   assert.match(roster, /weekly plan total|weekly plan remaining|not this prompt|not this spawn/);
   assert.match(roster, /leftoverMeans/);
+  assert.match(roster, /leave provider, model, and effort unset/);
+  assert.match(roster, /Workhorse chooses from callable bots by task fit and capacity/);
   assert.match(
     formatWeeklyPlanLine({ leftoverPercent: 43, usedPercent: 57 }),
     /43% leftover of this week's plan overall \(57% used this week so far/,

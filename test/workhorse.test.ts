@@ -7760,6 +7760,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     startedAt: 1,
     finishedAt: 2,
     exclusions: ["MiniMax M3"],
+    report: "It is a Godot game.",
     routingMode: "manual",
   });
   const autoDecision = {
@@ -7786,6 +7787,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
       effort: kidDone.effort,
       startedAt: 1,
       finishedAt: 2,
+      report: "It is a Godot game.",
       routingMode: "auto",
       routingDecision: autoDecision,
     },

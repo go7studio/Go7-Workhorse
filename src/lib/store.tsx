@@ -4645,6 +4645,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return {
                 ...item,
                 status: "running",
+                agentRun: item.agentRun
+                  ? {
+                      ...item.agentRun,
+                      status: "running" as const,
+                      startedAt,
+                      finishedAt: undefined,
+                      error: undefined,
+                      correlationId: peerCorrelationId,
+                    }
+                  : undefined,
                 messages: [
                   ...item.messages,
                   {
@@ -4663,26 +4673,73 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               };
             }),
           }));
-          const reply = await promptVendor(target, prompt, stateRef.current.settings.mcpServers);
-          const fallback = reply || vendorEmptyReply(target.provider);
-          setState((current) => ({
-            ...current,
-            sessions: withSubagentStatus(
-              current.sessions.map((item) =>
-                item.id === target.id
-                  ? {
-                      ...item,
-                      status: "idle",
-                      messages: item.messages.map((entry) =>
-                        entry.id === assistantId && !entry.text.trim() ? { ...entry, text: fallback } : entry,
-                      ),
-                    }
-                  : item,
+          const runPeer = async () => {
+            const reply = await promptVendor(target, prompt, stateRef.current.settings.mcpServers);
+            const fallback = reply || vendorEmptyReply(target.provider);
+            const finishedAt = Date.now();
+            setState((current) => ({
+              ...current,
+              sessions: withSubagentStatus(
+                current.sessions.map((item) =>
+                  item.id === target.id
+                    ? {
+                        ...item,
+                        status: "idle",
+                        agentRun: item.agentRun
+                          ? { ...item.agentRun, status: "completed" as const, finishedAt, error: undefined }
+                          : undefined,
+                        messages: item.messages.map((entry) =>
+                          entry.id === assistantId && !entry.text.trim() ? { ...entry, text: fallback } : entry,
+                        ),
+                      }
+                    : item,
+                ),
+                target.id,
+                "completed",
               ),
-              target.id,
-              "completed",
-            ),
-          }));
+            }));
+            return fallback;
+          };
+          if (payload.wait === false) {
+            await replyAsk({
+              text: JSON.stringify(
+                {
+                  accepted: true,
+                  childSessionId: target.id,
+                  worker: target.workerName,
+                  provider: target.provider,
+                  model: target.model,
+                  effort: target.effort,
+                  routingMode: target.routingMode ?? "manual",
+                  ...(target.routingDecision ? { routingDecision: target.routingDecision } : {}),
+                  status: "running",
+                  howToUse: "Poll workhorse_agent_status with this childSessionId until status is terminal and report is present.",
+                },
+                null,
+                2,
+              ),
+            });
+            void runPeer().catch((error) => {
+              const message = error instanceof Error ? error.message : String(error);
+              setState((current) => ({
+                ...current,
+                sessions: applyFailedPeerAsk(
+                  current.sessions.map((item) =>
+                    item.id === target.id && item.agentRun
+                      ? {
+                          ...item,
+                          status: "idle" as const,
+                          agentRun: { ...item.agentRun, status: "failed" as const, finishedAt: Date.now(), error: message },
+                        }
+                      : item,
+                  ),
+                  { parentId: from?.id, childId: target.id, targetTitle: target.title, error: message },
+                ),
+              }));
+            });
+            return;
+          }
+          const fallback = await runPeer();
           await replyAsk({ text: fallback });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

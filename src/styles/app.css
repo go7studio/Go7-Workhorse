@@ -1309,23 +1309,30 @@ html.pane-dragging * {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 200ms var(--ease);
+  pointer-events: none;
+  overflow: visible;
 }
 
 .session-edits-slot.open {
   grid-template-rows: 1fr;
+  position: relative;
+  min-height: 40px;
+  max-height: 40px;
+  overflow: visible;
 }
 
 .session-edits {
   flex-shrink: 0;
   width: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
   padding: 0 22px;
+  pointer-events: none;
 }
 
 .session-edits .edited-block {
@@ -1337,6 +1344,7 @@ html.pane-dragging * {
   opacity: 0;
   transform: translateY(6px);
   transition: opacity 200ms var(--ease), transform 200ms var(--ease);
+  pointer-events: auto;
 }
 
 .session-edits-slot.open .edited-block {
@@ -1351,7 +1359,11 @@ html.pane-dragging * {
 }
 
 .session-edits .edited-block.compact.open {
-  width: min(420px, 100%);
+  position: absolute;
+  right: 22px;
+  bottom: 0;
+  z-index: 3;
+  width: min(420px, calc(100% - 44px));
 }
 
 .session-edits .edited-block.compact:not(.open) .edited-toggle {

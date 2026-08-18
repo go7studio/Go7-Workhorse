@@ -4125,13 +4125,15 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const composerWrap = css.match(/\.composer-wrap\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(sessionEdits, /padding:\s*0 22px;/);
   assert.match(sessionEdits, /align-items:\s*flex-end/);
+  assert.match(sessionEdits, /pointer-events:\s*none/);
   assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
   assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
   assert.match(
     css,
     /\.session-edits \.edited-block\.compact:not\(\.open\)\s*\{[^}]*width:\s*fit-content/,
   );
-  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, 100%\)/);
+  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*position:\s*absolute/);
+  assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/);
   assert.match(
     css,
     /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*flex:\s*0 0 auto/,

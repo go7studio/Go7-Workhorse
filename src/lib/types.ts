@@ -696,7 +696,14 @@ export type GrokPlanUsage = {
  *                token_count). Carries contextUsed and cost. Never tokens.
  * - `estimate` — characters / 4 because the vendor reported nothing.
  */
-export type UsageSource = "turn" | "request" | "gauge" | "estimate";
+/**
+ * How the numbers were obtained.
+ *
+ * `subagent` is a vendor's own child reporting what it already spent. It is
+ * booked on its own rather than folded, because several can finish inside one
+ * parent turn and the fold keeps only one draft.
+ */
+export type UsageSource = "turn" | "request" | "gauge" | "estimate" | "subagent";
 
 export type UsageEvent = {
   id: string;

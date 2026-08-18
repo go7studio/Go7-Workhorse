@@ -5081,6 +5081,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           contextUsed: event.contextUsed,
           source: event.source,
         };
+        // A vendor's own subagent reports once, when it is already done, and
+        // several can land inside a single parent turn. Book it now: queueing
+        // would hand it to a fold that keeps one draft and drops the rest.
+        // It carries this chat's session id, so it rolls up on this chat.
+        if (incoming.source === "subagent") {
+          if (usageHasBilledTokens(incoming)) recordUsage(incoming);
+          return;
+        }
         // A gauge has no tokens but carries the context and cost the turn
         // should end with, so it queues too; the fold books zero from it.
         if (usageHasBilledTokens(incoming) || (incoming.source === "gauge" && (incoming.contextUsed !== undefined || incoming.costUsd !== undefined))) {

@@ -630,11 +630,15 @@ test("sidebar last-talked clock uses the latest user prompt, not later assistant
   assert.equal(lastTalkedAt(empty), undefined);
   assert.equal(lastTalkedAt(assistantOnly), undefined);
   assert.equal(lastTalkedAt(talked), new Date(2026, 7, 17, 0, 18, 0).getTime());
-  assert.equal(formatLastTalked(lastTalkedAt(talked), now), "12:18");
-  assert.equal(formatLastTalked(new Date(2026, 7, 17, 15, 5, 0).getTime(), now), "3:05");
-  assert.equal(formatLastTalked(new Date(2026, 7, 16, 23, 59, 0).getTime(), now), "Yesterday");
-  assert.equal(formatLastTalked(new Date(2026, 7, 10, 9, 0, 0).getTime(), now), "Aug 10");
-  assert.equal(formatLastTalked(new Date(2025, 7, 16, 9, 0, 0).getTime(), now), "Aug 16, 2025");
+  assert.equal(formatLastTalked(lastTalkedAt(talked), now), "eleven hours");
+  assert.equal(formatLastTalked(now - 4 * 60_000, now), "minutes");
+  assert.equal(formatLastTalked(now - 60 * 60_000, now), "one hour");
+  assert.equal(formatLastTalked(now + 5 * 60_000, now), "minutes");
+  assert.equal(formatLastTalked(new Date(2026, 7, 16, 23, 59, 0).getTime(), now), "twelve hours");
+  assert.equal(formatLastTalked(new Date(2026, 7, 16, 12, 0, 0).getTime(), now), "one day");
+  assert.equal(formatLastTalked(new Date(2026, 7, 15, 12, 0, 0).getTime(), now), "two days");
+  assert.equal(formatLastTalked(new Date(2026, 7, 10, 9, 0, 0).getTime(), now), "seven days");
+  assert.equal(formatLastTalked(new Date(2025, 7, 16, 9, 0, 0).getTime(), now), "366 days");
   assert.equal(formatLastTalked(undefined, now), "");
   const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
   assert.match(row, /row-talked/);
@@ -651,6 +655,7 @@ test("sidebar last-talked clock uses the latest user prompt, not later assistant
   assert.match(popout, /TimeStamp/);
   const stamp = readFileSync(path.join(ROOT, "src", "ui", "TimeStamp.tsx"), "utf8");
   assert.match(stamp, /formatLastTalked/);
+  assert.match(stamp, /setInterval/);
   assert.match(stamp, /<time/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /\.row-talked\s*\{/);

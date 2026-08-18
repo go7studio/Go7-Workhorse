@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { mdImageInitialSrc, pathToMediaUrl } from "../src/lib/media-display";
+import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 
 export type MediaSrcOpts = {
   cwd?: string;
@@ -84,7 +84,23 @@ export function displaySrcForHref(href: string, opts: MediaSrcOpts = {}, io?: Me
   const raw = String(href ?? "").trim();
   if (/^data:image\//i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
   if (/^(blob:|workhorse-media:)/i.test(raw)) return raw;
+  const context = { cwd: opts.cwd, vendorSessionId: opts.vendorSessionId };
   const file = resolveDisplayFile(raw, opts, io);
   if (file) return pathToMediaUrl(file);
-  return mdImageInitialSrc(raw);
+  return mdImageInitialSrc(raw, context);
+}
+
+/** File the custom protocol should stream. Exists-check only — no byte read. */
+export function resolveMediaProtocolFile(url: string, io?: MediaSrcIo): string | null {
+  const dest = mediaUrlToPath(url);
+  const context = mediaUrlContext(url);
+  const exists = io?.existsSync ?? ((file: string) => fs.existsSync(file));
+  if (dest) {
+    try {
+      if (path.isAbsolute(dest) && exists(dest)) return dest;
+    } catch {
+      // try candidates
+    }
+  }
+  return resolveDisplayFile(dest ?? "", { cwd: context.cwd, vendorSessionId: context.vendorSessionId }, io);
 }

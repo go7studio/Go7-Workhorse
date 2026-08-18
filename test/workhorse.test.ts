@@ -2167,6 +2167,7 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /vendorSessionId/);
   const mainSrc = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(mainSrc, /displaySrcForHref/);
+  assert.match(mainSrc, /resolveMediaProtocolFile/);
   assert.match(mainSrc, /workhorse-media/);
   assert.match(mainSrc, /protocol\.registerSchemesAsPrivileged/);
   assert.match(mainSrc, /protocol\.handle\("workhorse-media"/);

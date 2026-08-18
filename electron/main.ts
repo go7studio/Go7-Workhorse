@@ -34,8 +34,8 @@ import { learningInboundPath } from "../src/lib/learning-paths";
 import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
-import { mediaUrlToPath } from "../src/lib/media-display";
-import { displaySrcForHref } from "./media-src";
+
+import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -338,8 +338,8 @@ function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): str
 }
 
 function handleMediaProtocol(request: Request): Promise<Response> | Response {
-  const file = mediaUrlToPath(request.url);
-  if (!file || !fs.existsSync(file)) return new Response(null, { status: 404 });
+  const file = resolveMediaProtocolFile(request.url);
+  if (!file) return new Response(null, { status: 404 });
   try {
     return net.fetch(pathToFileURL(file).href);
   } catch {

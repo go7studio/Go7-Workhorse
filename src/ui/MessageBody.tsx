@@ -26,9 +26,9 @@ function MdImage({
   cwd?: string;
   vendorSessionId?: string;
 }) {
-  const [src, setSrc] = useState(() => mdImageInitialSrc(href));
+  const [src, setSrc] = useState(() => mdImageInitialSrc(href, { cwd, vendorSessionId }));
   useEffect(() => {
-    setSrc(mdImageInitialSrc(href));
+    setSrc(mdImageInitialSrc(href, { cwd, vendorSessionId }));
     if (isPassThroughImageHref(href)) return;
     let gone = false;
     void window.workhorse?.mediaSrc?.(href, cwd, vendorSessionId).then((next) => {

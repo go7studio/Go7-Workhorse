@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { displaySrcForHref } from "../electron/media-src";
+import { displaySrcForHref, resolveMediaProtocolFile } from "../electron/media-src";
 import {
   attachmentKind,
   MAX_FILE_BYTES,
@@ -17,7 +17,7 @@ import {
   modelImagePayloadBytes,
   normalizeImages,
 } from "../src/lib/images";
-import { mdImageInitialSrc, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
+import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 import type { AttachmentKind, ChatImage } from "../src/lib/types";
 import { spawnAttachments } from "../electron/workhorse-mcp";
 
@@ -210,7 +210,28 @@ test("MdImage first-paint helper is sync and skips data encode", () => {
 
   const display = readFileSync(path.join(ROOT, "src", "lib", "media-display.ts"), "utf8");
   assert.doesNotMatch(display, /node:fs|node:path/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /mdImageInitialSrc/);
+  const body = readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8");
+  assert.match(body, /mdImageInitialSrc\(href, \{ cwd, vendorSessionId \}\)/);
+});
+
+test("first-paint media URL carries cwd so the protocol can resolve a relative file", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-media-cwd."));
+  const file = path.join(root, "images", "1.jpg");
+  mkdirSync(path.join(root, "images"), { recursive: true });
+  writeFileSync(file, Buffer.from("jpeg"));
+  try {
+    const first = mdImageInitialSrc("images/1.jpg", { cwd: root, vendorSessionId: "sess-1" });
+    assert.match(first, /^workhorse-media:/);
+    assert.equal(mediaUrlToPath(first), "images/1.jpg");
+    assert.equal(mediaUrlContext(first).cwd, root);
+    assert.equal(mediaUrlContext(first).vendorSessionId, "sess-1");
+    const resolved = resolveMediaProtocolFile(first, {
+      existsSync: (candidate) => path.resolve(candidate) === path.resolve(file),
+    });
+    assert.equal(resolved, file);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("buildAcpPrompt keeps ACP image blocks as mimeType plus data", () => {

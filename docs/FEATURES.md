@@ -43,8 +43,8 @@ transcript rather than as a path.
 - Rewind to an earlier turn.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
-- Each chat row shows how old the last prompt is: minutes, one hour, two
-  days. Hover the stamp for the full time.
+- Each chat row shows how old the last prompt is in a compact form such as
+  `25m`, `2h`, or `3d`. Hover the stamp for the full time.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work popout keeps thinking and tool calls in the order they
   happened: think, tool, think. Each finished tool run closes when the

@@ -451,22 +451,16 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const COUNT_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
-
-function counted(n: number, singular: string, plural: string): string {
-  const word = n >= 1 && n <= COUNT_WORDS.length ? COUNT_WORDS[n - 1]! : String(n);
-  return n === 1 ? `one ${singular}` : `${word} ${plural}`;
-}
-
-/** Short age for a chat or turn: minutes, one hour, two days. */
+/** Compact age for a chat or turn: now, 25m, 2h, 3d. */
 export function formatLastTalked(at: number | undefined, now = Date.now()): string {
   if (typeof at !== "number" || at <= 0) return "";
   const age = Math.max(0, now - at);
   const minutes = Math.floor(age / 60_000);
-  if (minutes < 60) return "minutes";
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return counted(hours, "hour", "hours");
-  return counted(Math.floor(hours / 24), "day", "days");
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 export function formatLastTalkedFull(at: number | undefined): string {

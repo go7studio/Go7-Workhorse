@@ -1352,13 +1352,19 @@ html.pane-dragging * {
   transform: translateY(0);
 }
 
+.session-edits .edited-block.compact {
+  position: absolute;
+  right: 22px;
+  bottom: 0;
+  z-index: 3;
+  overflow: hidden;
+}
+
 .session-edits .edited-block.compact:not(.open) {
-  position: relative;
-  width: 100%;
-  max-width: 100%;
+  left: 22px;
+  width: auto;
   min-height: 32px;
   border-radius: 980px;
-  overflow: hidden;
 }
 
 .session-edits .edited-bar {
@@ -1366,10 +1372,7 @@ html.pane-dragging * {
 }
 
 .session-edits .edited-block.compact.open {
-  position: absolute;
-  right: 22px;
-  bottom: 0;
-  z-index: 3;
+  left: auto;
   width: min(420px, calc(100% - 44px));
 }
 

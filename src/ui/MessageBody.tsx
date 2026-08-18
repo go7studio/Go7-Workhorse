@@ -1,11 +1,11 @@
 import { memo, useEffect, useState, type MouseEvent } from "react";
-import { isHollowHref, looksLikeImageHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
+import { parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
+import { isPassThroughImageHref, mdImageInitialSrc } from "../lib/media-display";
 import { safeExternalUrl } from "../lib/open-external";
 import { copyText } from "../lib/copy-text";
 import { harvestFilePath } from "../lib/project-edits";
 import { editFromMention, isOpenableSource, useFileOpen } from "./FileOpen";
 import { ImageZoom } from "./ImageZoom";
-import { useMediaPaintReady } from "./MediaPaint";
 
 function openWebUrl(url: string) {
   if (window.workhorse?.openExternal) {
@@ -26,14 +26,10 @@ function MdImage({
   cwd?: string;
   vendorSessionId?: string;
 }) {
-  const ready = useMediaPaintReady();
-  const [src, setSrc] = useState("");
+  const [src, setSrc] = useState(() => mdImageInitialSrc(href));
   useEffect(() => {
-    if (!ready) return;
-    if (looksLikeImageHref(href) && /^(data:|https?:)/i.test(href) && !isHollowHref(href)) {
-      setSrc(href);
-      return;
-    }
+    setSrc(mdImageInitialSrc(href));
+    if (isPassThroughImageHref(href)) return;
     let gone = false;
     void window.workhorse?.mediaSrc?.(href, cwd, vendorSessionId).then((next) => {
       if (!gone && next) setSrc(next);
@@ -41,13 +37,13 @@ function MdImage({
     return () => {
       gone = true;
     };
-  }, [ready, href, cwd, vendorSessionId]);
+  }, [href, cwd, vendorSessionId]);
   if (!src) {
     return <span className="md-image-pending" aria-hidden="true" />;
   }
   return (
     <figure className="md-figure">
-      <ImageZoom className="md-image" src={src} alt={alt} />
+      <ImageZoom className="md-image" src={src} alt={alt} decoding="async" loading="lazy" />
       {alt ? <figcaption>{alt}</figcaption> : null}
     </figure>
   );

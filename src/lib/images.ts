@@ -1,4 +1,5 @@
 import { uid } from "./id";
+import { pathToMediaUrl } from "./media-display";
 import type { AttachmentKind, ChatImage } from "./types";
 
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
@@ -212,7 +213,9 @@ export function isTextFile(file: { name?: string; type?: string }): boolean {
   return ext ? TEXT_EXT.has(ext) : false;
 }
 
-export function imageSrc(image: Pick<ChatImage, "mimeType" | "data">): string {
+export function imageSrc(image: Pick<ChatImage, "mimeType" | "data" | "sourcePath">): string {
+  const sourcePath = image.sourcePath?.trim();
+  if (sourcePath) return pathToMediaUrl(sourcePath);
   return `data:${image.mimeType};base64,${image.data}`;
 }
 

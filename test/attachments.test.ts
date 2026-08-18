@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
+import { displaySrcForHref } from "../electron/media-src";
 import {
   attachmentKind,
   MAX_FILE_BYTES,
@@ -11,11 +13,15 @@ import {
   base64DecodedBytes,
   buildAcpPrompt,
   fitModelImages,
+  imageSrc,
   modelImagePayloadBytes,
   normalizeImages,
 } from "../src/lib/images";
+import { mdImageInitialSrc, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 import type { AttachmentKind, ChatImage } from "../src/lib/types";
 import { spawnAttachments } from "../electron/workhorse-mcp";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("attachment classifier recognizes documents, audio, and video", () => {
   assert.equal(attachmentKind({ name: "brief.pdf" }), "document");
@@ -149,6 +155,76 @@ test("custom transports emit native audio and PDF blocks where supported", () =>
   const anthropic = buildAnthropicBody({ model: "document-model", messages: [{ role: "user", text: "", images: [pdf] }] });
   assert.match(JSON.stringify(anthropic), /document/);
   assert.match(JSON.stringify(anthropic), /application\/pdf/);
+});
+
+test("display resolver returns workhorse-media without reading file bytes", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-media-display."));
+  const file = path.join(root, "shot.png");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+  writeFileSync(file, bytes);
+  try {
+    const allowed = path.resolve(file);
+    const src = displaySrcForHref(file, { cwd: root, home: path.join(root, "absent-home") }, {
+      existsSync: (candidate) => path.resolve(candidate) === allowed,
+    });
+    assert.match(src, /^workhorse-media:/);
+    assert.doesNotMatch(src, /^data:/);
+    assert.equal(src.includes(bytes.toString("base64")), false);
+    assert.equal(mediaUrlToPath(src), file);
+    assert.equal(displaySrcForHref("data:image/png;base64,abc"), "data:image/png;base64,abc");
+    assert.equal(displaySrcForHref("https://cdn.example/x.png"), "https://cdn.example/x.png");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("MdImage first-paint helper is sync and skips data encode", () => {
+  const win = mdImageInitialSrc("C:\\tmp\\out.png");
+  assert.ok(win);
+  assert.doesNotMatch(win, /^data:/);
+  assert.match(win, /^workhorse-media:/);
+  assert.equal(mediaUrlToPath(win), "C:\\tmp\\out.png");
+
+  const posix = mdImageInitialSrc("/tmp/out.png");
+  assert.ok(posix);
+  assert.doesNotMatch(posix, /^data:/);
+  assert.equal(mediaUrlToPath(posix), "/tmp/out.png");
+
+  const relative = mdImageInitialSrc("images/1.jpg");
+  assert.ok(relative);
+  assert.doesNotMatch(relative, /^data:/);
+  assert.equal(mediaUrlToPath(relative), "images/1.jpg");
+
+  const fileWin = mdImageInitialSrc("file:///C:/tmp/shot.png");
+  assert.equal(mediaUrlToPath(fileWin), "C:/tmp/shot.png");
+  const filePosix = mdImageInitialSrc("file:///tmp/shot.png");
+  assert.equal(mediaUrlToPath(filePosix), "/tmp/shot.png");
+
+  assert.equal(mdImageInitialSrc("data:image/png;base64,abc"), "data:image/png;base64,abc");
+  assert.equal(mdImageInitialSrc("https://cdn.example/x.png"), "https://cdn.example/x.png");
+  assert.equal(mdImageInitialSrc(""), "");
+  assert.equal(mdImageInitialSrc("#"), "");
+
+  const roundTrip = "C:\\Users\\lgovo\\shot.png";
+  assert.equal(mediaUrlToPath(pathToMediaUrl(roundTrip)), roundTrip);
+
+  const display = readFileSync(path.join(ROOT, "src", "lib", "media-display.ts"), "utf8");
+  assert.doesNotMatch(display, /node:fs|node:path/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /mdImageInitialSrc/);
+});
+
+test("buildAcpPrompt keeps ACP image blocks as mimeType plus data", () => {
+  const blocks = buildAcpPrompt("see this", [
+    { id: "i1", name: "shot.png", mimeType: "image/png", data: "abc123", kind: "image" },
+  ]);
+  assert.deepEqual(blocks[1], { type: "image", mimeType: "image/png", data: "abc123" });
+});
+
+test("attached pictures with a disk path display via workhorse-media", () => {
+  const fromDisk = imageSrc({ mimeType: "image/png", data: "abc", sourcePath: "C:\\tmp\\shot.png" });
+  assert.match(fromDisk, /^workhorse-media:/);
+  assert.equal(mediaUrlToPath(fromDisk), "C:\\tmp\\shot.png");
+  assert.equal(imageSrc({ mimeType: "image/png", data: "abc" }), "data:image/png;base64,abc");
 });
 
 test("saved media attachments retain path and derived frames", () => {

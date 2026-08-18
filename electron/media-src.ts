@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { mdImageInitialSrc, pathToMediaUrl } from "../src/lib/media-display";
 
 export type MediaSrcOpts = {
   cwd?: string;
@@ -60,4 +61,30 @@ export function mediaFileCandidates(href: string, opts: MediaSrcOpts = {}): stri
     for (const name of names) add(path.resolve(root, name));
   }
   return out;
+}
+
+export type MediaSrcIo = {
+  existsSync?: (file: string) => boolean;
+};
+
+/** First existing candidate. Does not read file bytes or walk session trees. */
+export function resolveDisplayFile(href: string, opts: MediaSrcOpts = {}, io?: MediaSrcIo): string | null {
+  const exists = io?.existsSync ?? ((file: string) => fs.existsSync(file));
+  for (const candidate of mediaFileCandidates(href, opts)) {
+    try {
+      if (exists(candidate)) return candidate;
+    } catch {
+      // skip unreadable candidates
+    }
+  }
+  return null;
+}
+
+export function displaySrcForHref(href: string, opts: MediaSrcOpts = {}, io?: MediaSrcIo): string {
+  const raw = String(href ?? "").trim();
+  if (/^data:image\//i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
+  if (/^(blob:|workhorse-media:)/i.test(raw)) return raw;
+  const file = resolveDisplayFile(raw, opts, io);
+  if (file) return pathToMediaUrl(file);
+  return mdImageInitialSrc(raw);
 }

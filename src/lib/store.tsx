@@ -229,6 +229,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { normalizeLearning } from "./learning-policy";
 import { settleBoundedGoal } from "./learning-goal";
+import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
 import type {
   AppState,
   CustomBot,
@@ -416,6 +417,8 @@ type SendOptions = {
 };
 
 function emitLearningEvent(draft: {
+  id?: string;
+  createdAt?: number;
   kind: import("./learning-types").LearningEventKind;
   projectId?: string | null;
   sessionId?: string;
@@ -426,8 +429,8 @@ function emitLearningEvent(draft: {
   actorClass?: "human" | "agent" | "system";
 }) {
   void window.workhorse?.learningRecord?.({
-    id: uid("lev"),
-    createdAt: Date.now(),
+    id: draft.id ?? uid("lev"),
+    createdAt: draft.createdAt ?? Date.now(),
     kind: draft.kind,
     actorClass: draft.actorClass ?? "system",
     projectId: draft.projectId ?? undefined,
@@ -1907,16 +1910,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       return false;
     }
-    emitLearningEvent({
-      kind: originalText !== text || options?.replaceUserId ? "human-edit" : "human-prompt",
-      actorClass: "human",
-      projectId: session.projectId,
-      sessionId: session.id,
-      provider: session.provider,
-      model: session.model,
-      effort: session.effort,
-      payload: { summary: originalText.slice(0, 800) },
-    });
+    const userMessageId = !hideUser && !options?.replaceUserId ? uid("msg") : undefined;
+    const userMessageCreatedAt = Date.now();
+    if (!hideUser) {
+      emitLearningEvent({
+        id: userMessageId ? backfillEventId(userMessageId) : undefined,
+        createdAt: userMessageCreatedAt,
+        kind: originalText !== text || options?.replaceUserId ? "human-edit" : "human-prompt",
+        actorClass: "human",
+        projectId: session.projectId,
+        sessionId: session.id,
+        provider: session.provider,
+        model: session.model,
+        effort: session.effort,
+        payload: { summary: originalText.slice(0, BACKFILL_SUMMARY_CHARS) },
+      });
+    }
     const project = current.projects.find((item) => item.id === session.projectId);
     let working = session.messages;
     let vendorSessionId = vendorSessionForSend(session);
@@ -1977,11 +1986,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         ? []
                         : [
                             {
-                              id: uid("msg"),
+                              id: userMessageId!,
                               role: "user" as const,
                               text: originalText,
                               ...(images.length > 0 ? { images } : {}),
-                              createdAt: Date.now(),
+                              createdAt: userMessageCreatedAt,
                               ...brainStamp(session),
                             },
                           ]),

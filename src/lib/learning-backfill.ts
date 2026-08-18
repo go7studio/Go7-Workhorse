@@ -3,7 +3,7 @@ import type { CompileResult, LearningEventKind } from "./learning-types";
 
 export const BACKFILL_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const BACKFILL_COMPILE_RUN_CAP = 24;
-export const BACKFILL_SUMMARY_CHARS = 800;
+export const BACKFILL_SUMMARY_CHARS = 4_000;
 
 export type BackfillMessage = {
   id: string;

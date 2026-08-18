@@ -49,7 +49,7 @@ export async function ephemeralCustomAuxiliary(
 ): Promise<AuxiliaryCallResult> {
   const result = await streamCustomHttp(
     config,
-    { messages: [{ role: "user", text: request.prompt }], effort: request.effort },
+    { messages: [{ role: "user", text: request.prompt }], effort: request.effort, maxTokens: 8192 },
     {},
     fetchImpl,
   );

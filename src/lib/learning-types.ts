@@ -192,6 +192,16 @@ export type LearningBrief = {
   operations: LearningBriefProposal[];
 };
 
+export type LearningIndexStats = {
+  indexedEvents: number;
+  indexedHumanEvents: number;
+  compiledEvents: number;
+  memories: number;
+  completedRuns: number;
+  latestEventAt?: number;
+  latestCompileAt?: number;
+};
+
 export type AdaptiveSelection = {
   provider?: ProviderId;
   model?: string;

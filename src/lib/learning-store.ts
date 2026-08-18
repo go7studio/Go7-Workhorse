@@ -162,13 +162,18 @@ export class InMemoryStore implements MemoryStore {
   }
 
   listEvents(filter: EventFilter = {}): LearningEvent[] {
+    const watermark = filter.afterWatermark ? this.state.events.get(filter.afterWatermark) : undefined;
     const rows = [...this.state.events.values()]
       .filter((event) => {
         if (!filter.includeTombstones && (event.tombstone || event.purged)) return false;
         if (filter.projectId && event.projectId !== filter.projectId) return false;
         if (filter.provider && event.provider !== filter.provider) return false;
         if (filter.kinds && !filter.kinds.includes(event.kind)) return false;
-        if (filter.afterWatermark && event.id <= filter.afterWatermark) return false;
+        if (
+          watermark &&
+          (event.createdAt < watermark.createdAt ||
+            (event.createdAt === watermark.createdAt && event.id <= watermark.id))
+        ) return false;
         return true;
       })
       .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));

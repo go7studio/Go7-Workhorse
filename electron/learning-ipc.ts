@@ -23,7 +23,7 @@ export function attachLearningIpc(
   ipcMain.handle("learning:retrieve", (_event, raw: unknown) => service.retrieve((raw ?? {}) as RetrievalQuery));
   ipcMain.handle("learning:compile", () => service.compile());
   ipcMain.handle("learning:memories", () => service.memories());
-  ipcMain.handle("learning:events", () => service.events());
+  ipcMain.handle("learning:stats", () => service.indexStats());
   ipcMain.handle("learning:approve", (_event, id: unknown) => (typeof id === "string" ? service.approve(id) : undefined));
   ipcMain.handle("learning:forget", (_event, target: unknown) => service.forget((target ?? { all: true }) as ForgetTarget));
   ipcMain.handle("learning:purge", (_event, target: unknown) => service.purge((target ?? { all: true }) as ForgetTarget));

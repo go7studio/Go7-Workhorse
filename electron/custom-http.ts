@@ -579,6 +579,7 @@ export async function streamCustomHttp(
     messages: CustomChatMessage[];
     preface?: string;
     effort?: EffortLevel | string | null;
+    maxTokens?: number;
     signal?: AbortSignal;
     tools?: CustomHttpTool[];
     role?: import("../src/lib/workhorse-rules").DeskRole;
@@ -594,8 +595,8 @@ export async function streamCustomHttp(
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, tools: input.tools, role: input.role, inputs: config.inputs })
-      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, tools: input.tools, role: input.role, inputs: config.inputs });
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs })
+      : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs });
 
   const headers: Record<string, string> = {
     "content-type": "application/json",

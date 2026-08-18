@@ -9,6 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 import { learningDatabasePath, usesHomePath } from "../src/lib/learning-paths";
 import { containsSecret, prepareEvent, redactText } from "../src/lib/learning-redact";
 import {
+  boundedCompilerBatch,
+  compilerPrompt,
   composeSkillBudget,
   DEFAULT_LEARNING,
   effectiveCompilerAssignment,
@@ -477,10 +479,19 @@ test("compiler picker only lists attached custom bots", () => {
   assert.doesNotMatch(pane, /attachedStockVendors/);
   assert.doesNotMatch(pane, /modelsFor\(/);
   assert.doesNotMatch(pane, /minimax\.io|api\.minimax/i);
+  assert.match(pane, /Prompt text stays in SQLite and is not shown here/);
+  assert.doesNotMatch(pane, /payload\.summary|events\.map/);
   const main = fs.readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /allowStub:\s*false/);
-  assert.match(fs.readFileSync(path.join(ROOT, "electron", "learning-ipc.ts"), "utf8"), /learning:events/);
-  assert.match(fs.readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /learningEvents/);
+  const ipc = fs.readFileSync(path.join(ROOT, "electron", "learning-ipc.ts"), "utf8");
+  const preload = fs.readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
+  assert.match(ipc, /learning:stats/);
+  assert.doesNotMatch(ipc, /learning:events/);
+  assert.match(preload, /learningStats/);
+  assert.doesNotMatch(preload, /learningEvents/);
+  const storeSource = fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSource, /backfillEventId\(userMessageId\)/);
+  assert.match(storeSource, /if \(!hideUser\)/);
   const options = eligibleLearningCompilers([
     { id: "bot_desk", name: "Desk bot", model: "fixture-model" },
   ]);
@@ -554,10 +565,76 @@ test("backfill last day records user prompts, ignores older rows, and is idempot
   assert.equal(service.record(again[0]!).inserted, false);
   assert.equal(store.listEvents().length, 1);
   assert.equal(service.events().some((event) => event.id === drafts[0]!.id), true);
+  assert.deepEqual(service.indexStats(), {
+    indexedEvents: 1,
+    indexedHumanEvents: 1,
+    compiledEvents: 0,
+    memories: 0,
+    completedRuns: 0,
+    latestEventAt: now - 1_000,
+    latestCompileAt: undefined,
+  });
   assert.equal(compileBatchSettled({ ran: true }), false);
   assert.equal(compileBatchSettled({ ran: false, skipped: "empty" }), true);
   assert.equal(compileBatchSettled({ ran: false, skipped: "threshold" }), true);
   assert.equal(compileBatchSettled({ ran: false, skipped: "duplicate" }), true);
+});
+
+test("compiler batches complete indexed events instead of truncating JSON", async () => {
+  const rows = ["lev_batch_a", "lev_batch_b", "lev_batch_c"].map((id, index) =>
+    eventDraft(id, {
+      createdAt: 1_700_000_000_000 + index,
+      payload: { summary: `${id} ${"x".repeat(360)}` },
+    }),
+  );
+  const one = compilerPrompt(rows.slice(0, 1), []).length;
+  const two = compilerPrompt(rows.slice(0, 2), []).length;
+  const maxPayloadChars = Math.floor((one + two) / 2);
+  const batch = boundedCompilerBatch(rows, [], maxPayloadChars);
+  assert.deepEqual(batch.map((event) => event.id), ["lev_batch_a"]);
+  assert.ok(compilerPrompt(batch, []).length <= maxPayloadChars);
+
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false }),
+    allowStub: true,
+    policy: { maxPayloadChars },
+  });
+  for (const row of rows) service.record(row);
+  while ((await service.compile()).ran) {
+    // Each completed watermark advances to the next whole event.
+  }
+  const stats = service.indexStats();
+  assert.equal(stats.indexedEvents, 3);
+  assert.equal(stats.compiledEvents, 3);
+  assert.equal(stats.completedRuns, 3);
+  assert.ok(stats.memories >= 3);
+});
+
+test("compiler contract requires explicit human rules to become sourced memories", () => {
+  const prompt = compilerPrompt(
+    [eventDraft("lev_explicit_rule", { payload: { summary: "Always verify every indexed event was analyzed." } })],
+    [],
+  );
+  assert.match(prompt, /Human-authored events are authoritative/);
+  assert.match(prompt, /Do not return empty arrays/);
+  assert.match(prompt, /sourceEventIds/);
+  assert.match(prompt, /lev_explicit_rule/);
+});
+
+test("event watermarks advance by time even when random ids sort backward", () => {
+  const stores = [new InMemoryStore(":memory:"), new SqliteMemoryStore(tempUserData())];
+  for (const store of stores) {
+    store.recordEvent(eventDraft("lev_z_older", { createdAt: 100 }));
+    store.recordEvent(eventDraft("lev_a_newer", { createdAt: 200 }));
+    store.recordEvent(eventDraft("lev_b_newest", { createdAt: 300 }));
+    assert.deepEqual(
+      store.listEvents({ afterWatermark: "lev_z_older" }).map((event) => event.id),
+      ["lev_a_newer", "lev_b_newest"],
+    );
+    store.close();
+  }
 });
 
 test("custom ephemeral compile stores memories; ACP-only assignment skips", async () => {
@@ -646,8 +723,12 @@ test("ephemeral custom HTTP compile stores the model brief, not the stub prompt 
     const chunks: Buffer[] = [];
     req.on("data", (chunk) => chunks.push(chunk as Buffer));
     req.on("end", () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { messages?: Array<{ content?: unknown }> };
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+        max_tokens?: number;
+        messages?: Array<{ content?: unknown }>;
+      };
       assert.match(JSON.stringify(body), /lev_http/);
+      assert.equal(body.max_tokens, 8192);
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: JSON.stringify(brief) } })}\n\n`);
     });

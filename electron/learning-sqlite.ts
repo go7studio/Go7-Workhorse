@@ -348,6 +348,7 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   listEvents(filter: EventFilter = {}): LearningEvent[] {
+    const database = this.conn();
     const clauses = [];
     const params: Array<string | number> = [];
     if (!filter.includeTombstones) {
@@ -362,12 +363,17 @@ export class SqliteMemoryStore implements MemoryStore {
       params.push(filter.provider);
     }
     if (filter.afterWatermark) {
-      clauses.push("id > ?");
-      params.push(filter.afterWatermark);
+      const watermark = database
+        .prepare("SELECT created_at FROM learning_events WHERE id = ?")
+        .get(filter.afterWatermark) as { created_at?: unknown } | undefined;
+      if (typeof watermark?.created_at === "number") {
+        clauses.push("(created_at > ? OR (created_at = ? AND id > ?))");
+        params.push(watermark.created_at, watermark.created_at, filter.afterWatermark);
+      }
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const limit = filter.limit ? ` LIMIT ${Math.max(1, Math.round(filter.limit))}` : "";
-    const rows = this.conn()
+    const rows = database
       .prepare(`SELECT * FROM learning_events ${where} ORDER BY created_at ASC, id ASC${limit}`)
       .all(...params) as Record<string, unknown>[];
     return rows

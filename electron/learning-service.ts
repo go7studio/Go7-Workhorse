@@ -1,6 +1,7 @@
 import { stubCompile } from "../src/lib/learning-compiler";
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import {
+  boundedCompilerBatch,
   compilerInputHash,
   compilerPrompt,
   DEFAULT_COMPILER_POLICY,
@@ -24,6 +25,7 @@ import type {
   CompilerPolicy,
   ForgetTarget,
   LearningEvent,
+  LearningIndexStats,
   LearningMode,
   LearningSettings,
   MemoryItem,
@@ -146,6 +148,25 @@ export class LearningService {
     return rows.slice(-Math.max(0, limit));
   }
 
+  indexStats(): LearningIndexStats {
+    const events = this.options.store.listEvents();
+    const memories = this.options.store.listMemories({ includeDeleted: false });
+    const completed = this.options.store.listCompilerRuns().filter((run) => run.status === "completed");
+    const last = completed.at(-1);
+    const watermarkIndex = last?.eventWatermark
+      ? events.findIndex((event) => event.id === last.eventWatermark)
+      : -1;
+    return {
+      indexedEvents: events.length,
+      indexedHumanEvents: events.filter((event) => event.actorClass === "human").length,
+      compiledEvents: watermarkIndex + 1,
+      memories: memories.length,
+      completedRuns: completed.length,
+      latestEventAt: events.at(-1)?.createdAt,
+      latestCompileAt: last?.endedAt,
+    };
+  }
+
   approve(id: string): MemoryItem | undefined {
     const item = this.options.store.getMemory(id);
     if (!item) return undefined;
@@ -217,9 +238,10 @@ export class LearningService {
     if (this.compiling) return { ran: false, skipped: "busy" };
     const mode = this.mode();
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };
-    const events = this.eligibleEvents();
-    if (events.length === 0) return { ran: false, skipped: "empty" };
+    const pendingEvents = this.eligibleEvents();
+    if (pendingEvents.length === 0) return { ran: false, skipped: "empty" };
     const memories = this.options.store.listMemories({ statuses: ["active", "approved", "proposed"] });
+    const events = boundedCompilerBatch(pendingEvents, memories, this.policy().maxPayloadChars);
     const inputHash = compilerInputHash(events, memories);
     const existing = this.options.store.listCompilerRuns().find((run) => run.inputHash === inputHash && run.status === "completed");
     if (existing && !input.resume) return { ran: false, skipped: "duplicate", runId: existing.id };
@@ -268,7 +290,7 @@ export class LearningService {
           model: selection.model,
           effort: selection.effort,
           customBotId: selection.customBotId,
-          prompt: compilerPrompt(events, memories).slice(0, this.policy().maxPayloadChars),
+          prompt: compilerPrompt(events, memories),
         });
         if (result.createdWorkhorseChat !== false || result.leftoverVendorThread !== false) {
           throw new Error("auxiliary-pollution");

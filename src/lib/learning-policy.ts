@@ -451,8 +451,14 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
     "Compile Workhorse learning events into a JSON object with keys intent and operations.",
     "Each item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?, supersedesId?, contradictsId?}.",
     "Intent is a durable human preference. Operations are provider-scoped workflow facts.",
+    "Human-authored events are authoritative. Convert explicit durable language such as prefer, always, must, should, or verify into a memory.",
+    "Agent and usage events are supporting evidence only; never invent a human preference from them alone.",
+    "Do not return empty arrays when a human event contains an explicit durable preference or recurring verification rule.",
+    'Use this exact shape: {"intent":[{"action":"add","memoryClass":"intent","scope":"global-user","statement":"...","sourceEventIds":["event-id"]}],"operations":[]}.',
+    "Every item must cite one or more exact event ids from the Events input in sourceEventIds.",
+    "Return at most 12 items total. Keep every statement under 180 characters and omit weak or duplicate claims.",
     "Do not copy the event summary as the statement. Do not copy secrets, raw tool output, or another vendor's private context.",
-    "Return JSON only.",
+    "Return JSON only, with no analysis, prose, or Markdown fences.",
     "",
     "Existing memories:",
     JSON.stringify(
@@ -470,6 +476,21 @@ export function compilerPrompt(events: LearningEvent[], memories: MemoryItem[]):
       })),
     ),
   ].join("\n");
+}
+
+export function boundedCompilerBatch(
+  events: LearningEvent[],
+  memories: MemoryItem[],
+  maxPayloadChars: number,
+): LearningEvent[] {
+  const selected: LearningEvent[] = [];
+  for (const event of events) {
+    const candidate = [...selected, event];
+    if (selected.length > 0 && compilerPrompt(candidate, memories).length > maxPayloadChars) break;
+    selected.push(event);
+    if (compilerPrompt(selected, memories).length >= maxPayloadChars) break;
+  }
+  return selected;
 }
 
 export function lexicalScore(statement: string, query: string): number {

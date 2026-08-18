@@ -130,6 +130,19 @@ test("eval baseline and contracts track the current product generation", () => {
   }
 });
 
+test("release automation keeps the eval target on the packaged version", () => {
+  const releaseConfig = json("release-please-config.json");
+  const releaseManifest = json(".release-please-manifest.json");
+  const manifest = json("package.json");
+  const extraFile = releaseConfig.packages["."]["extra-files"][0];
+  assert.equal(releaseManifest["."], manifest.version);
+  assert.deepEqual(extraFile, {
+    type: "json",
+    path: "eval/config.example.json",
+    jsonpath: "$.source.expectedVersion",
+  });
+});
+
 test("Cursor eval config covers authenticated ACP smoke and both usage pools", () => {
   const config = json("eval/config.example.json");
   const providers = json("eval/provider-matrix.json");

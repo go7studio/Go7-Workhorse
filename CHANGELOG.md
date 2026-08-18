@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.5.1...v0.6.0) (2026-08-18)
+
+
+### Features
+
+* a try desk packs the current tree beside production ([745f090](https://github.com/go7studio/Go7-Workhorse/commit/745f090d289ec39ab4e1e60eae85121dce8ff7d8))
+* a try desk packs the current tree beside production ([264a164](https://github.com/go7studio/Go7-Workhorse/commit/264a16446d98f296b6a6a995536e5424fe413f23))
+* OpenClaw and Hermes join as agent systems ([a265fba](https://github.com/go7studio/Go7-Workhorse/commit/a265fba9e8505db5bb9a65fa9a0fb9fa45cfe24f))
+
+
+### Bug Fixes
+
+* Mac release tests cannot hang on a dead bridge ([fa64d3d](https://github.com/go7studio/Go7-Workhorse/commit/fa64d3d4d170bc0f02117cad440971070547ada6))
+* Mac release tests cannot hang on a dead bridge ([49c662a](https://github.com/go7studio/Go7-Workhorse/commit/49c662a4873e5598a1832d486b6e4eeea22e431a))
+* prevent concurrent worker name collisions ([88a3d55](https://github.com/go7studio/Go7-Workhorse/commit/88a3d55996730956a48b44686296017be2d4a9a6))
+
 ## [0.5.1](https://github.com/go7studio/Go7-Workhorse/compare/v0.5.0...v0.5.1) (2026-08-18)
 
 

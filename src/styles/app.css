@@ -1356,6 +1356,14 @@ html.pane-dragging * {
   width: fit-content;
   max-width: 100%;
   border-radius: 980px;
+  overflow: hidden;
+}
+
+.session-edits .edited-block.compact:not(.open) .edited-files-slot,
+.session-edits .edited-block.compact:not(.open) .edited-files-slot > .file-list {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .session-edits .edited-block.compact.open {

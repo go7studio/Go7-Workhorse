@@ -14,9 +14,11 @@ import {
   parseHdiutilAttach,
   pickLatestTagOffer,
   pickMacDmgAsset,
+  pickWinSetupAsset,
   releaseTag,
   updateInstallKind,
   versionFromRef,
+  winReplaceScript,
 } from "../src/lib/app-update";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,6 +71,26 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   };
   assert.equal(pickMacDmgAsset(release, "arm64")?.name, "Go7-Workhorse-0.3.2-mac-arm64.dmg");
   assert.equal(pickMacDmgAsset(release, "x64")?.name, "Go7-Workhorse-0.3.2-mac-x64.dmg");
+  assert.equal(pickWinSetupAsset(release)?.name, "Go7-Workhorse-Setup-0.3.2.exe");
+  assert.equal(
+    pickWinSetupAsset({
+      assets: [
+        {
+          name: "Go7-Workhorse-Setup-0.3.2.exe.blockmap",
+          browser_download_url: "https://example.com/Go7-Workhorse-Setup-0.3.2.exe.blockmap",
+        },
+        {
+          name: "Workhorse-Setup-0.1.4.exe",
+          browser_download_url: "https://example.com/Workhorse-Setup-0.1.4.exe",
+        },
+      ],
+    })?.name,
+    "Workhorse-Setup-0.1.4.exe",
+  );
+  assert.equal(
+    pickWinSetupAsset({ assets: [{ name: "notes.txt", browser_download_url: "https://example.com/notes.txt" }] }),
+    null,
+  );
   assert.equal(
     pickMacDmgAsset(
       { assets: [{ name: "Workhorse-0.1.9-mac.dmg", browser_download_url: "https://example.com/Workhorse-0.1.9-mac.dmg" }] },
@@ -104,9 +126,11 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: false }), "mac-dmg");
   assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: true }), "mac-dmg");
   assert.equal(updateInstallKind({ platform: "darwin", packaged: false, hasGitCheckout: true }), "git-checkout");
-  assert.equal(updateInstallKind({ platform: "win32", packaged: true, hasGitCheckout: false }), "none");
+  assert.equal(updateInstallKind({ platform: "win32", packaged: true, hasGitCheckout: false }), "win-nsis");
+  assert.equal(updateInstallKind({ platform: "win32", packaged: true, hasGitCheckout: true }), "win-nsis");
   assert.equal(updateInstallKind({ platform: "win32", packaged: false, hasGitCheckout: true }), "git-checkout");
-  assert.match(packagedUpdateMissingMessage("win32"), /Windows installer/);
+  assert.equal(updateInstallKind({ platform: "linux", packaged: true, hasGitCheckout: false }), "none");
+  assert.match(packagedUpdateMissingMessage("linux"), /cannot install in place/);
 
   const script = macReplaceScript({
     pid: 4242,
@@ -120,6 +144,18 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /hdiutil detach "\$device"/);
   assert.match(script, /open "\$dest"/);
   assert.match(script, /4242/);
+
+  const winScript = winReplaceScript({
+    pid: 4242,
+    setup: "C:\\tmp\\workhorse-setup.exe",
+    tmp: "C:\\tmp\\workhorse-update-1",
+  });
+  assert.match(winScript, /\$pidToWait = 4242/);
+  assert.match(winScript, /Get-Process -Id \$pidToWait/);
+  assert.match(winScript, /\/S/);
+  assert.match(winScript, /--updated/);
+  assert.match(winScript, /--force-run/);
+  assert.match(winScript, /workhorse-setup\.exe/);
 });
 
 test("update check is wired through main, preload, and the desk banner", () => {
@@ -141,13 +177,17 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(sidebar, /UpdateChip/);
   // Check now used to return null on every GitHub error and every current
   // build, so the button did nothing a person could see. A miss has to say
-  // so, and a packaged Mac has to install the dmg, not hunt for a checkout.
+  // so, and a packaged Mac or Windows desk has to install the release
+  // artifact, not hunt for a checkout.
   assert.match(settings, /This is the latest build/);
   assert.match(settings, /Workhorse \$\{result\.offer\.version\} is ready/);
   assert.match(settings, /Install \$\{store\.appUpdate\.version\}/);
   assert.match(updater, /updateInstallKind/);
   assert.match(updater, /installMacDmg/);
   assert.match(updater, /pickMacDmgAsset/);
+  assert.match(updater, /installWinNsis/);
+  assert.match(updater, /pickWinSetupAsset/);
+  assert.match(updater, /winReplaceScript/);
   assert.match(updater, /hdiutil/);
   assert.doesNotMatch(updater, /hdiutil attach[^\n]*-quiet/);
   assert.match(updater, /error: message\.slice/);

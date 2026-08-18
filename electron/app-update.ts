@@ -16,10 +16,12 @@ import {
   parseVersion,
   pickLatestTagOffer,
   pickMacDmgAsset,
+  pickWinSetupAsset,
   releaseTag,
   UPDATE_REPO,
   updateInstallKind,
   versionFromRef,
+  winReplaceScript,
   type AppUpdateApplyResult,
   type AppUpdateCheckResult,
 } from "../src/lib/app-update";
@@ -146,6 +148,56 @@ async function installMacDmg(version: string): Promise<AppUpdateApplyResult> {
   return { ok: true };
 }
 
+async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
+  let release: unknown;
+  try {
+    release = await githubJson(`/releases/tags/${releaseTag(version)}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not reach GitHub.";
+    return { ok: false, message: message.slice(0, 180) };
+  }
+  const asset = pickWinSetupAsset(release);
+  if (!asset) return { ok: false, message: `No Windows installer on ${releaseTag(version)}.` };
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-update-"));
+  const setup = path.join(tmp, "workhorse-setup.exe");
+  try {
+    const response = await fetch(asset.url, {
+      headers: { "User-Agent": "Go7-Workhorse", Accept: "application/octet-stream" },
+      redirect: "follow",
+    });
+    if (!response.ok) throw new Error(`Download failed (${response.status}).`);
+    fs.writeFileSync(setup, Buffer.from(await response.arrayBuffer()));
+
+    const helper = path.join(tmp, "replace.ps1");
+    fs.writeFileSync(
+      helper,
+      winReplaceScript({
+        pid: process.pid,
+        setup,
+        tmp,
+      }),
+      { encoding: "utf8" },
+    );
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch (error) {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* helper may already be running */
+    }
+    const message = error instanceof Error ? error.message : "Install failed.";
+    return { ok: false, message: message.slice(0, 280) };
+  }
+  setImmediate(() => app.quit());
+  return { ok: true };
+}
+
 export async function applyAppUpdate(version: string): Promise<AppUpdateApplyResult> {
   const wanted = versionFromRef(version);
   if (!parseVersion(wanted)) return { ok: false, message: "That version is not a Workhorse build." };
@@ -158,6 +210,7 @@ export async function applyAppUpdate(version: string): Promise<AppUpdateApplyRes
     hasGitCheckout: Boolean(deskRoot()),
   });
   if (kind === "mac-dmg") return installMacDmg(wanted);
+  if (kind === "win-nsis") return installWinNsis(wanted);
   if (kind === "none") return { ok: false, message: packagedUpdateMissingMessage(process.platform) };
   const root = deskRoot();
   if (!root) return { ok: false, message: packagedUpdateMissingMessage(process.platform) };

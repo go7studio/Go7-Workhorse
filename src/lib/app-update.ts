@@ -110,7 +110,27 @@ export function parseHdiutilAttach(output: string, tmpDir: string): { device: st
   return { device, mount };
 }
 
-export type UpdateInstallKind = "mac-dmg" | "git-checkout" | "none";
+export type WinSetupAsset = { url: string; name: string };
+
+export function pickWinSetupAsset(release: unknown): WinSetupAsset | null {
+  if (!release || typeof release !== "object") return null;
+  const assets = (release as { assets?: unknown }).assets;
+  if (!Array.isArray(assets)) return null;
+  const named: WinSetupAsset[] = [];
+  for (const item of assets) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { name?: unknown; browser_download_url?: unknown };
+    if (typeof record.name !== "string" || typeof record.browser_download_url !== "string") continue;
+    if (!record.browser_download_url.startsWith("https://")) continue;
+    named.push({ name: record.name, url: record.browser_download_url });
+  }
+  const exact = named.find((asset) => /^Go7-Workhorse-Setup-.+\.exe$/i.test(asset.name));
+  if (exact) return exact;
+  // Releases before the Go7- prefix shipped Workhorse-Setup-<ver>.exe.
+  return named.find((asset) => /Setup-.+\.exe$/i.test(asset.name)) ?? null;
+}
+
+export type UpdateInstallKind = "mac-dmg" | "win-nsis" | "git-checkout" | "none";
 
 export function updateInstallKind(input: {
   platform: string;
@@ -118,15 +138,31 @@ export function updateInstallKind(input: {
   hasGitCheckout: boolean;
 }): UpdateInstallKind {
   if (input.platform === "darwin" && input.packaged) return "mac-dmg";
+  if (input.platform === "win32" && input.packaged) return "win-nsis";
   if (input.hasGitCheckout) return "git-checkout";
   return "none";
 }
 
 export function packagedUpdateMissingMessage(platform: string): string {
-  if (platform === "win32") {
-    return "This Windows installer cannot replace itself. Download the new installer from the release page.";
-  }
+  if (platform === "linux") return "This Linux build cannot install in place.";
   return "This Workhorse build cannot install in place.";
+}
+
+export function winReplaceScript(input: {
+  pid: number;
+  setup: string;
+  tmp: string;
+}): string {
+  const quote = (value: string) => JSON.stringify(value);
+  return `$pidToWait = ${Number(input.pid)}
+$setup = ${quote(input.setup)}
+$tmp = ${quote(input.tmp)}
+while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
+Start-Sleep -Milliseconds 400
+$p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated','--force-run') -Wait -PassThru
+Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+if ($null -ne $p -and $p.ExitCode -ne 0) { exit $p.ExitCode }
+`;
 }
 
 export function macReplaceScript(input: {

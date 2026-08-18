@@ -157,7 +157,9 @@ Settings can export a support report that excludes prompts, messages, file
 contents, environment variables, URLs and credential values.
 
 Settings → Profile can check GitHub for a newer desk. A Mac installer
-downloads that release's disk image and replaces the app.
+downloads that release's disk image and replaces the app. A Windows
+installer downloads that release's Setup exe and installs it after
+Workhorse quits.
 
 ## Platforms
 

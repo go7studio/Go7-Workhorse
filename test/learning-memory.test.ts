@@ -80,6 +80,8 @@ test("packaged learning smoke follows the branded app binary", () => {
   assert.equal(packageJson.build.win.executableName, "Go7 Workhorse");
   assert.match(smoke, /packageJson\.build\?\.win\?\.executableName/);
   assert.match(smoke, /fs\.existsSync\(path\.join\(macOsDir, name\)\)/);
+  assert.match(smoke, /delete smokeEnv\.WORKHORSE_VOLATILE_CREDENTIALS/);
+  assert.doesNotMatch(smoke, /WORKHORSE_VOLATILE_CREDENTIALS:\s*"1"/);
   assert.doesNotMatch(smoke, /path\.join\(winDir, "Workhorse\.exe"\)/);
   assert.doesNotMatch(smoke, /Contents", "MacOS", "Workhorse"/);
   const buildInstaller = release.indexOf("- name: Build installer");

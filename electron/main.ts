@@ -106,10 +106,9 @@ function packagedBuildChannel() {
   }
 }
 
-// Development shells and ad-hoc packages must never request access to the
-// installed app's Keychain item. The name controls Electron Safe Storage's
-// service, while ad-hoc packages use memory-only credentials because their
-// code requirement changes on every rebuild.
+// Development shells and ad-hoc packages must never request Keychain access.
+// The name keeps their other app data separate, while memory-only credentials
+// make agent-driven tests independent of each local build's code requirement.
 const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged, packagedBuildChannel());
 app.setName(runtimeIdentity.name);
 
@@ -796,7 +795,7 @@ app.whenReady().then(async () => {
     state: readState(),
     version: APP_VERSION,
     userData: app.getPath("userData"),
-    encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    encryptionAvailable: !useVolatileCredentials() && safeStorage.isEncryptionAvailable(),
     detections: {
       grok: await detectGrokLogin(),
       codex: await detectCodexLogin(),

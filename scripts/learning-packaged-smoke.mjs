@@ -77,10 +77,12 @@ if (files < 20) fail(`Packaged artifact looks hollow (${files} entries) at ${pac
 if (!fs.existsSync(packed.binary)) fail(`Missing packaged binary ${packed.binary}`);
 
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-learning-smoke-"));
+const smokeEnv = { ...process.env };
+delete smokeEnv.WORKHORSE_VOLATILE_CREDENTIALS;
 const result = spawnSync(packed.binary, ["--workhorse-learning-smoke", `--workhorse-user-data=${userData}`], {
   encoding: "utf8",
   timeout: 60_000,
-  env: { ...process.env, WORKHORSE_VOLATILE_CREDENTIALS: "1" },
+  env: smokeEnv,
 });
 const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 const jsonLine = output

@@ -25,7 +25,7 @@ export function workhorseRuntimeIdentity(
     ? {
         name: WORKHORSE_DEV_APP_NAME,
         userDataDirectory: WORKHORSE_DEV_USER_DATA_DIR,
-        volatileCredentials: isPackaged,
+        volatileCredentials: true,
       }
     : {
         name: WORKHORSE_APP_NAME,

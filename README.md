@@ -169,7 +169,7 @@ npm install
 npm run dist:mac
 ```
 
-On a Mac, that writes a dmg and a zip per architecture — `release/Go7-Workhorse-<version>-mac-arm64.dmg` for Apple silicon and `-mac-x64.dmg` for Intel — plus the unpacked `Go7 Workhorse.app`. The install script above picks the one matching your Mac. Local packages use isolated development data and session-only credentials, so their changing ad-hoc signatures never ask for the installed app's Keychain item; they should not be distributed. `npm run dev` uses the separate development vault. Release builds require the `MAC_CSC_*` signing secrets and `MAC_APPLE_*` notarization secrets. Vendor CLIs are not bundled.
+On a Mac, that writes a dmg and a zip per architecture — `release/Go7-Workhorse-<version>-mac-arm64.dmg` for Apple silicon and `-mac-x64.dmg` for Intel — plus the unpacked `Go7 Workhorse.app`. The install script above picks the one matching your Mac. Development runs, including `npm run dev` and local packages, use isolated development data and session-only credentials, so agent-driven tests never touch Keychain or the installed app's vault. Local packages should not be distributed. Release builds require the `MAC_CSC_*` signing secrets and `MAC_APPLE_*` notarization secrets. Vendor CLIs are not bundled.
 
 macOS approval belongs to the signed app identity. One allow sticks across updates with the same bundle ID and Team ID. Local builds cannot open the installed app's vault. Windows keeps the same app identity and encrypted user vault across updates.
 

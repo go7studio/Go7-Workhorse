@@ -271,7 +271,7 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.deepEqual(workhorseRuntimeIdentity(false), {
     name: "Go7 Workhorse Dev",
     userDataDirectory: "Go7 Workhorse Dev",
-    volatileCredentials: false,
+    volatileCredentials: true,
   });
   assert.deepEqual(workhorseRuntimeIdentity(true, "development"), {
     name: "Go7 Workhorse Dev",
@@ -481,6 +481,7 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /app\.setName\(runtimeIdentity\.name\)/);
   assert.match(main, /runtimeIdentity\.userDataDirectory/);
   assert.match(main, /runtimeIdentity\.volatileCredentials \|\| workhorseVolatileCredentials\(\)/);
+  assert.match(main, /!useVolatileCredentials\(\) && safeStorage\.isEncryptionAvailable\(\)/);
   assert.match(main, /app\.setPath\("userData"/);
   assert.equal(selectSurface({ panel: "settings", hasProject: true, hasSession: true }), "settings");
   assert.equal(selectSurface({ panel: "add-bot", hasProject: true, hasSession: true }), "add-bot");

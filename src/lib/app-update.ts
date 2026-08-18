@@ -99,11 +99,13 @@ export function parseHdiutilAttach(output: string, tmpDir: string): { device: st
     .map((line) => line.match(/^(\/dev\/\S+)/)?.[1])
     .find(Boolean);
   if (!device) return null;
-  const prefix = tmpDir.replace(/\\/g, "/");
+  const comparableMacPath = (value: string) =>
+    value.replace(/\\/g, "/").replace(/^\/private(?=\/(?:var|tmp)\/)/, "");
+  const prefix = comparableMacPath(tmpDir);
   const mount = output
     .replace(/\\/g, "/")
     .split(/\s+/)
-    .find((token) => token.startsWith(`${prefix}/`));
+    .find((token) => comparableMacPath(token).startsWith(`${prefix}/`));
   if (!mount) return null;
   return { device, mount };
 }

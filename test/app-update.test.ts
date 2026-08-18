@@ -91,6 +91,14 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
     `/dev/disk4s1            Apple_HFS                       ${tmp}/dmg.1234`,
   ].join("\n");
   assert.deepEqual(parseHdiutilAttach(attached, tmp), { device: "/dev/disk4", mount: `${tmp}/dmg.1234` });
+  const canonicalAttached = [
+    "/dev/disk4              GUID_partition_scheme",
+    `/dev/disk4s1            Apple_HFS                       /private${tmp}/dmg.5678`,
+  ].join("\n");
+  assert.deepEqual(parseHdiutilAttach(canonicalAttached, tmp), {
+    device: "/dev/disk4",
+    mount: `/private${tmp}/dmg.5678`,
+  });
   assert.equal(parseHdiutilAttach("nothing useful", tmp), null);
 
   assert.equal(updateInstallKind({ platform: "darwin", packaged: true, hasGitCheckout: false }), "mac-dmg");

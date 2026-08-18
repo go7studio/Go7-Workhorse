@@ -190,6 +190,46 @@ export type WorkerRecord = {
   agentRun?: { status?: string };
 };
 
+export type WorkerNameReservation = {
+  workerId: string;
+  parentId: string;
+  name: string;
+};
+
+/**
+ * Claim a name before React has committed the new worker to the session list.
+ *
+ * Several tool calls can spawn at once. They all begin with the same render,
+ * so allocating only from that render lets every call choose the same next
+ * name. Reservations bridge that short gap. Once a worker is visible in the
+ * supplied records, its reservation is pruned because the record itself now
+ * keeps the name taken.
+ */
+export function reserveWorkerName(
+  reservations: readonly WorkerNameReservation[],
+  workers: readonly Pick<WorkerRecord, "id" | "parentId" | "workerName">[],
+  scope: { workerId: string; parentId: string },
+): { name: string; reservations: WorkerNameReservation[] } {
+  const committedIds = new Set(workers.map((worker) => worker.id));
+  const pending = reservations.filter((reservation) => !committedIds.has(reservation.workerId));
+  const existing = pending.find((reservation) => reservation.workerId === scope.workerId);
+  if (existing) return { name: existing.name, reservations: pending };
+
+  const taken = [
+    ...workers
+      .filter((worker) => worker.parentId === scope.parentId && worker.workerName)
+      .map((worker) => worker.workerName as string),
+    ...pending
+      .filter((reservation) => reservation.parentId === scope.parentId)
+      .map((reservation) => reservation.name),
+  ];
+  const name = nextWorkerName(taken);
+  return {
+    name,
+    reservations: [...pending, { workerId: scope.workerId, parentId: scope.parentId, name }],
+  };
+}
+
 /** Busy means it is mid-slice. Reusing a busy worker would queue behind it. */
 export function workerIsFree(worker: Pick<WorkerRecord, "status" | "agentRun">): boolean {
   return worker.status !== "running" && worker.agentRun?.status !== "running";

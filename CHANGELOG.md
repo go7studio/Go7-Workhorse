@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.4.0](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.2...v0.4.0) (2026-08-18)
+
+
+### Features
+
+* learning compiler is a custom bot and can backfill a day ([4ecf068](https://github.com/go7studio/Go7-Workhorse/commit/4ecf0685247ab327ce042541fa5f1cd36af66699))
+
+
+### Bug Fixes
+
+* Changes list shows real +/- and stops crowding the row ([6ee7114](https://github.com/go7studio/Go7-Workhorse/commit/6ee71148b98ecc7a2b7411a7f7919b2a615b413b))
+* chat stamps say minutes, one hour, two days ([503da5a](https://github.com/go7studio/Go7-Workhorse/commit/503da5a8884441bf576dd73cfbd05952582a0d76))
+* composer grows to half the pane ([2d16321](https://github.com/go7studio/Go7-Workhorse/commit/2d1632179fbe181f320b59981c3b3de515918083))
+
 ## [0.3.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.3.1...v0.3.2) (2026-08-18)
 
 

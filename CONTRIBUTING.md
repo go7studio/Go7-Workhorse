@@ -31,7 +31,9 @@ Operator product law does not live in this public repository.
 ## Versioning
 
 [Semantic versioning](https://semver.org), held at major `0` until the product
-boundary is stable. You never edit the version and you never tag anything —
+boundary is stable. While Workhorse is pre-1.0, ordinary fixes and features
+advance one patch at a time; only a breaking product-boundary change advances
+the minor version. You never edit the version and you never tag anything —
 your commit type decides both. See Releases below.
 
 ## Commits
@@ -48,9 +50,9 @@ The type sets the next version, so it is not decoration:
 
 | Type | Version | Use it for |
 | --- | --- | --- |
-| `fix:` | patch — `0.1.8` → `0.1.9` | a defect |
-| `feat:` | minor — `0.1.8` → `0.2.0` | a new ability |
-| `feat!:`, or a `BREAKING CHANGE:` footer | major | a change that breaks how something worked |
+| `fix:` | patch — `0.6.0` → `0.6.1` | a defect |
+| `feat:` | patch before 1.0 — `0.6.0` → `0.6.1` | a new ability |
+| `feat!:`, or a `BREAKING CHANGE:` footer | minor before 1.0 — `0.6.0` → `0.7.0` | a change that breaks how something worked |
 | `docs:` `ci:` `build:` `test:` `refactor:` `chore:` | none | everything else |
 
 Only `fix:` and `feat:` reach the changelog. Work of any other type still

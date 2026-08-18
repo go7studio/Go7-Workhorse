@@ -146,6 +146,8 @@ test("release automation keeps the eval target on the packaged version", () => {
   assert.match(releaseManifest["."], /^\d+\.\d+\.\d+$/);
   assert.match(changelog, new RegExp(`^## \\[${releaseManifest["."]}\\]`, "m"));
   assert.equal(releaseConfig["include-component-in-tag"], false);
+  assert.equal(releaseConfig["bump-minor-pre-major"], true);
+  assert.equal(releaseConfig["bump-patch-for-minor-pre-major"], true);
   assert.deepEqual(extraFile, {
     type: "json",
     path: "eval/config.example.json",

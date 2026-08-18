@@ -5180,6 +5180,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /<details className="work-pop">/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
   assert.match(popout, /1 \? "tool" : "tools"/);
+  assert.match(popout, /count === 1/);
+  assert.match(popout, /\{count\} tools/);
   assert.match(popout, /peer-work/);
   assert.match(popout, /talkingToSummary/);
   assert.match(popout, /spawn_agent/);
@@ -6751,6 +6753,20 @@ test("work popout keeps think, tool, think in stream order across vendors", () =
   assert.equal(afterHop.length, 1);
   assert.equal(afterHop[0]?.type === "tools" ? afterHop[0].items.length : 0, 2);
   assert.equal(isActiveWorkRow(afterHop, 0, true), true);
+
+  const blankBetween = groupWorkRows(
+    displayWorkSteps(
+      groupTranscript(
+        playWorkEvents([
+          { kind: "tool", tool: { toolCallId: "a", title: "List tools", status: "completed", detail: "" } },
+          { kind: "thought", text: "   " },
+          { kind: "tool", tool: { toolCallId: "b", title: "List bots", status: "completed", detail: "" } },
+        ]),
+      ).find((block) => block.type === "reply") as Extract<ReturnType<typeof groupTranscript>[number], { type: "reply" }>,
+    ),
+  );
+  assert.equal(blankBetween.length, 1);
+  assert.equal(blankBetween[0]?.type === "tools" ? blankBetween[0].items.length : 0, 2);
 });
 
 test("vendor model caches drive the picker so Sol is first and new slugs need no hand edit", () => {

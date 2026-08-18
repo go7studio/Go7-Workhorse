@@ -57,8 +57,9 @@ transcript rather than as a path.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share
-  one fold labelled "3 tools"; a later thought starts a new hop. The visible
-  reply stays below that.
+  one fold labelled "3 tools"; expand it to see the calls listed underneath, not
+  a row of "1 tool". A single call shows its name. A later thought starts a new
+  hop. The visible reply stays below that.
 
 ## Control
 

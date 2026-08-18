@@ -215,6 +215,14 @@ export function WorkPopout({
             }
             const count = row.items.length;
             const firstId = row.items[0]?.step.message.id ?? `tools-${rowIndex}`;
+            if (count === 1) {
+              const only = row.items[0]!.step.message;
+              return (
+                <div key={`${firstId}-${active ? "live" : "idle"}`} className="work-step" data-kind="tool">
+                  <ToolLine tool={only} peer={isPeerTool(only)} />
+                </div>
+              );
+            }
             return (
               <details
                 key={`${firstId}-${active ? "live" : "idle"}`}
@@ -223,7 +231,7 @@ export function WorkPopout({
                 {...foldOpen(active)}
               >
                 <summary>
-                  {count} {count === 1 ? "tool" : "tools"}
+                  {count} tools
                 </summary>
                 <div className="work-fold-body">
                   {row.items.map((item) => {

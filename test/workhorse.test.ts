@@ -4132,11 +4132,14 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     css,
     /\.session-edits \.edited-block\.compact\s*\{[^}]*position:\s*absolute/,
   );
-  assert.match(css, /\.session-edits \.edited-bar\s*\{[^}]*width:\s*100%/);
+  assert.match(
+    css,
+    /\.session-edits \.edited-block\.compact:not\(\.open\)\s*\{[^}]*width:\s*fit-content/,
+  );
   assert.match(css, /\.session-edits \.edited-block\.compact\.open\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/);
   assert.match(
     css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-bar,\s*\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*inset:\s*0/,
+    /\.session-edits \.edited-block\.compact:not\(\.open\) \.edited-toggle\s*\{[^}]*width:\s*auto/,
   );
   assert.match(composerWrap, /padding:\s*8px 22px 16px/);
   assert.match(composerWrap, /flex:\s*0 0 auto/);

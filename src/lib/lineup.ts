@@ -8,12 +8,18 @@ export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
 const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted", "unknown"];
 
-export function emptyLineup(folder: string, now = Date.now(), userText?: string): DeskLineup {
+export function emptyLineup(
+  folder: string,
+  now = Date.now(),
+  userText?: string,
+  joinOwner?: DeskLineup["joinOwner"],
+): DeskLineup {
   return {
     id: uid("lineup"),
     folder: folder.trim(),
     startedAt: now,
     rows: [],
+    ...(joinOwner ? { joinOwner } : {}),
     ...(typeof userText === "string" && userText.trim() ? { userText: userText.trim() } : {}),
   };
 }
@@ -37,6 +43,7 @@ export function normalizeLineup(raw: unknown): DeskLineup | undefined {
     folder: typeof record.folder === "string" ? record.folder : "",
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     rows,
+    ...(record.joinOwner === "desk" || record.joinOwner === "external-runtime" ? { joinOwner: record.joinOwner } : {}),
     ...(notifiedAt !== undefined && !hasNewerWave ? { notifiedAt } : {}),
     ...(typeof record.userText === "string" && record.userText.trim() ? { userText: record.userText.trim() } : {}),
   };
@@ -69,14 +76,23 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
   };
 }
 
-export function addLineupRow(lineup: DeskLineup | undefined, row: DeskLineupRow): DeskLineup {
-  const base = lineup ?? emptyLineup(row.folder, row.startedAt);
+export function addLineupRow(
+  lineup: DeskLineup | undefined,
+  row: DeskLineupRow,
+  joinOwner?: DeskLineup["joinOwner"],
+): DeskLineup {
+  const base = lineup ?? emptyLineup(row.folder, row.startedAt, undefined, joinOwner);
   if (base.rows.some((item) => item.childId === row.childId)) return base;
   if (base.notifiedAt) {
-    return { ...emptyLineup(row.folder || base.folder, row.startedAt), rows: [row] };
+    return { ...emptyLineup(row.folder || base.folder, row.startedAt, undefined, joinOwner), rows: [row] };
   }
   const { notifiedAt: _previousNotification, ...openWave } = base;
-  return { ...openWave, folder: row.folder || base.folder, rows: [...base.rows, row] };
+  return {
+    ...openWave,
+    ...(joinOwner ? { joinOwner } : {}),
+    folder: row.folder || base.folder,
+    rows: [...base.rows, row],
+  };
 }
 
 export function setLineupRowStatus(
@@ -186,7 +202,16 @@ export function awaitAgentsWaits(input: { wait?: unknown; parentStatus?: string 
 
 export function formatAwaitAgentsSnapshot(input: {
   lineup?: DeskLineup;
-  reports?: Array<{ title: string; status: string; text: string; childSessionId: string }>;
+  reports?: Array<{
+    title: string;
+    status: string;
+    text: string;
+    childSessionId: string;
+    provider?: Session["provider"];
+    model?: string;
+    effort?: Session["effort"];
+    exclusions?: string[];
+  }>;
   wait?: boolean;
 }): string {
   const snapshot = lineupSnapshot(input.lineup);
@@ -441,6 +466,9 @@ export function applyJoinRateLimitRetry(
 export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup)) return sessions;
+  if (parent.lineup.joinOwner === "external-runtime") {
+    return handOverLineup(sessions, parentId, now);
+  }
   const broken = applyLineupTurnBreak(sessions, parentId, now);
   const delay = joinDelayMs(parent.lineup);
   const queued = enqueuePrompt(broken, parentId, {

@@ -20,6 +20,7 @@
       "Keep a person-selected chat pinned until that person explicitly selects Auto; Settings Routing does not rewrite manual chats.",
     "Apply Settings Routing to unassigned desk spawns, and let any explicit spawn provider, model, or target chat win.",
     "Remove explicitly excluded providers, models, and bots before scoring automatic routes.",
+      "Persist structured routing exclusions on the worker and inherit them across every nested spawn; reject an explicitly named excluded identity before a provider call.",
       "Penalize weekly overdraw and protected reserve only when capacity routing is enabled.",
       "Prefer capable spare capacity only when spare preference is enabled.",
       "Use local models only when local routing is enabled.",

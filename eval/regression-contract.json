@@ -318,6 +318,15 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/mcp-exposure.ts", "electron/workhorse-mcp.ts", "electron/mcp-install.ts", "src/lib/routing.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/routing.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-036",
+      "behavior": "A harness-owned worker wave returns once to OpenClaw or Hermes without a competing desk turn; structured exclusions persist into nested workers; worker status and joined reports expose authoritative provider, model, effort, lifecycle, and policy; the parent title stays stable.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["src/lib/lineup.ts", "src/lib/subagents.ts", "src/lib/routing.ts", "src/lib/store.tsx", "src/lib/titles.ts", "src/lib/types.ts", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/routing.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

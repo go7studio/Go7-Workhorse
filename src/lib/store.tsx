@@ -116,7 +116,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingProfileForModel } from "./routing";
+import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel } from "./routing";
 import type { AgentSystemsSettings } from "./types";
 import {
   approvePlanRun,
@@ -185,8 +185,10 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
+  workerStatusSnapshot,
 } from "./subagents";
 import {
   applySessionModelChange,
@@ -3814,6 +3816,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
+              const worker = latest.sessions.find((session) => session.id === id && Boolean(session.parentId));
+              if (worker) {
+                const parentId = payload.fromSessionId?.trim() || "";
+                const allowed = !parentId || descendantSessionIds(latest.sessions, parentId).includes(worker.id);
+                if (!allowed) {
+                  await replyAsk({ error: "unknown" });
+                  return;
+                }
+                await replyAsk({
+                  text: JSON.stringify(workerStatusSnapshot(worker), null, 2),
+                });
+                return;
+              }
               const task = normalizeTaskStore(latest.externalTasks).byId[id];
               if (!task) {
                 await replyAsk({ error: "unknown" });
@@ -3998,6 +4013,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeTier = payload.route === "quick" || payload.route === "balanced" || payload.route === "deep"
               ? payload.route
               : undefined;
+            const effectiveExclusions = spawnExclusions(caller, payload.exclude, isNested);
             const routeSpawn = shouldAutoRouteSpawn({
               routingEnabled: latest.settings.routing.enabled,
               provider: payload.provider,
@@ -4020,7 +4036,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     prompt: payload.message,
                     attachments: payload.attachments,
                     tier: routeTier ?? (isNested ? "quick" : undefined),
-                    exclude: payload.exclude,
+                    exclude: effectiveExclusions,
                   },
                   latest.settings.routing,
                 )
@@ -4075,6 +4091,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 requestedEffort ?? routeDecision?.effort,
               ),
             };
+            if (routingIdentityExcluded({
+              provider: spec.provider,
+              model: spec.model,
+              label: spec.title,
+              customBotId: spec.customBotId,
+            }, effectiveExclusions)) {
+              await replyAsk({ error: `${spec.title} is excluded by this orchestration policy` });
+              return;
+            }
             /*
              * Hand the slice back to the worker that already did the last one.
              *
@@ -4285,6 +4310,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedCapabilities.length > 0 ? { capabilities: assignedCapabilities } : {}),
                 ...(assignedTools.length > 0 ? { tools: assignedTools } : {}),
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
+                ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
                 correlationId: childCorrelationId,
               },
               routingMode: routeDecision ? "auto" : "manual",
@@ -4328,6 +4354,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               ...(planStepId ? { planStepId } : {}),
                               ...(rationale ? { rationale } : {}),
                             },
+                            exposure === "external-runtime" ? "external-runtime" : "desk",
                           ),
                           waveText,
                         ),
@@ -4814,8 +4841,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       if (event.type === "title") {
         // Free vendor metadata (generated_title / session_info_update / summary.json /
-        // session/new display names). Never bill a model. Steal it onto unlocked rows,
-        // including later mid-session updates. Manual rename locks stay put.
+        // session/new display names). Never bill a model. It may replace the initial
+        // placeholder once; later metadata cannot retitle a task in progress.
         setState((current) => {
           const owner = current.sessions.find((item) => item.id === event.sessionId);
           if (!owner || !titleAcceptsVendor(owner)) return current;

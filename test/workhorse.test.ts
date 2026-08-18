@@ -87,12 +87,14 @@ import {
   resolveSpawnSpec,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
+  spawnExclusions,
   spawnWaitsForReply,
   shouldAutoRouteSpawn,
   subagentTurns,
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
   withSubagentStatus,
+  workerStatusSnapshot,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
 import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, handOverLineup, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, queueWakeDelayMs, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
@@ -911,8 +913,17 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
     { id: "grandchild", parentId: "child" },
     { id: "other" },
   ], "parent"), ["child", "grandchild"]);
-  const interrupted = normalizeAgentRun({ status: "running", startedAt: 1, isolation: "worktree", tokenBudget: 500 });
+  const interrupted = normalizeAgentRun({
+    status: "running",
+    startedAt: 1,
+    isolation: "worktree",
+    tokenBudget: 500,
+    constraints: ["audit only"],
+    exclusions: ["MiniMax M3"],
+  });
   assert.equal(interrupted?.tokenBudget, 500);
+  assert.deepEqual(interrupted?.constraints, ["audit only"]);
+  assert.deepEqual(interrupted?.exclusions, ["MiniMax M3"]);
   // It used to land on "failed", which read as the worker breaking and left no
   // way back. The desk stopped it; the brief and the transcript are still here.
   assert.equal(interrupted?.status, "interrupted");
@@ -2770,7 +2781,7 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /titleAcceptsVendor\(owner\)/);
   assert.match(store, /Never bill a model/);
-  assert.match(store, /later mid-session updates/);
+  assert.match(store, /later metadata cannot retitle/);
   assert.doesNotMatch(store, /refreshGeneratedTitle/);
   assert.doesNotMatch(store, /completeChatTitle/);
   assert.doesNotMatch(store, /title-generate/);
@@ -2822,7 +2833,7 @@ test("intent titles reduce pings and filler without calling a model", () => {
   assert.equal(stolen?.[0].titleLocked, false);
   const later = autoRenameChat(stolen!, intent.id, "Ready when you are");
   assert.equal(later?.[0].title, "Ready when you are");
-  assert.equal(titleAcceptsVendor(later![0]), true);
+  assert.equal(titleAcceptsVendor(stolen![0]), false, "a live task keeps its first vendor title");
   const locked = renameChat([intent], intent.id, "My name");
   assert.equal(locked?.[0].titleLocked, true);
   assert.equal(titleAcceptsVendor(locked![0]), false);
@@ -7703,7 +7714,33 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
-  assert.equal(collectChildAgentReports([kidDone], "orch")[0]?.text, "It is a Godot game.");
+  const inheritedPolicy = spawnExclusions(
+    { agentRun: { status: "completed", startedAt: 1, isolation: "shared", exclusions: ["MiniMax M3"] } },
+    ["Kimi K3", "MiniMax M3"],
+    true,
+  );
+  assert.deepEqual(inheritedPolicy, ["MiniMax M3", "Kimi K3"]);
+  assert.deepEqual(spawnExclusions(undefined, ["MiniMax M3"], false), ["MiniMax M3"]);
+  const authoritativeReport = collectChildAgentReports([kidDone], "orch")[0];
+  assert.equal(authoritativeReport?.text, "It is a Godot game.");
+  assert.equal(authoritativeReport?.provider, kidDone.provider);
+  assert.equal(authoritativeReport?.model, kidDone.model);
+  assert.equal(authoritativeReport?.effort, kidDone.effort);
+  assert.deepEqual(workerStatusSnapshot({
+    ...kidDone,
+    agentRun: { ...kidDone.agentRun!, exclusions: ["MiniMax M3"] },
+  }), {
+    id: kidDone.id,
+    title: kidDone.title,
+    parentId: kidDone.parentId,
+    status: "completed",
+    provider: kidDone.provider,
+    model: kidDone.model,
+    effort: kidDone.effort,
+    startedAt: 1,
+    finishedAt: 2,
+    exclusions: ["MiniMax M3"],
+  });
   const { groupFanOutToolUses } = await import("../electron/custom-tools");
   assert.deepEqual(
     groupFanOutToolUses([
@@ -8186,6 +8223,19 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.ok((joinItem?.notBefore ?? 0) > 12);
   assert.ok(joinDelayMs(afterParent?.lineup) >= 8_000);
   assert.ok(afterParent?.lineup?.notifiedAt);
+  const externalWave = reconciled.map((item) =>
+    item.id === "orch" && item.lineup
+      ? { ...item, lineup: { ...item.lineup, joinOwner: "external-runtime" as const } }
+      : item,
+  );
+  const externalHanded = maybeEnqueueLineupJoin(externalWave, "orch", 12);
+  const externalParent = externalHanded.find((item) => item.id === "orch");
+  assert.ok(externalParent?.lineup?.notifiedAt, "an external harness owns the finished wave");
+  assert.equal(
+    Boolean(externalParent?.queue?.some((item) => item.joinAttempt != null)),
+    false,
+    "an external harness never races a second desk orchestration turn",
+  );
   // The queued join is behind a cool-down. The drainer must arm a wake for it,
   // and once the clock passes it must want to run now — with no user click.
   const idleOrch = { ...afterParent!, status: "idle" as const };

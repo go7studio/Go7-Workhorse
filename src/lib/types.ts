@@ -248,6 +248,8 @@ export type DeskLineup = {
   startedAt: number;
   rows: DeskLineupRow[];
   notifiedAt?: number;
+  /** External harnesses join their own reports; the desk must not start a second orchestration turn. */
+  joinOwner?: "desk" | "external-runtime";
   /** Original user sentence that started this wave. Desk-owned; not a model paraphrase. */
   userText?: string;
 };
@@ -275,6 +277,8 @@ export type AgentRun = {
   capabilities?: string[];
   tools?: string[];
   constraints?: string[];
+  /** Structured routing policy inherited by every nested worker. */
+  exclusions?: string[];
   correlationId?: string;
 };
 

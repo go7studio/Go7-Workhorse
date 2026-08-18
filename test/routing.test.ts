@@ -8,6 +8,7 @@ import {
   effortForRoutingTier,
   inferRoutingTier,
   rankRoutingCandidates,
+  routingIdentityExcluded,
   routingProfileForModel,
   weeklyDrawState,
   type RoutingCandidate,
@@ -50,6 +51,18 @@ test("routing tiers keep quick work light and deep work strong", () => {
   assert.equal(deep?.effort, "high");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-terra", "balanced"), "medium");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-luna", "quick", "high"), "high");
+});
+
+test("routing exclusions match provider, model, label, and bot identity", () => {
+  const kimi = candidate("hf:moonshotai/Kimi-K3", 20, {
+    provider: "custom",
+    label: "Kimi K3",
+    customBotId: "custom-kimi",
+  });
+  assert.equal(routingIdentityExcluded(kimi, ["minimax"]), false);
+  assert.equal(routingIdentityExcluded(kimi, ["kimi"]), true);
+  assert.equal(routingIdentityExcluded(candidate("gpt-5.6-sol"), ["codex"]), true);
+  assert.equal(routingIdentityExcluded(candidate("gpt-5.6-sol"), ["gpt-5.6-sol"]), true);
 });
 
 test("capacity can move balanced work to a model with spare allowance", () => {

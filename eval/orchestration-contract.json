@@ -101,7 +101,7 @@
     "approvePlan": "Approve one exact plan id, revision, and source hash before execution.",
     "resumePlan": "Continue the same plan and task attempts after pause or restart without dispatching completed work again.",
     "workerReuse": "A named or automatic follow-up may reuse only an idle, hidden, unarchived worker under the same parent and project with matching provider, model, effort, and custom connection; busy or incompatible work gets a distinct worker.",
-    "waveJoin": "A completed worker wave wakes and joins its accountable parent exactly once; later waves can continue the same orchestration."
+    "waveJoin": "A completed worker wave wakes and joins its accountable parent exactly once; later waves can continue the same orchestration. When OpenClaw or Hermes owns the wave, Workhorse returns the reports to that harness and never starts a competing desk orchestration turn."
     ,"externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned harnesses, never providers, custom bots, usage rings, or bridge chats. An explicit request to work with Workhorse delegates through Workhorse before direct execution; a blocked delegation reports the exact Workhorse error before fallback. A named target or one bounded grant is required. Each task supplies its task id, trace id, and explicit parent; dependent MCP orders preserve those fields. Inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops."
   },
   "cascadeLimits": {
@@ -139,7 +139,7 @@
       "shared versus worktree isolation"
     ],
     "fallbackRule": "If the requested agent, skill, tool, provider capability, budget, capacity, or isolation is unavailable, stop or downgrade explicitly; never silently substitute identity or authority. Only installed skill references count as skills; free-form expertise is a capability.",
-    "precedenceRule": "An explicit child provider or model assignment wins. Automatic nested routing defaults to quick and records its capacity-aware decision.",
+    "precedenceRule": "An explicit child provider or model assignment wins unless it violates an inherited structured exclusion. Automatic nested routing defaults to quick, inherits exclusions, and records its capacity-aware decision.",
     "selfRoutingRule": "A plan task may choose its agent only after recording required capabilities, candidates, Watch state, cost, concurrency, isolation, and a short rationale.",
     "watchRule": "A Watch-held provider receives no request. An approved capable fallback may run with the hold and substitution recorded.",
     "visualRule": "Tasks tagged visual, UI, UX, image, or computer-use require the configured Kimi K3 visual profile unless the user overrides or accepts unavailability. Kimi is audit-only and hands implementation to a coding worker.",

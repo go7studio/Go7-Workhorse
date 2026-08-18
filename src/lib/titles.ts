@@ -149,9 +149,9 @@ export function titleNeedsUpgrade(session: Pick<Session, "title" | "titleLocked"
   return looksLikePromptSlice(session.title, first) || looksLikeIntentTitle(session.title, first);
 }
 
-/** Vendor session names may replace any unlocked title, including a later update. */
-export function titleAcceptsVendor(session: Pick<Session, "titleLocked">): boolean {
-  return session.titleLocked !== true;
+/** A vendor may name an initial placeholder once; later metadata cannot retitle a live task. */
+export function titleAcceptsVendor(session: Pick<Session, "title" | "titleLocked" | "messages">): boolean {
+  return titleNeedsUpgrade(session);
 }
 
 export function applyAutoTitle(current: string, next: string | undefined, locked?: boolean): string | undefined {

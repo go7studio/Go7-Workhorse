@@ -389,6 +389,18 @@ export function shouldAutoRouteSpawn(input: {
   return input.routingEnabled && !input.provider && !input.model && !input.chat;
 }
 
+export function spawnExclusions(
+  parent: Pick<Session, "agentRun"> | undefined,
+  requested: unknown,
+  nested: boolean,
+): string[] {
+  const inherited = nested ? parent?.agentRun?.exclusions ?? [] : [];
+  const added = Array.isArray(requested)
+    ? requested.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+  return [...new Set([...inherited, ...added].map((item) => item.trim()))];
+}
+
 export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
   return input.wait === true || input.wait === "true" || input.wait === 1 || input.wait === "1";
 }
@@ -408,7 +420,16 @@ export function parentHasRunningChildren(
 export function collectChildAgentReports(
   sessions: Session[],
   parentId: string,
-): Array<{ title: string; status: string; text: string; childSessionId: string }> {
+): Array<{
+  title: string;
+  status: string;
+  text: string;
+  childSessionId: string;
+  provider: Session["provider"];
+  model: string;
+  effort: Session["effort"];
+  exclusions?: string[];
+}> {
   return sessions
     .filter((session) => session.parentId === parentId && isWorkerSession(session))
     .map((session) => {
@@ -420,8 +441,30 @@ export function collectChildAgentReports(
         status: session.agentRun?.status ?? session.status,
         text: reply?.text.trim() ?? "",
         childSessionId: session.id,
+        provider: session.provider,
+        model: session.model,
+        effort: session.effort,
+        ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
       };
     });
+}
+
+export function workerStatusSnapshot(
+  worker: Pick<Session, "id" | "title" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun">,
+): Record<string, unknown> {
+  return {
+    id: worker.id,
+    title: worker.title,
+    parentId: worker.parentId,
+    status: worker.agentRun?.status ?? worker.status,
+    provider: worker.provider,
+    model: worker.model,
+    effort: worker.effort,
+    ...(worker.agentRun?.startedAt ? { startedAt: worker.agentRun.startedAt } : {}),
+    ...(worker.agentRun?.finishedAt ? { finishedAt: worker.agentRun.finishedAt } : {}),
+    ...(worker.agentRun?.error ? { error: worker.agentRun.error } : {}),
+    ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
+  };
 }
 
 export function isWorkerOmittedTool(name: string): boolean {
@@ -752,6 +795,8 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(Array.isArray(row.skillFiles) ? { skillFiles: row.skillFiles.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.capabilities) ? { capabilities: row.capabilities.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.constraints) ? { constraints: row.constraints.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.exclusions) ? { exclusions: row.exclusions.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
   };
 }

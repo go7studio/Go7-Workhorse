@@ -44,6 +44,19 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   capacityDelta?: number;
 };
 
+export function routingIdentityExcluded(
+  identity: Pick<RoutingCandidate, "provider" | "model"> & Partial<Pick<RoutingCandidate, "label" | "customBotId">>,
+  exclude: string[] = [],
+): boolean {
+  const terms = exclude.map((item) => item.trim().toLowerCase()).filter(Boolean);
+  if (terms.length === 0) return false;
+  const value = [identity.provider, identity.model, identity.label, identity.customBotId]
+    .filter((item): item is string => Boolean(item))
+    .join(" ")
+    .toLowerCase();
+  return terms.some((term) => value.includes(term));
+}
+
 export function routingCandidatesForDesk(
   settings: Settings,
   statuses: WatchVendorStatus[] = [],
@@ -229,15 +242,10 @@ export function rankRoutingCandidates(
   const tier = request.tier ?? inferRoutingTier(request.prompt, request.attachments);
   const required = attachmentRequirements(request.attachments);
   const minimum = requiredIntelligence(tier);
-  const excluded = (request.exclude ?? []).map((item) => item.trim().toLowerCase()).filter(Boolean);
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
-    const identity = [candidate.provider, candidate.model, candidate.label, candidate.customBotId]
-      .filter((item): item is string => Boolean(item))
-      .join(" ")
-      .toLowerCase();
-    if (excluded.some((term) => identity.includes(term))) continue;
+    if (routingIdentityExcluded(candidate, request.exclude)) continue;
     const gap = candidate.profile.intelligence - minimum;
     let score = 100 + (gap < 0 ? gap * 30 : -gap * 5);
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);

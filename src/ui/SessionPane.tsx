@@ -70,7 +70,7 @@ export function SessionPane() {
   const edits = useMemo(() => {
     if (!session) return extraEdits;
     return mergeEdits(projectEdits([session], roots), extraEdits);
-  }, [session, store.sessions, roots, extraEdits]);
+  }, [session?.id, session?.messages, roots, extraEdits]);
   const hiddenPaths = session ? hiddenByChat[session.id] : undefined;
   const visible = useMemo(
     () => edits.filter((item) => !(hiddenPaths ?? []).some((path) => sameEditPath(path, item.path))),

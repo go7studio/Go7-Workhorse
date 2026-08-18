@@ -9,7 +9,7 @@ import { applyLineDiff, countLineChanges, countLineDelta, countLines, lineDiff, 
 import { countCreatedReview, growInstanceBaseline, instancePathKey, rememberInstance, reviewCreatedDiff } from "../src/lib/file-instances";
 import { countMotion } from "../src/lib/count";
 import { editListKey, markStatsFetched, planEditStatsHarvest, projectWritesKey, startEditStatsHarvest, takeEditStatsChunk } from "../src/lib/project-edits";
-import { countFileLines, dottedConfigAlt, findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance, resolveExistingFile } from "../electron/project-diff";
+import { countFileLines, dottedConfigAlt, findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance, resolveExistingFile, resolveStatFile } from "../electron/project-diff";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -433,6 +433,54 @@ test("first harvest does not do N sync full-file reads on the first call", async
   assert.match(home, /<EditedList[\s\S]*stats=\{stats\}/);
 });
 
+test("edit stats never walk the tree to score a 23-file list", () => {
+  const root = path.join("C:", "godot-game");
+  const gitDir = path.join(root, ".git");
+  const deep = path.join(root, "scripts", "ai", "minimax.gd");
+  const listed = Array.from({ length: 23 }, (_, index) => path.join(root, "scripts", `piece-${index}.gd`));
+  listed[0] = deep;
+  const files = new Map(listed.map((item, index) => [item, `line ${index}\n`]));
+  const scriptsDir = path.join(root, "scripts");
+  const aiDir = path.dirname(deep);
+  let walks = 0;
+  const input = {
+    existsSync: (item: string) =>
+      item === root || item === gitDir || item === scriptsDir || item === aiDir || files.has(item),
+    isDir: (item: string) => item === root || item === gitDir || item === scriptsDir || item === aiDir,
+    readdir: (dir: string) => {
+      walks += 1;
+      if (dir === root) return ["scripts", "decoy-0"];
+      if (dir === scriptsDir) return ["ai", "piece-1.gd"];
+      if (dir === aiDir) return ["minimax.gd"];
+      return ["decoy-1", "decoy-2"];
+    },
+    gitNumstat: (_repo: string, rels: string[]) =>
+      Object.fromEntries(rels.map((rel) => [rel, { added: 3, deleted: 1 }])),
+  };
+
+  const joined = resolveStatFile("scripts/ai/minimax.gd", [root], input.existsSync, input);
+  assert.equal(path.normalize(joined), path.normalize(deep));
+  assert.equal(walks, 0);
+
+  const stats = readEditStats(listed, [root], input, []);
+  assert.equal(walks, 0);
+  assert.deepEqual(stats[deep], { added: 3, deleted: 1 });
+  assert.deepEqual(stats[listed[22]!], { added: 3, deleted: 1 });
+
+  const viewer = findSourceFile("minimax.gd", [root], input);
+  assert.ok(walks > 0);
+  assert.equal(path.normalize(viewer ?? ""), path.normalize(deep));
+
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  const editsMemo = pane.slice(pane.indexOf("const edits = useMemo"), pane.indexOf("const hiddenPaths"));
+  assert.match(editsMemo, /projectEdits\(\[session\]/);
+  assert.doesNotMatch(editsMemo, /store\.sessions/);
+  const host = readFileSync(path.join(ROOT, "electron", "project-diff.ts"), "utf8");
+  const score = host.slice(host.indexOf("function addEditStatPath"), host.indexOf("function applyNumstat"));
+  assert.match(score, /resolveStatFile/);
+  assert.doesNotMatch(score, /resolveExistingFile|findSourceFile/);
+});
+
 test("non-git existing file is not a fake whole-file add; created is all adds", () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "wh-nongit-diff-"));
   writeFileSync(path.join(dir, "generic.inc"), "keep\nthis file\n");
@@ -557,7 +605,7 @@ test("instance store is injected and does not read the home directory", () => {
   assert.equal(painted.deleted, 1);
 });
 
-test("findSourceFile walks .walk and skips .git; created stats are non-zero", () => {
+test("findSourceFile walks .walk and skips .git; created stats do not walk", () => {
   const root = path.join(os.tmpdir(), "wh-walk-dot-dirs");
   const walkDir = path.join(root, ".walk");
   const gitDir = path.join(root, ".git");
@@ -569,10 +617,12 @@ test("findSourceFile walks .walk and skips .git; created stats are non-zero", ()
     [path.normalize(walkFile), "export const n = 1;\nexport const m = 2;\n"],
     [path.normalize(gitDecoy), "stolen from git\n"],
   ]);
+  let walks = 0;
   const input = {
     existsSync: (item: string) => dirs.has(path.normalize(item)) || files.has(path.normalize(item)),
     isDir: (item: string) => dirs.has(path.normalize(item)),
     readdir: (dir: string) => {
+      walks += 1;
       const norm = path.normalize(dir);
       if (norm === path.normalize(root)) return [".git", ".github", ".walk", "src"];
       if (norm === path.normalize(walkDir)) return ["audit.mjs"];
@@ -585,6 +635,7 @@ test("findSourceFile walks .walk and skips .git; created stats are non-zero", ()
   };
   const found = findSourceFile("audit.mjs", [root], input);
   assert.equal(path.normalize(found ?? ""), path.normalize(walkFile));
+  assert.ok(walks > 0);
 
   const gitOnlyRoot = path.join(os.tmpdir(), "wh-walk-git-only");
   const gitOnlyDir = path.join(gitOnlyRoot, ".git");
@@ -602,9 +653,14 @@ test("findSourceFile walks .walk and skips .git; created stats are non-zero", ()
   });
   assert.equal(gitOnly, null);
 
-  const stats = readEditStats(["audit.mjs"], [root], input, ["audit.mjs"]);
-  assert.ok(stats["audit.mjs"].added > 0);
-  assert.equal(stats["audit.mjs"].deleted, 0);
+  walks = 0;
+  const bare = readEditStats(["audit.mjs"], [root], input, ["audit.mjs"]);
+  assert.equal(walks, 0);
+  assert.equal(bare["audit.mjs"]?.added ?? 0, 0);
+  const cited = readEditStats([".walk/audit.mjs"], [root], input, [".walk/audit.mjs"]);
+  assert.equal(walks, 0);
+  assert.ok(cited[".walk/audit.mjs"].added > 0);
+  assert.equal(cited[".walk/audit.mjs"].deleted, 0);
 });
 
 test("absolute cite outside the project is not joined onto the project folder", () => {

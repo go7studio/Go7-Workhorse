@@ -595,7 +595,11 @@ export function UsagePane({
                   {item.unlimited ? <span>No weekly cap on this seat</span> : item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
                 </button>
               ))}
-              {planCopy ? <p className="usage-limit-note">{planCopy}</p> : null}
+              {planCopy ? (
+                <div className="usage-limits-foot">
+                  <p className="usage-limit-note">{planCopy}</p>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="usage-plan">

@@ -5052,9 +5052,11 @@ html.pane-dragging * {
   padding: 0;
 }
 
-.usage-limits-windows {
+.usage-limits-windows,
+.usage-limits-foot {
   display: flex;
   justify-content: center;
+  align-items: center;
   width: 100%;
   margin: 0;
 }
@@ -5064,7 +5066,9 @@ html.pane-dragging * {
 }
 
 .usage-limit-note {
-  margin: 2px 10px 0;
+  display: block;
+  width: 100%;
+  margin: 0;
   font-size: 13px;
   line-height: 18px;
   color: var(--text-tertiary);

@@ -1,4 +1,5 @@
-import type { WorkerHandoff } from "./types";
+import { enqueuePrompt } from "./chats";
+import type { ProviderId, Session, WorkerHandoff } from "./types";
 
 export type GoalStatus = "none" | "active" | "paused";
 
@@ -326,6 +327,78 @@ export function goalVendorPrompt(state: GoalState, action: "set" | "resume"): st
     "",
     state.objective,
   ].join("\n");
+}
+
+export type GoalIdleContinuation = {
+  text: string;
+  hideUser: true;
+  provider: ProviderId;
+  customBotId?: string;
+  sessionId: string;
+};
+
+export type GoalIdleResult = {
+  goal: GoalState | undefined;
+  continuation?: GoalIdleContinuation;
+};
+
+/** After a vendor turn goes idle: complete the round, maybe queue the next on this chat’s vendor. */
+export function applyDeskGoalAfterTurnIdle(input: {
+  session: Pick<Session, "id" | "provider" | "customBotId" | "goal" | "messages" | "hidden">;
+  safetyPaused?: boolean;
+  failed?: boolean;
+  now?: number;
+}): GoalIdleResult {
+  const now = input.now ?? Date.now();
+  const current = input.session.goal;
+  if (input.safetyPaused && current) {
+    return { goal: { ...current, status: "paused" } };
+  }
+  const kept = grokGoalAfterTurnIdle(input.session.provider, current);
+  if (!kept) return { goal: undefined };
+  if (kept.status === "paused") return { goal: kept };
+  if (input.session.hidden) return { goal: kept };
+  const lastAssistant = [...(input.session.messages ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && !message.kind && message.text.trim());
+  const completed = completeGoalRound(
+    kept,
+    {
+      status: input.failed ? "blocked" : "ok",
+      summary: lastAssistant?.text.trim().slice(0, 800) || "round finished",
+    },
+    now,
+  );
+  if (!completed) return { goal: kept };
+  if (!goalRoundAdmitted(completed)) return { goal: completed };
+  const next = continueGoalRound(completed, now);
+  if (!next.ok) return { goal: completed };
+  return {
+    goal: next.state,
+    continuation: {
+      text: next.prompt,
+      hideUser: true,
+      provider: input.session.provider,
+      ...(input.session.customBotId ? { customBotId: input.session.customBotId } : {}),
+      sessionId: input.session.id,
+    },
+  };
+}
+
+/** Same helper the store uses: idle session gets the next hideUser continuation on its own queue. */
+export function applyGoalIdleAndQueue(
+  session: Session,
+  options?: { safetyPaused?: boolean; failed?: boolean; now?: number },
+): Session {
+  const result = applyDeskGoalAfterTurnIdle({ session, ...options });
+  const next: Session = { ...session, goal: result.goal };
+  if (!result.continuation) return next;
+  return (
+    enqueuePrompt([next], next.id, {
+      text: result.continuation.text,
+      hideUser: true,
+    })?.[0] ?? next
+  );
 }
 
 export function normalizeGoal(raw: unknown): GoalState | undefined {

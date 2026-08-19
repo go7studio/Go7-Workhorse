@@ -6373,7 +6373,7 @@ test("Goal state set pause resume clear maps to display actions", () => {
     status: "paused",
     objective: "desk",
   });
-  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /grokGoalAfterTurnIdle/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applyVendorTurnIdle/);
   assert.match(bar, /Pause/);
   assert.match(bar, /Resume/);
   assert.match(bar, /Clear/);
@@ -6621,7 +6621,7 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /prepareVendorSend\(/);
   assert.doesNotMatch(store, /if \(looksLikeSpawnRequest\(originalText\)\)/);
-  assert.match(store, /grokGoalAfterTurnIdle/);
+  assert.match(store, /applyVendorTurnIdle/);
   assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal runs Grok Build/);
   // The rule must still hold both halves: no fan-out for a bare goal, and
   // desk workers when the objective asks for them.

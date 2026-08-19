@@ -178,3 +178,124 @@ function normalizeLedgerEvent(raw: unknown, fallbackSeq: number): LedgerEvent | 
   }
   return event;
 }
+
+export function isTurnOpen(ledger: SessionLedger | undefined): boolean {
+  if (!ledger?.events.length) return false;
+  let open = false;
+  for (const event of ledger.events) {
+    if (event.type === "turn/start") open = true;
+    if (event.type === "turn/end") open = false;
+  }
+  return open;
+}
+
+export function currentTurnNumber(ledger: SessionLedger | undefined): number {
+  const last = [...(ledger?.events ?? [])].reverse().find((event) => event.type === "turn/start");
+  return last?.turn ?? 0;
+}
+
+export type LiveTurnRecord = {
+  turn: number;
+  at?: number;
+  user: { id: string; text: string; source?: LedgerUserSource };
+  assistant?: { id: string; text: string; usage?: LedgerUsage };
+  tools?: Array<{ callId: string; name: string; arguments?: string; result?: string }>;
+  reason?: string;
+};
+
+/** Live stream: open a turn with the user (or goal) message. */
+export function appendOpenTurnUser(
+  ledger: SessionLedger | undefined,
+  input: { id: string; text: string; source?: LedgerUserSource; at?: number },
+): SessionLedger {
+  const at = input.at ?? Date.now();
+  if (isTurnOpen(ledger)) return ledger ?? emptyLedger();
+  const turn = currentTurnNumber(ledger) + 1;
+  let next = appendLedgerEvent(ledger, { type: "turn/start", turn }, at);
+  next = appendLedgerEvent(next, {
+    type: "user/message",
+    turn,
+    id: input.id,
+    text: input.text,
+    source: input.source ?? "human",
+  }, at);
+  return appendLedgerEvent(next, { type: "step/start", turn, step: 1 }, at);
+}
+
+/** Live stream: a finished tool call on the open turn. */
+export function appendLiveTool(
+  ledger: SessionLedger | undefined,
+  input: { callId: string; name: string; arguments?: string; result?: string; at?: number },
+): SessionLedger {
+  if (!isTurnOpen(ledger)) return ledger ?? emptyLedger();
+  const turn = currentTurnNumber(ledger);
+  const at = input.at ?? Date.now();
+  let next = appendLedgerEvent(ledger, {
+    type: "tool/call",
+    turn,
+    step: 1,
+    callId: input.callId,
+    name: input.name,
+    arguments: input.arguments ?? "",
+  }, at);
+  return appendLedgerEvent(next, {
+    type: "tool/result",
+    turn,
+    step: 1,
+    callId: input.callId,
+    text: input.result ?? "",
+  }, at);
+}
+
+/** Live stream: close the open turn with the assistant reply. */
+export function closeOpenTurn(
+  ledger: SessionLedger | undefined,
+  input: { assistant?: { id: string; text: string; usage?: LedgerUsage }; reason?: string; at?: number },
+): SessionLedger {
+  if (!isTurnOpen(ledger)) return ledger ?? emptyLedger();
+  const turn = currentTurnNumber(ledger);
+  const at = input.at ?? Date.now();
+  let next = ledger ?? emptyLedger();
+  if (input.assistant) {
+    next = appendLedgerEvent(next, {
+      type: "assistant/message",
+      turn,
+      step: 1,
+      id: input.assistant.id,
+      text: input.assistant.text,
+      usage: input.assistant.usage,
+    }, at);
+  }
+  next = appendLedgerEvent(next, { type: "step/end", turn, step: 1 }, at);
+  return appendLedgerEvent(next, { type: "turn/end", turn, reason: input.reason ?? "ok" }, at);
+}
+
+export function recordLiveCompact(
+  ledger: SessionLedger | undefined,
+  input: { id: string; text: string; throughMessageId?: string; at?: number },
+): SessionLedger {
+  return appendLedgerEvent(ledger, {
+    type: "compaction/summary",
+    id: input.id,
+    text: input.text,
+    throughMessageId: input.throughMessageId,
+  }, input.at);
+}
+
+/** One-shot record used by tests and idle close when the stream already assembled the turn. */
+export function recordTurnOnLedger(ledger: SessionLedger | undefined, record: LiveTurnRecord): SessionLedger {
+  let next = appendOpenTurnUser(ledger, {
+    id: record.user.id,
+    text: record.user.text,
+    source: record.user.source,
+    at: record.at,
+  });
+  for (const tool of record.tools ?? []) {
+    next = appendLiveTool(next, tool);
+  }
+  return closeOpenTurn(next, {
+    assistant: record.assistant,
+    reason: record.reason,
+    at: record.at,
+  });
+}

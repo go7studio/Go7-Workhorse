@@ -10,7 +10,7 @@ import {
 import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
-import { grokGoalAfterTurnIdle, isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
+import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
@@ -143,6 +143,7 @@ import {
 } from "./plan";
 import {
   applyCompactUsage,
+  formatCompactLine,
   applyFailedPeerAsk,
   failPeerAskMessages,
   finishOpenToolMessages,
@@ -201,6 +202,7 @@ import {
 import {
   applySessionModelChange,
   applySessionPolicyChange,
+  applyVendorTurnIdle,
   brainStamp,
   formatChatSidebar,
   normalizeSession,
@@ -212,9 +214,11 @@ import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
 import { withPortableHistory } from "./portable-history";
 import { createPortableCheckpoint, messagesForPortableReplay } from "./portable-compaction";
+import { appendLiveTool, appendOpenTurnUser, recordLiveCompact } from "./session-ledger";
 import { fitModelImages, hasSendableAttachment } from "./images";
 import { buildSessionPreface } from "./context-preface";
 import {
+  applyCompactOutcome,
   applyUsageContext,
   finalizeTurnUsage,
   normalizeUsage,
@@ -1765,14 +1769,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   }],
                 };
               }
+              const visible = item.messages.filter((message) =>
+                !message.kind && (message.role === "user" || message.role === "assistant") &&
+                (message.text.trim() || (message.images?.length ?? 0) > 0));
+              const outcome = applyCompactOutcome({
+                leftoverPercent: 0,
+                contextUsed: item.contextUsed,
+                windowSize: contextWindowFor(item.provider, item.model),
+                omittedMessages: checkpoint.omittedMessages,
+                keptMessages: Math.max(0, visible.length - checkpoint.omittedMessages),
+                summaryChars: checkpoint.summary.length,
+                usage: latest.usage,
+              });
+              const compactId = uid("msg");
               return {
                 ...item,
                 contextCheckpoint: checkpoint,
                 vendorSessionId: undefined,
                 vendorProvider: undefined,
-                contextUsed: Math.min(item.contextUsed, Math.ceil(checkpoint.summary.length / 4)),
+                contextUsed: outcome.contextUsed,
+                ledger: recordLiveCompact(item.ledger, {
+                  id: compactId,
+                  text: checkpoint.summary,
+                  throughMessageId: checkpoint.throughMessageId,
+                }),
                 messages: [...item.messages, {
-                  id: uid("msg"), role: "system" as const, kind: "compact" as const,
+                  id: compactId, role: "system" as const, kind: "compact" as const,
                   text: `Workhorse compacted ${checkpoint.omittedMessages} earlier messages into a portable checkpoint${note ? ` · kept: ${note}` : ""}.`,
                   createdAt: Date.now(),
                 }],
@@ -1815,6 +1837,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...item,
                 status: "idle",
                 contextUsed,
+                ledger: recordLiveCompact(item.ledger, {
+                  id: uid("msg"),
+                  text: formatCompactLine({ ...result, contextUsed, note: note || result.note }),
+                }),
                 messages: upsertCompactMessage(item.messages, { ...result, contextUsed, note: note || result.note }),
               };
             }),
@@ -2000,6 +2026,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return false;
     }
     const userMessageId = !hideUser && !options?.replaceUserId ? uid("msg") : undefined;
+    const ledgerUserId = userMessageId ?? uid("msg");
     const userMessageCreatedAt = Date.now();
     if (!hideUser) {
       emitLearningEvent({
@@ -2093,6 +2120,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   title: hideUser
                     ? item.title
                     : autoTitleForSend(item, originalText || images[0]?.name || "Image") ?? item.title,
+                  ledger: appendOpenTurnUser(item.ledger, {
+                    id: ledgerUserId,
+                    text: hideUser ? vendorText : originalText,
+                    source: hideUser ? "goal" : "human",
+                    at: userMessageCreatedAt,
+                  }),
                   messages: upsertThoughtMessage(
                     [
                       ...base,
@@ -2215,16 +2248,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? {
+                ? applyVendorTurnIdle({
                     ...item,
-                    status: "idle",
-                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("custom") }
                         : entry,
                     ),
-                  }
+                  }, { assistantId })
                 : item,
             ),
           }));
@@ -2245,17 +2276,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? {
+                ? applyVendorTurnIdle({
                     ...item,
-                    status: "idle",
                     vendorSessionId,
-                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("claude") }
                         : entry,
                     ),
-                  }
+                  }, { assistantId })
                 : item,
             ),
           }));
@@ -2276,16 +2305,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? {
+                ? applyVendorTurnIdle({
                     ...item,
-                    status: "idle",
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("cursor") }
                         : entry,
                     ),
-                  }
+                  }, { assistantId })
                 : item,
             ),
           }));
@@ -2310,17 +2338,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? {
+                ? applyVendorTurnIdle({
                     ...item,
-                    status: "idle",
                     vendorSessionId,
-                    goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                     messages: item.messages.map((entry) =>
                       entry.id === assistantId && !(entry.text ?? "").trim()
                         ? { ...entry, text: reply || vendorEmptyReply("codex") }
                         : entry,
                     ),
-                  }
+                  }, { assistantId })
                 : item,
             ),
           }));
@@ -2346,17 +2372,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...latest,
           sessions: latest.sessions.map((item) =>
             item.id === session.id
-              ? {
+              ? applyVendorTurnIdle({
                   ...item,
-                  status: "idle",
                   vendorSessionId,
-                  goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                   messages: item.messages.map((entry) =>
                     entry.id === assistantId && !(entry.text ?? "").trim()
                       ? { ...entry, text: reply || EMPTY_GROK_REPLY }
                       : entry,
                   ),
-                }
+                }, { assistantId })
               : item,
           ),
         }));
@@ -2424,10 +2448,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...latest,
           sessions: latest.sessions.map((item) =>
             item.id === session.id
-              ? {
+              ? applyVendorTurnIdle({
                   ...item,
-                  status: "idle",
-                  goal: grokGoalAfterTurnIdle(item.provider, item.goal),
                   messages: finishOpenToolMessages(
                     item.messages.map((entry) =>
                       entry.id === assistantId
@@ -2444,7 +2466,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     "failed",
                     message,
                   ),
-                }
+                }, { assistantId, failed: true })
               : item,
           ),
         }));
@@ -5189,6 +5211,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     status: event.status,
                     detail: event.detail,
                   }),
+                  ledger:
+                    toolIsFinished(event.status) && event.toolCallId
+                      ? appendLiveTool(session.ledger, {
+                          callId: event.toolCallId,
+                          name: event.title,
+                          arguments: event.detail,
+                          result: event.detail,
+                        })
+                      : session.ledger,
                 }
               : session,
           ),
@@ -5208,6 +5239,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return {
               ...session,
               contextUsed,
+              ledger: recordLiveCompact(session.ledger, {
+                id: uid("msg"),
+                text: formatCompactLine({ ...event, contextUsed }),
+              }),
               messages: upsertCompactMessage(session.messages, { ...event, contextUsed }),
             };
           }),
@@ -5539,13 +5574,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           let sessions = withSubagentStatus(
             current.sessions.map((session) => {
               if (session.id !== event.sessionId) return session;
-              return {
+              return applyVendorTurnIdle({
                 ...session,
-                status: "idle" as const,
-                goal:
-                  safetyPaused && session.goal
-                    ? { ...session.goal, status: "paused" as const }
-                    : grokGoalAfterTurnIdle(session.provider, session.goal),
                 scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
                   run.status === "running"
                     ? { ...run, status: safetyPaused ? ("failed" as const) : ("completed" as const) }
@@ -5585,7 +5615,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ),
                   safetyPaused ? "failed" : "completed",
                 ),
-              };
+              }, { assistantId, safetyPaused, failed: safetyPaused });
             }),
             event.sessionId,
             safetyPaused ? "failed" : "completed",
@@ -5647,10 +5677,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           let sessions = withSubagentStatus(
             current.sessions.map((session) =>
               session.id === event.sessionId
-                ? {
+                ? applyVendorTurnIdle({
                     ...session,
-                    status: "idle" as const,
-                    goal: grokGoalAfterTurnIdle(session.provider, session.goal),
                     scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
                       run.status === "running" ? { ...run, status: "failed" as const } : run,
                     ),
@@ -5668,7 +5696,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       "failed",
                       event.message,
                     ),
-                  }
+                  }, { assistantId, failed: true })
                 : session,
             ),
             event.sessionId,

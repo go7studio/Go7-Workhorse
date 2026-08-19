@@ -4,13 +4,13 @@ import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
 import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
 import { isProviderId } from "./providers";
-import { grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
+import { applyGoalIdleAndQueue, grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
 import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
 import { normalizePlanRun } from "./plan";
 import { normalizeAgentRun, workerNameFromTitle } from "./subagents";
-import { normalizeLedger } from "./session-ledger";
+import { closeOpenTurn, normalizeLedger } from "./session-ledger";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
@@ -172,6 +172,32 @@ export function normalizeSandbox(raw: unknown): SandboxProfile {
 
 export function normalizeSessionSecurityPolicy(_raw?: unknown): import("./types").SessionSecurityPolicy {
   return { network: "allowed", root: "allowed" };
+}
+
+/** Live idle path: close the turn log, then admit the next goal round on this chat. */
+export function applyVendorTurnIdle(
+  session: Session,
+  options?: { safetyPaused?: boolean; failed?: boolean; now?: number; assistantId?: string },
+): Session {
+  const assistant = options?.assistantId
+    ? session.messages.find((message) => message.id === options.assistantId)
+    : [...session.messages].reverse().find((message) => message.role === "assistant" && !message.kind);
+  const closed: Session = {
+    ...session,
+    status: "idle",
+    ledger: closeOpenTurn(session.ledger, {
+      assistant: assistant
+        ? { id: assistant.id, text: assistant.text }
+        : undefined,
+      reason: options?.failed || options?.safetyPaused ? "error" : "ok",
+      at: options?.now,
+    }),
+  };
+  return applyGoalIdleAndQueue(closed, {
+    safetyPaused: options?.safetyPaused,
+    failed: options?.failed,
+    now: options?.now,
+  });
 }
 
 export function normalizeSession(raw: unknown): Session | null {

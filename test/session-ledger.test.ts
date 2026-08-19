@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   appendLedgerEvent,
+  appendLiveTool,
+  appendOpenTurnUser,
+  closeOpenTurn,
   deriveModelHistory,
   emptyLedger,
   normalizeLedger,
   projectMessagesFromLedger,
+  recordTurnOnLedger,
 } from "../src/lib/session-ledger";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import { normalizeSession } from "../src/lib/session";
 
 test("append then project rebuilds the turn from the shipped ledger", () => {
@@ -86,4 +95,49 @@ test("normalizeSession keeps a per-chat ledger and does not share it", () => {
   });
   assert.equal(other?.ledger, undefined);
   assert.notEqual(session.vendorProvider, other?.provider);
+});
+
+test("the live stream helpers record a user, tool, and assistant turn", () => {
+  let ledger = appendOpenTurnUser(undefined, { id: "u1", text: "fix the meter", source: "human", at: 10 });
+  ledger = appendLiveTool(ledger, {
+    callId: "c1",
+    name: "read_file",
+    arguments: "{\"path\":\"src/lib/usage.ts\"}",
+    result: "export function leftoverForCard",
+    at: 11,
+  });
+  ledger = closeOpenTurn(ledger, {
+    assistant: { id: "a1", text: "checking usage.ts", usage: { inputTokens: 80, outputTokens: 20 } },
+    reason: "ok",
+    at: 12,
+  });
+  const types = ledger.events.map((event) => event.type);
+  assert.deepEqual(types, [
+    "turn/start",
+    "user/message",
+    "step/start",
+    "tool/call",
+    "tool/result",
+    "assistant/message",
+    "step/end",
+    "turn/end",
+  ]);
+  const history = deriveModelHistory(ledger);
+  assert.equal(history.find((row) => row.id === "u1")?.text, "fix the meter");
+  assert.equal(history.find((row) => row.id === "a1")?.text, "checking usage.ts");
+  const other = recordTurnOnLedger(undefined, {
+    turn: 1,
+    user: { id: "u-b", text: "other chat" },
+    assistant: { id: "a-b", text: "ok" },
+  });
+  assert.equal(projectMessagesFromLedger(ledger).some((row) => row.id === "u-b"), false);
+  assert.equal(projectMessagesFromLedger(other).some((row) => row.id === "u1"), false);
+});
+
+test("store writes the live turn log and does not share it across chats", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /appendOpenTurnUser\(/);
+  assert.match(store, /appendLiveTool\(/);
+  assert.match(store, /applyVendorTurnIdle\(/);
+  assert.match(store, /recordLiveCompact\(/);
 });

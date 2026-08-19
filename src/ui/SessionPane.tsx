@@ -183,22 +183,8 @@ export function SessionPane() {
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (!el) return;
-    const pin = () => {
-      if (followBottom.current) el.scrollTop = el.scrollHeight;
-    };
-    pin();
-    const stack = el.firstElementChild;
-    if (!(stack instanceof HTMLElement) || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(pin);
-    observer.observe(stack);
-    return () => observer.disconnect();
-  }, [session?.id, paintFrom, shownBlocks.length]);
-
-  useEffect(() => {
-    const el = scroller.current;
     if (el && followBottom.current) el.scrollTop = el.scrollHeight;
-  }, [session?.messages, session?.status, paintFrom]);
+  }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
     const thread = scroller.current;

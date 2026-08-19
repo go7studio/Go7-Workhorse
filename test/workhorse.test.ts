@@ -5657,6 +5657,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /transcript-stack/);
   assert.match(pane, /useLayoutEffect/);
   assert.match(pane, /MediaPaintProvider/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(stack\)/);
   assert.match(pane, /startTransition/);
   assert.match(pane, /requestAnimationFrame\(tick\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);

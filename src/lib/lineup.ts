@@ -178,9 +178,9 @@ export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { con
   });
   if (options?.continuePlan) {
     lines.push(
-      "Reconcile this wave against the running executable plan. Verify and integrate accepted isolated commits, record evidence, and dispatch newly ready steps.",
-      "Do not stop at a status summary while plan work remains ready. Continue until the plan completes or is truthfully blocked.",
-      "Keep the user-facing update concise; do not paste worker notes, raw checklists, or process narration.",
+      "The auditor’s named gate at that worktree commit is what counts. You cannot mark a plan step done.",
+      "Write a short user-facing update. Do not treat a builder report as admission.",
+      "Keep going until the plan completes or is truthfully blocked.",
     );
   } else {
     lines.push(

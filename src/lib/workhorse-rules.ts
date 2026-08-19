@@ -56,6 +56,9 @@ export const CURSOR_SESSION_RULES = WORKHORSE_SESSION_RULES.replace(
 export const WORKER_SESSION_RULES =
   "You are a worker on the Workhorse desk. Do the assigned slice in the bound folder only. Use list_dir and read_file on that folder. Quote real files. Only if your slice explicitly requires a second independent check, you may call workhorse_spawn_agent once; Workhorse uses a capacity-aware quick route with at most 5,000 tokens and depth two unless the assignment names a model. You may await that helper. Do not list bots or request another vendor. Do not ask the user. Do not review any other tree. Return the report as plain text.";
 
+export const AUDITOR_SESSION_RULES =
+  "You are an auditor on the Workhorse desk. Re-run the named gate in the bound folder. Do not write files. Do not spawn. Do not ask the user. Do not review any other tree. Reply with HEAD (git rev-parse HEAD, 40 hex), GATE (the command), LAST (the gate’s literal last line), and STATUS pass or fail.";
+
 export const CUSTOM_HTTP_WORKER_RULES =
   "You are a worker on the Workhorse desk. You are not the root orchestrator. Do the assigned slice in the bound folder. Workspace: list_dir, read_file (and write_file / run_command only if this turn allows writes). list_dir with no path lists the bound folder. Only if your slice explicitly requires a second independent check, you may call workhorse_spawn_agent once; Workhorse uses a capacity-aware quick route with at most 5,000 tokens and depth two unless the assignment names a model. You may await that helper. Do not list bots or request another vendor. Do not ask the user. Do not review any other tree. Return the report as plain text.";
 
@@ -65,7 +68,7 @@ export const CUSTOM_HTTP_PEER_HINT =
 export const SPAWN_TURN_HINT =
   "The user asked you to spawn or summon agents. Bind this chat’s project folder first. Call workhorse_list_bots now. Spawn every canCall row with workhorse_spawn_agent (full review task in prompt, wait=false when more than one) — including this chat’s own custom bot (provider custom, chat this bot’s name). The API key is already on the desk. After they start, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten). Workers fill their own chats. The desk joins their reports later as a new turn. Call workhorse_await_agents (default, no wait) only for a status snapshot. If a vendor is not on that list, skip it and do not name it. If they asked for multiple and only one vendor is callable, spawn several of that vendor with split tasks. Do not ask which vendor. Do not call workhorse_request_vendor. Do not ask the user to do the review themselves. Only say nothing to spawn if canCall is empty. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list. Each spawn prompt is the slice — never a request to summon more agents.";
 
-export type DeskRole = "orchestrator" | "worker";
+export type DeskRole = "orchestrator" | "worker" | "auditor";
 
 /**
  * The rules a vendor CLI is launched with, by role. Every launcher used to
@@ -78,6 +81,7 @@ export type DeskRole = "orchestrator" | "worker";
  * changed, so a Cursor worker takes the same worker rules as everyone else.
  */
 export function sessionRulesFor(role: DeskRole | undefined, provider: "grok" | "claude" | "codex" | "cursor" = "grok"): string {
+  if (role === "auditor") return AUDITOR_SESSION_RULES;
   if (role === "worker") return WORKER_SESSION_RULES;
   return provider === "cursor" ? CURSOR_SESSION_RULES : WORKHORSE_SESSION_RULES;
 }
@@ -138,7 +142,7 @@ export function looksLikeSpawnRequest(text: string): boolean {
 }
 
 export function withSpawnHint(text: string, role?: DeskRole): string {
-  if (role === "worker" || looksLikeWorkerBrief(text)) return text;
+  if (role === "worker" || role === "auditor" || looksLikeWorkerBrief(text)) return text;
   if (!looksLikeSpawnRequest(text)) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
 }

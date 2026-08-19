@@ -1,5 +1,6 @@
 import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from "../src/lib/agent-runtime";
-import { WORKER_DESK_TOOLS } from "../src/lib/subagents";
+import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS } from "../src/lib/subagents";
+import { LINK_TOOLS } from "../src/lib/workhorse-link";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 import type { DeskRole } from "../src/lib/workhorse-rules";
 
@@ -53,7 +54,7 @@ export const EXTERNAL_RUNTIME_FORBIDDEN = [
  * CLIs, which set nothing.
  */
 export function mcpExposureProfile(raw: unknown): McpExposureProfile {
-  if (raw === "worker" || raw === "external-runtime" || raw === "desk") return raw;
+  if (raw === "worker" || raw === "auditor" || raw === "external-runtime" || raw === "desk") return raw;
   if (raw === "link") return "external-runtime";
   if (typeof raw === "string" && raw.trim()) return "external-runtime";
   return "desk";
@@ -62,6 +63,7 @@ export function mcpExposureProfile(raw: unknown): McpExposureProfile {
 export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boolean {
   if (profile === "desk") return true;
   if (profile === "worker") return (WORKER_DESK_TOOLS as readonly string[]).includes(tool);
+  if (profile === "auditor") return (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool);
   return (EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool);
 }
 
@@ -73,6 +75,7 @@ export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boo
  */
 export function profileForCaller(envProfile: McpExposureProfile, callerRole: DeskRole | undefined): McpExposureProfile {
   if (envProfile === "external-runtime") return envProfile;
+  if (callerRole === "auditor") return "auditor";
   if (callerRole === "worker") return "worker";
   return envProfile;
 }

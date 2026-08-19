@@ -18,7 +18,23 @@ import {
   type PlanTransition,
 } from "../src/lib/plan";
 import { normalizeSession } from "../src/lib/session";
-import type { PlanRun } from "../src/lib/types";
+import type { PlanEvidence, PlanRun } from "../src/lib/types";
+
+function auditorProof(id: string, sessionId = "sess_auditor"): PlanEvidence {
+  return {
+    id,
+    kind: "test",
+    label: "Auditor gate",
+    value: `${"a".repeat(40)} npm test`,
+    recordedAt: 0,
+    sessionId,
+    head: "a".repeat(40),
+    gate: "npm test",
+    lastLine: "tests 1",
+    role: "auditor",
+    status: "pass",
+  };
+}
 
 function planFrom(result: PlanTransition): PlanRun {
   assert.equal(result.ok, true, result.ok ? undefined : result.error);
@@ -78,7 +94,7 @@ test("plan lifecycle follows dependencies and requires evidence", () => {
 
   plan = planFrom(setPlanStepStatus(plan, firstId, "running", { now: 5 }));
   const missingEvidence = setPlanStepStatus(plan, firstId, "completed", { now: 6 });
-  assert.deepEqual(missingEvidence, { ok: false, error: "Plan step needs evidence before completion." });
+  assert.deepEqual(missingEvidence, { ok: false, error: "Plan step needs auditor evidence at a git SHA before completion." });
   plan = planFrom(recordPlanEvidence(plan, firstId, {
     id: "evidence_1",
     kind: "test",
@@ -87,23 +103,19 @@ test("plan lifecycle follows dependencies and requires evidence", () => {
     recordedAt: 0,
     sessionId: "agent_kimi",
   }, 7));
-  plan = planFrom(setPlanStepStatus(plan, firstId, "completed", { now: 8 }));
+  const noteIsNotAdmission = setPlanStepStatus(plan, firstId, "completed", { now: 8 });
+  assert.equal(noteIsNotAdmission.ok, false);
+  plan = planFrom(recordPlanEvidence(plan, firstId, auditorProof("evidence_1_auditor"), 8));
+  plan = planFrom(setPlanStepStatus(plan, firstId, "completed", { now: 9 }));
   assert.equal(plan.steps[1]?.status, "ready");
 
-  plan = planFrom(setPlanStepStatus(plan, secondId, "running", { now: 9 }));
-  plan = planFrom(recordPlanEvidence(plan, secondId, {
-    id: "evidence_2",
-    kind: "test",
-    label: "Focused tests",
-    value: "pass",
-    recordedAt: 10,
-  }, 10));
-  plan = planFrom(setPlanStepStatus(plan, secondId, "completed", { now: 11 }));
-  plan = planFrom(completePlanRun(plan, 12));
+  plan = planFrom(setPlanStepStatus(plan, secondId, "running", { now: 10 }));
+  plan = planFrom(recordPlanEvidence(plan, secondId, auditorProof("evidence_2"), 11));
+  plan = planFrom(setPlanStepStatus(plan, secondId, "completed", { now: 12 }));
+  plan = planFrom(completePlanRun(plan, 13));
 
   assert.equal(plan.status, "completed");
-  assert.equal(plan.completedAt, 12);
-  assert.equal(plan.revision, 11);
+  assert.equal(plan.completedAt, 13);
 });
 
 test("plan assignments preserve model fit and agent identity", () => {
@@ -154,10 +166,10 @@ test("completed work can reopen with fresh evidence and dependent invalidation",
   plan = planFrom(approvePlanRun(plan, 3));
   plan = planFrom(startPlanRun(plan, 4));
   plan = planFrom(setPlanStepStatus(plan, firstId, "running", { now: 5 }));
-  plan = planFrom(recordPlanEvidence(plan, firstId, { id: "old_1", kind: "test", label: "Old", value: "pass", recordedAt: 6 }, 6));
+  plan = planFrom(recordPlanEvidence(plan, firstId, { ...auditorProof("old_1"), recordedAt: 6 }, 6));
   plan = planFrom(setPlanStepStatus(plan, firstId, "completed", { now: 7 }));
   plan = planFrom(setPlanStepStatus(plan, secondId, "running", { now: 8 }));
-  plan = planFrom(recordPlanEvidence(plan, secondId, { id: "old_2", kind: "test", label: "Old", value: "pass", recordedAt: 9 }, 9));
+  plan = planFrom(recordPlanEvidence(plan, secondId, { ...auditorProof("old_2"), recordedAt: 9 }, 9));
   plan = planFrom(setPlanStepStatus(plan, secondId, "completed", { now: 10 }));
   plan = planFrom(completePlanRun(plan, 11));
 

@@ -220,7 +220,7 @@ export type ExternalAgentRun = {
   correlationId: string;
 };
 
-export type McpExposureProfile = "desk" | "worker" | "external-runtime";
+export type McpExposureProfile = "desk" | "worker" | "auditor" | "external-runtime";
 
 export type DeskLineupRow = {
   childId: string;
@@ -281,6 +281,8 @@ export type AgentRun = {
   isolation: "worktree" | "shared";
   /** inherit keeps prior conversation. fresh starts cold with only a handoff. */
   seed?: WorkerSeed;
+  /** Sibling that admits a plan step. Not a builder and not a grandchild. */
+  role?: "auditor";
   changedFiles?: string[];
   conflictFiles?: string[];
   error?: string;
@@ -338,6 +340,14 @@ export type PlanEvidence = {
   value: string;
   recordedAt: number;
   sessionId?: string;
+  /** Auditor-only: 40-char worktree HEAD. */
+  head?: string;
+  /** Auditor-only: named gate command. */
+  gate?: string;
+  /** Auditor-only: the gate’s literal last line. */
+  lastLine?: string;
+  role?: "auditor";
+  status?: "pass" | "fail";
 };
 
 export type PlanAssignment = {
@@ -403,6 +413,8 @@ export type PlanRun = {
   updatedAt: number;
   source?: PlanSource;
   constraints?: PlanConstraints;
+  /** Named test command the auditor must re-run, e.g. `npm test`. */
+  gate?: string;
   steps: PlanStep[];
   events?: PlanEvent[];
   approvedAt?: number;

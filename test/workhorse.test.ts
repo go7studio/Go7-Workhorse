@@ -8196,8 +8196,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.ok(broken.find((item) => item.id === "orch")?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
   assert.match(lineupSynthesizePrompt(done), /HUD report/);
   assert.match(lineupSynthesizePrompt(done), /own words|combined review/);
-  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /maybeEnqueueLineupJoin/);
-  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /lineupJoinPrompt|maybeEnqueueLineupJoin/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /joinAndAdmit/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /joinAndAdmit|lineupJoinPrompt/);
   const nestedTree = nestProjectChats([
     { id: "orch" },
     { id: "sess_a", parentId: "orch" },
@@ -8730,8 +8730,8 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.equal(nextWave.notifiedAt, undefined);
   assert.deepEqual(nextWave.rows.map((row) => row.childId), ["c5"]);
   const planJoin = lineupJoinPrompt(nextWave, { continuePlan: true });
-  assert.match(planJoin, /Reconcile this wave against the running executable plan/);
-  assert.match(planJoin, /Continue until the plan completes or is truthfully blocked/);
+  assert.match(planJoin, /auditor’s named gate at that worktree commit/);
+  assert.match(planJoin, /You cannot mark a plan step done/);
   assert.doesNotMatch(planJoin, /Write one combined review/);
 
   const persistedLineup = normalizeLineup({
@@ -8833,7 +8833,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.equal(two.filter((block) => block.type === "reply").length, 2);
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /maybeEnqueueLineupJoin/);
+  assert.match(store, /joinAndAdmit/);
   assert.match(store, /applyJoinRateLimitRetry/);
   assert.match(store, /reconcileIdleChildren/);
   assert.match(store, /hideUser\s*\n\s*\? item\.title/);

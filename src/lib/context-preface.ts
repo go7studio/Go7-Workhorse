@@ -1,5 +1,6 @@
 import type { LinkedReference, PermissionMode, SandboxProfile } from "./types";
 import {
+  AUDITOR_SESSION_RULES,
   CURSOR_SESSION_RULES,
   CUSTOM_HTTP_SESSION_RULES,
   CUSTOM_HTTP_WORKER_RULES,
@@ -148,7 +149,9 @@ export function capabilityFromPreface(preface: string | undefined): string {
 /** First-prompt context: desk-slot rules, live limits, extra folders/refs and this-chat map. */
 export function buildSessionPreface(input: PrefaceInput): string {
   const worker = input.role === "worker";
-  const rules = worker
+  const rules = input.role === "auditor"
+    ? AUDITOR_SESSION_RULES
+    : worker
     ? input.surface === "http"
       ? CUSTOM_HTTP_WORKER_RULES
       : WORKER_SESSION_RULES

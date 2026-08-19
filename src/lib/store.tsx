@@ -169,12 +169,12 @@ import {
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
   handOverLineup,
-  maybeEnqueueLineupJoin,
   queueWakeDelayMs,
   reconcileIdleChildren,
   reconcilePersistedLineups,
   stampLineupUserText,
 } from "./lineup";
+import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
   admitSpawn,
   collectChildAgentReports,
@@ -630,6 +630,9 @@ function settlePlanAssignment(
   report: string,
 ): Session[] {
   const child = sessions.find((item) => item.id === childId);
+  if (child?.agentRun?.role === "auditor") {
+    return applyPlanAuditorSpawn(sessions, parentId, [], { childId: uid("sess") }).sessions;
+  }
   const stepId = child?.agentRun?.planStepId;
   if (!stepId) return sessions;
   return sessions.map((session) => {
@@ -647,19 +650,43 @@ function settlePlanAssignment(
       }, now);
       if (evidence.ok) plan = evidence.plan;
     }
-    const settled = setPlanStepStatus(plan, stepId, outcome, {
-      ...(outcome === "failed" ? { error: report.trim().slice(0, 1_000) || "Agent failed" } : {}),
-      now,
-    });
-    if (!settled.ok) return session;
-    const logged = recordPlanEvent(settled.plan, {
-      type: `agent.${outcome}`,
+    if (outcome === "failed") {
+      const settled = setPlanStepStatus(plan, stepId, "failed", {
+        error: report.trim().slice(0, 1_000) || "Agent failed",
+        now,
+      });
+      if (!settled.ok) return session;
+      const logged = recordPlanEvent(settled.plan, {
+        type: "agent.failed",
+        stepId,
+        sessionId: childId,
+        correlationId: child?.agentRun?.correlationId,
+      }, now);
+      return { ...session, planRun: logged.ok ? logged.plan : settled.plan };
+    }
+    const logged = recordPlanEvent(plan, {
+      type: "agent.completed",
       stepId,
       sessionId: childId,
       correlationId: child?.agentRun?.correlationId,
     }, now);
-    return { ...session, planRun: logged.ok ? logged.plan : settled.plan };
+    return { ...session, planRun: logged.ok ? logged.plan : plan };
   });
+}
+
+function joinAdmit(
+  sessions: Session[],
+  parentId: string,
+  state: Pick<AppState, "settings" | "usage" | "watchPermits" | "watchDayMarks">,
+  plans: import("./watch").WatchPlans,
+) {
+  return joinAndAdmit(sessions, parentId, deskCallCatalog({
+    settings: state.settings,
+    usage: state.usage,
+    plans,
+    permits: state.watchPermits,
+    dayMarks: state.watchDayMarks,
+  }), { childId: uid("sess") });
 }
 
 function snapshotWriteInstance(
@@ -4560,8 +4587,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               setState((current) => {
                 let sessions = applyChildIdleSync(current.sessions, childId, "failed", { report: message, error: message });
                 sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", message);
-                sessions = maybeEnqueueLineupJoin(sessions, parent.id);
-                return { ...current, sessions };
+                const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                queueMicrotask(() => {
+                  if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+                });
+                return { ...current, sessions: admitted.sessions };
               });
             };
             const runChild = async () => {
@@ -4601,8 +4631,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     error: terminalStatus,
                   });
                   sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", terminalStatus);
-                  sessions = maybeEnqueueLineupJoin(sessions, parent.id);
-                  return { ...current, sessions };
+                  const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                  queueMicrotask(() => {
+                    if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+                  });
+                  return { ...current, sessions: admitted.sessions };
                 });
                 return "";
               }
@@ -4633,8 +4666,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 );
                 let sessions = applyChildIdleSync(withReply, childId, "completed", { report: fallback });
                 sessions = settlePlanAssignment(sessions, parent.id, childId, "completed", fallback);
-                sessions = maybeEnqueueLineupJoin(sessions, parent.id);
-                return { ...current, sessions };
+                const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                queueMicrotask(() => {
+                  if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+                });
+                return { ...current, sessions: admitted.sessions };
               });
               return fallback;
             };
@@ -4963,9 +4999,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             );
             const parentId = payload.fromSessionId || target?.parentId;
             if (parentId && childId) failed = settlePlanAssignment(failed, parentId, childId, "failed", message);
+            const admitted = parentId ? joinAdmit(failed, parentId, current, plansRef.current) : { sessions: failed };
+            queueMicrotask(() => {
+              if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+            });
             return {
               ...current,
-              sessions: parentId ? maybeEnqueueLineupJoin(failed, parentId) : failed,
+              sessions: admitted.sessions,
             };
           });
           await replyAsk({ error: message });
@@ -4986,8 +5026,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         const parentId = child?.parentId;
         if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
-        if (parentId) sessions = maybeEnqueueLineupJoin(sessions, parentId);
-        return { ...current, sessions };
+        const admitted = parentId ? joinAdmit(sessions, parentId, current, plansRef.current) : { sessions };
+        queueMicrotask(() => {
+          if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+        });
+        return { ...current, sessions: admitted.sessions };
       });
     });
   }, []);
@@ -5566,7 +5609,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               report: childReportText(finished),
               ...(safetyPaused ? { error: "Agent paused before completing its goal." } : {}),
             });
-            sessions = maybeEnqueueLineupJoin(sessions, finished.parentId);
+            const admitted = joinAdmit(sessions, finished.parentId, current, plansRef.current);
+            queueMicrotask(() => {
+              if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+            });
+            sessions = admitted.sessions;
           }
           return { ...current, sessions };
         });
@@ -5648,7 +5695,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               report: childReportText(failed),
               error: event.message,
             });
-            sessions = maybeEnqueueLineupJoin(sessions, failed.parentId);
+            const admitted = joinAdmit(sessions, failed.parentId, current, plansRef.current);
+            queueMicrotask(() => {
+              if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+            });
+            sessions = admitted.sessions;
           }
           return { ...current, sessions };
         });

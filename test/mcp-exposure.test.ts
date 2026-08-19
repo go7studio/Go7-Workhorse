@@ -776,6 +776,9 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   assert.equal(rulesOf(buildCursorLaunchSpec({ ...base, role: "worker" })), WORKER_SESSION_RULES);
   assert.equal(rulesOf(buildCursorLaunchSpec(base)), CURSOR_SESSION_RULES);
   assert.equal(sessionRulesFor("worker", "cursor"), WORKER_SESSION_RULES);
+  const { AUDITOR_SESSION_RULES } = await import("../src/lib/workhorse-rules");
+  assert.equal(sessionRulesFor("auditor"), AUDITOR_SESSION_RULES);
+  assert.equal(rulesOf(buildGrokLaunchSpec({ ...base, role: "auditor" })), AUDITOR_SESSION_RULES);
   assert.ok(WORKER_SESSION_RULES.length * 10 < WORKHORSE_SESSION_RULES.length, "the worker rules are an order of magnitude smaller");
 });
 

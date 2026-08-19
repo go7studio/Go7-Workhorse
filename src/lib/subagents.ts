@@ -133,6 +133,9 @@ export function deskRoleOf(
   session?: Pick<Session, "hidden" | "parentId" | "agentRun"> | { hidden?: boolean; parentId?: string | null; agentRun?: unknown } | null,
 ): DeskRole {
   if (!session) return "orchestrator";
+  if (session.agentRun && typeof session.agentRun === "object" && (session.agentRun as { role?: string }).role === "auditor") {
+    return "auditor";
+  }
   return isWorkerSession(session) ? "worker" : "orchestrator";
 }
 
@@ -323,6 +326,16 @@ export const WORKER_DESK_TOOLS = [
   "workhorse_await_agents",
   "workhorse_agent_status",
   "workhorse_request_permission",
+  "workhorse_list_references",
+  "workhorse_list_skills",
+  "workhorse_read_skill",
+  "workhorse_probe_runtime",
+] as const;
+
+/** Auditor may read the folder and chats. It may not spawn or raise access. */
+export const AUDITOR_DESK_TOOLS = [
+  "workhorse_list_chats",
+  "workhorse_read_chat",
   "workhorse_list_references",
   "workhorse_list_skills",
   "workhorse_read_skill",
@@ -531,6 +544,9 @@ export function workerOmittedToolError(name: string): string {
 }
 
 export function toolsForDeskRole<T extends { name: string }>(tools: T[], role: DeskRole = "orchestrator"): T[] {
+  if (role === "auditor") {
+    return tools.filter((tool) => (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool.name));
+  }
   if (role !== "worker") return tools;
   return tools.filter((tool) => !isWorkerOmittedTool(tool.name));
 }
@@ -618,10 +634,33 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   return lines.join("\n");
 }
 
+export function formatAuditorPrompt(input: { folder: string; gate: string }): string {
+  const folder = input.folder.trim() || "(none — stop and say so)";
+  const gate = input.gate.trim() || "npm test";
+  return [
+    "ROLE: auditor",
+    "SEED: fresh",
+    "You have no parent conversation and no builder transcript.",
+    `FOLDER: ${folder}`,
+    `GATE: ${gate}`,
+    "",
+    "Re-run GATE in FOLDER. Do not write files. Do not spawn. Do not ask the user. Do not review any other tree.",
+    "Reply with exactly these four lines:",
+    "HEAD: <git rev-parse HEAD, 40 hex>",
+    "GATE: <the gate command>",
+    "LAST: <the gate's literal last line>",
+    "STATUS: pass",
+    "or STATUS: fail",
+  ].join("\n");
+}
+
 /** Text the vendor actually sees. Fresh seed is the handoff only — never the parent brief. */
 export function vendorTextForSpawn(
-  input: WorkerBriefInput & { seed?: WorkerSeed; handoff?: WorkerHandoff },
+  input: WorkerBriefInput & { seed?: WorkerSeed; handoff?: WorkerHandoff; role?: DeskRole; gate?: string },
 ): string {
+  if (input.role === "auditor") {
+    return formatAuditorPrompt({ folder: input.folder, gate: input.gate ?? input.text });
+  }
   if (input.seed === "fresh") {
     const handoff =
       input.handoff ??
@@ -738,7 +777,9 @@ export type SpawnAdmissionInput = {
 export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: string };
 
 export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
-  if (deskRoleOf(input.parent) === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
+  const parentRole = deskRoleOf(input.parent);
+  if (parentRole === "auditor") return { ok: false, error: "Auditors cannot spawn." };
+  if (parentRole === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
   if (!cwd) return { ok: false, error: UNBOUND_SPAWN_ERROR };
@@ -1021,6 +1062,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     startedAt: row.startedAt,
     isolation: row.isolation === "worktree" ? "worktree" : "shared",
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
+    ...(row.role === "auditor" ? { role: "auditor" as const } : {}),
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),

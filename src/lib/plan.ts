@@ -159,6 +159,7 @@ export function parseMarkdownPlan(input: MarkdownPlanInput): PlanRun {
     importedAt: now,
   };
   const constraints = normalizeConstraints(input.constraints);
+  const gate = parsePlanGate(markdown);
   return {
     id: clean(input.id) || `plan_${now.toString(36)}_${hash.slice(-8)}`,
     objective: markdownObjective(markdown, label),
@@ -168,6 +169,7 @@ export function parseMarkdownPlan(input: MarkdownPlanInput): PlanRun {
     updatedAt: now,
     source,
     ...(constraints ? { constraints } : {}),
+    ...(gate ? { gate } : {}),
     steps:
       parsedSteps.length > 0
         ? parsedSteps
@@ -231,6 +233,8 @@ function normalizeEvidence(raw: unknown): PlanEvidence | null {
   const kind = EVIDENCE_KINDS.includes(record.kind as PlanEvidenceKind)
     ? (record.kind as PlanEvidenceKind)
     : "note";
+  const head = clean(record.head).toLowerCase();
+  const lastLine = typeof record.lastLine === "string" ? record.lastLine.trim() : "";
   return {
     id,
     kind,
@@ -238,7 +242,62 @@ function normalizeEvidence(raw: unknown): PlanEvidence | null {
     value,
     recordedAt: finite(record.recordedAt) ?? 0,
     ...(clean(record.sessionId) ? { sessionId: clean(record.sessionId) } : {}),
+    ...(GIT_HEAD.test(head) ? { head } : {}),
+    ...(clean(record.gate) ? { gate: clean(record.gate) } : {}),
+    ...(lastLine ? { lastLine } : {}),
+    ...(record.role === "auditor" ? { role: "auditor" as const } : {}),
+    ...(record.status === "pass" || record.status === "fail" ? { status: record.status } : {}),
   };
+}
+
+const GIT_HEAD = /^[0-9a-f]{40}$/;
+
+/** Named gate from plan markdown (`Named test gate: \`npm test\``). */
+export function parsePlanGate(markdown: string): string | undefined {
+  const named = markdown.match(/named test gate[^\n`]*`([^`]+)`/i);
+  if (named?.[1]?.trim()) return named[1].trim();
+  const line = markdown.match(/^\s*(?:named test gate|gate)\s*[:.—-]\s*`?(.+?)`?\s*$/im);
+  const value = line?.[1]?.trim();
+  return value || undefined;
+}
+
+export type AuditorReport = {
+  head: string;
+  gate: string;
+  lastLine: string;
+  status: "pass" | "fail";
+};
+
+/** Parse the auditor’s required four-line receipt. */
+export function parseAuditorReport(text: string): AuditorReport | undefined {
+  const body = text.replace(/\r\n/g, "\n");
+  const head = body.match(/^\s*HEAD:\s*([0-9a-f]{40})\s*$/im)?.[1]?.toLowerCase();
+  const gate = body.match(/^\s*GATE:\s*(.+?)\s*$/im)?.[1]?.trim();
+  const lastLine = body.match(/^\s*LAST:\s*(.+?)\s*$/im)?.[1]?.trim();
+  const statusRaw = body.match(/^\s*STATUS:\s*(pass|fail)\s*$/im)?.[1]?.toLowerCase();
+  if (!head || !GIT_HEAD.test(head) || !gate || !lastLine || (statusRaw !== "pass" && statusRaw !== "fail")) {
+    return undefined;
+  }
+  return { head, gate, lastLine, status: statusRaw };
+}
+
+export function isAuditorGateEvidence(
+  evidence: PlanEvidence,
+  builderSessionId?: string,
+): boolean {
+  if (evidence.role !== "auditor") return false;
+  if (!GIT_HEAD.test((evidence.head ?? "").toLowerCase())) return false;
+  if (!clean(evidence.gate) || !(evidence.lastLine ?? "").trim()) return false;
+  if (!clean(evidence.sessionId)) return false;
+  if (builderSessionId && evidence.sessionId === builderSessionId) return false;
+  return evidence.status === "pass";
+}
+
+export function stepHasAuditorAdmission(step: PlanStep): boolean {
+  const list = step.reopenedAt === undefined
+    ? step.evidence
+    : step.evidence.filter((item) => item.recordedAt >= step.reopenedAt!);
+  return list.some((item) => isAuditorGateEvidence(item, step.assignedSessionId));
 }
 
 function normalizeStep(raw: unknown): PlanStep | null {
@@ -335,6 +394,7 @@ export function normalizePlanRun(raw: unknown): PlanRun | undefined {
     updatedAt: finite(record.updatedAt) ?? createdAt,
     ...(source ? { source } : {}),
     ...(constraints ? { constraints } : {}),
+    ...(clean(record.gate) ? { gate: clean(record.gate) } : {}),
     steps: normalizedSteps,
     events,
     ...(finite(record.approvedAt) !== undefined ? { approvedAt: finite(record.approvedAt) } : {}),
@@ -614,8 +674,8 @@ export function setPlanStepStatus(
   const qualifyingEvidence = step.reopenedAt === undefined
     ? step.evidence
     : step.evidence.filter((evidence) => evidence.recordedAt >= step.reopenedAt!);
-  if (status === "completed" && step.evidenceRequired && qualifyingEvidence.length === 0) {
-    return failed("Plan step needs evidence before completion.");
+  if (status === "completed" && step.evidenceRequired && !stepHasAuditorAdmission({ ...step, evidence: qualifyingEvidence })) {
+    return failed("Plan step needs auditor evidence at a git SHA before completion.");
   }
   const updated: PlanStep = {
     ...step,
@@ -636,8 +696,8 @@ export function completePlanRun(plan: PlanRun, now = Date.now()): PlanTransition
   if (plan.steps.length === 0 || plan.steps.some((step) => step.status !== "completed")) {
     return failed("Every plan step must be completed first.");
   }
-  if (plan.steps.some((step) => step.evidenceRequired && step.evidence.length === 0)) {
-    return failed("Every required plan step needs evidence.");
+  if (plan.steps.some((step) => step.evidenceRequired && !stepHasAuditorAdmission(step))) {
+    return failed("Every required plan step needs auditor evidence at a git SHA.");
   }
   return succeeded(changed(plan, { status: "completed", completedAt: now }, now));
 }

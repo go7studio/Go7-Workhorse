@@ -11,7 +11,14 @@ import {
   macReplaceScript,
   offerFromRelease,
   winInstallerArgs,
-  winInstallerLaunch,
+  winInstallerCommandLine,
+  winSchtasksCreate,
+  winSchtasksDelete,
+  winSchtasksRun,
+  winUpdateTaskXml,
+  winUpdateTaskXmlBytes,
+  winWmiCreate,
+  WIN_UPDATE_TASK_NAME,
   packagedUpdateMissingMessage,
   parseHdiutilAttach,
   pickLatestTagOffer,
@@ -20,7 +27,6 @@ import {
   releaseTag,
   updateInstallKind,
   versionFromRef,
-  winReplaceScript,
 } from "../src/lib/app-update";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -147,23 +153,52 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /open "\$dest"/);
   assert.match(script, /4242/);
 
-  const winScript = winReplaceScript({
-    pid: 4242,
-    setup: "C:\\tmp\\workhorse-setup.exe",
-    tmp: "C:\\tmp\\workhorse-update-1",
-    exe: "C:\\Users\\someone\\AppData\\Local\\Programs\\Go7 Workhorse\\Go7 Workhorse.exe",
-  });
-  assert.deepEqual(winInstallerArgs(), ["/S", "--updated"]);
-  assert.match(winScript, /pid = 4242/);
-  assert.match(winScript, /Win32_Process Where ProcessId/);
-  assert.match(winScript, /\/S --updated/);
-  assert.doesNotMatch(winScript, /--force-run/);
-  assert.match(winScript, /workhorse-setup\.exe/);
-  assert.match(winScript, /Go7 Workhorse\.exe/);
-  assert.match(winScript, /WScript\.Shell/);
-  const launch = winInstallerLaunch("C:\\tmp\\workhorse-update-1\\replace.vbs");
-  assert.equal(launch.command, "explorer.exe");
-  assert.deepEqual(launch.args, ["C:\\tmp\\workhorse-update-1\\replace.vbs"]);
+});
+
+test("a packaged Windows desk service-spawns silent Setup and NSIS relaunches once", () => {
+  const setup = "C:\\tmp\\workhorse-setup.exe";
+  assert.deepEqual(winInstallerArgs(), ["/S", "--force-run"]);
+  assert.ok(!winInstallerArgs().includes("--updated"));
+  assert.equal(winInstallerCommandLine(setup), `"${setup}" /S --force-run`);
+  assert.doesNotMatch(winInstallerCommandLine(setup), /--updated/);
+
+  const xml = winUpdateTaskXml({ command: setup });
+  assert.match(xml, /<Command>C:\\tmp\\workhorse-setup\.exe<\/Command>/);
+  assert.match(xml, /<Arguments>\/S --force-run<\/Arguments>/);
+  assert.doesNotMatch(xml, /--updated/);
+  assert.doesNotMatch(xml, /explorer\.exe/);
+  assert.doesNotMatch(xml, /Go7 Workhorse\.exe/);
+  assert.doesNotMatch(xml, /cmd\.exe/);
+  assert.doesNotMatch(xml, /<Command>schtasks/);
+  assert.equal((xml.match(/<Exec>/g) ?? []).length, 1);
+  assert.match(xml, /<Hidden>true<\/Hidden>/);
+  assert.match(xml, /InteractiveToken/);
+
+  const xmlPath = "C:\\tmp\\workhorse-update-1\\update-task.xml";
+  const create = winSchtasksCreate({ xmlPath });
+  assert.equal(create.command, "schtasks.exe");
+  assert.deepEqual(create.args, ["/Create", "/TN", WIN_UPDATE_TASK_NAME, "/XML", xmlPath, "/F"]);
+  const runTask = winSchtasksRun();
+  assert.equal(runTask.command, "schtasks.exe");
+  assert.deepEqual(runTask.args, ["/Run", "/TN", WIN_UPDATE_TASK_NAME]);
+  const remove = winSchtasksDelete();
+  assert.equal(remove.command, "schtasks.exe");
+  assert.deepEqual(remove.args, ["/Delete", "/TN", WIN_UPDATE_TASK_NAME, "/F"]);
+
+  const wmi = winWmiCreate(setup);
+  assert.equal(wmi.command, "powershell.exe");
+  const wmiCommand = wmi.args.join(" ");
+  assert.match(wmiCommand, /Win32_Process/);
+  assert.match(wmiCommand, /Create/);
+  assert.match(wmiCommand, /workhorse-setup\.exe/);
+  assert.match(wmiCommand, /\/S --force-run/);
+  assert.match(wmiCommand, /WindowStyle Hidden/);
+  assert.doesNotMatch(wmiCommand, /--updated/);
+  assert.doesNotMatch(wmiCommand, /Start-Sleep|Wait-Process|explorer\.exe/);
+
+  const xmlFile = winUpdateTaskXmlBytes(xml);
+  assert.equal(xmlFile[0], 0xff);
+  assert.equal(xmlFile[1], 0xfe);
 });
 
 test("update check is wired through main, preload, and the sidebar action", () => {
@@ -210,14 +245,28 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(updater, /pickMacDmgAsset/);
   assert.match(updater, /installWinNsis/);
   assert.match(updater, /pickWinSetupAsset/);
-  assert.match(updater, /winReplaceScript/);
-  assert.match(updater, /winInstallerLaunch/);
-  assert.match(updater, /replace\.vbs/);
+  assert.match(updater, /winUpdateTaskXml/);
+  assert.match(updater, /winSchtasksCreate/);
+  assert.match(updater, /winSchtasksRun/);
+  assert.match(updater, /winWmiCreate/);
+  assert.doesNotMatch(updater, /winReplaceScript/);
+  assert.doesNotMatch(updater, /winInstallerLaunch/);
+  assert.doesNotMatch(updater, /replace\.vbs/);
+  assert.doesNotMatch(updater, /explorer\.exe/);
   assert.match(updater, /hdiutil/);
+  const winApply = updater.slice(updater.indexOf("async function installWinNsis"), updater.indexOf("export async function applyAppUpdate"));
+  assert.match(winApply, /pickWinSetupAsset/);
+  assert.match(winApply, /writeFileSync\(setup/);
+  assert.match(winApply, /winSchtasksCreate/);
+  assert.match(winApply, /winSchtasksRun/);
+  assert.match(winApply, /winWmiCreate/);
+  assert.doesNotMatch(winApply, /cleanupDir/);
+  assert.match(winApply, /app\.quit/);
+  assert.doesNotMatch(winApply, /spawn\(/);
+  assert.doesNotMatch(winApply, /explorer/);
   const nsis = readFileSync(path.join(ROOT, "build", "installer.nsh"), "utf8");
-  assert.match(nsis, /customInstall/);
-  assert.match(nsis, /APP_EXECUTABLE_FILENAME/);
-  assert.match(nsis, /Exec /);
+  assert.doesNotMatch(nsis, /!macro customInstall/);
+  assert.doesNotMatch(nsis, /\bExec\b/);
   assert.doesNotMatch(updater, /hdiutil attach[^\n]*-quiet/);
   assert.match(updater, /error: message\.slice/);
   assert.doesNotMatch(updater, /catch \{\s*return null;\s*\}/);

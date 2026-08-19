@@ -54,6 +54,8 @@ test("the workflow asks the script, and the old heuristic is gone", () => {
   const detect = workflow.slice(workflow.indexOf("  detect-release:"), workflow.indexOf("  installers:"));
   assert.match(detect, /fetch-depth: 2/);
   assert.match(detect, /GH_TOKEN/);
+  const installers = workflow.slice(workflow.indexOf("  installers:"), workflow.indexOf("  publish:"));
+  assert.match(installers, /fetch-depth: 0/);
 });
 
 test("a version that moved without the manifest was typed by hand, and does not cut", () => {

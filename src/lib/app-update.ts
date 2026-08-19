@@ -148,53 +148,124 @@ export function packagedUpdateMissingMessage(platform: string): string {
   return "This Workhorse build cannot install in place.";
 }
 
+export const WIN_UPDATE_TASK_NAME = "Go7WorkhorseUpdate";
+
 export function winInstallerArgs(): string[] {
-  // --updated tells NSIS this is an in-place update (skip first-run).
-  // NSIS then will not start the app; the helper has to.
-  return ["/S", "--updated"];
+  // /S is NSIS silent. --force-run is electron-builder's assisted-installer
+  // switch that starts the new exe after a silent install (the finish page
+  // never runs under /S). Do not pass --updated: that is electron-updater's
+  // contract, and it is not a relaunch.
+  return ["/S", "--force-run"];
 }
 
-/** Hidden VBScript: wait for the desk to quit, install, then open the new exe. */
-export function winReplaceScript(input: {
-  pid: number;
-  setup: string;
-  tmp: string;
-  exe: string;
-}): string {
-  const quote = (value: string) => value.replace(/"/g, '""');
-  const pid = Number(input.pid);
-  const setup = quote(input.setup);
-  const exe = quote(input.exe);
-  const tmp = quote(input.tmp);
-  const flags = winInstallerArgs().join(" ");
+export function winInstallerCommandLine(setup: string): string {
+  return `"${setup}" ${winInstallerArgs().join(" ")}`;
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * One-shot Task Scheduler XML: silent Setup only.
+ * Do not Exec cmd.exe or schtasks.exe here — those are console apps and would
+ * flash a prompt in the user session. Setup /S has no wizard; --force-run
+ * opens Workhorse when the copy is done.
+ */
+export function winUpdateTaskXml(input: { command: string; args?: string }): string {
+  const command = xmlEscape(input.command);
+  const args = xmlEscape(input.args ?? winInstallerArgs().join(" "));
   return [
-    'Set sh = CreateObject("WScript.Shell")',
-    'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")',
-    `pid = ${pid}`,
-    "Do",
-    '  Set procs = wmi.ExecQuery("Select * from Win32_Process Where ProcessId = " & pid)',
-    "  If procs.Count = 0 Then Exit Do",
-    "  WScript.Sleep 200",
-    "Loop",
-    "WScript.Sleep 400",
-    `sh.Run """${setup}"" ${flags}", 0, True`,
-    `sh.Run """${exe}""", 1, False`,
-    `On Error Resume Next`,
-    `CreateObject("Scripting.FileSystemObject").DeleteFolder "${tmp}", True`,
+    '<?xml version="1.0" encoding="UTF-16"?>',
+    '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+    "  <RegistrationInfo>",
+    "    <Description>Go7 Workhorse in-app update</Description>",
+    "  </RegistrationInfo>",
+    "  <Triggers>",
+    "    <TimeTrigger>",
+    "      <StartBoundary>2020-01-01T00:00:00</StartBoundary>",
+    "      <Enabled>true</Enabled>",
+    "    </TimeTrigger>",
+    "  </Triggers>",
+    "  <Principals>",
+    '    <Principal id="Author">',
+    "      <LogonType>InteractiveToken</LogonType>",
+    "      <RunLevel>LeastPrivilege</RunLevel>",
+    "    </Principal>",
+    "  </Principals>",
+    "  <Settings>",
+    "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+    "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+    "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+    "    <AllowHardTerminate>true</AllowHardTerminate>",
+    "    <StartWhenAvailable>true</StartWhenAvailable>",
+    "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>",
+    "    <AllowStartOnDemand>true</AllowStartOnDemand>",
+    "    <Enabled>true</Enabled>",
+    "    <Hidden>true</Hidden>",
+    "    <RunOnlyIfIdle>false</RunOnlyIfIdle>",
+    "    <WakeToRun>false</WakeToRun>",
+    "    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>",
+    "    <Priority>7</Priority>",
+    "  </Settings>",
+    '  <Actions Context="Author">',
+    "    <Exec>",
+    `      <Command>${command}</Command>`,
+    `      <Arguments>${args}</Arguments>`,
+    "    </Exec>",
+    "  </Actions>",
+    "</Task>",
     "",
   ].join("\r\n");
 }
 
-/**
- * Ask Explorer to open the helper. Explorer is not in Electron's job, so the
- * installer keeps running after we quit. A PowerShell waiter stays in the job
- * and dies with the desk — then NSIS --updated never relaunches.
- */
-export function winInstallerLaunch(wrapper: string): { command: string; args: string[] } {
+export function winUpdateTaskXmlBytes(xml: string): Buffer {
+  return Buffer.from(`\uFEFF${xml}`, "utf16le");
+}
+
+export function winSchtasksCreate(input: { xmlPath: string; taskName?: string }): { command: string; args: string[] } {
   return {
-    command: "explorer.exe",
-    args: [wrapper],
+    command: "schtasks.exe",
+    args: ["/Create", "/TN", input.taskName ?? WIN_UPDATE_TASK_NAME, "/XML", input.xmlPath, "/F"],
   };
+}
+
+export function winSchtasksRun(input: { taskName?: string } = {}): { command: string; args: string[] } {
+  return {
+    command: "schtasks.exe",
+    args: ["/Run", "/TN", input.taskName ?? WIN_UPDATE_TASK_NAME],
+  };
+}
+
+export function winSchtasksDelete(input: { taskName?: string } = {}): { command: string; args: string[] } {
+  return {
+    command: "schtasks.exe",
+    args: ["/Delete", "/TN", input.taskName ?? WIN_UPDATE_TASK_NAME, "/F"],
+  };
+}
+
+/** WMI Win32_Process.Create. Born under WmiPrvSE, not Electron's job. */
+export function winWmiCreateCommand(commandLine: string): { command: string; args: string[] } {
+  const escaped = commandLine.replace(/'/g, "''");
+  return {
+    command: "powershell.exe",
+    args: [
+      "-NoProfile",
+      "-NonInteractive",
+      "-WindowStyle",
+      "Hidden",
+      "-Command",
+      `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${escaped}'}`,
+    ],
+  };
+}
+
+export function winWmiCreate(setup: string): { command: string; args: string[] } {
+  return winWmiCreateCommand(winInstallerCommandLine(setup));
 }
 
 export function macReplaceScript(input: {

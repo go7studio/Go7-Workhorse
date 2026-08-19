@@ -1,6 +1,5 @@
 import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from "../src/lib/agent-runtime";
 import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS } from "../src/lib/subagents";
-import { LINK_TOOLS } from "../src/lib/workhorse-link";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 import type { DeskRole } from "../src/lib/workhorse-rules";
 

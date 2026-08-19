@@ -191,7 +191,7 @@ export function LearningPane() {
         <div className="settings-row">
           <div className="settings-row-copy">
             <strong>Store</strong>
-            <span>Read the intelligence brief, check the private index, take a copy, or forget it.</span>
+            <span>Read the intelligence brief, check the private index, take a copy, or forget it. Index includes inbound Workhorse Link calls.</span>
           </div>
           <div className="settings-control">
             <div className="actions">

@@ -6,7 +6,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { learningDatabasePath, usesHomePath } from "../src/lib/learning-paths";
+import { learningDatabasePath, learningInboundPath, usesHomePath } from "../src/lib/learning-paths";
+import {
+  appendInboundJsonl,
+  drainInboundJsonl,
+  inboundJsonlFromStatePath,
+  inboundLearningDraft,
+  isInboundMutatingTool,
+  sanitizeInboundArgs,
+  shouldCaptureInboundProfile,
+} from "../src/lib/learning-inbound";
 import { containsSecret, prepareEvent, redactText } from "../src/lib/learning-redact";
 import {
   boundedCompilerBatch,
@@ -16,6 +25,7 @@ import {
   DEFAULT_LEARNING,
   effectiveCompilerAssignment,
   eligibleLearningCompilers,
+  eventsRequireAgentMemory,
   frameRetrievedMemories,
   isEligibleLearningCompiler,
   memoryCannotEscalate,
@@ -77,6 +87,9 @@ test("learning defaults off and stays in Settings", () => {
   assert.match(settingsUi, /id: "learning"/);
   assert.match(pane, /Nothing is recorded/);
   assert.match(pane, /Private memory, on this disk only/);
+  assert.match(pane, /inbound Workhorse Link/);
+  assert.match(fs.readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /inbound Workhorse Link calls from a harness/);
+  assert.match(fs.readFileSync(path.join(ROOT, "docs", "LINK.md"), "utf8"), /each Link call is stored on this machine/);
   assert.doesNotMatch(sidebar, /setSettingsSection\("learning"\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /generate-title|generateTitle/);
 });
@@ -87,6 +100,9 @@ test("path helper is platform-neutral and uses injected userData", () => {
   assert.equal(unix.replace(/\\/g, "/").endsWith("learning/learning.sqlite"), true);
   assert.match(windows, /learning/);
   assert.match(windows, /learning\.sqlite/);
+  assert.equal(learningInboundPath("/tmp/workhorse-user").replace(/\\/g, "/"), "/tmp/workhorse-user/learning/inbound.jsonl");
+  assert.equal(inboundJsonlFromStatePath("/tmp/workhorse-user/workhorse-state.json"), "/tmp/workhorse-user/learning/inbound.jsonl");
+  assert.equal(inboundJsonlFromStatePath("/tmp/workhorse-user/package.json"), undefined);
   assert.equal(usesHomePath(unix), false);
   assert.equal(usesHomePath(windows), true);
   assert.doesNotMatch(unix, /Users\/someone|\/Users\//);
@@ -1305,4 +1321,128 @@ test("a live compiler that does not return a brief does not stub-copy prompts", 
   assert.equal(compiled.skipped, "invalid-brief");
   assert.equal(service.memories().length, 0);
   assert.match(describeCompileResult(compiled), /did not return a learning brief/);
+});
+
+test("inbound Link drafts drop keys and paths, and only the harness profile captures", () => {
+  assert.equal(shouldCaptureInboundProfile("external-runtime"), true);
+  assert.equal(shouldCaptureInboundProfile("desk"), false);
+  assert.equal(shouldCaptureInboundProfile("worker"), false);
+  assert.equal(isInboundMutatingTool("workhorse_delegate"), true);
+  assert.equal(isInboundMutatingTool("workhorse_list_chats"), false);
+  const args = sanitizeInboundArgs({
+    task: "review the diff",
+    fromSessionId: "chat_1",
+    traceId: "trace_9",
+    origin: "openclaw",
+    folder: "/Users/someone/secret-repo",
+    apiKey: "sk-abcdefghijklmnopqrstuvwxyz",
+    token: "Bearer secret-value-here",
+    initialBrain: { provider: "codex", model: "gpt-5.4", apiKey: "sk-nested-secret-key" },
+  });
+  assert.equal(args.task, "review the diff");
+  assert.equal(args.fromSessionId, "chat_1");
+  assert.equal(args.origin, "openclaw");
+  assert.deepEqual(args.initialBrain, { provider: "codex", model: "gpt-5.4" });
+  assert.equal("folder" in args, false);
+  assert.equal("apiKey" in args, false);
+  assert.equal("token" in args, false);
+  const dumped = JSON.stringify(args);
+  assert.doesNotMatch(dumped, /sk-abcdefghijklmnopqrstuvwxyz|secret-repo|sk-nested-secret-key|Bearer secret/);
+  const draft = inboundLearningDraft({
+    tool: "workhorse_delegate",
+    args: {
+      task: "review the diff",
+      fromSessionId: "chat_1",
+      traceId: "trace_9",
+      idempotencyKey: "idem_9",
+      apiKey: "sk-abcdefghijklmnopqrstuvwxyz",
+    },
+    ok: true,
+    resultText: JSON.stringify({ worker: "w1", transcript: "full chat dump" }),
+    rpcId: 7,
+  });
+  assert.equal(draft.actorClass, "agent");
+  assert.equal(draft.kind, "tool");
+  assert.equal(draft.provider, undefined);
+  assert.equal(draft.correlationId, "trace_9");
+  assert.equal(draft.payload.surface, "workhorse-link");
+  assert.equal(draft.payload.tool, "workhorse_delegate");
+  assert.equal(draft.payload.mutating, true);
+  assert.equal(draft.payload.worker, "w1");
+  assert.equal("transcript" in draft.payload, false);
+  assert.doesNotMatch(JSON.stringify(draft), /sk-abcdefghijklmnopqrstuvwxyz|full chat dump/);
+  const forbidden = inboundLearningDraft({
+    tool: "workhorse_delete_chat",
+    args: { chat: "x" },
+    ok: false,
+    errorDetail: "profile_forbidden",
+    rpcId: 8,
+  });
+  assert.equal(forbidden.payload.status, "forbidden");
+  assert.match(String(forbidden.payload.summary), /refused profile_forbidden/);
+  assert.equal(
+    eventsRequireAgentMemory([prepareEvent(draft)]),
+    true,
+    "a mutating Link call is agent evidence",
+  );
+  const listed = inboundLearningDraft({
+    tool: "workhorse_list_chats",
+    args: {},
+    ok: true,
+    resultText: "[]",
+    rpcId: 9,
+  });
+  assert.equal(listed.payload.mutating, false);
+  assert.equal(eventsRequireAgentMemory([prepareEvent(listed)]), false);
+  assert.match(agentCompilerPrompt([prepareEvent(draft)], []), /inbound Workhorse Link/);
+});
+
+test("inbound jsonl drains into Learning and Off leaves the sidecar", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wh-inbound-"));
+  const file = path.join(dir, "inbound.jsonl");
+  const io = {
+    mkdirSync: (dest: string, opts: { recursive: true }) => fs.mkdirSync(dest, opts),
+    appendFileSync: (dest: string, data: string, encoding: "utf8") => fs.appendFileSync(dest, data, encoding),
+    renameSync: (from: string, to: string) => fs.renameSync(from, to),
+    readFileSync: (dest: string, encoding: "utf8") => fs.readFileSync(dest, encoding),
+    unlinkSync: (dest: string) => fs.unlinkSync(dest),
+  };
+  const draft = inboundLearningDraft({
+    tool: "workhorse_delegate",
+    args: { task: "ship it", fromSessionId: "chat_1", traceId: "trace_in", idempotencyKey: "idem_in" },
+    ok: true,
+    resultText: JSON.stringify({ worker: "w9" }),
+    rpcId: 1,
+  });
+  appendInboundJsonl(file, draft, io);
+  const queued: unknown[] = [];
+  const offStore = new InMemoryStore(":memory:");
+  const off = new LearningService({
+    store: offStore,
+    settings: () => ({ mode: "off", autoRetrieve: false }),
+    allowStub: true,
+    drainInbound: () => {
+      const rows = drainInboundJsonl(file, io);
+      queued.push(...rows);
+      return rows;
+    },
+  });
+  assert.equal(off.ingestInbound(), 0);
+  assert.equal(queued.length, 0);
+  assert.equal(fs.existsSync(file), true);
+  const store = new InMemoryStore(":memory:");
+  const service = new LearningService({
+    store,
+    settings: () => ({ mode: "capture", autoRetrieve: false }),
+    allowStub: true,
+    drainInbound: () => drainInboundJsonl(file, io),
+  });
+  assert.equal(service.ingestInbound(), 1);
+  const events = store.listEvents();
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.payload.surface, "workhorse-link");
+  assert.equal(events[0]?.payload.worker, "w9");
+  assert.equal(events[0]?.provider, undefined);
+  assert.equal(fs.existsSync(file), false);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

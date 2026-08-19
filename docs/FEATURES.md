@@ -162,7 +162,7 @@ transcript rather than as a path.
 
 - A private learning store on your own disk, in SQLite.
 - The compiler is a custom bot. Settings → Learning can backfill the last day of human prompts from saved chats.
-- Human intent, agent performance, and mismatches between them compile as separate private lanes. Agent evidence includes model outcomes, terminal tools, retries, tests, artifacts, usage, and errors—not raw reasoning text.
+- Human intent, agent performance, and mismatches between them compile as separate private lanes. Agent evidence includes model outcomes, terminal tools, retries, tests, artifacts, usage, errors, and inbound Workhorse Link calls from a harness (tool, envelope, and outcome — not keys or chat text).
 - Settings shows index counts and inferred memories, not raw prompt text or internal provenance ids.
 - Export it, or wipe it, from Settings.
 - Nothing is sent anywhere to hold it.

@@ -48,6 +48,14 @@ import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
 import { LINK_MUTATING_TOOLS, LinkReplayCache, linkEnvelope, linkHandshake, type LinkEnvelope } from "../src/lib/workhorse-link";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
+import { effectiveLearningMode, learningCaptures } from "../src/lib/learning-policy";
+import {
+  appendInboundJsonl,
+  inboundJsonlFromStatePath,
+  inboundLearningDraft,
+  shouldCaptureInboundProfile,
+  type InboundLearningDraft,
+} from "../src/lib/learning-inbound";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -640,6 +648,44 @@ let deskAsk: DeskAsk | null = null;
 /** When MiniMax tools run inside Electron main, skip HTTP-to-self and hit the live desk. */
 export function setWorkhorseDeskAsk(handler: DeskAsk | null): void {
   deskAsk = handler;
+}
+
+type InboundLearningSink = (draft: InboundLearningDraft) => void;
+let inboundLearningSink: InboundLearningSink | null = null;
+
+/** In-process Learning records here. The MCP child writes a sidecar instead. */
+export function setInboundLearningSink(handler: InboundLearningSink | null): void {
+  inboundLearningSink = handler;
+}
+
+function emitInboundLearning(draft: InboundLearningDraft): void {
+  try {
+    if (inboundLearningSink) {
+      inboundLearningSink(draft);
+      return;
+    }
+    const settings = normalizeSettings(readState().settings);
+    if (!learningCaptures(effectiveLearningMode(settings.learning))) return;
+    const file = inboundJsonlFromStatePath(process.env.WORKHORSE_STATE_PATH ?? "");
+    if (!file) return;
+    appendInboundJsonl(file, draft, {
+      mkdirSync: (dir, opts) => {
+        fs.mkdirSync(dir, opts);
+      },
+      appendFileSync: (dest, data, encoding) => {
+        fs.appendFileSync(dest, data, encoding);
+      },
+      renameSync: (from, to) => {
+        fs.renameSync(from, to);
+      },
+      readFileSync: (dest, encoding) => fs.readFileSync(dest, encoding),
+      unlinkSync: (dest) => {
+        fs.unlinkSync(dest);
+      },
+    });
+  } catch {
+    /* capture must not fail the tool the harness called */
+  }
 }
 
 async function postBridge(
@@ -2053,13 +2099,32 @@ export async function handleWorkhorseRpc(
   if (message.method === "tools/call") {
     if (message.id === undefined) return undefined;
     const params = (message.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+    const toolName = params.name ?? "";
+    const toolArgs = params.arguments ?? {};
+    const capture = shouldCaptureInboundProfile(currentMcpProfile()) && Boolean(toolName.trim());
+    const captureCall = (ok: boolean, resultText?: string, errorDetail?: string) => {
+      if (!capture) return;
+      emitInboundLearning(
+        inboundLearningDraft({
+          tool: toolName,
+          args: toolArgs,
+          fromSessionId: ctx?.fromSessionId,
+          ok,
+          resultText,
+          errorDetail,
+          rpcId: message.id,
+        }),
+      );
+    };
     try {
-      const text = await callTool(params.name ?? "", params.arguments ?? {}, ctx?.fromSessionId);
+      const text = await callTool(toolName, toolArgs, ctx?.fromSessionId);
+      captureCall(true, text);
       return { jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      captureCall(false, undefined, detail);
       const delegation = currentMcpProfile() === "external-runtime" &&
-        (params.name === "workhorse_delegate" || params.name === "workhorse_spawn_agent");
+        (toolName === "workhorse_delegate" || toolName === "workhorse_spawn_agent");
       const delegationDetail = detail.trim().replace(/[.\s]+$/, "");
       return {
         jsonrpc: "2.0",
@@ -2070,7 +2135,7 @@ export async function handleWorkhorseRpc(
             ? `Workhorse delegation failed: ${delegationDetail}. Report this exact Workhorse error before any direct fallback.`
             : detail,
           ...(delegation
-            ? { data: { tool: params.name, workhorseExecution: "failed", fallback: "report-before-direct-execution" } }
+            ? { data: { tool: toolName, workhorseExecution: "failed", fallback: "report-before-direct-execution" } }
             : {}),
         },
       };

@@ -1000,6 +1000,7 @@ test("Settings and FEATURES name leftover share without a new tab", () => {
   assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors/);
   assert.match(features, /query leftover and availability/);
   assert.match(features, /never includes keys or\s+chat content/);
+  assert.match(features, /inbound Workhorse Link calls from a harness/);
 });
 
 test("workhorse_list_external_agents lists the catalog, not past tasks", async () => {

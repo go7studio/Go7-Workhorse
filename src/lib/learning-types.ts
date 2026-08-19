@@ -4,6 +4,7 @@ export const LEARNING_SCHEMA_VERSION = 3;
 export const LEARNING_REDACTION_VERSION = 1;
 export const LEARNING_DIR_NAME = "learning";
 export const LEARNING_DB_FILE = "learning.sqlite";
+export const LEARNING_INBOUND_FILE = "inbound.jsonl";
 
 export type LearningMode = "off" | "capture" | "review" | "automatic";
 

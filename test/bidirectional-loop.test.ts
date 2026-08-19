@@ -7,12 +7,11 @@ import {
   emptyTaskStore,
   reconcileExternalTask,
   startExternalTask,
-  usageEventForWorkhorseWorker,
 } from "../src/lib/external-task";
 import { inboundDeskAction } from "../electron/mcp-exposure";
 import { addLineupRow, emptyLineup } from "../src/lib/lineup";
 
-test("bidirectional matrix: outbound grant, inbound parent, loops, restart, usage", () => {
+test("bidirectional matrix: outbound grant, inbound parent, loops, and restart", () => {
   const grant = createWaveGrant({ waveId: "plan", runtimeId: "openclaw", agentId: "main", now: 1 });
   const outbound = startExternalTask({
     explicitTarget: "openclaw/main",
@@ -58,9 +57,6 @@ test("bidirectional matrix: outbound grant, inbound parent, loops, restart, usag
   });
   assert.equal(codex.ok, true);
   if (!codex.ok || codex.kind !== "spawn-workhorse") return;
-  const usage = [usageEventForWorkhorseWorker({ provider: "codex", model: "gpt-5.6", sessionId: "kid", now: 3 })];
-  assert.equal(usage[0]?.provider, "codex");
-
   const bounce = inboundDeskAction({
     profile: "external-runtime",
     tool: "workhorse_spawn_agent",

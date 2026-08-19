@@ -19,8 +19,6 @@ import type {
   ExternalTask,
   ExternalTaskStatus,
   McpExposureProfile,
-  ProviderId,
-  UsageEvent,
 } from "./types";
 
 export type TaskStore = {
@@ -101,26 +99,6 @@ export function externalTaskToLineupRow(task: ExternalTask, slice = ""): DeskLin
     agentId: task.ref.agentId,
     ...(task.workspace ? { workspace: task.workspace } : {}),
     correlationId: task.envelope.traceId,
-  };
-}
-
-export function usageEventForWorkhorseWorker(input: {
-  provider: ProviderId;
-  model: string;
-  sessionId: string;
-  now?: number;
-}): UsageEvent {
-  return {
-    id: `use_${input.sessionId}_${input.now ?? Date.now()}`,
-    at: input.now ?? Date.now(),
-    provider: input.provider,
-    model: input.model,
-    sessionId: input.sessionId,
-    inputTokens: 1,
-    outputTokens: 1,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    source: "turn",
   };
 }
 

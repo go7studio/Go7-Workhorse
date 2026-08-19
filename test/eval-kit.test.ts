@@ -58,20 +58,22 @@ test("Godot suite evidence rejects exit-zero parse failures", async () => {
   assert.equal(parseGodotSuiteOutput("RESULT passed=788 failed=1", 0).ok, false);
 });
 
-test("plan, device, learning, and performance contracts map to suite rubrics and commands", () => {
+test("plan, device, learning, performance, and usage contracts map to suite rubrics and commands", () => {
   const suite = json("eval/suite.json");
   const plan = json("eval/execution-plan-contract.json");
   const devices = json("eval/device-capability-contract.json");
   const learning = json("eval/learning-memory-contract.json");
   const performance = json("eval/performance-contract.json");
+  const usage = json("eval/usage-contract.json");
   const manifest = json("package.json");
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
-  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric, ...performance.requiredRubric]) assert.ok(rubric.has(id), id);
+  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric, ...performance.requiredRubric, ...usage.requiredRubric]) assert.ok(rubric.has(id), id);
   assert.ok(manifest.scripts[devices.probeCommand]);
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
   assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
   for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
+  for (const command of usage.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const file of performance.sourceFiles.filter((item: string) => /^test\/.*\.test\.ts$/.test(item))) {
     assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
   }
@@ -79,6 +81,11 @@ test("plan, device, learning, and performance contracts map to suite rubrics and
   assert.ok(manifest.scripts["eval:multi-model-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
+  assert.deepEqual(usage.profiles.map((profile: any) => profile.id), suite.profiles);
+  assert.match(usage.unknownUsagePolicy, /never (?:estimates|invents)/i);
+  assert.match(usage.presentationInvariants.join(" "), /weekly.*monthly/i);
+  assert.match(usage.presentationInvariants.join(" "), /Cursor Auto.*Other Models/i);
+  assert.match(usage.presentationInvariants.join(" "), /aliases.*canonical model row/i);
 });
 
 test("observed regressions stay mapped to live suite coverage", () => {

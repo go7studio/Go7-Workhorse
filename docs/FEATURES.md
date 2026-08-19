@@ -107,8 +107,8 @@ transcript rather than as a path.
 ## Spend
 
 - Usage recorded per vendor and per chat, from each vendor's own count: the
-  ACP turn total, or the HTTP response's usage block. A turn is estimated at
-  four characters a token only when the vendor sent no count — Cursor, so far.
+  ACP turn total, or the HTTP response's usage block. If a vendor sends no
+  count, the turn stays unknown; Workhorse does not invent tokens.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.

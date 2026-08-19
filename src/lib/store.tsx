@@ -226,9 +226,7 @@ import {
   finalizeTurnUsage,
   normalizeUsage,
   occupancyFromUsage,
-  estimateTurnTokens,
   rehomeCustomUsage,
-  backfillCursorUsage,
   usageHasBilledTokens,
   usageHomeForReport,
 } from "./usage";
@@ -511,7 +509,7 @@ function hydrate(value: unknown): AppState {
     : [];
   const rawSessions = reconcilePersistedLineups(normalizedSessions);
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
-  const usage = [...backfillCursorUsage(rawSessions, restored), ...restored];
+  const usage = restored;
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
@@ -807,15 +805,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!ready) return;
-    setState((current) => {
-      const extra = backfillCursorUsage(current.sessions, current.usage);
-      if (extra.length === 0) return current;
-      return { ...current, usage: [...extra, ...current.usage] };
-    });
-  }, [ready]);
 
   useEffect(() => {
     if (!ready || !window.workhorse) return;
@@ -2791,6 +2780,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
+    // Provider silence is unknown, not permission to estimate a bill.
+    if (draft.source === "estimate") return;
+    const model = normalizeModelId(draft.provider, draft.model);
+    const tokenCount = (value: unknown) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+    };
+    const inputTokens = tokenCount(draft.inputTokens);
+    const outputTokens = tokenCount(draft.outputTokens);
+    const cacheReadTokens = tokenCount(draft.cacheReadTokens);
+    const cacheWriteTokens = tokenCount(draft.cacheWriteTokens);
+    const contextUsed = draft.contextUsed === undefined ? undefined : tokenCount(draft.contextUsed);
+    const costUsd = typeof draft.costUsd === "number" && Number.isFinite(draft.costUsd) && draft.costUsd >= 0
+      ? draft.costUsd
+      : undefined;
     const turn = draft.sessionId ? learningTurns.current[draft.sessionId] : undefined;
     emitLearningEvent({
       kind: "usage",
@@ -2798,24 +2802,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       projectId: draft.projectId,
       sessionId: draft.sessionId,
       provider: draft.provider,
-      model: draft.model,
+      model,
       correlationId: turn?.correlationId,
       agentRunId: turn?.agentRunId,
       toolIds: turn?.toolIds,
       payload: {
         summary: `${draft.provider} usage`,
-        inputTokens: draft.inputTokens,
-        outputTokens: draft.outputTokens,
-        costUsd: draft.costUsd,
+        inputTokens,
+        outputTokens,
+        costUsd,
         signals: { adapterTerminal: true },
       },
     });
     setState((current) => {
       const sessionId = draft.sessionId ?? current.activeSessionId ?? undefined;
-      const inputTokens = Math.max(0, Math.round(draft.inputTokens));
-      const cacheReadTokens = Math.max(0, Math.round(draft.cacheReadTokens ?? 0));
-      const contextUsed =
-        draft.contextUsed === undefined ? undefined : Math.max(0, Math.round(draft.contextUsed));
       return {
         ...current,
         usage: [
@@ -2823,16 +2823,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             id: uid("use"),
             at: Date.now(),
             provider: draft.provider,
-            model: draft.model,
+            model,
             projectId: draft.projectId ?? current.activeProjectId ?? undefined,
             sessionId,
             customBotId: draft.customBotId,
-            lane: draft.lane ?? (draft.provider === "cursor" ? cursorUsageLane(draft.model) : undefined),
+            lane: draft.lane ?? (draft.provider === "cursor" ? cursorUsageLane(model) : undefined),
             inputTokens,
-            outputTokens: Math.max(0, Math.round(draft.outputTokens)),
+            outputTokens,
             cacheReadTokens,
-            cacheWriteTokens: Math.max(0, Math.round(draft.cacheWriteTokens ?? 0)),
-            costUsd: draft.costUsd,
+            cacheWriteTokens,
+            costUsd,
             contextUsed,
             ...(draft.source ? { source: draft.source } : {}),
           },
@@ -5467,27 +5467,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             recordUsage({
               ...folded,
               contextUsed: occupancyForSession(session, folded, grokContextSeen.current[event.sessionId]),
-            });
-          }
-        } else if (session?.provider === "cursor" || session?.provider === "custom") {
-          const queued = grokChunkQueue.current[event.sessionId] ?? "";
-          const assistant = [...session.messages].reverse().find((item) => item.role === "assistant");
-          const user = [...session.messages].reverse().find((item) => item.role === "user");
-          const estimated = estimateTurnTokens(user?.text ?? "", (assistant?.text ?? "").trim() || queued);
-          if (usageHasBilledTokens({ ...estimated, cacheReadTokens: 0, cacheWriteTokens: 0 })) {
-            recordUsage({
-              provider: session.provider,
-              model: session.model,
-              projectId: session.projectId ?? undefined,
-              sessionId: session.id,
-              customBotId: session.provider === "custom" ? session.customBotId : undefined,
-              lane: session.provider === "cursor" ? cursorUsageLane(session.model) : undefined,
-              inputTokens: estimated.inputTokens,
-              outputTokens: estimated.outputTokens,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              contextUsed: grokContextSeen.current[event.sessionId],
-              source: "estimate",
             });
           }
         }

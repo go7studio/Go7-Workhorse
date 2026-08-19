@@ -357,7 +357,7 @@ const TOOLS = [
   {
     name: "workhorse_list_bots",
     description:
-      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
+      "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {

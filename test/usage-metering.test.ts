@@ -144,16 +144,12 @@ test("a tool loop bills each request once, and only adds prompts the vendor spli
   assert.equal(folded.contextUsed, 520_000);
 });
 
-test("an estimate stands only when nothing measured arrived", () => {
-  const measured = finalizeTurnUsage([
-    { provider: "cursor", model: "composer-2.5", inputTokens: 349, outputTokens: 7168, source: "estimate" },
-    { provider: "cursor", model: "composer-2.5", inputTokens: 1200, outputTokens: 640, cacheReadTokens: 9000, source: "request" },
+test("persisted estimates are removed so missing usage stays unknown", () => {
+  const normalized = normalizeUsage([
+    { id: "guessed", at: 1, provider: "cursor", model: "composer-2.5", inputTokens: 349, outputTokens: 7168, source: "estimate" },
+    { id: "measured", at: 2, provider: "cursor", model: "composer-2.5", inputTokens: 1200, outputTokens: 640, cacheReadTokens: 9000, source: "request" },
   ]);
-  assert.equal(measured.inputTokens, 1200);
-  assert.equal(measured.source, "request");
-  const alone = finalizeTurnUsage([{ provider: "cursor", model: "composer-2.5", inputTokens: 349, outputTokens: 7168, source: "estimate" }]);
-  assert.equal(alone.inputTokens, 349);
-  assert.equal(alone.source, "estimate");
+  assert.deepEqual(normalized.map((event) => event.id), ["measured"]);
 });
 
 test("untagged drafts keep the old size-based fold, so events already on disk do not move", () => {
@@ -209,6 +205,17 @@ test("what a row shows adds up to what a row totals", () => {
   const fable = rows.find((row) => row.label === "claude-fable-5")!;
   assert.equal(formatIoLine(fable), "74 in · 3.9M cached · 31k out");
   assert.equal(fable.totalTokens, 31_256);
+  assert.equal(formatIoLine({ inputTokens: 0, outputTokens: 0, events: 0 }), "No token data");
+});
+
+test("retired Cursor model aliases share one truthful model row", () => {
+  const rows = byModel([
+    { id: "old", at: 1, provider: "cursor", model: "grok-4.6", inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    { id: "new", at: 2, provider: "cursor", model: "cursor-grok-4.6-high", inputTokens: 200, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.label, "cursor-grok-4.6-high");
+  assert.equal(rows[0]?.totalTokens, 330);
 });
 
 test("a worker's usage files under its bot, not the orchestrator's vendor", async () => {

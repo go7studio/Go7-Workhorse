@@ -186,7 +186,7 @@
     },
     {
       "id": "REG-021",
-      "behavior": "Turn, request, gauge, estimate, cache, and unknown usage finalize without inflation and book under the actual worker.",
+      "behavior": "Turn, request, gauge, cache, and unknown usage finalize without inflation or synthetic counts and book under the actual worker.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["USG-S1", "USG-S5"],
       "rubric": ["USG-01", "USG-02", "USG-08"],

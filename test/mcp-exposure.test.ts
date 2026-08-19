@@ -31,7 +31,6 @@ import {
   workhorseExternalMcpLaunch,
   workhorseExternalMcpServer,
 } from "../electron/mcp-install";
-import { usageEventForWorkhorseWorker } from "../src/lib/external-task";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 
 test("external-runtime allows execution discovery, delegation, chat, and worker lifecycle", () => {
@@ -97,7 +96,7 @@ test("empty parent on external-runtime spawn does not use the open chat", () => 
   assert.equal("code" in missing && missing.code, "context_required");
 });
 
-test("inbound list/read/ask succeed without a parent; spawn Codex with a parent meters", () => {
+test("inbound list/read/ask succeed without a parent; spawn keeps the selected provider", () => {
   const listed = inboundDeskAction({ profile: "external-runtime", tool: "workhorse_list_chats" });
   assert.equal(listed.ok, true);
   const asked = inboundDeskAction({ profile: "external-runtime", tool: "workhorse_ask_chat" });
@@ -118,9 +117,6 @@ test("inbound list/read/ask succeed without a parent; spawn Codex with a parent 
   assert.equal(spawn.ok, true);
   if (!spawn.ok || spawn.kind !== "spawn-workhorse") return;
   assert.equal(spawn.provider, "codex");
-  const usage = [usageEventForWorkhorseWorker({ provider: spawn.provider, model: "gpt-5.6", sessionId: "worker_1", now: 9 })];
-  assert.equal(usage[0]?.provider, "codex");
-  assert.equal(usage[0]?.sessionId, "worker_1");
 });
 
 test("workhorse_list_bots never returns OpenClaw or Hermes", () => {

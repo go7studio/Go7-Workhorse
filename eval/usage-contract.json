@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "unknownUsagePolicy": "A completed, failed, canceled, or restarted turn without an authoritative provider usage event creates no token row. Workhorse never estimates or invents token counts.",
+  "presentationInvariants": [
+    "A connected model with no authoritative usage event says No token data instead of displaying measured zeroes.",
+    "Provider-supplied weekly and monthly periods stay accurate in Usage, Watch, and bot-roster copy.",
+    "Cursor Auto belongs to the Other Models API pool while Composer and Cursor Grok stay in the Composer pool.",
+    "Retired model aliases merge into one canonical model row without changing token totals."
+  ],
+  "requiredRubric": ["USG-01", "USG-02", "USG-03", "USG-04", "USG-05", "USG-06", "USG-07", "USG-08"],
+  "profiles": [
+    {
+      "id": "grok-acp",
+      "provider": "grok",
+      "tokenSource": "ACP request or authoritative turn usage",
+      "tokenBoundary": "electron/grok-agent.ts",
+      "leftoverBoundary": "electron/grok-plan.ts",
+      "pools": ["grok"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "codex-acp",
+      "provider": "codex",
+      "tokenSource": "ACP request or authoritative turn usage",
+      "tokenBoundary": "electron/grok-agent.ts",
+      "leftoverBoundary": "electron/codex-plan.ts",
+      "pools": ["codex"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "claude-acp",
+      "provider": "claude",
+      "tokenSource": "ACP request or authoritative turn usage",
+      "tokenBoundary": "electron/grok-agent.ts",
+      "leftoverBoundary": "electron/claude-plan.ts",
+      "pools": ["claude"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "cursor-acp",
+      "provider": "cursor",
+      "tokenSource": "ACP request or authoritative turn usage when supplied; otherwise unknown",
+      "tokenBoundary": "electron/grok-agent.ts",
+      "leftoverBoundary": "electron/cursor-plan.ts",
+      "pools": ["cursor:cursor-models", "cursor:other-models"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "custom-openai",
+      "provider": "custom",
+      "tokenSource": "OpenAI-compatible response usage block per HTTP request",
+      "tokenBoundary": "electron/custom-http.ts",
+      "leftoverBoundary": "electron/custom-plan.ts",
+      "pools": ["custom-connection"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "custom-kimi",
+      "provider": "custom",
+      "tokenSource": "OpenAI-compatible response usage block per HTTP request",
+      "tokenBoundary": "electron/custom-http.ts",
+      "leftoverBoundary": "electron/custom-plan.ts",
+      "pools": ["custom-connection"],
+      "direct": true,
+      "orchestratedWorker": true
+    },
+    {
+      "id": "custom-anthropic",
+      "provider": "custom",
+      "tokenSource": "Anthropic-compatible response usage block per HTTP request",
+      "tokenBoundary": "electron/custom-http.ts",
+      "leftoverBoundary": "electron/custom-plan.ts",
+      "pools": ["custom-connection"],
+      "direct": true,
+      "orchestratedWorker": true
+    }
+  ],
+  "sourceFiles": [
+    "electron/grok-agent.ts",
+    "electron/custom-http.ts",
+    "electron/custom-host.ts",
+    "src/lib/store.tsx",
+    "src/lib/usage.ts",
+    "src/lib/watch.ts",
+    "src/lib/cursor-lane.ts",
+    "src/lib/models.ts",
+    "src/lib/grok-events.ts",
+    "electron/workhorse-mcp.ts",
+    "src/ui/UsagePane.tsx",
+    "src/ui/WatchPane.tsx",
+    "test/usage-metering.test.ts",
+    "test/subagent-usage.test.ts",
+    "test/custom-multi-model.test.ts",
+    "test/vendor-meter.test.ts"
+  ],
+  "verificationCommands": ["eval:validate", "verify"]
+}

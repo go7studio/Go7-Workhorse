@@ -14,6 +14,7 @@ const executionPlanPath = path.join(evalDir, "execution-plan-contract.json");
 const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json");
 const learningMemoryPath = path.join(evalDir, "learning-memory-contract.json");
 const performancePath = path.join(evalDir, "performance-contract.json");
+const usagePath = path.join(evalDir, "usage-contract.json");
 const regressionPath = path.join(evalDir, "regression-contract.json");
 const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
@@ -68,7 +69,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -78,6 +79,7 @@ async function validate() {
     json(deviceCapabilityPath),
     json(learningMemoryPath),
     json(performancePath),
+    json(usagePath),
     json(regressionPath),
     json(configExamplePath),
     json(packagePath),
@@ -96,6 +98,7 @@ async function validate() {
     deviceCapabilities.schemaVersion !== 1 ||
     learningMemory.schemaVersion !== 1 ||
     performance.schemaVersion !== 1 ||
+    usage.schemaVersion !== 1 ||
     regressions.schemaVersion !== 1 ||
     configExample.schemaVersion !== 1
   ) {
@@ -287,6 +290,43 @@ async function validate() {
   for (const command of performance.verificationCommands ?? []) {
     if (!packageManifest.scripts?.[command]) problems.push(`performance verification command is missing: ${command}`);
   }
+  const usageRubric = rubricIds.filter((id) => id.startsWith("USG-"));
+  if (!sameMembers(usage.requiredRubric ?? [], usageRubric)) {
+    problems.push(
+      "usage requiredRubric does not match the USG rubric " +
+      `(contract: ${(usage.requiredRubric ?? []).join(", ")}; suite: ${usageRubric.join(", ")})`,
+    );
+  }
+  if (!/never (?:estimates|invents)/i.test(usage.unknownUsagePolicy ?? "")) {
+    problems.push("usage unknown policy must forbid estimated or invented token counts");
+  }
+  if (!sameMembers((usage.profiles ?? []).map((profile) => profile.id), profileIds)) {
+    problems.push("usage-contract profiles and provider-matrix profiles differ");
+  }
+  const usagePresentation = (usage.presentationInvariants ?? []).join(" ");
+  for (const required of [/weekly.*monthly/i, /Cursor Auto.*Other Models/i, /aliases.*canonical model row/i]) {
+    if (!required.test(usagePresentation)) problems.push(`usage presentation invariant is missing: ${required}`);
+  }
+  for (const profile of usage.profiles ?? []) {
+    if (!providerNames.has(profile.provider)) problems.push(`usage profile ${profile.id} has an unknown provider`);
+    if (!profile.tokenSource?.trim() || !profile.tokenBoundary?.trim() || !profile.leftoverBoundary?.trim()) {
+      problems.push(`usage profile ${profile.id} is missing token or leftover provenance`);
+    }
+    if (!profile.direct || !profile.orchestratedWorker) {
+      problems.push(`usage profile ${profile.id} must cover direct and orchestrated worker calls`);
+    }
+    if (!profile.pools?.length) problems.push(`usage profile ${profile.id} has no pool contract`);
+  }
+  for (const file of usage.sourceFiles ?? []) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`usage source file is missing: ${file}`);
+    }
+  }
+  for (const command of usage.verificationCommands ?? []) {
+    if (!packageManifest.scripts?.[command]) problems.push(`usage verification command is missing: ${command}`);
+  }
   const defaultTestScript = packageManifest.scripts?.test ?? "";
   for (const file of (performance.sourceFiles ?? []).filter((item) => /^test\/.*\.test\.ts$/.test(item))) {
     if (!defaultTestScript.includes(file)) {
@@ -346,7 +386,7 @@ async function validate() {
       `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles, ` +
       `${regressionIds.length} regression contracts.`,
   );
-  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, regressions };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions };
 }
 
 function list({ suite, commands, providers }) {

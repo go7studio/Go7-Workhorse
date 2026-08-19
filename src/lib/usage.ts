@@ -1,6 +1,6 @@
 import { customBotServes, findCustomBotByModel } from "./custom-bots";
 import { projectedOccupancyAfterCompact } from "./portable-compaction";
-import { contextWindowFor, largestKnownContextWindow, modelsFor, usageModelKey, usageToneForModel } from "./models";
+import { contextWindowFor, largestKnownContextWindow, modelsFor, normalizeModelId, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
 import { vendorLabel, vendorTint } from "./settings";
 import {
@@ -46,45 +46,6 @@ export function eventTotal(event: UsageEvent): number {
   return event.inputTokens + event.outputTokens + event.cacheWriteTokens;
 }
 
-/** Fallback when a vendor turn reports no billed tokens. ~4 characters per token. */
-export function estimateTurnTokens(userText: string, assistantText: string): { inputTokens: number; outputTokens: number } {
-  const tokens = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return 0;
-    return Math.max(1, Math.round(trimmed.length / 4));
-  };
-  return { inputTokens: tokens(userText), outputTokens: tokens(assistantText) };
-}
-
-type CursorTurnMessage = {
-  role?: string;
-  text?: string;
-  createdAt?: number;
-};
-
-export function completedCursorTurns(
-  messages: CursorTurnMessage[],
-): Array<{ userText: string; assistantText: string; at: number }> {
-  const turns: Array<{ userText: string; assistantText: string; at: number }> = [];
-  let pending: { text: string; at: number } | undefined;
-  for (const message of messages) {
-    const text = (message.text ?? "").trim();
-    if (message.role === "user" && text) {
-      pending = { text, at: typeof message.createdAt === "number" ? message.createdAt : 0 };
-      continue;
-    }
-    if (message.role === "assistant" && text && pending) {
-      turns.push({
-        userText: pending.text,
-        assistantText: text,
-        at: typeof message.createdAt === "number" && message.createdAt > 0 ? message.createdAt : pending.at,
-      });
-      pending = undefined;
-    }
-  }
-  return turns;
-}
-
 function cursorLaneFromRecord(record: Record<string, unknown>, model: string): CursorUsageLane {
   const lane = record.lane;
   if (
@@ -97,41 +58,6 @@ function cursorLaneFromRecord(record: Record<string, unknown>, model: string): C
     return lane;
   }
   return cursorUsageLane(model);
-}
-
-/** Fill in Cursor turns that ACP never billed, or that hydrate used to drop. */
-export function backfillCursorUsage(
-  sessions: Array<Pick<Session, "id" | "provider" | "model" | "projectId" | "messages">>,
-  usage: UsageEvent[],
-): UsageEvent[] {
-  const extras: UsageEvent[] = [];
-  for (const session of sessions) {
-    if (session.provider !== "cursor") continue;
-    const turns = completedCursorTurns(session.messages);
-    const have = usage.filter((event) => event.sessionId === session.id).length;
-    if (have >= turns.length) continue;
-    const missing = turns.slice(0, turns.length - have);
-    for (const [index, turn] of missing.entries()) {
-      const estimated = estimateTurnTokens(turn.userText, turn.assistantText);
-      if (!usageHasBilledTokens(estimated)) continue;
-      const id = `use_cursor_${session.id}_${index}`;
-      if (usage.some((event) => event.id === id) || extras.some((event) => event.id === id)) continue;
-      extras.push({
-        id,
-        at: turn.at || Date.now(),
-        provider: "cursor",
-        model: session.model,
-        projectId: session.projectId ?? undefined,
-        sessionId: session.id,
-        lane: cursorUsageLane(session.model),
-        inputTokens: estimated.inputTokens,
-        outputTokens: estimated.outputTokens,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      });
-    }
-  }
-  return extras;
 }
 
 export function contextFromEvent(event: { inputTokens: number; cacheReadTokens?: number }): number {
@@ -675,11 +601,12 @@ export function byModel(events: UsageEvent[], customBots: CustomBot[] = []): Usa
   const map = new Map<string, UsageGroup>();
   for (const event of events) {
     const provider = event.provider;
+    const model = normalizeModelId(provider, event.model);
     const bot = provider === "custom" ? customBotForEvent(event, customBots) : undefined;
-    const key = bot ? `bot:${bot.id}:${usageModelKey(event.model)}` : `${provider}:${usageModelKey(event.model)}`;
+    const key = bot ? `bot:${bot.id}:${usageModelKey(model)}` : `${provider}:${usageModelKey(model)}`;
     const current = map.get(key) ?? {
       key,
-      label: event.model,
+      label: model,
       provider,
       ...(bot?.color ? { color: bot.color } : {}),
       ...EMPTY,
@@ -687,7 +614,7 @@ export function byModel(events: UsageEvent[], customBots: CustomBot[] = []): Usa
     map.set(key, {
       ...add(current, event),
       key,
-      label: event.model,
+      label: model,
       provider,
       ...(current.color ? { color: current.color } : {}),
     });
@@ -1330,7 +1257,13 @@ export function promptTokens(row: { inputTokens: number; cacheReadTokens?: numbe
  * against 3.9M of cached history said "3.9M in", beside a total that left the
  * cache out. Now the two figures are named apart, and both add up to the total.
  */
-export function formatIoLine(row: { inputTokens: number; outputTokens: number; cacheReadTokens?: number }): string {
+export function formatIoLine(row: {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  events?: number;
+}): string {
+  if (row.events === 0) return "No token data";
   const cached = row.cacheReadTokens ?? 0;
   const parts = [`${formatTokens(row.inputTokens)} in`];
   if (cached > 0) parts.push(`${formatTokens(cached)} cached`);
@@ -1663,6 +1596,15 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
+    // Older builds guessed Cursor/custom tokens from transcript characters and
+    // backfilled Cursor rows on restart. Those are not provider measurements.
+    // Drop the rows during hydration so a missing count remains unknown.
+    if (
+      record.source === "estimate" ||
+      (record.provider === "cursor" && typeof record.id === "string" && record.id.startsWith("use_cursor_"))
+    ) {
+      continue;
+    }
     if (
       record.provider !== "grok" &&
       record.provider !== "claude" &&
@@ -1673,26 +1615,34 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       continue;
     }
     if (typeof record.model !== "string" || !record.model) continue;
-    const inputTokens = Number(record.inputTokens) || 0;
-    const outputTokens = Number(record.outputTokens) || 0;
-    const cacheReadTokens = Number(record.cacheReadTokens) || 0;
-    const cacheWriteTokens = Number(record.cacheWriteTokens) || 0;
+    const tokenCount = (value: unknown) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+    };
+    const inputTokens = tokenCount(record.inputTokens);
+    const outputTokens = tokenCount(record.outputTokens);
+    const cacheReadTokens = tokenCount(record.cacheReadTokens);
+    const cacheWriteTokens = tokenCount(record.cacheWriteTokens);
+    const model = normalizeModelId(record.provider, record.model);
     const lane =
-      record.provider === "cursor" ? asCursorLane(record.lane) ?? cursorUsageLane(record.model) : undefined;
+      record.provider === "cursor" ? asCursorLane(record.lane) ?? cursorUsageLane(model) : undefined;
     events.push({
       id: typeof record.id === "string" ? record.id : `use_${events.length}`,
-      at: typeof record.at === "number" ? record.at : Date.now(),
+      at: typeof record.at === "number" && Number.isFinite(record.at) ? record.at : Date.now(),
       provider: record.provider,
-      model: record.model,
+      model,
       projectId: typeof record.projectId === "string" ? record.projectId : undefined,
       sessionId: typeof record.sessionId === "string" ? record.sessionId : undefined,
       customBotId: typeof record.customBotId === "string" && record.customBotId ? record.customBotId : undefined,
-      lane: record.provider === "cursor" ? cursorLaneFromRecord(record, record.model) : undefined,
+      lane: record.provider === "cursor" ? cursorLaneFromRecord(record, model) : undefined,
       inputTokens,
       outputTokens,
       cacheReadTokens,
       cacheWriteTokens,
-      costUsd: typeof record.costUsd === "number" ? record.costUsd : undefined,
+      costUsd:
+        typeof record.costUsd === "number" && Number.isFinite(record.costUsd) && record.costUsd >= 0
+          ? record.costUsd
+          : undefined,
       contextUsed:
         typeof record.contextUsed === "number" && Number.isFinite(record.contextUsed)
           ? Math.max(0, Math.round(record.contextUsed))

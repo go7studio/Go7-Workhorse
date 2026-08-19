@@ -198,7 +198,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   {
     name: "workhorse_list_bots",
     description:
-      "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false.",
+      "List built-in vendors and custom desk slots with leftover/Watch status. leftoverPercent is that vendor’s plan remaining overall, not this prompt. Do not spawn or ask a row whose canCall is false.",
     input_schema: { type: "object", properties: {} },
   },
   {

@@ -37,8 +37,8 @@ metadata → provider representation → model-visible evidence.
 
 Manual chats stay pinned until Auto is selected. Settings Routing applies to
 unassigned desk work, and explicit spawn assignments win. Usage evidence is
-classified as turn, request, gauge, estimate, or unknown and is attributed to
-the actual worker, connection, and model.
+classified as turn, request, gauge, or unknown and is attributed to the actual
+worker, connection, and model. Missing counts are never estimated.
 
 Learning adds a fourth chain: visible recent human prompt → redacted stable
 event → selected custom compiler bot and its credential → ephemeral brief →
@@ -87,6 +87,8 @@ The validator checks:
   source boundaries, and verification commands;
 - the large-desk performance contract maps its scale fixtures, rendering and
   persistence boundaries, verification commands, rubric items, and default tests;
+- every provider usage profile covers direct and orchestrated calls, authoritative
+  token and leftover boundaries, pool identity, and unknown-without-estimation behavior;
 - the baseline is a full commit and the example version matches package.json;
 - config and provider profiles agree; native-command examples stay runtime-discovered;
 - the Settings section inventory still matches the product.

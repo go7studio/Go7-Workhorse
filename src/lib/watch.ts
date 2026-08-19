@@ -24,7 +24,7 @@ import {
   planRingView,
   weeklyPlanLeftover,
 } from "./usage";
-import { cursorUsageLane, cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
+import { cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
 import { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
 export { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
@@ -59,6 +59,7 @@ export type WatchVendorStatus = {
   ringLeft?: number;
   ringLabel?: string;
   usedPercent?: number;
+  period?: GrokPlanUsage["period"];
   resetsAt?: string;
   prepaidBalance?: number;
   todayTokens: number;
@@ -667,6 +668,7 @@ export function watchVendorStatuses(input: {
       ringLeft: ring ? ring.value * 100 : leftover,
       ringLabel: ring?.label ?? (leftover != null ? `${Math.round(leftover)}%` : undefined),
       usedPercent,
+      period: plan?.period,
       resetsAt,
       prepaidBalance: plan && plan.prepaidBalance > 0 ? plan.prepaidBalance : undefined,
       todayTokens: today,
@@ -708,6 +710,7 @@ export type DeskCallRow = {
   kind: "vendor" | "custom";
   leftoverPercent?: number;
   usedPercent?: number;
+  period?: GrokPlanUsage["period"];
   resetsAt?: string;
   canCall: boolean;
   status: DeskCallStatus;
@@ -727,6 +730,7 @@ function deskCallRow(input: {
   enabled: boolean;
   leftover?: number;
   usedPercent?: number;
+  period?: GrokPlanUsage["period"];
   allowedPercent?: number;
   overPercent?: number;
   resetsAt?: string;
@@ -767,6 +771,7 @@ function deskCallRow(input: {
     kind: input.kind,
     leftoverPercent: input.leftover,
     usedPercent: input.usedPercent,
+    period: input.period,
     resetsAt: input.resetsAt,
     canCall,
     status: code,
@@ -798,8 +803,8 @@ export function deskCallCatalog(input: {
       const api = byKey.get("cursor:other-models");
       const connected = Boolean(link?.connected);
       const enabled = Boolean(link?.connected && link?.enabled !== false);
-      const composerModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "cursor-models" || item.id === "auto");
-      const apiModels = modelsFor("cursor").filter((item) => cursorUsageLane(item.id) === "other-models");
+      const composerModels = modelsFor("cursor").filter((item) => cursorWatchLane(item.id) === "cursor:cursor-models");
+      const apiModels = modelsFor("cursor").filter((item) => cursorWatchLane(item.id) === "cursor:other-models");
       rows.push(
         deskCallRow({
           key: "cursor:cursor-models",
@@ -812,6 +817,7 @@ export function deskCallCatalog(input: {
           enabled,
           leftover: composer?.leftover,
           usedPercent: composer?.usedPercent,
+          period: composer?.period,
           allowedPercent: composer?.allowedPercent,
           overPercent: composer?.overPercent,
           resetsAt: composer?.resetsAt,
@@ -830,6 +836,7 @@ export function deskCallCatalog(input: {
           enabled,
           leftover: api?.leftover,
           usedPercent: api?.usedPercent,
+          period: api?.period,
           allowedPercent: api?.allowedPercent,
           overPercent: api?.overPercent,
           resetsAt: api?.resetsAt,
@@ -851,6 +858,7 @@ export function deskCallCatalog(input: {
         enabled: Boolean(link?.connected && link?.enabled !== false),
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,
+        period: status?.period,
         allowedPercent: status?.allowedPercent,
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
@@ -878,6 +886,7 @@ export function deskCallCatalog(input: {
         enabled: customBotEnabled(bot),
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,
+        period: status?.period,
         allowedPercent: status?.allowedPercent,
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
@@ -973,14 +982,15 @@ export function deskCallBlockFor(
   return `${row.reason || `${row.name} is not callable right now.`} Do not wait, retry, or leave a hanging call.`;
 }
 
-export function formatWeeklyPlanLine(row: Pick<DeskCallRow, "leftoverPercent" | "usedPercent">): string {
-  if (row.leftoverPercent == null) return "weekly plan leftover not loaded yet";
+export function formatPlanLine(row: Pick<DeskCallRow, "leftoverPercent" | "usedPercent" | "period">): string {
+  const period = row.period === "monthly" ? "month" : row.period === "weekly" ? "week" : "plan";
+  if (row.leftoverPercent == null) return `${period} leftover not loaded yet`;
   const left = Math.round(row.leftoverPercent);
   const used =
     row.usedPercent != null && Number.isFinite(row.usedPercent)
       ? Math.round(row.usedPercent)
       : Math.max(0, 100 - left);
-  return `${left}% leftover of this week's plan overall (${used}% used this week so far — the whole week pool, not this prompt)`;
+  return `${left}% leftover of this ${period}'s plan overall (${used}% used this ${period} so far — the whole ${period} pool, not this prompt)`;
 }
 
 export function callableDeskRows(rows: DeskCallRow[]): DeskCallRow[] {
@@ -1003,10 +1013,10 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   const callable = callableDeskRows(attached);
   const lines = [
     "Desk bots on this Workhorse window:",
-    "Leftover and used percents are that vendor’s weekly plan total across every chat and tool, not the cost of one spawn or prompt.",
+    "Leftover and used percents are that vendor’s plan total across every chat and tool, not the cost of one spawn or prompt.",
   ];
   for (const row of attached) {
-    const leftover = formatWeeklyPlanLine(row);
+    const leftover = formatPlanLine(row);
     const flag = row.canCall
       ? row.kind === "custom"
         ? "you can call this (API key is on the desk)"
@@ -1034,10 +1044,10 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   }
   if (held.length === 0) lines.push("None of these are on Watch hold.");
   lines.push("Name every attached bot when asked. Only refuse to spawn or ask one if it says not callable.");
-  lines.push("If you mention leftover or used %, say it is the weekly plan overall, never this one shot.");
+  lines.push("If you mention leftover or used %, say it is the vendor plan overall, never this one shot.");
   return JSON.stringify(
     {
-      leftoverMeans: "Weekly plan remaining for that vendor across all chats, not this spawn or prompt.",
+      leftoverMeans: "Plan remaining for that vendor across all chats, not this spawn or prompt.",
       summary: lines.join("\n"),
       bots: attached.map((row) => ({ ...row, strengths: routingStrengths(row) })),
       routingRule: "Workhorse chooses from callable bots by task fit and capacity. Explicit user assignments win.",

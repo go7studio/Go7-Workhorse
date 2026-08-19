@@ -19,7 +19,7 @@ import {
   occupancyCannotHoldSend,
   evaluateWatchHold,
   formatDeskRoster,
-  formatWeeklyPlanLine,
+  formatPlanLine,
   projectCapacitySnapshot,
   type DeskCallRow,
   vendorCallBlocked,
@@ -573,15 +573,19 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.ok(callableDeskRows(unlocked).some((row) => row.id === "grok"));
   assert.ok(callableDeskRows(rows).some((row) => row.kind === "custom"));
   assert.equal(callableDeskRows(rows).some((row) => row.id === "grok"), false);
-  assert.match(roster, /weekly plan total|weekly plan remaining|not this prompt|not this spawn/);
+  assert.match(roster, /plan total|plan remaining|not this prompt|not this spawn/);
   assert.match(roster, /leftoverMeans/);
   assert.match(roster, /leave provider, model, and effort unset/);
   assert.match(roster, /Workhorse chooses from callable bots by task fit and capacity/);
   assert.match(
-    formatWeeklyPlanLine({ leftoverPercent: 43, usedPercent: 57 }),
+    formatPlanLine({ leftoverPercent: 43, usedPercent: 57, period: "weekly" }),
     /43% leftover of this week's plan overall \(57% used this week so far/,
   );
-  assert.match(formatWeeklyPlanLine({ leftoverPercent: 43, usedPercent: 57 }), /not this prompt/);
+  assert.match(formatPlanLine({ leftoverPercent: 43, usedPercent: 57, period: "weekly" }), /not this prompt/);
+  assert.match(
+    formatPlanLine({ leftoverPercent: 51, usedPercent: 49, period: "monthly" }),
+    /51% leftover of this month's plan overall \(49% used this month so far/,
+  );
   assert.doesNotMatch(roster, /only one bot/);
   assert.match(deskCallBlockFor(rows, { provider: "grok" }) ?? "", /leftover|Watch|bank|Do not wait/);
   assert.equal(deskCallBlockFor(unlocked, { provider: "grok" }), null);
@@ -661,6 +665,25 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     }),
     null,
   );
+});
+
+test("desk roster assigns Cursor Auto to the API pool it actually uses", () => {
+  const rows = deskCallCatalog({
+    settings: {
+      watch: { ...DEFAULT_WATCH, lockDaily: false },
+      customBots: [],
+      usageBudgets: {},
+      llms: { cursor: { connected: true } },
+    },
+    usage: [],
+    plans: {},
+    permits: {},
+  });
+  const composer = rows.find((row) => row.id === "cursor:cursor-models");
+  const api = rows.find((row) => row.id === "cursor:other-models");
+  assert.equal(composer?.models?.some((model) => model.id === "auto"), false);
+  assert.equal(api?.models?.some((model) => model.id === "auto"), true);
+  assert.equal(api?.model, "auto");
 });
 
 test("available LLMs include a keyed custom bot when stock vendors are a no-go", () => {

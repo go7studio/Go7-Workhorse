@@ -1457,7 +1457,7 @@
           "steps": [
             "Record the empty baseline, then send one deterministic prompt per profile.",
             "Capture raw provider/API usage events and the finalized Workhorse usage row.",
-            "Classify each event as authoritative turn, billable request, context gauge, estimate, or unknown before finalization.",
+            "Classify each event as authoritative turn, billable request, context gauge, or unknown before finalization.",
             "Switch models once and send again.",
             "Run one child turn and verify usage belongs to the worker's actual bot, model, and custom connection rather than the parent.",
             "Reconcile provider totals, model totals, input/output/cache tokens, context, and cost without double counting."
@@ -1506,8 +1506,8 @@
           "executor": "unit",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
-            "Feed authoritative turn, multiple request, context-gauge, estimate, and legacy untagged fixtures into finalization.",
-            "Verify an authoritative turn replaces lower-quality token evidence, requests sum once, gauges book no tokens, and estimate is used only as fallback.",
+            "Feed authoritative turn, multiple request, context-gauge, unknown, and legacy untagged fixtures into finalization.",
+            "Verify an authoritative turn replaces lower-quality token evidence, requests sum once, gauges book no tokens, and unknown creates no row.",
             "Run a routed worker and verify its usage home is the worker's actual bot rather than the orchestrator.",
             "Use two approved models on one custom connection and verify one connection ring retains separate truthful model rows.",
             "Verify canceled-before-send, failed preflight, and missing-usage ACP turns never invent tokens."
@@ -1589,7 +1589,7 @@
           "testability": "auto-partial",
           "profiles": ["cursor-acp"],
           "scenarios": ["USG-S4"],
-          "passCriteria": "Composer and API rings use independent source records, totals, thresholds, and Watch decisions; an ACP turn without a usage event creates no synthetic token count.",
+          "passCriteria": "Composer and API rings use independent source records, totals, thresholds, Watch decisions, and official weekly/monthly period labels; an ACP turn without a usage event creates no synthetic token count.",
           "evidence": "Cursor plan payloads, lane keys, Usage and Watch screenshots, raw ACP events, finalized usage row, and restart state."
         },
         {
@@ -1600,7 +1600,7 @@
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["USG-S1", "USG-S5"],
-          "passCriteria": "Authoritative turn usage wins, request usage sums once, gauges book no tokens, estimates are fallback only, unknown remains unknown, workers book under their actual bot, and custom models remain separate beneath one connection ring.",
+          "passCriteria": "Authoritative turn usage wins, request usage sums once, gauges book no tokens, unknown creates no synthetic count, workers book under their actual bot, and custom models remain separate beneath one connection ring.",
           "evidence": "Raw events with source classes, finalization trace, worker lineage, connection/model keys, Usage rows, and independent arithmetic."
         }
       ]

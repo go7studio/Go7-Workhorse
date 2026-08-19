@@ -224,8 +224,6 @@ import {
   modelsForProvider,
   customBotUsageEvents,
   deskUsageCards,
-  estimateTurnTokens,
-  backfillCursorUsage,
   leftoverForCard,
   leftoverMissingCopy,
   byModel,
@@ -1477,17 +1475,10 @@ test("parseGrokUsage reads ACP usage_update and token fields", () => {
   assert.equal(cursorNamed?.outputTokens, 12);
 });
 
-test("estimateTurnTokens covers Cursor turns that omit billed usage", () => {
-  const estimated = estimateTurnTokens("hello there", "pong");
-  assert.ok(estimated.inputTokens > 0);
-  assert.ok(estimated.outputTokens > 0);
-  assert.deepEqual(estimateTurnTokens("", ""), { inputTokens: 0, outputTokens: 0 });
-});
-
 test("normalizeUsage keeps Cursor composer events and their lane", () => {
   const hydrated = normalizeUsage([
     {
-      id: "use_cursor_keep",
+      id: "use_measured_cursor",
       at: 10,
       provider: "cursor",
       model: "composer-2.5",
@@ -1505,28 +1496,49 @@ test("normalizeUsage keeps Cursor composer events and their lane", () => {
   assert.equal(hydrated[0].lane, "cursor-models");
 });
 
-test("backfillCursorUsage estimates missing Composer turns", () => {
-  const session = {
-    id: "sess_cursor_gap",
-    provider: "cursor" as const,
-    model: "composer-2.5",
-    projectId: "proj_1",
-    messages: [
-      { role: "user" as const, text: "hello there", createdAt: 1 },
-      { role: "assistant" as const, text: "pong from composer", createdAt: 2 },
-      { role: "user" as const, text: "again please", createdAt: 3 },
-      { role: "assistant" as const, text: "pong two", createdAt: 4 },
-    ],
-  };
-  const first = backfillCursorUsage([session], []);
-  assert.equal(first.length, 2);
-  assert.ok(first.every((event) => event.provider === "cursor" && event.lane === "cursor-models"));
-  assert.ok(first[0].inputTokens > 0 && first[0].outputTokens > 0);
-  const once = backfillCursorUsage([session], first);
-  assert.equal(once.length, 0);
-  const partial = backfillCursorUsage([session], [first[1]]);
-  assert.equal(partial.length, 1);
-  assert.equal(partial[0].id, first[0].id);
+test("normalizeUsage removes guessed rows and repairs invalid persisted counts", () => {
+  const hydrated = normalizeUsage([
+    {
+      id: "use_estimate",
+      at: 1,
+      provider: "cursor",
+      model: "composer-2.5",
+      inputTokens: 12,
+      outputTokens: 4,
+      source: "estimate",
+    },
+    {
+      id: "use_cursor_old_backfill_0",
+      at: 2,
+      provider: "cursor",
+      model: "composer-2.5",
+      inputTokens: 12,
+      outputTokens: 4,
+    },
+    {
+      id: "use_measured",
+      at: 3,
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      inputTokens: -12,
+      outputTokens: 4.6,
+      cacheReadTokens: Number.POSITIVE_INFINITY,
+      cacheWriteTokens: "9",
+      costUsd: Number.NaN,
+      source: "turn",
+    },
+  ]);
+  assert.equal(hydrated.length, 1);
+  assert.deepEqual(
+    {
+      input: hydrated[0]?.inputTokens,
+      output: hydrated[0]?.outputTokens,
+      cacheRead: hydrated[0]?.cacheReadTokens,
+      cacheWrite: hydrated[0]?.cacheWriteTokens,
+    },
+    { input: 0, output: 5, cacheRead: 0, cacheWrite: 9 },
+  );
+  assert.equal(hydrated[0]?.costUsd, undefined);
 });
 
 test("collapseInflatedUsage drops used-as-input snapshots and duplicate finals", () => {

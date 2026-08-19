@@ -650,7 +650,7 @@ export function UsagePane({
           <div className="usage-facts">
             <div className="usage-fact">
               <span>API traffic</span>
-              <strong>{formatTokens(focused.inputTokens + focused.outputTokens)}</strong>
+              <strong>{focused.events > 0 ? formatTokens(focused.inputTokens + focused.outputTokens) : "-"}</strong>
             </div>
             <div className="usage-fact">
               <span>{plan ? "Used" : "Cost"}</span>

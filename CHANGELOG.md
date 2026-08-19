@@ -8,6 +8,18 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.4](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.3...v0.6.4) (2026-08-19)
+
+
+### Bug Fixes
+
+* keep a slowly loading chat pinned to the latest turn ([#74](https://github.com/go7studio/Go7-Workhorse/issues/74)) ([806b4c9](https://github.com/go7studio/Go7-Workhorse/commit/806b4c97790e00ea3f195ffc2bbce23c76340475))
+
+
+### Performance Improvements
+
+* keep large desks responsive ([c67910a](https://github.com/go7studio/Go7-Workhorse/commit/c67910a522d0598fbab190c4a878d1ef9518305f))
+
 ## [0.6.3](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.2...v0.6.3) (2026-08-19)
 
 

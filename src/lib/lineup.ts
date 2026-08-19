@@ -336,8 +336,12 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
     if (!row) continue;
     const workerName = child.workerName ?? workerNameFromTitle(child.title);
     const title = workerName ? workerTaskTitle(workerName, row.title) : child.title;
-    if (workerName && (workerName !== child.workerName || title !== child.title)) {
-      next[childIndex] = { ...next[childIndex]!, workerName, title };
+    if (child.status !== "idle" || (workerName && (workerName !== child.workerName || title !== child.title))) {
+      next[childIndex] = {
+        ...next[childIndex]!,
+        status: "idle",
+        ...(workerName ? { workerName, title } : {}),
+      };
       changed = true;
     }
     // A row written by an older build says "failed" for the same interruption

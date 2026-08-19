@@ -16,6 +16,35 @@ const deskRoute: RoutingDecision = {
   reason: "desk",
 };
 
+test("named desk spawn with Routing, Include harnesses, and a grant stays on the desk", () => {
+  const grant = createWaveGrant({ waveId: "w", runtimeId: "openclaw", agentId: "main" });
+  const routing = { enabled: true, includeExternalAgents: true };
+  const candidates = [{ runtimeId: "openclaw" as const, agentId: "main" }];
+  for (const named of [
+    { namedProvider: "codex" },
+    { namedModel: "gpt-5.6" },
+    { namedChat: "Kimi" },
+  ]) {
+    const decision = decideDispatch({
+      ...named,
+      routing,
+      grant,
+      externalCandidates: candidates,
+    });
+    assert.notEqual(decision.kind, "external-agent", JSON.stringify(named));
+    assert.equal(decision.kind, "desk");
+  }
+  const withRoute = decideDispatch({
+    namedProvider: "codex",
+    routing,
+    grant,
+    deskRoute,
+    externalCandidates: candidates,
+  });
+  assert.equal(withRoute.kind, "desk-model");
+  if (withRoute.kind === "desk-model") assert.equal(withRoute.route.provider, "codex");
+});
+
 test("named Workhorse provider wins", () => {
   const decision = decideDispatch({
     namedProvider: "codex",

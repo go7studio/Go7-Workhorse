@@ -193,6 +193,9 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(store, /caller\.planRun\?\.externalGrant/);
   assert.match(store, /exposure !== "external-runtime"/);
   assert.match(store, /decideDispatch\(/);
+  assert.match(store, /namedProvider: payload\.provider/);
+  assert.match(store, /namedModel: payload\.model/);
+  assert.match(store, /namedChat: payload\.chat/);
   assert.match(store, /routing: latest\.settings\.routing/);
   assert.match(store, /acceptInboundEnvelope/);
   assert.match(store, /if \(ready\) void refreshAgentRuntimes\(\)/);

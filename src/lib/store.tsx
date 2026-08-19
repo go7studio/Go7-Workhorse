@@ -4083,6 +4083,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
             }
             const dispatch = decideDispatch({
+              namedProvider: payload.provider,
+              namedModel: payload.model,
+              namedChat: payload.chat,
               namedExternal: parseExternalAgentRef(payload.provider) ?? parseExternalAgentRef(payload.chat),
               routing: latest.settings.routing,
               grant: caller.planRun?.externalGrant,

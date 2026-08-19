@@ -161,6 +161,61 @@ export function groupTranscript(messages: ChatMessage[]): TranscriptBlock[] {
   return blocks;
 }
 
+export type TranscriptGrouper = {
+  group: (messages: ChatMessage[]) => TranscriptBlock[];
+  rebuiltFrom: () => number;
+};
+
+/**
+ * Keep completed turns stable while the live turn streams. React can then
+ * preserve every older turn instead of reparsing the whole transcript.
+ */
+export function createTranscriptGrouper(): TranscriptGrouper {
+  let previous: ChatMessage[] = [];
+  let blocks: TranscriptBlock[] = [];
+  let lastRebuiltFrom = 0;
+  return {
+    group(messages) {
+      if (messages === previous) return blocks;
+      let shared = 0;
+      const limit = Math.min(previous.length, messages.length);
+      while (shared < limit && previous[shared] === messages[shared]) shared += 1;
+      if (shared === previous.length && shared === messages.length) {
+        previous = messages;
+        return blocks;
+      }
+
+      let from = Math.min(shared, messages.length);
+      while (from > 0 && messages[from]?.role !== "user") from -= 1;
+      const boundary = messages[from];
+      const cut = boundary?.role === "user"
+        ? blocks.findIndex((block) => block.type === "user" && block.message.id === boundary.id)
+        : 0;
+      const prefix = cut < 0 ? [] : blocks.slice(0, cut);
+      blocks = [...prefix, ...groupTranscript(messages.slice(from))];
+      previous = messages;
+      lastRebuiltFrom = from;
+      return blocks;
+    },
+    rebuiltFrom: () => lastRebuiltFrom,
+  };
+}
+
+/** Bounded path context avoids joining an entire long chat on every paint. */
+export function recentTranscriptText(messages: ChatMessage[], maxChars = 64_000): string {
+  if (maxChars <= 0) return "";
+  const parts: string[] = [];
+  let used = 0;
+  for (let index = messages.length - 1; index >= 0 && used < maxChars; index -= 1) {
+    const text = messages[index]?.text ?? "";
+    if (!text) continue;
+    const remaining = maxChars - used;
+    parts.push(text.length > remaining ? text.slice(text.length - remaining) : text);
+    used += Math.min(text.length, remaining) + 1;
+  }
+  return parts.reverse().join("\n");
+}
+
 export function workStepKinds(steps: Array<{ type: string }>): string[] {
   return steps.map((step) => step.type);
 }

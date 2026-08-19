@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { splitGoalCommand } from "../lib/commands";
 import { attachmentLabel, groupAttachments, imageSrc, isPicture } from "../lib/images";
 import { peerPromptParts } from "../lib/session-bridge";
-import { useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
 import type { ChatImage, ChatMessage } from "../lib/types";
 import { ImageZoom } from "./ImageZoom";
 import { useMediaPaintReady } from "./MediaPaint";
@@ -17,9 +17,30 @@ function DeferredChatImage({ image }: { image: ChatImage }) {
   return <ImageZoom className="say-image" src={imageSrc(image)} alt={image.name} />;
 }
 
-export function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
-  const store = useStore();
-  const editing = store.editMessageId === message.id;
+type UserTurnStore = {
+  editing: boolean;
+  requestEditMessage: (id: string) => void;
+  clearEditMessage: () => void;
+  resendFrom: (id: string, text: string) => void;
+  forkFrom: (id: string) => void;
+};
+
+const sameUserTurnStore = (left: UserTurnStore, right: UserTurnStore) =>
+  left.editing === right.editing &&
+  left.requestEditMessage === right.requestEditMessage &&
+  left.clearEditMessage === right.clearEditMessage &&
+  left.resendFrom === right.resendFrom &&
+  left.forkFrom === right.forkFrom;
+
+export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
+  const store = useStoreSelector((desk) => ({
+    editing: desk.editMessageId === message.id,
+    requestEditMessage: desk.requestEditMessage,
+    clearEditMessage: desk.clearEditMessage,
+    resendFrom: desk.resendFrom,
+    forkFrom: desk.forkFrom,
+  }), sameUserTurnStore);
+  const editing = store.editing;
   const [draft, setDraft] = useState(message.text);
   const field = useRef<HTMLTextAreaElement>(null);
 
@@ -33,7 +54,7 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
       el.style.height = "0px";
       el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
       el.setSelectionRange(el.value.length, el.value.length);
-    });
+});
   }, [editing, message.text]);
 
   if (editing && !readOnly) {
@@ -137,4 +158,4 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
       />
     </article>
   );
-}
+});

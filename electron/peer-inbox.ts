@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ChatImage } from "../src/lib/types";
+import type { ChatImage, MissionIteration } from "../src/lib/types";
 
 export type PeerAction =
   | "list"
@@ -61,6 +61,12 @@ export type PeerAsk = {
   onlyThis?: boolean;
   scope?: string;
   wait?: boolean;
+  /** Delegate calls ask the first worker to make and report a bounded execution strategy. */
+  mission?: boolean;
+  /** Present only for an explicitly enabled adaptive sequential mission. */
+  missionIteration?: MissionIteration;
+  /** Restrict await aggregation to these workers instead of the parent's full history. */
+  workerIds?: string[];
   route?: "auto" | "quick" | "balanced" | "deep";
   planStepId?: string;
   planTitle?: string;

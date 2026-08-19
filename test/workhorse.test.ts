@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./performance.test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -77,12 +78,15 @@ import {
   isHiddenSession,
   isSpawnOnlyPrompt,
   nestedSpawnError,
+  nextMissionIteration,
   normalizeAgentRun,
+  normalizeMissionIteration,
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
   MIN_ROOT_WORKERS,
   rootSpawnError,
+  scopedChildAgentIds,
   resolveModelHint,
   resolveSpawnSpec,
   shouldSpawnInsteadOfAsk,
@@ -122,6 +126,7 @@ import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
+  WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
   parseWorkhorseBuildChannel,
@@ -951,6 +956,69 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
     { id: "a", parentId: "parent", agentRun: { status: "completed", startedAt: 1, isolation: "shared", changedFiles: ["C:\\repo\\a.ts"] } },
     { id: "b", parentId: "parent", agentRun: { status: "running", startedAt: 2, isolation: "shared" } },
   ], "b", ["C:/repo/a.ts"]), ["C:\\repo\\a.ts"]);
+});
+
+test("adaptive missions continue one terminal pass at a time", () => {
+  const mission = normalizeMissionIteration({
+    id: "mission_1",
+    mode: "adaptive",
+    objective: "Ship the verified feature",
+    acceptanceCriteria: ["Tests pass", "Feature is visible"],
+    iteration: 1,
+    maxIterations: 3,
+    previousWorkerIds: [],
+  });
+  assert.ok(mission);
+  const worker = normalizeSession({
+    id: "worker_1",
+    parentId: "parent",
+    hidden: true,
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    title: "Wren · First pass",
+    status: "idle",
+    messages: [],
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission },
+  });
+  assert.ok(worker);
+  const next = nextMissionIteration([worker!], "parent", ["worker_1"]);
+  assert.equal(next.ok, true);
+  if (!next.ok) return;
+  assert.equal(next.mission.iteration, 2);
+  assert.deepEqual(next.mission.previousWorkerIds, ["worker_1"]);
+  assert.deepEqual(next.mission.acceptanceCriteria, ["Tests pass", "Feature is visible"]);
+  const stale = nextMissionIteration([worker!], "parent", ["worker_1"], 2);
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.match(stale.error, /no longer matches/);
+
+  const running = normalizeSession({
+    ...worker,
+    id: "worker_running",
+    agentRun: { status: "running", startedAt: 3, isolation: "shared", mission },
+  });
+  const runningDecision = nextMissionIteration([running!], "parent", ["worker_running"]);
+  assert.equal(runningDecision.ok, false);
+  if (!runningDecision.ok) assert.match(runningDecision.error, /interrupted|running/);
+
+  const newer = normalizeSession({
+    ...worker,
+    id: "worker_2",
+    agentRun: { status: "completed", startedAt: 3, finishedAt: 4, isolation: "shared", mission: next.mission },
+  });
+  const duplicate = nextMissionIteration([worker!, newer!], "parent", ["worker_1"]);
+  assert.equal(duplicate.ok, false);
+  if (!duplicate.ok) assert.match(duplicate.error, /already continued/);
+
+  const finalMission = { ...next.mission, iteration: 3, maxIterations: 3 };
+  const finalWorker = normalizeSession({
+    ...worker,
+    id: "worker_3",
+    agentRun: { status: "completed", startedAt: 5, finishedAt: 6, isolation: "shared", mission: finalMission },
+  });
+  const limited = nextMissionIteration([finalWorker!], "parent", ["worker_3"]);
+  assert.equal(limited.ok, false);
+  if (!limited.ok) assert.match(limited.error, /iteration limit/);
 });
 
 test("Workhorse chat tools read as talking to another chat", () => {
@@ -1981,7 +2049,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-file/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /FileOpenProvider/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{session\.messages/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{nearby\}/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "turns.ts"), "utf8"), /recentTranscriptText/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileOpen.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWindowOpenHandler/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /shell\.openExternal/);
@@ -2433,6 +2502,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   const names = ((listedTools as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
   assert.deepEqual(names, [
     "workhorse_delegate",
+    "workhorse_continue_mission",
     "workhorse_list_chats",
     "workhorse_read_chat",
     "workhorse_ask_chat",
@@ -4542,7 +4612,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(sidebar, /function ProjectFolder/);
   assert.match(sidebar, /className=\{`project-folder/);
-  assert.match(sidebar, /useProjectSessions\(project\.id\)/);
+  assert.match(sidebar, /index\.liveByProject\.get\(project\.id\)/);
   assert.match(sidebar, /startSession\(project\.id\)/);
   assert.match(sidebar, /startSession\(null\)/);
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
@@ -4643,9 +4713,9 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(css, /\.chat-move-panel/);
   assert.match(css, /\.place-project/);
   assert.match(sidebar, /Show more/);
-  assert.match(sidebar, /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(sidebar, /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(sidebar, /settingsOpen/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /panel !== "settings"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /!desk\.settingsOpen/);
   assert.equal(PROJECT_CHAT_LIMIT, 5);
   const rows = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id: String(id) }));
   assert.deepEqual(visibleProjectChats(rows, false).map((item) => item.id), ["1", "2", "3", "4", "5"]);
@@ -6107,6 +6177,7 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   }
   assert.deepEqual(splitGoalCommand("/goal"), { name: "/goal", rest: "" });
   assert.deepEqual(splitGoalCommand("/goal ship the backlog"), { name: "/goal", rest: " ship the backlog" });
+  assert.deepEqual(splitGoalCommand("/loop verify the release"), { name: "/loop", rest: " verify the release" });
   assert.equal(splitGoalCommand("/plan"), null);
   assert.equal(splitGoalCommand("please /goal later"), null);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8"), /chat-command/);
@@ -6128,6 +6199,9 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.deepEqual(parseGoalInput("/pause"), { action: "pause", objective: "" });
   assert.deepEqual(parseGoalInput("/goal resume"), { action: "resume", objective: "" });
   assert.deepEqual(parseGoalInput("/goal clear"), { action: "clear", objective: "" });
+  assert.deepEqual(parseGoalInput("/loop ship and verify"), { action: "set", objective: "ship and verify" });
+  assert.deepEqual(parseGoalInput("set a goal to ship the backlog"), { action: "set", objective: "ship the backlog" });
+  assert.deepEqual(parseGoalInput("set a loop for verify every gate"), { action: "set", objective: "verify every gate" });
   assert.equal(goalHaltsVendor("/goal pause"), true);
   assert.equal(goalHaltsVendor("/pause"), true);
   assert.equal(goalHaltsVendor("/goal clear"), true);
@@ -6157,7 +6231,10 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.match(queuedGoal?.[0].queue?.[0]?.vendorText ?? "", /ongoing Workhorse goal/);
   assert.notEqual(queuedGoal?.[0].queue?.[0]?.hideUser, true);
   const set = applyGoalCommand(undefined, "/goal ship the 18 features in BACKLOG.md");
-  assert.deepEqual(set, { status: "active", objective: "ship the 18 features in BACKLOG.md" });
+  assert.deepEqual(set, { status: "active", objective: "ship the 18 features in BACKLOG.md", mode: "goal" });
+  const loop = applyGoalCommand(undefined, "set a loop to ship and certify the app");
+  assert.equal(loop?.mode, "loop");
+  assert.equal(goalDisplay(loop)?.title, "Loop");
   const viewed = applyGoalCommand(set, "/goal");
   assert.deepEqual(viewed, set);
   const paused = applyGoalCommand(set, "/goal pause");
@@ -6175,6 +6252,7 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.deepEqual(pausedView?.actions, ["resume", "clear"]);
   assert.equal(goalDisplay(undefined), null);
   assert.equal(goalCommandForAction("pause"), "/goal pause");
+  assert.equal(goalCommandForAction("resume", "loop"), "/loop resume");
   assert.match(goalVendorPrompt(set!, "set"), /concrete progress/);
   assert.match(goalVendorPrompt(resumed!, "resume"), /Do not only acknowledge/);
   const persisted = normalizeSession({
@@ -6189,9 +6267,9 @@ test("Goal state set pause resume clear maps to display actions", () => {
     status: "idle",
     messages: [],
     contextUsed: 0,
-    goal: { status: "paused", objective: "keep going" },
+    goal: { status: "paused", objective: "keep going", mode: "goal" },
   });
-  assert.deepEqual(persisted?.goal, { status: "paused", objective: "keep going" });
+  assert.deepEqual(persisted?.goal, { status: "paused", objective: "keep going", mode: "goal" });
   const finishedDesk = normalizeSession({
     id: "goal_done",
     projectId: null,
@@ -6316,12 +6394,24 @@ test("Grok chats send native /goal and skill slashes; desk wrap stays off Grok",
   assert.equal(advertised?.find((command) => command.name === "/local:commit")?.run, "grok");
   const withAcp = commandsForSession({ provider: "grok", grokCommands: advertised });
   assert.equal(withAcp.find((command) => command.name === "/goal")?.run, "grok");
+  assert.equal(withAcp.find((command) => command.name === "/loop")?.run, "grok");
+  assert.equal(commandsForSession({ provider: "codex" }).find((command) => command.name === "/loop")?.run, "goal");
   assert.ok(withAcp.some((command) => command.name === "/local:commit"));
 
   const grokSet = prepareVendorSend({ provider: "grok", text: "/goal ship the backlog" });
   assert.equal(grokSet.vendorText, "/goal ship the backlog");
   assert.equal(grokSet.skipVendor, false);
   assert.doesNotMatch(grokSet.vendorText, /ongoing Workhorse goal/);
+  const grokWorkhorseLoop = prepareVendorSend({ provider: "grok", text: "set a loop to ship and certify" });
+  assert.match(grokWorkhorseLoop.vendorText, /opt-in Workhorse loop/);
+  assert.match(grokWorkhorseLoop.vendorText, /independent root slices in parallel/);
+  const grokLoopResume = prepareVendorSend({
+    provider: "grok",
+    text: "/loop resume",
+    goal: { status: "paused", objective: "ship and certify", mode: "loop" },
+  });
+  assert.match(grokLoopResume.vendorText, /Resume the active Workhorse loop/);
+  assert.equal(grokLoopResume.skipVendor, false);
   const grokBudget = prepareVendorSend({ provider: "grok", text: "/goal --budget 80000 migrate auth" });
   assert.equal(grokBudget.vendorText, "/goal --budget 80000 migrate auth");
   assert.equal(parseGrokGoalLine("/goal --budget 80000 migrate auth")?.objective, "migrate auth");
@@ -6431,7 +6521,7 @@ test("Grok chats send native /goal and skill slashes; desk wrap stays off Grok",
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /filterPalette\(value, extras\)/);
   const bar = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
-  assert.match(bar, /store\.send\(goalCommandForAction\(action\)\)/);
+  assert.match(bar, /store\.send\(goalCommandForAction\(action, view\?\.mode\)\)/);
 
   const mirrored = nextGoalForSend("grok", undefined, "/goal migrate auth", true);
   assert.deepEqual(mirrored, { status: "active", objective: "migrate auth" });
@@ -7569,6 +7659,36 @@ test("switching This-chat vendor drops the previous vendor session", () => {
     }),
     "GPT-5.6-Terra · Medium · Done",
   );
+  assert.equal(
+    workerSidebarLabel({
+      id: "worker_pass_2",
+      parentId: "orchestrator",
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      effort: "medium",
+      title: "Wren · Verify repairs",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "running",
+      contextUsed: 0,
+      messages: [],
+      agentRun: {
+        status: "running",
+        startedAt: 2,
+        isolation: "shared",
+        mission: {
+          id: "mission_1",
+          mode: "adaptive",
+          objective: "Finish repairs",
+          acceptanceCriteria: ["Tests pass"],
+          iteration: 2,
+          maxIterations: 3,
+          previousWorkerIds: ["worker_pass_1"],
+        },
+      },
+    }),
+    "Sonnet 4.6 · Medium · Pass 2 · Working…",
+  );
   const listed = catalogSessions({
     sessions: [
       {
@@ -7792,6 +7912,21 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   };
   assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch"), true);
   assert.equal(parentHasRunningChildren([kidDone], "orch"), false);
+  assert.equal(parentHasRunningChildren([kidRunning, kidDone], "orch", new Set([kidDone.id])), false);
+  const oldDone = {
+    ...kidDone,
+    id: "kid_old",
+    agentRun: { ...kidDone.agentRun!, correlationId: "trace_old" },
+  };
+  const waveDone = {
+    ...kidDone,
+    id: "kid_wave",
+    agentRun: { ...kidDone.agentRun!, correlationId: "trace_wave" },
+  };
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { lineupChildIds: [waveDone.id] }), [waveDone.id]);
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { traceId: "trace_wave" }), [waveDone.id]);
+  assert.deepEqual(scopedChildAgentIds([oldDone, waveDone], "orch", { workerIds: [oldDone.id] }), [oldDone.id]);
+  assert.deepEqual(collectChildAgentReports([oldDone, waveDone], "orch", new Set([waveDone.id])).map((row) => row.childSessionId), [waveDone.id]);
   assert.equal(rootSpawnError([kidRunning], "orch"), null);
   // A seven-bot desk gets a seven-worker lineup. The old flat cap of 2 rejected
   // the third spawn of the seven the desk skill asks for.
@@ -8016,10 +8151,10 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   });
   assert.equal(persisted?.lineup?.rows.length, 2);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /addLineupRow/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nestProjectChats/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "sidebar-index.ts"), "utf8"), /nestProjectChats/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /openCrew/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /workersOpen=\{Boolean\(openCrew/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /currentColor 70%/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /crew-twist/);
 
@@ -8185,6 +8320,35 @@ test("desk builds one named join prompt and syncs idle children", () => {
     readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
     /formatWorkerPrompt\(\{[\s\S]*?folder: childCwd,/,
   );
+  const missionBrief = formatWorkerPrompt({
+    fromTitle: "Walt",
+    text: "Implement and verify the Mission Control fixes.",
+    folder,
+    mission: true,
+  });
+  assert.match(missionBrief, /ROLE: mission coordinator/);
+  assert.match(missionBrief, /focused or split execution strategy/);
+  assert.match(missionBrief, /task coupling, risk, skills, and useful concurrency/);
+  assert.match(missionBrief, /Do not fan out for appearance/);
+  assert.match(missionBrief, /Workhorse attaches the actual model and effort/);
+  const loopBrief = formatWorkerPrompt({
+    fromTitle: "Walt",
+    text: "Finish the unmet checks.",
+    folder,
+    mission: true,
+    missionIteration: {
+      id: "mission_1",
+      mode: "adaptive",
+      objective: "Ship verified fixes",
+      acceptanceCriteria: ["Tests pass"],
+      iteration: 2,
+      maxIterations: 3,
+      previousWorkerIds: ["worker_1"],
+    },
+  });
+  assert.match(loopBrief, /ADAPTIVE LOOP: Pass 2 of 3/);
+  assert.match(loopBrief, /Required follow-up belongs to the parent mission loop/);
+  assert.match(loopBrief, /helper stops or leaves work incomplete, report continue/);
   assert.equal(looksLikePermissionQuestion("what sandbox do you have?"), true);
   assert.equal(
     looksLikePermissionQuestion("Permission / Sandbox are workspace facts on this turn."),
@@ -8728,7 +8892,11 @@ test("the repo tracks no symlinks and states its working rules", () => {
   const tryDesk = readFileSync(path.join(ROOT, "scripts", "try-desk.ts"), "utf8");
   assert.match(tryDesk, /workhorseInstallTarget/);
   assert.match(tryDesk, /tryInstallWouldReplaceProduction/);
+  assert.match(tryDesk, /stampDevBundle/);
+  assert.match(tryDesk, /\/usr\/bin\/ditto/);
+  assert.match(tryDesk, /codesign/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
+  assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);
   const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts as { try?: string; "try:dry"?: string };
   assert.match(scripts.try ?? "", /try-desk\.ts/);
   assert.match(scripts["try:dry"] ?? "", /--dry/);

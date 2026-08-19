@@ -12,6 +12,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   WORKHORSE_APP_NAME,
+  WORKHORSE_DEV_APP_ID,
+  WORKHORSE_DEV_APP_NAME,
   tryInstallWouldReplaceProduction,
   workhorseInstallTarget,
   type WorkhorseBuildChannel,
@@ -91,7 +93,23 @@ function packCurrentArch() {
 }
 
 function quitDevApp() {
-  spawnSync("osascript", ["-e", 'tell application "Go7 Workhorse Dev" to quit'], { stdio: "ignore" });
+  spawnSync("osascript", ["-e", `tell application id "${WORKHORSE_DEV_APP_ID}" to quit`], { stdio: "ignore" });
+}
+
+function stampDevBundle(dest: string) {
+  const plist = path.join(dest, "Contents", "Info.plist");
+  // Electron derives helper app names from CFBundleName. Keep that internal
+  // value stable; the display name and bundle id are the public identity.
+  const fields = [
+    ["CFBundleIdentifier", WORKHORSE_DEV_APP_ID],
+    ["CFBundleDisplayName", WORKHORSE_DEV_APP_NAME],
+  ];
+  for (const [key, value] of fields) {
+    const changed = spawnSync("/usr/bin/plutil", ["-replace", key, "-string", value, plist], { stdio: "inherit" });
+    if (changed.status !== 0) die(`Could not stamp ${key} on the development app.`);
+  }
+  const signed = spawnSync("/usr/bin/codesign", ["--force", "--sign", "-", dest], { stdio: "inherit" });
+  if (signed.status !== 0) die("Could not sign the development app.");
 }
 
 function installDevApp(src: string, dest: string) {
@@ -101,7 +119,9 @@ function installDevApp(src: string, dest: string) {
   say(`Quitting Go7 Workhorse Dev if it is open...`);
   quitDevApp();
   fs.rmSync(dest, { recursive: true, force: true });
-  fs.cpSync(src, dest, { recursive: true });
+  const copied = spawnSync("/usr/bin/ditto", [src, dest], { stdio: "inherit" });
+  if (copied.status !== 0) die("Could not copy the development app.");
+  stampDevBundle(dest);
   try {
     spawnSync("xattr", ["-dr", "com.apple.quarantine", dest], { stdio: "ignore" });
   } catch {
@@ -135,7 +155,7 @@ function main() {
   if (!built) die("No packed Go7 Workhorse.app under release/mac*. Run without --skip-pack.");
   installDevApp(built, target.dest);
   say(`Opening ${target.dest}`);
-  const opened = spawnSync("open", [target.dest], { stdio: "inherit" });
+  const opened = spawnSync("open", ["-na", target.dest], { stdio: "inherit" });
   if (opened.status !== 0) die("open failed.");
 }
 

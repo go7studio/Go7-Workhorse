@@ -317,50 +317,6 @@ html.pane-dragging * {
   flex: 1;
 }
 
-.brand-update {
-  flex: none;
-  margin-left: auto;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-solid));
-  color: var(--accent);
-  -webkit-app-region: no-drag;
-}
-
-.brand-update:hover {
-  background: color-mix(in srgb, var(--accent) 28%, var(--bg-solid));
-}
-
-.brand-update:disabled {
-  cursor: default;
-}
-
-.brand-update svg {
-  width: 11px;
-  height: 11px;
-  display: block;
-}
-
-.brand-update.busy {
-  animation: brand-update-pulse 900ms var(--ease) infinite;
-}
-
-.brand-update.error {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
-}
-
-@keyframes brand-update-pulse {
-  50% {
-    opacity: 0.55;
-  }
-}
-
 .brand-title {
   display: flex;
   align-items: baseline;
@@ -494,6 +450,72 @@ html.pane-dragging * {
   padding: 6px 0 10px;
   border-top: 1px solid var(--line);
   background: var(--bg-sidebar);
+}
+
+.sidebar-update {
+  margin-bottom: 3px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.sidebar-update:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-solid));
+}
+
+.sidebar-update:disabled {
+  cursor: default;
+}
+
+.sidebar-update > span:last-child {
+  min-width: 0;
+}
+
+.sidebar-update .row-title {
+  color: var(--accent);
+}
+
+.sidebar-update-icon {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.sidebar-update-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.sidebar-update-icon path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar-update.busy .sidebar-update-icon {
+  animation: sidebar-update-pulse 900ms var(--ease) infinite;
+}
+
+.sidebar-update.error,
+.sidebar-update.error .row-title {
+  color: var(--danger);
+}
+
+.sidebar-update.error .sidebar-update-icon {
+  background: var(--danger);
+}
+
+@keyframes sidebar-update-pulse {
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .settings-pulse {
@@ -3319,6 +3341,8 @@ html.pane-dragging * {
 }
 
 .diff-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 20px;
   display: block;
   padding: 1px 20px 1px 16px;
   border-left: 3px solid transparent;

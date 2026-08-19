@@ -1,37 +1,101 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
-import { nestProjectChats } from "../lib/lineup";
 import { folderSummary } from "../lib/project";
-import { useLooseSessions, useProjectSessions, useStore } from "../lib/store";
+import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
-import type { Project } from "../lib/types";
-import { ChatRow } from "./ChatRow";
+import type { Project, Session } from "../lib/types";
+import { ChatRow, type ChatRowDesk } from "./ChatRow";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
+import { buildSidebarChatIndex, sameSidebarSessions, type SidebarChatIndex } from "../lib/sidebar-index";
 
-function LooseChats() {
-  const store = useStore();
-  const chats = useLooseSessions();
-  const archived = useLooseSessions(true);
+type SidebarStore = Pick<
+  Store,
+  | "projects"
+  | "sessions"
+  | "usage"
+  | "settings"
+  | "theme"
+  | "activeProjectId"
+  | "activeSessionId"
+  | "panel"
+  | "sidebarWidth"
+  | "appUpdate"
+  | "appUpdateBusy"
+  | "appUpdateError"
+  | "setSidebarWidth"
+  | "toggleWorkhorseTheme"
+  | "openSheet"
+  | "startSession"
+  | "selectProject"
+  | "moveSession"
+  | "selectSession"
+  | "renameSession"
+  | "forkFrom"
+  | "exportSession"
+  | "archiveSession"
+  | "deleteWorkers"
+  | "deleteSession"
+  | "openSettings"
+  | "closeSettings"
+  | "applyAppUpdate"
+>;
+
+function selectSidebarStore(store: Store): SidebarStore {
+  return store;
+}
+
+function sameSidebarStore(left: SidebarStore, right: SidebarStore): boolean {
+  return (
+    left.projects === right.projects &&
+    sameSidebarSessions(left.sessions, right.sessions) &&
+    left.usage === right.usage &&
+    left.settings === right.settings &&
+    left.theme === right.theme &&
+    left.activeProjectId === right.activeProjectId &&
+    left.activeSessionId === right.activeSessionId &&
+    left.panel === right.panel &&
+    left.sidebarWidth === right.sidebarWidth &&
+    left.appUpdate === right.appUpdate &&
+    left.appUpdateBusy === right.appUpdateBusy &&
+    left.appUpdateError === right.appUpdateError
+  );
+}
+
+function rowDesk(store: SidebarStore, index: SidebarChatIndex, session: Session): ChatRowDesk {
+  return {
+    activeSessionId: store.activeSessionId,
+    settingsOpen: store.panel === "settings" || store.panel === "add-bot",
+    settings: store.settings,
+    projects: store.projects,
+    parent: session.parentId ? index.parentsById.get(session.parentId) : undefined,
+    link: index.linksBySession.get(session.id),
+    actions: store,
+  };
+}
+
+function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatIndex }) {
+  const chats = index.liveByProject.get(null) ?? [];
+  const archived = index.archivedByProject.get(null) ?? [];
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
-  const nested = nestProjectChats(chats);
   useEffect(() => {
-    const active = store.sessions.find((item) => item.id === store.activeSessionId);
+    const active = store.activeSessionId ? index.parentsById.get(store.activeSessionId) : undefined;
     if (!active?.parentId) return;
     setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
-  }, [store.activeSessionId, store.sessions]);
+  }, [store.activeSessionId, index]);
   if (chats.length === 0 && archived.length === 0) return null;
   return (
     <div className="loose-chats">
       <div className="section-label">Chats</div>
-      {nested.map((session) => (
+      {chats.map((session) => (
         <div key={session.id} className="project-chat-block">
           <ChatRow
             session={session}
+            desk={rowDesk(store, index, session)}
             workerCount={session.workers.length}
             workersOpen={Boolean(openCrew[session.id])}
             onToggleWorkers={() =>
@@ -39,7 +103,7 @@ function LooseChats() {
             }
           />
           {openCrew[session.id]
-            ? session.workers.map((worker) => <ChatRow key={worker.id} session={worker} nested />)
+            ? session.workers.map((worker) => <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />)
             : null}
         </div>
       ))}
@@ -48,7 +112,7 @@ function LooseChats() {
           <button className="archive-toggle" type="button" onClick={() => setShowArchived((value) => !value)}>
             Archived ({archived.length})
           </button>
-          {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} />)}
+          {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} desk={rowDesk(store, index, session)} />)}
         </>
       )}
     </div>
@@ -61,30 +125,32 @@ function ProjectFolder({
   dropOver,
   onToggle,
   onDropTarget,
+  store,
+  index,
 }: {
   project: Project;
   open: boolean;
   dropOver: boolean;
   onToggle: () => void;
   onDropTarget: (id: string | null) => void;
+  store: SidebarStore;
+  index: SidebarChatIndex;
 }) {
-  const store = useStore();
-  const chats = useProjectSessions(project.id);
-  const archived = useProjectSessions(project.id, true);
+  const chats = index.liveByProject.get(project.id) ?? [];
+  const archived = index.archivedByProject.get(project.id) ?? [];
   const [showMore, setShowMore] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    const active = store.sessions.find((item) => item.id === store.activeSessionId);
+    const active = store.activeSessionId ? index.parentsById.get(store.activeSessionId) : undefined;
     if (!active?.parentId) return;
     setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
-  }, [store.activeSessionId, store.sessions]);
+  }, [store.activeSessionId, index]);
   const settingsOpen = store.panel === "settings" || store.panel === "add-bot";
   const selected = !settingsOpen && project.id === store.activeProjectId;
-  const nested = nestProjectChats(chats);
-  const visible = visibleProjectChats(nested, showMore, store.activeSessionId);
-  const hidden = hiddenProjectChatCount(nested.length, showMore);
-  const count = nested.length + archived.length;
+  const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
+  const hidden = hiddenProjectChatCount(chats.length, showMore);
+  const count = chats.length + archived.length;
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -146,6 +212,7 @@ function ProjectFolder({
             <div key={session.id} className="project-chat-block">
               <ChatRow
                 session={session}
+                desk={rowDesk(store, index, session)}
                 workerCount={session.workers.length}
                 workersOpen={Boolean(openCrew[session.id])}
                 onToggleWorkers={() =>
@@ -154,12 +221,12 @@ function ProjectFolder({
               />
               {openCrew[session.id]
                 ? session.workers.map((worker) => (
-                    <ChatRow key={worker.id} session={worker} nested />
+                    <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />
                   ))
                 : null}
             </div>
           ))}
-          {nested.length > PROJECT_CHAT_LIMIT && hidden > 0 && (
+          {chats.length > PROJECT_CHAT_LIMIT && hidden > 0 && (
             <button className="archive-toggle" type="button" onClick={() => setShowMore((value) => !value)}>
               {showMore ? "Show less" : `Show more (${hidden})`}
             </button>
@@ -169,7 +236,7 @@ function ProjectFolder({
               <button className="archive-toggle" type="button" onClick={() => setShowArchived((value) => !value)}>
                 Archived ({archived.length})
               </button>
-              {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} />)}
+              {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} desk={rowDesk(store, index, session)} />)}
             </>
           )}
         </div>
@@ -178,8 +245,7 @@ function ProjectFolder({
   );
 }
 
-function SettingsPulse() {
-  const store = useStore();
+function SettingsPulse({ store }: { store: Pick<SidebarStore, "usage" | "sessions"> }) {
   const lines = deskPulseLines({ usage: store.usage ?? [], sessions: store.sessions });
   const [index, setIndex] = useState(0);
   useEffect(() => {
@@ -196,50 +262,53 @@ function SettingsPulse() {
   );
 }
 
-function UpdateChip() {
-  const store = useStore();
+function SidebarUpdate({ store }: { store: SidebarStore }) {
   const offer = store.appUpdate;
   if (!offer) return null;
-  const label = store.appUpdateBusy
-    ? `Installing Workhorse ${offer.version}`
-    : store.appUpdateError
-      ? store.appUpdateError
-      : `Install Workhorse ${offer.version}`;
+  const label = store.appUpdateBusy ? "Updating…" : store.appUpdateError ? "Try update again" : "Update now";
+  const detail = store.appUpdateError ? "Update failed" : `Workhorse ${offer.version}`;
+  const title = store.appUpdateError || `Update to Workhorse ${offer.version}`;
   return (
     <button
-      className={`brand-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
+      className={`row sidebar-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
       type="button"
-      aria-label={label}
-      title={label}
+      aria-label={`${label}. ${detail}`}
+      title={title}
       disabled={store.appUpdateBusy}
       onClick={() => {
         if (!store.appUpdate) return;
         void store.applyAppUpdate(offer.version);
       }}
     >
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path
-          d="M8 12.5V3.5M4.2 7 8 3.2 11.8 7"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <span className="sidebar-update-icon">
+        <svg viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M5.1 13.2h7.8a3 3 0 0 0 .2-6 4.4 4.4 0 0 0-8.4 1.2 2.4 2.4 0 0 0 .4 4.8Z" />
+          <path d="M9 8.7v5.1m-2-1.9 2 2 2-2" />
+        </svg>
+      </span>
+      <span>
+        <span className="row-title">{label}</span>
+        <span className="row-meta">{detail}</span>
+      </span>
     </button>
   );
 }
 
 export function Sidebar() {
-  const store = useStore();
+  const store = useStoreSelector(selectSidebarStore, sameSidebarStore);
+  const readStore = useStoreReader();
   const [query, setQuery] = useState("");
   const [openIds, setOpenIds] = useState<string[]>(() => (store.activeProjectId ? [store.activeProjectId] : []));
   const [dropId, setDropId] = useState<string | null>(null);
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
-  const liveProjects = store.projects.filter((item) => !item.archivedAt);
-  const archivedProjects = store.projects.filter((item) => item.archivedAt);
-  const results = searchChats(store.sessions, store.projects, query);
+  const index = useMemo(() => buildSidebarChatIndex(store.sessions), [store.sessions]);
+  const liveProjects = useMemo(() => store.projects.filter((item) => !item.archivedAt), [store.projects]);
+  const archivedProjects = useMemo(() => store.projects.filter((item) => item.archivedAt), [store.projects]);
+  const results = useMemo(() => {
+    if (!query.trim()) return [];
+    const latest = readStore();
+    return searchChats(latest.sessions, latest.projects, query);
+  }, [query, readStore]);
 
   useEffect(() => {
     if (!store.activeProjectId) return;
@@ -276,7 +345,6 @@ export function Sidebar() {
           </div>
           <p>One desk, every agent</p>
         </div>
-        <UpdateChip />
       </div>
 
       <button className="ghost open-project" type="button" onClick={() => store.openSheet("project")}>
@@ -322,6 +390,8 @@ export function Sidebar() {
           <ProjectFolder
             key={item.id}
             project={item}
+            store={store}
+            index={index}
             open={openIds.includes(item.id)}
             dropOver={dropId === item.id}
             onToggle={() =>
@@ -346,6 +416,8 @@ export function Sidebar() {
                 <ProjectFolder
                   key={item.id}
                   project={item}
+                  store={store}
+                  index={index}
                   open={openIds.includes(item.id)}
                   dropOver={dropId === item.id}
                   onToggle={() =>
@@ -358,9 +430,10 @@ export function Sidebar() {
               ))}
           </>
         )}
-        <LooseChats />
+        <LooseChats store={store} index={index} />
       </div>
       <footer className="sidebar-dock">
+        <SidebarUpdate store={store} />
         <button
           className={store.panel === "settings" || store.panel === "add-bot" ? "row active" : "row"}
           type="button"
@@ -370,7 +443,7 @@ export function Sidebar() {
         >
           <span>
             <span className="row-title">Settings</span>
-            <SettingsPulse />
+            <SettingsPulse store={store} />
           </span>
         </button>
       </footer>

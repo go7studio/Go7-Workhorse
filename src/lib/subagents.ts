@@ -1,7 +1,7 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
 import { findSession, type SessionSnapshot } from "./session-bridge";
-import type { AgentRun, EffortLevel, ProviderId, Session } from "./types";
+import type { AgentRun, EffortLevel, MissionIteration, ProviderId, Session } from "./types";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
 
 export type { DeskRole };
@@ -420,20 +420,41 @@ export function spawnWaitsForReply(input: { wait?: unknown }): boolean {
 }
 
 export function parentHasRunningChildren(
-  sessions: Array<Pick<Session, "parentId" | "status" | "agentRun" | "hidden">>,
+  sessions: Array<Pick<Session, "id" | "parentId" | "status" | "agentRun" | "hidden">>,
   parentId: string,
+  childIds?: ReadonlySet<string>,
 ): boolean {
   return sessions.some(
     (session) =>
       session.parentId === parentId &&
+      (!childIds || childIds.has(session.id)) &&
       isWorkerSession(session) &&
       (session.agentRun?.status === "running" || session.status === "running"),
   );
 }
 
+export function scopedChildAgentIds(
+  sessions: Session[],
+  parentId: string,
+  input: { workerIds?: string[]; traceId?: string; lineupChildIds?: string[] } = {},
+): string[] {
+  const children = sessions.filter((session) => session.parentId === parentId && isWorkerSession(session));
+  const childIds = new Set(children.map((session) => session.id));
+  const requested = [...new Set((input.workerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (requested.length > 0) return requested.filter((id) => childIds.has(id));
+  const traceId = input.traceId?.trim();
+  if (traceId) {
+    return children.filter((session) => session.agentRun?.correlationId === traceId).map((session) => session.id);
+  }
+  const lineup = [...new Set((input.lineupChildIds ?? []).map((id) => id.trim()).filter(Boolean))]
+    .filter((id) => childIds.has(id));
+  return lineup.length > 0 ? lineup : children.map((session) => session.id);
+}
+
 export function collectChildAgentReports(
   sessions: Session[],
   parentId: string,
+  childIds?: ReadonlySet<string>,
 ): Array<{
   title: string;
   status: string;
@@ -443,9 +464,10 @@ export function collectChildAgentReports(
   model: string;
   effort: Session["effort"];
   exclusions?: string[];
+  mission?: MissionIteration;
 }> {
   return sessions
-    .filter((session) => session.parentId === parentId && isWorkerSession(session))
+    .filter((session) => session.parentId === parentId && (!childIds || childIds.has(session.id)) && isWorkerSession(session))
     .map((session) => {
       const reply = [...session.messages]
         .reverse()
@@ -459,6 +481,7 @@ export function collectChildAgentReports(
         model: session.model,
         effort: session.effort,
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
+        ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
       };
     });
 }
@@ -484,6 +507,7 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.error ? { error: worker.agentRun.error } : {}),
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
+    ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
     ...(worker.agentRun?.status !== "running" && report ? { report } : {}),
     routingMode: worker.routingMode ?? "manual",
     ...(worker.routingDecision ? { routingDecision: worker.routingDecision } : {}),
@@ -516,6 +540,8 @@ export type WorkerBriefInput = {
   constraints?: string[];
   skills?: Array<{ name: string; file: string }>;
   capabilities?: string[];
+  mission?: boolean;
+  missionIteration?: MissionIteration;
 };
 
 export function stripSpawnPreamble(text: string): string {
@@ -563,7 +589,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const vendor = input.vendor?.trim();
   const task = stripSpawnPreamble(input.text) || input.text.trim();
   const lines = [
-    "ROLE: worker",
+    input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
     `PROJECT: ${project || "(none — stop and say so)"}`,
     `FOLDER: ${folder || "(none — stop and say so)"}`,
@@ -574,6 +600,20 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
   if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
+  if (input.mission) {
+    lines.push("Choose a focused or split execution strategy from task coupling, risk, skills, and useful concurrency.");
+    lines.push("Focused is valid when one worker can safely own the coupled change; split is valid when an independent slice adds value.");
+    lines.push("If split, dispatch one bounded helper before the main work. Do not fan out for appearance.");
+    lines.push("Explain the strategy and report every worker used. Workhorse attaches the actual model and effort to the result.");
+  }
+  if (input.missionIteration) {
+    lines.push(`ADAPTIVE LOOP: Pass ${input.missionIteration.iteration} of ${input.missionIteration.maxIterations}`);
+    lines.push("Acceptance:");
+    input.missionIteration.acceptanceCriteria.forEach((criterion) => lines.push(`- ${criterion}`));
+    lines.push("Required follow-up belongs to the parent mission loop. A leaf helper is only an optional bounded check.");
+    lines.push("If that helper stops or leaves work incomplete, report continue with the remaining work; do not claim completion.");
+    lines.push("Verify the acceptance criteria after the work. End with Mission status: complete, continue, or blocked, plus evidence or remaining work.");
+  }
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
   if (input.skills?.length) lines.push("Read every listed SKILL.md fully before acting.");
   lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
@@ -782,6 +822,83 @@ export function descendantSessionIds(sessions: Pick<Session, "id" | "parentId">[
 /** What builds before the `interrupted` status wrote for the same thing. */
 export const LEGACY_INTERRUPTED_ERROR = "Subagent was interrupted when Workhorse exited.";
 
+export function normalizeMissionIteration(raw: unknown): MissionIteration | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Partial<MissionIteration>;
+  if (row.mode !== "adaptive" || typeof row.id !== "string" || !row.id.trim()) return undefined;
+  if (typeof row.objective !== "string" || !row.objective.trim()) return undefined;
+  const iteration = typeof row.iteration === "number" ? Math.floor(row.iteration) : 0;
+  const maxIterations = typeof row.maxIterations === "number" ? Math.floor(row.maxIterations) : 0;
+  if (iteration < 1 || maxIterations < 2 || iteration > maxIterations || maxIterations > 8) return undefined;
+  const acceptanceCriteria = Array.isArray(row.acceptanceCriteria)
+    ? row.acceptanceCriteria.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : [];
+  if (acceptanceCriteria.length === 0) return undefined;
+  return {
+    id: row.id.trim(),
+    mode: "adaptive",
+    objective: row.objective.trim(),
+    acceptanceCriteria,
+    iteration,
+    maxIterations,
+    previousWorkerIds: Array.isArray(row.previousWorkerIds)
+      ? [...new Set(row.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
+      : [],
+  };
+}
+
+export type MissionContinuationDecision =
+  | { ok: true; mission: MissionIteration }
+  | { ok: false; error: string };
+
+export function nextMissionIteration(
+  sessions: Session[],
+  parentId: string,
+  previousWorkerIds: string[],
+  previousIteration?: number,
+): MissionContinuationDecision {
+  const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
+  const workers = ids.map((id) => sessions.find((session) => session.id === id));
+  if (workers.some((worker) => !worker || worker.parentId !== parentId)) {
+    return { ok: false, error: "unknown worker in this mission" };
+  }
+  const missions = workers.map((worker) => worker?.agentRun?.mission).filter((mission): mission is MissionIteration => Boolean(mission));
+  if (missions.length !== workers.length || missions.some((mission) => mission.mode !== "adaptive")) {
+    return { ok: false, error: "sequential mode was not enabled for this mission" };
+  }
+  const first = missions[0];
+  if (!first || missions.some((mission) => mission.id !== first.id || mission.iteration !== first.iteration)) {
+    return { ok: false, error: "workers are not from one mission pass" };
+  }
+  if (typeof previousIteration === "number" && first.iteration !== Math.floor(previousIteration)) {
+    return { ok: false, error: "mission pass no longer matches these workers" };
+  }
+  const criteria = JSON.stringify(first.acceptanceCriteria);
+  if (missions.some((mission) => mission.maxIterations !== first.maxIterations || mission.objective !== first.objective || JSON.stringify(mission.acceptanceCriteria) !== criteria)) {
+    return { ok: false, error: "workers do not share one mission contract" };
+  }
+  if (workers.some((worker) => worker?.agentRun?.status === "running")) {
+    return { ok: false, error: "previous mission pass is still running" };
+  }
+  if (workers.some((worker) => worker?.agentRun?.status === "interrupted")) {
+    return { ok: false, error: "resume the interrupted worker before continuing the mission" };
+  }
+  const latest = sessions
+    .filter((session) => session.parentId === parentId && session.agentRun?.mission?.id === first.id)
+    .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
+  if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
+  if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
+  return {
+    ok: true,
+    mission: {
+      ...first,
+      iteration: first.iteration + 1,
+      previousWorkerIds: ids,
+    },
+  };
+}
+
 export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;
@@ -797,6 +914,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   // carries it, so an exact match recovers those runs without guessing.
   const interrupted =
     row.status === "running" || (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
+  const mission = normalizeMissionIteration(row.mission);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
@@ -821,6 +939,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(Array.isArray(row.constraints) ? { constraints: row.constraints.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.exclusions) ? { exclusions: row.exclusions.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
+    ...(mission ? { mission } : {}),
   };
 }
 

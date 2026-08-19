@@ -1,13 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lastTalkedAt } from "../lib/chats";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk, vendorAttachedForSession } from "../lib/settings";
-import { chatLinksFromSessions } from "../lib/tool-labels";
-import { useStore } from "../lib/store";
-import type { Session } from "../lib/types";
+import type { Store } from "../lib/store";
+import type { ChatLink } from "../lib/tool-labels";
+import type { Project, Session, Settings } from "../lib/types";
 import { TimeStamp } from "./TimeStamp";
 
 export function workerSidebarLabel(session: Session, botName?: string): string {
@@ -23,23 +23,46 @@ export function workerSidebarLabel(session: Session, botName?: string): string {
   else if (run === "interrupted") state = "Interrupted";
   else if (run === "cancelled") state = "Cancelled";
   else if (session.status === "needs-input") state = "Needs you";
-  return [name, effort, state].filter(Boolean).join(" · ");
+  const iteration = session.agentRun?.mission?.iteration ?? 0;
+  const pass = iteration > 1 ? `Pass ${iteration}` : "";
+  return [name, effort, pass, state].filter(Boolean).join(" · ");
 }
+
+export type ChatRowDesk = {
+  activeSessionId: string | null;
+  settingsOpen: boolean;
+  settings: Settings;
+  projects: Project[];
+  parent?: Session;
+  link?: ChatLink;
+  actions: Pick<
+    Store,
+    | "selectSession"
+    | "renameSession"
+    | "forkFrom"
+    | "moveSession"
+    | "exportSession"
+    | "archiveSession"
+    | "deleteWorkers"
+    | "deleteSession"
+  >;
+};
 
 export function ChatRow({
   session,
+  desk,
   nested = false,
   workerCount = 0,
   workersOpen = false,
   onToggleWorkers,
 }: {
   session: Session;
+  desk: ChatRowDesk;
   nested?: boolean;
   workerCount?: number;
   workersOpen?: boolean;
   onToggleWorkers?: () => void;
 }) {
-  const store = useStore();
   const [menu, setMenu] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveSide, setMoveSide] = useState<"right" | "left">("right");
@@ -54,12 +77,11 @@ export function ChatRow({
   const field = useRef<HTMLInputElement>(null);
   const archived = typeof session.archivedAt === "number";
   const bot = session.customBotId
-    ? store.settings.customBots.find((item) => item.id === session.customBotId)
+    ? desk.settings.customBots.find((item) => item.id === session.customBotId)
     : undefined;
-  const stockLink = session.provider !== "custom" ? store.settings.llms[session.provider] : undefined;
-  const parent = session.parentId ? store.sessions.find((item) => item.id === session.parentId) : undefined;
-  const ink = deskInk(session, store.settings) ?? (parent ? deskInk(parent, store.settings) : undefined);
-  const rowLabel = vendorAttachedForSession(session, store.settings)
+  const stockLink = session.provider !== "custom" ? desk.settings.llms[session.provider] : undefined;
+  const ink = deskInk(session, desk.settings) ?? (desk.parent ? deskInk(desk.parent, desk.settings) : undefined);
+  const rowLabel = vendorAttachedForSession(session, desk.settings)
     ? formatChatSidebar({
         provider: session.provider,
         model: session.model,
@@ -70,10 +92,7 @@ export function ChatRow({
       })
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
-  const link = useMemo(
-    () => chatLinksFromSessions(store.sessions).find((item) => item.sessionId === session.id),
-    [store.sessions, session.id],
-  );
+  const link = desk.link;
 
   useEffect(() => {
     if (!menu && !confirmDelete) return;
@@ -139,7 +158,7 @@ export function ChatRow({
   }, [renaming, session.title]);
 
   const commitRename = () => {
-    store.renameSession(session.id, draft);
+    desk.actions.renameSession(session.id, draft);
     setRenaming(false);
   };
 
@@ -147,7 +166,7 @@ export function ChatRow({
 
   return (
     <div
-      className={`chat-row${nested ? " nested-worker" : ""}${store.panel !== "settings" && store.panel !== "add-bot" && session.id === store.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
+      className={`chat-row${nested ? " nested-worker" : ""}${!desk.settingsOpen && session.id === desk.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -177,7 +196,7 @@ export function ChatRow({
         <button
           className="row chat-open"
           type="button"
-          onClick={() => store.selectSession(session.id)}
+          onClick={() => desk.actions.selectSession(session.id)}
           onDoubleClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -264,7 +283,7 @@ export function ChatRow({
                   .reverse()
                   .find((message) => message.role === "user" || message.role === "assistant");
                 setMenu(false);
-                if (last) store.forkFrom(last.id, session.id);
+                if (last) desk.actions.forkFrom(last.id, session.id);
               }}
             >
               Fork chat
@@ -281,14 +300,14 @@ export function ChatRow({
               </button>
               {moveOpen ? (
                 <div ref={movePanel} className={`chat-move-panel ${moveSide}`} role="menu">
-                  {store.projects
+                  {desk.projects
                     .filter((project) => project.id !== session.projectId)
                     .map((project) => (
                       <button
                         key={project.id}
                         type="button"
                         onClick={() => {
-                          store.moveSession(session.id, project.id);
+                          desk.actions.moveSession(session.id, project.id);
                           setMenu(false);
                           setMoveOpen(false);
                         }}
@@ -296,7 +315,7 @@ export function ChatRow({
                         {project.name}
                       </button>
                     ))}
-                  {store.projects.filter((project) => project.id !== session.projectId).length === 0 && (
+                  {desk.projects.filter((project) => project.id !== session.projectId).length === 0 && (
                     <em>No other project</em>
                   )}
                 </div>
@@ -306,7 +325,7 @@ export function ChatRow({
               type="button"
               onClick={() => {
                 setMenu(false);
-                void store.exportSession(session.id);
+                void desk.actions.exportSession(session.id);
               }}
             >
               Export chat
@@ -314,7 +333,7 @@ export function ChatRow({
             <button
               type="button"
               onClick={() => {
-                store.archiveSession(session.id, !archived);
+                desk.actions.archiveSession(session.id, !archived);
                 setMenu(false);
               }}
             >
@@ -325,7 +344,7 @@ export function ChatRow({
                 className="danger"
                 type="button"
                 onClick={() => {
-                  store.deleteWorkers(session.id);
+                  desk.actions.deleteWorkers(session.id);
                   setMenu(false);
                 }}
               >
@@ -337,7 +356,7 @@ export function ChatRow({
                 className="danger"
                 type="button"
                 onClick={() => {
-                  store.deleteSession(session.id);
+                  desk.actions.deleteSession(session.id);
                   setMenu(false);
                 }}
               >

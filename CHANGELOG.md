@@ -8,6 +8,24 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.3](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.2...v0.6.3) (2026-08-19)
+
+
+### Features
+
+* add adaptive goal and mission loops ([c37dbd2](https://github.com/go7studio/Go7-Workhorse/commit/c37dbd23f2ccd657fd7e86adb06134996c883397))
+* surface available updates beside settings ([838c729](https://github.com/go7studio/Go7-Workhorse/commit/838c729eca0636c3ecf673bc0db65555508649b1))
+* Windows installs a newer desk from inside Workhorse ([#68](https://github.com/go7studio/Go7-Workhorse/issues/68)) ([31e9a98](https://github.com/go7studio/Go7-Workhorse/commit/31e9a9838e9b6b1089413f1e1e73dbc058f3c5c8))
+
+
+### Bug Fixes
+
+* paint a long chat across frames instead of locking the desk ([#73](https://github.com/go7studio/Go7-Workhorse/issues/73)) ([c4878ea](https://github.com/go7studio/Go7-Workhorse/commit/c4878eaaed6207bd9c60d251c243f79ac7f75c92))
+* scope delegated missions to their worker wave ([eec9b09](https://github.com/go7studio/Go7-Workhorse/commit/eec9b096baa9bcfbf4e7ae2d822e14983d6d73eb))
+* selecting a long chat no longer freezes the desk ([#72](https://github.com/go7studio/Go7-Workhorse/issues/72)) ([cb35479](https://github.com/go7studio/Go7-Workhorse/commit/cb35479c066deb8bc1df4d80cea733a1ef0ac4e5))
+* the Harnesses card reads at a glance instead of as a paragraph ([f5b754b](https://github.com/go7studio/Go7-Workhorse/commit/f5b754b2363567bdc237434c6a52affda9bfdeab))
+* the Harnesses card reads at a glance instead of as a paragraph ([6e93b82](https://github.com/go7studio/Go7-Workhorse/commit/6e93b82566a678f3222d882679c7c38936330e96))
+
 ## [0.6.2](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.1...v0.6.2) (2026-08-18)
 
 

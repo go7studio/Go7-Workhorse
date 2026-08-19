@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.0",
+  "contractVersion": "0.6.5",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -353,6 +353,60 @@
       "scenarios": ["ORC-S9"],
       "rubric": ["ORC-17"],
       "sourceFiles": ["src/lib/routing.ts", "src/lib/store.tsx", "src/lib/subagents.ts", "electron/workhorse-mcp.ts", "test/routing.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-040",
+      "behavior": "Harness delegation is fully automatic by default. A harness may choose only the first coordinating provider, model, or effort; that choice never leaks into later unassigned workers, which route independently.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/workhorse-mcp.ts", "src/lib/routing.ts", "src/lib/subagents.ts", "test/mcp-exposure.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-041",
+      "behavior": "The packaged development desk has a distinct app id, display name, user data, and volatile credential namespace while retaining Electron's internal helper name; copied framework links stay inside the installed bundle, so it launches beside production without replacing, waking, or crashing into a temporary build.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S1", "SEC-S4"],
+      "rubric": ["REL-01", "REL-02", "SEC-07"],
+      "sourceFiles": ["scripts/try-desk.ts", "src/lib/app-identity.ts", "electron/main.ts", "test/workhorse.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-042",
+      "behavior": "A newer release exposes one short Update now action above Settings, reuses the checked installer, shows bounded busy and retry states, and disappears when no update is available.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S3", "REL-S4"],
+      "rubric": ["REL-05", "REL-07"],
+      "sourceFiles": ["src/ui/Sidebar.tsx", "src/styles/app.css", "src/lib/store.tsx", "electron/app-update.ts", "test/app-update.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-043",
+      "behavior": "Harness delegation makes a model-decided focused-or-split execution strategy visible, preserves Workhorse's automatic provider/model/effort choice, and scopes await results to the requested worker ids, trace, or active wave instead of every historical child on the parent.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-044",
+      "behavior": "Harness mission loops are opt-in and bounded. A terminal incomplete pass can continue from exact worker ids and pass number with its acceptance criteria, evidence, skills, tools, constraints, exclusions, and iteration lineage preserved; the next pass independently auto-routes, displays its pass, and stale or over-limit continuation stops before a provider call. Required follow-up stays at the parent mission level, while a stopped leaf helper returns remaining work instead of expanding its envelope.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "src/ui/ChatRow.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-045",
+      "behavior": "Goal and Loop are explicit interoperable outcome intents. The coordinating brain chooses focused or split execution; independent Auto-routed root slices may run in parallel, coupled work stays sequential, and ordinary prompts do not silently become autonomous.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CMD-S2", "ORC-S4", "ORC-S9"],
+      "rubric": ["CMD-03", "ORC-07", "ORC-17"],
+      "sourceFiles": ["src/lib/goal.ts", "src/lib/vendor-send.ts", "src/lib/commands.ts", "src/lib/store.tsx", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/mcp-exposure.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]

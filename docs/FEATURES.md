@@ -26,6 +26,10 @@ is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
 chat you pick. Delete, rename, credentials, and elevate stay blocked.
 An explicit request to work with Workhorse delegates before direct execution;
 blocked delegation returns the Workhorse error before any fallback.
+A harness may choose the first coordinating brain; unassigned workers still route independently.
+A delegated mission states whether it stayed focused or split, and its results stay scoped to that worker wave.
+Delegation is one wave by default. An opt-in loop can route bounded follow-up passes against explicit acceptance criteria.
+Goal and Loop intent can choose focused, parallel, or sequential Auto-routed work.
 
 ## Files you can hand a chat
 
@@ -157,9 +161,9 @@ Settings can export a support report that excludes prompts, messages, file
 contents, environment variables, URLs and credential values.
 
 Settings → Profile can check GitHub for a newer desk. A Mac installer
-downloads that release's disk image and replaces the app. A Windows
-installer downloads that release's Setup exe and installs it after
-Workhorse quits.
+downloads that release's disk image and replaces the app. A Windows installer
+downloads the Setup exe and installs it after Workhorse quits. When one is
+ready, Update now appears above Settings.
 
 ## Platforms
 

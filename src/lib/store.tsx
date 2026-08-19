@@ -1,15 +1,16 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { StoreContext, useStore } from "./store-context";
-export { useStore };
+import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
+export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
-import { grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "./goal";
+import { grokGoalAfterTurnIdle, isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
@@ -183,6 +184,7 @@ import {
   resolveSpawnSpec,
   findReusableWorker,
   reserveWorkerName,
+  scopedChildAgentIds,
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
@@ -699,6 +701,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
+  const selectorStore = useRef<Store | null>(null);
+  const selectorListeners = useRef(new Set<() => void>());
+  const selectorRuntime = useMemo(
+    () => ({
+      getSnapshot: () => {
+        if (!selectorStore.current) throw new Error("Workhorse store is not ready");
+        return selectorStore.current;
+      },
+      subscribe: (listener: () => void) => {
+        selectorListeners.current.add(listener);
+        return () => selectorListeners.current.delete(listener);
+      },
+    }),
+    [],
+  );
   stateRef.current = state;
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
   useEffect(() => {
@@ -1504,7 +1521,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       goal: liveSession?.goal,
       match,
     });
-    const goalInput = liveSession && liveSession.provider !== "grok" ? parseGoalInput(originalText) : null;
+    const goalInput = liveSession && (
+      liveSession.provider !== "grok" ||
+      isWorkhorseGoalIntent(originalText) ||
+      isWorkhorseGoalControl(originalText, liveSession.goal)
+    ) ? parseGoalInput(originalText) : null;
     let vendorText = prep.vendorText;
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
@@ -1519,7 +1540,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         goalHaltedSessions.current.add(liveSession.id);
       }
       const cleared =
-        liveSession.provider === "grok"
+        liveSession.provider === "grok" && !isWorkhorseGoalIntent(originalText) && !isWorkhorseGoalControl(originalText, liveSession.goal)
           ? parseGrokGoalLine(originalText)?.action === "clear"
           : parseGoalInput(originalText)?.action === "clear";
       const halt = cleared ? "goal cleared" : "goal paused";
@@ -3862,6 +3883,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
               const parentLive = stateRef.current.sessions.find((item) => item.id === parentId);
+              const requestedWorkerIds = Array.isArray(payload.workerIds)
+                ? [...new Set(payload.workerIds.map((id) => id.trim()).filter(Boolean))]
+                : [];
+              const waveIds = scopedChildAgentIds(stateRef.current.sessions, parentId, {
+                workerIds: requestedWorkerIds,
+                traceId: payload.traceId,
+                lineupChildIds: parentLive?.lineup?.rows.map((row) => row.childId),
+              });
+              if (requestedWorkerIds.length > 0 && waveIds.length !== requestedWorkerIds.length) {
+                await replyAsk({ error: "unknown worker in this parent chat" });
+                return;
+              }
+              if (requestedWorkerIds.length === 0 && payload.traceId?.trim() && waveIds.length === 0) {
+                await replyAsk({ error: "unknown worker trace in this parent chat" });
+                return;
+              }
+              const waveIdSet = new Set(waveIds);
               const shouldWait = awaitAgentsWaits({ wait: payload.wait, parentStatus: parentLive?.status });
               if (shouldWait) {
                 const timeoutMs =
@@ -3869,7 +3907,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
                     : 10 * 60 * 1_000;
                 const deadline = Date.now() + timeoutMs;
-                while (parentHasRunningChildren(stateRef.current.sessions, parentId) && Date.now() < deadline) {
+                while (parentHasRunningChildren(stateRef.current.sessions, parentId, waveIdSet) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, 400));
                 }
               }
@@ -3882,10 +3920,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return sessions === current.sessions ? current : { ...current, sessions };
               });
               const parentNow = stateRef.current.sessions.find((item) => item.id === parentId);
-              const reports = collectChildAgentReports(stateRef.current.sessions, parentId);
+              const reports = collectChildAgentReports(stateRef.current.sessions, parentId, waveIdSet);
+              const scopedLineup = parentNow?.lineup
+                ? { ...parentNow.lineup, rows: parentNow.lineup.rows.filter((row) => waveIdSet.has(row.childId)) }
+                : undefined;
               await replyAsk({
                 text: formatAwaitAgentsSnapshot({
-                  lineup: parentNow?.lineup,
+                  lineup: scopedLineup,
                   reports,
                   wait: shouldWait,
                 }),
@@ -3919,6 +3960,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (!caller) {
               await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
               return;
+            }
+            if (payload.missionIteration) {
+              const mission = payload.missionIteration;
+              const existingPass = latest.sessions.find(
+                (session) =>
+                  session.parentId === caller.id &&
+                  session.agentRun?.mission?.id === mission.id &&
+                  session.agentRun?.mission?.iteration === mission.iteration,
+              );
+              if (existingPass) {
+                await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
+                return;
+              }
             }
             if (exposure === "external-runtime") {
               const inboundHop = checkEnvelope(
@@ -4314,6 +4368,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
                 correlationId: childCorrelationId,
+                ...(payload.missionIteration ? { mission: payload.missionIteration } : {}),
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
@@ -4353,6 +4408,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               status: "running",
                               startedAt,
                               correlationId: childCorrelationId,
+                              ...(payload.missionIteration ? {
+                                missionId: payload.missionIteration.id,
+                                iteration: payload.missionIteration.iteration,
+                              } : {}),
                               ...(planStepId ? { planStepId } : {}),
                               ...(rationale ? { rationale } : {}),
                             },
@@ -4411,6 +4470,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   constraints: assignedConstraints,
                   skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
                   capabilities: assignedCapabilities,
+                  mission: payload.mission === true,
+                  missionIteration: payload.missionIteration,
                 }),
                 latest.settings.mcpServers,
                 spawnImages,
@@ -6483,7 +6544,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  selectorStore.current = value;
+  useLayoutEffect(() => {
+    for (const listener of selectorListeners.current) listener();
+  }, [value]);
+
+  return (
+    <StoreRuntimeContext.Provider value={selectorRuntime}>
+      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+    </StoreRuntimeContext.Provider>
+  );
 }
 
 export function useActiveProject() {

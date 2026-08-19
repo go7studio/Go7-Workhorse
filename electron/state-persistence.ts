@@ -27,7 +27,7 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number) {
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const handle = fs.openSync(temp, "wx", mode);
   try {
-    fs.writeFileSync(handle, JSON.stringify(value, null, 2), "utf8");
+    fs.writeFileSync(handle, JSON.stringify(value), "utf8");
     fs.fsyncSync(handle);
   } finally {
     fs.closeSync(handle);
@@ -113,10 +113,11 @@ export function writeVersionedState(
   file: string,
   state: PersistableState,
   protect: (state: PersistableState) => PersistableState,
+  options: { rotateBackups?: boolean } = {},
 ): PersistableState {
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
-  rotateProtectedBackups(file, protect);
+  if (options.rotateBackups !== false) rotateProtectedBackups(file, protect);
   atomicWriteJson(file, protectedState);
   return protectedState;
 }

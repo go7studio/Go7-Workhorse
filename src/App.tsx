@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useActiveProject, useActiveSession, useStore } from "./lib/store";
+import { useStoreSelector, type Store } from "./lib/store";
 import { resolvedTheme } from "./lib/theme";
 import { selectSurface, titlebarLabel } from "./lib/surface";
 import { EditContextMenu } from "./ui/EditContextMenu";
@@ -14,15 +14,49 @@ import { Settings } from "./ui/Settings";
 import { WatchNotices } from "./ui/WatchNotices";
 import { Welcome } from "./ui/Welcome";
 
+type AppView = {
+  theme: Store["theme"];
+  panel: Store["panel"];
+  sidebarWidth: number;
+  projectName?: string;
+  sessionTitle?: string;
+  hasProject: boolean;
+  hasSession: boolean;
+};
+
+function selectAppView(store: Store): AppView {
+  const project = store.projects.find((item) => item.id === store.activeProjectId);
+  const session = store.sessions.find((item) => item.id === store.activeSessionId);
+  return {
+    theme: store.theme,
+    panel: store.panel,
+    sidebarWidth: store.sidebarWidth,
+    projectName: project?.name,
+    sessionTitle: session?.title,
+    hasProject: Boolean(project),
+    hasSession: Boolean(session),
+  };
+}
+
+function sameAppView(left: AppView, right: AppView): boolean {
+  return (
+    left.theme === right.theme &&
+    left.panel === right.panel &&
+    left.sidebarWidth === right.sidebarWidth &&
+    left.projectName === right.projectName &&
+    left.sessionTitle === right.sessionTitle &&
+    left.hasProject === right.hasProject &&
+    left.hasSession === right.hasSession
+  );
+}
+
 export function App() {
-  const store = useStore();
-  const project = useActiveProject();
-  const session = useActiveSession();
+  const view = useStoreSelector(selectAppView, sameAppView);
 
   useEffect(() => {
     const apply = () => {
       document.documentElement.dataset.theme = resolvedTheme(
-        store.theme,
+        view.theme,
         window.matchMedia("(prefers-color-scheme: dark)").matches,
       );
     };
@@ -30,21 +64,21 @@ export function App() {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
-  }, [store.theme]);
+  }, [view.theme]);
 
   const surface = selectSurface({
-    panel: store.panel,
-    hasProject: Boolean(project),
-    hasSession: Boolean(session),
+    panel: view.panel,
+    hasProject: view.hasProject,
+    hasSession: view.hasSession,
   });
-  const title = titlebarLabel(project?.name, session?.title, store.panel);
+  const title = titlebarLabel(view.projectName, view.sessionTitle, view.panel);
 
   return (
     <div className="app">
       <header className="titlebar">
         <span>{title}</span>
       </header>
-      <div className="workspace" style={{ ["--sidebar" as string]: `${store.sidebarWidth}px` }}>
+      <div className="workspace" style={{ ["--sidebar" as string]: `${view.sidebarWidth}px` }}>
         <Sidebar />
         <main className="main">
           {surface === "settings" && <Settings />}

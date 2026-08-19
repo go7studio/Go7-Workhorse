@@ -33,13 +33,15 @@ export function searchChats(
     const project = session.projectId ? names.get(session.projectId) ?? "" : "Loose chats";
     const header = `${session.title} ${project} ${session.provider} ${session.model}`;
     if (header.toLowerCase().includes(needle)) {
+      let at = 0;
+      for (const message of session.messages) at = Math.max(at, message.createdAt);
       rows.push({
         sessionId: session.id,
         title: session.title,
         project,
         provider: session.provider,
         snippet: clip(header, needle),
-        at: Math.max(0, ...session.messages.map((message) => message.createdAt)),
+        at,
       });
     }
     for (const message of session.messages) {

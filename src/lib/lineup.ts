@@ -73,6 +73,8 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ...(typeof record.agentId === "string" && record.agentId.trim() ? { agentId: record.agentId.trim() } : {}),
     ...(typeof record.workspace === "string" && record.workspace.trim() ? { workspace: record.workspace.trim() } : {}),
     ...(typeof record.correlationId === "string" && record.correlationId.trim() ? { correlationId: record.correlationId.trim() } : {}),
+    ...(typeof record.missionId === "string" && record.missionId.trim() ? { missionId: record.missionId.trim() } : {}),
+    ...(typeof record.iteration === "number" && record.iteration > 0 ? { iteration: Math.floor(record.iteration) } : {}),
   };
 }
 
@@ -211,6 +213,7 @@ export function formatAwaitAgentsSnapshot(input: {
     model?: string;
     effort?: Session["effort"];
     exclusions?: string[];
+    mission?: import("./types").MissionIteration;
   }>;
   wait?: boolean;
 }): string {

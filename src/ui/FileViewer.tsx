@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { buildFileDiff, type FileDiff } from "../lib/file-diff";
 import { editSearchRoots, sameEditPath, type ProjectEdit } from "../lib/project-edits";
 import { DiffStat } from "./DiffStat";
@@ -18,6 +18,7 @@ export function FileViewer({
   const [missing, setMissing] = useState(false);
   const [unreadable, setUnreadable] = useState(false);
   const [directory, setDirectory] = useState(false);
+  const [paintedRows, setPaintedRows] = useState(400);
   const shownPath = useRef(file.path);
   const rootKey = roots.join("\n");
   const created = file.kind === "created";
@@ -93,6 +94,24 @@ export function FileViewer({
   }, [file.path, file.name, file.folder, file.edits, file.at, created, rootKey]);
 
   const rows = diff?.lines ?? [];
+  useEffect(() => {
+    setPaintedRows(Math.min(400, rows.length));
+    if (rows.length <= 400) return;
+    let cancelled = false;
+    let frame = 0;
+    let current = 400;
+    const paintMore = () => {
+      if (cancelled) return;
+      current = Math.min(rows.length, current + 800);
+      startTransition(() => setPaintedRows(current));
+      if (current < rows.length) frame = requestAnimationFrame(paintMore);
+    };
+    frame = requestAnimationFrame(paintMore);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [diff]);
   const shownFilePath = diff?.path || file.path;
   const shownName = diff?.name || file.name;
   const viewOnly = !file.kind && file.edits < 1;
@@ -115,7 +134,7 @@ export function FileViewer({
             {directory ? <span className="row-meta">Folder.</span> : null}
             {missing ? <span className="row-meta">File not found.</span> : null}
             {unreadable ? <span className="row-meta">Can't display this file.</span> : null}
-            {rows.map((line, index) => (
+            {rows.slice(0, paintedRows).map((line, index) => (
               <span key={index} className={`diff-line ${line.kind}`}>
                 <i>{line.kind === "del" ? (line.oldNo ?? "") : (line.newNo ?? index + 1)}</i>
                 <em>{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</em>

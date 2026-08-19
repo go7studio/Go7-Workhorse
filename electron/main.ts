@@ -321,6 +321,8 @@ function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): str
   return newest ? fileToDataUrl(newest.file) : null;
 }
 
+let lastStateBackupAt = 0;
+
 function writeState(state: Persistable) {
   try {
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
@@ -341,7 +343,15 @@ function writeState(state: Persistable) {
         // existing file unreadable — write through
       }
     }
-    writeVersionedState(file, state, (snapshot) => protectStateCredentials(snapshot, credentialStore()));
+    const now = Date.now();
+    const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
+    writeVersionedState(
+      file,
+      state,
+      (snapshot) => protectStateCredentials(snapshot, credentialStore()),
+      { rotateBackups },
+    );
+    if (rotateBackups) lastStateBackupAt = now;
     const io = folderAccessIo();
     for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {
       rememberFolderBookmark(folder, bookmark, io);

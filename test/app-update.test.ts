@@ -158,7 +158,7 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(winScript, /workhorse-setup\.exe/);
 });
 
-test("update check is wired through main, preload, and the desk banner", () => {
+test("update check is wired through main, preload, and the sidebar action", () => {
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -173,8 +173,16 @@ test("update check is wired through main, preload, and the desk banner", () => {
   assert.match(preload, /checkAppUpdate/);
   assert.match(preload, /applyAppUpdate/);
   assert.match(store, /applyAppUpdate/);
-  assert.match(sidebar, /brand-update/);
-  assert.match(sidebar, /UpdateChip/);
+  assert.match(sidebar, /sidebar-update/);
+  assert.match(sidebar, /SidebarUpdate/);
+  assert.match(sidebar, /"Update now"/);
+  assert.match(sidebar, /Try update again/);
+  const dock = sidebar.indexOf('<footer className="sidebar-dock">');
+  const updateAction = sidebar.indexOf("<SidebarUpdate store={store} />", dock);
+  const settingsAction = sidebar.indexOf(">Settings<", dock);
+  assert.ok(dock >= 0 && updateAction > dock && settingsAction > updateAction);
+  const brand = sidebar.slice(sidebar.indexOf('<div className="brand">'), dock);
+  assert.doesNotMatch(brand, /<SidebarUpdate/);
   // Check now used to return null on every GitHub error and every current
   // build, so the button did nothing a person could see. A miss has to say
   // so, and a packaged Mac or Windows desk has to install the release

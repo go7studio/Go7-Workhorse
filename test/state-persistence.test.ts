@@ -44,6 +44,18 @@ test("state reader falls back through backups after corruption", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("hot state saves can skip rotating multi-megabyte backups", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-state-hot-"));
+  const file = path.join(dir, "state.json");
+  writeVersionedState(file, { sessions: [{ id: "first" }] }, scrub);
+  writeVersionedState(file, { sessions: [{ id: "second" }] }, scrub);
+  const backup = fs.readFileSync(`${file}.bak`, "utf8");
+  writeVersionedState(file, { sessions: [{ id: "third" }] }, scrub, { rotateBackups: false });
+  assert.equal(fs.readFileSync(`${file}.bak`, "utf8"), backup);
+  assert.equal((JSON.parse(fs.readFileSync(file, "utf8")) as { sessions: Array<{ id: string }> }).sessions[0]?.id, "third");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("newer unknown state versions are skipped in favor of a compatible backup", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-version-"));
   const file = path.join(dir, "state.json");

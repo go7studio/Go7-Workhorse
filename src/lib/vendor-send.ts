@@ -3,6 +3,8 @@ import {
   applyGoalCommand,
   applyGrokGoalMirror,
   goalVendorPrompt,
+  isWorkhorseGoalControl,
+  isWorkhorseGoalIntent,
   parseGoalInput,
   parseGrokGoalLine,
   type GoalState,
@@ -24,7 +26,8 @@ export function prepareVendorSend(input: {
   match?: Command | null;
 }): VendorSendPrep {
   const text = input.text.trim();
-  if (input.provider === "grok") {
+  const workhorseGoal = isWorkhorseGoalIntent(text) || isWorkhorseGoalControl(text, input.goal);
+  if (input.provider === "grok" && !workhorseGoal) {
     const grokGoal = parseGrokGoalLine(text);
     if (grokGoal) {
       const halt = grokGoal.action === "pause" || grokGoal.action === "clear";
@@ -78,7 +81,8 @@ export function nextGoalForSend(
   now = Date.now(),
 ): GoalState | undefined {
   if (!applyDeskGoal) return settleBoundedGoal(state, now);
-  const next = provider === "grok" ? applyGrokGoalMirror(state, text) : applyGoalCommand(state, text);
+  const workhorseGoal = isWorkhorseGoalIntent(text) || isWorkhorseGoalControl(text, state);
+  const next = provider === "grok" && !workhorseGoal ? applyGrokGoalMirror(state, text) : applyGoalCommand(state, text);
   const budget = extractGoalBudget(text);
   if (next?.status === "active" && budget.budgetMs) {
     return settleBoundedGoal(

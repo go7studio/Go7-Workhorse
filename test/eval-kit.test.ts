@@ -127,9 +127,12 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.lifecycleStates.includes("unknown"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_ask_chat"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_delegate"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_continue_mission"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
   assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
+  assert.match(orchestration.semantics.adaptiveMission, /one wave/i);
+  assert.match(orchestration.routingContract.sequentialRule, /opt-in per mission/i);
   assert.equal(providers.profiles.some((profile: any) => ["openclaw", "hermes"].includes(profile.id)), false);
   assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);
   assert.match(orchestration.cascadeLimits.ordinaryLineupFanout, /one worker per callable bot/i);

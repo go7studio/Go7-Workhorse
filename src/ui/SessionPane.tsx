@@ -1,4 +1,4 @@
-import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
@@ -25,6 +25,7 @@ import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
 import { FileOpenProvider } from "./FileOpen";
 import { FileViewer } from "./FileViewer";
+import { MediaPaintProvider } from "./MediaPaint";
 import { MessageBody } from "./MessageBody";
 import { PlaceInProject } from "./PlaceInProject";
 import { SessionSetup } from "./SessionSetup";
@@ -255,10 +256,10 @@ export function SessionPane() {
     followBottom.current = true;
   }, [session?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scroller.current;
     if (el && followBottom.current) el.scrollTop = el.scrollHeight;
-  }, [session?.messages, session?.status]);
+  }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
     const thread = scroller.current;
@@ -318,6 +319,7 @@ export function SessionPane() {
         setOpen(next);
       }}
     >
+    <MediaPaintProvider resetKey={session.id}>
     <section
       className={`session${open ? " has-file" : ""}`}
       ref={pane}
@@ -374,6 +376,7 @@ export function SessionPane() {
           if (el) followBottom.current = pinnedToBottom(el);
         }}
       >
+        <div className="transcript-stack">
         {paintFrom > 0 ? (
           <div className="transcript-earlier" aria-hidden="true">
             Loading earlier turns…
@@ -403,6 +406,7 @@ export function SessionPane() {
             />
           );
         })}
+        </div>
       </div>
       <div className={`session-edits-slot${editsBarOpen ? " open" : ""}`}>
         <div className="session-edits">
@@ -466,6 +470,7 @@ export function SessionPane() {
         </aside>
       ) : null}
     </section>
+    </MediaPaintProvider>
     </FileOpenProvider>
   );
 }

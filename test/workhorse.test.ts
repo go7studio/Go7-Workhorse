@@ -189,6 +189,11 @@ import {
   talkingToSummary,
 } from "../src/lib/tool-labels";
 import {
+  createMediaPaintQueue,
+  enqueueMediaPaint,
+  resetMediaPaint,
+} from "../src/lib/media-paint";
+import {
   displayWorkSteps,
   earlierWorkLabel,
   formatWorked,
@@ -763,6 +768,8 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   const turn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(turn, /say-images/);
   assert.match(turn, /say-file/);
+  assert.match(turn, /useMediaPaintReady/);
+  assert.match(turn, /say-image-pending/);
   const agent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
   assert.match(agent, /buildAcpPrompt\(text, images\)/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -2058,6 +2065,19 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.equal(relative.some((block) => block.type === "image"), true);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-image/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /ImageZoom/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /useMediaPaintReady/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /MediaPaintProvider/);
+  const scheduled: Array<() => void> = [];
+  const queue = createMediaPaintQueue();
+  const seen: string[] = [];
+  enqueueMediaPaint(queue, () => seen.push("a"), (fn) => scheduled.push(fn) && scheduled.length, () => {});
+  enqueueMediaPaint(queue, () => seen.push("b"), (fn) => scheduled.push(fn) && scheduled.length, () => {});
+  assert.deepEqual(seen, []);
+  scheduled.shift()?.();
+  assert.deepEqual(seen, ["a"]);
+  scheduled.shift()?.();
+  assert.deepEqual(seen, ["a", "b"]);
+  resetMediaPaint(queue, () => {});
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /image-zoom/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /originFromClick/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /transformOrigin/);
@@ -5704,8 +5724,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
   assert.match(pane, /transcriptPaintStart/);
   assert.match(pane, /shownBlocks\.map/);
+  assert.match(pane, /transcript-stack/);
+  assert.match(pane, /useLayoutEffect/);
+  assert.match(pane, /MediaPaintProvider/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(stack\)/);
   assert.match(pane, /startTransition/);
   assert.match(pane, /requestAnimationFrame\(tick\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /justify-content: flex-end/);
   assert.equal(transcriptPaintStart(4), 0);
   assert.equal(transcriptPaintStart(26), 22);
   assert.equal(nextTranscriptPaintStart(22), 20);

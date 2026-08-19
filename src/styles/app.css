@@ -1599,6 +1599,14 @@ html.pane-dragging * {
   overscroll-behavior: contain;
 }
 
+.transcript-stack {
+  box-sizing: border-box;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 .transcript-earlier {
   margin: 0 0 16px;
   color: var(--text-tertiary);
@@ -2474,6 +2482,26 @@ html.pane-dragging * {
   max-width: 220px;
   max-height: 160px;
   object-fit: cover;
+}
+
+.say-image-pending,
+.md-image-pending {
+  display: block;
+  border: 1px solid var(--line);
+  background: var(--bg-hover);
+}
+
+.say-images .say-image-pending {
+  width: 220px;
+  height: 160px;
+  border-radius: 12px;
+}
+
+.md-image-pending {
+  width: min(880px, 100%);
+  height: 180px;
+  margin: 10px 0 4px;
+  border-radius: 14px;
 }
 
 .image-zoom-open {

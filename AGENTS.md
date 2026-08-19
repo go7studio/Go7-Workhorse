@@ -40,6 +40,11 @@ breaking it cost real time.
 - **Never leave work uncommitted.** Commit to a branch when you stop. A dozen
   modified files in a shared checkout is invisible to everyone else, blocks
   branch switching, and is one careless command from gone.
+- **Check for a version collision before you ship.** Two people cut releases
+  from this repo. Before you bump `package.json`, merge a `chore(main): release`
+  PR, tag, or tell someone a version is new, fetch `official/main` and confirm
+  that tag and GitHub release do not already exist. 0.6.3 shipped while another
+  desk was still treating it as uncut. The next unused patch is the one to use.
 - **One tree per agent.** Take a `git worktree` or a clone, and give it its own
   `npm ci`. Never symlink `node_modules` from another tree: `npm ci` follows the
   link and empties the tree it points at.

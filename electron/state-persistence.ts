@@ -109,6 +109,18 @@ export function writeComposerDraftFile(stateFile: string, drafts: unknown) {
   atomicWriteJson(file, drafts);
 }
 
+export function readStringMapFile(file: string): Map<string, string> {
+  const parsed = parseObject(file);
+  if (!parsed) return new Map();
+  return new Map(
+    Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+}
+
+export function writeStringMapFile(file: string, values: ReadonlyMap<string, string>) {
+  atomicWriteJson(file, Object.fromEntries(values));
+}
+
 export function writeVersionedState(
   file: string,
   state: PersistableState,

@@ -1,4 +1,4 @@
-import type { ChatImage, EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
+import type { ChatImage, EffortLevel, McpServerConfig, PermissionGrant, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 import { buildPolicyContext } from "../src/lib/context-preface";
 import {
   classifyElevationInput,
@@ -38,6 +38,7 @@ export type CustomPromptInput = {
   history?: CustomChatMessage[];
   mcpServers?: McpServerConfig[];
   securityPolicy?: SessionSecurityPolicy;
+  permissionGrants?: PermissionGrant[];
   folders?: string[];
   parentId?: string;
   hidden?: boolean;
@@ -445,7 +446,7 @@ export class CustomSessionHost {
             }
             messages = [
               ...messages,
-              { role: "assistant", text: result.text || text },
+              { role: "assistant", text: result.text || text, reasoning: result.thought },
               { role: "user", text: CONTINUE_NUDGE },
             ];
             messages = compactCustomTurnTranscript(messages, baseMessageCount, this.safety.maxTranscriptChars);
@@ -665,6 +666,7 @@ export class CustomSessionHost {
             : customToolPolicy(use, {
                 mode,
                 sandbox,
+                grants: input.permissionGrants,
                 cwd: input.cwd,
                 sessionId: input.sessionId,
                 folders: input.folders,
@@ -747,7 +749,7 @@ export class CustomSessionHost {
         }
         messages = [
           ...messages,
-          { role: "assistant", text: result.text || "", toolUses },
+          { role: "assistant", text: result.text || "", toolUses, reasoning: result.thought },
           { role: "user", text: "", toolResults: results },
         ];
         const roundFingerprint = customToolRoundFingerprint(toolUses, results);

@@ -6,6 +6,7 @@ import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } fr
 import { isProviderId } from "./providers";
 import { applyGoalIdleAndQueue, grokGoalAfterTurnIdle, normalizeGoal } from "./goal";
 import { normalizeSessionEnvironment } from "./session-environment";
+import { normalizePermissionGrants } from "./permission-grants";
 import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
 import { normalizePlanRun } from "./plan";
@@ -253,9 +254,7 @@ export function normalizeSession(raw: unknown): Session | null {
       : [],
     contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
     archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : null,
-    permissionGrants: Array.isArray(record.permissionGrants)
-      ? record.permissionGrants.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : undefined,
+    permissionGrants: normalizePermissionGrants(record.permissionGrants),
     queue: (() => {
       if (!Array.isArray(record.queue)) return undefined;
       const rows = record.queue.map(normalizeQueuedPrompt).filter((item): item is NonNullable<typeof item> => item !== null);

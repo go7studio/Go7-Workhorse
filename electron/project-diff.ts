@@ -187,19 +187,6 @@ export function findSourceFile(
     if (!underLinked && roots.length > 0) return null;
   }
   const searchRoots: string[] = [];
-  const addRoot = (dir: string) => {
-    if (!dir) return;
-    let resolved = dir;
-    try {
-      resolved = hostResolve(dir);
-    } catch {
-      return;
-    }
-    if (resolved === path.parse(resolved).root) return;
-    if (!existsSync(resolved) || !isDir(resolved)) return;
-    if (searchRoots.some((root) => hostResolve(root) === resolved)) return;
-    searchRoots.push(resolved);
-  };
   for (const root of roots) {
     if (!root.trim()) continue;
     let resolved: string;
@@ -213,8 +200,8 @@ export function findSourceFile(
     if (searchRoots.some((item) => hostResolve(item) === resolved)) continue;
     searchRoots.push(resolved);
   }
-  // Linked project folders are the only trees. Cwd/home steal same basenames.
-  if (searchRoots.length === 0 && roots.length === 0) addRoot(process.cwd());
+  // Linked chat folders are the only searchable trees. Never let the app's
+  // launch directory steal a same-named file from an unbound chat.
   const relFromAbs = (() => {
     if (!isAbsolutePath(trimmed)) return trimmed;
     for (const root of roots) {
@@ -293,7 +280,7 @@ export function resolveExistingFile(
   if (found) return found;
   const trimmed = cleanSearchPath(filePath);
   if (!trimmed) return trimmed;
-  return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
+  return isAbsolutePath(trimmed) ? trimmed : roots[0] ? path.resolve(roots[0], trimmed) : "";
 }
 
 /**
@@ -342,7 +329,7 @@ export function resolveStatFile(
       if (loose) return loose;
     }
   }
-  return isAbsolutePath(trimmed) ? trimmed : path.resolve(roots[0] ?? process.cwd(), trimmed);
+  return isAbsolutePath(trimmed) ? trimmed : roots[0] ? path.resolve(roots[0], trimmed) : "";
 }
 
 function gitIndexLocked(repo: string, existsSync: (filePath: string) => boolean): boolean {
@@ -381,6 +368,7 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
       }
     });
   const abs = resolveExistingFile(filePath, roots, existsSync, input);
+  if (!abs) return buildFileDiff(filePath, "", "");
   if (existsSync(abs) && isDir(abs)) {
     return { ...buildFileDiff(abs, "", ""), directory: true };
   }
@@ -390,7 +378,7 @@ export function readFileDiff(filePath: string, roots: string[] = [], input: File
   } catch {
     after = "";
   }
-  const start = existsSync(abs) ? path.dirname(abs) : roots[0] ?? process.cwd();
+  const start = existsSync(abs) ? path.dirname(abs) : roots[0] ?? "";
   const repo =
     gitRootFrom(start, existsSync) ??
     roots.map((root) => gitRootFrom(root, existsSync)).find((item): item is string => Boolean(item)) ??
@@ -420,6 +408,7 @@ export function recordFileInstance(filePath: string, roots: string[] = [], input
   const existsSync = input.existsSync ?? ((item) => fs.existsSync(item));
   const readFile = input.readFile ?? ((item) => fs.readFileSync(item, "utf8"));
   const abs = resolveExistingFile(filePath, roots, existsSync, input);
+  if (!abs) return "";
   let text = "";
   try {
     text = existsSync(abs) ? readFile(abs) : "";
@@ -606,7 +595,11 @@ function addEditStatPath(
     work.next[item] = createdLineStat(abs, existsSync, readFile, countLinesAt, input.instances);
     return "created";
   }
-  const start = existsSync(abs) ? path.dirname(abs) : roots[0] ?? process.cwd();
+  const start = existsSync(abs) ? path.dirname(abs) : roots[0];
+  if (!start) {
+    work.next[item] = { added: 0, deleted: 0 };
+    return "other";
+  }
   const repo =
     gitRootFrom(start, existsSync) ??
     roots.map((root) => gitRootFrom(root, existsSync)).find((found): found is string => Boolean(found)) ??

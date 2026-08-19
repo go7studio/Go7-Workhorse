@@ -247,17 +247,16 @@ export function usageHomeForReport(
   if (report.customBotId && bots.some((bot) => bot.id === report.customBotId)) {
     return { provider: "custom", customBotId: report.customBotId };
   }
-  const named =
-    findCustomBotByModel(bots, report.model) ??
-    bots.find((bot) => bot.id === report.model || bot.name === report.model);
-  if (named && (report.provider === "custom" || owner?.provider !== "custom")) {
-    return { provider: "custom", customBotId: named.id };
+  if (report.provider === "custom" || owner?.provider === "custom") {
+    if (owner?.customBotId && bots.some((bot) => bot.id === owner.customBotId)) {
+      return { provider: "custom", customBotId: owner.customBotId };
+    }
+    const matches = bots.filter(
+      (bot) => bot.model === report.model || bot.id === report.model || bot.name === report.model || customBotServes(bot, report.model),
+    );
+    return { provider: "custom", ...(matches.length === 1 ? { customBotId: matches[0]!.id } : {}) };
   }
-  const provider = usageProviderForSession(owner, report.provider);
-  if (provider === "custom") {
-    return { provider, customBotId: owner?.customBotId ?? named?.id };
-  }
-  return { provider };
+  return { provider: usageProviderForSession(undefined, report.provider ?? owner?.provider) };
 }
 
 export function customBotUsageEvents(

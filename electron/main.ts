@@ -52,14 +52,14 @@ import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, type EnsureWorktreeInput } from "./worktree-host";
 import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
 import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig } from "./mcp-install";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readVersionedState, writeComposerDraftFile, writeVersionedState } from "./state-persistence";
+import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -100,7 +100,47 @@ const CLAUDE_AUTH_SESSION = "auth:claude";
 export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
 
 /** Union of written file versions for the review. Survives later deletes of created lines. */
-const fileInstances = new Map<string, string>();
+let fileInstances = new Map<string, string>();
+const externalRuntimeProcesses = new Map<string, ChildProcess>();
+
+function runExternalRuntimeProcess(taskId: string, file: string, args: string[]) {
+  return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
+    const child = execFile(
+      file,
+      args,
+      { encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (externalRuntimeProcesses.get(taskId) === child) externalRuntimeProcesses.delete(taskId);
+        const rawCode = (error as { code?: string | number } | null)?.code;
+        const code = typeof rawCode === "number"
+          ? rawCode
+          : error
+            ? 1
+            : 0;
+        resolve({ status: code, stdout: stdout ?? "", stderr: stderr ?? "" });
+      },
+    );
+    externalRuntimeProcesses.set(taskId, child);
+  });
+}
+
+function cancelExternalRuntimeProcess(taskId: string): boolean {
+  const child = externalRuntimeProcesses.get(taskId);
+  if (!child) return false;
+  externalRuntimeProcesses.delete(taskId);
+  if (process.platform === "win32" && child.pid) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+  } else {
+    child.kill("SIGTERM");
+  }
+  return true;
+}
+
+function requireSessionCwd(value?: string | null): string {
+  const cwd = resolveSessionCwd(value);
+  if (!cwd) throw new Error("This chat has no execution folder. Link a folder before running it.");
+  return cwd;
+}
 
 function packagedBuildChannel() {
   if (!app.isPackaged || process.platform !== "darwin") return app.isPackaged ? "release" : "development";
@@ -166,6 +206,10 @@ type Persistable = Record<string, unknown>;
 
 function statePath() {
   return path.join(app.getPath("userData"), "workhorse-state.json");
+}
+
+function fileInstancesPath() {
+  return path.join(app.getPath("userData"), "file-instances.json");
 }
 
 let credentials: CredentialStore | null = null;
@@ -441,6 +485,7 @@ app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
   claimLinkedFolders();
+  fileInstances = readStringMapFile(fileInstancesPath());
   void archiveWorkhorseWorkerThreads()
     .then((result) => {
       if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
@@ -624,7 +669,7 @@ app.whenReady().then(async () => {
   // is a channel written next month.
   guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
 
-  ipcMain.handle("agentRuntime:detect", () => {
+  const detectAgentRuntimes = () => {
     const home = app.getPath("home");
     const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
     return detectRuntimesOnHost(
@@ -637,7 +682,8 @@ app.whenReady().then(async () => {
         },
       },
     );
-  });
+  };
+  ipcMain.handle("agentRuntime:detect", detectAgentRuntimes);
 
   const linkLaunch = () => ({
     command: process.env.WORKHORSE_MCP_COMMAND || process.execPath,
@@ -720,13 +766,13 @@ app.whenReady().then(async () => {
       request: import("../src/lib/external-task").RuntimeStartRequest,
     ) => {
       const io = {
-        exec: (file: string, args: string[]) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 120_000, windowsHide: true });
-          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-        },
+        exec: (file: string, args: string[]) => runExternalRuntimeProcess(request.taskId, file, args),
       };
       return startRuntimeTask(io, request);
     },
+  );
+  ipcMain.handle("agentRuntime:cancel", (_event, taskId: unknown) =>
+    typeof taskId === "string" ? cancelExternalRuntimeProcess(taskId) : false,
   );
 
   ipcMain.handle("grok:peer-result", (_event, payload: { id: string } & PeerAskResult) => {
@@ -851,16 +897,19 @@ app.whenReady().then(async () => {
     return readFileDiff(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [], {
       created: created === true,
       instances: fileInstances,
+      recordInstance: false,
     });
   });
 
   ipcMain.handle("project:record-write", (_event, filePath: string, roots: string[] = []) => {
     if (typeof filePath !== "string" || !filePath.trim()) return "";
-    return recordFileInstance(
+    const recorded = recordFileInstance(
       filePath,
       Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [],
       { instances: fileInstances },
     );
+    if (recorded) writeStringMapFile(fileInstancesPath(), fileInstances);
+    return recorded;
   });
 
   ipcMain.handle("project:read-file", (_event, filePath: string, roots: string[] = []) => {
@@ -869,7 +918,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("project:git-changes", (_event, cwd: unknown) =>
-    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : process.cwd()),
+    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : ""),
   );
 
   ipcMain.handle("terminal:start", (event, raw: { sessionId?: string; cwd?: string }) =>
@@ -939,7 +988,9 @@ app.whenReady().then(async () => {
       body: typeof payload?.body === "string" ? payload.body : "",
     }),
   );
-  const collectDiagnostics = async () => buildSupportReport({
+  const collectDiagnostics = async () => {
+    const runtimes = detectAgentRuntimes().statuses;
+    return buildSupportReport({
     state: readState(),
     version: APP_VERSION,
     userData: app.getPath("userData"),
@@ -948,8 +999,12 @@ app.whenReady().then(async () => {
       grok: await detectGrokLogin(),
       codex: await detectCodexLogin(),
       claude: await detectClaudeLogin(),
+      cursor: await detectCursorLogin(),
+      openclaw: { connected: runtimes.some((item) => item.runtimeId === "openclaw" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "openclaw")?.binaryPath },
+      hermes: { connected: runtimes.some((item) => item.runtimeId === "hermes" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "hermes")?.binaryPath },
     },
-  });
+    });
+  };
   ipcMain.handle("diagnostics:collect", () => collectDiagnostics());
   ipcMain.handle("diagnostics:export", async () => {
     const result = await dialog.showSaveDialog({
@@ -1066,7 +1121,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("codex:prompt", async (event, raw: CodexPromptInput) => {
     const input: CodexPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await codexHost.prompt(input, (payload) => {
       try {
@@ -1090,7 +1145,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("claude:prompt", async (event, raw: ClaudePromptInput) => {
     const input: ClaudePromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await claudeHost.prompt(input, (payload) => {
       try {
@@ -1113,7 +1168,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("cursor:prompt", async (event, raw: CursorPromptInput) => {
     const input: CursorPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await cursorHost.prompt(input, (payload) => {
       try {
@@ -1133,7 +1188,8 @@ app.whenReady().then(async () => {
 
   const customHost = new CustomSessionHost();
   ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
-    const result = await customHost.prompt(raw, (payload) => {
+    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
+    const result = await customHost.prompt(input, (payload) => {
       try {
         if (!event.sender.isDestroyed()) event.sender.send("custom:event", payload);
       } catch (error) {
@@ -1152,7 +1208,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:prompt", async (event, raw: GrokPromptInput) => {
     const input: GrokPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await grokHost.prompt(input, (payload) => {
       try {
@@ -1175,7 +1231,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:compact", async (event, raw: GrokCompactInput) => {
     const input: GrokCompactInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     return grokHost.compact(input, (payload) => {
       try {
@@ -1196,7 +1252,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:fork", async (event, raw: GrokPromptInput) => {
-    const input = { ...raw, cwd: resolveSessionCwd(raw.cwd) };
+    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
     try {
       return await grokHost.fork(input, (payload) => {
         try {
@@ -1213,7 +1269,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:rewind", async (event, raw: GrokPromptInput & { keepUserIndex: number }) => {
     const input = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     try {
       return await grokHost.rewind(input, (payload) => {

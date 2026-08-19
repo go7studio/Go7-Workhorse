@@ -35,5 +35,5 @@ export function sessionExecutionCwd(environment: SessionEnvironment | undefined,
   const normalized = normalizeSessionEnvironment(environment);
   if (normalized.kind === "worktree") return normalized.path;
   if (normalized.kind === "cloud" && normalized.cwd) return normalized.cwd;
-  return localCwd;
+  return clean(localCwd);
 }

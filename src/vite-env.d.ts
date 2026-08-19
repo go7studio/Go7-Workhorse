@@ -208,6 +208,7 @@ type WorkhorseBridge = {
     history?: { role: "user" | "assistant"; text: string }[];
     mcpServers?: import("./lib/types").McpServerConfig[];
     securityPolicy?: import("./lib/types").SessionSecurityPolicy;
+    permissionGrants?: import("./lib/types").PermissionGrant[];
     folders?: string[];
     parentId?: string;
     hidden?: boolean;
@@ -291,6 +292,7 @@ type WorkhorseBridge = {
   startExternalRuntimeTask?: (
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
+  cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
 };
 
 interface Window {

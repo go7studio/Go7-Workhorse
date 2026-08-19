@@ -106,6 +106,12 @@ async function validate() {
   }
   if (!/^[a-f0-9]{40}$/.test(suite.baselineRef ?? "")) {
     problems.push("suite baselineRef must be a full lowercase Git commit");
+  } else {
+    try {
+      execFileSync("git", ["merge-base", "--is-ancestor", suite.baselineRef, "HEAD"], { cwd: root, stdio: "ignore" });
+    } catch {
+      problems.push("suite baselineRef must be an ancestor of the evaluated source");
+    }
   }
   if (configExample.source?.expectedVersion !== packageManifest.version) {
     problems.push(
@@ -417,6 +423,15 @@ function git(...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 
+async function currentSource() {
+  return {
+    commit: git("rev-parse", "HEAD"),
+    branch: git("branch", "--show-current"),
+    dirty: Boolean(git("status", "--porcelain")),
+    version: JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version,
+  };
+}
+
 async function initRun(manifests, args) {
   const configPath = path.resolve(root, option(args, "--config") ?? path.join("eval", "config.json"));
   let config;
@@ -495,12 +510,7 @@ async function initRun(manifests, args) {
     status: "initialized",
     executionStarted: false,
     configMode: config.mode,
-    source: {
-      commit: git("rev-parse", "HEAD"),
-      branch: git("branch", "--show-current"),
-      dirty: Boolean(git("status", "--porcelain")),
-      version: JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version,
-    },
+    source: await currentSource(),
     enabledProfiles,
     modelPolicy,
     safety: config.safety,
@@ -537,7 +547,15 @@ async function score(manifests, args) {
     return null;
   }
   const runDir = path.resolve(root, value);
-  const results = await json(path.join(runDir, "results.json"));
+  const [results, run] = await Promise.all([
+    json(path.join(runDir, "results.json")),
+    json(path.join(runDir, "run.json")),
+  ]);
+  if (!run.runId || run.runId !== results.runId) {
+    console.error("Cannot score run: run.json and results.json identify different runs.");
+    process.exitCode = 1;
+    return null;
+  }
   const allItems = manifests.suite.areas.flatMap((area) => area.rubric);
   const itemById = new Map(allItems.map((item) => [item.id, item]));
   const verdicts = results.verdicts ?? {};
@@ -584,24 +602,34 @@ async function score(manifests, args) {
     };
   });
   const weightedCoverage = areaReports.reduce((sum, area) => sum + area.coverage * area.areaWeight, 0) / 100;
-  const judgedAreas = areaReports.filter((area) => area.score !== null);
-  const judgedAreaWeight = judgedAreas.reduce((sum, area) => sum + area.areaWeight, 0);
+  const judgedAreas = areaReports.filter((area) => area.score !== null && area.coverage > 0);
+  const judgedAreaWeight = judgedAreas.reduce((sum, area) => sum + area.areaWeight * area.coverage, 0);
   const weightedScore = judgedAreaWeight
-    ? judgedAreas.reduce((sum, area) => sum + area.score * area.areaWeight, 0) / judgedAreaWeight
+    ? judgedAreas.reduce((sum, area) => sum + area.score * area.areaWeight * area.coverage, 0) / judgedAreaWeight
     : null;
+  const areaCoverageFloor = 0.5;
+  const thinAreas = areaReports.filter((area) => area.coverage < areaCoverageFloor).map((area) => area.id);
+  const scoreWithheld = weightedCoverage < 0.6 || thinAreas.length > 0;
   const report = {
     schemaVersion: 1,
     runId: results.runId,
     generatedAt: new Date().toISOString(),
-    headlineScore: weightedCoverage >= 0.6 ? weightedScore : null,
-    scoreWithheld: weightedCoverage < 0.6,
+    source: run.source,
+    configMode: run.configMode,
+    enabledProfiles: run.enabledProfiles,
+    modelPolicy: run.modelPolicy,
+    spend: run.spend,
+    headlineScore: scoreWithheld ? null : weightedScore,
+    scoreWithheld,
+    areaCoverageFloor,
+    thinAreas,
     coverage: weightedCoverage,
     areas: areaReports,
   };
   await writeFile(path.join(runDir, "report.json"), JSON.stringify(report, null, 2) + "\n", "utf8");
   console.log(
     report.scoreWithheld
-      ? `Score withheld: ${(weightedCoverage * 100).toFixed(1)}% coverage is below the 60% floor.`
+      ? `Score withheld: ${(weightedCoverage * 100).toFixed(1)}% coverage; thin areas: ${thinAreas.join(", ") || "none"}.`
       : `Score ${(weightedScore * 100).toFixed(1)}% over ${(weightedCoverage * 100).toFixed(1)}% coverage.`,
   );
   return report;
@@ -616,6 +644,19 @@ async function finalize(manifests, args) {
   }
   const runDir = path.resolve(root, value);
   const results = await json(path.join(runDir, "results.json"));
+  const runPath = path.join(runDir, "run.json");
+  const run = await json(runPath);
+  const source = await currentSource();
+  const sourceChanged = ["commit", "branch", "dirty", "version"].filter((key) => run.source?.[key] !== source[key]);
+  if (run.runId !== results.runId || sourceChanged.length > 0) {
+    console.error(
+      run.runId !== results.runId
+        ? "Cannot finalize: run.json and results.json identify different runs."
+        : `Cannot finalize: evaluated source changed (${sourceChanged.join(", ")}). Start a new run.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   const expectedIds = manifests.suite.areas.flatMap((area) => area.rubric.map((item) => item.id));
   const missingIds = expectedIds.filter((id) => !results.verdicts?.[id]);
   const notRunIds = expectedIds.filter((id) => results.verdicts?.[id]?.verdict === "not_run");
@@ -630,17 +671,10 @@ async function finalize(manifests, args) {
   }
   const report = await score(manifests, args);
   if (!report) return;
-  const runPath = path.join(runDir, "run.json");
-  const run = await json(runPath);
   run.status = "completed";
   run.executionStarted = true;
   run.completedAt = new Date().toISOString();
-  run.source = {
-    commit: git("rev-parse", "HEAD"),
-    branch: git("branch", "--show-current"),
-    dirty: Boolean(git("status", "--porcelain")),
-    version: JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version,
-  };
+  run.completedSource = source;
   await writeFile(runPath, JSON.stringify(run, null, 2) + "\n", "utf8");
   console.log(`Finalized ${results.runId} with ${Object.keys(results.verdicts).length} verdicts.`);
 }

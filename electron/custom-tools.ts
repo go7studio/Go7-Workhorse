@@ -9,7 +9,7 @@ import {
   workerOmittedToolError,
   type DeskRole,
 } from "../src/lib/subagents";
-import type { PermissionMode, SandboxProfile } from "../src/lib/types";
+import type { PermissionGrant, PermissionMode, SandboxProfile } from "../src/lib/types";
 import type { CustomHttpTool } from "./custom-http";
 import { handleWorkhorseRpc } from "./workhorse-mcp";
 
@@ -46,7 +46,7 @@ export function limitCustomToolResult(
 export type CustomToolPolicy = {
   mode?: PermissionMode;
   sandbox?: SandboxProfile;
-  grants?: string[];
+  grants?: PermissionGrant[];
   cwd?: string;
   folders?: string[];
   sessionId?: string;
@@ -470,7 +470,7 @@ export function customToolPolicy(
   if (forced) return forced;
   if ((policy.mode ?? "ask") === "always-approve") return "once";
   if (!looksLikeWriteTool(name, detail, filePath)) return "once";
-  return autoAllowPermission({ tool: name, grants: policy.grants }) ?? "ask";
+  return autoAllowPermission({ tool: name, detail, path: filePath, grants: policy.grants }) ?? "ask";
 }
 
 export function parseLeftoverToolCalls(text: string): CustomToolUse[] {

@@ -7,11 +7,20 @@
     "chats": 10000,
     "transcriptMessages": 1000,
     "searchMessages": 150000,
+    "workerHeavyRestartChats": 10000,
     "liveWalkMinimum": {
       "projects": 60,
       "chats": 600,
       "transcriptMessages": 600
     }
+  },
+  "interactionBudgetsMs": {
+    "warmProjectToggleP95": 100,
+    "warmChatSwitchP95": 250,
+    "searchP95": 150,
+    "settingsTabP95": 400,
+    "coldChatP95": 800,
+    "workerHeavyRestartMax": 1500
   },
   "invariants": [
     "Assistant prose streaming does not rerender the whole app shell or unrelated sidebar rows; visible status and tool changes still update.",
@@ -21,7 +30,8 @@
     "Media decode and large file diffs paint in bounded animation-frame batches without blocking chat navigation.",
     "Search handles the declared corpus without spread-argument overflow and returns the newest matching timestamp.",
     "Draft typing stays local until a normal flush boundary; state is compact and full recovery backups rotate on their own interval rather than every journal save.",
-    "A restart preserves session identity, parent nesting, selected chat, goal and worker state, attachments, and the newest durable message without duplicate dispatch."
+    "A restart preserves session identity, parent nesting, selected chat, goal and worker state, attachments, and the newest durable message without duplicate dispatch.",
+    "A worker-heavy ten-thousand-chat restart is reconciled with indexed linear work under the declared maximum."
   ],
   "sourceFiles": [
     "src/App.tsx",
@@ -37,6 +47,7 @@
     "src/ui/FileViewer.tsx",
     "electron/main.ts",
     "test/performance.test.ts",
+    "test/interrupted-workers.test.ts",
     "test/workhorse.test.ts"
   ],
   "verificationCommands": ["verify"],

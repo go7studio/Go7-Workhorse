@@ -31,6 +31,8 @@ export type CustomChatMessage = {
   images?: ChatImage[];
   toolUses?: CustomToolUse[];
   toolResults?: CustomToolResult[];
+  /** Provider-required replay for a thinking assistant tool-call row. */
+  reasoning?: string;
 };
 
 export type CustomHttpUsage = {
@@ -267,6 +269,8 @@ export function buildOpenAiBody(input: {
   model: string;
   messages: CustomChatMessage[];
   preface?: string;
+  effort?: EffortLevel | string | null;
+  baseUrl?: string;
   maxTokens?: number;
   tools?: CustomHttpTool[];
   role?: import("../src/lib/workhorse-rules").DeskRole;
@@ -284,6 +288,7 @@ export function buildOpenAiBody(input: {
           function: { name: tool.name, arguments: JSON.stringify(tool.input ?? {}) },
         }));
       }
+      if (item.reasoning?.trim()) row.reasoning_content = item.reasoning;
       messages.push(row);
       continue;
     }
@@ -301,14 +306,24 @@ export function buildOpenAiBody(input: {
       content: parts.length > 1 || (item.images?.length ?? 0) > 0 ? parts : item.text || "",
     });
   }
-  return {
+  const body: Record<string, unknown> = {
     model: input.model,
     stream: true,
     stream_options: { include_usage: true },
-    max_tokens: input.maxTokens && input.maxTokens > 0 ? input.maxTokens : 4096,
+    max_tokens: input.maxTokens && input.maxTokens > 0 ? input.maxTokens : Math.max(8192, customMaxTokens(input.model, input.effort)),
     messages,
     tools: customHttpToolsOpenAi(input.tools, { role: input.role }),
   };
+  const deepSeek = /(?:^|\.)api\.deepseek\.com(?=\/|$)/i.test(input.baseUrl ?? "") || /^deepseek-v4-(?:pro|flash)$/i.test(input.model);
+  if (deepSeek) {
+    if (input.effort === "off") {
+      body.thinking = { type: "disabled" };
+    } else {
+      body.thinking = { type: "enabled" };
+      body.reasoning_effort = ["high", "xhigh", "max", "ultra", "adaptive"].includes(String(input.effort)) ? "max" : "high";
+    }
+  }
+  return body;
 }
 
 /**
@@ -340,12 +355,17 @@ export function parseCustomUsage(raw: unknown): CustomHttpUsage | undefined {
   const anthropicInput = num(usage.input_tokens) ?? num(usage.inputTokens);
   const openaiPrompt = num(usage.prompt_tokens);
   const openaiCached = num(details(usage.prompt_tokens_details).cached_tokens) ?? num(usage.cached_tokens);
+  const deepSeekCacheHit = num(usage.prompt_cache_hit_tokens);
+  const deepSeekCacheMiss = num(usage.prompt_cache_miss_tokens);
   const explicitCacheRead = num(usage.cache_read_input_tokens) ?? num(usage.cache_read_tokens);
   const cacheWrite = num(usage.cache_creation_input_tokens) ?? num(usage.cache_write_tokens) ?? 0;
 
   let inputTokens: number;
   let cacheRead: number;
-  if (anthropicInput !== undefined) {
+  if (deepSeekCacheHit !== undefined || deepSeekCacheMiss !== undefined) {
+    inputTokens = deepSeekCacheMiss ?? 0;
+    cacheRead = deepSeekCacheHit ?? 0;
+  } else if (anthropicInput !== undefined) {
     inputTokens = anthropicInput;
     cacheRead = explicitCacheRead ?? 0;
   } else if (openaiPrompt !== undefined) {
@@ -586,7 +606,7 @@ export async function streamCustomHttp(
   },
   handlers: CustomHttpHandlers = {},
   fetchImpl: typeof fetch = fetch,
-): Promise<{ text: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
+): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
   const apiKey = config.apiKey.trim();
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
@@ -595,7 +615,7 @@ export async function streamCustomHttp(
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs })
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, baseUrl, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs })
       : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs });
 
   const headers: Record<string, string> = {
@@ -624,6 +644,7 @@ export async function streamCustomHttp(
     let raw = "";
     let emitted = "";
     let emittedThought = "";
+    let reasoning = "";
     let usage: CustomHttpUsage | undefined;
     const toolUses: CustomToolUse[] = [];
     let stopReason: string | undefined;
@@ -640,16 +661,20 @@ export async function streamCustomHttp(
       toolUses.push(tool);
       handlers.onToolUse?.(tool);
     };
+    const emitThought = (chunk: string) => {
+      reasoning += chunk;
+      handlers.onThought?.(chunk);
+    };
     const sink: CustomHttpHandlers = {
       onChunk: (chunk) => {
         raw += chunk;
         const split = peelThinkTags(holdUnfinishedToolcall(raw));
         if (split.thought.startsWith(emittedThought)) {
           const add = split.thought.slice(emittedThought.length);
-          if (add) handlers.onThought?.(add);
+          if (add) emitThought(add);
           emittedThought = split.thought;
         } else if (split.thought) {
-          handlers.onThought?.(split.thought);
+          emitThought(split.thought);
           emittedThought = split.thought;
         }
         const clean = sanitizeCustomReply(split.body);
@@ -661,7 +686,7 @@ export async function streamCustomHttp(
           emitted = clean;
         }
       },
-      onThought: handlers.onThought,
+      onThought: emitThought,
       onUsage: (next) => {
         usage = mergeCustomUsageSnapshot(usage, next);
       },
@@ -743,7 +768,7 @@ export async function streamCustomHttp(
       if (delta) handlers.onChunk?.(delta);
     }
     if (usage) handlers.onUsage?.(usage);
-    return { text, usage, toolUses, stopReason };
+    return { text, ...(reasoning ? { thought: reasoning } : {}), usage, toolUses, stopReason };
   };
 
   try {

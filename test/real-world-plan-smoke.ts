@@ -76,6 +76,7 @@ try {
 
   let lastPlanStatus = "none";
   let elevated = false;
+  let peakRootWorkers = 0;
   const timeoutMinutes = Math.max(10, Number(process.env.WORKHORSE_REAL_PLAN_TIMEOUT_MINUTES ?? 60));
   const deadline = Date.now() + timeoutMinutes * 60_000;
   while (Date.now() < deadline) {
@@ -97,6 +98,7 @@ try {
     const runningChildren = (saved.sessions ?? []).filter(
       (session: any) => session.parentId === rootSessionId && session.agentRun?.status === "running",
     );
+    peakRootWorkers = Math.max(peakRootWorkers, runningChildren.length);
     if (["completed", "blocked", "cancelled"].includes(lastPlanStatus)) break;
     const rootIdle = root?.status !== "running";
     const hasUsefulReply = root?.messages?.some(
@@ -114,6 +116,7 @@ try {
     startedAt,
     finishedAt: Date.now(),
     elevated,
+    peakRootWorkers,
     runDir,
     plan: root?.planRun
       ? {
@@ -138,6 +141,10 @@ try {
       status: child.agentRun?.status,
       planStepId: child.agentRun?.planStepId,
       rationale: child.agentRun?.rationale,
+      effort: child.effort,
+      isolation: child.agentRun?.isolation,
+      exclusions: child.agentRun?.exclusions,
+      startedAt: child.agentRun?.startedAt,
       attachments: child.messages?.[0]?.images?.map((image: any) => ({ name: image.name, kind: image.kind, size: image.size })),
     })),
     usage: (saved.usage ?? [])
@@ -147,9 +154,28 @@ try {
   fs.writeFileSync(path.join(runDir, "evidence.json"), JSON.stringify(evidence, null, 2));
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
   if (!evidence.plan) throw new Error("The orchestrator did not import a plan.");
+  if (!["completed", "blocked"].includes(evidence.plan.status)) {
+    throw new Error(`The plan did not reach a truthful terminal state: ${evidence.plan.status}.`);
+  }
+  if (evidence.peakRootWorkers > 2) throw new Error(`Root concurrency exceeded two: ${evidence.peakRootWorkers}.`);
   if (!evidence.children.some((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length)) {
     throw new Error("No Kimi visual child received attachments.");
   }
+  const productionChildren = evidence.children.filter((child: any) => child.startedAt >= startedAt);
+  if (productionChildren.some((child: any) => !child.planStepId || !String(child.rationale ?? "").trim())) {
+    throw new Error("A production worker is missing its plan step or routing rationale.");
+  }
+  const kimi = evidence.children.find((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length);
+  const kimiLimits = (kimi?.exclusions ?? []).join(" ");
+  if (!/no[- ]code/i.test(kimiLimits) || !/no[- ]commit/i.test(kimiLimits) || !/audit[- ]only/i.test(kimiLimits)) {
+    throw new Error("The Kimi visual worker was not constrained to audit-only, no-code, and no-commit work.");
+  }
+  if (evidence.children.some((child: any) => /minimax|\bm3\b/i.test(`${child.title} ${child.model}`)) ||
+      evidence.usage.some((event: any) => /minimax|\bm3\b/i.test(`${event.provider} ${event.model}`))) {
+    throw new Error("MiniMax M3 entered the production run.");
+  }
+  const completedWithoutEvidence = evidence.plan.steps.filter((step: any) => step.status === "completed" && step.evidence === 0);
+  if (completedWithoutEvidence.length) throw new Error("A completed plan step has no recorded evidence.");
 } finally {
   await app.close().catch(() => undefined);
 }

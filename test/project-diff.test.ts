@@ -79,6 +79,28 @@ test("project diffs use the linked-root file, not a whole-file or sibling steal"
   }
 });
 
+test("an unbound chat never reads a same-named file from the app cwd", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "wh-diff-unbound-"));
+  writeFileSync(path.join(temp, "secret.txt"), "must not leak\n");
+  const previous = process.cwd();
+  try {
+    process.chdir(temp);
+    assert.equal(findSourceFile("secret.txt", []), null);
+    assert.deepEqual(readFileDiff("secret.txt", []), {
+      path: "secret.txt",
+      name: "secret.txt",
+      before: "",
+      after: "",
+      added: 0,
+      deleted: 0,
+      lines: [],
+    });
+  } finally {
+    process.chdir(previous);
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test("new file is all adds of the real after; delete is all deletes of the real before", () => {
   const repo = makeRepo("wh-diff-newdel-");
   commitFile(repo, "kept.md", "stay\n");

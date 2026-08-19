@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { LEGACY_INTERRUPTED_ERROR, normalizeAgentRun } from "../src/lib/subagents";
-import { lineupIsTerminal, reconcilePersistedLineups } from "../src/lib/lineup";
+import { applyChildIdleSync, lineupIsTerminal, reconcilePersistedLineups } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
 
@@ -89,6 +89,50 @@ test("the wave stops waiting on workers that can no longer answer", () => {
   assert.equal(rows.some((row) => row.status === "completed"), false);
 });
 
+test("a late completion from an older worker run cannot finish the reused worker", () => {
+  const parent = {
+    ...worker("sess_parent", "Parent"),
+    parentId: undefined,
+    hidden: undefined,
+    agentRun: undefined,
+    lineup: {
+      id: "lineup_new",
+      folder: "/repo",
+      startedAt: 10,
+      rows: [{
+        childId: "sess_a",
+        title: "Current slice",
+        slice: "current",
+        folder: "/repo",
+        vendor: "Grok",
+        status: "running" as const,
+        startedAt: 10,
+        correlationId: "corr_new",
+      }],
+    },
+  } as Session;
+  const child = {
+    ...worker("sess_a", "Current slice"),
+    status: "running" as const,
+    agentRun: { status: "running" as const, startedAt: 10, isolation: "shared" as const, correlationId: "corr_new" },
+  };
+  const original = [parent, child];
+  const stale = applyChildIdleSync(original, "sess_a", "completed", {
+    report: "old result",
+    correlationId: "corr_old",
+  });
+  assert.equal(stale, original);
+  assert.equal(stale[1]?.agentRun?.status, "running");
+  assert.equal(stale[0]?.lineup?.rows[0]?.status, "running");
+
+  const current = applyChildIdleSync(stale, "sess_a", "completed", {
+    report: "current result",
+    correlationId: "corr_new",
+  });
+  assert.equal(current[1]?.agentRun?.status, "completed");
+  assert.equal(current[0]?.lineup?.rows[0]?.status, "completed");
+});
+
 test("resume puts the worker back to running and re-sends its brief", () => {
   const store = read("src/lib/store.tsx");
   const action = store.slice(store.indexOf("const resumeAgentRun = useCallback"), store.indexOf("const resumeAgentRun = useCallback") + 2600);
@@ -144,4 +188,37 @@ test("a lineup row written as failed by the old build is healed with its worker"
   assert.equal(healed.find((s) => s.id === "sess_a")!.agentRun?.status, "interrupted");
   assert.equal(healed.find((s) => s.id === "sess_parent")!.lineup!.rows[0]!.status, "interrupted",
     "or the wave and the worker disagree about what happened");
+});
+
+test("worker-heavy restart reconciliation stays linear at ten thousand chats", () => {
+  const sessions: Session[] = [];
+  for (let index = 0; index < 5_000; index += 1) {
+    const parentId = `parent_${index}`;
+    const childId = `child_${index}`;
+    sessions.push({
+      ...worker(parentId, `Parent ${index}`),
+      parentId: undefined,
+      hidden: undefined,
+      agentRun: undefined,
+      lineup: {
+        id: `lineup_${index}`,
+        folder: "/repo",
+        startedAt: 1,
+        joinOwner: "external-runtime",
+        rows: [{ childId, title: "Slice", slice: "slice", folder: "/repo", vendor: "Grok", status: "running", startedAt: 1 }],
+      },
+    });
+    sessions.push({
+      ...worker(childId, `Worker ${index}`),
+      parentId,
+      agentRun: { status: "interrupted", startedAt: 1, finishedAt: 2, isolation: "shared", error: "restart" },
+    });
+  }
+  const started = performance.now();
+  const healed = reconcilePersistedLineups(sessions, 3);
+  const elapsed = performance.now() - started;
+  assert.equal(healed.length, 10_000);
+  assert.equal(healed[0]?.lineup?.rows[0]?.status, "interrupted");
+  assert.equal(healed.at(-2)?.lineup?.rows[0]?.status, "interrupted");
+  assert.ok(elapsed < 1_500, `worker-heavy restart took ${elapsed.toFixed(1)}ms`);
 });

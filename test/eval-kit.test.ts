@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,46 @@ function run(relative: string, args: string[] = []) {
     encoding: "utf8",
   }));
 }
+
+function scoreFixture(verdicts: Record<string, unknown>) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "workhorse-eval-score-"));
+  writeFileSync(path.join(dir, "run.json"), JSON.stringify({
+    schemaVersion: 1,
+    runId: "score-test",
+    source: { commit: "source", branch: "branch", dirty: false, version: "0.0.0" },
+    configMode: "baseline-only",
+    enabledProfiles: [],
+    modelPolicy: null,
+    spend: { maxUsd: 0 },
+  }));
+  writeFileSync(path.join(dir, "results.json"), JSON.stringify({ schemaVersion: 1, runId: "score-test", verdicts }));
+  execFileSync(process.execPath, [path.join(ROOT, "scripts/workhorse-eval.mjs"), "score", "--run", dir], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  const report = JSON.parse(readFileSync(path.join(dir, "report.json"), "utf8"));
+  rmSync(dir, { recursive: true, force: true });
+  return report;
+}
+
+test("eval scoring binds its source and withholds sparse area sampling", () => {
+  const suite = json("eval/suite.json");
+  const sparse: Record<string, unknown> = {};
+  for (const area of suite.areas) {
+    sparse[area.rubric[0].id] = { verdict: "pass", evidence: ["fixture"] };
+  }
+  const sparseReport = scoreFixture(sparse);
+  assert.equal(sparseReport.headlineScore, null);
+  assert.ok(sparseReport.thinAreas.length > 0);
+  assert.equal(sparseReport.source.commit, "source");
+
+  const complete = Object.fromEntries(
+    suite.areas.flatMap((area: any) => area.rubric.map((item: any) => [item.id, { verdict: "pass", evidence: ["fixture"] }])),
+  );
+  const completeReport = scoreFixture(complete);
+  assert.equal(completeReport.headlineScore, 1);
+  assert.deepEqual(completeReport.thinAreas, []);
+});
 
 test("plan fixture is approval-gated, routed, correlated, and restart-idempotent", () => {
   const result = run("scripts/workhorse-eval-plan-fixture.mjs");

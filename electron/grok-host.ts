@@ -107,8 +107,8 @@ export function shouldLoadVendorSession(input: {
 }
 
 export function resolveSessionCwd(folderPath?: string | null): string {
-  if (folderPath && path.isAbsolute(folderPath)) return folderPath;
-  return process.cwd();
+  const candidate = folderPath?.trim() ?? "";
+  return candidate && path.isAbsolute(candidate) ? candidate : "";
 }
 
 export class GrokSessionHost {

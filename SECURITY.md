@@ -58,5 +58,14 @@ reasonable default for reading someone else's code.
 ## Supply chain
 
 Four runtime dependencies. `npm audit --omit=dev` is clean and CI fails on a
-secret pattern. Releases are built in CI, signed with the studio's Developer ID
-and notarized by Apple; installers are attached only when both platforms build.
+secret pattern. Releases are built in CI, and installers are attached only when
+both platforms build.
+
+**Verifying a build is ours.** On macOS, `codesign -dvv` on the app names
+`Developer ID Application: Go7 Studio` and `spctl -a -t exec` reports a
+notarized Developer ID — a fork cannot produce either.
+
+**On Windows there is currently nothing to check.** The installer is unsigned,
+so Windows shows an unknown publisher, and a rebuild from a fork looks exactly
+the same. Until an Authenticode certificate is in place, download the Windows
+installer only from this repository's releases page.

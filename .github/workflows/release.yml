@@ -116,6 +116,12 @@ jobs:
           MAC_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_ID || '' }}
           MAC_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_APP_SPECIFIC_PASSWORD || '' }}
           MAC_APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
+          # Authenticode, when a certificate exists. Until then the exe ships
+          # unsigned and Windows says "unknown publisher" — and so does a
+          # fork's, which is the whole problem: on Windows there is currently
+          # nothing a user can check to tell our installer from a copy.
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
         # The Windows leg never sees the certificate: these resolve to '' off
         # macOS, so signing material is only materialised on the job that
         # signs. A signing variable is then exported only when it has a value.
@@ -126,14 +132,20 @@ jobs:
         # missing.
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
-            for pair in CSC_LINK:MAC_CSC_LINK CSC_KEY_PASSWORD:MAC_CSC_KEY_PASSWORD CSC_NAME:MAC_CSC_NAME \
-                        APPLE_ID:MAC_APPLE_ID APPLE_APP_SPECIFIC_PASSWORD:MAC_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID:MAC_APPLE_TEAM_ID; do
-              target="${pair%%:*}"
-              source="${pair#*:}"
-              if [ -n "${!source}" ]; then
-                export "$target"="${!source}"
-              fi
-            done
+            pairs="CSC_LINK:MAC_CSC_LINK CSC_KEY_PASSWORD:MAC_CSC_KEY_PASSWORD CSC_NAME:MAC_CSC_NAME
+                   APPLE_ID:MAC_APPLE_ID APPLE_APP_SPECIFIC_PASSWORD:MAC_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID:MAC_APPLE_TEAM_ID"
+          else
+            pairs="CSC_LINK:WIN_CSC_LINK CSC_KEY_PASSWORD:WIN_CSC_KEY_PASSWORD"
+          fi
+          for pair in $pairs; do
+            target="${pair%%:*}"
+            source="${pair#*:}"
+            if [ -n "${!source}" ]; then
+              export "$target"="${!source}"
+            fi
+          done
+          if [ "$RUNNER_OS" = "Windows" ] && [ -z "$CSC_LINK" ]; then
+            echo "::warning::Windows installer is unsigned — no WIN_CSC_LINK. Users will see an unknown-publisher prompt, and a fork's installer looks identical to this one."
           fi
           npm run ${{ matrix.script }}
 

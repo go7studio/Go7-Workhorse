@@ -276,6 +276,12 @@ test("update check is wired through main, preload, and the sidebar action", () =
   // It relabels when it creates the release, but this workflow passes
   // skip-github-release and creates the release itself — so publishing has to
   // move the label, or the first release is the last one anybody can cut.
+  // Signing material is scoped to the job that signs, on both platforms, and
+  // an unsigned Windows installer is announced rather than shipped quietly:
+  // a fork's exe is indistinguishable from ours until Authenticode exists.
+  assert.match(workflow, /WIN_CSC_LINK: \$\{\{ runner\.os == 'Windows'/);
+  assert.match(workflow, /MAC_CSC_LINK: \$\{\{ runner\.os == 'macOS'/);
+  assert.match(workflow, /::warning::Windows installer is unsigned/);
   assert.match(publish, /autorelease: tagged/);
   // Moving that label is a pull-request write and labels are an issues API, so
   // the job needs both. 0.2.0 published every installer and then failed on the

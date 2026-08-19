@@ -4,9 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  attachmentRequirements,
   chooseRoutingDecision,
+  describeRoutingMiss,
   effortForRoutingTier,
   inferRoutingTier,
+  mergeInputRequirements,
   rankRoutingCandidates,
   routingIdentityExcluded,
   routingProfileForModel,
@@ -128,6 +131,39 @@ test("weekly draw state reports excess and overdraw consistently", () => {
   assert.ok((heavy.delta ?? 0) < 0);
 });
 
+test("a monthly Cursor window is not scored as a 7-day one", () => {
+  // Old weeklyDrawState hard-coded 7 days. Reset 574h out made elapsed clamp
+  // to 0, expectedUsedPercent 0, delta -8 — OVERSPENT while inside a month.
+  // This uses only weeklyDrawState, which existed before the repair.
+  const now = Date.parse("2026-08-19T00:00:00Z");
+  const reset = new Date(now + 574 * 60 * 60 * 1000).toISOString();
+  const draw = weeklyDrawState({ usedPercent: 8, resetsAt: reset }, now);
+  assert.ok((draw.expectedUsedPercent ?? 0) > 8, `expected used should beat 8%, got ${draw.expectedUsedPercent}`);
+  assert.ok((draw.delta ?? 0) > 0, `monthly Cursor must look inside budget, got delta ${draw.delta}`);
+});
+
+test("a vendor inside 24h of reset does not take the full flat -70 reserve", () => {
+  // Old rankRoutingCandidates always did score -= 70 when usedPercent sat in
+  // the reserve band. A 90% vendor resetting in 3h dropped by 70 points.
+  // The repaired math spends that vendor down, so the score stays well above 40.
+  const now = Date.parse("2026-08-19T00:00:00Z");
+  const inThreeHours = new Date(now + 3 * 60 * 60 * 1000).toISOString();
+  const spendDown = candidate("kimi-k3", 90, {
+    provider: "custom",
+    customBotId: "bot_kimi",
+    capacity: { usedPercent: 90, resetsAt: inThreeHours },
+  });
+  const ranked = rankRoutingCandidates(
+    [spendDown],
+    { prompt: "Review this change", tier: "balanced", now },
+    { ...settings, preferExcess: false, reservePercent: 15 },
+  );
+  assert.ok(
+    (ranked[0]?.score ?? 0) > 40,
+    `hours-to-reset vendor must not eat a flat -70, got ${ranked[0]?.score}`,
+  );
+});
+
 test("automatic custom spawns preserve the selected bot identity", () => {
   const spec = resolveSpawnSpec(
     { fromSessionId: "parent", prompt: "Transcribe", provider: "custom", model: "same-model", customBotId: "audio-bot" },
@@ -199,4 +235,51 @@ test("Settings draws one bar on every tab and no second title", () => {
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(css, /^\.switch \{/m);
   assert.doesNotMatch(css, /\.watch-toggle/);
+});
+
+test("prompt words UI visual design do not require image input", () => {
+  assert.equal(attachmentRequirements([]).images, undefined);
+  assert.equal(
+    mergeInputRequirements([], undefined).images,
+    undefined,
+  );
+  const textOnly = candidate("text-bot", 10, {
+    provider: "custom",
+    customBotId: "bot_text",
+    profile: routingProfileForModel("custom", "text-bot", {
+      inputs: { text: true, images: false, documents: false, audio: false, video: false },
+    }),
+  });
+  const decision = chooseRoutingDecision(
+    [textOnly],
+    { prompt: "Polish the Mission Control UI visual design" },
+    settings,
+  );
+  assert.equal(decision?.customBotId, "bot_text");
+});
+
+test("no capable route is null with reasons, not a silent fallback winner", () => {
+  const textOnly = candidate("text-bot", 10, {
+    provider: "custom",
+    customBotId: "bot_text",
+    profile: routingProfileForModel("custom", "text-bot", {
+      inputs: { text: true, images: false, documents: false, audio: false, video: false },
+    }),
+  });
+  const request = {
+    prompt: "Look at this screenshot",
+    attachments: [{ id: "img", name: "ui.png", mimeType: "image/png", data: "AA==", kind: "image" as const }],
+  };
+  assert.equal(chooseRoutingDecision([textOnly], request, settings), null);
+  assert.match(describeRoutingMiss([textOnly], request, settings), /images/);
+});
+
+test("auto-route spawn fails closed when no candidate qualifies", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const gate = store.slice(
+    store.indexOf("const routeDecision = routeSpawn"),
+    store.indexOf("const spawnProvider"),
+  );
+  assert.match(gate, /no capable route/);
+  assert.match(gate, /describeRoutingMiss/);
 });

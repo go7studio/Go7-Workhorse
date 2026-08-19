@@ -123,7 +123,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
+import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
 import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
@@ -190,6 +190,7 @@ import {
   rootSpawnError,
   resolveSpawnSpec,
   findReusableWorker,
+  resolveNamedWorker,
   parseWorkerHandoff,
   workerStartMessages,
   reserveWorkerName,
@@ -4316,18 +4317,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
+            const routeRequest = {
+              prompt: payload.message,
+              attachments: payload.attachments,
+              tier: routeTier ?? (isNested ? "quick" as const : undefined),
+              exclude: effectiveExclusions,
+            };
+            const routeCandidates = routeSpawn
+              ? routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current)
+              : [];
             const routeDecision = routeSpawn
-              ? chooseRoutingDecision(
-                  routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  {
-                    prompt: payload.message,
-                    attachments: payload.attachments,
-                    tier: routeTier ?? (isNested ? "quick" : undefined),
-                    exclude: effectiveExclusions,
-                  },
-                  latest.settings.routing,
-                )
+              ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
               : null;
+            if (routeSpawn && !routeDecision) {
+              await replyAsk({
+                error: `no capable route: ${describeRoutingMiss(routeCandidates, routeRequest, latest.settings.routing)}`,
+              });
+              return;
+            }
             const spawnProvider = routeDecision?.provider ?? payload.provider;
             const spawnModel = routeDecision?.model ?? payload.model;
             const selectedTier = routeDecision?.taskTier ?? routeTier ?? inferRoutingTier(payload.message, payload.attachments);
@@ -4399,18 +4406,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
              */
             const spawnSeed = payload.seed === "fresh" ? "fresh" as const : undefined;
             const spawnHandoff = parseWorkerHandoff(payload.handoff);
-            const reusedWorker = findReusableWorker(
-              {
-                name: typeof payload.worker === "string" ? payload.worker : undefined,
-                provider: spec.provider,
-                model: spec.model,
-                effort: spec.effort,
-                customBotId: spec.customBotId,
-                seed: spawnSeed,
-              },
-              latest.sessions as unknown as WorkerRecord[],
-              { parentId: parent.id, projectId: parent.projectId },
-            );
+            const askedWorkerName = typeof payload.worker === "string" ? payload.worker.trim() : "";
+            const namedResolution = askedWorkerName
+              ? resolveNamedWorker(
+                  { name: askedWorkerName, seed: spawnSeed },
+                  latest.sessions as unknown as WorkerRecord[],
+                  { parentId: parent.id, projectId: parent.projectId },
+                )
+              : null;
+            if (namedResolution && !namedResolution.ok) {
+              await replyAsk({ error: namedResolution.error });
+              return;
+            }
+            const reusedWorker = namedResolution?.worker
+              ?? (!askedWorkerName
+                ? findReusableWorker(
+                    {
+                      provider: spec.provider,
+                      model: spec.model,
+                      effort: spec.effort,
+                      customBotId: spec.customBotId,
+                      seed: spawnSeed,
+                    },
+                    latest.sessions as unknown as WorkerRecord[],
+                    { parentId: parent.id, projectId: parent.projectId },
+                  )
+                : null);
             if (vendorSendTarget(spec.provider) === "preview") {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;
@@ -4528,11 +4549,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const priorWorker = reusedWorker
               ? latest.sessions.find((item) => item.id === reusedWorker.id)
               : undefined;
-            if (priorWorker?.environment) {
-              // It is already sitting in its tree. Re-cutting one would move
-              // the worker away from the work it just did.
-              environment = priorWorker.environment;
-              isolation = priorWorker.environment.kind === "worktree" ? "worktree" : "shared";
+            if (priorWorker) {
+              // A reused worker stays where it already worked. Legacy saves
+              // may lack environment; treat that as the project folder, do
+              // not cut a new worktree under the same name.
+              environment = priorWorker.environment ?? { kind: "local" };
+              isolation = environment.kind === "worktree" ? "worktree" : "shared";
             } else if (isolation === "worktree") {
               if (!root || !window.workhorse?.ensureWorktree) {
                 await replyAsk({ error: "Worktree isolation is unavailable for this folder." });
@@ -4568,7 +4590,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               agentRunId: assistantId,
               payload: { summary: `${spec.provider} ${spec.model} worker call started`, status: "started", hiddenWorker: true },
             });
-            let workerName = priorWorker?.workerName;
+            let workerName = priorWorker?.workerName ?? (namedResolution && namedResolution.ok && !namedResolution.worker ? namedResolution.createName : undefined);
             if (!workerName) {
               const reserved = reserveWorkerName(
                 workerNameReservations.current,
@@ -5059,7 +5081,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   routingMode: target.routingMode ?? "manual",
                   ...(target.routingDecision ? { routingDecision: target.routingDecision } : {}),
                   status: "running",
-                  howToUse: "Poll workhorse_agent_status with this childSessionId until status is terminal and report is present.",
+                  howToUse: "Accepted. Stop. The desk journals the reply and wakes the parent chat. Do not poll workhorse_agent_status.",
                 },
                 null,
                 2,

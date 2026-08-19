@@ -331,7 +331,12 @@ export function dropDrafts(sessions: Session[], keepId?: string | null): Session
 }
 
 export function listedChats(sessions: Session[]): Session[] {
-  return sessions.filter((session) => !isDraftChat(session));
+  // A worker is a durable address, never a draft. listedChats gates what gets
+  // written to workhorse-state.json, and a freshly spawned worker has no user
+  // bubble yet — so without this a spawn can return a session id and cut a
+  // worktree while the session is never persisted at all. Restart in that
+  // window and the worker is gone, but its worktree is still on disk.
+  return sessions.filter((session) => Boolean(session.parentId) || !isDraftChat(session));
 }
 
 /** Loose Chats first, then any other visible root chat. Settings inbound parent uses this when unset. */

@@ -21,6 +21,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # eval:validate resolves suite.baselineRef with
+          # git merge-base --is-ancestor, which a depth-1 clone cannot answer.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -61,6 +65,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # eval:validate resolves suite.baselineRef with
+          # git merge-base --is-ancestor, which a depth-1 clone cannot answer.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:

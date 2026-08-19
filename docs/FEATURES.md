@@ -28,6 +28,8 @@ An explicit request to work with Workhorse delegates before direct execution;
 blocked delegation returns the Workhorse error before any fallback.
 A harness may choose the first coordinating brain; unassigned workers still route independently.
 A delegated mission states whether it stayed focused or split, and its results stay scoped to that worker wave.
+Delegation is one wave by default. An opt-in loop can route bounded follow-up passes against explicit acceptance criteria.
+Goal and Loop intent can choose focused, parallel, or sequential Auto-routed work.
 
 ## Files you can hand a chat
 

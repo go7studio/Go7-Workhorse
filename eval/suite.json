@@ -451,6 +451,8 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Use /goal with the same deterministic objective in each profile.",
+            "Use plain-language set a goal and set a loop intent; verify Goal chooses focused or split execution and Loop adds bounded reassessment without changing ordinary prompts.",
+            "Give one independent and one coupled slice; verify independent root work may run in parallel on Auto while coupled work stays sequential.",
             "Check /goal status, pause, resume, and clear.",
             "Verify control commands do not pollute the normal transcript and the goal bar reflects state.",
             "Restart during an active goal and verify recovery; confirm each provider receives equivalent objective semantics."
@@ -465,7 +467,7 @@
             "Create a recurring /schedule in every profile without waiting for its due time.",
             "Inspect /plan translation and verify tool restrictions before approval.",
             "Create enough fixture context to invoke /compact and identify native versus Workhorse checkpoint behavior.",
-            "Where a harness exposes /loop, compare it with /schedule and verify the UI explains which state Workhorse can recover."
+            "Compare Workhorse adaptive Loop with /schedule and provider-native loops; verify Grok keeps its scheduled /loop while plain-language set a loop invokes Workhorse."
           ]
         }
       ],
@@ -494,13 +496,13 @@
         },
         {
           "id": "CMD-03",
-          "criterion": "/goal set, status, pause, resume, and clear have equivalent Workhorse semantics across every provider and survive restart.",
+          "criterion": "Goal and Loop intent have equivalent Workhorse semantics across every provider and survive restart; Goal selects focused or split Auto-routed work and Loop adds bounded reassessment.",
           "weight": 3,
           "type": "roundtrip",
           "testability": "auto",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S2"],
-          "passCriteria": "The same objective and lifecycle state are visible regardless of attached provider; control commands remain quiet; active state recovers.",
+          "passCriteria": "The same objective and lifecycle state are visible regardless of attached provider; control commands remain quiet; active state recovers; independent slices can run as parallel roots while coupled work stays sequential.",
           "evidence": "Goal state timeline, transcript diff, restart state, and provider prompts."
         },
         {
@@ -527,13 +529,13 @@
         },
         {
           "id": "CMD-06",
-          "criterion": "Recurring intent works through the canonical /schedule language everywhere, while provider-native loop/workflow features are surfaced as optional augmentations with clear ownership.",
+          "criterion": "Recurring intent uses /schedule, adaptive objective intent uses Workhorse Loop, and provider-native loop/workflow features keep clear ownership.",
           "weight": 2,
           "type": "depth",
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["CMD-S3"],
-          "passCriteria": "Every profile can create a persisted Workhorse schedule; native /loop appears only when discovered; the user can tell which mechanism survives a Workhorse restart.",
+          "passCriteria": "Every profile can create a persisted schedule and adaptive loop; Grok keeps native scheduled /loop while plain-language set a loop invokes Workhorse; ownership and restart behavior remain clear.",
           "evidence": "Schedule records, provider-native command inventory, and ownership labels."
         }
       ]
@@ -941,6 +943,10 @@
             "Discover OpenClaw and Hermes separately from Workhorse providers and verify discovery grants no authority.",
             "Tell the harness to work with Workhorse without naming a tool; verify it uses workhorse_delegate for an ordinary task, leaves initialBrain unset, attempts Workhorse execution before direct work, and reports the exact Workhorse error before any fallback when blocked.",
             "Delegate a broad mission with independently verifiable work; require the coordinator to declare a focused or split strategy, justify focused execution, and report every worker with its actual model and effort.",
+            "Verify ordinary delegation remains one wave; then opt into an adaptive loop with acceptance criteria and a pass ceiling, finish pass one, and continue only its unmet work through workhorse_continue_mission.",
+            "Let the coordinator's bounded leaf helper stop or return incomplete; verify the coordinator reports continue and the harness starts the required follow-up as a new parent-level pass without increasing the leaf envelope.",
+            "Verify the continuation preserves criteria, exclusions, prior evidence, exact worker ids and previous pass, returns provider/model/effort to Auto routing, and shows Pass 2 in Mission Control.",
+            "Retry an old pass and exceed the pass ceiling; require both to stop before a provider call.",
             "Repeat with an explicit initialBrain and verify only the first coordinator uses it; every unassigned descendant returns to independent task- and capacity-aware routing.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
             "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
@@ -1156,8 +1162,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["ORC-S9"],
-          "passCriteria": "An explicit request to work with Workhorse attempts Workhorse delegation before direct execution and reports the exact Workhorse error before fallback when blocked; a named or granted OpenClaw or Hermes agent supplies a bounded traced task and constraints without choosing a model, Workhorse auto-routing selects provider, model, and effort from task fit and capacity and returns its scored rationale, and the mission coordinator declares and explains a focused or split strategy; the harness uses one real result to choose a second order under the explicit parent; await returns only the requested worker ids, trace, or active wave and never older reports from that parent; wait=true returns a structured completion envelope with the worker id and authoritative runtime identity; externally owned waves, including a reused worker from a finished wave, return once to the harness without a competing desk turn or unsolicited workers; a reused worker keeps its stable name across restart while showing the current slice, and late permission events cannot make terminal work look active; hidden worker briefs and joins preserve the assigned route; structured exclusions persist and reach every descendant; worker status reports authoritative provider, model, effort, lifecycle, exclusions, and route decision; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
-          "evidence": "Tool discovery and ordering transcript, exact blocked-delegation error, mission strategy and worker roster, harness catalog and grant, exact CLI invocation, MCP transcript with two dependent orders, parent/trace/worker-id fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
+          "passCriteria": "An explicit request to work with Workhorse attempts Workhorse delegation before direct execution and reports the exact Workhorse error before fallback when blocked; a named or granted OpenClaw or Hermes agent supplies a bounded traced task and constraints without choosing a model, Workhorse auto-routing selects provider, model, and effort from task fit and capacity and returns its scored rationale, and the mission coordinator declares and explains a focused or split strategy; ordinary delegation stays one wave, while an explicitly enabled adaptive loop preserves acceptance criteria, exclusions, evidence, pass lineage, and a bounded ceiling; only terminal incomplete work continues, every continuation returns to independent Auto routing, Mission Control shows the pass, and stale or over-limit continuation stops before a provider call; the harness uses one real result to choose a second order under the explicit parent; await returns only the requested worker ids, trace, or active wave and never older reports from that parent; wait=true returns a structured completion envelope with the worker id and authoritative runtime identity; externally owned waves, including a reused worker from a finished wave, return once to the harness without a competing desk turn or unsolicited workers; a reused worker keeps its stable name across restart while showing the current slice, and late permission events cannot make terminal work look active; hidden worker briefs and joins preserve the assigned route; structured exclusions persist and reach every descendant; worker status reports authoritative provider, model, effort, lifecycle, exclusions, and route decision; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
+          "evidence": "Tool discovery and ordering transcript, exact blocked-delegation error, mission strategy and worker roster, adaptive-loop contract and pass labels, harness catalog and grant, exact CLI invocation, MCP transcript with sequential dependent orders, parent/trace/worker-id/pass fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
         }
       ]
     },

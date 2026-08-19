@@ -9,7 +9,7 @@ import {
 import { StoreContext, useStore } from "./store-context";
 export { useStore };
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
-import { grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "./goal";
+import { grokGoalAfterTurnIdle, isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
@@ -1505,7 +1505,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       goal: liveSession?.goal,
       match,
     });
-    const goalInput = liveSession && liveSession.provider !== "grok" ? parseGoalInput(originalText) : null;
+    const goalInput = liveSession && (
+      liveSession.provider !== "grok" ||
+      isWorkhorseGoalIntent(originalText) ||
+      isWorkhorseGoalControl(originalText, liveSession.goal)
+    ) ? parseGoalInput(originalText) : null;
     let vendorText = prep.vendorText;
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
@@ -1520,7 +1524,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         goalHaltedSessions.current.add(liveSession.id);
       }
       const cleared =
-        liveSession.provider === "grok"
+        liveSession.provider === "grok" && !isWorkhorseGoalIntent(originalText) && !isWorkhorseGoalControl(originalText, liveSession.goal)
           ? parseGrokGoalLine(originalText)?.action === "clear"
           : parseGoalInput(originalText)?.action === "clear";
       const halt = cleared ? "goal cleared" : "goal paused";
@@ -3941,6 +3945,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
               return;
             }
+            if (payload.missionIteration) {
+              const mission = payload.missionIteration;
+              const existingPass = latest.sessions.find(
+                (session) =>
+                  session.parentId === caller.id &&
+                  session.agentRun?.mission?.id === mission.id &&
+                  session.agentRun?.mission?.iteration === mission.iteration,
+              );
+              if (existingPass) {
+                await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
+                return;
+              }
+            }
             if (exposure === "external-runtime") {
               const inboundHop = checkEnvelope(
                 createEnvelope({
@@ -4335,6 +4352,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
                 correlationId: childCorrelationId,
+                ...(payload.missionIteration ? { mission: payload.missionIteration } : {}),
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
@@ -4374,6 +4392,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               status: "running",
                               startedAt,
                               correlationId: childCorrelationId,
+                              ...(payload.missionIteration ? {
+                                missionId: payload.missionIteration.id,
+                                iteration: payload.missionIteration.iteration,
+                              } : {}),
                               ...(planStepId ? { planStepId } : {}),
                               ...(rationale ? { rationale } : {}),
                             },
@@ -4433,6 +4455,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
                   capabilities: assignedCapabilities,
                   mission: payload.mission === true,
+                  missionIteration: payload.missionIteration,
                 }),
                 latest.settings.mcpServers,
                 spawnImages,

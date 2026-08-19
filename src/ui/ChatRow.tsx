@@ -23,7 +23,9 @@ export function workerSidebarLabel(session: Session, botName?: string): string {
   else if (run === "interrupted") state = "Interrupted";
   else if (run === "cancelled") state = "Cancelled";
   else if (session.status === "needs-input") state = "Needs you";
-  return [name, effort, state].filter(Boolean).join(" · ");
+  const iteration = session.agentRun?.mission?.iteration ?? 0;
+  const pass = iteration > 1 ? `Pass ${iteration}` : "";
+  return [name, effort, pass, state].filter(Boolean).join(" · ");
 }
 
 export function ChatRow({

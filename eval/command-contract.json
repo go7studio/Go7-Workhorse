@@ -26,6 +26,7 @@
     { "id": "watch", "name": "/watch", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["USG-05"] },
     { "id": "schedule", "name": "/schedule", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-06", "REL-04"] },
     { "id": "goal", "name": "/goal", "aliases": [], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-03", "REL-04"] },
+    { "id": "loop", "name": "/loop", "aliases": [], "owner": "workhorse", "providers": ["codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["CMD-03", "ORC-07"] },
     { "id": "quit", "name": "/quit", "aliases": ["/exit"], "owner": "workhorse", "providers": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"], "rubric": ["REL-02"] }
   ],
   "providerNative": {
@@ -49,6 +50,12 @@
       "canonical": "/goal <objective>",
       "nativeOpportunities": {},
       "rule": "Goal state is owned by Workhorse and must not depend on a provider-specific command name."
+    },
+    {
+      "intent": "adaptive objective",
+      "canonical": "/loop <objective> or set a loop to <objective>",
+      "nativeOpportunities": { "grok-acp": "plain-language Workhorse loop; /loop remains Grok scheduling" },
+      "rule": "Loop is opt-in, bounded, evidence-reassessed, and distinct from recurring schedules."
     },
     {
       "intent": "context compaction",

@@ -5,6 +5,7 @@ export type GoalTerminal = "completed" | "timed-out" | "cancelled";
 export type GoalState = {
   status: Exclude<GoalStatus, "none">;
   objective: string;
+  mode?: "goal" | "loop";
   startedAt?: number;
   budgetMs?: number;
   deadlineAt?: number;
@@ -17,6 +18,7 @@ export type GoalDisplay = {
   title: string;
   status: Exclude<GoalStatus, "none">;
   objective: string;
+  mode: "goal" | "loop";
   actions: Array<"pause" | "resume" | "clear">;
 };
 
@@ -28,8 +30,10 @@ function looksLikeGoalQuestion(rest: string): boolean {
 export function parseGoalInput(text: string): { action: GoalAction; objective: string } | null {
   const trimmed = text.trim();
   if (/^\/pause$/i.test(trimmed)) return { action: "pause", objective: "" };
-  if (trimmed !== "/goal" && !trimmed.startsWith("/goal ")) return null;
-  const rest = trimmed.slice(5).trim();
+  const slash = /^(\/goal|\/loop)(?:\s+(.*))?$/i.exec(trimmed);
+  const natural = /^(?:please\s+)?set\s+(?:a\s+|the\s+)?(goal|loop)(?:\s+(?:to|for))?\s*[:,-]?\s*(.*)$/i.exec(trimmed);
+  if (!slash && !natural) return null;
+  const rest = (slash?.[2] ?? natural?.[2] ?? "").trim();
   if (!rest) return { action: "view", objective: "" };
   const key = rest.toLowerCase();
   if (key === "pause") return { action: "pause", objective: "" };
@@ -38,6 +42,21 @@ export function parseGoalInput(text: string): { action: GoalAction; objective: s
   if (key === "status") return { action: "view", objective: "" };
   if (looksLikeGoalQuestion(rest)) return null;
   return { action: "set", objective: rest };
+}
+
+export function goalModeForInput(text: string): "goal" | "loop" {
+  return /^(?:\/loop\b|(?:please\s+)?set\s+(?:a\s+|the\s+)?loop\b)/i.test(text.trim()) ? "loop" : "goal";
+}
+
+/** Grok keeps its native `/goal` and scheduled `/loop`; plain-language goal/loop intent belongs to Workhorse. */
+export function isWorkhorseGoalIntent(text: string): boolean {
+  return /^(?:please\s+)?set\s+(?:a\s+|the\s+)?(?:goal|loop)\b/i.test(text.trim());
+}
+
+export function isWorkhorseGoalControl(text: string, state?: GoalState): boolean {
+  if (!state?.mode) return false;
+  const command = state.mode === "loop" ? "loop" : "goal";
+  return new RegExp(`^\\/${command}\\s+(?:status|pause|resume|clear|stop)$`, "i").test(text.trim());
 }
 
 /** Grok `/goal` only — never the desk `/pause` alias. Strips `--budget` from the mirrored objective. */
@@ -80,7 +99,7 @@ export function goalHaltsVendor(text: string): boolean {
 export function applyGoalCommand(state: GoalState | undefined, text: string): GoalState | undefined {
   const parsed = parseGoalInput(text);
   if (!parsed) return state;
-  if (parsed.action === "set") return { status: "active", objective: parsed.objective };
+  if (parsed.action === "set") return { status: "active", objective: parsed.objective, mode: goalModeForInput(text) };
   if (parsed.action === "pause") {
     if (!state?.objective) return state;
     return { ...state, status: "paused" };
@@ -95,27 +114,31 @@ export function applyGoalCommand(state: GoalState | undefined, text: string): Go
 
 export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
   if (!state?.objective.trim()) return null;
+  const mode = state.mode === "loop" ? "loop" : "goal";
+  const name = mode === "loop" ? "Loop" : "Goal";
   if (state.terminal === "timed-out") {
-    return { title: "Goal timed out", status: "paused", objective: state.objective, actions: ["clear"] };
+    return { title: `${name} timed out`, status: "paused", objective: state.objective, mode, actions: ["clear"] };
   }
   if (state.terminal === "cancelled") {
-    return { title: "Goal cancelled", status: "paused", objective: state.objective, actions: ["clear"] };
+    return { title: `${name} cancelled`, status: "paused", objective: state.objective, mode, actions: ["clear"] };
   }
   if (state.terminal === "completed") {
-    return { title: "Goal completed", status: "paused", objective: state.objective, actions: ["clear"] };
+    return { title: `${name} completed`, status: "paused", objective: state.objective, mode, actions: ["clear"] };
   }
   if (state.status === "paused") {
     return {
-      title: "Goal paused",
+      title: `${name} paused`,
       status: "paused",
       objective: state.objective,
+      mode,
       actions: ["resume", "clear"],
     };
   }
   return {
-    title: "Goal",
+    title: name,
     status: "active",
     objective: state.objective,
+    mode,
     actions: ["pause", "clear"],
   };
 }
@@ -143,23 +166,35 @@ export function grokGoalAfterTurnIdle(
   return undefined;
 }
 
-export function goalCommandForAction(action: "pause" | "resume" | "clear"): string {
-  return `/goal ${action}`;
+export function goalCommandForAction(action: "pause" | "resume" | "clear", mode: "goal" | "loop" = "goal"): string {
+  return `/${mode} ${action}`;
 }
 
 /** Convert a local goal transition into useful work, not a request to narrate the transition. */
 export function goalVendorPrompt(state: GoalState, action: "set" | "resume"): string {
+  const strategy = state.mode === "loop"
+    ? [
+        "Own this opt-in Workhorse loop. State concrete acceptance checks and a bounded pass ceiling before dispatch.",
+        "Choose focused or split execution from coupling, risk, skills, and capacity. Run only independent root slices in parallel; keep coupled work sequential.",
+        "Leave unassigned workers on Auto. Reconcile exact worker reports after each pass, continue only unmet work, and stop complete, blocked, or at the ceiling.",
+      ]
+    : [
+        "Own this ongoing Workhorse goal and drive it to a real terminal result.",
+        "Make concrete progress now while the goal remains active.",
+        "Choose focused or split execution from coupling, risk, skills, and capacity. Run only independent root slices in parallel; keep coupled work sequential.",
+        "Leave unassigned workers on Auto. Reconcile their evidence and finish or truthfully block.",
+      ];
   if (action === "resume") {
     return [
-      "Resume the active Workhorse goal below.",
+      `Resume the active Workhorse ${state.mode === "loop" ? "loop" : "goal"} below.`,
       "Continue from the existing conversation and perform the next useful work now. Do not only acknowledge that the goal resumed.",
+      ...strategy,
       "",
       state.objective,
     ].join("\n");
   }
   return [
-    "Work toward this ongoing Workhorse goal.",
-    "Make concrete progress now and continue autonomously while the goal remains active.",
+    ...strategy,
     "",
     state.objective,
   ].join("\n");
@@ -181,6 +216,7 @@ export function normalizeGoal(raw: unknown): GoalState | undefined {
   return {
     status: record.status,
     objective,
+    ...(record.mode === "goal" || record.mode === "loop" ? { mode: record.mode } : {}),
     ...(startedAt ? { startedAt } : {}),
     ...(budgetMs ? { budgetMs } : {}),
     ...(deadlineAt ? { deadlineAt } : {}),

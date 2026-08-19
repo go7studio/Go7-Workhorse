@@ -240,6 +240,8 @@ export type DeskLineupRow = {
   agentId?: string;
   workspace?: string;
   correlationId?: string;
+  missionId?: string;
+  iteration?: number;
 };
 
 export type DeskLineup = {
@@ -280,6 +282,17 @@ export type AgentRun = {
   /** Structured routing policy inherited by every nested worker. */
   exclusions?: string[];
   correlationId?: string;
+  mission?: MissionIteration;
+};
+
+export type MissionIteration = {
+  id: string;
+  mode: "adaptive";
+  objective: string;
+  acceptanceCriteria: string[];
+  iteration: number;
+  maxIterations: number;
+  previousWorkerIds: string[];
 };
 
 export type WorkhorseWorkerRun = AgentRun & { kind?: "workhorse" };
@@ -437,6 +450,7 @@ export type Session = {
   goal?: {
     status: "active" | "paused";
     objective: string;
+    mode?: "goal" | "loop";
     startedAt?: number;
     budgetMs?: number;
     deadlineAt?: number;

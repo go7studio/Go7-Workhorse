@@ -4,6 +4,7 @@ import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 
 export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_delegate",
+  "workhorse_continue_mission",
   "workhorse_list_bots",
   "workhorse_list_chats",
   "workhorse_read_chat",

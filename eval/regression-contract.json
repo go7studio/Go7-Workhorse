@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.4",
+  "contractVersion": "0.6.5",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-18",
   "regressions": [
@@ -389,6 +389,24 @@
       "scenarios": ["ORC-S9"],
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-044",
+      "behavior": "Harness mission loops are opt-in and bounded. A terminal incomplete pass can continue from exact worker ids and pass number with its acceptance criteria, evidence, skills, tools, constraints, exclusions, and iteration lineage preserved; the next pass independently auto-routes, displays its pass, and stale or over-limit continuation stops before a provider call. Required follow-up stays at the parent mission level, while a stopped leaf helper returns remaining work instead of expanding its envelope.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "src/ui/ChatRow.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-045",
+      "behavior": "Goal and Loop are explicit interoperable outcome intents. The coordinating brain chooses focused or split execution; independent Auto-routed root slices may run in parallel, coupled work stays sequential, and ordinary prompts do not silently become autonomous.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CMD-S2", "ORC-S4", "ORC-S9"],
+      "rubric": ["CMD-03", "ORC-07", "ORC-17"],
+      "sourceFiles": ["src/lib/goal.ts", "src/lib/vendor-send.ts", "src/lib/commands.ts", "src/lib/store.tsx", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/mcp-exposure.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]

@@ -27,6 +27,7 @@ export const COMMANDS: Command[] = [
   { id: "watch", name: "/watch", hint: "Leftover, daily spend, and send holds", run: "watch" },
   { id: "schedule", name: "/schedule", hint: "Run later or repeat, e.g. /schedule every 30m check build", run: "schedule", inputHint: "[every] 30m prompt" },
   { id: "goal", name: "/goal", hint: "Set or manage a quiet Workhorse goal", run: "goal", inputHint: "objective | status | pause | resume | clear" },
+  { id: "loop", name: "/loop", hint: "Run a bounded Workhorse goal loop", run: "goal", inputHint: "objective | status | pause | resume | clear" },
   { id: "quit", name: "/quit", hint: "Close Workhorse", run: "quit", aliases: ["/exit"] },
 ];
 
@@ -134,7 +135,7 @@ export function commandsForSession(
     ? COMMANDS.filter((command) => command.id !== "compact")
     : COMMANDS;
   if (session?.provider === "grok") {
-    const desk = common.filter((command) => command.id !== "goal");
+    const desk = common.filter((command) => command.id !== "goal" && command.id !== "loop");
     return mergeCommands(desk, [...GROK_SHELL_COMMANDS, ...(session.grokCommands ?? []), ...skillCmds]);
   }
   if (session?.provider === "codex") return mergeCommands(common, [...CODEX_SHELL_COMMANDS, ...skillCmds]);
@@ -168,8 +169,9 @@ export function commandContinuesToVendor(run?: string): boolean {
 export function splitGoalCommand(text: string): { name: string; rest: string } | null {
   const value = text.trim();
   if (!parseGoalInput(value)) return null;
-  if (value === "/goal" || value.startsWith("/goal ")) {
-    return { name: "/goal", rest: value.slice("/goal".length) };
+  const command = value.startsWith("/loop") ? "/loop" : value.startsWith("/goal") ? "/goal" : "";
+  if (command) {
+    return { name: command, rest: value.slice(command.length) };
   }
   return null;
 }

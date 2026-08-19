@@ -14,7 +14,7 @@ export function GoalBar() {
     <div className={`goal-bar ${view?.status ?? plan?.status ?? "active"}`} role="region" aria-label={title}>
       <span className="goal-bar-mark" aria-hidden="true" />
       <div className="goal-bar-copy">
-        <strong>{view ? `${view.status === "paused" ? "Paused" : "Active goal"}${plan ? ` · ${planLabel}` : ""}` : planLabel}</strong>
+        <strong>{view ? `${view.status === "paused" ? "Paused" : "Active"} ${view.mode}${plan ? ` · ${planLabel}` : ""}` : planLabel}</strong>
         <span title={view?.objective ?? plan?.objective}>{view?.objective ?? plan?.objective}</span>
       </div>
       <div className="goal-bar-actions">
@@ -36,7 +36,7 @@ export function GoalBar() {
             className={action === "clear" ? "goal-action quiet" : "goal-action primary-action"}
             type="button"
             aria-label={action === "clear" ? "Clear goal" : undefined}
-            onClick={() => store.send(goalCommandForAction(action))}
+            onClick={() => store.send(goalCommandForAction(action, view?.mode))}
           >
             {action === "pause" ? "Pause" : action === "resume" ? "Resume" : "End"}
           </button>

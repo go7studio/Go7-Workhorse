@@ -36,6 +36,7 @@ import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 test("external-runtime allows execution discovery, delegation, chat, and worker lifecycle", () => {
   for (const tool of [
     "workhorse_delegate",
+    "workhorse_continue_mission",
     "workhorse_list_bots",
     "workhorse_list_chats",
     "workhorse_read_chat",
@@ -145,8 +146,9 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     assert.ok(names.includes("workhorse_list_agents"));
     assert.ok(names.includes("workhorse_list_bots"));
     assert.ok(names.includes("workhorse_delegate"));
+    assert.ok(names.includes("workhorse_continue_mission"));
     const delegateFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_delegate")?.inputSchema?.properties ?? {};
-    for (const field of ["task", "initialBrain", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
+    for (const field of ["task", "initialBrain", "loop", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
       assert.ok(field in delegateFields, `workhorse_delegate publishes ${field}`);
     }
     for (const field of ["provider", "model", "effort", "worker", "chat"]) {
@@ -159,6 +161,10 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     }
     const awaitFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_await_agents")?.inputSchema?.properties ?? {};
     assert.ok("workerIds" in awaitFields, "workhorse_await_agents publishes wave worker ids");
+    const continueFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_continue_mission")?.inputSchema?.properties ?? {};
+    for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "fromSessionId", "traceId"]) {
+      assert.ok(field in continueFields, `workhorse_continue_mission publishes ${field}`);
+    }
     const deleted = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 2,
@@ -190,6 +196,8 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
   assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
+  assert.match(initialized.result?.instructions ?? "", /Ordinary delegation is one wave/);
+  assert.match(initialized.result?.instructions ?? "", /workhorse_continue_mission/);
   assert.ok(initialized.result?.capabilities?.tools);
 });
 
@@ -241,6 +249,7 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   let seenTimeout = 0;
   let seenWait: boolean | undefined;
   let seenMission = false;
+  let seenMissionIteration: import("../src/lib/types").MissionIteration | undefined;
   let seenWorkerIds: string[] = [];
   setWorkhorseDeskAsk(async (ask) => {
     seenFrom = ask.fromSessionId;
@@ -258,6 +267,7 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     seenTimeout = ask.timeoutSeconds ?? 0;
     seenWait = ask.wait;
     seenMission = ask.mission === true;
+    seenMissionIteration = ask.missionIteration;
     seenWorkerIds = ask.workerIds ?? [];
     return { text: JSON.stringify({ ok: true, parent: ask.fromSessionId }) };
   });
@@ -308,7 +318,45 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenTimeout, 420);
     assert.equal(seenWait, false);
     assert.equal(seenMission, true);
+    assert.equal(seenMissionIteration, undefined);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
+
+    const looped = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 52,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Ship and certify analytics",
+          loop: { acceptanceCriteria: ["Tests pass", "Live check passes"], maxIterations: 4 },
+          folder: dir,
+          fromSessionId: "parent_chat",
+          traceId: "trace_loop_1",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(looped.error, undefined, looped.error?.message);
+    assert.equal(seenMissionIteration?.id, "trace_loop_1");
+    assert.equal(seenMissionIteration?.iteration, 1);
+    assert.equal(seenMissionIteration?.maxIterations, 4);
+    assert.deepEqual(seenMissionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
+
+    const untracedLoop = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 53,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Ship without a mission identity",
+          loop: { acceptanceCriteria: ["Tests pass"] },
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(untracedLoop.error?.message ?? "", /traceId/);
 
     const awaited = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -359,6 +407,128 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenModel, "");
     assert.equal(seenEffort, "");
     assert.deepEqual(seenExclude, ["Vendor Alpha", "model/x-2.7"]);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("adaptive mission continuation preserves criteria and returns routing to Auto", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-loop-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    sessions: [
+      { id: "parent_chat", title: "Desk", provider: "grok", model: "grok-4.6", projectId: null, messages: [] },
+      {
+        id: "worker_pass_1",
+        parentId: "parent_chat",
+        hidden: true,
+        title: "Wren · First pass",
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        effort: "medium",
+        status: "idle",
+        messages: [{ id: "report", role: "assistant", text: "Implemented the first half.", createdAt: 2 }],
+        agentRun: {
+          status: "completed",
+          startedAt: 1,
+          finishedAt: 2,
+          isolation: "shared",
+          constraints: ["Keep changes scoped"],
+          capabilities: ["implementation"],
+          tools: ["browser"],
+          exclusions: ["MiniMax M3"],
+          mission: {
+            id: "mission_trace",
+            mode: "adaptive",
+            objective: "Ship analytics",
+            acceptanceCriteria: ["Tests pass", "Live check passes"],
+            iteration: 1,
+            maxIterations: 3,
+            previousWorkerIds: [],
+          },
+        },
+      },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  setWorkhorseDeskAsk(async (ask) => {
+    if (ask.action === "await-agents") {
+      return {
+        text: JSON.stringify({
+          ok: true,
+          running: [],
+          reports: [{
+            title: "First pass",
+            status: "completed",
+            text: "Implemented the first half.",
+            childSessionId: "worker_pass_1",
+            provider: "claude",
+            model: "claude-sonnet-4-6",
+            effort: "medium",
+          }],
+        }),
+      };
+    }
+    spawned = ask;
+    return { text: JSON.stringify({ ok: true, workerId: "worker_pass_2" }) };
+  });
+  try {
+    const continued = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Finish and verify the live path.",
+          evidence: ["The first commit exists"],
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(continued.error, undefined, continued.error?.message);
+    assert.equal(spawned?.route, "auto");
+    assert.equal(spawned?.provider, undefined);
+    assert.equal(spawned?.model, undefined);
+    assert.equal(spawned?.effort, undefined);
+    assert.equal(spawned?.missionIteration?.iteration, 2);
+    assert.equal(spawned?.missionIteration?.maxIterations, 3);
+    assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
+    assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);
+    assert.deepEqual(spawned?.constraints, ["Keep changes scoped"]);
+    assert.deepEqual(spawned?.capabilities, ["implementation"]);
+    assert.deepEqual(spawned?.tools, ["browser"]);
+    assert.deepEqual(spawned?.exclude, ["MiniMax M3"]);
+    assert.match(spawned?.message ?? "", /PRIOR REPORTS/);
+    assert.match(spawned?.message ?? "", /Implemented the first half/);
+    assert.match(spawned?.message ?? "", /Finish and verify the live path/);
+    const wrongTrace = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 62,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Try again.",
+          fromSessionId: "parent_chat",
+          traceId: "different_mission",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(wrongTrace.error?.message ?? "", /traceId does not match/);
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

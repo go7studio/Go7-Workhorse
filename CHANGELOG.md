@@ -8,6 +8,35 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.9](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.8...v0.6.9) (2026-08-19)
+
+
+### Features
+
+* admit a plan step only after a sibling auditor ([c8b38a3](https://github.com/go7studio/Go7-Workhorse/commit/c8b38a3ee59caa5608969bf22eeb39c47ada2343))
+* capture inbound Workhorse Link calls in Learning ([ed81fd8](https://github.com/go7studio/Go7-Workhorse/commit/ed81fd8606c615891806b7d3946ce8b44b13c71c))
+* capture inbound Workhorse Link calls in Learning ([04f527d](https://github.com/go7studio/Go7-Workhorse/commit/04f527d0057c7d8096e80cee17545128b4865ad3))
+* harden provider and eval durability ([9331de0](https://github.com/go7studio/Go7-Workhorse/commit/9331de04c3409bd592b33af6526f1d9031fb82ed))
+
+
+### Bug Fixes
+
+* auditor admission only covers builder steps ([aa83052](https://github.com/go7studio/Go7-Workhorse/commit/aa830527fdb5cc3e1997e82055a26f3353bacb36))
+* bind work to exact session scope ([4da70d6](https://github.com/go7studio/Go7-Workhorse/commit/4da70d6a02197e623602a1d19455b401b3fcef98))
+* **coordination:** accept valid mission passes that mix roles ([d408cf5](https://github.com/go7studio/Go7-Workhorse/commit/d408cf5793f6fa94c7d603effca3a199afd539ef))
+* **coordination:** cap workhorse_await_agents to a short cursor poll ([b70dec3](https://github.com/go7studio/Go7-Workhorse/commit/b70dec3cced0f4cb3136926d799a24d777f329c2))
+* **coordination:** desk-owned join and fail-closed routing ([7131fe0](https://github.com/go7studio/Go7-Workhorse/commit/7131fe0986ab49c0d976f81d6738afc808afe845))
+* **coordination:** keep named workers as durable addresses ([e6267e0](https://github.com/go7studio/Go7-Workhorse/commit/e6267e031c4bad83d6a4598f190ad0f9969028a3))
+* **coordination:** make cancel-agent cover worker sessions and external tasks ([4a1cc13](https://github.com/go7studio/Go7-Workhorse/commit/4a1cc13cdf1a597ef7d0f1fcad8ba896755b1133))
+* idle reconciled workers after restart ([4366d03](https://github.com/go7studio/Go7-Workhorse/commit/4366d038d195d839fa87d6b424681506f1b31a84))
+* ordinary plans stay human; product asks carry a default ([d61edcd](https://github.com/go7studio/Go7-Workhorse/commit/d61edcd7115acefc1de5c2d43a45c96e07c598b3))
+* persist and reconcile long-running work ([03ad024](https://github.com/go7studio/Go7-Workhorse/commit/03ad02499c0035adf3f3d485c00ca53b1535eb87))
+* reopen Windows in-app updates via Task Scheduler ([577e783](https://github.com/go7studio/Go7-Workhorse/commit/577e7835cc782cb8536cec2a3ab199f374a0ac94))
+* reopen Windows in-app updates via Task Scheduler ([628e463](https://github.com/go7studio/Go7-Workhorse/commit/628e4635ffeef3cbd7a72ecfca64017a6aeee256))
+* **routing:** derive period from real reset cadence, scale reserve by time-to-reset ([eb50225](https://github.com/go7studio/Go7-Workhorse/commit/eb502256d97961d519385bf3121f411dea0374ca))
+* unbreak main and stop shipping 506MB of unreachable agent binaries ([be8ec88](https://github.com/go7studio/Go7-Workhorse/commit/be8ec886c5d5d8d9763b76bcdd8b903c5d8cd76c))
+* worker token ceiling meters this slice, not the repo ([24fa642](https://github.com/go7studio/Go7-Workhorse/commit/24fa6426a60d4214fe030424945afe9d38d3893d))
+
 ## [0.6.8](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.7...v0.6.8) (2026-08-19)
 
 

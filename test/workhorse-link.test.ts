@@ -15,7 +15,8 @@ import {
   linkHostCliArgs,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
-import { handleWorkhorseRpc, linkCliCall, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, type InstallIo } from "../electron/mcp-install";
 
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
@@ -148,6 +149,81 @@ test("delegate over Link dedupes by idempotencyKey and echoes the envelope it ra
     if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
     else process.env.WORKHORSE_STATE_PATH = previous.state;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a Link tools/call is captured for Learning, without keys or chat text", async () => {
+  const previous = process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  const captured: InboundLearningDraft[] = [];
+  setInboundLearningSink((draft) => {
+    captured.push(draft);
+  });
+  setWorkhorseDeskAsk(async () => ({ text: JSON.stringify({ worker: "w_learn", transcript: "do not store me" }) }));
+  try {
+    const delegated = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "review this",
+          fromSessionId: "parent_chat",
+          traceId: "trace_learn",
+          idempotencyKey: "idem_learn",
+          apiKey: "sk-abcdefghijklmnopqrstuvwxyz",
+          folder: "/Users/someone/secret-repo",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    const listed = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    assert.ok(listed);
+    const forbidden = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_delete_chat", arguments: { chat: "x", apiKey: "sk-abcdefghijklmnopqrstuvwxyz" } },
+    })) as { error?: { message?: string } };
+    assert.match(forbidden.error?.message ?? "", /profile_forbidden/);
+    assert.equal(captured.length, 2);
+    assert.equal(captured[0]?.payload.tool, "workhorse_delegate");
+    assert.equal(captured[0]?.payload.worker, "w_learn");
+    assert.equal(captured[0]?.actorClass, "agent");
+    assert.equal(captured[0]?.provider, undefined);
+    assert.equal(captured[1]?.payload.tool, "workhorse_delete_chat");
+    assert.equal(captured[1]?.payload.status, "forbidden");
+    const blob = JSON.stringify(captured);
+    assert.doesNotMatch(blob, /sk-abcdefghijklmnopqrstuvwxyz|secret-repo|do not store me/);
+    assert.doesNotMatch(blob, /"provider":"(openclaw|hermes)"/);
+  } finally {
+    setInboundLearningSink(null);
+    setWorkhorseDeskAsk(null as never);
+    if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous;
+  }
+});
+
+test("the desk profile does not write inbound Learning events", async () => {
+  const previous = process.env.WORKHORSE_MCP_PROFILE;
+  delete process.env.WORKHORSE_MCP_PROFILE;
+  const captured: InboundLearningDraft[] = [];
+  setInboundLearningSink((draft) => {
+    captured.push(draft);
+  });
+  try {
+    await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_capabilities", arguments: {} },
+    });
+    assert.equal(captured.length, 0);
+  } finally {
+    setInboundLearningSink(null);
+    if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous;
   }
 });
 

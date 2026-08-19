@@ -27,7 +27,9 @@ import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { startWorkhorseBridge, type PeerAskResult } from "./workhorse-bridge";
-import { setWorkhorseDeskAsk } from "./workhorse-mcp";
+import { setInboundLearningSink, setWorkhorseDeskAsk } from "./workhorse-mcp";
+import { drainInboundJsonl } from "../src/lib/learning-inbound";
+import { learningInboundPath } from "../src/lib/learning-paths";
 import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
 import { existingPeerReply } from "../src/lib/session-bridge";
 import { imageMime } from "../src/lib/images";
@@ -474,10 +476,27 @@ app.whenReady().then(async () => {
   }
 
   let liveSettings: Settings = normalizeSettings({});
+  const inboundFile = learningInboundPath(app.getPath("userData"));
+  const inboundIo = {
+    mkdirSync: (dir: string, opts: { recursive: true }) => {
+      fs.mkdirSync(dir, opts);
+    },
+    appendFileSync: (dest: string, data: string, encoding: "utf8") => {
+      fs.appendFileSync(dest, data, encoding);
+    },
+    renameSync: (from: string, to: string) => {
+      fs.renameSync(from, to);
+    },
+    readFileSync: (dest: string, encoding: "utf8") => fs.readFileSync(dest, encoding),
+    unlinkSync: (dest: string) => {
+      fs.unlinkSync(dest);
+    },
+  };
   const learningStore = new SqliteMemoryStore(app.getPath("userData"));
   const learningService = new LearningService({
     store: learningStore,
     settings: () => liveSettings.learning,
+    drainInbound: () => drainInboundJsonl(inboundFile, inboundIo),
     allowStub: false,
     candidates: () => {
       const rows: AdaptiveCandidate[] = [];
@@ -521,7 +540,19 @@ app.whenReady().then(async () => {
   attachLearningIpc(ipcMain, learningService, (settings) => {
     liveSettings = settings;
   });
+  setInboundLearningSink((draft) => {
+    learningService.record(draft);
+  });
   learningCloser = learningService;
+  try {
+    fs.mkdirSync(path.dirname(inboundFile), { recursive: true });
+    fs.watch(path.dirname(inboundFile), (_event, filename) => {
+      if (filename && filename !== "inbound.jsonl") return;
+      if (learningService.ingestInbound() > 0) learningService.schedule();
+    });
+  } catch (error) {
+    console.warn("Learning inbound watch failed", error);
+  }
   void learningService.recover().catch((error) => console.warn("Learning recover failed", error));
   debugStartup("learning ready");
   const peerBusy = new Set<string>();

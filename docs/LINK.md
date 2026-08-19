@@ -72,6 +72,9 @@ Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and
 a call is refused.
 
+When Settings → Learning is on, each Link call is stored on this machine as
+agent evidence. Keys and chat text stay out.
+
 ## Execution contract
 
 A call that changes the desk carries:

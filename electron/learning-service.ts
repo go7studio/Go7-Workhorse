@@ -56,6 +56,8 @@ export type LearningServiceOptions = {
     setTimeout: (fn: () => void, ms: number) => unknown;
     clearTimeout: (id: unknown) => void;
   };
+  /** Inbound Workhorse Link drafts waiting on disk or in a test sink. */
+  drainInbound?: () => unknown[];
 };
 
 export class LearningService {
@@ -108,10 +110,33 @@ export class LearningService {
   }
 
   probe() {
+    this.ingestInbound();
     return this.options.store.probe();
   }
 
+  /**
+   * Pull inbound Link drafts into the private index. Capture stays off when
+   * Learning is off, and the drain is left untouched so a later Capture can
+   * still see them.
+   */
+  ingestInbound(): number {
+    if (!learningCaptures(this.mode())) return 0;
+    const drain = this.options.drainInbound;
+    if (!drain) return 0;
+    let inserted = 0;
+    for (const raw of drain()) {
+      if (!raw || typeof raw !== "object") continue;
+      if (this.commit(raw as Parameters<typeof prepareEvent>[0]).inserted) inserted += 1;
+    }
+    return inserted;
+  }
+
   record(draft: Parameters<typeof prepareEvent>[0]): { inserted: boolean; event?: LearningEvent } {
+    this.ingestInbound();
+    return this.commit(draft);
+  }
+
+  private commit(draft: Parameters<typeof prepareEvent>[0]): { inserted: boolean; event?: LearningEvent } {
     const mode = this.mode(draft.projectId);
     if (!learningCaptures(mode)) return { inserted: false };
     const event = prepareEvent(draft);
@@ -123,6 +148,7 @@ export class LearningService {
   }
 
   retrieve(query: RetrievalQuery) {
+    this.ingestInbound();
     const mode = this.mode(query.projectId);
     if (mode === "off") {
       return { items: [], frame: "", auditId: undefined as string | undefined };
@@ -150,15 +176,18 @@ export class LearningService {
   }
 
   memories() {
+    this.ingestInbound();
     return this.options.store.listMemories({ includeDeleted: false, intelligenceLane: HUMAN_INTELLIGENCE_LANE });
   }
 
   events(limit = 200): LearningEvent[] {
+    this.ingestInbound();
     const rows = this.options.store.listEvents();
     return rows.slice(-Math.max(0, limit));
   }
 
   indexStats(): LearningIndexStats {
+    this.ingestInbound();
     const events = this.options.store.listEvents();
     const humanEvents = events.filter((event) => event.actorClass === "human");
     const agentEvents = events.filter((event) => event.actorClass === "agent");
@@ -215,6 +244,7 @@ export class LearningService {
   }
 
   exportBundle() {
+    this.ingestInbound();
     const payload = this.options.store.exportAll();
     return { jsonl: exportJsonl(payload), markdown: exportMarkdown(payload), payload };
   }
@@ -235,6 +265,7 @@ export class LearningService {
   }
 
   async recover(): Promise<CompileResult> {
+    this.ingestInbound();
     const unfinished = this.options.store
       .listCompilerRuns()
       .find(
@@ -247,6 +278,7 @@ export class LearningService {
   }
 
   async compileIfDue(): Promise<CompileResult> {
+    this.ingestInbound();
     if (this.paused || this.sleeping) return { ran: false, skipped: "paused" };
     const mode = this.mode();
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };
@@ -301,6 +333,7 @@ export class LearningService {
   }
 
   async compile(input: { resume?: string } = {}): Promise<CompileResult> {
+    this.ingestInbound();
     if (this.compiling) return { ran: false, skipped: "busy" };
     const mode = this.mode();
     if (!learningCompiles(mode)) return { ran: false, skipped: "mode" };

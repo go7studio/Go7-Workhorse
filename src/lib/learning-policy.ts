@@ -506,7 +506,7 @@ export function agentCompilerPrompt(events: LearningEvent[], memories: MemoryIte
   return [
     "Compile agent-authored Workhorse evidence into an agent-performance JSON object with keys intent and operations.",
     "Intent must always be empty. Each operations item is {action, memoryClass, scope, statement, sourceEventIds, projectId?, providerScope?, tags?}.",
-    "Capture observable performance: completed or failed model calls, tool behavior, retries, errors, tests, artifacts, latency, usage, and missing verification.",
+    "Capture observable performance: completed or failed model calls, tool behavior, retries, errors, tests, artifacts, latency, usage, missing verification, and inbound Workhorse Link tool calls from a harness (tool, outcome, envelope — not human intent).",
     "Never infer a human goal, preference, complaint, or acceptance criterion. Human-authored events must never appear in this input.",
     "Distinguish an agent claim from verified evidence. A successful terminal event alone does not prove the requested outcome was correct.",
     "State facts compactly, including the provider when useful. Do not copy raw output, secrets, commands, or paths into the statement.",
@@ -571,7 +571,9 @@ export function eventsRequireAgentMemory(events: LearningEvent[]): boolean {
   return events.some((event) => {
     if (event.actorClass !== "agent") return false;
     const status = String(event.payload.status ?? event.payload.outcome ?? "").toLowerCase();
-    return event.kind === "outcome" || (event.kind === "tool" && /fail|error|denied|cancel/.test(status));
+    if (event.kind === "outcome") return true;
+    if (event.kind === "tool" && /fail|error|denied|cancel|forbidden/.test(status)) return true;
+    return event.kind === "tool" && event.payload.surface === "workhorse-link" && event.payload.mutating === true;
   });
 }
 

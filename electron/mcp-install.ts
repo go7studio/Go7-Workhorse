@@ -1,4 +1,5 @@
 import type { McpServerConfig } from "../src/lib/types";
+import { LINK_HOSTS, LINK_HOST_LABEL, linkGenericMcpConfig, linkHostCliArgs, type LinkHost } from "../src/lib/workhorse-link";
 
 export const WORKHORSE_MCP_NAME = "workhorse";
 
@@ -133,8 +134,8 @@ export type InstallIo = {
 
 export type InstallReport = {
   ok: boolean;
-  written: Array<{ target: "openclaw" | "hermes"; path: string; how: "file" | "cli" }>;
-  skipped: Array<{ target: "openclaw" | "hermes"; reason: string }>;
+  written: Array<{ target: LinkHost; path: string; how: "file" | "cli" }>;
+  skipped: Array<{ target: LinkHost; reason: string }>;
 };
 
 function dirnameOf(file: string): string {
@@ -142,28 +143,82 @@ function dirnameOf(file: string): string {
   return cut <= 0 ? file : file.slice(0, cut);
 }
 
-export function installWorkhorseExternalMcp(input: {
+export type InstallLinkInput = {
   home: string;
   platform: "darwin" | "win32" | "linux";
   command: string;
   script: string;
   statePath: string;
   io: InstallIo;
-}): InstallReport {
+  /** Which hosts to connect. Default: every host Link knows. */
+  hosts?: LinkHost[];
+};
+
+/**
+ * The generic configuration, for any MCP client Link has no writer for.
+ * Same launch as every host gets; a new harness connects from this without
+ * a Workhorse release.
+ */
+export function workhorseLinkGenericConfig(input: { command: string; script: string; statePath: string }): string {
+  return linkGenericMcpConfig(workhorseExternalMcpServer(input));
+}
+
+/**
+ * Connect a host that has its own `mcp add`. Its file format stays its
+ * business; we only hand it the same launch. Exact flags are in
+ * linkHostCliArgs, verified against each CLI's help.
+ */
+function connectViaHostCli(
+  host: Exclude<LinkHost, "openclaw" | "hermes">,
+  server: McpServerConfig,
+  io: InstallIo,
+  written: InstallReport["written"],
+  skipped: InstallReport["skipped"],
+): void {
+  if (!io.exec) {
+    skipped.push({ target: host, reason: `${host} needs its CLI to write the config, and none is available here` });
+    return;
+  }
+  const { command, args } = linkHostCliArgs(host, server);
+  const result = io.exec(command, args);
+  if (result.status === 0) {
+    written.push({ target: host, path: `${command} mcp`, how: "cli" });
+    return;
+  }
+  const detail = `${result.stderr || result.stdout}`.trim().split("\n")[0] ?? "";
+  skipped.push({
+    target: host,
+    reason: result.status === 127 || /not found|ENOENT/i.test(detail) ? `${host} is not installed (no \`${command}\` on PATH)` : `\`${command} mcp add\` failed: ${detail || `exit ${result.status}`}`,
+  });
+}
+
+/** The original call: OpenClaw and Hermes, as it always did. Other hosts go through installWorkhorseLink. */
+export function installWorkhorseExternalMcp(input: Omit<InstallLinkInput, "hosts">): InstallReport {
+  return installWorkhorseLink({ ...input, hosts: ["openclaw", "hermes"] });
+}
+
+export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
   const launch = workhorseExternalMcpLaunch(input);
+  const server = workhorseExternalMcpServer(input);
+  const hosts = new Set<LinkHost>(input.hosts?.length ? input.hosts : LINK_HOSTS);
   const written: InstallReport["written"] = [];
   const skipped: InstallReport["skipped"] = [];
 
+  for (const host of ["codex", "claude", "grok"] as const) {
+    if (hosts.has(host)) connectViaHostCli(host, server, input.io, written, skipped);
+  }
+  if (!hosts.has("openclaw") && !hosts.has("hermes")) return { ok: written.length > 0, written, skipped };
+
   const openclawPath = openClawConfigPath(input.home, input.platform);
-  let openclawDone = false;
-  if (input.io.exec) {
+  let openclawDone = !hosts.has("openclaw");
+  if (hosts.has("openclaw") && input.io.exec) {
     const result = input.io.exec("openclaw", ["mcp", "set", WORKHORSE_MCP_NAME, openClawMcpSetJson(launch)]);
     if (result.status === 0) {
       written.push({ target: "openclaw", path: openclawPath, how: "cli" });
       openclawDone = true;
     }
   }
-  if (!openclawDone) {
+  if (!openclawDone && hosts.has("openclaw")) {
     try {
       let existing: unknown = {};
       if (input.io.existsSync(openclawPath)) {
@@ -187,7 +242,9 @@ export function installWorkhorseExternalMcp(input: {
 
   const hermesPath = hermesConfigPath(input.home, input.platform);
   const hermesHome = dirnameOf(hermesPath);
-  if (!input.io.existsSync(hermesPath) && !input.io.existsSync(hermesHome)) {
+  if (!hosts.has("hermes")) {
+    /* not asked */
+  } else if (!input.io.existsSync(hermesPath) && !input.io.existsSync(hermesHome)) {
     skipped.push({ target: "hermes", reason: "Hermes is not installed (no ~/.hermes)" });
   } else try {
     const current = input.io.existsSync(hermesPath) ? input.io.readFile(hermesPath) : "";
@@ -210,9 +267,12 @@ export function installWorkhorseExternalMcp(input: {
 }
 
 export function installReportMessage(report: InstallReport): string {
+  const name = (target: LinkHost) => LINK_HOST_LABEL[target];
   if (report.written.length === 0) {
-    return report.skipped[0]?.reason || "Could not write OpenClaw or Hermes config.";
+    return report.skipped[0]?.reason || "Could not connect any host.";
   }
-  const names = report.written.map((item) => (item.target === "openclaw" ? "OpenClaw" : "Hermes")).join(" and ");
-  return `Wrote the Workhorse MCP into ${names}. They launch this app’s helper. No token stored.`;
+  const names = report.written.map((item) => name(item.target));
+  const list = names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const missed = report.skipped.length ? ` ${report.skipped.map((item) => `${name(item.target)}: ${item.reason}`).join(" · ")}` : "";
+  return `Connected ${list} to Workhorse Link. ${names.length === 1 ? "It launches" : "They launch"} this app’s helper. No token stored.${missed}`;
 }

@@ -285,7 +285,8 @@ type WorkhorseBridge = {
     statuses: import("./lib/external-catalog").AgentRuntimeStatus[];
     agents: import("./lib/external-catalog").ExternalAgent[];
   }>;
-  installExternalMcp?: () => Promise<{ ok: boolean; message?: string }>;
+  installExternalMcp?: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
+  linkConfig?: () => Promise<string>;
   startExternalRuntimeTask?: (
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;

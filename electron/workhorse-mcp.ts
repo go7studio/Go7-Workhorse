@@ -46,6 +46,7 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
 import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
+import { LinkReplayCache, linkEnvelope, linkHandshake } from "../src/lib/workhorse-link";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 
 type JsonRpc = {
@@ -145,6 +146,12 @@ export function consumeMcpFrames(buffer: string): { frames: McpFrame[]; rest: st
 
 const TOOLS = [
   {
+    name: "workhorse_capabilities",
+    description:
+      "Call this first. Returns the Workhorse Link contract: protocolVersion, whether the desk is online, the capabilities this desk offers, and the exact tools this helper will answer. Do not guess which Workhorse or which tools you have.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "workhorse_delegate",
     description:
       "Execute one task through Workhorse. Leave initialBrain unset for full Auto; set it only for the first coordinator. Descendants route independently unless a slice is explicitly assigned. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
@@ -188,6 +195,7 @@ const TOOLS = [
         wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
         fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
         traceId: { type: "string", description: "Optional trace id for this orchestration loop; Workhorse creates one when an adaptive loop omits it" },
+        idempotencyKey: { type: "string", description: "Send one per intended task. A retry with the same key gets the first answer back, not a second worker. Workhorse creates one when omitted and echoes it." },
       },
       required: ["task", "fromSessionId"],
     },
@@ -1439,11 +1447,53 @@ function currentMcpProfile() {
   return mcpExposureProfile(process.env.WORKHORSE_MCP_PROFILE);
 }
 
+
+/**
+ * Echo the execution envelope on a delegate reply so the harness can see the
+ * trace and idempotency key Workhorse ran under — including the ones it made
+ * because the caller sent none. A reply that is not JSON is passed through.
+ */
+function withLinkEnvelope(text: string, envelope: { traceId: string; idempotencyKey: string; supplied: string[] }): string {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify(
+        { ...(parsed as Record<string, unknown>), envelope: { traceId: envelope.traceId, idempotencyKey: envelope.idempotencyKey, supplied: envelope.supplied } },
+        null,
+        2,
+      );
+    }
+  } catch {
+    /* plain text reply */
+  }
+  return text;
+}
+
+const linkReplay = new LinkReplayCache();
+
+function deskIsOnline(): boolean {
+  if (deskAsk) return true;
+  const live = readBridgeRecord(process.env.WORKHORSE_STATE_PATH);
+  return Boolean(live?.url || process.env.WORKHORSE_BRIDGE_URL);
+}
+
 async function callTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   assertMcpToolAllowed(profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(from))), name);
+  if (name === "workhorse_capabilities") {
+    return JSON.stringify(linkHandshake({ deskOnline: deskIsOnline() }), null, 2);
+  }
   if (name === "workhorse_delegate") {
+    // The execution envelope. A repeat of the same idempotencyKey is the same
+    // request — a harness retrying after a dropped pipe — and gets the first
+    // answer, not a second worker. Workhorse fills what the caller left out
+    // and says so in the reply.
+    const envelope = linkEnvelope(args, (prefix) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`, from);
+    const replayed = linkReplay.get(envelope.idempotencyKey);
+    if (replayed) return replayed;
     const task = typeof args.task === "string" ? args.task : "";
-    const traceId = typeof args.traceId === "string" ? args.traceId : undefined;
+    // A mission mints its own trace id when the caller sent none; only a
+    // plain delegate falls back to the envelope's generated one.
+    const traceId = envelope.supplied.includes("traceId") ? envelope.traceId : undefined;
     const missionIteration = missionIterationFromArgs(args, task, traceId);
     const effectiveTraceId = missionIteration?.id ?? traceId;
     const initialBrain = args.initialBrain && typeof args.initialBrain === "object" && !Array.isArray(args.initialBrain)
@@ -1478,7 +1528,11 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         traceId: effectiveTraceId,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
-    );
+    ).then((text) => {
+      const answer = withLinkEnvelope(text, { ...envelope, traceId: effectiveTraceId ?? envelope.traceId });
+      linkReplay.put(envelope.idempotencyKey, answer);
+      return answer;
+    });
   }
   if (name === "workhorse_continue_mission") {
     return continueMission(args, typeof args.fromSessionId === "string" ? args.fromSessionId : from);
@@ -2047,6 +2101,80 @@ function isMcpEntry(): boolean {
   return process.argv.includes("--workhorse-mcp");
 }
 
+/**
+ * Workhorse Link's JSON CLI, for a harness that cannot speak MCP. Each
+ * subcommand is one tools/call through the same handler MCP uses, printed as
+ * JSON — not a second API. Invoke the packaged helper with `link` first:
+ *
+ *   <helper> link capabilities
+ *   <helper> link capacity [--provider <id>] [--callable]
+ *   <helper> link delegate --chat <sessionId> --task "<text>" [--trace <id>] [--key <idempotencyKey>]
+ *   <helper> link status <workerId>
+ *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>]
+ *
+ * `--json` is accepted and ignored: the output is always JSON. Exit 0 on a
+ * result, 1 on an error, with the error as JSON on stdout.
+ */
+export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
+  const [sub, ...rest] = argv.filter((item) => item !== "--json");
+  const flag = (name: string): string | undefined => {
+    const index = rest.indexOf(`--${name}`);
+    return index >= 0 ? rest[index + 1] : undefined;
+  };
+  const positional = rest.filter((item, index) => !item.startsWith("--") && !(index > 0 && rest[index - 1]?.startsWith("--") && rest[index - 1] !== "--callable"));
+  const usage =
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | delegate --chat <id> --task <text> [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>]";
+  if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
+  if (sub === "capacity") {
+    return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(rest.includes("--callable") ? { callableOnly: true } : {}) } };
+  }
+  if (sub === "delegate") {
+    const task = flag("task");
+    const chat = flag("chat");
+    if (!task || !chat) return { usage };
+    return { name: "workhorse_delegate", args: { task, fromSessionId: chat, ...(flag("trace") ? { traceId: flag("trace") } : {}), ...(flag("key") ? { idempotencyKey: flag("key") } : {}) } };
+  }
+  if (sub === "status") {
+    if (!positional[0]) return { usage };
+    return { name: "workhorse_agent_status", args: { id: positional[0] } };
+  }
+  if (sub === "follow-up") {
+    // Continue the wave that worker finished; Workhorse routes the next pass.
+    const [worker, ...text] = positional;
+    const chat = flag("chat");
+    if (!worker || text.length === 0 || !chat) return { usage };
+    const pass = Number(flag("pass") ?? "1");
+    return {
+      name: "workhorse_continue_mission",
+      args: { previousWorkerIds: [worker], previousPass: Number.isFinite(pass) ? pass : 1, remainingWork: text.join(" "), fromSessionId: chat, ...(flag("trace") ? { traceId: flag("trace") } : {}) },
+    };
+  }
+  return { usage };
+}
+
+export async function runLinkCli(argv: string[]): Promise<number> {
+  const call = linkCliCall(argv);
+  if ("usage" in call) {
+    process.stdout.write(`${JSON.stringify({ error: call.usage })}\n`);
+    return 1;
+  }
+  const reply = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.args } })) as
+    | { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } }
+    | undefined;
+  if (reply?.error) {
+    process.stdout.write(`${JSON.stringify({ error: reply.error.message ?? "error" })}\n`);
+    return 1;
+  }
+  const text = reply?.result?.content?.[0]?.text ?? "";
+  process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+  return 0;
+}
+
 if (isMcpEntry()) {
-  void runWorkhorseMcp();
+  const linkAt = process.argv.indexOf("link");
+  if (linkAt > 1) {
+    void runLinkCli(process.argv.slice(linkAt + 1)).then((code) => process.exit(code));
+  } else {
+    void runWorkhorseMcp();
+  }
 }

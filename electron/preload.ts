@@ -77,7 +77,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   saveComposerDrafts: (drafts: Record<string, { text?: string; images?: import("../src/lib/types").ChatImage[] }>) =>
     ipcRenderer.invoke("state:save-drafts", drafts),
   detectAgentRuntimes: () => ipcRenderer.invoke("agentRuntime:detect"),
-  installExternalMcp: () => ipcRenderer.invoke("agentRuntime:installMcp"),
+  installExternalMcp: (hosts?: string[]) => ipcRenderer.invoke("agentRuntime:installMcp", hosts),
+  linkConfig: () => ipcRenderer.invoke("agentRuntime:linkConfig"),
   startExternalRuntimeTask: (request: import("../src/lib/external-task").RuntimeStartRequest) =>
     ipcRenderer.invoke("agentRuntime:start", request) as Promise<import("../src/lib/types").ExternalTask | null>,
   syncJobs: (sessions: import("../src/lib/types").Session[]) =>

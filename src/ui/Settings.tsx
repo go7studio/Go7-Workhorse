@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LINK_HOSTS, LINK_HOST_LABEL } from "../lib/workhorse-link";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -749,28 +750,56 @@ function AgentSystemsBlock() {
         <div className="settings-row-copy">
           <strong>Harnesses</strong>
           <span>Installed runtimes the desk can grant work to.</span>
-          <span>The installed MCP can read leftover and availability. That check does not share keys or chats.</span>
+          <span>
+            Workhorse Link lets an outside app call this desk: list, read and ask chats, read leftover, and delegate a
+            task. The installed MCP can read leftover and availability. That check does not share keys or chats.
+            Connecting creates no vendor, login or Usage ring.
+          </span>
           {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
         <div className="settings-control">
           <button className="tiny" type="button" onClick={() => void store.refreshAgentRuntimes()}>
             Recheck
           </button>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Workhorse Link</strong>
+          <span>Each button writes the same launch into that app’s own MCP config, through its own tool.</span>
+        </div>
+        <div className="settings-control link-connect">
+          {LINK_HOSTS.map((host) => (
+            <button
+              className="tiny"
+              type="button"
+              key={host}
+              onClick={() => {
+                void store.installExternalMcp([host]).then((result) => setNote(result.message || (result.ok ? `Connected ${LINK_HOST_LABEL[host]}.` : `Could not connect ${LINK_HOST_LABEL[host]}.`)));
+              }}
+            >
+              Connect {LINK_HOST_LABEL[host]}
+            </button>
+          ))}
           <button
             className="tiny"
             type="button"
             onClick={() => {
-              void store.installExternalMcp().then((result) => {
-                setNote(
-                  result.message ||
-                    (result.ok
-                      ? "Installed Workhorse MCP for the available harnesses."
-                      : "Could not install."),
-                );
+              void store.linkConfig().then(async (text) => {
+                if (!text) {
+                  setNote("Workhorse desktop only.");
+                  return;
+                }
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setNote("Copied the generic MCP configuration. Paste it into any MCP client’s servers list.");
+                } catch {
+                  setNote(text);
+                }
               });
             }}
           >
-            Install MCP
+            Copy generic MCP configuration
           </button>
         </div>
       </div>

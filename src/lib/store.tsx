@@ -418,7 +418,8 @@ export type Store = AppState & {
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
   refreshAgentRuntimes: () => Promise<void>;
-  installExternalMcp: () => Promise<{ ok: boolean; message?: string }>;
+  installExternalMcp: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
+  linkConfig: () => Promise<string>;
   updateLearning: (patch: Partial<import("./learning-types").LearningSettings>) => void;
   watchNotices: WatchNotice[];
   watchHold: WatchHold | null;
@@ -6230,9 +6231,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (ready) void refreshAgentRuntimes();
   }, [ready, refreshAgentRuntimes]);
 
-  const installExternalMcp = useCallback(async () => {
-    const result = await window.workhorse?.installExternalMcp?.();
+  const installExternalMcp = useCallback(async (hosts?: string[]) => {
+    const result = await window.workhorse?.installExternalMcp?.(hosts);
     return result ?? { ok: false, message: "Workhorse desktop only." };
+  }, []);
+
+  const linkConfig = useCallback(async () => {
+    return (await window.workhorse?.linkConfig?.()) ?? "";
   }, []);
 
   const updateLearning = useCallback((patch: Partial<import("./learning-types").LearningSettings>) => {
@@ -6520,6 +6525,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       agentCatalog,
       refreshAgentRuntimes,
       installExternalMcp,
+      linkConfig,
       updateLearning,
       watchNotices,
       watchHold,
@@ -6639,6 +6645,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       agentCatalog,
       refreshAgentRuntimes,
       installExternalMcp,
+      linkConfig,
       updateLearning,
       watchNotices,
       watchHold,

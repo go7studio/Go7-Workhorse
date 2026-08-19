@@ -2514,6 +2514,8 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   const listedTools = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const names = ((listedTools as { result?: { tools?: { name: string }[] } })?.result?.tools ?? []).map((tool) => tool.name);
   assert.deepEqual(names, [
+    // First, so a harness reads the contract before anything else.
+    "workhorse_capabilities",
     "workhorse_delegate",
     "workhorse_continue_mission",
     "workhorse_list_chats",

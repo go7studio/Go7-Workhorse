@@ -7,6 +7,7 @@ import {
   hermesConfigPath,
   openClawConfigPath,
   parseCatalogAgents,
+  projectExternalAgentCatalog,
 } from "../src/lib/external-catalog";
 
 test("detect uses injected home and never os.homedir", () => {
@@ -77,4 +78,25 @@ test("default catalog entries are openclaw/main and hermes/default", () => {
   );
   const parsed = parseCatalogAgents("openclaw", [{ id: "research" }, { name: "main" }]);
   assert.ok(parsed.some((item) => item.agentId === "research"));
+});
+
+test("external agent discovery lists the catalog, not past tasks or workspace paths", () => {
+  const snapshot = projectExternalAgentCatalog({
+    agents: [
+      { runtimeId: "openclaw", agentId: "main", name: "openclaw/main", workspace: "/Users/foo/.openclaw" },
+      { runtimeId: "hermes", agentId: "research", name: "hermes/research", workspace: "/tmp/hermes" },
+    ],
+    runtimes: [
+      { runtimeId: "openclaw", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+      { runtimeId: "hermes", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+    ],
+    now: Date.parse("2026-08-19T12:00:00.000Z"),
+  });
+  assert.deepEqual(
+    snapshot.agents.map((item) => item.id),
+    ["openclaw/main", "hermes/research"],
+  );
+  assert.equal(snapshot.agents[0]?.reachable, true);
+  const encoded = JSON.stringify(snapshot);
+  assert.doesNotMatch(encoded, /ext_|status|completed|\/Users\/foo|\.openclaw|\/tmp\/hermes/);
 });

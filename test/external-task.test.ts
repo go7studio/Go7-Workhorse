@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { createWaveGrant } from "../src/lib/agent-runtime";
+import { authorizeExternalCall, createWaveGrant } from "../src/lib/agent-runtime";
 import { grantExternalAgents } from "../src/lib/plan";
 import {
   applyAdapterStatus,
@@ -113,6 +113,59 @@ test("outbound hop past the limit is hop_limit and does not start the runtime", 
   assert.equal(limited.ok, false);
   if (!limited.ok) assert.equal(limited.code, "hop_limit");
   assert.equal(called, false);
+});
+
+test("a completed task stays completed when live status is missing", () => {
+  const started = startExternalTask({
+    explicitTarget: "openclaw/main",
+    grant: createWaveGrant({ waveId: "w", runtimeId: "openclaw", agentId: "main" }),
+    prompt: "done",
+    store: emptyTaskStore(),
+    now: 20,
+  });
+  assert.equal(started.ok, true);
+  if (!started.ok) return;
+  const finished = {
+    ...started.task,
+    status: "completed" as const,
+    finishedAt: 21,
+    result: "ok",
+  };
+  assert.equal(reconcileExternalTask(finished, null).status, "completed");
+});
+
+test("a duplicate idempotency key returns the original task and consumes the grant", () => {
+  const grant = createWaveGrant({ waveId: "w", runtimeId: "openclaw", agentId: "main", now: 30 });
+  const first = startExternalTask({
+    explicitTarget: "openclaw/main",
+    grant,
+    prompt: "once",
+    store: emptyTaskStore(),
+    envelope: { idempotencyKey: "same-key", origin: "workhorse", visitedSystems: ["workhorse"], hopCount: 0 },
+    now: 30,
+  });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  assert.equal(first.grant?.consumedAt, 30);
+  const stale = createWaveGrant({ waveId: "w", runtimeId: "openclaw", agentId: "main", now: 30, id: grant.id });
+  const again = startExternalTask({
+    explicitTarget: "openclaw/main",
+    grant: stale,
+    prompt: "again",
+    store: first.store,
+    envelope: { idempotencyKey: "same-key", origin: "workhorse", visitedSystems: ["workhorse"], hopCount: 0 },
+    now: 31,
+  });
+  assert.equal(again.ok, true);
+  if (!again.ok) return;
+  assert.equal(again.duplicate, true);
+  assert.equal(again.task.id, first.task.id);
+  assert.equal(again.grant?.consumedAt, 31);
+  const replay = authorizeExternalCall({
+    grant: again.grant,
+    routing: { enabled: true, includeExternalAgents: true },
+  });
+  assert.equal(replay.ok, false);
 });
 
 test("inbound external-runtime cannot bounce a spawn back to OpenClaw", async () => {

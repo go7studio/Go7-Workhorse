@@ -1346,6 +1346,13 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(parseCustomPlanUsage({ subscription: { limit: 0, requests: 0 } }), undefined);
   assert.equal(parseCustomPlanUsage({ subscription: { requests: 3 } }), undefined);
   assert.equal(customPlanRemainsUrl("https://api.groq.com/openai/v1"), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.together.ai/v1"), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.fireworks.ai/inference/v1"), undefined);
+  assert.equal(customPlanRemainsUrl("https://router.huggingface.co/v1"), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.cerebras.ai/v1"), undefined);
+  assert.equal(customPlanRemainsUrl("https://api.deepseek.com"), "https://api.deepseek.com/user/balance");
+  assert.equal(customPlanRemainsUrl("https://api.novita.ai/openai"), "https://api.novita.ai/openapi/v1/billing/balance/detail");
+  assert.equal(customPlanRemainsUrl("https://api.aimlapi.com/v1"), "https://api.aimlapi.com/v2/billing");
   const seen: string[] = [];
   const miniPlan = await fetchCustomPlanUsage({
     baseUrl: "https://api.minimax.io/anthropic",
@@ -1362,6 +1369,23 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   });
   assert.equal(seen[0], "https://www.minimax.io/v1/token_plan/remains");
   assert.equal(miniPlan?.leftPercent, 86);
+  const deepseekPlan = await fetchCustomPlanUsage({
+    baseUrl: "https://api.deepseek.com",
+    apiKey: "sk-test",
+    fetchImpl: async (url) => {
+      seen.push(String(url));
+      return new Response(
+        JSON.stringify({
+          is_available: true,
+          balance_infos: [{ currency: "USD", total_balance: "8.00" }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  assert.equal(seen.at(-1), "https://api.deepseek.com/user/balance");
+  assert.equal(deepseekPlan?.prepaidBalance, 8);
+  assert.equal(Number.isFinite(deepseekPlan?.leftPercent), false);
   const synPlan = await fetchCustomPlanUsage({
     baseUrl: "https://api.synthetic.new/openai/v1",
     apiKey: "syn_test",
@@ -1372,7 +1396,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       });
     },
   });
-  assert.equal(seen[1], "https://api.synthetic.new/v2/quotas");
+  assert.equal(seen.at(-1), "https://api.synthetic.new/v2/quotas");
   assert.equal(synPlan?.leftPercent, 90);
   assert.equal(synPlan?.products[0]?.product, "session");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");

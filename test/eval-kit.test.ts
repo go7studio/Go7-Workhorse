@@ -142,6 +142,7 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_delegate"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_continue_mission"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
+  assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_query_capacity"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
   const commands = json("eval/command-contract.json");
   assert.match(commands.providerNativePolicy, /non-normative.*runtime-discovered/i);

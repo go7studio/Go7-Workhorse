@@ -6,6 +6,8 @@ import { test } from "node:test";
 import { isSettingsSection, normalizeSettings } from "../src/lib/settings";
 import type { CustomBot, GrokPlanUsage } from "../src/lib/types";
 import {
+  CAPACITY_SNAPSHOT_VERSION,
+  CAPACITY_STALE_AFTER_MS,
   DAY_SHARE_PERCENT,
   dayKey,
   DEFAULT_WATCH,
@@ -18,6 +20,8 @@ import {
   evaluateWatchHold,
   formatDeskRoster,
   formatWeeklyPlanLine,
+  projectCapacitySnapshot,
+  type DeskCallRow,
   vendorCallBlocked,
   isVendorDeclinedResult,
   vendorDeclinedForBot,
@@ -752,4 +756,223 @@ test("a full context window never holds a send the way a spent daily bank does",
   });
   assert.equal(spent?.reason, "spent");
   assert.notEqual(spent?.reason, undefined);
+});
+
+test("a vaulted custom bot is callable without a plaintext key", () => {
+  const vaulted: CustomBot = { ...bot, apiKey: "", credentialId: "cred_kimi" };
+  const rows = deskCallCatalog({
+    settings: {
+      watch: { ...DEFAULT_WATCH, lockDaily: false },
+      customBots: [vaulted],
+      usageBudgets: {},
+      llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } },
+    },
+    usage: [],
+    plans: { custom: { bot_minimax: plan(73) } },
+    permits: {},
+  });
+  const row = rows.find((item) => item.id === "bot:bot_minimax");
+  assert.equal(row?.canCall, true);
+  assert.notEqual(row?.status, "not_connected");
+  const snap = projectCapacitySnapshot(rows, {
+    now: Date.parse("2026-08-19T12:00:00.000Z"),
+    plans: { custom: { bot_minimax: plan(73) } },
+    settings: { customBots: [vaulted] },
+  });
+  const kimi = snap.rows.find((item) => item.id === "bot:bot_minimax");
+  assert.equal(kimi?.availability.canCall, true);
+  assert.notEqual(kimi?.availability.status, "not_connected");
+  assert.equal(kimi?.meter.remainingPercent, 73);
+  assert.doesNotMatch(JSON.stringify(snap), /sk-|cred_kimi/);
+});
+
+function capacityRow(partial: Partial<DeskCallRow> & Pick<DeskCallRow, "id" | "name" | "provider" | "kind">): DeskCallRow {
+  return {
+    canCall: true,
+    status: "ok",
+    ...partial,
+  };
+}
+
+test("projectCapacitySnapshot is version 1, omits unknown percents, and never infers used", () => {
+  const now = Date.parse("2026-08-19T17:42:00.000Z");
+  const snapshot = projectCapacitySnapshot(
+    [
+      capacityRow({
+        id: "grok",
+        name: "Grok",
+        provider: "grok",
+        kind: "vendor",
+        leftoverPercent: 68,
+        models: [
+          { id: "grok-4.6", name: "Grok 4.6" },
+          { id: "grok-build", name: "Grok Build" },
+        ],
+      }),
+      capacityRow({
+        id: "codex",
+        name: "Codex",
+        provider: "codex",
+        kind: "vendor",
+        leftoverPercent: 40,
+        usedPercent: 55,
+        resetsAt: "2026-08-23T00:00:00.000Z",
+      }),
+      capacityRow({
+        id: "claude",
+        name: "Claude",
+        provider: "claude",
+        kind: "vendor",
+      }),
+    ],
+    { now },
+  );
+  assert.equal(snapshot.version, CAPACITY_SNAPSHOT_VERSION);
+  assert.equal(snapshot.version, 1);
+  assert.equal(snapshot.asOf, "2026-08-19T17:42:00.000Z");
+  assert.equal(snapshot.freshness, "fresh");
+  const grok = snapshot.rows.find((row) => row.id === "grok");
+  assert.equal(grok?.meter.status, "known");
+  assert.equal(grok?.meter.remainingPercent, 68);
+  assert.equal(grok?.meter.usedPercent, undefined);
+  assert.equal("usedPercent" in (grok?.meter ?? {}), false);
+  const claude = snapshot.rows.find((row) => row.id === "claude");
+  assert.equal(claude?.meter.status, "unknown");
+  assert.equal(claude?.meter.remainingPercent, undefined);
+  assert.equal(claude?.meter.usedPercent, undefined);
+  const encoded = JSON.stringify(snapshot);
+  assert.doesNotMatch(encoded, /"usedPercent":32/);
+  assert.doesNotMatch(encoded, /"total"/);
+  assert.equal("total" in snapshot, false);
+});
+
+test("projectCapacitySnapshot keeps Cursor pools and one custom-account row, drops harness ids", () => {
+  const now = Date.parse("2026-08-19T12:00:00.000Z");
+  const reset = "2026-09-01T00:00:00.000Z";
+  const settings = {
+    watch: { ...DEFAULT_WATCH, lockDaily: false },
+    customBots: [
+      {
+        ...bot,
+        model: "MiniMax-M2.5",
+      },
+    ],
+    usageBudgets: {},
+    llms: {
+      grok: { connected: false },
+      claude: { connected: false },
+      codex: { connected: false },
+      cursor: { connected: true },
+    },
+  };
+  const plans = {
+    cursor: {
+      usedPercent: 50,
+      leftPercent: 50,
+      period: "monthly" as const,
+      resetsAt: reset,
+      prepaidBalance: 0,
+      products: [
+        { product: "cursor-models", label: "Cursor Models", usagePercent: 10 },
+        { product: "other-models", label: "Other Models", usagePercent: 40 },
+      ],
+    },
+    custom: {
+      bot_minimax: plan(55, { resetsAt: reset }),
+    },
+  };
+  const catalog = deskCallCatalog({
+    settings,
+    usage: [],
+    plans,
+    permits: {},
+    now,
+  });
+  const traps: DeskCallRow[] = [
+    ...catalog,
+    capacityRow({
+      id: "openclaw/main",
+      name: "OpenClaw",
+      provider: "grok",
+      kind: "vendor",
+    }),
+    {
+      id: "hermes/research",
+      name: "Hermes",
+      provider: "hermes" as DeskCallRow["provider"],
+      kind: "vendor",
+      canCall: true,
+      status: "ok",
+    },
+  ];
+  const snapshot = projectCapacitySnapshot(traps, {
+    now,
+    fetchedAt: now,
+    plans,
+    settings,
+  });
+  const cursor = snapshot.rows.filter((row) => row.provider === "cursor");
+  assert.equal(cursor.length, 2);
+  assert.ok(cursor.some((row) => row.id === "cursor:cursor-models"));
+  assert.ok(cursor.some((row) => row.id === "cursor:other-models"));
+  assert.notEqual(cursor[0]?.meter.remainingPercent, cursor[1]?.meter.remainingPercent);
+  const custom = snapshot.rows.filter((row) => row.kind === "custom");
+  assert.equal(custom.length, 1);
+  assert.equal(custom[0]?.id, "bot:bot_minimax");
+  assert.ok((custom[0]?.models.length ?? 0) >= 2);
+  assert.equal(
+    snapshot.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes") || row.provider === ("hermes" as DeskCallRow["provider"])),
+    false,
+  );
+  const summed = snapshot.rows.reduce((sum, row) => sum + (row.meter.remainingPercent ?? 0), 0);
+  assert.equal("total" in snapshot, false);
+  assert.ok(summed > 0);
+});
+
+test("projectCapacitySnapshot freshness uses the six-hour cache age", () => {
+  const now = Date.parse("2026-08-19T18:00:00.000Z");
+  const rows = [
+    capacityRow({ id: "grok", name: "Grok", provider: "grok", kind: "vendor", leftoverPercent: 20 }),
+  ];
+  const stale = projectCapacitySnapshot(rows, {
+    now,
+    fetchedAt: now - CAPACITY_STALE_AFTER_MS - 1,
+  });
+  assert.equal(stale.freshness, "stale");
+  assert.equal(stale.asOf, new Date(now - CAPACITY_STALE_AFTER_MS - 1).toISOString());
+  const fresh = projectCapacitySnapshot(rows, { now, fetchedAt: now - 60_000 });
+  assert.equal(fresh.freshness, "fresh");
+  const unknown = projectCapacitySnapshot(
+    [capacityRow({ id: "grok", name: "Grok", provider: "grok", kind: "vendor" })],
+    { now },
+  );
+  assert.equal(unknown.freshness, "unknown");
+  assert.equal(unknown.rows[0]?.meter.status, "unknown");
+});
+
+test("projectCapacitySnapshot does not copy free-text reasons or trap fields", () => {
+  const row = {
+    ...capacityRow({
+      id: "grok",
+      name: "Grok",
+      provider: "grok",
+      kind: "vendor",
+      leftoverPercent: 12,
+      reason: "see chat Secret Title in /Users/foo/userData/workhorse-state.json with Bearer sk-secret",
+      status: "spent",
+      canCall: false,
+    }),
+    apiKey: "sk-trap",
+    baseUrl: "https://api.example.invalid/v1",
+  } as DeskCallRow;
+  const snapshot = projectCapacitySnapshot([row], { now: Date.parse("2026-08-19T12:00:00.000Z") });
+  const encoded = JSON.stringify(snapshot);
+  assert.doesNotMatch(encoded, /sk-/);
+  assert.doesNotMatch(encoded, /Bearer/);
+  assert.doesNotMatch(encoded, /userData/);
+  assert.doesNotMatch(encoded, /workhorse-state\.json/);
+  assert.doesNotMatch(encoded, /Secret Title/);
+  assert.equal(snapshot.rows[0]?.availability.reasonCode, "spent");
+  assert.equal(snapshot.rows[0]?.availability.canCall, false);
+  assert.equal("reason" in snapshot.rows[0]!, false);
 });

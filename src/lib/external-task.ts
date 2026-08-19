@@ -32,6 +32,12 @@ export function emptyTaskStore(): TaskStore {
   return { byId: {}, byKey: {} };
 }
 
+export function envelopeForTrace(store: TaskStore, traceId?: string): CorrelationEnvelope | undefined {
+  const id = traceId?.trim();
+  if (!id) return undefined;
+  return Object.values(store.byId).find((task) => task.envelope.traceId === id)?.envelope;
+}
+
 export function normalizeTaskStore(raw: unknown): TaskStore {
   if (!raw || typeof raw !== "object") return emptyTaskStore();
   const record = raw as Partial<TaskStore>;
@@ -50,9 +56,16 @@ export function normalizeTaskStore(raw: unknown): TaskStore {
   return { byId, byKey };
 }
 
+const TERMINAL: ExternalTaskStatus[] = ["completed", "failed", "cancelled", "unknown"];
+
+export function isTerminalExternalStatus(status: ExternalTaskStatus): boolean {
+  return TERMINAL.includes(status);
+}
+
 export function reconcileExternalTask(task: ExternalTask, live?: ExternalTask | null): ExternalTask {
-  if (!live) return { ...task, status: "unknown" };
-  return { ...task, ...live, id: task.id, envelope: task.envelope, grantId: task.grantId };
+  if (live) return { ...task, ...live, id: task.id, envelope: task.envelope, grantId: task.grantId };
+  if (isTerminalExternalStatus(task.status)) return task;
+  return { ...task, status: "unknown" };
 }
 
 export function externalTaskToRun(task: ExternalTask): ExternalAgentRun {
@@ -142,13 +155,14 @@ export function startExternalTask(input: StartExternalTaskInput): StartExternalT
   const existingId = input.store.byKey[hop.envelope.idempotencyKey];
   if (existingId && input.store.byId[existingId]) {
     const task = input.store.byId[existingId]!;
+    const grant = auth.grant ? consumeGrant(auth.grant, now) : input.grant ? consumeGrant(input.grant, now) : undefined;
     return {
       ok: true,
       task,
       store: input.store,
       run: externalTaskToRun(task),
       row: externalTaskToLineupRow(task, input.prompt),
-      grant: input.grant ?? undefined,
+      grant,
       duplicate: true,
     };
   }
@@ -210,8 +224,6 @@ export function applyAdapterStatus(store: TaskStore, taskId: string, live: Exter
   const next = reconcileExternalTask(task, live);
   return { ...store, byId: { ...store.byId, [taskId]: next } };
 }
-
-const TERMINAL: ExternalTaskStatus[] = ["completed", "failed", "cancelled", "unknown"];
 
 export function reconcileTaskStoreOnRestart(store: TaskStore): TaskStore {
   const byId: Record<string, ExternalTask> = {};

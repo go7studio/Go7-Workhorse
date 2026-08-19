@@ -135,6 +135,9 @@ export function authorizeExternalCall(input: AuthorizeExternalInput): AuthorizeE
     }
     return { ok: true, ref: named, grant };
   }
+  if (input.routing?.enabled !== true || input.routing.includeExternalAgents !== true) {
+    return { ok: false, code: "grant_required" };
+  }
   if (!grant) return { ok: false, code: "grant_required" };
   if (grant.agentId && isAgentRuntimeId(grant.runtimeId)) {
     return { ok: true, ref: { runtimeId: grant.runtimeId, agentId: grant.agentId }, grant };
@@ -142,6 +145,40 @@ export function authorizeExternalCall(input: AuthorizeExternalInput): AuthorizeE
   const pick = (input.selectFrom ?? []).find((ref) => grantMatches(grant, ref));
   if (pick) return { ok: true, ref: pick, grant };
   return { ok: false, code: "grant_required" };
+}
+
+/** Inbound hop/visited is a continuation token. Never trust a client reset. */
+export function acceptInboundEnvelope(input: {
+  stored?: CorrelationEnvelope | null;
+  claimed?: Partial<CorrelationEnvelope>;
+  caller: CorrelationOrigin;
+  hopLimit?: number;
+}): { ok: true; envelope: CorrelationEnvelope } | { ok: false; code: ExternalErrorCode } {
+  const hopLimit = input.hopLimit ?? DEFAULT_HOP_LIMIT;
+  if (input.stored) {
+    const claimedHop = input.claimed?.hopCount;
+    if (typeof claimedHop === "number" && Number.isFinite(claimedHop) && claimedHop < input.stored.hopCount) {
+      return { ok: false, code: "hop_limit" };
+    }
+    const claimedVisited = input.claimed?.visitedSystems;
+    if (
+      Array.isArray(claimedVisited) &&
+      input.stored.visitedSystems.some((id) => !claimedVisited.includes(id))
+    ) {
+      return { ok: false, code: "cycle_rejected" };
+    }
+    return checkEnvelope(input.stored, "workhorse", hopLimit);
+  }
+  const seeded = createEnvelope(
+    {
+      origin: input.caller,
+      visitedSystems: [input.caller],
+      hopCount: 0,
+      traceId: input.claimed?.traceId,
+      idempotencyKey: input.claimed?.idempotencyKey,
+    },
+  );
+  return checkEnvelope(seeded, "workhorse", hopLimit);
 }
 
 export function newId(prefix: string, now = Date.now()): string {

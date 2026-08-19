@@ -3,9 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { leftoverForCard } from "../src/lib/usage";
+import { leftoverForCard, weeklyPlanLeftover } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
+import { CUSTOM_METERS } from "../src/lib/custom-meters";
+import { PROVIDER_PRESETS } from "../src/lib/provider-catalog";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -85,4 +87,44 @@ test("Claude MiniMax and Synthetic leftovers stay on their own rings", () => {
   assert.notEqual(mini?.leftPercent, leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, plans)?.leftPercent);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /leftoverForCard/);
+});
+
+test("prepaid custom meters fill balance and do not invent leftover percent", () => {
+  const deepseek = parseCustomPlanUsage({
+    is_available: true,
+    balance_infos: [{ currency: "USD", total_balance: "42.50", granted_balance: "2.50", topped_up_balance: "40.00" }],
+  });
+  assert.equal(deepseek?.prepaidBalance, 42.5);
+  assert.equal(Number.isFinite(deepseek?.leftPercent), false);
+  assert.equal(weeklyPlanLeftover(deepseek), undefined);
+
+  const novita = parseCustomPlanUsage({ availableBalance: "1000000", cashBalance: "800000" });
+  assert.equal(novita?.prepaidBalance, 100);
+  assert.equal(weeklyPlanLeftover(novita), undefined);
+
+  const aiml = parseCustomPlanUsage({ current_balance: 12.25, currency: "USD" }, undefined, "aimlapi");
+  assert.equal(aiml?.prepaidBalance, 12.25);
+  assert.equal(weeklyPlanLeftover(aiml), undefined);
+
+  const plans = {
+    custom: { bot_ds: deepseek, bot_nv: novita, bot_al: aiml },
+  };
+  assert.equal(leftoverForCard({ focus: "bot:bot_ds", provider: "custom", key: "bot_ds" }, plans)?.prepaidBalance, 42.5);
+  assert.notEqual(
+    leftoverForCard({ focus: "bot:bot_ds", provider: "custom", key: "bot_ds" }, plans)?.prepaidBalance,
+    leftoverForCard({ focus: "bot:bot_nv", provider: "custom", key: "bot_nv" }, plans)?.prepaidBalance,
+  );
+});
+
+test("custom leftover meters are a closed official list and catalog hosts stay custom bots", () => {
+  assert.deepEqual(
+    CUSTOM_METERS.map((item) => item.id),
+    ["minimax", "synthetic", "openrouter", "deepseek", "novita", "aimlapi"],
+  );
+  const ids = PROVIDER_PRESETS.map((item) => item.id);
+  for (const id of ["minimax", "synthetic", "openrouter", "groq", "deepseek", "together", "fireworks", "huggingface", "novita", "cerebras", "aimlapi"]) {
+    assert.ok(ids.includes(id), id);
+  }
+  assert.equal(ids.includes("openclaw"), false);
+  assert.equal(ids.includes("hermes"), false);
 });

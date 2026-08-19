@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   EXTERNAL_RUNTIME_ALLOW,
@@ -38,6 +39,7 @@ test("external-runtime allows execution discovery, delegation, chat, and worker 
     "workhorse_delegate",
     "workhorse_continue_mission",
     "workhorse_list_bots",
+    "workhorse_query_capacity",
     "workhorse_list_chats",
     "workhorse_read_chat",
     "workhorse_ask_chat",
@@ -147,6 +149,7 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
     assert.ok(names.includes("workhorse_list_agents"));
     assert.ok(names.includes("workhorse_list_bots"));
+    assert.ok(names.includes("workhorse_query_capacity"));
     assert.ok(names.includes("workhorse_delegate"));
     assert.ok(names.includes("workhorse_continue_mission"));
     const delegateFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_delegate")?.inputSchema?.properties ?? {};
@@ -705,7 +708,7 @@ test("a worker is offered only the desk tools it may call, and a hidden name is 
     assert.ok(worker.includes("workhorse_spawn_agent"));
     assert.ok(worker.includes("workhorse_await_agents"));
     // Reshaping the desk does not.
-    for (const name of ["workhorse_delete_project", "workhorse_create_project", "workhorse_setup_custom_bot", "workhorse_delete_bot", "workhorse_list_bots", "workhorse_plan", "workhorse_request_vendor"]) {
+    for (const name of ["workhorse_delete_project", "workhorse_create_project", "workhorse_setup_custom_bot", "workhorse_delete_bot", "workhorse_list_bots", "workhorse_query_capacity", "workhorse_plan", "workhorse_request_vendor"]) {
       assert.ok(!worker.includes(name), `${name} is not offered to a worker`);
     }
     // Knowing the name is not enough.
@@ -736,7 +739,7 @@ test("the worker allowlist is one list, and the profile follows the caller, not 
     assert.equal(isWorkerOmittedTool(name), false, name);
   }
   // Every desk tool a worker may not call is refused on both surfaces alike.
-  for (const name of ["workhorse_delete_project", "workhorse_list_bots", "workhorse_plan", "workhorse_request_vendor", "workhorse_setup_custom_bot"]) {
+  for (const name of ["workhorse_delete_project", "workhorse_list_bots", "workhorse_query_capacity", "workhorse_plan", "workhorse_request_vendor", "workhorse_setup_custom_bot"]) {
     assert.equal(isMcpToolAllowed("worker", name), false, name);
     assert.equal(isWorkerOmittedTool(name), true, name);
   }
@@ -778,4 +781,300 @@ test("a worker's CLI is launched with worker rules, an orchestrator's with the b
   assert.equal(rulesOf(buildCursorLaunchSpec(base)), CURSOR_SESSION_RULES);
   assert.equal(sessionRulesFor("worker", "cursor"), WORKER_SESSION_RULES);
   assert.ok(WORKER_SESSION_RULES.length * 10 < WORKHORSE_SESSION_RULES.length, "the worker rules are an order of magnitude smaller");
+});
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function mcpToolText(rpc: unknown): string {
+  const result = rpc as { result?: { content?: Array<{ text?: string }> }; error?: { message?: string } };
+  if (result.error?.message) throw new Error(result.error.message);
+  return result.result?.content?.[0]?.text ?? "";
+}
+
+test("workhorse_query_capacity is read-only on external-runtime and omits trap fields", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-capacity-"));
+  const statePath = path.join(dir, "workhorse-state.json");
+  const usage = [
+    {
+      id: "u1",
+      at: 1,
+      provider: "grok",
+      model: "grok-4.6",
+      sessionId: "chat_secret",
+      inputTokens: 9,
+      outputTokens: 3,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const permits = { grok: { untilReset: true } };
+  const state = {
+    settings: {
+      llms: {
+        grok: { connected: true },
+        cursor: { connected: true },
+        claude: { connected: false },
+        codex: { connected: false },
+      },
+      customBots: [
+        {
+          id: "bot_minimax",
+          name: "MiniMax",
+          color: "#0071e3",
+          baseUrl: "https://api.minimax.io/anthropic",
+          model: "MiniMax-M2.5",
+          apiKey: "sk-trap-secret",
+          api: "anthropic-messages",
+          contextWindow: 200_000,
+          createdAt: 1,
+        },
+        {
+          id: "bot_kimi",
+          name: "Kimi K3",
+          color: "#bf5af2",
+          baseUrl: "https://api.synthetic.new/openai/v1",
+          model: "hf:moonshotai/Kimi-K3",
+          apiKey: "",
+          credentialId: "cred_kimi",
+          api: "openai-completions",
+          contextWindow: 524_288,
+          createdAt: 1,
+        },
+      ],
+      routing: { enabled: true, includeExternalAgents: false },
+      watch: { lockDaily: false },
+    },
+    sessions: [{ id: "chat_secret", title: "Secret Title", provider: "grok", projectId: "proj_trap" }],
+    projects: [{ id: "proj_trap", name: "Trap Project", folders: [{ path: "/Users/foo/userData/workhorse-state.json" }] }],
+    usage,
+    watchPermits: permits,
+    deskPlans: {
+      grok: {
+        usedPercent: 32,
+        leftPercent: 68,
+        period: "weekly",
+        prepaidBalance: 0,
+        products: [],
+        resetsAt: "2026-08-23T00:00:00.000Z",
+      },
+      cursor: {
+        usedPercent: 50,
+        leftPercent: 50,
+        period: "monthly",
+        prepaidBalance: 0,
+        products: [
+          { product: "cursor-models", label: "Cursor Models", usagePercent: 10 },
+          { product: "other-models", label: "Other Models", usagePercent: 40 },
+        ],
+      },
+      custom: {
+        bot_minimax: { usedPercent: 45, leftPercent: 55, period: "weekly", prepaidBalance: 0, products: [] },
+        bot_kimi: { usedPercent: 27, leftPercent: 73, period: "weekly", prepaidBalance: 0, products: [] },
+      },
+    },
+  };
+  writeFileSync(statePath, JSON.stringify(state));
+  const previous = {
+    profile: process.env.WORKHORSE_MCP_PROFILE,
+    state: process.env.WORKHORSE_STATE_PATH,
+    url: process.env.WORKHORSE_BRIDGE_URL,
+  };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  delete process.env.WORKHORSE_BRIDGE_URL;
+  try {
+    assert.equal(isMcpToolAllowed("external-runtime", "workhorse_query_capacity"), true);
+    assert.equal(isMcpToolAllowed("worker", "workhorse_query_capacity"), false);
+    const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as {
+      result?: { tools?: Array<{ name: string }> };
+    };
+    const names = (listed.result?.tools ?? []).map((tool) => tool.name);
+    assert.ok(names.includes("workhorse_query_capacity"));
+    assert.ok(names.includes("workhorse_list_bots"));
+    assert.ok(!names.includes("workhorse_delete_chat"));
+    assert.ok(!names.includes("workhorse_setup_custom_bot"));
+    const first = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "workhorse_query_capacity", arguments: {} },
+        }),
+      ),
+    ) as { version: number; freshness: string; rows: Array<{ id: string; provider: string; kind: string; meter: { remainingPercent?: number } }> };
+    assert.equal(first.version, 1);
+    assert.ok(first.rows.some((row) => row.id === "grok"));
+    assert.equal(first.rows.filter((row) => row.provider === "cursor").length, 2);
+    assert.equal(first.rows.filter((row) => row.kind === "custom").length, 2);
+    const kimi = first.rows.find((row) => row.id === "bot:bot_kimi") as
+      | { availability?: { canCall?: boolean; status?: string }; meter?: { remainingPercent?: number } }
+      | undefined;
+    assert.equal(kimi?.availability?.canCall, true);
+    assert.notEqual(kimi?.availability?.status, "not_connected");
+    assert.equal(kimi?.meter?.remainingPercent, 73);
+    assert.equal(
+      first.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes")),
+      false,
+    );
+    const grokOnly = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "workhorse_query_capacity", arguments: { provider: "grok" } },
+        }),
+      ),
+    ) as { rows: Array<{ id: string }> };
+    assert.deepEqual(
+      grokOnly.rows.map((row) => row.id),
+      ["grok"],
+    );
+    const encoded = JSON.stringify(first);
+    assert.doesNotMatch(encoded, /sk-/);
+    assert.doesNotMatch(encoded, /Bearer/);
+    assert.doesNotMatch(encoded, /userData/);
+    assert.doesNotMatch(encoded, /workhorse-state\.json/);
+    assert.doesNotMatch(encoded, /Secret Title/);
+    assert.doesNotMatch(encoded, /Trap Project/);
+    assert.doesNotMatch(encoded, /chat_secret/);
+    assert.doesNotMatch(encoded, /cred_kimi/);
+    const mcpSrc = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+    assert.doesNotMatch(
+      mcpSrc.slice(mcpSrc.indexOf("function queryCapacity"), mcpSrc.indexOf("function probeRuntime")),
+      /fetchCustomPlanUsage/,
+    );
+    const second = mcpToolText(
+      await handleWorkhorseRpc({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "workhorse_query_capacity", arguments: {} },
+      }),
+    );
+    assert.equal(JSON.parse(second).version, 1);
+    const after = JSON.parse(readFileSync(statePath, "utf8")) as typeof state;
+    assert.equal(after.usage.length, 1);
+    assert.deepEqual(after.watchPermits, permits);
+    assert.equal(after.settings.routing.enabled, true);
+    assert.equal(after.settings.routing.includeExternalAgents, false);
+    const deleted = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "workhorse_delete_chat", arguments: { chat: "chat_secret" } },
+    })) as { error?: { message?: string } };
+    assert.match(deleted.error?.message ?? "", /profile_forbidden/);
+    const setup = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { name: "workhorse_setup_custom_bot", arguments: { name: "x" } },
+    })) as { error?: { message?: string } };
+    assert.match(setup.error?.message ?? "", /profile_forbidden/);
+    const elevate = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "workhorse_request_vendor", arguments: {} },
+    })) as { error?: { message?: string } };
+    assert.match(elevate.error?.message ?? "", /profile_forbidden/);
+  } finally {
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.url === undefined) delete process.env.WORKHORSE_BRIDGE_URL;
+    else process.env.WORKHORSE_BRIDGE_URL = previous.url;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Settings and FEATURES name leftover share without a new tab", () => {
+  const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(settingsUi, /The installed MCP can read leftover and availability/);
+  assert.match(settingsUi, /That check does not share keys or chats/);
+  assert.doesNotMatch(settingsUi, /id: "harnesses"/);
+  assert.doesNotMatch(settingsUi, /id: "mesh"/);
+  assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors/);
+  assert.match(features, /query leftover and availability/);
+  assert.match(features, /never includes keys or\s+chat content/);
+});
+
+test("workhorse_list_external_agents lists the catalog, not past tasks", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-ext-catalog-"));
+  const statePath = path.join(dir, "workhorse-state.json");
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      agentCatalog: [
+        { runtimeId: "openclaw", agentId: "main", name: "openclaw/main", workspace: "/Users/foo/.openclaw" },
+        { runtimeId: "hermes", agentId: "research", name: "hermes/research" },
+      ],
+      agentRuntimes: [
+        { runtimeId: "openclaw", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+        { runtimeId: "hermes", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+      ],
+      externalTasks: {
+        byId: {
+          ext_old: {
+            id: "ext_old",
+            ref: { runtimeId: "openclaw", agentId: "main" },
+            status: "completed",
+            startedAt: 1,
+            finishedAt: 2,
+            envelope: { traceId: "t", idempotencyKey: "k", origin: "workhorse", visitedSystems: ["workhorse"], hopCount: 1 },
+            grantId: "g1",
+          },
+        },
+        byKey: { k: "ext_old" },
+      },
+    }),
+  );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH, url: process.env.WORKHORSE_BRIDGE_URL };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  delete process.env.WORKHORSE_BRIDGE_URL;
+  try {
+    const listed = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "workhorse_list_external_agents", arguments: {} },
+        }),
+      ),
+    ) as { agents: Array<{ id: string; status?: string }> };
+    assert.deepEqual(
+      listed.agents.map((item) => item.id),
+      ["openclaw/main", "hermes/research"],
+    );
+    assert.equal(
+      listed.agents.some((item) => item.id === "ext_old" || item.status === "completed"),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(listed), /\/Users\/foo|\.openclaw|ext_old/);
+    const status = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "workhorse_agent_status", arguments: { id: "ext_old" } },
+        }),
+      ),
+    ) as { status?: string };
+    assert.equal(status.status, "completed");
+  } finally {
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.url === undefined) delete process.env.WORKHORSE_BRIDGE_URL;
+    else process.env.WORKHORSE_BRIDGE_URL = previous.url;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

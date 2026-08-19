@@ -749,6 +749,7 @@ function AgentSystemsBlock() {
         <div className="settings-row-copy">
           <strong>Harnesses</strong>
           <span>Installed runtimes the desk can grant work to.</span>
+          <span>The installed MCP can read leftover and availability. That check does not share keys or chats.</span>
           {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
         <div className="settings-control">

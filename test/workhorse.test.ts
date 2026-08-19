@@ -2514,6 +2514,7 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
     "workhorse_agent_status",
     "workhorse_cancel_agent",
     "workhorse_list_bots",
+    "workhorse_query_capacity",
     "workhorse_probe_runtime",
     "workhorse_plan",
     "workhorse_detect_custom",

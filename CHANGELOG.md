@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.6](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.5...v0.6.6) (2026-08-19)
+
+
+### Features
+
+* goal rounds, fresh worker loops, and a per-chat turn log ([69b56d5](https://github.com/go7studio/Go7-Workhorse/commit/69b56d5c7c59ef86772bfdc2f08443cde6d38dee))
+
+
+### Bug Fixes
+
+* close full eval orchestration gaps ([74e2c18](https://github.com/go7studio/Go7-Workhorse/commit/74e2c1847879ee6158cde9c4555ec38f4076de50))
+* MiniMax leftover tracks and the Changes dock stays put ([#78](https://github.com/go7studio/Go7-Workhorse/issues/78)) ([48698e9](https://github.com/go7studio/Go7-Workhorse/commit/48698e95df2a4c1b346e5c85305b3d47911d5692))
+* preserve fresh worker handoffs across MCP ([e638525](https://github.com/go7studio/Go7-Workhorse/commit/e638525ebfa3cb53b700c15fc4f0a2f78e385c8f))
+* route approved API models and harness agents ([62630ce](https://github.com/go7studio/Go7-Workhorse/commit/62630ceec68c271bc94975e0e8469f7eca98c420))
+* send the handoff, not the parent slice, to a fresh worker ([4f59a1e](https://github.com/go7studio/Go7-Workhorse/commit/4f59a1e65483a31200ce0e825ee0dc0905e6304c))
+
 ## [0.6.5](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.4...v0.6.5) (2026-08-19)
 
 

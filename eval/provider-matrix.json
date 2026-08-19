@@ -46,9 +46,9 @@
       "provider": "custom",
       "transport": "http",
       "apiShape": "openai-completions",
-      "discovery": ["provider preset", "base URL", "models endpoint probe", "user-approved model subset and default"],
+      "discovery": ["provider preset", "base URL", "models endpoint probe", "provider-neutral maker grouping with automatic and frontier choices first", "bounded searchable catalog", "manual model id when discovery is incomplete", "user-approved model subset and default"],
       "launchBoundary": "electron/custom-http.ts",
-      "expectedModelEvidence": ["connection id", "approved configured model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row"],
+      "expectedModelEvidence": ["connection id", "approved configured model", "same-key second approved model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row"],
       "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
       "baselineStatus": "unrun"
     },

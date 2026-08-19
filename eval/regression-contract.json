@@ -534,6 +534,42 @@
       "rubric": ["ORC-10", "ORC-16", "ORC-17"],
       "sourceFiles": ["electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/fresh-spawn.test.ts"],
       "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-060",
+      "behavior": "One custom API key can discover or manually approve several models; explicit chats, Auto routing, HTTP requests, revocation fallback, and Usage preserve the actual selected model while sharing one connection capacity.",
+      "profiles": ["custom-openai", "custom-kimi"],
+      "scenarios": ["SET-S2", "USG-S5"],
+      "rubric": ["SET-03", "USG-08"],
+      "sourceFiles": ["src/ui/BotForm.tsx", "src/lib/custom-bots.ts", "src/lib/routing.ts", "src/lib/store.tsx", "test/custom-multi-model.test.ts", "test/custom-multi-model-live-smoke.ts"],
+      "verification": ["eval:validate", "eval:multi-model-smoke", "verify"]
+    },
+    {
+      "id": "REG-061",
+      "behavior": "Harness discovery grants no authority. Settings persists a per-agent allowlist, and unnamed Auto delegation can reach only a selected agent after Routing, Include harnesses, and the plan wave grant are all active; inbound harness work never bounces back out.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["src/ui/Settings.tsx", "src/ui/GoalBar.tsx", "src/lib/agent-runtime.ts", "src/lib/store.tsx", "test/agent-runtime.test.ts", "test/external-task.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke", "verify"]
+    },
+    {
+      "id": "REG-062",
+      "behavior": "A local Try build disables certificate discovery and strips release signing inputs before packaging, so visual testing cannot trigger release-Keychain approval or reuse production identity.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["SEC-S4", "REL-S3"],
+      "rubric": ["SEC-07", "REL-06"],
+      "sourceFiles": ["scripts/try-desk.ts", "scripts/after-pack.cjs", "test/workhorse.test.ts", "test/folder-access.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-063",
+      "behavior": "Compatible-provider catalogs use the same discovery and approval contract: automatic routes lead, models are grouped by maker and newest-first, initial rendering is bounded, search reaches the full catalog, and approved models remain visible.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["SET-S2"],
+      "rubric": ["SET-03"],
+      "sourceFiles": ["src/lib/model-groups.ts", "src/ui/BotForm.tsx", "src/lib/provider-catalog.ts", "test/model-groups.test.ts", "test/custom-multi-model.test.ts"],
+      "verification": ["eval:validate", "verify"]
     }
   ]
 }

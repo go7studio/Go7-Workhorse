@@ -6175,6 +6175,13 @@ html.pane-dragging * {
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
   color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.agent-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 /* Four flags, four chips. Each fails for its own reason. */
@@ -7689,6 +7696,21 @@ html.pane-dragging * {
   margin: 0 0 4px;
 }
 
+.bot-model-add {
+  display: flex;
+  gap: 8px;
+}
+
+.bot-model-add input {
+  min-width: 0;
+  flex: 1;
+}
+
+.bot-model-search {
+  width: 100%;
+  margin-top: 4px;
+}
+
 .bot-model-group {
   min-width: 0;
 }
@@ -7715,6 +7737,22 @@ html.pane-dragging * {
 }
 
 .bot-model-group .section-label .tiny:hover {
+  text-decoration: underline;
+}
+
+.bot-model-more {
+  align-self: flex-start;
+  margin: 6px 2px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bot-model-more:hover {
   text-decoration: underline;
 }
 

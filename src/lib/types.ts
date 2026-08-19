@@ -640,6 +640,8 @@ export type RoutingSettings = {
 export type AgentSystemsSettings = {
   inboundSessionId?: string;
   inboundProjectId?: string;
+  /** Harness agents the owner permits Auto routing to consider. */
+  allowedAgents?: string[];
 };
 
 export type RoutingDecision = {

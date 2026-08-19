@@ -17,8 +17,9 @@ Each vendor runs under its own login. Subscriptions, context and sandboxes are
 never pooled.
 
 OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
-whether each runtime is installed. A plan can grant them for one wave, or you
-can name `openclaw/main` or `hermes/<profile>`. Those tasks join the lineup.
+whether each runtime is installed and lets you select its callable agents. A
+plan can grant selected agents for one wave, or you can name `openclaw/main`
+or `hermes/<profile>`. Those tasks join the lineup.
 They do not get a Usage ring. Settings → LLMs → Install MCP writes a restricted
 Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
 if Hermes is already installed. Those apps launch the packaged helper. No token
@@ -30,6 +31,8 @@ A harness may choose the first coordinating brain; unassigned workers still rout
 A delegated mission states whether it stayed focused or split, and its results stay scoped to that worker wave.
 Delegation is one wave by default. An opt-in loop can route bounded follow-up passes against explicit acceptance criteria.
 Goal and Loop intent can choose focused, parallel, or sequential Auto-routed work.
+
+One custom API connection can approve several models. Chats and Auto routing use only that list while Usage keeps one connection ring and separate model rows.
 
 ## Files you can hand a chat
 
@@ -151,10 +154,8 @@ transcript rather than as a path.
 - **MCP servers** — attached to a runtime, with the same approval and result
   path as built-in tools.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own
-  name and colour. Testing the connection asks the provider which models it
-  serves; tick the ones you want and any chat on that bot can pick between
-  them. One key is one bot and one leftover ring, however many models it
-  offers — Usage still breaks the tokens out per model.
+  name and colour. Large catalogs are grouped, frontier-first, searchable, and
+  explicitly approved; one key keeps one ring with separate model rows.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

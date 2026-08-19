@@ -42,9 +42,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     api: "openai-completions",
     keyPrefixes: ["syn_"],
     models: [
-      { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3", contextWindow: 524_288 },
-      { id: "hf:zai-org/GLM-5.2", name: "GLM 5.2", contextWindow: 524_288 },
       { id: "syn:large:text", name: "syn:large:text", contextWindow: 524_288 },
+      { id: "syn:large:vision", name: "syn:large:vision", contextWindow: 524_288 },
+      { id: "hf:zai-org/GLM-5.2", name: "GLM 5.2", contextWindow: 524_288 },
+      { id: "hf:moonshotai/Kimi-K3Beta", name: "Kimi K3", contextWindow: 524_288 },
+      { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3 legacy", contextWindow: 524_288 },
     ],
   },
   {

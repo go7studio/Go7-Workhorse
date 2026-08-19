@@ -95,6 +95,19 @@
     "requireTerminalDuration": true,
     "notes": "Run OpenClaw and Hermes separately. Missing binary, login, model, target chat, or state path is not_run, never a fallback to another harness or provider."
   },
+  "multiModelConnections": {
+    "liveSmokeEnabled": false,
+    "baseUrlEnv": "WORKHORSE_EVAL_MULTI_MODEL_BASE_URL",
+    "apiKeyEnv": "WORKHORSE_EVAL_MULTI_MODEL_API_KEY",
+    "modelsEnv": "WORKHORSE_EVAL_MULTI_MODEL_MODELS",
+    "defaultModels": ["syn:large:text", "syn:large:vision"],
+    "catalogFixtures": ["synthetic", "openrouter"],
+    "catalogMaxGroups": 6,
+    "catalogMaxModelsPerGroup": 4,
+    "maxCalls": 2,
+    "requireSameKey": true,
+    "requireDistinctRequestedModels": true
+  },
   "spend": {
     "liveApiAllowed": false,
     "approvedUsd": 0,

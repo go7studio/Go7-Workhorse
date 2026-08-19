@@ -141,9 +141,10 @@ test("Settings → Routing is the desk's own routing for spawned work: on by def
   assert.equal(normalizeRouting({}).enabled, true);
   assert.equal(normalizeRouting({ enabled: false }).enabled, false);
   assert.equal(normalizeRouting({ enabled: true }).enabled, true);
-  // The store reads the switch in exactly one place: the spawn gate.
+  // The store reads the switch at the desk-model gate and the separately
+  // granted harness gate. Both are spawn paths; neither touches user chats.
   const store = read("src/lib/store.tsx");
-  assert.equal(store.split("settings.routing.enabled").length - 1, 1);
+  assert.equal(store.split("settings.routing.enabled").length - 1, 2);
   const spawn = store.slice(store.indexOf("const routeSpawn = shouldAutoRouteSpawn({"), store.indexOf("const routeSpawn = shouldAutoRouteSpawn({") + 320);
   assert.match(spawn, /routingEnabled: latest\.settings\.routing\.enabled/);
   // The Settings pane names what it governs.

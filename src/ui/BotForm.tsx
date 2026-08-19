@@ -8,7 +8,7 @@ import {
   fillEmptyFromProvider,
   findProvider,
 } from "../lib/provider-catalog";
-import { groupModelIds, modelChipLabel, parseModelId } from "../lib/model-groups";
+import { groupModelIds, modelChipLabel, parseModelId, visibleModelGroups } from "../lib/model-groups";
 import { ColorWheel } from "./ColorWheel";
 
 const BASE_COLORS = new Set(BOT_COLORS.map((swatch) => swatch.value.toLowerCase()));
@@ -36,15 +36,21 @@ export type BotFormValue = {
 function ApprovedModels({
   value,
   onChange,
+  suggested = [],
 }: {
   value: BotFormValue;
   onChange: (patch: Partial<BotFormValue>) => void;
+  suggested?: string[];
 }) {
+  const [manual, setManual] = useState("");
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const primary = (value.model ?? "").trim();
-  const offered = (value.discovered ?? []).filter((id) => id !== primary);
-  if (offered.length === 0) return null;
   const approved = new Set(value.models ?? []);
+  const offered = [...new Set([...(value.discovered ?? []), ...suggested, ...approved])]
+    .filter((id) => id && id !== primary);
   const groups = groupModelIds(offered);
+  const view = visibleModelGroups(groups, { query, expanded, approved });
   const toggle = (id: string) => {
     const next = new Set(approved);
     if (next.has(id)) next.delete(id);
@@ -59,24 +65,60 @@ function ApprovedModels({
     }
     onChange({ models: [...next].filter((item) => item !== primary) });
   };
+  const addManual = () => {
+    const id = manual.trim();
+    if (!id || id === primary) return;
+    onChange({ models: [...new Set([...approved, id])].filter((item) => item !== primary) });
+    setManual("");
+  };
   return (
     <div className="field wide bot-models">
       <span>Models on this key</span>
-      <p className="row-meta">
-        {`${offered.length} more offered, newest first. Tick what a chat may use — one key, one bill, one leftover ring.`}
-      </p>
-      <div className="bot-model-group">
-        <div className="section-label">Default</div>
-        <div className="setup-effort setup-models">
-          <button type="button" className="on" aria-pressed disabled title="The default model is always approved">
-            <strong>{modelChipLabel(parseModelId(primary))}</strong>
-            <span>always on</span>
-          </button>
-        </div>
+      <p className="row-meta">Approve models this key may call.</p>
+      <div className="bot-model-add">
+        <input
+          value={manual}
+          placeholder="model-id"
+          aria-label="Model id"
+          onChange={(event) => setManual(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addManual();
+            }
+          }}
+        />
+        <button className="tiny" type="button" disabled={!manual.trim()} onClick={addManual}>Add</button>
       </div>
-      {groups.map((group) => {
+      {offered.length > 12 ? (
+        <input
+          className="bot-model-search"
+          type="search"
+          value={query}
+          placeholder="Search models"
+          aria-label="Search models"
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setExpanded(false);
+          }}
+        />
+      ) : null}
+      {primary ? (
+        <div className="bot-model-group">
+          <div className="section-label">Default</div>
+          <div className="setup-effort setup-models">
+            <button type="button" className="on" aria-pressed disabled title="The default model is always approved">
+              <strong>{modelChipLabel(parseModelId(primary))}</strong>
+              <span>always on</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {view.groups.map((group) => {
         const ids = group.models.map((model) => model.id);
         const all = ids.every((id) => approved.has(id));
+        const fullGroup = groups.find((candidate) => candidate.key === group.key);
+        const completeGroup = fullGroup?.models.length === group.models.length;
         // One group is not a grouping. A provider whose ids carry no maker —
         // MiniMax answers M3, M2.7, M2.5 — would otherwise sit under a header
         // reading "Other", which says nothing and costs a line.
@@ -85,9 +127,11 @@ function ApprovedModels({
           <div className="bot-model-group" key={group.key}>
             <div className="section-label">
               {label}
-              <button type="button" className="tiny" onClick={() => setGroup(ids, !all)}>
-                {all ? "None" : "All"}
-              </button>
+              {completeGroup ? (
+                <button type="button" className="tiny" onClick={() => setGroup(ids, !all)}>
+                  {all ? "None" : "All"}
+                </button>
+              ) : null}
             </div>
             <div className="setup-effort setup-models" role="group" aria-label={`${group.label} models`}>
               {group.models.map((model) => (
@@ -107,6 +151,13 @@ function ApprovedModels({
           </div>
         );
       })}
+      {view.hiddenCount > 0 ? (
+        <button className="bot-model-more" type="button" onClick={() => setExpanded(true)}>
+          Show all {view.totalCount}
+        </button>
+      ) : expanded && view.totalCount > 12 ? (
+        <button className="bot-model-more" type="button" onClick={() => setExpanded(false)}>Show less</button>
+      ) : null}
     </div>
   );
 }
@@ -128,6 +179,23 @@ export function BotForm({
   const customColor = Boolean(value.color) && !BASE_COLORS.has(value.color.toLowerCase());
   const matched = detectProviderFromUrl(value.baseUrl ?? "") ?? detectProviderFromKey(value.apiKey ?? "");
   const providerId = matched?.id ?? "";
+  const approvedModelIds = [...new Set([
+    ...(matched?.models.map((item) => item.id) ?? []),
+    ...(value.models ?? []),
+    ...((value.model ?? "").trim() ? [value.model!.trim()] : []),
+  ])];
+  const changeDefaultModel = (model: string) => {
+    if (!matched) return onChange({ model });
+    const models = new Set(value.models ?? []);
+    const previous = (value.model ?? "").trim();
+    if (previous && previous !== model) models.add(previous);
+    models.delete(model);
+    const presetModel = matched.models.some((item) => item.id === model);
+    onChange({
+      ...(presetModel ? draftFromProvider(matched, model) : { model }),
+      models: [...models],
+    });
+  };
   const applyProvider = (id: string) => {
     if (!id) return;
     const preset = findProvider(id);
@@ -209,13 +277,16 @@ export function BotForm({
             {matched ? (
               <select
                 value={value.model}
-                onChange={(event) => onChange(draftFromProvider(matched, event.target.value))}
+                onChange={(event) => changeDefaultModel(event.target.value)}
               >
-                {matched.models.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
+                {approvedModelIds.map((id) => {
+                  const preset = matched.models.find((item) => item.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {preset?.name ?? id}
+                    </option>
+                  );
+                })}
               </select>
             ) : (
               <input
@@ -261,7 +332,7 @@ export function BotForm({
               onChange={(event) => onChange({ contextWindow: Number(event.target.value) || 128000 })}
             />
           </label>
-          <ApprovedModels value={value} onChange={onChange} />
+          <ApprovedModels value={value} onChange={onChange} suggested={matched?.models.map((item) => item.id)} />
         </>
       )}
     </div>

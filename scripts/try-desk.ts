@@ -82,6 +82,10 @@ function packCurrentArch() {
   say(`Packing a development ${arch} dir (unsigned, this tree)...`);
   const env = { ...process.env };
   delete env.WORKHORSE_RELEASE_BUILD;
+  delete env.CSC_LINK;
+  delete env.CSC_KEY_PASSWORD;
+  delete env.CSC_NAME;
+  env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
   const build = spawnSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "inherit" });
   if (build.status !== 0) die("npm run build failed.");
   const pack = spawnSync(

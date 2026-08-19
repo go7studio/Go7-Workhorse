@@ -93,6 +93,17 @@ export function parseModelId(id: string): ParsedModelId {
   const slash = rest.indexOf("/");
   const maker = slash > 0 ? rest.slice(0, slash) : undefined;
   const name = slash > 0 ? rest.slice(slash + 1) : rest;
+  // Compatible gateways commonly expose a provider-neutral `maker/auto`
+  // route. It belongs beside Synthetic's aliases, not among fixed models.
+  if (/^(?:auto|automatic)$/i.test(name)) {
+    return {
+      id: raw,
+      ...(scheme ? { scheme } : {}),
+      ...(maker ? { maker } : {}),
+      family: name,
+      alias: true,
+    };
+  }
   const family = name
     .replace(/(\d+(?:\.\d+)?)\s*[bB]\b/g, "")
     .replace(/[-_]?v?\d+(?:\.\d+)*/g, "")
@@ -125,6 +136,12 @@ export type ModelGroup = {
   models: ParsedModelId[];
 };
 
+export type ModelGroupView = {
+  groups: ModelGroup[];
+  hiddenCount: number;
+  totalCount: number;
+};
+
 const ALIAS_GROUP = "alias";
 const OTHER_GROUP = "other";
 
@@ -153,6 +170,58 @@ export function groupModelIds(ids: string[]): ModelGroup[] {
     return group.models[0]?.version ?? 0;
   };
   return groups.sort((left, right) => rank(right) - rank(left) || left.label.localeCompare(right.label));
+}
+
+/**
+ * Keep a large compatible-provider catalog useful at a glance. Automatic
+ * routes and each maker's frontier stay first; approved models stay visible;
+ * search still reaches the complete discovered catalog.
+ */
+export function visibleModelGroups(
+  groups: ModelGroup[],
+  options: {
+    query?: string;
+    expanded?: boolean;
+    approved?: Iterable<string>;
+    maxGroups?: number;
+    maxModelsPerGroup?: number;
+  } = {},
+): ModelGroupView {
+  const query = options.query?.trim().toLowerCase() ?? "";
+  const approved = new Set(options.approved ?? []);
+  const maxGroups = Math.max(1, options.maxGroups ?? 6);
+  const maxModels = Math.max(1, options.maxModelsPerGroup ?? 4);
+  const matching = groups
+    .map((group) => ({
+      ...group,
+      models: query
+        ? group.models.filter((model) =>
+            `${group.label} ${model.id} ${model.family} ${model.maker ?? ""}`.toLowerCase().includes(query))
+        : group.models,
+    }))
+    .filter((group) => group.models.length > 0);
+  const totalCount = matching.reduce((total, group) => total + group.models.length, 0);
+  if (options.expanded) return { groups: matching, hiddenCount: 0, totalCount };
+
+  const alwaysShow = new Set(
+    matching
+      .filter((group) => group.key === ALIAS_GROUP || group.models.some((model) => approved.has(model.id)))
+      .map((group) => group.key),
+  );
+  const selectedKeys = new Set(alwaysShow);
+  for (const group of matching) {
+    if (selectedKeys.size >= maxGroups) break;
+    selectedKeys.add(group.key);
+  }
+  const visible = matching
+    .filter((group) => selectedKeys.has(group.key))
+    .map((group) => {
+      const ids = new Set(group.models.slice(0, maxModels).map((model) => model.id));
+      for (const model of group.models) if (approved.has(model.id)) ids.add(model.id);
+      return { ...group, models: group.models.filter((model) => ids.has(model.id)) };
+    });
+  const visibleCount = visible.reduce((total, group) => total + group.models.length, 0);
+  return { groups: visible, hiddenCount: totalCount - visibleCount, totalCount };
 }
 
 /** The short name to show on a chip: `Kimi-K3`, `large:text`. */

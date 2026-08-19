@@ -203,5 +203,8 @@ export function customBotForSession(
   bots: CustomBot[],
   input: { customBotId?: string; model?: string },
 ): CustomBot | undefined {
-  return findCustomBot(bots, input.customBotId) ?? findCustomBotByModel(bots, input.model);
+  const assigned = findCustomBot(bots, input.customBotId);
+  if (assigned) return !input.model || customBotServes(assigned, input.model) ? assigned : undefined;
+  if (input.customBotId) return undefined;
+  return findCustomBotByModel(bots, input.model);
 }

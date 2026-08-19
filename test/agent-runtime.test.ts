@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   authorizeExternalCall,
+  allowedExternalCandidates,
   canCallCatalogHasExternal,
   checkEnvelope,
   consumeGrant,
@@ -12,12 +13,13 @@ import {
   createWaveGrant,
   filterWorkhorseVendorRows,
   isStockProviderId,
+  normalizeAllowedExternalAgents,
   parseExternalAgentRef,
   PROVIDER_ID_SOURCE,
   STOCK_PROVIDER_IDS,
 } from "../src/lib/agent-runtime";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
-import { DEFAULT_SETTINGS } from "../src/lib/settings";
+import { DEFAULT_SETTINGS, normalizeAgentSystems } from "../src/lib/settings";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -89,6 +91,27 @@ test("blanket plan grant authorizes one named agent from the set", () => {
   if (picked.ok) assert.equal(picked.ref.runtimeId, "hermes");
 });
 
+test("the owner selects which discovered harness agents Auto may call", () => {
+  assert.deepEqual(
+    normalizeAllowedExternalAgents(["openclaw/main", "bad", "hermes/default", "openclaw/main"]),
+    ["openclaw/main", "hermes/default"],
+  );
+  assert.deepEqual(
+    allowedExternalCandidates(
+      ["hermes/default", "openclaw/main", "openclaw/gone"],
+      [
+        { runtimeId: "openclaw", agentId: "main" },
+        { runtimeId: "hermes", agentId: "default" },
+      ],
+    ),
+    [
+      { runtimeId: "hermes", agentId: "default" },
+      { runtimeId: "openclaw", agentId: "main" },
+    ],
+  );
+  assert.deepEqual(normalizeAgentSystems({ allowedAgents: ["openclaw/main", "invalid"] }).allowedAgents, ["openclaw/main"]);
+});
+
 test("wave grant names one agent and consumes once", () => {
   const grant = createWaveGrant({ waveId: "plan_1", runtimeId: "openclaw", agentId: "main", now: 10 });
   const first = authorizeExternalCall({ grant, routing: { enabled: false } });
@@ -137,6 +160,8 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   }
   assert.match(settingsUi, /status-chip/);
   assert.match(settingsUi, /runtime-tile/);
+  assert.match(settingsUi, /allowedAgents/);
+  assert.match(settingsUi, /aria-pressed=\{allowed\.has/);
   assert.doesNotMatch(settingsUi, /llm-mark[^"]*"[^>]*runtime/);
   // Inbound parent offers chats only: inboundProjectId is normalised but not
   // read on the inbound path, so a project option would be a lie.
@@ -147,7 +172,12 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   const routingUi = readFileSync(path.join(ROOT, "src", "ui", "RoutingPane.tsx"), "utf8");
   assert.match(routingUi, /Include harnesses/);
   const grant = readFileSync(path.join(ROOT, "src", "ui", "GoalBar.tsx"), "utf8");
-  assert.match(grant, /Allow OpenClaw\/Hermes for this plan/);
+  assert.match(grant, /Allow selected harnesses/);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /allowedExternalCandidates/);
+  assert.match(store, /caller\.planRun\?\.externalGrant/);
+  assert.match(store, /exposure !== "external-runtime"/);
+  assert.match(store, /if \(ready\) void refreshAgentRuntimes\(\)/);
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
   assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors\./);
   const addBot = readFileSync(path.join(ROOT, "src", "ui", "AddBot.tsx"), "utf8");

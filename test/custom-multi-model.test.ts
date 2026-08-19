@@ -7,12 +7,15 @@ import {
   botFromDraft,
   customBotModels,
   customBotServes,
+  customBotForSession,
   findCustomBotByModel,
   normalizeCustomBot,
   normalizeCustomModelList,
 } from "../src/lib/custom-bots";
 import { customModelsUrl, parseCustomModels } from "../electron/custom-models";
 import { byModel, customBotUsageEvents } from "../src/lib/usage";
+import { routingCandidatesForDesk } from "../src/lib/routing";
+import { DEFAULT_SETTINGS, firstAttachedChoice } from "../src/lib/settings";
 import type { CustomBot, UsageEvent } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,6 +88,36 @@ test("a chat on a secondary model still finds its connection", () => {
   assert.equal(findCustomBotByModel(bots, "hf:moonshotai/Kimi-K3")?.id, "bot_syn");
   assert.equal(findCustomBotByModel(bots, "hf:zai-org/GLM-5.2")?.id, "bot_syn");
   assert.equal(findCustomBotByModel(bots, "nothing-we-serve"), undefined);
+  assert.equal(customBotForSession(bots, { customBotId: "bot_syn", model: "nothing-we-serve" }), undefined);
+});
+
+test("Auto routes every approved model through one connection capacity", () => {
+  const settings = {
+    ...structuredClone(DEFAULT_SETTINGS),
+    customBots: [SYNTHETIC],
+  };
+  const candidates = routingCandidatesForDesk(settings, [
+    { key: "bot:bot_syn", label: "Synthetic", leftPercent: 75, usedPercent: 25, tone: "bot", holding: false },
+  ]);
+  assert.deepEqual(candidates.map((item) => item.model), ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"]);
+  assert.equal(candidates.every((item) => item.customBotId === "bot_syn"), true);
+  assert.equal(candidates.every((item) => item.capacity?.usedPercent === 25), true);
+});
+
+test("new chats remember an approved secondary model", () => {
+  const settings = {
+    ...structuredClone(DEFAULT_SETTINGS),
+    customBots: [SYNTHETIC],
+  };
+  const remembered = firstAttachedChoice(settings, {
+    provider: "custom",
+    model: "hf:zai-org/GLM-5.2",
+    customBotId: "bot_syn",
+    effort: null,
+    mode: "ask",
+    sandbox: "off",
+  });
+  assert.equal(remembered?.model, "hf:zai-org/GLM-5.2");
 });
 
 test("the provider's list is read, and a bad one cannot poison the bot", () => {
@@ -121,8 +154,18 @@ test("discovery offers; only the owner approves", () => {
   assert.match(form, /value\.discovered/);
   assert.match(form, /onChange\(\{ models: \[\.\.\.next\]/);
   assert.match(form, /groupModelIds\(offered\)/, "grouped by maker, newest first");
+  assert.match(form, /visibleModelGroups\(groups/, "large catalogs are bounded before rendering");
+  assert.match(form, /placeholder="Search models"/, "the full catalog remains searchable");
+  assert.match(form, /Show all \{view\.totalCount\}/, "the owner can deliberately expand the catalog");
+  assert.match(form, /placeholder="model-id"/, "a model can be approved when discovery is incomplete");
+  assert.match(form, /models\.add\(previous\)/, "changing the default keeps the old default approved");
+  assert.match(form, /models\.delete\(model\)/, "the new default is not duplicated in secondary approvals");
+  assert.match(form, /preset\?\.name \?\? id/, "approved discovered models can become the default");
 
   // A chat picks from the bot's approved list, not a stock catalogue.
   const setup = read("src/ui/SessionSetup.tsx");
   assert.match(setup, /customBotModels\(bot\)\.map/);
+  const storeSource = read("src/lib/store.tsx");
+  assert.match(storeSource, /model: session\.model \|\| custom\.model/);
+  assert.doesNotMatch(storeSource, /model: custom\.model \|\| session\.model/);
 });

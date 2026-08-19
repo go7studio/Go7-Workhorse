@@ -65,6 +65,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
+import { customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
@@ -490,14 +491,16 @@ app.whenReady().then(async () => {
       }
       for (const bot of liveSettings.customBots) {
         if (bot.enabled === false) continue;
-        rows.push({
-          provider: "custom" as const,
-          model: bot.model,
-          customBotId: bot.id,
-          connected: Boolean(bot.apiKey?.trim() || bot.credentialId),
-          ephemeral: providerAllowsEphemeralAuxiliary("custom"),
-          ...routingProfileForModel("custom", bot.model, bot.routingProfile),
-        });
+        for (const model of customBotModels(bot)) {
+          rows.push({
+            provider: "custom" as const,
+            model,
+            customBotId: bot.id,
+            connected: Boolean(bot.apiKey?.trim() || bot.credentialId),
+            ephemeral: providerAllowsEphemeralAuxiliary("custom"),
+            ...routingProfileForModel("custom", model, bot.routingProfile),
+          });
+        }
       }
       return rows;
     },

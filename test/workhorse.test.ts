@@ -8943,6 +8943,8 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /stampDevBundle/);
   assert.match(tryDesk, /\/usr\/bin\/ditto/);
   assert.match(tryDesk, /codesign/);
+  assert.match(tryDesk, /CSC_IDENTITY_AUTO_DISCOVERY = "false"/);
+  assert.match(tryDesk, /delete env\.CSC_LINK/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
   assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);
   const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts as { try?: string; "try:dry"?: string };

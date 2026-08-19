@@ -76,6 +76,7 @@ test("plan, device, learning, and performance contracts map to suite rubrics and
     assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
   }
   assert.ok(manifest.scripts["eval:harness-smoke"]);
+  assert.ok(manifest.scripts["eval:multi-model-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
 });
@@ -156,6 +157,12 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.equal(performance.scaleFixture.chats, 10000);
   assert.equal(performance.scaleFixture.searchMessages, 150000);
   assert.match(performance.invariants.join(" "), /animation-frame batches/i);
+  assert.equal(config.multiModelConnections.maxCalls, 2);
+  assert.equal(config.multiModelConnections.requireSameKey, true);
+  assert.deepEqual(config.multiModelConnections.defaultModels, ["syn:large:text", "syn:large:vision"]);
+  assert.deepEqual(config.multiModelConnections.catalogFixtures, ["synthetic", "openrouter"]);
+  assert.equal(config.multiModelConnections.catalogMaxGroups, 6);
+  assert.equal(config.multiModelConnections.catalogMaxModelsPerGroup, 4);
   for (const id of ["custom-openai", "custom-kimi", "custom-anthropic"]) {
     const profile = providers.profiles.find((item: any) => item.id === id);
     assert.match(profile.discovery.join(" "), /user-approved/i);

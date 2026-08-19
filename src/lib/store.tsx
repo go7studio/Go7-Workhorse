@@ -65,6 +65,7 @@ import {
   applyUpdateCustomBot,
   botFromDraft,
   customBotForSession,
+  customBotServes,
   draftReady,
   EMPTY_CUSTOM_DRAFT,
   normalizeCustomModelList,
@@ -109,7 +110,7 @@ import {
   normalizeRouting,
   vendorAttachedForSession,
 } from "./settings";
-import { checkEnvelope, createEnvelope, parseExternalAgentRef } from "./agent-runtime";
+import { allowedExternalCandidates, checkEnvelope, createEnvelope, parseExternalAgentRef } from "./agent-runtime";
 import { inboundDeskAction, inboundSpawnParent, mcpExposureProfile } from "../../electron/mcp-exposure";
 import {
   emptyTaskStore,
@@ -700,6 +701,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
+  const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
@@ -1003,6 +1005,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const session = current.sessions.find((item) => item.id === current.activeSessionId);
     if (!session) return;
     const botId = provider === "custom" ? customBotId : undefined;
+    if (provider === "custom" && botId) {
+      const bot = current.settings.customBots.find((item) => item.id === botId);
+      if (!bot || !customBotServes(bot, model)) return;
+    }
     if (session.provider !== provider || session.customBotId !== botId) {
       if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
       else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
@@ -2154,8 +2160,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (!window.workhorse?.customPrompt) {
             throw new Error("Custom model runs in the Workhorse desktop window.");
           }
-          const custom =
-            customBotForSession(stateRef.current.settings.customBots, session) ?? stateRef.current.settings.llms.custom;
+          const bot = customBotForSession(stateRef.current.settings.customBots, session);
+          if (session.customBotId && !bot) throw new Error("This model is not approved on this key.");
+          const custom = bot ?? stateRef.current.settings.llms.custom;
           if (!custom.apiKey?.trim() || !custom.baseUrl?.trim()) {
             throw new Error("Create this bot in Settings first.");
           }
@@ -2172,7 +2179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             projectId: session.projectId ?? undefined,
             text: vendorText,
             images,
-            model: custom.model || session.model,
+            model: session.model || custom.model,
             effort: session.effort,
             cwd,
             mode: session.mode,
@@ -2188,9 +2195,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             config: {
               baseUrl: custom.baseUrl,
               apiKey: custom.apiKey,
-              model: custom.model,
+              model: session.model || custom.model,
               api: "api" in custom ? custom.api : undefined,
-              inputs: routingProfileForModel("custom", custom.model, "routingProfile" in custom ? custom.routingProfile : undefined).inputs,
+              inputs: routingProfileForModel("custom", session.model || custom.model, "routingProfile" in custom ? custom.routingProfile : undefined).inputs,
             },
           });
           const reply = typeof result?.text === "string" ? result.text.trim() : "";
@@ -2868,8 +2875,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
           if (live === "custom") {
             if (!window.workhorse?.customPrompt) throw new Error("Custom model runs in the Workhorse desktop window.");
-            const custom =
-              customBotForSession(snapshot.settings.customBots, session) ?? snapshot.settings.llms.custom;
+            const bot = customBotForSession(snapshot.settings.customBots, session);
+            if (session.customBotId && !bot) throw new Error("This model is not approved on this key.");
+            const custom = bot ?? snapshot.settings.llms.custom;
             if (!custom.apiKey?.trim() || !custom.baseUrl?.trim()) {
               throw new Error("Custom model is not connected yet");
             }
@@ -2878,7 +2886,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               projectId: session.projectId ?? undefined,
               text,
               images,
-              model: custom.model || session.model,
+              model: session.model || custom.model,
               effort: session.effort,
               cwd,
               mode: session.mode,
@@ -2898,11 +2906,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               config: {
                 baseUrl: custom.baseUrl,
                 apiKey: custom.apiKey,
-                model: custom.model,
+                model: session.model || custom.model,
                 api: custom.api,
                 inputs: routingProfileForModel(
                   "custom",
-                  custom.model,
+                  session.model || custom.model,
                   "routingProfile" in custom ? custom.routingProfile : undefined,
                 ).inputs,
               },
@@ -4047,6 +4055,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ text: JSON.stringify(started.run, null, 2) });
               return;
             }
+            const autoExternalCandidates = allowedExternalCandidates(
+              latest.settings.agentSystems?.allowedAgents,
+              agentCatalogRef.current,
+            );
+            const mayAutoRouteExternal =
+              exposure !== "external-runtime" &&
+              shouldAutoRouteSpawn({
+                routingEnabled: latest.settings.routing.enabled,
+                provider: payload.provider,
+                model: payload.model,
+                chat: payload.chat,
+              }) &&
+              latest.settings.routing.includeExternalAgents === true &&
+              Boolean(caller.planRun?.externalGrant && !caller.planRun.externalGrant.consumedAt) &&
+              autoExternalCandidates.length > 0;
+            if (mayAutoRouteExternal) {
+              const started = await launchExternalAssignment({
+                profile: exposure,
+                grant: caller.planRun?.externalGrant,
+                selectFrom: autoExternalCandidates,
+                routing: latest.settings.routing,
+                prompt: payload.message,
+                fromSessionId: caller.id,
+                workspace: latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path,
+                store: normalizeTaskStore(latest.externalTasks) || emptyTaskStore(),
+                envelope: {
+                  origin: payload.origin ?? "workhorse",
+                  visitedSystems: payload.visitedSystems ?? ["workhorse"],
+                  hopCount: payload.hopCount ?? 0,
+                  traceId: payload.traceId,
+                  idempotencyKey: payload.idempotencyKey,
+                },
+                startRuntime: (request) =>
+                  window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
+              });
+              if (started.ok) {
+                setState((current) => ({
+                  ...current,
+                  externalTasks: started.store,
+                  sessions: current.sessions.map((session) =>
+                    session.id === caller.id
+                      ? {
+                          ...session,
+                          lineup: addLineupRow(session.lineup, started.row),
+                          ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
+                        }
+                      : session,
+                  ),
+                }));
+                await replyAsk({ text: JSON.stringify(started.run, null, 2) });
+                return;
+              }
+            }
             const boundProject = latest.projects.find((item) => item.id === caller.projectId);
             const isNested = deskRoleOf(caller) === "worker";
             const catalog = deskCallCatalog({
@@ -4224,12 +4285,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
             if (spec.provider === "custom") {
-              const custom =
-                customBotForSession(latest.settings.customBots, {
+              const custom = customBotForSession(latest.settings.customBots, {
                   customBotId: spec.customBotId,
                   model: spec.model,
-                }) ?? latest.settings.llms.custom;
-              if (!custom.baseUrl?.trim() || !custom.apiKey?.trim() || !custom.model?.trim()) {
+                });
+              if (spec.customBotId && !custom) {
+                await replyAsk({ error: "That model is not approved on this key" });
+                return;
+              }
+              const config = custom ?? latest.settings.llms.custom;
+              if (!config.baseUrl?.trim() || !config.apiKey?.trim() || !spec.model?.trim()) {
                 await replyAsk({ error: "Custom model is not connected yet" });
                 return;
               }
@@ -5867,20 +5932,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateCustomBot = useCallback((id: string, patch: Partial<CustomBot>) => {
-    setState((current) => ({
-      ...current,
-      settings: {
-        ...current.settings,
-        customBots: applyUpdateCustomBot(current.settings.customBots, id, patch),
-      },
-      lastModel:
-        current.lastModel.customBotId === id && patch.model
-          ? { ...current.lastModel, model: patch.model }
-          : current.lastModel,
-      sessions: current.sessions.map((session) =>
-        session.customBotId === id && patch.model ? { ...session, model: patch.model } : session,
-      ),
-    }));
+    setState((current) => {
+      const customBots = applyUpdateCustomBot(current.settings.customBots, id, patch);
+      const bot = customBots.find((item) => item.id === id);
+      const repairModel = (model: string) => bot && customBotServes(bot, model) ? model : bot?.model ?? model;
+      return {
+        ...current,
+        settings: { ...current.settings, customBots },
+        lastModel:
+          current.lastModel.customBotId === id
+            ? { ...current.lastModel, model: repairModel(current.lastModel.model) }
+            : current.lastModel,
+        sessions: current.sessions.map((session) =>
+          session.customBotId === id ? { ...session, model: repairModel(session.model) } : session,
+        ),
+      };
+    });
   }, []);
 
   const probeCustomBot = useCallback(async (id: string) => {
@@ -6126,8 +6193,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const result = await window.workhorse?.detectAgentRuntimes?.();
     if (!result) return;
     setAgentRuntimes(result.statuses ?? []);
-    setAgentCatalog(result.agents ?? []);
+    agentCatalogRef.current = result.agents ?? [];
+    setAgentCatalog(agentCatalogRef.current);
   }, []);
+
+  useEffect(() => {
+    if (ready) void refreshAgentRuntimes();
+  }, [ready, refreshAgentRuntimes]);
 
   const installExternalMcp = useCallback(async () => {
     const result = await window.workhorse?.installExternalMcp?.();

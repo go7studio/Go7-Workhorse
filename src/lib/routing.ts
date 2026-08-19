@@ -9,7 +9,7 @@ import type {
   RoutingTaskTier,
   Settings,
 } from "./types";
-import { customBotEnabled } from "./custom-bots";
+import { customBotEnabled, customBotModels } from "./custom-bots";
 import { modelsFor, withEffort } from "./models";
 import { cursorWatchLane } from "./cursor-lane";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
@@ -104,19 +104,21 @@ export function routingCandidatesForDesk(
   for (const bot of settings.customBots.filter((item) => customBotEnabled(item))) {
     const capacity = status.get(`bot:${bot.id}`) ?? status.get(bot.id);
     const plan = plans.custom?.[bot.id];
-    const product = plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(bot.model.toLowerCase()));
-    candidates.push({
-      provider: "custom",
-      model: bot.model,
-      label: bot.name,
-      customBotId: bot.id,
-      connected: !capacity?.holding,
-      profile: routingProfileForModel("custom", bot.model, bot.routingProfile),
-      capacity: {
-        usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-        resetsAt: product?.resetsAt ?? capacity?.resetsAt,
-      },
-    });
+    for (const model of customBotModels(bot)) {
+      const product = plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(model.toLowerCase()));
+      candidates.push({
+        provider: "custom",
+        model,
+        label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
+        customBotId: bot.id,
+        connected: !capacity?.holding,
+        profile: routingProfileForModel("custom", model, bot.routingProfile),
+        capacity: {
+          usedPercent: product?.usagePercent ?? capacity?.usedPercent,
+          resetsAt: product?.resetsAt ?? capacity?.resetsAt,
+        },
+      });
+    }
   }
   return candidates;
 }

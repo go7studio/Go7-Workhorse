@@ -1,4 +1,5 @@
-import { customBotEnabled, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
+import { customBotEnabled, customBotServes, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
+import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
@@ -52,9 +53,11 @@ export function normalizeAgentSystems(raw: unknown): AgentSystemsSettings {
   const record = raw as AgentSystemsSettings;
   const inboundSessionId = typeof record.inboundSessionId === "string" ? record.inboundSessionId.trim() : "";
   const inboundProjectId = typeof record.inboundProjectId === "string" ? record.inboundProjectId.trim() : "";
+  const allowedAgents = normalizeAllowedExternalAgents(record.allowedAgents);
   return {
     ...(inboundSessionId ? { inboundSessionId } : {}),
     ...(inboundProjectId ? { inboundProjectId } : {}),
+    ...(allowedAgents ? { allowedAgents } : {}),
   };
 }
 
@@ -134,12 +137,13 @@ export function firstAttachedChoice(settings: Settings, remembered?: ModelChoice
   if (remembered?.provider === "custom") {
     const bot = attachedCustomBots(settings).find((item) => item.id === remembered.customBotId);
     if (bot) {
+      const model = customBotServes(bot, remembered.model) ? remembered.model : bot.model;
       return {
         ...remembered,
         provider: "custom",
-        model: bot.model,
+        model,
         customBotId: bot.id,
-        effort: withEffort("custom", bot.model, remembered.effort),
+        effort: withEffort("custom", model, remembered.effort),
       };
     }
   } else if (remembered && vendorEnabled(settings.llms[remembered.provider])) {

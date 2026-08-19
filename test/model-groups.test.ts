@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareModels, groupModelIds, makerLabel, modelChipLabel, parseModelId } from "../src/lib/model-groups";
+import {
+  compareModels,
+  groupModelIds,
+  makerLabel,
+  modelChipLabel,
+  parseModelId,
+  visibleModelGroups,
+} from "../src/lib/model-groups";
 
 // Ids in the shapes Synthetic's /models actually answers with.
 const SYNTHETIC = [
@@ -109,4 +116,59 @@ test("duplicates and blanks never reach the list", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0]!.models.length, 1);
   assert.deepEqual(groupModelIds([]), []);
+});
+
+test("OpenRouter auto is an automatic route and maker catalogs stay frontier-first", () => {
+  const groups = groupModelIds([
+    "anthropic/claude-sonnet-4.5",
+    "openai/gpt-4.1",
+    "openrouter/auto",
+    "openai/gpt-5.4",
+    "anthropic/claude-opus-4.8",
+  ]);
+  assert.equal(groups[0]!.label, "Automatic");
+  assert.equal(groups[0]!.models[0]!.id, "openrouter/auto");
+  assert.deepEqual(
+    groups.find((group) => group.label === "OpenAI")!.models.map((model) => model.id),
+    ["openai/gpt-5.4", "openai/gpt-4.1"],
+  );
+  assert.deepEqual(
+    groups.find((group) => group.label === "Anthropic")!.models.map((model) => model.id),
+    ["anthropic/claude-opus-4.8", "anthropic/claude-sonnet-4.5"],
+  );
+});
+
+test("large catalogs are bounded, searchable, and keep approved models visible", () => {
+  const ids = [
+    "openrouter/auto",
+    ...Array.from({ length: 10 }, (_, index) => `openai/gpt-${index + 1}`),
+    "anthropic/claude-opus-4.8",
+    "anthropic/claude-sonnet-4.6",
+    "google/gemini-3.1-pro",
+    "xai/grok-4.6",
+    "zai-org/glm-5.2",
+    "moonshotai/kimi-k3",
+    "deepseek/deepseek-v3.2",
+  ];
+  const groups = groupModelIds(ids);
+  const view = visibleModelGroups(groups, {
+    approved: ["openai/gpt-1", "deepseek/deepseek-v3.2"],
+    maxGroups: 4,
+    maxModelsPerGroup: 3,
+  });
+  assert.ok(view.hiddenCount > 0);
+  assert.ok(view.groups.length >= 4);
+  assert.equal(view.groups[0]!.label, "Automatic");
+  assert.ok(view.groups.flatMap((group) => group.models).some((model) => model.id === "openai/gpt-1"));
+  assert.ok(view.groups.flatMap((group) => group.models).some((model) => model.id === "deepseek/deepseek-v3.2"));
+
+  const search = visibleModelGroups(groups, { query: "anthropic", maxGroups: 1, maxModelsPerGroup: 1 });
+  assert.equal(search.groups.length, 1);
+  assert.equal(search.groups[0]!.label, "Anthropic");
+  assert.equal(search.groups[0]!.models[0]!.id, "anthropic/claude-opus-4.8");
+  assert.equal(search.hiddenCount, 1);
+
+  const expanded = visibleModelGroups(groups, { expanded: true });
+  assert.equal(expanded.hiddenCount, 0);
+  assert.equal(expanded.totalCount, ids.length);
 });

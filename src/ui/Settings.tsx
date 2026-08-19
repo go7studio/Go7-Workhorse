@@ -17,6 +17,7 @@ import { RoutingPane } from "./RoutingPane";
 import { LearningPane } from "./LearningPane";
 import { ProfileHorse } from "./ProfileHorse";
 import { routingProfileForModel } from "../lib/routing";
+import { formatExternalAgentRef } from "../lib/agent-runtime";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
@@ -725,6 +726,14 @@ function AgentSystemsBlock() {
     void store.refreshAgentRuntimes();
   }, []);
   const runtimes = store.agentRuntimes.length ? store.agentRuntimes : EMPTY_RUNTIMES;
+  const allowed = new Set(store.settings.agentSystems?.allowedAgents ?? []);
+  const toggleAgent = (runtimeId: AgentRuntimeId, agentId: string) => {
+    const key = formatExternalAgentRef({ runtimeId, agentId });
+    const next = new Set(allowed);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    store.updateAgentSystems({ allowedAgents: [...next] });
+  };
   const chats = store.sessions.filter((session) => !session.hidden && !session.archivedAt);
   // The picker groups chats by project, the way the sidebar does, so a chat
   // called "Full repo review" can be told apart from another with that name.
@@ -777,11 +786,18 @@ function AgentSystemsBlock() {
                 {runtime.version ? <small>{runtime.version}</small> : null}
               </strong>
               {agents.length > 0 ? (
-                <span className="agent-chips">
+                <span className="agent-chips" role="group" aria-label={`${label.name} agents`}>
                   {agents.map((agent) => (
-                    <code className="agent-chip" key={agent.agentId} title={agent.workspace ?? agent.name}>
+                    <button
+                      className={`agent-chip${allowed.has(formatExternalAgentRef(agent)) ? " on" : ""}`}
+                      key={agent.agentId}
+                      type="button"
+                      aria-pressed={allowed.has(formatExternalAgentRef(agent))}
+                      title={agent.workspace ?? agent.name}
+                      onClick={() => toggleAgent(agent.runtimeId, agent.agentId)}
+                    >
                       {agent.name}
-                    </code>
+                    </button>
                   ))}
                 </span>
               ) : (

@@ -57,6 +57,30 @@ export function formatExternalAgentRef(ref: ExternalAgentRef): string {
   return `${ref.runtimeId}/${ref.agentId}`;
 }
 
+export function normalizeAllowedExternalAgents(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const refs = [
+    ...new Set(
+      raw
+        .map((item) => parseExternalAgentRef(item))
+        .filter((item): item is ExternalAgentRef => Boolean(item))
+        .map(formatExternalAgentRef),
+    ),
+  ];
+  return refs.length > 0 ? refs : undefined;
+}
+
+/** Preserve the owner's order while dropping agents no longer discovered. */
+export function allowedExternalCandidates(
+  allowed: unknown,
+  discovered: ExternalAgentRef[],
+): ExternalAgentRef[] {
+  const catalog = new Map(discovered.map((ref) => [formatExternalAgentRef(ref), ref]));
+  return (normalizeAllowedExternalAgents(allowed) ?? [])
+    .map((key) => catalog.get(key))
+    .filter((ref): ref is ExternalAgentRef => Boolean(ref));
+}
+
 export function isExternalAgentAddress(value: unknown): boolean {
   return Boolean(parseExternalAgentRef(value));
 }

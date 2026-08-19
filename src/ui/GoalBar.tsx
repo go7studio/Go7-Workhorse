@@ -27,7 +27,7 @@ export function GoalBar() {
                 if (session) store.grantPlanExternalAgents(session.id, event.target.checked);
               }}
             />
-            Allow OpenClaw/Hermes for this plan
+            Allow selected harnesses
           </label>
         ) : null}
         {(view?.actions ?? []).map((action) => (

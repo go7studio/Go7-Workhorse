@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "de199e717670dfc37645f661c8b21de6f16b02ff",
+  "baselineRef": "e638525ebfa3cb53b700c15fc4f0a2f78e385c8f",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -38,7 +38,10 @@
             "Inspect detected Grok, Codex, Claude, and Cursor rows without changing their vendor-owned login state.",
             "Create one OpenAI Chat Completions bot and one Anthropic Messages bot using local fixture endpoints or approved endpoints.",
             "Probe one model catalog, approve a subset, select a default, and verify later catalog changes do not silently approve or retarget models.",
+            "Load an OpenRouter-shaped large catalog and verify Automatic leads, makers are grouped, each maker is frontier-first, the initial list is bounded, and search reaches hidden models.",
+            "If discovery omits a valid model, add its id manually and approve it without creating another connection.",
             "Switch between two approved models on one custom connection and verify one connection card and usage ring retain separate model rows.",
+            "Run two bounded calls through one Synthetic key, verify Kimi and GLM request identities reach the HTTP boundary, then revoke one model and verify its chats fall back before another call.",
             "Save, disable, re-enable, edit, and remove one bot.",
             "Verify secrets are masked and never copied into ordinary persisted state or support exports."
           ]
@@ -103,7 +106,7 @@
           "testability": "auto",
           "profiles": ["custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S2"],
-          "passCriteria": "Both API shapes persist their explicit URL/schema, the user approves discovered models, one connection can expose multiple approved models with one connection ring and separate model rows, probe errors are clear, and deletion does not silently retarget existing chats.",
+          "passCriteria": "Both API shapes persist their explicit URL/schema, the user approves discovered models, large catalogs are grouped, frontier-first, bounded, and searchable, one connection can expose multiple approved models with one connection ring and separate model rows, probe errors are clear, and deletion does not silently retarget existing chats.",
           "evidence": "Before/after screenshots, discovery and approval transcript, saved connection card, model rows, and affected-chat state."
         },
         {
@@ -977,6 +980,7 @@
             "Retry an old pass and exceed the pass ceiling; require both to stop before a provider call.",
             "Repeat with an explicit initialBrain and verify only the first coordinator uses it; every unassigned descendant returns to independent task- and capacity-aware routing.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
+            "Select permitted OpenClaw and Hermes agents in Settings; verify discovery alone grants nothing and Auto considers only the selected agents after the plan wave grant.",
             "Have the external agent use the restricted MCP profile to ask one existing Workhorse chat for a nonce reply, inspect that real result, and choose a dependent second order.",
             "Verify both Workhorse calls run the assigned provider, preserve the supplied trace and parent identity, and return real replies before the external goal completes.",
             "Spawn one bounded Workhorse worker with the same parent and trace, receive its terminal result, then address the returned worker name for compatible follow-up work without creating a cold duplicate.",

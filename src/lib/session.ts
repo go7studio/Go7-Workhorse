@@ -10,6 +10,7 @@ import { normalizeScheduledRuns } from "./schedule";
 import { normalizeLineup } from "./lineup";
 import { normalizePlanRun } from "./plan";
 import { normalizeAgentRun, workerNameFromTitle } from "./subagents";
+import { normalizeLedger } from "./session-ledger";
 import { normalizePortableCheckpoint } from "./portable-compaction";
 import { normalizeRoutingDecision } from "./routing";
 import type { ChatMessage, CustomBot, EffortLevel, PermissionMode, ProviderId, SandboxProfile, Session } from "./types";
@@ -228,6 +229,7 @@ export function normalizeSession(raw: unknown): Session | null {
     })(),
     scheduledRuns: normalizeScheduledRuns(record.scheduledRuns),
     contextCheckpoint: normalizePortableCheckpoint(record.contextCheckpoint),
+    ledger: normalizeLedger(record.ledger),
     composerDraft:
       typeof record.composerDraft === "string" && record.composerDraft ? record.composerDraft : undefined,
     composerImages: (() => {

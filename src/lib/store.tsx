@@ -183,6 +183,8 @@ import {
   rootSpawnError,
   resolveSpawnSpec,
   findReusableWorker,
+  parseWorkerHandoff,
+  workerStartMessages,
   reserveWorkerName,
   scopedChildAgentIds,
   type WorkerNameReservation,
@@ -4168,6 +4170,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
              * project, is reused; a busy one still gets a colleague, because
              * running several at once is the point of the desk.
              */
+            const spawnSeed = payload.seed === "fresh" ? "fresh" as const : undefined;
+            const spawnHandoff = parseWorkerHandoff(payload.handoff);
             const reusedWorker = findReusableWorker(
               {
                 name: typeof payload.worker === "string" ? payload.worker : undefined,
@@ -4175,6 +4179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 model: spec.model,
                 effort: spec.effort,
                 customBotId: spec.customBotId,
+                seed: spawnSeed,
               },
               latest.sessions as unknown as WorkerRecord[],
               { parentId: parent.id, projectId: parent.projectId },
@@ -4361,6 +4366,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 timeoutMs,
                 ...(tokenBudget ? { tokenBudget } : {}),
                 isolation,
+                ...(spawnSeed === "fresh" ? { seed: "fresh" as const } : {}),
                 ...(planStepId ? { planStepId } : {}),
                 ...(rationale ? { rationale } : {}),
                 ...(assignedSkills.length > 0 ? { skills: assignedSkills } : {}),
@@ -4374,21 +4380,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
-              messages: [
-                ...(priorWorker?.messages ?? []),
-                {
-                  id: uid("msg"),
-                  role: "user",
-                  kind: "peer",
-                  fromTitle: parent.title?.trim() || "another agent",
-                  text: payload.message.trim(),
-                  ...(spawnImages.length ? { images: spawnImages } : {}),
-                  createdAt: startedAt,
-                  correlationId: childCorrelationId,
-                  ...brainStamp(spec),
-                },
-                { id: assistantId, role: "assistant", text: "", createdAt: startedAt, correlationId: childCorrelationId, ...brainStamp(spec) },
-              ],
+              ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
+              messages: workerStartMessages({
+                seed: spawnSeed,
+                priorMessages: priorWorker?.messages,
+                userId: uid("msg"),
+                assistantId,
+                fromTitle: parent.title?.trim() || "another agent",
+                text: payload.message.trim(),
+                createdAt: startedAt,
+                handoff: spawnHandoff,
+                images: spawnImages.length ? spawnImages : undefined,
+                correlationId: childCorrelationId,
+                ...brainStamp(spec),
+              }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
             setState((current) => ({

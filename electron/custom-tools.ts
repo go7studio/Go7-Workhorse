@@ -166,6 +166,14 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },
+        seed: {
+          type: "string",
+          description: "inherit (default) may reuse an idle worker. fresh starts cold with only a handoff — no parent conversation.",
+        },
+        handoff: {
+          type: "object",
+          description: "Bounded report for seed=fresh: status, summary, evidence, nextSteps, blocker.",
+        },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
           type: "boolean",

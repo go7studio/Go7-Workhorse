@@ -1,3 +1,4 @@
+import { projectedOccupancyAfterCompact } from "./portable-compaction";
 import { contextWindowFor, largestKnownContextWindow, modelsFor, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
 import { vendorLabel, vendorTint } from "./settings";
@@ -137,6 +138,60 @@ export function contextFromEvent(event: { inputTokens: number; cacheReadTokens?:
 }
 
 /** Window occupancy only. Ignores billed input+cache when it overshoots the model window. */
+/** A billed compact is booked on the same bot that summarized. Never another ring. */
+export function billedCompactUsage(input: {
+  provider: ProviderId;
+  model: string;
+  sessionId: string;
+  customBotId?: string;
+  projectId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  at?: number;
+  id?: string;
+}): UsageEvent {
+  return {
+    id: input.id?.trim() || `use_compact_${input.sessionId}_${input.at ?? 0}`,
+    at: input.at ?? Date.now(),
+    provider: input.provider,
+    model: input.model,
+    sessionId: input.sessionId,
+    ...(input.customBotId ? { customBotId: input.customBotId } : {}),
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    inputTokens: Math.max(0, Math.round(input.inputTokens)),
+    outputTokens: Math.max(0, Math.round(input.outputTokens)),
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    source: "compact",
+  };
+}
+
+/**
+ * Excerpt compact never rewrites leftover. A billed summary adds a UsageEvent
+ * on that same bot. Leftover percent stays the official meter — we do not
+ * invent it from tokens.
+ */
+export function applyCompactOutcome(input: {
+  leftoverPercent: number;
+  contextUsed: number;
+  windowSize: number;
+  omittedMessages: number;
+  keptMessages: number;
+  summaryChars: number;
+  billed?: Parameters<typeof billedCompactUsage>[0];
+  usage: UsageEvent[];
+}): { leftoverPercent: number; contextUsed: number; usage: UsageEvent[] } {
+  const contextUsed = projectedOccupancyAfterCompact({
+    contextUsed: input.contextUsed,
+    windowSize: input.windowSize,
+    omittedMessages: input.omittedMessages,
+    keptMessages: input.keptMessages,
+    summaryChars: input.summaryChars,
+  });
+  const usage = input.billed ? [...input.usage, billedCompactUsage(input.billed)] : input.usage;
+  return { leftoverPercent: input.leftoverPercent, contextUsed, usage };
+}
+
 export function occupancyFromUsage(
   draft: { contextUsed?: number; inputTokens?: number; cacheReadTokens?: number },
   windowSize: number,
@@ -1552,7 +1607,7 @@ function collapseStackedCustomTurns(events: UsageEvent[]): UsageEvent[] {
   return drop.size ? events.filter((event) => !drop.has(event.id)) : events;
 }
 
-const USAGE_SOURCES = new Set(["turn", "request", "gauge", "estimate"]);
+const USAGE_SOURCES = new Set(["turn", "request", "gauge", "estimate", "subagent", "compact"]);
 
 /**
  * One event stores one turn. A turn's fresh input can be at most one prompt,

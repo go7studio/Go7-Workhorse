@@ -100,6 +100,9 @@ transcript rather than as a path.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
+- Compact shrinks the context meter. Leftover does not move unless that same
+  bot ran a billed summary. A full window never holds a send the way a spent
+  daily bank does.
 - Budgets per vendor.
 - A weekly pace that tells you when you are ahead of it, before the bill does.
 - A usage view by day, week, month, or all time.
@@ -108,7 +111,15 @@ transcript rather than as a path.
 
 - **Schedules** — one-shot and recurring, journalled by the desktop process and
   recovered after a restart.
-- **Goals** — long-running intent that survives the chat that started it.
+- **Goals** — long-running intent that survives the chat that started it. A
+  desk goal continues in rounds after a turn ends, until pause, clear, or the
+  round cap. Each round is one turn on that chat’s vendor. Grok’s own `/goal`
+  is still that vendor’s one-shot driver.
+- **Loops** — spawn a worker cold with only a bounded handoff (`seed: fresh`).
+  The worker gets no parent conversation. It keeps its own vendor, leftover
+  ring, and sandbox.
+- **Turn log** — a chat can reconstruct model history from its own turn and
+  step log. The log is per chat. It is never shared across vendors.
 - **Subagents** — lifecycle records, runtime and token ceilings, cascading
   cancellation, changed-file review, and worktree isolation where the project
   supports it. A worker gets a worker's context: the short worker rules and

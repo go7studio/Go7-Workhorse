@@ -4,10 +4,13 @@ import { acpUpdateUsageSource, classifyAcpUpdate, parseGrokUsage } from "../elec
 import { parseCustomUsage } from "../electron/custom-http";
 import { largestKnownContextWindow } from "../src/lib/models";
 import {
+  applyCompactOutcome,
+  billedCompactUsage,
   byModel,
   eventTotal,
   finalizeTurnUsage,
   formatIoLine,
+  leftoverForCard,
   normalizeUsage,
   repairSummedPromptTurn,
   sumRequestBills,
@@ -278,4 +281,70 @@ test("a worker's usage files under its bot, not the orchestrator's vendor", asyn
   assert.equal(kimi?.inputTokens, 4767);
   const cursorApi = cards.find((card) => card.focus === "cursor:other-models");
   assert.equal(cursorApi?.inputTokens ?? 0, 0, "Cursor · API no longer claims the Kimi turn");
+});
+
+test("excerpt compact shrinks occupancy and leaves leftover and usage alone", () => {
+  const leftoverPercent = 67;
+  const outcome = applyCompactOutcome({
+    leftoverPercent,
+    contextUsed: 90_000,
+    windowSize: 128_000,
+    omittedMessages: 20,
+    keptMessages: 8,
+    summaryChars: 800,
+    usage: [],
+  });
+  assert.equal(outcome.leftoverPercent, leftoverPercent);
+  assert.ok(outcome.contextUsed < 90_000);
+  assert.equal(outcome.usage.length, 0);
+});
+
+test("a billed compact lands on the same bot ring, not another vendor", () => {
+  const leftoverPercent = 67;
+  const outcome = applyCompactOutcome({
+    leftoverPercent,
+    contextUsed: 90_000,
+    windowSize: 128_000,
+    omittedMessages: 20,
+    keptMessages: 8,
+    summaryChars: 800,
+    billed: {
+      provider: "custom",
+      model: "MiniMax-M3",
+      sessionId: "sess_compact",
+      customBotId: "bot_minimax",
+      inputTokens: 1200,
+      outputTokens: 400,
+      at: 50,
+      id: "use_compact_sess_compact_50",
+    },
+    usage: [],
+  });
+  assert.equal(outcome.leftoverPercent, leftoverPercent, "official leftover is not invented from tokens");
+  assert.equal(outcome.usage.length, 1);
+  const event = outcome.usage[0]!;
+  assert.equal(event.source, "compact");
+  assert.equal(event.provider, "custom");
+  assert.equal(event.customBotId, "bot_minimax");
+  assert.equal(event.sessionId, "sess_compact");
+  assert.equal(event.inputTokens, 1200);
+  assert.notEqual(event.provider, "grok");
+  const billed = billedCompactUsage({
+    provider: "custom",
+    model: "MiniMax-M3",
+    sessionId: "sess_compact",
+    customBotId: "bot_minimax",
+    inputTokens: 1200,
+    outputTokens: 400,
+    at: 50,
+    id: "use_compact_sess_compact_50",
+  });
+  assert.deepEqual(event, billed);
+  const normalized = normalizeUsage([event]);
+  assert.equal(normalized[0]?.source, "compact");
+  const grokPlan = leftoverForCard(
+    { focus: "grok", provider: "grok", key: "grok" },
+    { grok: { usedPercent: 10, leftPercent: 90, period: "weekly", prepaidBalance: 0, products: [] } },
+  );
+  assert.equal(grokPlan?.leftPercent, 90);
 });

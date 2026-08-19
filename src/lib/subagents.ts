@@ -1,7 +1,7 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
 import { findSession, type SessionSnapshot } from "./session-bridge";
-import type { AgentRun, EffortLevel, MissionIteration, ProviderId, Session } from "./types";
+import type { AgentRun, ChatMessage, EffortLevel, MissionIteration, ProviderId, Session, WorkerHandoff, WorkerSeed } from "./types";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
 
 export type { DeskRole };
@@ -18,6 +18,9 @@ export type SpawnRequest = {
   timeoutSeconds?: number;
   tokenBudget?: number;
   isolation?: "worktree" | "shared";
+  /** inherit (default) may reuse an idle worker. fresh starts cold with only a handoff. */
+  seed?: WorkerSeed;
+  handoff?: WorkerHandoff;
   folder?: string;
   wait?: boolean;
   route?: "auto" | "quick" | "balanced" | "deep";
@@ -268,10 +271,12 @@ export function findReusableWorker(
     model: string;
     effort: EffortLevel | null;
     customBotId?: string;
+    seed?: WorkerSeed;
   },
   workers: WorkerRecord[],
   scope: { parentId: string; projectId: string | null },
 ): WorkerRecord | null {
+  if (want.seed === "fresh") return null;
   const mine = workers.filter(
     (worker) =>
       worker.hidden &&
@@ -580,6 +585,80 @@ export function isSpawnOnlyPrompt(text: string): boolean {
     /^(please\s+)?(call|spawn|summon)\s+((a|an|the)\s+)?(minimax|grok|codex|claude|sol|terra|luna)(\s+bot)?\s*\.?$/i;
   if (only.test(trimmed) || vendorOnly.test(trimmed)) return true;
   return !stripSpawnPreamble(trimmed);
+}
+
+export function parseWorkerHandoff(raw: unknown): WorkerHandoff | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Partial<WorkerHandoff>;
+  const summary = typeof row.summary === "string" ? row.summary.trim() : "";
+  const status = typeof row.status === "string" ? row.status.trim() : "";
+  if (!summary || !status) return undefined;
+  return {
+    status,
+    summary,
+    ...(typeof row.evidence === "string" && row.evidence.trim() ? { evidence: row.evidence.trim() } : {}),
+    ...(typeof row.nextSteps === "string" && row.nextSteps.trim() ? { nextSteps: row.nextSteps.trim() } : {}),
+    ...(typeof row.blocker === "string" && row.blocker.trim() ? { blocker: row.blocker.trim() } : {}),
+  };
+}
+
+export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
+  const lines = [
+    "ROLE: worker",
+    "SEED: fresh",
+    "You have no parent conversation. Use only this handoff and the bound folder.",
+    "",
+    `status: ${handoff.status}`,
+    handoff.summary,
+  ];
+  if (handoff.evidence) lines.push(`evidence: ${handoff.evidence}`);
+  if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
+  if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
+  lines.push("", "Do this slice only. Quote real files. Return the report as plain text.");
+  return lines.join("\n");
+}
+
+export function workerStartMessages(input: {
+  seed?: WorkerSeed;
+  priorMessages?: ChatMessage[];
+  userId: string;
+  assistantId: string;
+  fromTitle: string;
+  text: string;
+  createdAt: number;
+  handoff?: WorkerHandoff;
+  images?: ChatMessage["images"];
+  correlationId?: string;
+  provider?: ProviderId;
+  model?: string;
+  customBotId?: string;
+}): ChatMessage[] {
+  const stamp = {
+    ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.customBotId ? { customBotId: input.customBotId } : {}),
+    ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+  };
+  const text = input.seed === "fresh" && input.handoff ? formatFreshHandoffPrompt(input.handoff) : input.text;
+  const user: ChatMessage = {
+    id: input.userId,
+    role: "user",
+    kind: "peer",
+    fromTitle: input.fromTitle.trim() || "another agent",
+    text,
+    createdAt: input.createdAt,
+    ...(input.images?.length ? { images: input.images } : {}),
+    ...stamp,
+  };
+  const assistant: ChatMessage = {
+    id: input.assistantId,
+    role: "assistant",
+    text: "",
+    createdAt: input.createdAt,
+    ...stamp,
+  };
+  if (input.seed === "fresh") return [user, assistant];
+  return [...(input.priorMessages ?? []), user, assistant];
 }
 
 export function formatWorkerPrompt(input: WorkerBriefInput): string {
@@ -919,6 +998,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
     isolation: row.isolation === "worktree" ? "worktree" : "shared",
+    ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),

@@ -10,6 +10,25 @@ function excerpt(message: ChatMessage): string {
   return `${message.role}${brain ? ` (${brain})` : ""}: ${body}`;
 }
 
+/** Next request occupancy after a compact. Shrinks; never invents leftover. */
+export function projectedOccupancyAfterCompact(input: {
+  contextUsed: number;
+  windowSize: number;
+  omittedMessages: number;
+  keptMessages: number;
+  summaryChars: number;
+}): number {
+  const window = Math.max(0, Math.round(input.windowSize));
+  const kept = Math.max(0, input.keptMessages);
+  const omitted = Math.max(0, input.omittedMessages);
+  const prior = omitted + kept;
+  const fromKept = prior > 0 ? Math.round(Math.max(0, input.contextUsed) * (kept / prior)) : 0;
+  const fromSummary = Math.max(0, Math.round(Math.max(0, input.summaryChars) / 4));
+  const next = fromKept + fromSummary;
+  if (window === 0) return next;
+  return Math.min(window, next);
+}
+
 export function createPortableCheckpoint(
   messages: ChatMessage[],
   note = "",

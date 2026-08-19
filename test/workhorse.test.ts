@@ -6230,9 +6230,13 @@ test("Goal state set pause resume clear maps to display actions", () => {
   assert.ok(queuedGoal?.[0].messages.some((message) => message.text === "/goal ship the backlog"));
   assert.match(queuedGoal?.[0].queue?.[0]?.vendorText ?? "", /ongoing Workhorse goal/);
   assert.notEqual(queuedGoal?.[0].queue?.[0]?.hideUser, true);
-  const set = applyGoalCommand(undefined, "/goal ship the 18 features in BACKLOG.md");
-  assert.deepEqual(set, { status: "active", objective: "ship the 18 features in BACKLOG.md", mode: "goal" });
-  const loop = applyGoalCommand(undefined, "set a loop to ship and certify the app");
+  const set = applyGoalCommand(undefined, "/goal ship the 18 features in BACKLOG.md", 1);
+  assert.equal(set?.status, "active");
+  assert.equal(set?.objective, "ship the 18 features in BACKLOG.md");
+  assert.equal(set?.mode, "goal");
+  assert.equal(set?.roundCap, 8);
+  assert.equal(set?.rounds, 0);
+  const loop = applyGoalCommand(undefined, "set a loop to ship and certify the app", 1);
   assert.equal(loop?.mode, "loop");
   assert.equal(goalDisplay(loop)?.title, "Loop");
   const viewed = applyGoalCommand(set, "/goal");

@@ -1,6 +1,10 @@
+import type { WorkerHandoff } from "./types";
+
 export type GoalStatus = "none" | "active" | "paused";
 
 export type GoalTerminal = "completed" | "timed-out" | "cancelled";
+
+export type GoalHandoff = WorkerHandoff;
 
 export type GoalState = {
   status: Exclude<GoalStatus, "none">;
@@ -10,7 +14,43 @@ export type GoalState = {
   budgetMs?: number;
   deadlineAt?: number;
   terminal?: GoalTerminal;
+  /** Completed continuation rounds. Absent on Grok one-shot goals. */
+  rounds?: number;
+  /** Cap on goal-sourced turns. Set on desk /goal so the loop survives idle. */
+  roundCap?: number;
+  lastRoundAt?: number;
+  lastHandoff?: GoalHandoff;
 };
+
+export const DEFAULT_GOAL_ROUND_CAP = 8;
+
+export type GoalRoundFail = "no-goal" | "paused" | "terminal" | "cap";
+
+export function goalSurvivesIdle(state: GoalState | undefined): boolean {
+  if (!state?.objective.trim()) return false;
+  if (state.terminal) return false;
+  if (typeof state.roundCap !== "number" || state.roundCap <= 0) return false;
+  return true;
+}
+
+export function goalRoundAdmitted(state: GoalState | undefined): boolean {
+  if (!goalSurvivesIdle(state) || !state) return false;
+  if (state.status !== "active") return false;
+  const used = state.rounds ?? 0;
+  return used < state.roundCap!;
+}
+
+function withLoop(state: GoalState, now: number): GoalState {
+  if (typeof state.roundCap === "number" && state.roundCap > 0) {
+    return { ...state, startedAt: state.startedAt ?? now };
+  }
+  return {
+    ...state,
+    rounds: state.rounds ?? 0,
+    roundCap: DEFAULT_GOAL_ROUND_CAP,
+    startedAt: state.startedAt ?? now,
+  };
+}
 
 export type GoalAction = "set" | "view" | "pause" | "resume" | "clear";
 
@@ -96,10 +136,12 @@ export function goalHaltsVendor(text: string): boolean {
   return parsed?.action === "pause" || parsed?.action === "clear";
 }
 
-export function applyGoalCommand(state: GoalState | undefined, text: string): GoalState | undefined {
+export function applyGoalCommand(state: GoalState | undefined, text: string, now = Date.now()): GoalState | undefined {
   const parsed = parseGoalInput(text);
   if (!parsed) return state;
-  if (parsed.action === "set") return { status: "active", objective: parsed.objective, mode: goalModeForInput(text) };
+  if (parsed.action === "set") {
+    return withLoop({ status: "active", objective: parsed.objective, mode: goalModeForInput(text) }, now);
+  }
   if (parsed.action === "pause") {
     if (!state?.objective) return state;
     return { ...state, status: "paused" };
@@ -110,6 +152,91 @@ export function applyGoalCommand(state: GoalState | undefined, text: string): Go
   }
   if (parsed.action === "clear") return undefined;
   return state;
+}
+
+export function startGoalRound(
+  state: GoalState | undefined,
+  now = Date.now(),
+): { ok: true; state: GoalState; prompt: string } | { ok: false; reason: GoalRoundFail } {
+  if (!state?.objective.trim()) return { ok: false, reason: "no-goal" };
+  if (state.terminal) return { ok: false, reason: "terminal" };
+  if (state.status === "paused") return { ok: false, reason: "paused" };
+  const looped = withLoop(state, now);
+  if (!goalRoundAdmitted(looped)) return { ok: false, reason: "cap" };
+  return { ok: true, state: looped, prompt: goalVendorPrompt(looped, "set") };
+}
+
+export function completeGoalRound(
+  state: GoalState | undefined,
+  handoff: GoalHandoff,
+  now = Date.now(),
+): GoalState | undefined {
+  if (!state?.objective.trim()) return state;
+  const used = (state.rounds ?? 0) + 1;
+  const cap = state.roundCap ?? DEFAULT_GOAL_ROUND_CAP;
+  const done = handoff.status === "done" || used >= cap;
+  const blocked = handoff.status === "blocked";
+  return {
+    ...state,
+    rounds: used,
+    roundCap: cap,
+    lastRoundAt: now,
+    lastHandoff: normalizeGoalHandoff(handoff) ?? handoff,
+    status: blocked || done ? "paused" : state.status,
+    ...(done && !blocked ? { terminal: "completed" as const } : {}),
+  };
+}
+
+export function pauseGoalRound(state: GoalState | undefined): GoalState | undefined {
+  if (!state?.objective) return state;
+  return { ...state, status: "paused" };
+}
+
+export function continueGoalRound(
+  state: GoalState | undefined,
+  now = Date.now(),
+): { ok: true; state: GoalState; prompt: string } | { ok: false; reason: GoalRoundFail } {
+  if (!state?.objective.trim()) return { ok: false, reason: "no-goal" };
+  if (state.terminal) return { ok: false, reason: "terminal" };
+  const active: GoalState = { ...state, status: "active" };
+  const started = startGoalRound(active, now);
+  if (!started.ok) return started;
+  return { ok: true, state: started.state, prompt: goalContinuePrompt(started.state) };
+}
+
+export function goalContinuePrompt(state: GoalState): string {
+  const handoff = state.lastHandoff;
+  const lines = [
+    "Continue the active Workhorse goal. This is a goal round, not a new conversation.",
+    "Use the handoff below. Do not restart the objective from scratch.",
+    "",
+    `OBJECTIVE: ${state.objective}`,
+    `ROUND: ${(state.rounds ?? 0) + 1} of ${state.roundCap ?? DEFAULT_GOAL_ROUND_CAP}`,
+  ];
+  if (handoff) {
+    lines.push("", "HANDOFF:");
+    lines.push(`status: ${handoff.status}`);
+    lines.push(handoff.summary);
+    if (handoff.evidence) lines.push(`evidence: ${handoff.evidence}`);
+    if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
+    if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
+  }
+  return lines.join("\n");
+}
+
+export function normalizeGoalHandoff(raw: unknown): GoalHandoff | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Partial<GoalHandoff>;
+  const summary = typeof row.summary === "string" ? row.summary.trim() : "";
+  const status = typeof row.status === "string" ? row.status.trim() : "";
+  if (!summary || !status) return undefined;
+  return {
+    status,
+    summary,
+    ...(typeof row.evidence === "string" && row.evidence.trim() ? { evidence: row.evidence.trim() } : {}),
+    ...(typeof row.nextSteps === "string" && row.nextSteps.trim() ? { nextSteps: row.nextSteps.trim() } : {}),
+    ...(typeof row.blocker === "string" && row.blocker.trim() ? { blocker: row.blocker.trim() } : {}),
+  };
 }
 
 export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
@@ -143,7 +270,7 @@ export function goalDisplay(state: GoalState | undefined): GoalDisplay | null {
   };
 }
 
-/** Hide an active goal once the vendor turn is idle. Paused stays until resume or End. */
+/** Hide a one-shot active goal once the vendor turn is idle. Looping goals stay visible. */
 export function goalDisplayForSession(session?: {
   provider?: string;
   status?: string;
@@ -152,17 +279,18 @@ export function goalDisplayForSession(session?: {
   const view = goalDisplay(session?.goal);
   if (!view) return null;
   if (view.status === "active" && session?.status !== "running" && session?.status !== "needs-input") {
-    return null;
+    return goalSurvivesIdle(session?.goal) ? view : null;
   }
   return view;
 }
 
-/** Drop a finished active goal when the turn goes idle. Paused goals stay. */
+/** Drop a one-shot active goal when the turn goes idle. Looping desk goals and paused goals stay. */
 export function grokGoalAfterTurnIdle(
   _provider: string | undefined,
   goal: GoalState | undefined,
 ): GoalState | undefined {
   if (goal?.status === "paused") return goal;
+  if (goalSurvivesIdle(goal)) return goal;
   return undefined;
 }
 
@@ -213,6 +341,16 @@ export function normalizeGoal(raw: unknown): GoalState | undefined {
     record.terminal === "completed" || record.terminal === "timed-out" || record.terminal === "cancelled"
       ? record.terminal
       : undefined;
+  const rounds = typeof record.rounds === "number" && Number.isFinite(record.rounds) && record.rounds >= 0
+    ? Math.floor(record.rounds)
+    : undefined;
+  const roundCap = typeof record.roundCap === "number" && Number.isFinite(record.roundCap) && record.roundCap > 0
+    ? Math.floor(record.roundCap)
+    : undefined;
+  const lastRoundAt = typeof record.lastRoundAt === "number" && Number.isFinite(record.lastRoundAt)
+    ? record.lastRoundAt
+    : undefined;
+  const lastHandoff = normalizeGoalHandoff(record.lastHandoff);
   return {
     status: record.status,
     objective,
@@ -221,5 +359,9 @@ export function normalizeGoal(raw: unknown): GoalState | undefined {
     ...(budgetMs ? { budgetMs } : {}),
     ...(deadlineAt ? { deadlineAt } : {}),
     ...(terminal ? { terminal } : {}),
+    ...(rounds !== undefined ? { rounds } : {}),
+    ...(roundCap ? { roundCap } : {}),
+    ...(lastRoundAt ? { lastRoundAt } : {}),
+    ...(lastHandoff ? { lastHandoff } : {}),
   };
 }

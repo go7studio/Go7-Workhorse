@@ -256,6 +256,16 @@ export type DeskLineup = {
   userText?: string;
 };
 
+export type WorkerSeed = "inherit" | "fresh";
+
+export type WorkerHandoff = {
+  status: string;
+  summary: string;
+  evidence?: string;
+  nextSteps?: string;
+  blocker?: string;
+};
+
 export type AgentRun = {
   /**
    * `interrupted` is the desk stopping, not the worker failing — Workhorse
@@ -269,6 +279,8 @@ export type AgentRun = {
   tokenBudget?: number;
   usedTokens?: number;
   isolation: "worktree" | "shared";
+  /** inherit keeps prior conversation. fresh starts cold with only a handoff. */
+  seed?: WorkerSeed;
   changedFiles?: string[];
   conflictFiles?: string[];
   error?: string;
@@ -455,7 +467,13 @@ export type Session = {
     budgetMs?: number;
     deadlineAt?: number;
     terminal?: "completed" | "timed-out" | "cancelled";
+    rounds?: number;
+    roundCap?: number;
+    lastRoundAt?: number;
+    lastHandoff?: WorkerHandoff;
   };
+  /** Reconstructable turn/step log. Model history projects from this when present. */
+  ledger?: import("./session-ledger").SessionLedger;
   /** Workhorse-owned lifecycle and review record for hidden cross-provider children. */
   agentRun?: AgentRun;
   /** Active worker crew for this orchestrator chat. */
@@ -721,7 +739,7 @@ export type GrokPlanUsage = {
  * booked on its own rather than folded, because several can finish inside one
  * parent turn and the fold keeps only one draft.
  */
-export type UsageSource = "turn" | "request" | "gauge" | "estimate" | "subagent";
+export type UsageSource = "turn" | "request" | "gauge" | "estimate" | "subagent" | "compact";
 
 export type UsageEvent = {
   id: string;

@@ -14,6 +14,7 @@ import {
   deskCallCatalog,
   deskCallPromptable,
   deskCallRowFor,
+  occupancyCannotHoldSend,
   evaluateWatchHold,
   formatDeskRoster,
   formatWeeklyPlanLine,
@@ -688,4 +689,33 @@ test("the daily-over banner names the pace it is measured against", () => {
   // The old wording gave a bare percentage with nothing to read it against.
   assert.doesNotMatch(watchSource, /is \$\{over\}% over`/);
   assert.doesNotMatch(watchSource, /leftover can last the rest of the week/);
+});
+
+test("a full context window never holds a send the way a spent daily bank does", () => {
+  const now = Date.parse("2026-08-18T12:00:00");
+  const grokReset = new Date(now + 3 * 24 * 60 * 60 * 1000).toISOString();
+  const settings = {
+    watch: { ...DEFAULT_WATCH, lockDaily: true },
+    customBots: [bot],
+    usageBudgets: {},
+    llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+  };
+  assert.equal(occupancyCannotHoldSend(99_000, 100_000), null);
+  const unlocked = evaluateWatchHold({
+    session: { provider: "grok", id: "sess_full_window" },
+    settings: { ...settings, watch: { ...settings.watch, lockDaily: false } },
+    plans: { grok: plan(80, { resetsAt: grokReset }) },
+    permits: {},
+    now,
+  });
+  assert.equal(unlocked, null, "occupancy is not in the hold reasons");
+  const spent = evaluateWatchHold({
+    session: { provider: "grok", id: "sess_spent" },
+    settings,
+    plans: { grok: plan(0, { resetsAt: grokReset }) },
+    permits: {},
+    now,
+  });
+  assert.equal(spent?.reason, "spent");
+  assert.notEqual(spent?.reason, undefined);
 });

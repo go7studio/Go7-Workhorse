@@ -478,6 +478,14 @@ export function evaluateWatchHold(input: {
   return null;
 }
 
+/**
+ * Occupancy is window fill. It never holds a send. Only leftover and the
+ * daily bank do that.
+ */
+export function occupancyCannotHoldSend(_occupancy?: number, _windowSize?: number): null {
+  return null;
+}
+
 export function watchHoldMessage(hold: {
   label: string;
   reason?: WatchHoldReason;

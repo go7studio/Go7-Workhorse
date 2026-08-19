@@ -277,6 +277,14 @@ const TOOLS = [
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional total token ceiling" },
         isolation: { type: "string", description: "worktree (default) or shared" },
+        seed: {
+          type: "string",
+          description: "inherit (default) may reuse an idle worker. fresh starts cold with only a handoff — no parent conversation.",
+        },
+        handoff: {
+          type: "object",
+          description: "Bounded report for seed=fresh: status, summary, evidence, nextSteps, blocker.",
+        },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
           type: "boolean",
@@ -1075,6 +1083,8 @@ async function spawnAgent(
     timeoutSeconds?: number;
     tokenBudget?: number;
     isolation?: "worktree" | "shared";
+    seed?: "inherit" | "fresh";
+    handoff?: { status: string; summary: string; evidence?: string; nextSteps?: string; blocker?: string };
     folder?: string;
     wait?: boolean;
     mission?: boolean;
@@ -1166,6 +1176,8 @@ async function spawnAgent(
     timeoutSeconds: spawnInput.timeoutSeconds,
     tokenBudget: spawnInput.tokenBudget,
     isolation: spawnInput.isolation,
+    seed: spawnInput.seed,
+    handoff: spawnInput.handoff,
     folder: admitted.cwd,
     wait: spawnInput.wait,
     mission: spawnInput.mission,
@@ -1460,6 +1472,11 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
+        seed: args.seed === "fresh" ? "fresh" : args.seed === "inherit" ? "inherit" : undefined,
+        handoff:
+          args.handoff && typeof args.handoff === "object"
+            ? (args.handoff as { status: string; summary: string; evidence?: string; nextSteps?: string; blocker?: string })
+            : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: args.wait === false ? false : args.wait === true ? true : undefined,
         route:

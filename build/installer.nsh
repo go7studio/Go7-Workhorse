@@ -1,5 +1,3 @@
-; electron-updater passes --updated so NSIS skips runAfterFinish.
-; This desk is not electron-updater — reopen after a silent update.
-!macro customInstall
-  Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
-!macroend
+; Silent in-app update passes /S --force-run. The assisted installer then
+; starts the new exe once from installSection. Do not start it from here or
+; a second copy would open.

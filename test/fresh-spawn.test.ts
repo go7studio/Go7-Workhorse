@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   findReusableWorker,
   formatFreshHandoffPrompt,
+  formatWorkerPrompt,
   normalizeAgentRun,
   parseWorkerHandoff,
+  vendorTextForSpawn,
   workerStartMessages,
   type WorkerRecord,
 } from "../src/lib/subagents";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const handoff = {
   status: "ok",
@@ -83,6 +90,36 @@ test("fresh handoff parse rejects an empty report", () => {
   assert.equal(parseWorkerHandoff({ summary: "x" }), undefined);
   assert.deepEqual(parseWorkerHandoff(handoff), handoff);
   assert.match(formatFreshHandoffPrompt(handoff), /battle_hud\.gd/);
+});
+
+test("vendorTextForSpawn sends the handoff on fresh and the parent brief on inherit", () => {
+  const parentText = "parent said lots of secrets about the whole repo";
+  const brief = {
+    fromTitle: "Boss",
+    text: parentText,
+    folder: "/repo",
+    project: "Pathogeneer",
+    slice: "audit HUD",
+    vendor: "Grok 4.6",
+  };
+  const inherited = vendorTextForSpawn({ ...brief, seed: "inherit" });
+  assert.equal(inherited, formatWorkerPrompt(brief));
+  assert.match(inherited, /parent said lots of secrets/);
+
+  const fresh = vendorTextForSpawn({ ...brief, seed: "fresh", handoff });
+  assert.equal(fresh, formatFreshHandoffPrompt(handoff));
+  assert.match(fresh, /SEED: fresh/);
+  assert.match(fresh, /HUD lives in battle_hud.gd/);
+  assert.doesNotMatch(fresh, /parent said lots of secrets/);
+  assert.notEqual(fresh, formatWorkerPrompt(brief));
+});
+
+test("the live spawn path asks the vendor through vendorTextForSpawn", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const runChild = store.slice(store.indexOf("const runChild = async"));
+  const promptCall = runChild.slice(0, runChild.indexOf("latest.settings.mcpServers"));
+  assert.match(promptCall, /vendorTextForSpawn\(/);
+  assert.doesNotMatch(promptCall, /formatWorkerPrompt\(/);
 });
 
 test("normalizeAgentRun keeps fresh seed on the worker’s own run", () => {

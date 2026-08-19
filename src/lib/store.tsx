@@ -174,7 +174,7 @@ import {
   collectChildAgentReports,
   deskRoleOf,
   descendantSessionIds,
-  formatWorkerPrompt,
+  vendorTextForSpawn,
   isHiddenSession,
   nestedSpawnError,
   overlappingAgentFiles,
@@ -4467,7 +4467,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               );
               const reply = await promptVendor(
                 child,
-                formatWorkerPrompt({
+                vendorTextForSpawn({
+                  seed: spawnSeed,
+                  handoff: spawnHandoff,
                   fromTitle: parent.title?.trim() || "another agent",
                   text: payload.message,
                   folder: childCwd,

@@ -618,6 +618,19 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   return lines.join("\n");
 }
 
+/** Text the vendor actually sees. Fresh seed is the handoff only — never the parent brief. */
+export function vendorTextForSpawn(
+  input: WorkerBriefInput & { seed?: WorkerSeed; handoff?: WorkerHandoff },
+): string {
+  if (input.seed === "fresh") {
+    const handoff =
+      input.handoff ??
+      (input.text.trim() ? { status: "ok", summary: input.text.trim() } : undefined);
+    if (handoff) return formatFreshHandoffPrompt(handoff);
+  }
+  return formatWorkerPrompt(input);
+}
+
 export function workerStartMessages(input: {
   seed?: WorkerSeed;
   priorMessages?: ChatMessage[];
@@ -639,7 +652,16 @@ export function workerStartMessages(input: {
     ...(input.customBotId ? { customBotId: input.customBotId } : {}),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
   };
-  const text = input.seed === "fresh" && input.handoff ? formatFreshHandoffPrompt(input.handoff) : input.text;
+  const text =
+    input.seed === "fresh"
+      ? vendorTextForSpawn({
+          seed: "fresh",
+          handoff: input.handoff,
+          fromTitle: input.fromTitle,
+          text: input.text,
+          folder: "",
+        })
+      : input.text;
   const user: ChatMessage = {
     id: input.userId,
     role: "user",

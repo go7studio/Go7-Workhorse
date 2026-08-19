@@ -27,9 +27,9 @@ or an API key for a hosted or local model — and each sits idle while you work
 in the other. Workhorse is one place to pick which one does each job, and to
 see what each has left this week.
 
-**Why it exists.** It began at a desk paying for SuperGrok Heavy, Cursor,
-Claude and Codex, where one plan ran dry most days while another sat idle. The
-sharpest case is Grok with Cursor: a Grok plan and a Cursor plan each give you
+**Why it exists.** Our team is paying for SuperGrok Heavy, Cursor,
+Claude and Codex, one plan ran dry most days while another sat idle. The
+efficient case is Grok with Cursor: a Grok plan and a Cursor plan each give you
 Grok 4.6, on separate meters. Workhorse treats them as one model with two
 pools — it shows both meters, moves a chat between them, and with auto-route
 on leans each task toward the pool with more left. So a plan you already pay
@@ -208,6 +208,7 @@ Each chat can execute in the linked local folder or a managed detached Git workt
 - Cross-provider subagents have explicit lifecycle records, runtime and token ceilings, cascading cancellation, changed-file review, shared-workspace conflict warnings, and managed-worktree isolation when the project supports it.
 - The sidebar searches chat titles and message text across projects.
 - Settings can export a support-safe provider report. It excludes prompts, messages, file contents, environment variables, URLs, and credential values.
+- Harnesses can query usage across all attached models.
 
 Custom OpenAI-compatible HTTP support intentionally targets Chat Completions. This project does not implement the OpenAI Responses API or Azure OpenAI deployment routing.
 

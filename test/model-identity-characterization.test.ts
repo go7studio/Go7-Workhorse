@@ -16,6 +16,7 @@
  * picker and not an availability claim.
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ import { MODEL_CATALOG, applyVendorCatalog, contextWindowFor, defaultModel, find
 import { resolveCursorModel } from "../electron/cursor-launch";
 import { normalizeMessage, normalizeSession } from "../src/lib/session";
 import { normalizeSettings } from "../src/lib/settings";
+import { normalizeUsage } from "../src/lib/usage";
 import { routingCandidatesForDesk, shouldRouteSessionTurn } from "../src/lib/routing";
 import type { ProviderId } from "../src/lib/types";
 
@@ -33,7 +35,7 @@ const CORPUS = JSON.parse(readFileSync(path.join(ROOT, "test", "fixtures", "mode
 };
 const byProvider = (provider: ProviderId) => CORPUS.variants.filter((row) => row.providerId === provider).map((row) => row.runtimeModelId);
 
-test("corpus: 223 exact runtime ids, 204 of them Cursor, no duplicate pairs, no case twins", () => {
+test("fixture integrity (no production code involved): 223 exact runtime ids, 204 of them Cursor, no duplicate pairs, no case twins", () => {
   const pairs = CORPUS.variants.map((row) => `${row.providerId}|${row.runtimeModelId}`);
   assert.equal(pairs.length, 223);
   assert.equal(new Set(pairs).size, 223, "every (provider, id) pair is distinct");
@@ -67,6 +69,20 @@ test("normalizeModelId is idempotent, trims, and is injective over every real ru
   );
   assert.equal(byProvider("cursor").includes("grok-4.6"), false, "the retired bare spelling is not a live Cursor id");
   assert.equal(byProvider("cursor").includes("auto-smart"), false);
+  // A fourth alias would be a behaviour change wearing a data change. Over
+  // every id the desk knows — the stock catalog plus the whole corpus —
+  // nothing is rewritten, so an alias added for any known id fails here.
+  // (An alias for a string in neither set cannot be caught without exporting
+  // the table; that is the honest limit of this guard.)
+  const known = new Set<string>();
+  for (const provider of ["grok", "claude", "codex", "cursor", "custom"] as const) {
+    for (const model of MODEL_CATALOG[provider]) known.add(`${provider}|${model.id}`);
+  }
+  for (const { providerId, runtimeModelId } of CORPUS.variants) known.add(`${providerId}|${runtimeModelId}`);
+  const rewritten = [...known]
+    .map((pair) => { const [provider, ...rest] = pair.split("|"); return { provider: provider as ProviderId, id: rest.join("|") }; })
+    .filter(({ provider, id }) => normalizeModelId(provider, id) !== id);
+  assert.deepEqual(rewritten, [], "no id the desk knows about is rewritten by normalization");
   // Unknown and legacy ids are preserved, never guessed.
   assert.equal(normalizeModelId("grok", "grok-9-preview"), "grok-9-preview");
   assert.equal(normalizeModelId("claude", "claude-3-opus-20240229"), "claude-3-opus-20240229");
@@ -90,8 +106,13 @@ test("the stock picker per provider: exact ids, exact order, today", () => {
   // the stock list is the picker; discovery is not.
   assert.equal(modelsFor("cursor").length, 4);
   assert.ok(byProvider("cursor").length > 200);
-  // Same call, same answer: the picker does not reorder between reads.
-  assert.deepEqual(modelsFor("codex").map((m) => m.id), modelsFor("codex").map((m) => m.id));
+  // Order survives a live-catalog cycle: apply one for another provider, drop
+  // it, and Codex still reads the same. (Comparing one call to another in the
+  // same expression proves nothing — it is the same call twice.)
+  const before = modelsFor("codex").map((m) => m.id);
+  applyVendorCatalog({ grok: [{ id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 }] });
+  resetVendorCatalog();
+  assert.deepEqual(modelsFor("codex").map((m) => m.id), before, "the picker order is stable across catalog churn");
 });
 
 test("a live vendor catalog replaces the stock rows for that provider only, and an empty list leaves stock in place", () => {
@@ -99,7 +120,7 @@ test("a live vendor catalog replaces the stock rows for that provider only, and 
   try {
     applyVendorCatalog({ grok: [{ id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 }] });
     assert.deepEqual(modelsFor("grok").map((m) => m.id), ["grok-4.6"], "live inventory replaces stock: grok-build is gone when the CLI does not list it");
-    assert.deepEqual(modelsFor("claude").map((m) => m.id).length, 6, "other providers keep stock");
+    assert.deepEqual(modelsFor("claude").map((m) => m.id), ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-sonnet-4-6"], "other providers keep stock, ids and order");
     applyVendorCatalog({ grok: [] });
     assert.deepEqual(modelsFor("grok").map((m) => m.id), ["grok-4.6", "grok-4.5", "grok-build"], "an empty live list means stock, not nothing");
     // findModel falls back to the stock catalog for an id the live list dropped.
@@ -115,19 +136,33 @@ test("Cursor: every real variant resolves to itself; only the three retired spel
   assert.equal(resolveCursorModel("grok-4.6"), "cursor-grok-4.6-high");
   assert.equal(resolveCursorModel("auto-smart"), "auto");
   assert.equal(resolveCursorModel(" composer-2.5 "), "composer-2.5");
-  assert.equal(resolveCursorModel(""), resolveCursorModel(undefined));
+  // Each pinned to the literal default, not to each other: asserting they are
+  // equal would stay green if all three started returning something else.
+  assert.equal(resolveCursorModel(""), "composer-2.5");
+  assert.equal(resolveCursorModel(undefined), "composer-2.5");
   assert.equal(resolveCursorModel(null), "composer-2.5", "no model means the Cursor default, composer-2.5");
+  assert.equal(resolveCursorModel("   "), "composer-2.5", "whitespace is no model");
   // An id Cursor has never listed is passed through as asked — no substitution.
   assert.equal(resolveCursorModel("made-up-model-x"), "made-up-model-x");
 });
 
 test("hydration: a stored chat or message keeps its model; an unknown id is kept, a missing one gets the provider default", () => {
+  // Against the literal id, not against normalizeModelId's own output: if both
+  // sides call the function under test they move together and the loop stays
+  // green while a live id is silently rewritten. Every corpus id is one
+  // normalization maps to itself — the injectivity test above is what proves
+  // that separately, so this loop can hold the literal.
   for (const { providerId, runtimeModelId } of CORPUS.variants) {
     const session = normalizeSession({ id: "s1", provider: providerId, model: runtimeModelId, messages: [] });
-    assert.equal(session?.model, normalizeModelId(providerId, runtimeModelId), `${providerId}/${runtimeModelId}`);
+    assert.equal(session?.model, runtimeModelId, `${providerId}/${runtimeModelId} survives hydration unchanged`);
     const message = normalizeMessage({ id: "m1", role: "assistant", text: "x", createdAt: 1, provider: providerId, model: runtimeModelId });
-    assert.equal(message?.model, normalizeModelId(providerId, runtimeModelId));
+    assert.equal(message?.model, runtimeModelId);
   }
+  // A retired Cursor spelling on a message hydrates the way it does on a chat.
+  assert.equal(
+    normalizeMessage({ id: "m2", role: "assistant", text: "x", createdAt: 1, provider: "cursor", model: "grok-4.6" })?.model,
+    "cursor-grok-4.6-high",
+  );
   assert.equal(normalizeSession({ id: "s2", provider: "grok", model: "grok-9-preview", messages: [] })?.model, "grok-9-preview", "unknown ids survive a restart unchanged");
   assert.equal(normalizeSession({ id: "s3", provider: "grok", messages: [] })?.model, "grok-4.6", "a missing model hydrates to the provider default");
   assert.equal(normalizeSession({ id: "s4", provider: "cursor", model: "grok-4.6", messages: [] })?.model, "cursor-grok-4.6-high", "a retired Cursor spelling hydrates to the current one");
@@ -138,7 +173,30 @@ test("hydration: a stored chat or message keeps its model; an unknown id is kept
   assert.match(store, /function normalizeChoice\(raw: unknown\)[\s\S]{0,400}normalizeModelId\(\s*provider,\s*typeof record\.model === "string" && record\.model \? record\.model : defaultModel\(provider\)\.id,\s*\)/);
 });
 
-test("usage keys: lowercase, whitespace to dashes, injective over the corpus, and the usage ledger keeps the id it was given", () => {
+test("usage: the stored ledger keeps every id it was given, and usage keys stay injective over the corpus", () => {
+  // The ledger path itself, not just the key helper: normalizeUsage is what
+  // every stored event passes through on load, and it calls normalizeModelId.
+  const stored = normalizeUsage(
+    CORPUS.variants.map((row, index) => ({
+      id: `u${index}`,
+      at: 1,
+      provider: row.providerId,
+      model: row.runtimeModelId,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })),
+  );
+  assert.equal(stored.length, CORPUS.variants.length, "no stored event is dropped");
+  for (const [index, row] of CORPUS.variants.entries()) {
+    assert.equal(stored[index]?.model, row.runtimeModelId, `${row.providerId}/${row.runtimeModelId} survives the ledger unchanged`);
+    assert.equal(stored[index]?.provider, row.providerId);
+  }
+  // A retired Cursor spelling in an old ledger row is folded on load.
+  const retired = normalizeUsage([{ id: "u_old", at: 1, provider: "cursor", model: "grok-4.6", inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }]);
+  assert.equal(retired[0]?.model, "cursor-grok-4.6-high");
+
   const keys = new Map<string, string>();
   for (const { providerId, runtimeModelId } of CORPUS.variants) {
     const key = `${providerId}|${usageModelKey(runtimeModelId)}`;
@@ -202,10 +260,21 @@ test("Routing Off / a manual pin never routes: the gate is the chat's own mode, 
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "rewrite this" }), true);
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "/model grok-4.5" }), false, "a slash command is never routed");
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "hi", hideUser: true }), false, "a hidden desk turn is never routed");
-  // The store substitutes a model only inside that gate, and nowhere else.
+  // One gate in the whole product, not just in store.tsx: a second call
+  // anywhere under src/ or electron/ would be another way in.
+  const productionCalls = execFileSync("git", ["grep", "-n", "shouldRouteSessionTurn(", "--", "src", "electron"], { cwd: ROOT, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .filter((line) => !/routing\.ts:\d+:export function/.test(line));
+  // The file, not the line: a line number drifts every time anything above it
+  // grows, which is noise. "Exactly one gate, and it is in the store" is the
+  // property worth failing on.
+  assert.deepEqual(
+    productionCalls.map((line) => line.split(":")[0]),
+    ["src/lib/store.tsx"],
+    `exactly one production call site; found:\n${productionCalls.join("\n")}`,
+  );
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  const gates = store.match(/shouldRouteSessionTurn\(/g) ?? [];
-  assert.equal(gates.length, 1, "exactly one call site");
   assert.match(store, /if \(shouldRouteSessionTurn\(\{ routingMode: session\.routingMode, text: originalText, hideUser \}\)\) \{/);
 });
 

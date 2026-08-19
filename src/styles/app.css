@@ -1575,6 +1575,15 @@ html.pane-dragging * {
   overflow-y: auto;
   padding: 28px 22px 20px;
   overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-stack {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .transcript-earlier {

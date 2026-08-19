@@ -5634,8 +5634,12 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
   assert.match(pane, /transcriptPaintStart/);
   assert.match(pane, /shownBlocks\.map/);
+  assert.match(pane, /transcript-stack/);
+  assert.match(pane, /useLayoutEffect/);
   assert.match(pane, /startTransition/);
   assert.match(pane, /requestAnimationFrame\(tick\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /justify-content: flex-end/);
   assert.equal(transcriptPaintStart(4), 0);
   assert.equal(transcriptPaintStart(26), 22);
   assert.equal(nextTranscriptPaintStart(22), 20);

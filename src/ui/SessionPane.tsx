@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
@@ -180,10 +180,24 @@ export function SessionPane() {
     followBottom.current = true;
   }, [session?.id]);
 
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const pin = () => {
+      if (followBottom.current) el.scrollTop = el.scrollHeight;
+    };
+    pin();
+    const stack = el.firstElementChild;
+    if (!(stack instanceof HTMLElement) || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(pin);
+    observer.observe(stack);
+    return () => observer.disconnect();
+  }, [session?.id, paintFrom, shownBlocks.length]);
+
   useEffect(() => {
     const el = scroller.current;
     if (el && followBottom.current) el.scrollTop = el.scrollHeight;
-  }, [session?.messages, session?.status]);
+  }, [session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
     const thread = scroller.current;
@@ -299,6 +313,7 @@ export function SessionPane() {
           if (el) followBottom.current = pinnedToBottom(el);
         }}
       >
+        <div className="transcript-stack">
         {paintFrom > 0 ? (
           <div className="transcript-earlier" aria-hidden="true">
             Loading earlier turns…
@@ -363,6 +378,7 @@ export function SessionPane() {
             </article>
           );
         })}
+        </div>
       </div>
       <div className={`session-edits-slot${editsBarOpen ? " open" : ""}`}>
         <div className="session-edits">

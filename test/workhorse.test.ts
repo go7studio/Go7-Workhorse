@@ -8292,7 +8292,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /admitSpawn/);
-  assert.match(store, /formatWorkerPrompt/);
+  assert.match(store, /vendorTextForSpawn/);
   assert.match(store, /spawnWaitsForReply/);
   assert.match(store, /await-agents/);
   assert.match(store, /awaitAgentsWaits/);
@@ -8366,7 +8366,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.equal(looksLikePermissionQuestion(workerBrief), false);
   assert.match(
     readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"),
-    /formatWorkerPrompt\(\{[\s\S]*?folder: childCwd,/,
+    /vendorTextForSpawn\(\{[\s\S]*?folder: childCwd,/,
   );
   const missionBrief = formatWorkerPrompt({
     fromTitle: "Walt",

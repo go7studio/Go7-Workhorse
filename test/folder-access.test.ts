@@ -91,8 +91,8 @@ test("mac release packaging refuses an identity that would retrigger Keychain ap
  */
 test("mac release packaging rejects a CSC_NAME carrying a certificate type", () => {
   for (const name of [
-    "Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
-    "Apple Distribution: Moonlight Capital LLC",
+    "Developer ID Application: Example Studio LLC (TEAM123456)",
+    "Apple Distribution: Example Studio LLC",
     "Apple Development: Someone",
     "3rd Party Mac Developer Application: Someone",
   ]) {
@@ -114,19 +114,19 @@ test("mac release packaging rejects a CSC_NAME carrying a certificate type", () 
 test("a release is verified against the signature it produced, not the env", () => {
   const developerId = [
     "Executable=/tmp/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
-    "Authority=Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
+    "Authority=Developer ID Application: Example Studio LLC (TEAM123456)",
     "Authority=Developer ID Certification Authority",
     "Authority=Apple Root CA",
   ].join("\n");
   assert.equal(afterSign.developerIdProblem(developerId), null);
   assert.equal(
     afterSign.assertDeveloperIdSignature("/tmp/app", () => ({ stderr: developerId })),
-    "Developer ID Application: Moonlight Capital LLC (F6Y5HMGMHD)",
+    "Developer ID Application: Example Studio LLC (TEAM123456)",
   );
 
   // An App Store identity signs happily and is refused outside the store.
   assert.match(
-    afterSign.developerIdProblem("Authority=Apple Distribution: Moonlight Capital LLC") ?? "",
+    afterSign.developerIdProblem("Authority=Apple Distribution: Example Studio LLC") ?? "",
     /signed by "Apple Distribution/,
   );
   assert.match(afterSign.developerIdProblem("Signature=adhoc") ?? "", /ad-hoc/);

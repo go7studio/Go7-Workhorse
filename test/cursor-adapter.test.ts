@@ -258,7 +258,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
 
 test("cursorAboutLoggedIn reads the official about table", () => {
   assert.equal(cursorAboutLoggedIn("User Email          Not logged in"), false);
-  assert.equal(cursorAboutLoggedIn("User Email          sgovoni@gmail.com\nSubscription Tier   Ultra"), true);
+  assert.equal(cursorAboutLoggedIn("User Email          someone@example.test\nSubscription Tier   Ultra"), true);
   assert.equal(cursorAboutLoggedIn("CLI Version         2026.08.11-e8db854"), undefined);
 });
 

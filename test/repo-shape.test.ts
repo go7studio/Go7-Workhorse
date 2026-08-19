@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -84,6 +85,38 @@ test("the repository keeps its shape", () => {
   // A symlink committed once pointed at one developer's disk.
   const links = files.filter((f) => f.mode === "120000").map((f) => f.file);
   assert.deepEqual(links, [], `tracked symlinks: ${links.join(", ")}`);
+});
+
+/**
+ * Identity that belongs to the studio, not the product. The signing Team ID and
+ * the legal company name were committed in a test on 2026-08-17 — the CI secret
+ * scan could not catch it, because that scan skips *.test.ts, which is exactly
+ * where it was. A fork should be able to read every line here and still not be
+ * able to pose as the publisher.
+ */
+const PRIVATE_IDENTITY = [
+  { rx: /F6Y5HMGMHD/, why: "Apple Team ID — use TEAM123456 in fixtures" },
+  { rx: /Moonlight Capital/, why: "the publishing company's legal name — use Example Studio LLC" },
+  { rx: /sgovoni@/i, why: "a real address — use someone@example.test" },
+];
+
+test("no studio identity is committed, including in tests", () => {
+  const offenders: string[] = [];
+  for (const { file } of tracked()) {
+    if (file === "test/repo-shape.test.ts") continue;
+    let text = "";
+    try {
+      // The working tree, not HEAD: this has to fail before the commit that
+      // would leak, not after it.
+      text = readFileSync(path.join(ROOT, file), "utf8");
+    } catch {
+      continue;
+    }
+    for (const rule of PRIVATE_IDENTITY) {
+      if (rule.rx.test(text)) offenders.push(`${file} (${rule.why})`);
+    }
+  }
+  assert.deepEqual(offenders, [], `studio identity in tracked files:\n  ${offenders.join("\n  ")}`);
 });
 
 test("the version is a single semantic version, and the changelog knows it", async () => {

@@ -32,7 +32,7 @@ function assertStableReleaseIdentity(env = process.env) {
   );
   if (requiresStableIdentity(env) && typePrefix) {
     throw new Error(
-      `Remove "${typePrefix[1]}:" from CSC_NAME. electron-builder chooses the certificate type and rejects a name that names one; leave the common name only, such as "Moonlight Capital LLC (TEAMID1234)".`,
+      `Remove "${typePrefix[1]}:" from CSC_NAME. electron-builder chooses the certificate type and rejects a name that names one; leave the common name only, such as "Example Studio LLC (TEAM123456)".`,
     );
   }
   const hasAppleIdCredentials = [env.APPLE_ID, env.APPLE_APP_SPECIFIC_PASSWORD, env.APPLE_TEAM_ID]

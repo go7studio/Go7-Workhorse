@@ -110,13 +110,15 @@ jobs:
           # Only a release has to be signed and notarized. Demanding a
           # certificate for a test build would mean never getting one.
           WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
-          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          MAC_CSC_NAME: ${{ secrets.MAC_CSC_NAME }}
-          MAC_APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
-          MAC_APP_SPECIFIC_PASSWORD: ${{ secrets.MAC_APP_SPECIFIC_PASSWORD }}
-          MAC_APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
-        # A signing variable is exported only when its secret has a value.
+          MAC_CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          MAC_CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          MAC_CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
+          MAC_APPLE_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_ID || '' }}
+          MAC_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_APP_SPECIFIC_PASSWORD || '' }}
+          MAC_APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_APPLE_TEAM_ID || '' }}
+        # The Windows leg never sees the certificate: these resolve to '' off
+        # macOS, so signing material is only materialised on the job that
+        # signs. A signing variable is then exported only when it has a value.
         # electron-builder treats CSC_LINK="" as a path, resolves it to the
         # checkout, and dies with "not a file" — which is what a missing secret
         # used to look like. Unset, it falls back to an ad-hoc signature for a

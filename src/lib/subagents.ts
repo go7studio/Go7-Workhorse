@@ -993,6 +993,95 @@ export type MissionContinuationDecision =
   | { ok: true; mission: MissionIteration }
   | { ok: false; error: string };
 
+/**
+ * Role of a worker inside a mission pass. Coordinator carries the mission
+ * manifest, implementers share the same parent and pass, and supporting
+ * reviewers are siblings spawned without adaptive metadata — they may
+ * legitimately lack `agentRun.mission`, so requiring it on every passed-in
+ * worker would reject a valid continuation.
+ */
+export type MissionParticipantRole = "coordinator" | "implementer" | "supporting-reviewer";
+
+export type MissionParticipant = {
+  sessionId: string;
+  role: MissionParticipantRole;
+};
+
+/**
+ * Classify each worker id as coordinator, implementer, or supporting reviewer.
+ * The coordinator is the one (or one of the ones) that carries the mission
+ * metadata for this pass; implementers are siblings with matching metadata;
+ * supporting reviewers are siblings with no mission field of their own.
+ */
+export function classifyMissionParticipants(
+  sessions: Session[],
+  parentId: string,
+  workerIds: string[],
+  missionId: string,
+  iteration: number,
+): MissionParticipant[] {
+  return workerIds.map((id) => {
+    const session = sessions.find((row) => row.id === id);
+    if (!session || session.parentId !== parentId) {
+      return { sessionId: id, role: "supporting-reviewer" as const };
+    }
+    const ownMission = session.agentRun?.mission;
+    if (ownMission && ownMission.id === missionId && ownMission.iteration === iteration) {
+      // Two coordinator markers today: mission metadata, or being the first
+      // declared worker of this pass. The first declared worker is treated as
+      // the coordinator so a future revision can store the manifest in just
+      // one place instead of duplicating it on every implementer.
+      return { sessionId: id, role: "coordinator" as const };
+    }
+    if (ownMission && ownMission.id !== missionId) {
+      // From a different mission; we cannot accept it under this continuation.
+      return { sessionId: id, role: "supporting-reviewer" as const };
+    }
+    // No mission metadata but parentId matches: a reviewer that joined this
+    // pass without carrying adaptive metadata. Accept it.
+    return { sessionId: id, role: "supporting-reviewer" as const };
+  });
+}
+
+/**
+ * Resolve the mission manifest for a parent. The coordinator is the only
+ * place adaptive metadata is required; implementers and supporting reviewers
+ * are accepted on parentId alone. If no coordinator is present, the call is
+ * not a valid adaptive pass.
+ */
+export function resolveMissionManifest(
+  sessions: Session[],
+  parentId: string,
+  workerIds: string[],
+  previousIteration?: number,
+): { mission: MissionIteration; coordinatorId: string } | { error: string } {
+  if (workerIds.length === 0) return { error: "previous worker ids are required" };
+  const workers = workerIds.map((id) => sessions.find((session) => session.id === id));
+  if (workers.some((worker) => !worker || worker.parentId !== parentId)) {
+    return { error: "unknown worker in this mission" };
+  }
+  const coordinator = workers.find((worker) => worker?.agentRun?.mission?.mode === "adaptive");
+  if (!coordinator || !coordinator.agentRun?.mission) {
+    return { error: "sequential mode was not enabled for this mission" };
+  }
+  const first = coordinator.agentRun.mission;
+  // Every implementer that does carry metadata must agree with the coordinator.
+  for (const worker of workers) {
+    const own = worker?.agentRun?.mission;
+    if (!own) continue; // supporting reviewer; allowed
+    if (own.id !== first.id || own.iteration !== first.iteration) {
+      return { error: "workers are not from one mission pass" };
+    }
+    if (own.maxIterations !== first.maxIterations || own.objective !== first.objective || JSON.stringify(own.acceptanceCriteria) !== JSON.stringify(first.acceptanceCriteria)) {
+      return { error: "workers do not share one mission contract" };
+    }
+  }
+  if (typeof previousIteration === "number" && first.iteration !== Math.floor(previousIteration)) {
+    return { error: "mission pass no longer matches these workers" };
+  }
+  return { mission: first, coordinatorId: coordinator.id };
+}
+
 export function nextMissionIteration(
   sessions: Session[],
   parentId: string,
@@ -1001,29 +1090,16 @@ export function nextMissionIteration(
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
-  const workers = ids.map((id) => sessions.find((session) => session.id === id));
-  if (workers.some((worker) => !worker || worker.parentId !== parentId)) {
+  const manifest = resolveMissionManifest(sessions, parentId, ids, previousIteration);
+  if ("error" in manifest) return { ok: false, error: manifest.error };
+  const first = manifest.mission;
+  if (ids.some((id) => !sessions.find((session) => session.id === id && session.parentId === parentId))) {
     return { ok: false, error: "unknown worker in this mission" };
   }
-  const missions = workers.map((worker) => worker?.agentRun?.mission).filter((mission): mission is MissionIteration => Boolean(mission));
-  if (missions.length !== workers.length || missions.some((mission) => mission.mode !== "adaptive")) {
-    return { ok: false, error: "sequential mode was not enabled for this mission" };
-  }
-  const first = missions[0];
-  if (!first || missions.some((mission) => mission.id !== first.id || mission.iteration !== first.iteration)) {
-    return { ok: false, error: "workers are not from one mission pass" };
-  }
-  if (typeof previousIteration === "number" && first.iteration !== Math.floor(previousIteration)) {
-    return { ok: false, error: "mission pass no longer matches these workers" };
-  }
-  const criteria = JSON.stringify(first.acceptanceCriteria);
-  if (missions.some((mission) => mission.maxIterations !== first.maxIterations || mission.objective !== first.objective || JSON.stringify(mission.acceptanceCriteria) !== criteria)) {
-    return { ok: false, error: "workers do not share one mission contract" };
-  }
-  if (workers.some((worker) => worker?.agentRun?.status === "running")) {
+  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
     return { ok: false, error: "previous mission pass is still running" };
   }
-  if (workers.some((worker) => worker?.agentRun?.status === "interrupted")) {
+  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")) {
     return { ok: false, error: "resume the interrupted worker before continuing the mission" };
   }
   const latest = sessions

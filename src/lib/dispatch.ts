@@ -1,8 +1,9 @@
-import { authorizeExternalCall, isExternalAgentAddress, isStockProviderId, parseExternalAgentRef } from "./agent-runtime";
+import { authorizeExternalCall, isExternalAgentAddress, parseExternalAgentRef } from "./agent-runtime";
 import type { AgentGrant, AgentRuntimeId, RoutingDecision } from "./types";
 
 export type DispatchDecision =
   | { kind: "desk-model"; route: RoutingDecision }
+  | { kind: "desk" }
   | { kind: "external-agent"; runtimeId: AgentRuntimeId; agentId: string }
   | { kind: "refuse"; code: "grant_required" | "not_callable" };
 
@@ -19,13 +20,21 @@ export type DispatchInput = {
   externalCandidates?: import("./types").ExternalAgentRef[];
 };
 
+function namedText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function decideDispatch(input: DispatchInput): DispatchDecision {
+  const namedProvider = namedText(input.namedProvider);
+  const namedModel = namedText(input.namedModel);
+  const namedChat = namedText(input.namedChat);
   const namedDesk =
-    (typeof input.namedProvider === "string" && isStockProviderId(input.namedProvider.trim().toLowerCase())) ||
-    (typeof input.namedModel === "string" && input.namedModel.trim() && !isExternalAgentAddress(input.namedModel)) ||
-    (typeof input.namedChat === "string" && input.namedChat.trim() && !isExternalAgentAddress(input.namedChat));
-  if (namedDesk && !isExternalAgentAddress(input.namedProvider) && input.deskRoute) {
-    return { kind: "desk-model", route: input.deskRoute };
+    (namedProvider && !isExternalAgentAddress(namedProvider)) ||
+    (namedModel && !isExternalAgentAddress(namedModel)) ||
+    (namedChat && !isExternalAgentAddress(namedChat));
+  if (namedDesk) {
+    if (input.deskRoute) return { kind: "desk-model", route: input.deskRoute };
+    return { kind: "desk" };
   }
 
   const explicit =

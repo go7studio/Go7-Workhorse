@@ -210,6 +210,9 @@ export type WorkerRecord = {
   agentRun?: { status?: string };
 };
 
+/** Named worker exists on this parent but is bound to another project or folder. */
+export const WORKER_BOUND_ELSEWHERE_ERROR = "worker_bound_elsewhere";
+
 export type WorkerNameReservation = {
   workerId: string;
   parentId: string;
@@ -290,9 +293,21 @@ export function findReusableWorker(
   );
   const asked = want.name?.trim().toLowerCase();
   if (asked) {
-    // Named is an address: it means that worker or a new one, never a
-    // stranger wearing the name.
-    return mine.find((worker) => worker.workerName?.trim().toLowerCase() === asked) ?? null;
+    // Named is an address. A legacy worker that never received a project
+    // folder binding still is that address — do not invent "Wren 2".
+    const named = workers.filter(
+      (worker) =>
+        worker.hidden &&
+        !worker.archivedAt &&
+        worker.parentId === scope.parentId &&
+        workerIsFree(worker) &&
+        worker.workerName?.trim().toLowerCase() === asked,
+    );
+    return (
+      named.find((worker) => worker.projectId === scope.projectId) ??
+      named.find((worker) => worker.projectId == null) ??
+      null
+    );
   }
   const sameBot = mine.filter(
     (worker) =>
@@ -303,6 +318,69 @@ export function findReusableWorker(
   );
   // The most recently used one knows the most about where this work got to.
   return sameBot.length ? sameBot[sameBot.length - 1] : null;
+}
+
+export type NamedWorkerResolution =
+  | { ok: true; worker: WorkerRecord }
+  | { ok: true; worker: null; createName: string }
+  | { ok: false; error: string };
+
+/**
+ * Resolve an explicit worker name as a durable address.
+ *
+ * Reuse the named worker when it is free on this parent. A missing project
+ * folder on an older save is backfilled. A name already bound to another
+ * project is `worker_bound_elsewhere` — never a silent "Wren 2".
+ */
+export function resolveNamedWorker(
+  want: { name: string; seed?: WorkerSeed },
+  workers: WorkerRecord[],
+  scope: { parentId: string; projectId: string | null },
+): NamedWorkerResolution {
+  const asked = want.name.trim();
+  if (!asked) {
+    return { ok: true, worker: null, createName: nextWorkerName(takenWorkerNames(workers, scope.parentId)) };
+  }
+  if (want.seed === "fresh") {
+    const holder = namedWorkerOnParent(workers, scope.parentId, asked);
+    if (holder) return { ok: false, error: WORKER_BOUND_ELSEWHERE_ERROR };
+    return { ok: true, worker: null, createName: asked };
+  }
+  const reused = findReusableWorker(
+    { name: asked, provider: "grok", model: "", effort: null, seed: want.seed },
+    workers,
+    scope,
+  );
+  if (reused) return { ok: true, worker: reused };
+  const holder = namedWorkerOnParent(workers, scope.parentId, asked);
+  if (holder && holder.projectId != null && holder.projectId !== scope.projectId) {
+    return { ok: false, error: WORKER_BOUND_ELSEWHERE_ERROR };
+  }
+  if (holder && !workerIsFree(holder)) {
+    return { ok: true, worker: null, createName: nextWorkerName(takenWorkerNames(workers, scope.parentId)) };
+  }
+  return { ok: true, worker: null, createName: asked };
+}
+
+function namedWorkerOnParent(
+  workers: WorkerRecord[],
+  parentId: string,
+  name: string,
+): WorkerRecord | undefined {
+  const asked = name.trim().toLowerCase();
+  return workers.find(
+    (worker) =>
+      worker.hidden &&
+      !worker.archivedAt &&
+      worker.parentId === parentId &&
+      worker.workerName?.trim().toLowerCase() === asked,
+  );
+}
+
+function takenWorkerNames(workers: WorkerRecord[], parentId: string): string[] {
+  return workers
+    .filter((worker) => worker.parentId === parentId && worker.workerName)
+    .map((worker) => worker.workerName as string);
 }
 
 /**

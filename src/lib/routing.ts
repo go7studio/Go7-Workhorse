@@ -33,6 +33,8 @@ export type RoutingCandidate = {
 export type RoutingRequest = {
   prompt: string;
   attachments?: ChatImage[];
+  /** Structured input needs. Never inferred from prompt words. */
+  requirements?: Partial<ModelInputCapabilities>;
   tier?: RoutingTaskTier;
   now?: number;
   current?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
@@ -196,6 +198,46 @@ export function attachmentRequirements(attachments: ChatImage[] = []): Partial<M
   return required;
 }
 
+const INPUT_KEYS: (keyof ModelInputCapabilities)[] = ["text", "images", "documents", "audio", "video"];
+
+/**
+ * Hard input needs come only from real attachments or structured requirements.
+ * Prompt words such as UI, visual, or design are expertise hints, not modalities.
+ */
+export function mergeInputRequirements(
+  attachments: ChatImage[] = [],
+  requirements?: Partial<ModelInputCapabilities>,
+): Partial<ModelInputCapabilities> {
+  const required = attachmentRequirements(attachments);
+  if (!requirements) return required;
+  for (const key of INPUT_KEYS) {
+    if (requirements[key]) required[key] = true;
+  }
+  return required;
+}
+
+/** Why rankRoutingCandidates produced no winner. Empty when a route exists. */
+export function describeRoutingMiss(
+  candidates: RoutingCandidate[],
+  request: RoutingRequest,
+  settings: RoutingSettings,
+): string {
+  const required = mergeInputRequirements(request.attachments, request.requirements);
+  if (candidates.length === 0) return "no connected vendors";
+  const connected = candidates.filter((candidate) => candidate.connected);
+  if (connected.length === 0) return "no connected vendors";
+  const allowed = connected.filter((candidate) => settings.allowLocal || !candidate.profile.local);
+  if (allowed.length === 0) return "local models are off";
+  const notExcluded = allowed.filter((candidate) => !routingIdentityExcluded(candidate, request.exclude));
+  if (notExcluded.length === 0) return "all candidates are excluded";
+  const capable = notExcluded.filter((candidate) => supports(candidate.profile, required));
+  if (capable.length === 0) {
+    const need = INPUT_KEYS.filter((key) => required[key]);
+    return `no vendor accepts ${need.join(", ") || "the required inputs"}`;
+  }
+  return "no capable route";
+}
+
 export function inferRoutingTier(prompt: string, attachments: ChatImage[] = []): RoutingTaskTier {
   const text = prompt.trim().toLowerCase();
   const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent)\b/.test(text);
@@ -312,7 +354,7 @@ export function rankRoutingCandidates(
   settings: RoutingSettings,
 ): RankedRoutingCandidate[] {
   const tier = request.tier ?? inferRoutingTier(request.prompt, request.attachments);
-  const required = attachmentRequirements(request.attachments);
+  const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {

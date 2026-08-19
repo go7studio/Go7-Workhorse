@@ -207,6 +207,9 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
   assert.match(initialized.result?.instructions ?? "", /Ordinary delegation is one wave/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_continue_mission/);
+  assert.doesNotMatch(initialized.result?.instructions ?? "", /poll workhorse_agent_status until/);
+  assert.match(initialized.result?.instructions ?? "", /Do not poll workhorse_agent_status/);
+  assert.match(initialized.result?.instructions ?? "", /desk journals the terminal report/);
   assert.ok(initialized.result?.capabilities?.tools);
 });
 

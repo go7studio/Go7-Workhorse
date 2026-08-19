@@ -57,8 +57,10 @@ reasonable default for reading someone else's code.
 
 ## Supply chain
 
-Four runtime dependencies. `npm audit --omit=dev` is clean and CI fails on a
-secret pattern. Releases are built in CI, and installers are attached only when
+Four direct runtime dependencies, seventy-seven packages once their own are
+counted; [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists all of them and
+names any that do not carry a redistributable licence. `npm audit --omit=dev` is
+clean and CI fails on a secret pattern. Releases are built in CI, and installers are attached only when
 both platforms build.
 
 **Verifying a build is ours.** On macOS, `codesign -dvv` on the app names

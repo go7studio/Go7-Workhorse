@@ -129,7 +129,7 @@ The code is MIT, in [LICENSE](LICENSE). The name **Go7 Workhorse** and the horse
 are not — see [TRADEMARKS.md](TRADEMARKS.md). Fork it freely; ship it under your
 own name and icon, so people can tell whose build they are running.
 
-Security policy and what counts as in scope: [SECURITY.md](SECURITY.md).
+Security policy and what counts as in scope: [SECURITY.md](SECURITY.md). What else ships in the installer: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Contributing
 
@@ -160,7 +160,7 @@ npm install
 npm run dist:win
 ```
 
-Run `release/Go7-Workhorse-Setup-<version>.exe` to install the branded **Go7 Workhorse** desktop application. The installer creates Start-menu and Desktop shortcuts and preserves existing projects and chats when updating or uninstalling.
+Run `release/Go7-Workhorse-Setup-<version>.exe` to install the branded **Go7 Workhorse** desktop application. The Windows installer is not code-signed yet, so Windows will warn about an unknown publisher — take it only from [this repository's releases](https://github.com/go7studio/Go7-Workhorse/releases), where the macOS build beside it is signed and notarized. The installer creates Start-menu and Desktop shortcuts and preserves existing projects and chats when updating or uninstalling.
 
 ## Install on macOS
 
@@ -177,7 +177,7 @@ npm install
 npm run dist:mac
 ```
 
-On a Mac, that writes a dmg and a zip per architecture — `release/Go7-Workhorse-<version>-mac-arm64.dmg` for Apple silicon and `-mac-x64.dmg` for Intel — plus the unpacked `Go7 Workhorse.app`. The install script above picks the one matching your Mac. Development runs, including `npm run dev` and local packages, use isolated development data and session-only credentials, so agent-driven tests never touch Keychain or the installed app's vault. Local packages should not be distributed. Release builds require the `MAC_CSC_*` signing secrets and `MAC_APPLE_*` notarization secrets. Vendor CLIs are not bundled.
+On a Mac, that writes a dmg and a zip per architecture — `release/Go7-Workhorse-<version>-mac-arm64.dmg` for Apple silicon and `-mac-x64.dmg` for Intel — plus the unpacked `Go7 Workhorse.app`. The install script above picks the one matching your Mac. Development runs, including `npm run dev` and local packages, use isolated development data and session-only credentials, so agent-driven tests never touch Keychain or the installed app's vault. Local packages should not be distributed. Release builds require the `MAC_CSC_*` signing secrets and `MAC_APPLE_*` notarization secrets. The desk runs the vendor CLI you already have installed, found on your PATH — it never runs a copy of its own. Some vendor packages still arrive as npm dependencies and are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 macOS approval belongs to the signed app identity. One allow sticks across updates with the same bundle ID and Team ID. Local builds cannot open the installed app's vault. Windows keeps the same app identity and encrypted user vault across updates.
 

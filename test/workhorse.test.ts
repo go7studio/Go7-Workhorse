@@ -191,8 +191,10 @@ import {
   groupWorkRows,
   isActiveWorkRow,
   lastReplyIndex,
+  nextTranscriptPaintStart,
   packWorkRows,
   playWorkEvents,
+  transcriptPaintStart,
   resolveWorkedMs,
   thoughtForReply,
   workStepKinds,
@@ -5630,6 +5632,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(popout, /Copy work/);
   assert.match(popout, /unsquashSentences\(text\)/);
   assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
+  assert.match(pane, /transcriptPaintStart/);
+  assert.match(pane, /shownBlocks\.map/);
+  assert.match(pane, /startTransition/);
+  assert.match(pane, /requestAnimationFrame\(tick\)/);
+  assert.equal(transcriptPaintStart(4), 0);
+  assert.equal(transcriptPaintStart(26), 22);
+  assert.equal(nextTranscriptPaintStart(22), 20);
+  assert.equal(nextTranscriptPaintStart(1), 0);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /unsquashSentences\(peeled\.body\)/);

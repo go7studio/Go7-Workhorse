@@ -259,6 +259,19 @@ export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
 export const WORK_PACK_AFTER = 4;
 export const WORK_TAIL = 3;
 
+/** First paint of a chat: last turns only. Older blocks fill in on later frames. */
+export const TRANSCRIPT_FIRST_PAINT = 4;
+export const TRANSCRIPT_PAINT_CHUNK = 2;
+
+export function transcriptPaintStart(total: number, first = TRANSCRIPT_FIRST_PAINT): number {
+  if (total <= first) return 0;
+  return total - first;
+}
+
+export function nextTranscriptPaintStart(from: number, chunk = TRANSCRIPT_PAINT_CHUNK): number {
+  return Math.max(0, from - chunk);
+}
+
 export function workRowToolCount(row: GroupedWorkRow): number {
   return row.type === "tools" ? row.items.length : 0;
 }

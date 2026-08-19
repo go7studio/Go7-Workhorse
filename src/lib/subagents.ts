@@ -1450,6 +1450,52 @@ export function workerMayWrite(role?: DeskRole): boolean {
   return role !== "auditor";
 }
 
+export type CancelWorkerResult = {
+  sessions: Session[];
+  found: boolean;
+  alreadyTerminal: boolean;
+  worker?: Session;
+};
+
+/**
+ * The state half of cancelling a worker, with no side effects.
+ *
+ * The desk also has to authorise the caller and stop the vendor process, and
+ * both of those belong to the store. Keeping the transition itself pure is what
+ * makes cancellation testable: idempotent on an already-terminal run, and it
+ * never discards the messages or reports a cancelled worker already produced.
+ */
+export function applyCancelWorker(sessions: Session[], workerId: string, now = Date.now()): CancelWorkerResult {
+  const worker = sessions.find((session) => session.id === workerId && Boolean(session.parentId));
+  if (!worker) return { sessions, found: false, alreadyTerminal: false };
+  const existing = worker.agentRun;
+  if (existing && existing.status !== "running") {
+    return { sessions, found: true, alreadyTerminal: true, worker };
+  }
+  const next = sessions.map((session) => {
+    if (session.id !== worker.id) return session;
+    const baseRun: AgentRun = session.agentRun
+      ? { ...session.agentRun }
+      : { status: "running", startedAt: now, isolation: "shared" };
+    return {
+      ...session,
+      status: "idle" as const,
+      agentRun: {
+        ...baseRun,
+        status: "cancelled" as const,
+        finishedAt: now,
+        error: baseRun.error?.trim() ? baseRun.error : "Cancelled by the orchestrator before the worker finished.",
+      },
+    };
+  });
+  return {
+    sessions: next,
+    found: true,
+    alreadyTerminal: false,
+    worker: next.find((session) => session.id === worker.id),
+  };
+}
+
 export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;

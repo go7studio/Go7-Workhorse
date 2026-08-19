@@ -177,6 +177,7 @@ import {
 } from "./lineup";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
 import {
+  applyCancelWorker,
   admitSpawn,
   collectChildAgentReports,
   deskRoleOf,
@@ -3991,24 +3992,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   cancelVendorSession(worker);
                 }
                 const finishedAt = Date.now();
+                // The transition itself is pure and lives in subagents so it can
+                // be tested without a desk. Authorising the caller and stopping
+                // the vendor stay here, because both are side effects.
                 setState((currentState) => ({
                   ...currentState,
-                  sessions: currentState.sessions.map((session) => {
-                    if (session.id !== worker.id) return session;
-                    const baseRun: AgentRun = session.agentRun
-                      ? { ...session.agentRun }
-                      : { status: "running", startedAt: finishedAt, isolation: "shared" };
-                    return {
-                      ...session,
-                      status: "idle",
-                      agentRun: {
-                        ...baseRun,
-                        status: "cancelled" as const,
-                        finishedAt,
-                        error: baseRun.error?.trim() ? baseRun.error : "Cancelled by the orchestrator before the worker finished.",
-                      },
-                    };
-                  }),
+                  sessions: applyCancelWorker(currentState.sessions, worker.id, finishedAt).sessions,
                 }));
                 const settled = stateRef.current.sessions.find((session) => session.id === worker.id);
                 if (!settled) {

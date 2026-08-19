@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { applyCancelWorker } from "../src/lib/subagents";
+import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STORE = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -45,22 +47,34 @@ test("cancel-agent dispatcher actually stops the vendor run", () => {
 });
 
 test("cancel-agent dispatcher marks the worker terminal and preserves partial work", () => {
-  const block = extractCancelAgentBlock(STORE);
-  assert.match(
-    block,
-    /status:\s*"cancelled"\s*as\s*const/,
-    "the worker agentRun must end in the terminal `cancelled` status",
+  // The state transition lives in applyCancelWorker so it can be exercised
+  // directly. The store still owns authorising the caller and stopping the
+  // vendor; those stay covered by the source checks above.
+  const worker = {
+    id: "sess_child",
+    parentId: "sess_parent",
+    title: "Wren \u00b7 slice",
+    messages: [{ id: "m1", role: "assistant", text: "partial work", createdAt: 1 }],
+    agentRun: { status: "running", startedAt: 1, isolation: "worktree" },
+  } as unknown as Session;
+
+  const out = applyCancelWorker([worker], "sess_child", 4_242);
+  assert.equal(out.found, true);
+  assert.equal(out.alreadyTerminal, false);
+  const run = out.worker?.agentRun;
+  assert.equal(run?.status, "cancelled", "the worker agentRun must end in the terminal `cancelled` status");
+  assert.equal(run?.finishedAt, 4_242, "the worker agentRun must carry a finishedAt timestamp");
+  assert.equal(
+    out.worker?.messages.length,
+    1,
+    "cancelling must preserve the partial work the worker already produced",
   );
-  assert.match(
-    block,
-    /finishedAt/,
-    "the worker agentRun must carry a finishedAt timestamp",
-  );
-  assert.match(
-    block,
-    /isolation:\s*"shared"/,
-    "a freshly cancelled worker with no prior agentRun still records a valid run envelope",
-  );
+
+  // A worker with no prior agentRun still records a valid run envelope.
+  const bare = { id: "sess_bare", parentId: "sess_parent", messages: [] } as unknown as Session;
+  const bareOut = applyCancelWorker([bare], "sess_bare", 7);
+  assert.equal(bareOut.worker?.agentRun?.isolation, "shared");
+  assert.equal(bareOut.worker?.agentRun?.status, "cancelled");
 });
 
 test("cancel-agent dispatcher is idempotent on a second call", () => {

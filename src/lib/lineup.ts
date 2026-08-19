@@ -54,9 +54,12 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<DeskLineupRow>;
   if (typeof record.childId !== "string" || !record.childId.trim()) return null;
+  // An unrecognised status is not a running worker. Defaulting to "running"
+  // made a lineup keep advertising slices that were already dead, so a caller
+  // reading the lineup saw work in flight that had finished or failed.
   const status = ROW_STATUSES.includes(record.status as DeskLineupRowStatus)
     ? (record.status as DeskLineupRowStatus)
-    : "running";
+    : "unknown";
   return {
     childId: record.childId.trim(),
     title: typeof record.title === "string" ? record.title : "Worker",

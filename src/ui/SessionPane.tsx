@@ -6,13 +6,14 @@ import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
+import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
 import {
-  displayWorkSteps,
   createTranscriptGrouper,
   isDeskNotice,
   lastReplyIndex,
-  nextTranscriptPaintStart,
   recentTranscriptText,
+  scheduleAfterPaint,
+  startTranscriptFill,
   transcriptPaintStart,
   type TranscriptBlock,
 } from "../lib/turns";
@@ -35,14 +36,23 @@ import { TurnActions } from "./TurnActions";
 import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
-import { pinChangesDock } from "../lib/session-dock";
+import { pinNoticesDock } from "../lib/session-dock";
 import { followLatestTurn, pinnedToLatest, pinToLatest } from "../lib/transcript-scroll";
-import type { AppState, ProviderId, Session } from "../lib/types";
+import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
 const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
   if (isDeskNotice(block.message)) return null;
+  if (block.message.text === LINEUP_FINISHED_NOTICE) {
+    return (
+      <article className="turn crew-done" aria-label={LINEUP_FINISHED_NOTICE}>
+        <div className="crew-done-card">
+          <strong>{LINEUP_FINISHED_NOTICE}</strong>
+        </div>
+      </article>
+    );
+  }
   return (
     <article className="turn system chat">
       <div className="say"><MessageBody text={block.message.text} /></div>
@@ -59,7 +69,6 @@ const AssistantTurn = memo(function AssistantTurn({
   settings,
   cwd,
   vendorSessionId,
-  sessions,
   onFork,
   onOpenThread,
 }: {
@@ -71,13 +80,11 @@ const AssistantTurn = memo(function AssistantTurn({
   settings: AppState["settings"];
   cwd: string;
   vendorSessionId?: string;
-  sessions?: Session[];
   onFork: (id: string) => void;
   onOpenThread: (id: string) => void;
 }) {
   const assistantText = block.assistant.text ?? "";
   const peeled = peelPlanningPreamble(assistantText, live);
-  const steps = displayWorkSteps(block, { live });
   const body = unsquashSentences(peeled.body);
   const who = brainCaption(
     messageBrain(block.assistant, { provider, model, ...(customBotId ? { customBotId } : {}) }),
@@ -91,8 +98,8 @@ const AssistantTurn = memo(function AssistantTurn({
         {who.name}
       </div>
       <WorkPopout
-        steps={steps}
-        sessions={sessions}
+        block={block}
+        peeled={peeled}
         startedAt={block.assistant.createdAt}
         workedMs={block.assistant.workedMs}
         live={live}
@@ -129,6 +136,8 @@ export function SessionPane() {
   const [editsBarOpen, setEditsBarOpen] = useState(false);
   const [editsIdle, setEditsIdle] = useState(false);
   const [paint, setPaint] = useState({ id: "", from: 0 });
+  const [openFor, setOpenFor] = useState("");
+  const [wantEarlier, setWantEarlier] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
@@ -158,11 +167,19 @@ export function SessionPane() {
     if (!session || !editsIdle) return extraEdits;
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
-  const blocks = session ? transcriptGrouper.current.group(session.messages) : [];
-  const nearby = useMemo(() => recentTranscriptText(session?.messages ?? []), [session?.messages]);
   const sessionId = session?.id ?? "";
-  const paintFrom = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
-  const shownBlocks = blocks.slice(paintFrom);
+  const transcriptOpen = openFor === sessionId;
+  const blocks = transcriptOpen && session ? transcriptGrouper.current.group(session.messages) : [];
+  const nearby = useMemo(
+    () => (transcriptOpen ? recentTranscriptText(session?.messages ?? []) : ""),
+    [session?.messages, transcriptOpen],
+  );
+  const paintFrom = !transcriptOpen
+    ? 0
+    : paint.id === sessionId
+      ? paint.from
+      : transcriptPaintStart(blocks.length);
+  const shownBlocks = transcriptOpen ? blocks.slice(paintFrom) : [];
   const hiddenPaths = session ? hiddenByChat[session.id] : undefined;
   const visible = useMemo(
     () => edits.filter((item) => !(hiddenPaths ?? []).some((path) => sameEditPath(path, item.path))),
@@ -191,24 +208,43 @@ export function SessionPane() {
   }, [session?.id]);
 
   useEffect(() => {
+    if (!sessionId) return;
+    setWantEarlier(false);
+    return scheduleAfterPaint(
+      () => startTransition(() => setOpenFor(sessionId)),
+      {
+        frame: (cb) => requestAnimationFrame(cb),
+        cancelFrame: (id) => cancelAnimationFrame(id),
+        later: (cb) => window.setTimeout(cb, 0),
+        cancelLater: (id) => window.clearTimeout(id),
+      },
+    );
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!transcriptOpen) return;
     const initial = transcriptPaintStart(blocks.length);
     setPaint({ id: sessionId, from: initial });
-    if (!sessionId || initial === 0) return;
-    let current = initial;
-    let frame = 0;
-    let gone = false;
-    const tick = () => {
-      if (gone) return;
-      current = nextTranscriptPaintStart(current);
-      startTransition(() => setPaint({ id: sessionId, from: current }));
-      if (current > 0) frame = requestAnimationFrame(tick);
+  }, [sessionId, transcriptOpen]);
+
+  useEffect(() => {
+    if (!transcriptOpen || !wantEarlier) return;
+    const from = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
+    if (!sessionId || from === 0) return;
+    const whenIdle = (cb: () => void) =>
+      typeof requestIdleCallback === "function"
+        ? requestIdleCallback(() => cb(), { timeout: 240 })
+        : window.setTimeout(cb, 32);
+    const cancelIdle = (id: number) => {
+      if (typeof cancelIdleCallback === "function") cancelIdleCallback(id);
+      else window.clearTimeout(id);
     };
-    frame = requestAnimationFrame(tick);
-    return () => {
-      gone = true;
-      cancelAnimationFrame(frame);
-    };
-  }, [sessionId]);
+    return startTranscriptFill(
+      from,
+      (next) => startTransition(() => setPaint({ id: sessionId, from: next })),
+      { whenIdle, cancelIdle },
+    );
+  }, [sessionId, transcriptOpen, wantEarlier]);
 
   useEffect(() => {
     fetchedStats.current = {};
@@ -267,30 +303,50 @@ export function SessionPane() {
     const content = stack.current;
     const wrap = pane.current?.querySelector(".composer-wrap");
     if (!thread || typeof ResizeObserver === "undefined") return;
+    let skipPin = false;
+    let skipClear = 0;
+    const onToggle = (event: Event) => {
+      const node = event.target;
+      if (!(node instanceof HTMLElement)) return;
+      if (!node.classList.contains("work-pop") && !node.classList.contains("work-fold")) return;
+      skipPin = true;
+      if (skipClear) cancelAnimationFrame(skipClear);
+      skipClear = requestAnimationFrame(() => {
+        skipClear = requestAnimationFrame(() => {
+          skipPin = false;
+          skipClear = 0;
+        });
+      });
+    };
     const pin = () => {
+      if (skipPin) return;
       if (followBottom.current) pinToLatest(thread);
     };
     const observer = new ResizeObserver(pin);
+    thread.addEventListener("toggle", onToggle, true);
     if (content) observer.observe(content);
     if (wrap instanceof HTMLElement) observer.observe(wrap);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      thread.removeEventListener("toggle", onToggle, true);
+      if (skipClear) cancelAnimationFrame(skipClear);
+    };
   }, [session?.id]);
 
   useEffect(() => {
     const col = pane.current?.querySelector(".session-col");
     if (!(col instanceof HTMLElement)) return;
+    const notices = col.querySelector(".session-notices");
     const pin = () => {
-      const block = col.querySelector(".session-edits .edited-block");
-      pinChangesDock(col, block instanceof HTMLElement ? block : null);
+      pinNoticesDock(col, notices instanceof HTMLElement ? notices : null);
     };
     pin();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(pin);
     observer.observe(col);
-    const block = col.querySelector(".session-edits .edited-block");
-    if (block instanceof HTMLElement) observer.observe(block);
+    if (notices instanceof HTMLElement) observer.observe(notices);
     return () => observer.disconnect();
-  }, [session?.id, editsBarOpen, displayEdits.length]);
+  }, [session?.id]);
 
   if (!session) return null;
   const closeFilePane = () => {
@@ -410,9 +466,13 @@ export function SessionPane() {
       >
         <div className="transcript-stack" ref={stack}>
         {paintFrom > 0 ? (
-          <div className="transcript-earlier" aria-hidden="true">
-            Loading earlier turns…
-          </div>
+          <button
+            className="transcript-earlier"
+            type="button"
+            onClick={() => setWantEarlier(true)}
+          >
+            Load earlier turns…
+          </button>
         ) : null}
         {shownBlocks.map((block, offset) => {
           const index = paintFrom + offset;
@@ -432,7 +492,6 @@ export function SessionPane() {
               settings={store.settings}
               cwd={cwd}
               vendorSessionId={session.vendorSessionId}
-              sessions={block.subagents.length ? store.sessions : undefined}
               onFork={store.forkFrom}
               onOpenThread={store.selectSession}
             />
@@ -440,7 +499,7 @@ export function SessionPane() {
         })}
         </div>
       </div>
-      <div className={`session-edits-slot${editsBarOpen ? " open" : ""}`}>
+      <div className={`session-edits-slot${editsBarOpen ? " open" : ""}${setupOpen ? " away" : ""}`}>
         <div className="session-edits">
           {displayEdits.length > 0 ? (
             <EditedList

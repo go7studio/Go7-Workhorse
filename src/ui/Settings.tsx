@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
-import { vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
+import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
@@ -666,7 +666,9 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           {probing
             ? "Testing API…"
             : probeNote ||
-              `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`}
+              (!bot.apiKey?.trim()
+                ? "This key isn't stored. Paste it again to track leftover and send on this bot."
+                : `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`)}
         </p>
       </div>
       <div className="actions add-bot-actions">
@@ -817,15 +819,27 @@ function AgentSystemsBlock() {
       <label className="settings-row">
         <div className="settings-row-copy">
           <strong>Inbound parent</strong>
-          <span>Unnamed inbound work lands under this chat.</span>
+          <span>
+            When OpenClaw or Hermes spawns a worker here without naming a chat, a new chat is created there. Chats is
+            the default. Pick a project to land it in that project, or a thread to nest under that chat.
+          </span>
         </div>
         <div className="settings-control">
           <select
-            value={store.settings.agentSystems?.inboundSessionId ?? ""}
-            onChange={(event) => store.updateAgentSystems({ inboundSessionId: event.target.value || undefined })}
-            aria-label="Inbound parent chat"
+            value={inboundParentSelectValue(store.settings.agentSystems)}
+            onChange={(event) => store.updateAgentSystems(agentSystemsFromInboundSelect(event.target.value))}
+            aria-label="Inbound parent"
           >
-            <option value="">None</option>
+            <option value="">Chats</option>
+            {store.projects.length > 0 ? (
+              <optgroup label="Projects">
+                {store.projects.map((project) => (
+                  <option key={project.id} value={`project:${project.id}`}>
+                    {project.name}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
             {groups.map((group) => (
               <optgroup key={group.project.id} label={group.project.name}>
                 {group.chats.map((session) => (

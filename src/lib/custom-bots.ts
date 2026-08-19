@@ -191,7 +191,10 @@ export function findCustomBot(bots: CustomBot[], id?: string | null): CustomBot 
  * it serves, not only the one it starts on; the bot's own model still wins if
  * two connections happen to list the same id.
  */
-export function findCustomBotByModel(bots: CustomBot[], model?: string | null): CustomBot | undefined {
+export function findCustomBotByModel<T extends Pick<CustomBot, "id" | "model" | "models">>(
+  bots: T[],
+  model?: string | null,
+): T | undefined {
   if (!model) return undefined;
   return (
     bots.find((bot) => bot.model === model || bot.id === model) ??

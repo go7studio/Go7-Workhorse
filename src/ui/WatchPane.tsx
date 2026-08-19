@@ -11,7 +11,11 @@ function dayCopy(row: ReturnType<typeof watchVendorStatuses>[number]): string {
     return [day, `${Math.round(row.overPercent)}% over`].filter(Boolean).join(" · ");
   }
   if (row.holding) return [day, "Locked"].filter(Boolean).join(" · ");
-  if (used == null) return [day, `${allowed}% bank`].filter(Boolean).join(" · ");
+  if (used == null) {
+    if (row.ringLabel === "∞") return [day, "∞"].filter(Boolean).join(" · ");
+    if (row.ringLabel) return [day, `${row.ringLabel} left`].filter(Boolean).join(" · ");
+    return [day, `${allowed}% bank`].filter(Boolean).join(" · ");
+  }
   return [day, `${Math.round(used)} / ${allowed}%`].filter(Boolean).join(" · ");
 }
 
@@ -66,6 +70,8 @@ export function WatchPane() {
         <div className={`usage-brains watch-brains${picking ? "" : " off"}`}>
           {statuses.map((row, index) => {
             const leftover = row.leftover;
+            const ringValue = leftover != null ? leftover / 100 : row.ringLeft != null ? row.ringLeft / 100 : undefined;
+            const ringLabel = leftover != null ? `${Math.round(leftover)}%` : row.ringLabel;
             const fill = watchDayFill(row);
             const picked = watchPicksKey(watch, row.key);
             return (
@@ -87,13 +93,13 @@ export function WatchPane() {
                 }
               >
                 <FuelRing
-                  value={leftover != null ? leftover / 100 : undefined}
+                  value={ringValue}
                   size={104}
                   tone={row.provider}
                   color={row.color}
                   delay={index * 90}
                   over={row.overPercent > 0 ? Math.min(1, row.overPercent / 100) : 0}
-                  label={leftover != null ? `${Math.round(leftover)}%` : "…"}
+                  label={ringLabel ?? "…"}
                 />
                 <span>{row.label}</span>
                 <em>{dayCopy(row)}</em>

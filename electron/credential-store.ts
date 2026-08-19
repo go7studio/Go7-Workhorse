@@ -33,6 +33,11 @@ export class CredentialStore {
     return this.encryptionAvailable;
   }
 
+  /** False in Dev / test volatile mode: secrets stay in process memory only. */
+  persists(): boolean {
+    return !this.memoryOnly;
+  }
+
   put(secret: string, preferredId?: string): string {
     const value = secret.trim();
     if (!value) throw new Error("Cannot store an empty credential.");
@@ -134,7 +139,9 @@ function secureRow(row: LooseRecord, vault: CredentialStore, fallbackId: string)
   let credentialId = typeof row.credentialId === "string" ? row.credentialId.trim() : "";
   if (secret) credentialId = vault.put(secret, credentialId || fallbackId);
   if (credentialId) row.credentialId = credentialId;
-  delete row.apiKey;
+  // A memory-only vault cannot reload the secret after quit. Leaving the key
+  // on the row is how Dev keeps a pasted Synthetic/Kimi key across restarts.
+  if (vault.persists()) delete row.apiKey;
 }
 
 function hydrateRow(row: LooseRecord, vault: CredentialStore): void {

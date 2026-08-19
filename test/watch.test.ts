@@ -297,6 +297,40 @@ test("leftover numbers stay visible on cards without a second hold setting", () 
     ),
     undefined,
   );
+  assert.equal(
+    leftoverPercentForKey(
+      "bot:bot_minimax",
+      {
+        custom: {
+          bot_minimax: plan(100, {
+            products: [
+              { product: "session", label: "5h", usagePercent: 69 },
+              { product: "weekly", label: "Weekly", usagePercent: 31 },
+            ],
+          }),
+        },
+      },
+      { customBots: [bot] },
+    ),
+    69,
+  );
+  assert.equal(
+    leftoverPercentForKey(
+      "bot:bot_minimax",
+      {
+        custom: {
+          bot_minimax: plan(100, {
+            products: [
+              { product: "session", label: "5h", usagePercent: 73 },
+              { product: "weekly", label: "Weekly", usagePercent: 0 },
+            ],
+          }),
+        },
+      },
+      { customBots: [bot] },
+    ),
+    100,
+  );
 
   const pruned = pruneWatchPermits(
     { grok: { day: "2026-08-12" }, "bot:bot_minimax": { day: dayKey(now) } },

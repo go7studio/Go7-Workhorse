@@ -41,6 +41,8 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
+const planWindowByFocus = new Map<string, string>();
+
 type Focus = ProviderId | `bot:${string}` | "overview" | "cursor:cursor-models" | "cursor:other-models";
 
 function SplitBar({
@@ -347,10 +349,25 @@ export function UsagePane({
     settings,
   } = useStore();
   const [focus, setFocus] = useState<Focus>("overview");
-  const [claudeWindow, setClaudeWindow] = useState("weekly_all");
+  const [claudeWindow, setClaudeWindowState] = useState(
+    () => planWindowByFocus.get("overview") ?? "weekly_all",
+  );
+  const setClaudeWindow = (id: string, key = String(focus)) => {
+    planWindowByFocus.set(key, id);
+    setClaudeWindowState(id);
+  };
   useEffect(() => {
     if (homeSignal > 0) setFocus("overview");
   }, [homeSignal]);
+  useEffect(() => {
+    const key = String(focus);
+    const saved = planWindowByFocus.get(key);
+    if (saved) {
+      setClaudeWindowState(saved);
+      return;
+    }
+    setClaudeWindowState(focus === "claude" ? "weekly_all" : "");
+  }, [focus]);
   const range = usageRange ?? "month";
   const events = (usage ?? []).filter((event) => inRange(event, range));
   const cards = deskUsageCards(events, settings);
@@ -494,7 +511,7 @@ export function UsagePane({
             </div>
             <div className="usage-brains">
               {cards.map((row, index) => {
-                const ring = planRingView(row, deskPlans, claudeWindow);
+                const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)));
                 const chip = planWindowChip(leftoverForCard(row, deskPlans));
                 return (
                   <button

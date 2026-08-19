@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { memo, useEffect, useState, type MouseEvent } from "react";
 import { isHollowHref, looksLikeImageHref, parseChatMarkdown, parseInline, type Inline } from "../lib/markdown";
 import { safeExternalUrl } from "../lib/open-external";
 import { copyText } from "../lib/copy-text";
@@ -146,7 +146,7 @@ function Inlines({
   );
 }
 
-export function MessageBody({
+export const MessageBody = memo(function MessageBody({
   text,
   cwd,
   vendorSessionId,
@@ -245,4 +245,4 @@ export function MessageBody({
       })}
     </div>
   );
-}
+});

@@ -1025,7 +1025,15 @@ test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
       0,
       83,
     ),
+    false,
+  );
+  assert.equal(
+    weeklyIsUnlimited({ current_weekly_status: 3 }, {}, undefined, 83),
     true,
+  );
+  assert.equal(
+    weeklyIsUnlimited({ current_weekly_status: 3, current_weekly_remaining_percent: 100 }, {}, 100, 27),
+    false,
   );
   const unlimited = parseCustomPlanUsage({
     model_remains: [
@@ -1057,7 +1065,7 @@ test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
   assert.equal(flagged?.products[1]?.unlimited, true);
   assert.equal(flagged?.leftPercent, 100);
 
-  const inferred = parseCustomPlanUsage({
+  const spentWeekly = parseCustomPlanUsage({
     model_remains: [
       {
         model_name: "general",
@@ -1066,9 +1074,11 @@ test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
       },
     ],
   });
-  assert.equal(inferred?.products[1]?.unlimited, true);
-  assert.equal(inferred?.leftPercent, 100);
-  assert.equal(inferred?.products[0]?.usagePercent, 17);
+  assert.equal(spentWeekly?.products[1]?.unlimited, undefined);
+  assert.equal(spentWeekly?.leftPercent, 0);
+  assert.equal(spentWeekly?.usedPercent, 100);
+  assert.equal(spentWeekly?.products[0]?.usagePercent, 17);
+  assert.equal(spentWeekly?.products[1]?.usagePercent, 100);
 
   const percentOnly = parseCustomPlanUsage({
     model_remains: [
@@ -1085,6 +1095,58 @@ test("parseCustomPlanUsage keeps 5h and marks unlimited weekly", () => {
   assert.equal(percentOnly?.products[0]?.usagePercent, 1);
   assert.ok(percentOnly?.products[0]?.resetsAt);
   assert.ok(percentOnly?.resetsAt);
+
+  const tokenPlan = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        start_time: 1782381600000,
+        end_time: 1782399600000,
+        remains_time: 2669853,
+        current_interval_total_count: 0,
+        current_interval_usage_count: 0,
+        current_interval_remaining_percent: 31,
+        current_interval_status: 1,
+        current_weekly_total_count: 0,
+        current_weekly_usage_count: 0,
+        current_weekly_remaining_percent: 69,
+        current_weekly_status: 1,
+        weekly_start_time: 1782086400000,
+        weekly_end_time: 1782691200000,
+        weekly_remains_time: 294269853,
+      },
+    ],
+  });
+  assert.equal(tokenPlan?.leftPercent, 69);
+  assert.equal(tokenPlan?.usedPercent, 31);
+  assert.equal(tokenPlan?.products[0]?.label, "5h");
+  assert.equal(tokenPlan?.products[0]?.usagePercent, 69);
+  assert.equal(tokenPlan?.products[0]?.unlimited, undefined);
+  assert.ok(tokenPlan?.products[0]?.resetsAt);
+  assert.equal(tokenPlan?.products[1]?.label, "Weekly");
+  assert.equal(tokenPlan?.products[1]?.usagePercent, 31);
+  assert.equal(tokenPlan?.products[1]?.unlimited, undefined);
+
+  const liveGeneral = parseCustomPlanUsage({
+    model_remains: [
+      {
+        model_name: "general",
+        current_interval_status: 1,
+        current_interval_remaining_percent: 27,
+        current_weekly_status: 3,
+        current_weekly_remaining_percent: 100,
+        current_weekly_total_count: 0,
+        current_interval_total_count: 0,
+        end_time: Date.now() + 37 * 60 * 1000,
+        weekly_end_time: Date.now() + 4 * 24 * 60 * 60 * 1000,
+      },
+    ],
+  });
+  assert.equal(liveGeneral?.leftPercent, 100);
+  assert.equal(liveGeneral?.usedPercent, 0);
+  assert.equal(liveGeneral?.products[0]?.usagePercent, 73);
+  assert.equal(liveGeneral?.products[1]?.unlimited, undefined);
+  assert.equal(liveGeneral?.products[1]?.usagePercent, 0);
 });
 
 test("MiniMax Anthropic request and stream usage parse", async () => {
@@ -1317,6 +1379,24 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   // orchestrator's session, so the session alone filed Kimi as Cursor.
   assert.match(store, /usageHomeForReport\(event, owner/);
   assert.match(store, /customBotId: home\.customBotId/);
+  assert.match(store, /customBotId: session.customBotId/);
+  const customHostSrc = readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8");
+  assert.match(customHostSrc, /customBotId: input.customBotId/);
+  const { leftoverMissingCopy, leftoverForCard } = await import("../src/lib/usage");
+  assert.equal(
+    leftoverMissingCopy({ hasKey: false, fetchKnown: false, canLoad: true, planName: "Kimi K3" }),
+    "This key isn't stored. Paste it on the bot in Settings to track leftover.",
+  );
+  assert.equal(
+    leftoverMissingCopy({ hasKey: true, fetchKnown: true, canLoad: true, planName: "Kimi K3" }),
+    "Couldn't read weekly leftover for this key.",
+  );
+  assert.match(leftoverMissingCopy({ hasKey: true, fetchKnown: false, canLoad: true, planName: "Kimi K3" }), /Loading weekly plan usage/);
+  const cardPlan = leftoverForCard(
+    { focus: "bot:bot_syn", provider: "custom", key: "bot_syn" },
+    { custom: { bot_syn: { usedPercent: 20, leftPercent: 80, period: "weekly", prepaidBalance: 0, products: [] } } },
+  );
+  assert.equal(cardPlan?.leftPercent, 80);
   assert.equal(defaultModel("custom").id, "MiniMax-M3");
   assert.equal(knownContextWindow("MiniMax-M3"), 1_000_000);
   assert.equal(catalogWindow("hf:moonshotai/Kimi-K3"), 524_288);

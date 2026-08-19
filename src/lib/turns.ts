@@ -231,11 +231,11 @@ function thoughtCovers(existing: string, incoming: string): boolean {
 
 export function displayWorkSteps(
   block: Extract<TranscriptBlock, { type: "reply" }>,
-  input: { live?: boolean } = {},
+  input: { live?: boolean; peeled?: { thought: string; body: string } } = {},
 ): DisplayWorkStep[] {
   const live = Boolean(input.live);
   const assistantText = block.assistant.text ?? "";
-  const peeled = peelPlanningPreamble(assistantText, live);
+  const peeled = input.peeled ?? peelPlanningPreamble(assistantText, live);
   const visible = peeled.body;
   const out: DisplayWorkStep[] = [];
 
@@ -325,6 +325,62 @@ export function transcriptPaintStart(total: number, first = TRANSCRIPT_FIRST_PAI
 
 export function nextTranscriptPaintStart(from: number, chunk = TRANSCRIPT_PAINT_CHUNK): number {
   return Math.max(0, from - chunk);
+}
+
+export type TranscriptFillTimers = {
+  whenIdle: (cb: () => void) => number;
+  cancelIdle: (id: number) => void;
+};
+
+export type AfterPaintTimers = {
+  frame: (cb: () => void) => number;
+  cancelFrame: (id: number) => void;
+  later: (cb: () => void) => number;
+  cancelLater: (id: number) => void;
+};
+
+/**
+ * Run after the current frame paints so a chat click can highlight the
+ * sidebar and take another click before markdown work starts.
+ */
+export function scheduleAfterPaint(show: () => void, timers: AfterPaintTimers): () => void {
+  let frame = 0;
+  let later = 0;
+  let gone = false;
+  frame = timers.frame(() => {
+    if (gone) return;
+    later = timers.later(() => {
+      if (!gone) show();
+    });
+  });
+  return () => {
+    gone = true;
+    timers.cancelFrame(frame);
+    timers.cancelLater(later);
+  };
+}
+
+/** Older turns fill after the first paint, one idle slice at a time. */
+export function startTranscriptFill(
+  from: number,
+  publish: (next: number) => void,
+  timers: TranscriptFillTimers,
+  chunk = 1,
+): () => void {
+  let current = from;
+  let idle = 0;
+  let gone = false;
+  const tick = () => {
+    if (gone) return;
+    current = nextTranscriptPaintStart(current, chunk);
+    publish(current);
+    if (current > 0) idle = timers.whenIdle(tick);
+  };
+  if (from > 0) idle = timers.whenIdle(tick);
+  return () => {
+    gone = true;
+    timers.cancelIdle(idle);
+  };
 }
 
 export function workRowToolCount(row: GroupedWorkRow): number {

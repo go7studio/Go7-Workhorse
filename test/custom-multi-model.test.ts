@@ -120,6 +120,14 @@ test("new chats remember an approved secondary model", () => {
   assert.equal(remembered?.model, "hf:zai-org/GLM-5.2");
 });
 
+test("untagged usage on a secondary model still bills the Synthetic connection", () => {
+  const events: UsageEvent[] = [
+    { id: "glm", at: 1, provider: "custom", model: "hf:zai-org/GLM-5.2", inputTokens: 40, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  ];
+  assert.equal(customBotUsageEvents(events, SYNTHETIC).length, 1);
+  assert.equal(customBotUsageEvents(events, { ...SYNTHETIC, id: "bot_other", model: "other", models: undefined }).length, 0);
+});
+
 test("the provider's list is read, and a bad one cannot poison the bot", () => {
   assert.equal(customModelsUrl("https://api.synthetic.new/openai/v1"), "https://api.synthetic.new/openai/v1/models");
   assert.equal(customModelsUrl("https://api.synthetic.new/openai/v1/"), "https://api.synthetic.new/openai/v1/models");

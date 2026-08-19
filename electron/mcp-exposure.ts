@@ -89,12 +89,10 @@ export function resolveInboundParent(input: InboundParentInput): InboundParentRe
   if (from) return { ok: true, sessionId: from, source: "from" };
   const configured = input.defaultSessionId?.trim() ?? "";
   if (configured) return { ok: true, sessionId: configured, source: "default" };
-  if (input.profile === "external-runtime") {
-    if (input.defaultProjectId?.trim()) return { ok: true, discoveryOnly: true };
-    return { ok: true, discoveryOnly: true };
+  if (input.profile !== "external-runtime") {
+    const ambient = input.runningVisibleSessionId?.trim() ?? "";
+    if (ambient) return { ok: true, sessionId: ambient, source: "from" };
   }
-  const ambient = input.runningVisibleSessionId?.trim() ?? "";
-  if (ambient) return { ok: true, sessionId: ambient, source: "from" };
   return { ok: true, discoveryOnly: true };
 }
 
@@ -110,15 +108,28 @@ export function inboundSessionIdFromState(state: { settings?: unknown } | undefi
   return typeof systems?.inboundSessionId === "string" ? systems.inboundSessionId.trim() : "";
 }
 
+export function inboundAmbientSessionIdFromState(state: { activeSessionId?: unknown; sessions?: unknown } | undefined): string {
+  const active = typeof state?.activeSessionId === "string" ? state.activeSessionId.trim() : "";
+  if (!active) return "";
+  if (!Array.isArray(state?.sessions)) return active;
+  const hit = state.sessions.find(
+    (item) => item && typeof item === "object" && (item as { id?: unknown }).id === active,
+  ) as { hidden?: boolean; archivedAt?: unknown } | undefined;
+  if (!hit || hit.hidden || hit.archivedAt) return "";
+  return active;
+}
+
 export function resolveMcpSpawnFrom(input: {
   profile: McpExposureProfile;
   fromSessionId?: string;
   inboundSessionId?: string;
+  runningVisibleSessionId?: string;
 }): { parentId: string } | { code: "context_required" } {
   return inboundSpawnParent({
     profile: input.profile,
     fromSessionId: input.fromSessionId,
     defaultSessionId: input.inboundSessionId,
+    runningVisibleSessionId: input.runningVisibleSessionId,
   });
 }
 

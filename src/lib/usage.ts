@@ -1,3 +1,4 @@
+import { customBotServes, findCustomBotByModel } from "./custom-bots";
 import { projectedOccupancyAfterCompact } from "./portable-compaction";
 import { contextWindowFor, largestKnownContextWindow, modelsFor, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
@@ -313,11 +314,16 @@ export function usageProviderForSession(
  * bot's, whatever session it arrived under.
  */
 export function usageHomeForReport(
-  report: { provider?: ProviderId; model: string },
+  report: { provider?: ProviderId; model: string; customBotId?: string },
   owner: { provider?: ProviderId; customBotId?: string } | null | undefined,
-  bots: Pick<CustomBot, "id" | "name" | "model">[],
+  bots: Pick<CustomBot, "id" | "name" | "model" | "models">[],
 ): { provider: ProviderId; customBotId?: string } {
-  const named = bots.find((bot) => bot.model === report.model || bot.id === report.model || bot.name === report.model);
+  if (report.customBotId && bots.some((bot) => bot.id === report.customBotId)) {
+    return { provider: "custom", customBotId: report.customBotId };
+  }
+  const named =
+    findCustomBotByModel(bots, report.model) ??
+    bots.find((bot) => bot.id === report.model || bot.name === report.model);
   if (named && (report.provider === "custom" || owner?.provider !== "custom")) {
     return { provider: "custom", customBotId: named.id };
   }
@@ -328,18 +334,21 @@ export function usageHomeForReport(
   return { provider };
 }
 
-export function customBotUsageEvents(events: UsageEvent[], bot: Pick<CustomBot, "id" | "name" | "model">): UsageEvent[] {
+export function customBotUsageEvents(
+  events: UsageEvent[],
+  bot: Pick<CustomBot, "id" | "name" | "model" | "models">,
+): UsageEvent[] {
   return events.filter((event) => {
     if (event.provider !== "custom") return false;
     if (event.customBotId) return event.customBotId === bot.id;
-    return event.model === bot.model || event.model === bot.id || event.model === bot.name;
+    return event.model === bot.model || event.model === bot.id || event.model === bot.name || customBotServes(bot, event.model);
   });
 }
 
 /** Move MiniMax/custom tokens that were stored as Grok onto the matching desk bot. */
 export function rehomeCustomUsage(
   events: UsageEvent[],
-  bots: Pick<CustomBot, "id" | "name" | "model">[],
+  bots: Pick<CustomBot, "id" | "name" | "model" | "models">[],
   sessions: Pick<Session, "id" | "provider" | "customBotId" | "model">[] = [],
 ): UsageEvent[] {
   if (events.length === 0 || (bots.length === 0 && sessions.length === 0)) return events;
@@ -348,7 +357,7 @@ export function rehomeCustomUsage(
     // bot's: a Kimi worker under a Cursor orchestrator was stored as
     // cursor/hf:moonshotai/Kimi-K3. Only an exact model match moves it — a
     // Cursor event on a Cursor model must stay where it is.
-    const namedBot = bots.find((item) => item.model === event.model);
+    const namedBot = findCustomBotByModel(bots, event.model);
     if (namedBot && event.provider !== "custom") {
       const { lane: _lane, ...rest } = event;
       return { ...rest, provider: "custom", customBotId: namedBot.id };
@@ -359,7 +368,8 @@ export function rehomeCustomUsage(
     const sessionBotId = session?.provider === "custom" ? session.customBotId : undefined;
     const bot =
       bots.find((item) => item.id === event.customBotId || item.id === sessionBotId) ??
-      bots.find((item) => item.model === event.model || item.id === event.model || item.name === event.model);
+      findCustomBotByModel(bots, event.model) ??
+      bots.find((item) => item.id === event.model || item.name === event.model);
     if (!bot) return event;
     if (!session && event.provider === "grok") return event;
     if (event.provider === "custom" && event.customBotId === bot.id) return event;
@@ -501,7 +511,10 @@ export function leftoverForCard(
     custom?: Record<string, GrokPlanUsage | undefined>;
   },
 ): GrokPlanUsage | undefined {
-  if (row.focus.startsWith("bot:")) return plans.custom?.[row.key];
+  if (row.focus.startsWith("bot:")) {
+    const id = row.focus.slice(4);
+    return plans.custom?.[row.key] ?? plans.custom?.[id] ?? plans.custom?.[row.focus];
+  }
   if (isCursorWatchKey(String(row.focus))) {
     return cursorLanePlan(plans.cursor, row.focus as CursorWatchKey);
   }
@@ -512,6 +525,19 @@ export function leftoverForCard(
   if (row.provider === "codex") return plans.codex;
   if (row.provider === "claude") return plans.claude;
   return undefined;
+}
+
+/** Copy under the leftover ring when the weekly plan is missing. */
+export function leftoverMissingCopy(input: {
+  hasKey: boolean;
+  fetchKnown: boolean;
+  canLoad: boolean;
+  planName: string;
+}): string {
+  if (!input.hasKey) return "This key isn't stored. Paste it on the bot in Settings to track leftover.";
+  if (input.fetchKnown) return "Couldn't read weekly leftover for this key.";
+  if (input.canLoad) return "Loading weekly plan usage…";
+  return `Restart Workhorse to load ${input.planName} plan usage.`;
 }
 
 export function cursorLanePlan(plan: GrokPlanUsage | undefined, key: CursorWatchKey): GrokPlanUsage | undefined {
@@ -542,6 +568,9 @@ export function planTimeWindows(plan: GrokPlanUsage | undefined): GrokPlanProduc
 
 export function weeklyPlanLeftover(plan: GrokPlanUsage | undefined): number | undefined {
   if (!plan) return undefined;
+  const weekly = plan.products.find((item) => /weekly/i.test(item.product));
+  if (weekly?.unlimited) return undefined;
+  if (weekly) return Math.min(100, Math.max(0, 100 - weekly.usagePercent));
   if (plan.products.some((item) => item.unlimited && /weekly/i.test(item.product))) return undefined;
   if (Number.isFinite(plan.leftPercent)) return Math.min(100, Math.max(0, plan.leftPercent));
   return undefined;

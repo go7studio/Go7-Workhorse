@@ -323,11 +323,32 @@ export function findDraftChat(sessions: Session[], projectId: string | null): Se
 }
 
 export function dropDrafts(sessions: Session[], keepId?: string | null): Session[] {
-  return sessions.filter((session) => !isDraftChat(session) || session.id === keepId);
+  const next = sessions.filter((session) => !isDraftChat(session) || session.id === keepId);
+  if (next.length === sessions.length && next.every((session, index) => session === sessions[index])) {
+    return sessions;
+  }
+  return next;
 }
 
 export function listedChats(sessions: Session[]): Session[] {
   return sessions.filter((session) => !isDraftChat(session));
+}
+
+/** Loose Chats first, then any other visible root chat. Settings inbound parent uses this when unset. */
+export function defaultInboundParentId(
+  sessions: Array<{ id?: unknown; projectId?: unknown; hidden?: unknown; archivedAt?: unknown; parentId?: unknown }>,
+): string {
+  const visible = sessions.filter(
+    (session) =>
+      typeof session.id === "string" &&
+      session.id &&
+      !session.hidden &&
+      session.archivedAt == null &&
+      !session.parentId,
+  );
+  const loose = visible.find((session) => !session.projectId);
+  const picked = loose ?? visible[0];
+  return typeof picked?.id === "string" ? picked.id : "";
 }
 
 export function openDraft(sessions: Session[], draft: Session): { sessions: Session[]; session: Session } {

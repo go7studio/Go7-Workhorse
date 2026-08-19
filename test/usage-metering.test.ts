@@ -235,6 +235,11 @@ test("a worker's usage files under its bot, not the orchestrator's vendor", asyn
   assert.deepEqual(usageHomeForReport({ provider: "cursor", model: "composer-2.5" }, cursorOwner, bots), { provider: "cursor" });
   // A Grok report with no owner is Grok.
   assert.deepEqual(usageHomeForReport({ provider: "grok", model: "grok-4.6" }, undefined, bots), { provider: "grok" });
+  // The host now stamps the bot. That wins even if the model string is odd.
+  assert.deepEqual(
+    usageHomeForReport({ provider: "custom", model: "kimi-k3", customBotId: "bot_wfd6ghzwhfa7" }, cursorOwner, bots),
+    { provider: "custom", customBotId: "bot_wfd6ghzwhfa7" },
+  );
 
   // The event as it sits on disk today, verbatim, and its owning session.
   const stray = {

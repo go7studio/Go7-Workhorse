@@ -265,16 +265,33 @@ export function pathFromNearbyWrite(text: string): string {
   return fallback;
 }
 
-function nearbyWriteContext(messages: Session["messages"], index: number): string {
+type TurnWriteContext = {
+  start: number;
+  end: number;
+  parts: { index: number; text: string }[];
+};
+
+/** One user-to-user span. Nearby text is rebuilt per tool so the current row stays out. */
+function turnWriteContext(messages: Session["messages"], index: number): TurnWriteContext {
   let start = index;
   while (start > 0 && messages[start - 1]?.role !== "user") start -= 1;
   let end = index;
   while (end + 1 < messages.length && messages[end + 1]?.role !== "user") end += 1;
-  const parts: string[] = [];
+  const parts: { index: number; text: string }[] = [];
   for (let i = start; i <= end; i += 1) {
     const message = messages[i];
-    if (!message || i === index) continue;
-    if (message.kind === "thought" || message.role === "assistant") parts.push(message.text);
+    if (!message) continue;
+    if (message.kind === "thought" || message.role === "assistant") parts.push({ index: i, text: message.text });
+  }
+  return { start, end, parts };
+}
+
+function nearbyFromTurn(turn: TurnWriteContext, index: number): string {
+  if (turn.parts.length === 0) return "";
+  if (turn.parts.length === 1 && turn.parts[0]?.index === index) return "";
+  const parts: string[] = [];
+  for (const part of turn.parts) {
+    if (part.index !== index) parts.push(part.text);
   }
   return parts.join("\n");
 }
@@ -316,10 +333,13 @@ export function formatEditWhen(at: number, now = Date.now()): string {
 function collectWrites(sessions: Session[], folderRoots: string[] = []): ProjectEdit[] {
   const map = new Map<string, ProjectEdit>();
   for (const session of sessions) {
+    let turn: TurnWriteContext | null = null;
     for (const [index, message] of session.messages.entries()) {
       if (message.kind !== "tool") continue;
       const { title } = splitToolLine(message.text);
-      const nearby = nearbyWriteContext(session.messages, index);
+      if (!isWriteToolTitle(title)) continue;
+      if (!turn || index < turn.start || index > turn.end) turn = turnWriteContext(session.messages, index);
+      const nearby = nearbyFromTurn(turn, index);
       const fromId = (message.toolCallId ?? "").match(/^(?:edit|write):(.+)$/i)?.[1] ?? "";
       const extracted =
         pathFromWriteTool(message.text, nearby, undefined, folderRoots) ||

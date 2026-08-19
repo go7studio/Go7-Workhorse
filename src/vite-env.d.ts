@@ -212,6 +212,7 @@ type WorkhorseBridge = {
     parentId?: string;
     hidden?: boolean;
     role?: import("./lib/workhorse-rules").DeskRole;
+    customBotId?: string;
     config: {
       baseUrl: string;
       apiKey: string;

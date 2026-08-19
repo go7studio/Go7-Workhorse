@@ -154,9 +154,9 @@ import {
   wrapMarkdown,
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
-import { applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
+import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
@@ -227,6 +227,7 @@ import {
   estimateTurnTokens,
   backfillCursorUsage,
   leftoverForCard,
+  leftoverMissingCopy,
   byModel,
   rehomeCustomUsage,
   usageProviderForSession,
@@ -2621,6 +2622,8 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(mcp, /Do not tell the user a project exists unless it appears here/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /source: "live"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /saveState/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /deskPersistBodyEqual/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "chats.ts"), "utf8"), /next.every\(\(session, index\) => session === sessions\[index\]\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "add-reference"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "list-references"/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /action === "delete-reference"/);
@@ -2989,7 +2992,7 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(pane, /composer-wrap/);
   assert.match(composer, /pinComposerInput/);
   assert.match(css, /--composer-input/);
-  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ 8px\)/);
+  assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ var\(--notices-dock, 0px\) \+ 16px\)/);
   const col = {
     getBoundingClientRect: () => ({ bottom: 800 }),
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
@@ -3150,6 +3153,10 @@ test("context ring opens this-chat stats instead of the Usage page", () => {
   assert.match(meter, /useAnimatedNumber/);
   assert.match(meter, /strokeDashoffset/);
   assert.match(meter, /--desk-ink/);
+  assert.match(meter, /referenceOnly/);
+  assert.match(meter, /placeContextPop/);
+  assert.match(meter, /left: anchor.left/);
+  assert.doesNotMatch(meter, /right: anchor.right/);
   assert.doesNotMatch(meter, /Estimated from this chat/);
   assert.doesNotMatch(meter, /until a Grok turn is live/);
   assert.doesNotMatch(meter, /Live breakdown from this Grok session/);
@@ -4100,6 +4107,12 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
   assert.match(home, /Project/);
   assert.match(home, /projectFileChanges/);
+  assert.match(home, /editsIdle/);
+  assert.match(home, /requestAnimationFrame/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "project-edits.ts"), "utf8"),
+    /if \(!isWriteToolTitle\(title\)\) continue/,
+  );
   assert.match(home, /FileViewer/);
   assert.match(home, /EditedList/);
   assert.match(home, /editStats/);
@@ -4153,6 +4166,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(pane, /compact/);
   assert.match(pane, /session-edits/);
   assert.match(pane, /session-edits-slot/);
+  assert.match(pane, /setupOpen \? " away"/);
   assert.match(pane, /editsBarOpen/);
   assert.match(pane, /holdEditStats/);
   assert.match(pane, /startEditStatsHarvest/);
@@ -4171,7 +4185,10 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(editedList, /FOLD_MS/);
   assert.match(editedList, /boxWidth/);
   assert.match(editedList, /pillWidth/);
+  assert.match(editedList, /fill/);
+  assert.match(editedList, /compact && !fill && boxWidth/);
   assert.match(editedList, /startOpen/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8"), /\bfill\b/);
   assert.match(editedList, /showLineStats/);
   assert.match(editedList, /label = "Edited"/);
   assert.match(editedList, /file-kind/);
@@ -4236,32 +4253,26 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(sessionEdits, /align-items:\s*flex-end/);
   assert.match(sessionEdits, /pointer-events:\s*none/);
   assert.doesNotMatch(sessionEdits, /padding:\s*0 22px \d+px/);
-  assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):hover/);
+  assert.match(css, /\.edited-toggle:hover/);
   assert.match(
     css,
     /\.session-edits \.edited-block\.compact\s*\{[^}]*position:\s*absolute/,
   );
+  assert.match(css, /flex-direction:\s*column-reverse/);
+  assert.match(css, /\.session-edits \.edited-toggle[\s\S]*?justify-content:\s*flex-start/);
+  assert.match(css, /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\)\s*\{[^}]*width:\s*fit-content/);
+  assert.match(css, /\.session-edits \.edited-block\.compact\.open[\s\S]*?width:\s*min\(420px, calc\(100% - 44px\)\)/);
   assert.match(css, /\.session-edits \.edited-block\.compact\s*\{[^}]*width 200ms/);
-  assert.match(
-    css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\)\s*\{[^}]*width:\s*fit-content/,
-  );
-  assert.match(
-    css,
-    /\.session-edits \.edited-block\.compact\.open,\s*\.session-edits \.edited-block\.compact\.closing\s*\{[^}]*width:\s*min\(420px, calc\(100% - 44px\)\)/,
-  );
+  assert.match(editedList, /requestAnimationFrame\(\(\) => requestAnimationFrame\(shrink\)\)/);
   assert.match(css, /container-name:\s*changes/);
   assert.match(css, /@container changes \(max-width: 300px\)[\s\S]*\.file-when/);
   assert.match(css, /\.session-edits \.file-row strong[\s\S]*text-overflow:\s*ellipsis/);
-  assert.match(
-    css,
-    /\.session-edits \.edited-block\.compact:not\(\.open\):not\(\.closing\) \.edited-toggle\s*\{[^}]*width:\s*auto/,
-  );
   assert.match(composerWrap, /padding:\s*8px 22px 16px/);
   assert.match(composerWrap, /flex:\s*0 0 auto/);
   assert.match(css, /\.session-edits-slot/);
+  assert.match(css, /\.session-edits-slot\.open\.away/);
   assert.match(css, /grid-template-rows:\s*0fr/);
-  assert.match(css, /--changes-dock/);
+  assert.match(css, /--notices-dock/);
   assert.match(pane, /session-notices/);
   const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(fileClose, /width:\s*22px/);
@@ -4286,11 +4297,20 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(fileNameCol, /flex:\s*1/);
   assert.match(css, /\.file-when/);
   const compactList = css.match(/\.edited-block\.compact \.file-list\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.match(compactList, /min-width:\s*min\(420px, 100%\)/);
   assert.match(compactList, /max-height:\s*148px/);
   assert.match(compactList, /scrollbar-gutter:\s*stable/);
   const overviewList = css.match(/\.project-overview \.edited-block\.compact \.file-list[\s\S]*?\}/)?.[0] ?? "";
   assert.match(overviewList, /max-height:\s*none/);
   assert.match(overviewList, /overflow:\s*visible/);
+  assert.match(css, /\.project-overview \.edited-block\.compact\.fill/);
+  assert.match(css, /\.project-overview \.edited-block\.compact,\s*\.project-overview \.edited-block\.compact\.fill\s*\{[^}]*width:\s*100%/);
+  assert.doesNotMatch(
+    css.match(/\.project-overview \.edited-block\.compact \.edited-files-slot\s*\{[^}]*\}/)?.[0] ?? "none",
+    /transition:\s*none/,
+  );
+  assert.match(css, /\.edited-block\.compact \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
+  assert.match(css, /\.edited-block\.compact\.open \.edited-files-slot\s*\{[^}]*grid-template-rows:\s*1fr/);
   const filePane = css.match(/\.session-file\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(filePane, /border-left/);
   assert.match(filePane, /file-pane-in/);
@@ -4523,6 +4543,22 @@ test("empty chats stay drafts until the first send names them", () => {
   assert.equal(isDraftChat(draft), true);
   assert.equal(isDraftChat(named), false);
   assert.deepEqual(listedChats([draft, named]).map((item) => item.id), ["live_1"]);
+  assert.equal(
+    defaultInboundParentId([
+      { id: "proj_chat", projectId: "p1" },
+      { id: "loose_chat", projectId: null },
+      { id: "hidden", projectId: null, hidden: true },
+    ]),
+    "loose_chat",
+  );
+  assert.equal(defaultInboundParentId([{ id: "only_proj", projectId: "p1" }]), "only_proj");
+  assert.equal(inboundParentSelectValue({}), "");
+  assert.equal(inboundParentSelectValue({ inboundProjectId: "proj_chess" }), "project:proj_chess");
+  assert.equal(inboundParentSelectValue({ inboundSessionId: "sess_1", inboundProjectId: "proj_chess" }), "sess_1");
+  assert.deepEqual(agentSystemsFromInboundSelect(""), {});
+  assert.deepEqual(agentSystemsFromInboundSelect("project:proj_chess"), { inboundProjectId: "proj_chess" });
+  assert.deepEqual(agentSystemsFromInboundSelect("sess_1"), { inboundSessionId: "sess_1" });
+  assert.equal(titleFromIntent("please allocate the Darkest Dungeon game"), "Allocate the Darkest Dungeon game");
   const reused = openDraft([draft, named], { ...draft, id: "draft_2", model: "grok-4.5", mode: "plan", sandbox: "strict" });
   assert.equal(reused.session.id, "draft_1");
   assert.equal(reused.session.model, "grok-4.5");
@@ -4643,6 +4679,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(settings, /Disable/);
   assert.match(settings, /Delete/);
   assert.match(settings, /Test API/);
+  assert.match(settings, /This key isn't stored/);
   assert.match(settings, /setLlmConnected/);
   const botForm = readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8");
   assert.match(botForm, /Bot name/);
@@ -5064,6 +5101,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /usage-plan/);
   assert.match(pane, /Weekly allowance/);
   assert.match(pane, /leftoverForCard/);
+  assert.match(pane, /leftoverMissingCopy/);
   assert.match(pane, /planRingView/);
   assert.match(pane, /planWindowChip/);
   assert.match(pane, /usage-limits/);
@@ -5072,6 +5110,9 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /% used/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
+  assert.match(pane, /referenceOnly/);
+  assert.match(pane, /modelsFor\(focused.provider\)/);
+  assert.doesNotMatch(pane, /matchProvider=\{focused.provider\}/);
   assert.match(pane, /setInterval\(pull, 180_000\)/);
   assert.match(pane, /codexPlan/);
   assert.doesNotMatch(pane, /row\.totalTokens \/ peak/);
@@ -5478,6 +5519,8 @@ test("Usage rings include every desk LLM even with no spend", () => {
   });
   assert.equal(claude?.leftPercent, 93);
   assert.equal(mini?.leftPercent, 100);
+  assert.match(leftoverMissingCopy({ hasKey: false, fetchKnown: false, canLoad: true, planName: "Kimi K3" }), /isn't stored/);
+  assert.match(leftoverMissingCopy({ hasKey: true, fetchKnown: true, canLoad: true, planName: "Kimi K3" }), /Couldn't read weekly leftover/);
   assert.equal(
     vendorUsedPercent(cards.find((card) => card.label === "Grok")!, {
       grok: { usedPercent: 60, leftPercent: 40, period: "weekly", prepaidBalance: 0, products: [] },
@@ -5723,7 +5766,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /Other chats/);
   assert.doesNotMatch(popout, /Copy work/);
   assert.match(popout, /unsquashSentences\(text\)/);
-  assert.match(pane, /displayWorkSteps\(block, \{ live \}\)/);
+  assert.doesNotMatch(pane, /displayWorkSteps\(block, \{ live \}\)/);
+  assert.match(popout, /bodyOpen && hasInner \? displayWorkSteps\(block, \{ live, peeled \}\)/);
   assert.match(pane, /transcriptPaintStart/);
   assert.match(pane, /shownBlocks\.map/);
   assert.match(pane, /transcript-stack/);
@@ -5731,7 +5775,16 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /MediaPaintProvider/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(content\)/);
   assert.match(pane, /startTransition/);
-  assert.match(pane, /requestAnimationFrame\(tick\)/);
+  assert.match(pane, /scheduleAfterPaint/);
+  assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
+  assert.match(pane, /transcriptOpen && session/);
+  assert.match(pane, /startTranscriptFill/);
+  assert.match(pane, /wantEarlier/);
+  assert.match(pane, /Load earlier turns/);
+  assert.match(pane, /if \(!transcriptOpen \|\| !wantEarlier\) return/);
+  assert.doesNotMatch(pane, /block\.subagents\.length \? store\.sessions/);
+  assert.match(pane, /requestIdleCallback/);
+  assert.doesNotMatch(pane, /requestAnimationFrame\(tick\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /justify-content: flex-end/);
   assert.equal(transcriptPaintStart(4), 0);
@@ -5739,6 +5792,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(nextTranscriptPaintStart(22), 20);
   assert.equal(nextTranscriptPaintStart(1), 0);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /LINEUP_FINISHED_NOTICE/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /crew-done/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-done-card/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /unsquashSentences\(peeled\.body\)/);
   assert.doesNotMatch(
@@ -8204,6 +8260,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "sidebar-index.ts"), "utf8"), /nestProjectChats/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /openCrew/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /workersOpen=\{Boolean\(openCrew/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /crew-slot/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /currentColor 70%/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /crew-twist/);

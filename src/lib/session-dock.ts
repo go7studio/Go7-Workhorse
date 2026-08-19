@@ -1,11 +1,10 @@
-/** Space to keep watch/goal notices above the Changes control. */
+/** Lift Changes above a temp watch/goal notice so the notice stays on the composer. */
 
-export function pinChangesDock(
+export function pinNoticesDock(
   col: { style: { setProperty: (name: string, value: string) => void } },
-  edits: { getBoundingClientRect: () => { height: number } } | null,
+  notices: { getBoundingClientRect: () => { height: number } } | null,
 ): number {
-  const height = edits ? Math.max(0, Math.round(edits.getBoundingClientRect().height)) : 0;
-  const dock = height > 0 ? height + 8 : 0;
-  col.style.setProperty("--changes-dock", `${dock}px`);
-  return dock;
+  const height = notices ? Math.max(0, Math.round(notices.getBoundingClientRect().height)) : 0;
+  col.style.setProperty("--notices-dock", `${height}px`);
+  return height;
 }

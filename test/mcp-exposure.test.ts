@@ -68,7 +68,7 @@ test("external-runtime rejects forbidden tools at dispatch, not by hiding them",
   assert.equal(isMcpToolAllowed("desk", "workhorse_delete_chat"), true);
 });
 
-test("empty parent on external-runtime spawn is context_required and ignores a running chat", () => {
+test("empty parent on external-runtime spawn does not use the open chat", () => {
   const ambient = resolveInboundParent({
     profile: "external-runtime",
     runningVisibleSessionId: "running_chat",
@@ -91,6 +91,8 @@ test("empty parent on external-runtime spawn is context_required and ignores a r
     runningVisibleSessionId: "running_chat",
   });
   assert.equal("parentId" in configured && configured.parentId, "default_chat");
+  const missing = inboundSpawnParent({ profile: "external-runtime" });
+  assert.equal("code" in missing && missing.code, "context_required");
 });
 
 test("inbound list/read/ask succeed without a parent; spawn Codex with a parent meters", () => {
@@ -172,14 +174,22 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       params: { name: "workhorse_delete_chat", arguments: { chat: "x" } },
     })) as { error?: { message?: string } };
     assert.match(deleted.error?.message ?? "", /profile_forbidden/);
+    const asks: Array<{ fromSessionId?: string; mode?: string; message?: string }> = [];
+    setWorkhorseDeskAsk(async (payload) => {
+      asks.push({ fromSessionId: payload.fromSessionId, mode: payload.mode, message: payload.message });
+      return { text: "ok" };
+    });
     const spawned = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
       params: { name: "workhorse_spawn_agent", arguments: { prompt: "hi", provider: "codex" } },
-    })) as { error?: { message?: string } };
-    assert.match(spawned.error?.message ?? "", /Workhorse delegation failed: context_required/);
-    assert.match(spawned.error?.message ?? "", /before any direct fallback/);
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    setWorkhorseDeskAsk(null);
+    assert.equal(spawned.error, undefined);
+    assert.equal(asks[0]?.mode, "spawn");
+    assert.equal(asks[0]?.fromSessionId ?? "", "");
+    assert.equal(asks[0]?.message, "hi");
   } finally {
     if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
     else process.env.WORKHORSE_MCP_PROFILE = previous;
@@ -216,6 +226,11 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     inboundSessionId: "parent_chat",
   });
   assert.equal("parentId" in named && named.parentId, "parent_chat");
+  const open = resolveMcpSpawnFrom({
+    profile: "external-runtime",
+    runningVisibleSessionId: "open_chat",
+  });
+  assert.equal("code" in open && open.code, "context_required");
   const missing = resolveMcpSpawnFrom({ profile: "external-runtime" });
   assert.equal("code" in missing && missing.code, "context_required");
 

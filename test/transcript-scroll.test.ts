@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { pinChangesDock } from "../src/lib/session-dock";
+import { pinNoticesDock } from "../src/lib/session-dock";
 import { followLatestTurn, pinnedToLatest, pinToLatest } from "../src/lib/transcript-scroll";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,15 +29,15 @@ test("pinToLatest writes scrollTop to the end of the thread", () => {
   assert.equal(el.scrollTop, 2400);
 });
 
-test("pinChangesDock reserves the Changes control height above notices", () => {
+test("pinNoticesDock lifts Changes by the temp notice height", () => {
   const col = {
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
   };
-  assert.equal(pinChangesDock(col, null), 0);
-  assert.equal(col.style.value, "--changes-dock:0px");
-  assert.equal(pinChangesDock(col, { getBoundingClientRect: () => ({ height: 40 }) }), 48);
-  assert.equal(col.style.value, "--changes-dock:48px");
-  assert.equal(pinChangesDock(col, { getBoundingClientRect: () => ({ height: 120 }) }), 128);
+  assert.equal(pinNoticesDock(col, null), 0);
+  assert.equal(col.style.value, "--notices-dock:0px");
+  assert.equal(pinNoticesDock(col, { getBoundingClientRect: () => ({ height: 72 }) }), 72);
+  assert.equal(col.style.value, "--notices-dock:72px");
+  assert.equal(pinNoticesDock(col, { getBoundingClientRect: () => ({ height: 0 }) }), 0);
 });
 
 test("SessionPane follows latest on start and ignores layout scroll unpinning", () => {
@@ -48,15 +48,18 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /observer\.observe\(content\)/);
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
+  assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
+  assert.match(pane, /if \(skipPin\) return/);
   assert.match(pane, /session-notices/);
-  assert.match(pane, /pinChangesDock/);
+  assert.match(pane, /pinNoticesDock/);
 });
 
-test("watch and goal notices lift above an open Changes dock", () => {
+test("an open Changes dock sits above watch and goal notices", () => {
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
-  assert.match(css, /--changes-dock/);
+  assert.match(css, /--notices-dock/);
   assert.match(
     css,
-    /\.session-col:has\(\.session-edits-slot\.open\) \.session-notices:has\(\.watch-banners, \.goal-bar\)\s*\{[^}]*margin-bottom:\s*var\(--changes-dock, 48px\)/,
+    /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ var\(--notices-dock, 0px\) \+ 16px\)/,
   );
+  assert.doesNotMatch(css, /margin-bottom:\s*var\(--changes-dock/);
 });

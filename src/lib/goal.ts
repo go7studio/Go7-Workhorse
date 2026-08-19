@@ -21,6 +21,8 @@ export type GoalState = {
   roundCap?: number;
   lastRoundAt?: number;
   lastHandoff?: GoalHandoff;
+  /** Last assistant message already billed as a goal round. A second idle on that turn is a no-op. */
+  lastIdleAssistantId?: string;
 };
 
 export const DEFAULT_GOAL_ROUND_CAP = 8;
@@ -347,10 +349,13 @@ export function applyDeskGoalAfterTurnIdle(input: {
   session: Pick<Session, "id" | "provider" | "customBotId" | "goal" | "messages" | "hidden">;
   safetyPaused?: boolean;
   failed?: boolean;
+  compacted?: boolean;
+  assistantId?: string;
   now?: number;
 }): GoalIdleResult {
   const now = input.now ?? Date.now();
   const current = input.session.goal;
+  if (input.compacted) return { goal: current };
   if (input.safetyPaused && current) {
     return { goal: { ...current, status: "paused" } };
   }
@@ -358,9 +363,15 @@ export function applyDeskGoalAfterTurnIdle(input: {
   if (!kept) return { goal: undefined };
   if (kept.status === "paused") return { goal: kept };
   if (input.session.hidden) return { goal: kept };
-  const lastAssistant = [...(input.session.messages ?? [])]
-    .reverse()
-    .find((message) => message.role === "assistant" && !message.kind && message.text.trim());
+  const lastAssistant = input.assistantId
+    ? input.session.messages.find((message) => message.id === input.assistantId)
+    : [...(input.session.messages ?? [])]
+        .reverse()
+        .find((message) => message.role === "assistant" && !message.kind && message.text.trim());
+  const assistantId = lastAssistant?.id ?? input.assistantId;
+  if (assistantId && kept.lastIdleAssistantId === assistantId) {
+    return { goal: kept };
+  }
   const completed = completeGoalRound(
     kept,
     {
@@ -370,11 +381,12 @@ export function applyDeskGoalAfterTurnIdle(input: {
     now,
   );
   if (!completed) return { goal: kept };
-  if (!goalRoundAdmitted(completed)) return { goal: completed };
-  const next = continueGoalRound(completed, now);
-  if (!next.ok) return { goal: completed };
+  const stamped = assistantId ? { ...completed, lastIdleAssistantId: assistantId } : completed;
+  if (!goalRoundAdmitted(stamped)) return { goal: stamped };
+  const next = continueGoalRound(stamped, now);
+  if (!next.ok) return { goal: stamped };
   return {
-    goal: next.state,
+    goal: assistantId ? { ...next.state, lastIdleAssistantId: assistantId } : next.state,
     continuation: {
       text: next.prompt,
       hideUser: true,
@@ -388,7 +400,7 @@ export function applyDeskGoalAfterTurnIdle(input: {
 /** Same helper the store uses: idle session gets the next hideUser continuation on its own queue. */
 export function applyGoalIdleAndQueue(
   session: Session,
-  options?: { safetyPaused?: boolean; failed?: boolean; now?: number },
+  options?: { safetyPaused?: boolean; failed?: boolean; compacted?: boolean; assistantId?: string; now?: number },
 ): Session {
   const result = applyDeskGoalAfterTurnIdle({ session, ...options });
   const next: Session = { ...session, goal: result.goal };
@@ -436,5 +448,8 @@ export function normalizeGoal(raw: unknown): GoalState | undefined {
     ...(roundCap ? { roundCap } : {}),
     ...(lastRoundAt ? { lastRoundAt } : {}),
     ...(lastHandoff ? { lastHandoff } : {}),
+    ...(typeof record.lastIdleAssistantId === "string" && record.lastIdleAssistantId.trim()
+      ? { lastIdleAssistantId: record.lastIdleAssistantId.trim() }
+      : {}),
   };
 }

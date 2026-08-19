@@ -471,6 +471,7 @@ export type Session = {
     roundCap?: number;
     lastRoundAt?: number;
     lastHandoff?: WorkerHandoff;
+    lastIdleAssistantId?: string;
   };
   /** Reconstructable turn/step log. Model history projects from this when present. */
   ledger?: import("./session-ledger").SessionLedger;

@@ -5615,7 +5615,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ),
                   safetyPaused ? "failed" : "completed",
                 ),
-              }, { assistantId, safetyPaused, failed: safetyPaused });
+              }, { assistantId, safetyPaused, failed: safetyPaused, compacted: event.stopReason === "compacted" });
             }),
             event.sessionId,
             safetyPaused ? "failed" : "completed",

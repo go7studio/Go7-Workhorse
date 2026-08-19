@@ -177,7 +177,7 @@ export function normalizeSessionSecurityPolicy(_raw?: unknown): import("./types"
 /** Live idle path: close the turn log, then admit the next goal round on this chat. */
 export function applyVendorTurnIdle(
   session: Session,
-  options?: { safetyPaused?: boolean; failed?: boolean; now?: number; assistantId?: string },
+  options?: { safetyPaused?: boolean; failed?: boolean; compacted?: boolean; now?: number; assistantId?: string },
 ): Session {
   const assistant = options?.assistantId
     ? session.messages.find((message) => message.id === options.assistantId)
@@ -189,13 +189,15 @@ export function applyVendorTurnIdle(
       assistant: assistant
         ? { id: assistant.id, text: assistant.text }
         : undefined,
-      reason: options?.failed || options?.safetyPaused ? "error" : "ok",
+      reason: options?.compacted ? "compacted" : options?.failed || options?.safetyPaused ? "error" : "ok",
       at: options?.now,
     }),
   };
   return applyGoalIdleAndQueue(closed, {
     safetyPaused: options?.safetyPaused,
     failed: options?.failed,
+    compacted: options?.compacted,
+    assistantId: assistant?.id ?? options?.assistantId,
     now: options?.now,
   });
 }

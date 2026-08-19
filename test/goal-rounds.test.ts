@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   applyDeskGoalAfterTurnIdle,
   applyGoalCommand,
@@ -16,6 +19,8 @@ import {
 import { applyVendorTurnIdle, normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
 import { appendOpenTurnUser } from "../src/lib/session-ledger";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function chat(over: Partial<Session> = {}): Session {
   return {
@@ -153,6 +158,13 @@ test("pause, cap, failed, and Grok one-shot do not queue another round", () => {
   assert.equal(grok.queue, undefined);
 });
 
+test("store treats compacted done as compact, not a goal round", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /compacted: event\.stopReason === "compacted"/);
+  const host = readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8");
+  assert.match(host, /stopReason: "compacted"/);
+});
+
 test("applyVendorTurnIdle is the store helper: closes the log and queues the next round", () => {
   const goal = applyGoalCommand(undefined, "/goal ship leftover rings", 1)!;
   const opened = appendOpenTurnUser(undefined, { id: "u1", text: "/goal ship leftover rings", source: "human", at: 1 });
@@ -161,4 +173,29 @@ test("applyVendorTurnIdle is the store helper: closes the log and queues the nex
   assert.ok(after.ledger?.events.some((event) => event.type === "turn/end"));
   assert.ok(after.ledger?.events.some((event) => event.type === "assistant/message" && event.text?.includes("leftoverForCard")));
   assert.equal(after.queue?.[0]?.hideUser, true);
+});
+
+test("a second idle on the same closed turn does not increment rounds or queue again", () => {
+  const goal = applyGoalCommand(undefined, "/goal ship leftover rings", 1)!;
+  const opened = appendOpenTurnUser(undefined, { id: "u1", text: "/goal ship leftover rings", source: "human", at: 1 });
+  const first = applyVendorTurnIdle(chat({ goal, ledger: opened }), { assistantId: "a1", now: 20 });
+  assert.equal(first.goal?.rounds, 1);
+  assert.equal(first.queue?.length, 1);
+  const second = applyVendorTurnIdle(first, { assistantId: "a1", now: 21 });
+  assert.equal(second.goal?.rounds, first.goal?.rounds);
+  assert.equal(second.queue?.length, first.queue?.length);
+  assert.equal(second.queue?.[0]?.id, first.queue?.[0]?.id);
+});
+
+test("compact-done does not burn a goal round", () => {
+  const goal = applyGoalCommand(undefined, "/goal ship leftover rings", 1)!;
+  const opened = appendOpenTurnUser(undefined, { id: "u1", text: "/goal ship leftover rings", source: "human", at: 1 });
+  const after = applyVendorTurnIdle(chat({ goal, ledger: opened }), {
+    assistantId: "a1",
+    compacted: true,
+    now: 20,
+  });
+  assert.equal(after.goal?.rounds, 0);
+  assert.equal(after.queue, undefined);
+  assert.equal(after.goal?.status, "active");
 });

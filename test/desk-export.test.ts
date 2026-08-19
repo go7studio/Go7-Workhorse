@@ -87,7 +87,7 @@ test("Settings Skills tab and Mass send are wired", () => {
   assert.match(store, /massSendVendor/);
   assert.match(store, /listDeskSkills/);
   assert.doesNotMatch(store.slice(store.indexOf("const massSendVendor"), store.indexOf("const exportSession")), /pickExportFolder/);
-  assert.equal(defaultExportRoot("C:\\Users\\lgovo", true).replace(/\\/g, "/"), "C:/Users/lgovo/Desktop/Workhorse exports");
+  assert.equal(defaultExportRoot("C:\\Users\\someone", true).replace(/\\/g, "/"), "C:/Users/someone/Desktop/Workhorse exports");
   assert.match(defaultExportRoot("/home/me", false), /Workhorse exports/);
   assert.match(preload, /desk:export-vendor/);
   assert.match(main, /desk:list-skills/);

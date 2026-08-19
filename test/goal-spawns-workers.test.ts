@@ -26,9 +26,9 @@ import {
  * the desk it looked like nothing was delegated at all.
  */
 const REAL_OBJECTIVE =
-  "/goal get acquainted with pathogeneer repo, assign bots to look at the way analystics is setup " +
+  "/goal get acquainted with analytics-lab repo, assign bots to look at the way analystics is setup " +
   "for GA4 across ios and play store, look at how the referral system works, compare it ot the " +
-  "planned go7referral system and passport, create and drive the bots to improve hte products so " +
+  "planned referrals system and accounts, create and drive the bots to improve hte products so " +
   "the ecosystem and monitoring is stronger and more accurate for the game";
 
 test("the goal that spawned nothing now asks for workers", () => {
@@ -114,7 +114,7 @@ test("an ordinary tool row is still free to rename itself", () => {
   messages = upsertToolMessage(messages, { toolCallId: "c1", title: "search_replace", status: "pending", detail: "" });
   messages = upsertToolMessage(messages, {
     toolCallId: "c1",
-    title: "Edit `/BioCascade/game/scripts/autoload/analytics_director.gd`",
+    title: "Edit `/DemoGame/game/scripts/autoload/analytics_director.gd`",
     status: "completed",
     detail: "",
   });

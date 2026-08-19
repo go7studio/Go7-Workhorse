@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 /**
- * Recorded from the Pathogeneer `/goal`, 2026-08-18. Four subagents ran under
+ * Recorded from the Analytics Lab `/goal`, 2026-08-18. Four subagents ran under
  * one goal and spent 404,686 tokens on our own Grok subscription. The desk
  * booked 958,822 for the chat and none of theirs — a 30% under-count — because
  * each child bills to its own Grok session and only the parent's is watched.

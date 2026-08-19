@@ -98,6 +98,8 @@ const PRIVATE_IDENTITY = [
   { rx: /F6Y5HMGMHD/, why: "Apple Team ID — use TEAM123456 in fixtures" },
   { rx: /Moonlight Capital/, why: "the publishing company's legal name — use Example Studio LLC" },
   { rx: /sgovoni@/i, why: "a real address — use someone@example.test" },
+  { rx: /venomspike|lgovo/i, why: "a real account name from someone's machine" },
+  { rx: /shoreclose|go7referral|pathogeneer|biocascade/i, why: "a studio project — fixtures use invented names" },
 ];
 
 test("no studio identity is committed, including in tests", () => {

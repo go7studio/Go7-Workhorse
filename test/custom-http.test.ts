@@ -223,7 +223,7 @@ test("MiniMax stream splits thinking from text and keeps a leftover SSE event", 
   assert.match(mmReply, /Done\. Allocated Space Battle/);
   const { peelThinkTags } = await import("../src/lib/markdown");
   const streamed = peelThinkTags(
-    "Look at the D drive, should be there. <mm:think>searching D:\\\\Godot</mm:think>\nAllocated Space Battle at D:\\\\Godot\\\\Projects\\\\spaceship-battle.",
+    "Look at the D drive, should be there. <mm:think>searching D:\\\\Godot</mm:think>\nAllocated Space Battle at D:\\\\Godot\\\\Projects\\\\demo-game.",
   );
   assert.match(streamed.thought, /searching D:/);
   assert.match(streamed.body, /Allocated Space Battle/);
@@ -392,7 +392,7 @@ test("custom host preface names workspace and live limits", async () => {
 test("custom host keeps going when MiniMax says it will search more", async () => {
   assert.ok(CUSTOM_TURN_SAFETY_DEFAULTS.emergencyModelCalls > 32);
   assert.equal(looksLikeUnfinishedDeskTurn("Let me search more broadly for it."), true);
-  assert.equal(looksLikeUnfinishedDeskTurn("Here is the folder: D:\\godot\\spaceship-battle"), false);
+  assert.equal(looksLikeUnfinishedDeskTurn("Here is the folder: D:\\godot\\demo-game"), false);
   assert.equal(looksLikeUnfinishedDeskTurn("ok", "max_tokens"), true);
   assert.equal(looksLikeWaitingOnUser("Say which and I'll proceed."), true);
   assert.equal(looksLikeUnfinishedDeskTurn("Say which and I'll proceed."), false);
@@ -415,7 +415,7 @@ test("custom host keeps going when MiniMax says it will search more", async () =
     if (calls.length === 1) {
       return { text: "I don't see a godot folder. Let me search more broadly for it." };
     }
-    return { text: "Found it at D:\\godot\\projects\\spaceship-battle" };
+    return { text: "Found it at D:\\godot\\projects\\demo-game" };
   });
   const reply = await host.prompt(
     {
@@ -423,7 +423,7 @@ test("custom host keeps going when MiniMax says it will search more", async () =
       text: "Can you find the godot folder with the space battles game in it please",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "C:\\Users\\lgovo",
+      cwd: "C:\\Users\\someone",
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -433,7 +433,7 @@ test("custom host keeps going when MiniMax says it will search more", async () =
   );
   assert.equal(calls.length, 2);
   assert.match(calls[1] ?? "", /Continue/);
-  assert.match(reply.text, /spaceship-battle/);
+  assert.match(reply.text, /demo-game/);
 });
 
 test("custom host ends the parent turn after wait=false spawn and does not continue I'll-check-back", async () => {
@@ -442,7 +442,7 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
       started: true,
       title: "Scripts scrape",
       childSessionId: "sess_worker",
-      folder: "D:\\Godot\\Projects\\spaceship-battle",
+      folder: "D:\\Godot\\Projects\\demo-game",
     },
     null,
     2,
@@ -450,7 +450,7 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
   assert.equal(spawnDispatchStarted({ name: "workhorse_spawn_agent", content: started }), true);
   assert.equal(shouldEndDispatchTurn([{ name: "workhorse_spawn_agent", content: started }]), true);
   assert.equal(
-    shouldEndDispatchTurn([{ name: "workhorse_spawn_agent", content: "HUD is in battle_hud.gd." }]),
+    shouldEndDispatchTurn([{ name: "workhorse_spawn_agent", content: "HUD is in main_hud.gd." }]),
     false,
   );
   assert.equal(shouldEndDispatchTurn([{ name: "workhorse_list_bots", content: "[]" }]), false);
@@ -488,7 +488,7 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
       text: "Please do a deep scrape of this project with subagents",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\Godot\\Projects\\spaceship-battle",
+      cwd: "D:\\Godot\\Projects\\demo-game",
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -514,7 +514,7 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
       text: "Please do a deep scrape of this project with subagents",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\Godot\\Projects\\spaceship-battle",
+      cwd: "D:\\Godot\\Projects\\demo-game",
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -541,7 +541,7 @@ test("custom host does not keep going when MiniMax asks the user to pick", async
       text: "List the scene tree so I can map the codebase",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\godot\\Projects\\spaceship-battle",
+      cwd: "D:\\godot\\Projects\\demo-game",
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -679,7 +679,7 @@ test("custom host does not halt a worker that already wrote a report", async () 
       parentId: "orch",
       hidden: true,
       role: "worker",
-      text: "ROLE: worker\nFOLDER: D:\\Godot\\Projects\\spaceship-battle\n\nScrape assets.",
+      text: "ROLE: worker\nFOLDER: D:\\Godot\\Projects\\demo-game\n\nScrape assets.",
       model: "MiniMax-M3",
       effort: "medium",
       cwd: ROOT,

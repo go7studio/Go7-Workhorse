@@ -355,20 +355,24 @@ export function applyDeskGoalAfterTurnIdle(input: {
 }): GoalIdleResult {
   const now = input.now ?? Date.now();
   const current = input.session.goal;
-  if (input.compacted) return { goal: current };
-  if (input.safetyPaused && current) {
-    return { goal: { ...current, status: "paused" } };
-  }
-  const kept = grokGoalAfterTurnIdle(input.session.provider, current);
-  if (!kept) return { goal: undefined };
-  if (kept.status === "paused") return { goal: kept };
-  if (input.session.hidden) return { goal: kept };
   const lastAssistant = input.assistantId
     ? input.session.messages.find((message) => message.id === input.assistantId)
     : [...(input.session.messages ?? [])]
         .reverse()
         .find((message) => message.role === "assistant" && !message.kind && message.text.trim());
   const assistantId = lastAssistant?.id ?? input.assistantId;
+  const stamp = (state: GoalState | undefined): GoalState | undefined =>
+    assistantId && state ? { ...state, lastIdleAssistantId: assistantId } : state;
+  // Compact-done is not a goal round. Stamp so a later unflagged *Prompt
+  // return cannot complete one.
+  if (input.compacted) return { goal: stamp(current) };
+  if (input.safetyPaused && current) {
+    return { goal: stamp({ ...current, status: "paused" }) };
+  }
+  const kept = grokGoalAfterTurnIdle(input.session.provider, current);
+  if (!kept) return { goal: undefined };
+  if (kept.status === "paused") return { goal: stamp(kept) };
+  if (input.session.hidden) return { goal: stamp(kept) };
   if (assistantId && kept.lastIdleAssistantId === assistantId) {
     return { goal: kept };
   }
@@ -380,13 +384,13 @@ export function applyDeskGoalAfterTurnIdle(input: {
     },
     now,
   );
-  if (!completed) return { goal: kept };
-  const stamped = assistantId ? { ...completed, lastIdleAssistantId: assistantId } : completed;
+  if (!completed) return { goal: stamp(kept) };
+  const stamped = stamp(completed)!;
   if (!goalRoundAdmitted(stamped)) return { goal: stamped };
   const next = continueGoalRound(stamped, now);
   if (!next.ok) return { goal: stamped };
   return {
-    goal: assistantId ? { ...next.state, lastIdleAssistantId: assistantId } : next.state,
+    goal: stamp(next.state),
     continuation: {
       text: next.prompt,
       hideUser: true,

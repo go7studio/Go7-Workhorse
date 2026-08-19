@@ -76,7 +76,7 @@ export function withVendorPreface(text: string, preface: string | undefined): st
 /**
  * Which shell the machine actually speaks. An ACP vendor learns this from its
  * own CLI; a custom HTTP bot has no CLI and guesses. Kimi guessed Windows on a
- * Mac and ran `dir D:/ shoreclose* 2>nul`, which failed, and the turn then had
+ * Mac and ran `dir D:/ harbour* 2>nul`, which failed, and the turn then had
  * nothing to report.
  */
 export function machineLine(platform: string): string {

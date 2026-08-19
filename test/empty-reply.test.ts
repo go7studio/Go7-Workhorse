@@ -12,7 +12,7 @@ const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
 
 // Three different endings all wrote "Custom finished without a visible reply."
 // over turns taken from the real ledger on 2026-08-17:
-//   "switch to the shoreclose folder please"  — stopped by hand, 1 thought 1 tool
+//   "switch to the harbour folder please"  — stopped by hand, 1 thought 1 tool
 //   "summon 8 bots on differetn models"       — dispatch, 8 thoughts 14 tools
 //   "Full repo review"                        — 11 thoughts, 22 tools, 64s
 
@@ -86,7 +86,7 @@ test("a dispatch turn names the workers it started", () => {
 });
 
 test("a custom bot is told which shell the machine speaks", () => {
-  // Kimi ran `dir D:/ shoreclose* 2>nul` on a Mac. It had never been told.
+  // Kimi ran `dir D:/ harbour* 2>nul` on a Mac. It had never been told.
   const mac = machineLine("darwin");
   assert.match(mac, /macOS/);
   assert.match(mac, /2>\/dev\/null/);

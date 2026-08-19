@@ -89,7 +89,7 @@ test("path helper is platform-neutral and uses injected userData", () => {
   assert.match(windows, /learning\.sqlite/);
   assert.equal(usesHomePath(unix), false);
   assert.equal(usesHomePath(windows), true);
-  assert.doesNotMatch(unix, /Users\/venomspike|\/Users\//);
+  assert.doesNotMatch(unix, /Users\/someone|\/Users\//);
 });
 
 test("packaged learning smoke follows the branded app binary", () => {

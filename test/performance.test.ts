@@ -82,8 +82,8 @@ test("project changes skip read tools and still see the write in a long scrape t
     message("a", "assistant", "done", 404),
   ]);
   const started = performance.now();
-  const edits = projectEdits([scrape], ["D:\\Godot\\Projects\\spaceship-battle"]);
-  const split = projectFileChanges([scrape], ["D:\\Godot\\Projects\\spaceship-battle"]);
+  const edits = projectEdits([scrape], ["D:\\Godot\\Projects\\demo-game"]);
+  const split = projectFileChanges([scrape], ["D:\\Godot\\Projects\\demo-game"]);
   const ms = performance.now() - started;
   assert.equal(edits.length, 1);
   assert.equal(edits[0]?.name, "nothing.md");

@@ -493,7 +493,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /request-permission/);
   assert.equal(looksLikePermissionQuestion("what permissions do you have?"), true);
   assert.equal(looksLikePermissionQuestion("list the folder"), false);
-  assert.equal(looksLikePermissionQuestion("ROLE: worker\nFOLDER: D:\\Godot\\Projects\\spaceship-battle\nPermission / Sandbox are workspace facts."), false);
+  assert.equal(looksLikePermissionQuestion("ROLE: worker\nFOLDER: D:\\Godot\\Projects\\demo-game\nPermission / Sandbox are workspace facts."), false);
   assert.equal(
     looksLikePermissionQuestion(
       "This chat’s live desk limits for THIS turn (already enforced — do not probe them).\n- Permission: Ask\n- Sandbox: Off",
@@ -1877,9 +1877,9 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
     toolCallId: "call_abs",
     title: "Edit",
     status: "completed",
-    rawInput: { path: "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts" },
+    rawInput: { path: "/Users/someone/workspace/Go7-Workhorse-github/electron/main.ts" },
   });
-  assert.equal(absWrite?.detail, "/Users/venomspike/workspace/Go7-Workhorse-github/electron/main.ts");
+  assert.equal(absWrite?.detail, "/Users/someone/workspace/Go7-Workhorse-github/electron/main.ts");
   assert.equal(shortDisplayPath(absWrite?.detail ?? ""), "electron/main.ts");
   assert.match(
     collapseToolText(`Edit · completed — ${absWrite?.detail ?? ""}`, "completed"),
@@ -1927,16 +1927,16 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(rows[0].text, "Read · completed — src/main.rs");
   assert.match(formatToolLine("Read", "in_progress", "src/main.rs"), /Read · in_progress — src\/main\.rs/);
   assert.match(
-    formatToolLine("Edit", "completed", "C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md"),
+    formatToolLine("Edit", "completed", "C:\\Users\\someone\\Projects\\two-talking-llms\\nothing.md"),
     /nothing\.md/,
   );
   const keptPath = upsertToolMessage(
     [],
     {
-      toolCallId: "edit:C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md",
+      toolCallId: "edit:C:\\Users\\someone\\Projects\\two-talking-llms\\nothing.md",
       title: "Edit",
       status: "completed",
-      detail: "C:\\Users\\lgovo\\Projects\\two-talking-llms\\nothing.md",
+      detail: "C:\\Users\\someone\\Projects\\two-talking-llms\\nothing.md",
     },
     3,
   );
@@ -1944,7 +1944,7 @@ test("classifyAcpUpdate extracts tool_call and tool_call_update title status det
   assert.equal(formatToolLine("Read", "completed", "a".repeat(400)), "Read · completed");
   assert.match(collapseToolText(`Read · completed — ${"x".repeat(500)}`, "completed"), /^Read · completed$/);
   assert.match(
-    collapseToolText("Write `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed", "completed"),
+    collapseToolText("Write `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed", "completed"),
     /WALK-TEST-EDIT\.md/,
   );
 });
@@ -1981,14 +1981,14 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   const inline = parseInline("I’m **Grok 4.6** on `C:\\\\Workhorse`");
   assert.deepEqual(inline.map((part) => part.type), ["text", "strong", "text", "code"]);
   assert.equal(parseFactLine("- **Model:** Grok 4.6 (Grok Build TUI)")?.label, "Model");
-  assert.equal(parseFactLine("- **Workspace:** `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse`")?.value, "C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse");
+  assert.equal(parseFactLine("- **Workspace:** `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse`")?.value, "C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse");
 
   const blocks = parseChatMarkdown(
     [
       "Nothing is running in the background from this session.",
       "",
       "- **Model:** Grok 4.6 (Grok Build TUI)",
-      "- **Workspace:** `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse`",
+      "- **Workspace:** `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse`",
       "- **Background commands / monitors / subagents:** none",
       "",
       "I’m idle and waiting on your next task.",
@@ -2086,9 +2086,9 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /vendorSessionId/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /mediaFileCandidates/);
   const guessed = mediaFileCandidates("images/1.jpg", {
-    cwd: "C:\\Users\\lgovo\\Projects\\Go7-Workhorse",
+    cwd: "C:\\Users\\someone\\Projects\\Go7-Workhorse",
     vendorSessionId: "019ff9cd-bab5-7b22-94ee-aa6a8fbd4b3b",
-    home: "C:\\Users\\lgovo",
+    home: "C:\\Users\\someone",
   });
   assert.ok(
     guessed.some(
@@ -2173,9 +2173,9 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(tagged.body, /Here is the project shape/);
   assert.doesNotMatch(tagged.body, /<think/);
   const mmLeak = [
-    "Sweeping the D drive for Space Battle folders now.</mm:think>Searching D:\\ for space* folders. Let me also list the root to see what's on D. Got it — found two candidate folders on D:\\. Let me peek inside both to see which is the real one.</mm:think>Both folders exist. Let me check what's inside each so I know which to allocate. Got it — D:\\Godot\\Projects\\spaceship-battle\\ is the canonical Space Battle project (full code, scenes, project.godot with the SpaceBattle autoload). The space folder is just an empty scratch directory.",
+    "Sweeping the D drive for Space Battle folders now.</mm:think>Searching D:\\ for space* folders. Let me also list the root to see what's on D. Got it — found two candidate folders on D:\\. Let me peek inside both to see which is the real one.</mm:think>Both folders exist. Let me check what's inside each so I know which to allocate. Got it — D:\\Godot\\Projects\\demo-game\\ is the canonical Space Battle project (full code, scenes, project.godot with the SpaceBattle autoload). The space folder is just an empty scratch directory.",
     "",
-    "Allocating now.</mm:think>Done. Allocated “Space Battle” as a Workhorse project linked to D:\\Godot\\Projects\\spaceship-battle\\. This chat has been moved into it.",
+    "Allocating now.</mm:think>Done. Allocated “Space Battle” as a Workhorse project linked to D:\\Godot\\Projects\\demo-game\\. This chat has been moved into it.",
   ].join("\n");
   const mm = peelThinkTags(mmLeak);
   assert.match(mm.thought, /Sweeping the D drive/);
@@ -2183,7 +2183,7 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.doesNotMatch(mm.body, /<\/?mm:think>/i);
   assert.doesNotMatch(mm.body, /Sweeping the D drive/);
   assert.match(mm.body, /Done\. Allocated/);
-  assert.match(mm.body, /D:\\Godot\\Projects\\spaceship-battle/);
+  assert.match(mm.body, /D:\\Godot\\Projects\\demo-game/);
   const mmShown = peelPlanningPreamble(mmLeak);
   assert.doesNotMatch(mmShown.body, /<\/?mm:think>/i);
   assert.doesNotMatch(mmShown.body, /Sweeping the D drive/);
@@ -3279,7 +3279,7 @@ test("new project can ship with dropped or picked source folders", () => {
 });
 
 test("create-project binds the exact name and does not attach the folder to another project", () => {
-  const appFolder = "C:\\Users\\lgovo\\Projects\\Go7-Workhorse";
+  const appFolder = "C:\\Users\\someone\\Projects\\Go7-Workhorse";
   const other = emptyProject("Go7-Workhorse", [appFolder]);
   const bound = applyCreateWorkhorseProject(
     [other],
@@ -3309,7 +3309,7 @@ test("create-project binds the exact name and does not attach the folder to anot
   assert.equal(again.projects.filter((item) => item.name === "Workhorse Dev").length, 1);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /applyCreateWorkhorseProject/);
-  const named = emptyProject("Spaceship Battles", ["D:\\\\godot\\\\Projects\\\\spaceship-battle"]);
+  const named = emptyProject("Spaceship Battles", ["D:\\\\godot\\\\Projects\\\\demo-game"]);
   assert.equal(findProjectByQuery([named, other], "spaceship battles")?.id, named.id);
   const loose = {
     id: "sess_loose",
@@ -3465,8 +3465,8 @@ test("rename chat and project in place without delete", () => {
   const missingName = applyRenameDeskChat([chat], { fromSessionId: chat.id, name: "  " });
   assert.equal(missingName.ok, false);
 
-  const project = emptyProject("Godot Spaceships", ["D:\\\\Godot\\\\Projects\\\\spaceship-battle"]);
-  const other = emptyProject("Workhorse Dev", ["C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse"]);
+  const project = emptyProject("Godot Spaceships", ["D:\\\\Godot\\\\Projects\\\\demo-game"]);
+  const other = emptyProject("Workhorse Dev", ["C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse"]);
   const renamedProject = applyRenameDeskProject([project, other], {
     name: "Spaceship game",
     fromProjectId: project.id,
@@ -3615,39 +3615,39 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(pathFromNearbyWrite("Created a minimal markdown file named nothing.md."), "nothing.md");
   assert.equal(pathFromNearbyWrite("Created `another-one.md` in the project folder."), "another-one.md");
   assert.equal(
-    harvestFilePath("openclaw.json", "Chat found OpenClaw at `C:\\Users\\lgovo\\openclaw`"),
-    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+    harvestFilePath("openclaw.json", "Chat found OpenClaw at `C:\\Users\\someone\\openclaw`"),
+    "C:\\Users\\someone\\openclaw\\openclaw.json",
   );
   assert.equal(
     harvestFilePath(
       "openclaw.json",
-      "Project folder `C:\\Users\\lgovo\\Projects\\talk-in-talk-in`. OpenClaw is at `C:\\Users\\lgovo\\openclaw`.",
+      "Project folder `C:\\Users\\someone\\Projects\\talk-in-talk-in`. OpenClaw is at `C:\\Users\\someone\\openclaw`.",
     ),
-    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+    "C:\\Users\\someone\\openclaw\\openclaw.json",
   );
   assert.equal(
     harvestFilePath(
       "openclaw.json",
-      "Slice 1 found the live Open Claw config at `C:\\Users\\lgovo\\.openclaw\\openclaw.json`.",
+      "Slice 1 found the live Open Claw config at `C:\\Users\\someone\\.openclaw\\openclaw.json`.",
     ),
-    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+    "C:\\Users\\someone\\.openclaw\\openclaw.json",
   );
   assert.equal(
-    harvestFilePath("C:\\Users\\lgovo\\openclaw\\openclaw.json", "project folder C:\\Users\\lgovo\\Projects\\talk-in-talk-in"),
-    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+    harvestFilePath("C:\\Users\\someone\\openclaw\\openclaw.json", "project folder C:\\Users\\someone\\Projects\\talk-in-talk-in"),
+    "C:\\Users\\someone\\openclaw\\openclaw.json",
   );
-  const openclawAbs = "C:\\Users\\lgovo\\openclaw\\openclaw.json";
-  const openclawDir = "C:\\Users\\lgovo\\openclaw";
+  const openclawAbs = "C:\\Users\\someone\\openclaw\\openclaw.json";
+  const openclawDir = "C:\\Users\\someone\\openclaw";
   assert.equal(
-    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", (file) => file === openclawAbs || file === openclawDir),
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\someone\\openclaw`", (file) => file === openclawAbs || file === openclawDir),
     openclawAbs,
   );
   assert.equal(
-    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", (file) => file === "C:\\Users\\lgovo\\.openclaw\\openclaw.json"),
-    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\someone\\openclaw`", (file) => file === "C:\\Users\\someone\\.openclaw\\openclaw.json"),
+    "C:\\Users\\someone\\.openclaw\\openclaw.json",
   );
   assert.equal(
-    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`", () => false),
+    harvestFilePath("openclaw.json", "Found OpenClaw at `C:\\Users\\someone\\openclaw`", () => false),
     "openclaw.json",
   );
   assert.equal(harvestFilePath("nothing.md", "Wrote `C:\\proj\\nothing.md`"), "C:\\proj\\nothing.md");
@@ -3722,16 +3722,16 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.deepEqual(citedAbsolutePaths("Applying patch · completed — test/workhorse.test.ts"), []);
   assert.equal(pathFromWriteTool("Applying patch · completed — test/workhorse.test.ts"), "test/workhorse.test.ts");
   assert.equal(
-    pathFromWriteTool("Write · completed — openclaw.json", "OpenClaw lives at `C:\\Users\\lgovo\\openclaw`"),
-    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+    pathFromWriteTool("Write · completed — openclaw.json", "OpenClaw lives at `C:\\Users\\someone\\openclaw`"),
+    "C:\\Users\\someone\\openclaw\\openclaw.json",
   );
   assert.equal(
-    pathFromWriteTool("Write `C:\\Users\\lgovo\\.openclaw\\openclaw.json` · completed — .openclaw\\openclaw.json"),
-    "C:\\Users\\lgovo\\.openclaw\\openclaw.json",
+    pathFromWriteTool("Write `C:\\Users\\someone\\.openclaw\\openclaw.json` · completed — .openclaw\\openclaw.json"),
+    "C:\\Users\\someone\\.openclaw\\openclaw.json",
   );
   assert.equal(
-    pathFromNearbyWrite("Found OpenClaw at `C:\\Users\\lgovo\\openclaw`. Config is `openclaw.json`."),
-    "C:\\Users\\lgovo\\openclaw\\openclaw.json",
+    pathFromNearbyWrite("Found OpenClaw at `C:\\Users\\someone\\openclaw`. Config is `openclaw.json`."),
+    "C:\\Users\\someone\\openclaw\\openclaw.json",
   );
   assert.equal(isWriteToolTitle("Read"), false);
   assert.equal(isWriteToolTitle("Applying patch"), true);
@@ -3739,8 +3739,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(isWriteToolTitle("Updated workhorse.test.ts"), true);
   assert.equal(isWriteToolTitle("Reading workhorse.test.ts"), false);
   assert.equal(
-    fileFolderFromPath("C:/Users/lgovo/Projects/Go7-Workhorse/src/ui/UsagePane.tsx", [
-      "C:/Users/lgovo/Projects/Go7-Workhorse",
+    fileFolderFromPath("C:/Users/someone/Projects/Go7-Workhorse/src/ui/UsagePane.tsx", [
+      "C:/Users/someone/Projects/Go7-Workhorse",
     ]),
     "src/ui",
   );
@@ -3768,7 +3768,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
             id: "t6",
             role: "system",
             kind: "tool",
-            text: "Write `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed",
+            text: "Write `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed",
             createdAt: noon + 3000,
           },
         ],
@@ -3798,8 +3798,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
     ["C:\\\\proj"],
   );
   assert.equal(
-    pathFromWriteTool("Write `C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed"),
-    "C:\\\\Users\\\\lgovo\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md",
+    pathFromWriteTool("Write `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md` · completed"),
+    "C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse\\\\WALK-TEST-EDIT.md",
   );
   const openclawEdits = projectEdits(
     [
@@ -3818,7 +3818,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
           {
             id: "a1",
             role: "assistant",
-            text: "Found OpenClaw at `C:\\Users\\lgovo\\openclaw`. Config is `openclaw.json`.",
+            text: "Found OpenClaw at `C:\\Users\\someone\\openclaw`. Config is `openclaw.json`.",
             createdAt: noon,
           },
           {
@@ -3831,9 +3831,9 @@ test("project home lists edited files from write tools, not Choose a brain", () 
         ],
       },
     ],
-    ["C:\\Users\\lgovo\\Projects\\talk-in-talk-in"],
+    ["C:\\Users\\someone\\Projects\\talk-in-talk-in"],
   );
-  assert.equal(openclawEdits[0]?.path, "C:\\Users\\lgovo\\openclaw\\openclaw.json");
+  assert.equal(openclawEdits[0]?.path, "C:\\Users\\someone\\openclaw\\openclaw.json");
   assert.equal(edits.length, 4);
   assert.equal(edits[0].name, "WALK-TEST-EDIT.md");
   assert.equal(edits[1].name, "UsagePane.tsx");
@@ -3881,7 +3881,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.equal(
     sameEditPath(
       "electron/app-update.ts",
-      "C:\\Users\\lgovo\\Projects\\Go7-Workhorse\\electron\\app-update.ts",
+      "C:\\Users\\someone\\Projects\\Go7-Workhorse\\electron\\app-update.ts",
     ),
     true,
   );
@@ -3948,13 +3948,13 @@ test("project home lists edited files from write tools, not Choose a brain", () 
             id: "t9",
             role: "system",
             kind: "tool",
-            text: "Write · completed — C:\\Users\\lgovo\\Projects\\Go7-Workhorse\\electron\\app-update.ts",
+            text: "Write · completed — C:\\Users\\someone\\Projects\\Go7-Workhorse\\electron\\app-update.ts",
             createdAt: noon + 1,
           },
         ],
       },
     ],
-    ["C:\\Users\\lgovo\\Projects\\Go7-Workhorse"],
+    ["C:\\Users\\someone\\Projects\\Go7-Workhorse"],
   );
   assert.equal(twins.length, 1);
   assert.equal(twins[0]?.name, "app-update.ts");
@@ -5850,7 +5850,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
     { id: "u", role: "user", text: "call subagents", createdAt: 1 },
     { id: "a1", role: "assistant", text: "Started three slices.", createdAt: 2 },
     { id: "note", role: "system", text: "All workers finished.", createdAt: 3 },
-    { id: "a2", role: "assistant", text: "HUD is in battle_hud.gd.", createdAt: 4 },
+    { id: "a2", role: "assistant", text: "HUD is in main_hud.gd.", createdAt: 4 },
   ]);
   assert.equal(synthesis.filter((block) => block.type === "reply").length, 2);
   assert.equal(
@@ -5859,7 +5859,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   );
   const replies = synthesis.filter((block) => block.type === "reply");
   if (replies[0]?.type === "reply") assert.equal(replies[0].assistant.text, "Started three slices.");
-  if (replies[1]?.type === "reply") assert.equal(replies[1].assistant.text, "HUD is in battle_hud.gd.");
+  if (replies[1]?.type === "reply") assert.equal(replies[1].assistant.text, "HUD is in main_hud.gd.");
   const twoAssistants = groupTranscript([
     { id: "u", role: "user", text: "go", createdAt: 1 },
     { id: "a1", role: "assistant", text: "Workers are running.", createdAt: 2 },
@@ -7852,7 +7852,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const workerBrief = formatWorkerPrompt({
     fromTitle: "PLease call subagents to strip threw...",
     text: "You are a MiniMax sub-agent spawned by the Workhorse MiniMax chat.\n\nYour slice: PROJECT IDENTITY & BUILD CONFIG.\n\nRead README.md",
-    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    folder: "D:\\Godot\\Projects\\demo-game",
     project: "Spaceship battles",
     slice: "Review project identity and docs",
     vendor: "MiniMax",
@@ -7861,7 +7861,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   });
   assert.equal(looksLikeWorkerBrief(workerBrief), true);
   assert.match(workerBrief, /ROLE: worker/);
-  assert.match(workerBrief, /D:\\Godot\\Projects\\spaceship-battle/);
+  assert.match(workerBrief, /D:\\Godot\\Projects\\demo-game/);
   assert.match(workerBrief, /one quick-route helper/);
   assert.match(workerBrief, /SKILLS: codex:play-release @ \/skills\/play-release\/SKILL\.md/);
   assert.match(workerBrief, /CAPABILITIES: Godot Android billing/);
@@ -7907,11 +7907,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   const bound = admitSpawn({
     parent: { parentId: null },
-    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
   });
   assert.equal(bound.ok, true);
-  if (bound.ok) assert.equal(bound.cwd, "D:\\Godot\\Projects\\spaceship-battle");
+  if (bound.ok) assert.equal(bound.cwd, "D:\\Godot\\Projects\\demo-game");
 
   const unbound = admitSpawn({
     parent: { parentId: null },
@@ -7922,14 +7922,14 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   const nested = admitSpawn({
     parent: { parentId: "sess_orch", hidden: true },
-    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
   });
   assert.equal(nested.ok, false);
   if (!nested.ok) assert.equal(nested.error, WORKER_SPAWN_ERROR);
   const boundedNested = admitSpawn({
     parent: { parentId: "sess_orch", hidden: true },
-    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Independently verify project.godot.",
     allowNested: true,
   });
@@ -7952,7 +7952,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   const spawnOnly = admitSpawn({
     parent: { parentId: null },
-    projectFolder: "D:\\Godot\\Projects\\spaceship-battle",
+    projectFolder: "D:\\Godot\\Projects\\demo-game",
     prompt: "please spawn MiniMax",
   });
   assert.equal(spawnOnly.ok, false);
@@ -7960,12 +7960,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
   const explicit = admitSpawn({
     parent: { parentId: null },
-    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    folder: "D:\\Godot\\Projects\\demo-game",
     prompt: "Read project.godot and say what this game is.",
-    folderExists: (value) => value === "D:\\Godot\\Projects\\spaceship-battle",
+    folderExists: (value) => value === "D:\\Godot\\Projects\\demo-game",
   });
   assert.equal(explicit.ok, true);
-  if (explicit.ok) assert.equal(explicit.cwd, "D:\\Godot\\Projects\\spaceship-battle");
+  if (explicit.ok) assert.equal(explicit.cwd, "D:\\Godot\\Projects\\demo-game");
 
   assert.equal(deskRoleOf({ parentId: "p", hidden: true }), "worker");
   assert.equal(deskRoleOf({ parentId: null }), "orchestrator");
@@ -8130,11 +8130,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   const mainPeerBridge = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.doesNotMatch(mainPeerBridge, /settlePeerAsk/);
   assert.match(mainPeerBridge, /ipcMain\.handle\("grok:peer-result"/);
-  const crew = addLineupRow(emptyLineup("D:\\Godot\\Projects\\spaceship-battle", 1), {
+  const crew = addLineupRow(emptyLineup("D:\\Godot\\Projects\\demo-game", 1), {
     childId: "sess_a",
     title: "HUD",
     slice: "HUD",
-    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    folder: "D:\\Godot\\Projects\\demo-game",
     vendor: "MiniMax",
     status: "running",
     startedAt: 1,
@@ -8143,7 +8143,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     childId: "sess_b",
     title: "Ships",
     slice: "Ships",
-    folder: "D:\\Godot\\Projects\\spaceship-battle",
+    folder: "D:\\Godot\\Projects\\demo-game",
     vendor: "MiniMax",
     status: "running",
     startedAt: 2,
@@ -8279,7 +8279,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
           {
             id: "proj_ships",
             name: "Spaceship battles",
-            folders: [{ id: "f", path: "D:\\Godot\\Projects\\spaceship-battle" }],
+            folders: [{ id: "f", path: "D:\\Godot\\Projects\\demo-game" }],
           },
         ],
         sessions: [
@@ -8370,7 +8370,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
 
 test("desk builds one named join prompt and syncs idle children", () => {
   const userSentence = "Please do a deep scrape of this project with subagents";
-  const folder = "D:\\Godot\\Projects\\spaceship-battle";
+  const folder = "D:\\Godot\\Projects\\demo-game";
   let wave = emptyLineup(folder, Date.parse("2026-08-14T12:00:00.000Z"), userSentence);
   wave = { ...wave, id: "lineup_join_test" };
   const slices = [
@@ -8395,7 +8395,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.match(joined, /ORCHESTRATION CALL/);
   assert.match(joined, /Please do a deep scrape of this project with subagents/);
   assert.match(joined, /lineup_join_test/);
-  assert.match(joined, /D:\\Godot\\Projects\\spaceship-battle/);
+  assert.match(joined, /D:\\Godot\\Projects\\demo-game/);
   assert.match(joined, /sess_struct/);
   assert.match(joined, /sess_scripts/);
   assert.match(joined, /sess_scenes/);

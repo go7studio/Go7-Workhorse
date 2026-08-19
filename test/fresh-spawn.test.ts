@@ -18,8 +18,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const handoff = {
   status: "ok",
-  summary: "HUD lives in battle_hud.gd",
-  evidence: "game/scripts/autoload/battle_hud.gd",
+  summary: "HUD lives in main_hud.gd",
+  evidence: "game/scripts/autoload/main_hud.gd",
   nextSteps: "wire the leftover ring into the HUD",
 };
 
@@ -58,7 +58,7 @@ test("fresh seed skips reuse and starts with only the handoff", () => {
   });
   assert.equal(messages.length, 2);
   assert.equal(messages[0]?.id, "u-fresh");
-  assert.match(messages[0]?.text ?? "", /HUD lives in battle_hud.gd/);
+  assert.match(messages[0]?.text ?? "", /HUD lives in main_hud.gd/);
   assert.match(messages[0]?.text ?? "", /SEED: fresh/);
   assert.doesNotMatch(messages[0]?.text ?? "", /parent said lots of secrets/);
   assert.doesNotMatch(messages[0]?.text ?? "", /this parent prompt must not appear/);
@@ -89,7 +89,7 @@ test("fresh handoff parse rejects an empty report", () => {
   assert.equal(parseWorkerHandoff({ status: "ok" }), undefined);
   assert.equal(parseWorkerHandoff({ summary: "x" }), undefined);
   assert.deepEqual(parseWorkerHandoff(handoff), handoff);
-  assert.match(formatFreshHandoffPrompt(handoff), /battle_hud\.gd/);
+  assert.match(formatFreshHandoffPrompt(handoff), /main_hud\.gd/);
 });
 
 test("vendorTextForSpawn sends the handoff on fresh and the parent brief on inherit", () => {
@@ -98,7 +98,7 @@ test("vendorTextForSpawn sends the handoff on fresh and the parent brief on inhe
     fromTitle: "Boss",
     text: parentText,
     folder: "/repo",
-    project: "Pathogeneer",
+    project: "Analytics Lab",
     slice: "audit HUD",
     vendor: "Grok 4.6",
   };
@@ -109,7 +109,7 @@ test("vendorTextForSpawn sends the handoff on fresh and the parent brief on inhe
   const fresh = vendorTextForSpawn({ ...brief, seed: "fresh", handoff });
   assert.equal(fresh, formatFreshHandoffPrompt(handoff));
   assert.match(fresh, /SEED: fresh/);
-  assert.match(fresh, /HUD lives in battle_hud.gd/);
+  assert.match(fresh, /HUD lives in main_hud.gd/);
   assert.doesNotMatch(fresh, /parent said lots of secrets/);
   assert.notEqual(fresh, formatWorkerPrompt(brief));
 });

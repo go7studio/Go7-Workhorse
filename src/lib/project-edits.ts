@@ -151,7 +151,7 @@ function dottedCite(cite: string): string {
 
 /**
  * Keep an agent-cited absolute path. A bare `openclaw.json` next to
- * `C:\Users\lgovo\openclaw` becomes that folder's file — not the project folder.
+ * `C:\Users\someone\openclaw` becomes that folder's file — not the project folder.
  */
 export function harvestFilePath(
   mention: string,

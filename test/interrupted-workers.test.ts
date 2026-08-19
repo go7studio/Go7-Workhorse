@@ -18,7 +18,7 @@ const brief = { id: "m1", role: "user" as const, text: "Audit every input on the
 const worker = (id: string, title: string): Session =>
   ({
     id,
-    projectId: "proj_shoreclose",
+    projectId: "proj_harbour",
     parentId: "sess_parent",
     hidden: true,
     provider: "grok",

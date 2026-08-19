@@ -151,7 +151,7 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
     pid: 4242,
     setup: "C:\\tmp\\workhorse-setup.exe",
     tmp: "C:\\tmp\\workhorse-update-1",
-    exe: "C:\\Users\\lgovo\\AppData\\Local\\Programs\\Go7 Workhorse\\Go7 Workhorse.exe",
+    exe: "C:\\Users\\someone\\AppData\\Local\\Programs\\Go7 Workhorse\\Go7 Workhorse.exe",
   });
   assert.deepEqual(winInstallerArgs(), ["/S", "--updated"]);
   assert.match(winScript, /pid = 4242/);

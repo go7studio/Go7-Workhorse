@@ -18,7 +18,7 @@ import {
 } from "../src/lib/goal";
 import { applyVendorTurnIdle, normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
-import { appendOpenTurnUser } from "../src/lib/session-ledger";
+import { appendOpenTurnUser, currentTurnNumber, isTurnOpen } from "../src/lib/session-ledger";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -175,27 +175,41 @@ test("applyVendorTurnIdle is the store helper: closes the log and queues the nex
   assert.equal(after.queue?.[0]?.hideUser, true);
 });
 
-test("a second idle on the same closed turn does not increment rounds or queue again", () => {
+test("a second idle after the next turn opens leaves that turn running", () => {
   const goal = applyGoalCommand(undefined, "/goal ship leftover rings", 1)!;
   const opened = appendOpenTurnUser(undefined, { id: "u1", text: "/goal ship leftover rings", source: "human", at: 1 });
   const first = applyVendorTurnIdle(chat({ goal, ledger: opened }), { assistantId: "a1", now: 20 });
   assert.equal(first.goal?.rounds, 1);
-  assert.equal(first.queue?.length, 1);
-  const second = applyVendorTurnIdle(first, { assistantId: "a1", now: 21 });
+  assert.equal(first.status, "idle");
+  assert.equal(first.goal?.lastIdleAssistantId, "a1");
+  const continuation = first.queue?.[0]?.text;
+  assert.ok(continuation);
+  const turn2 = appendOpenTurnUser(first.ledger, { id: "u2", text: continuation, source: "goal", at: 21 });
+  const running: Session = { ...first, status: "running", ledger: turn2 };
+  assert.equal(isTurnOpen(running.ledger), true);
+  assert.equal(currentTurnNumber(running.ledger), 2);
+  const second = applyVendorTurnIdle(running, { assistantId: "a1", now: 22 });
+  assert.equal(second.status, "running");
+  assert.equal(isTurnOpen(second.ledger), true);
+  assert.equal(currentTurnNumber(second.ledger), 2);
   assert.equal(second.goal?.rounds, first.goal?.rounds);
-  assert.equal(second.queue?.length, first.queue?.length);
   assert.equal(second.queue?.[0]?.id, first.queue?.[0]?.id);
 });
 
-test("compact-done does not burn a goal round", () => {
+test("compacted idle stamps so a later return does not burn a round", () => {
   const goal = applyGoalCommand(undefined, "/goal ship leftover rings", 1)!;
   const opened = appendOpenTurnUser(undefined, { id: "u1", text: "/goal ship leftover rings", source: "human", at: 1 });
-  const after = applyVendorTurnIdle(chat({ goal, ledger: opened }), {
+  const compacted = applyVendorTurnIdle(chat({ goal, ledger: opened }), {
     assistantId: "a1",
     compacted: true,
     now: 20,
   });
-  assert.equal(after.goal?.rounds, 0);
-  assert.equal(after.queue, undefined);
-  assert.equal(after.goal?.status, "active");
+  assert.equal(compacted.goal?.rounds, 0);
+  assert.equal(compacted.queue, undefined);
+  assert.equal(compacted.goal?.status, "active");
+  assert.equal(compacted.goal?.lastIdleAssistantId, "a1");
+  const again = applyVendorTurnIdle(compacted, { assistantId: "a1", now: 21 });
+  assert.equal(again.goal?.rounds, 0);
+  assert.equal(again.queue, undefined);
+  assert.equal(again.status, compacted.status);
 });

@@ -182,6 +182,12 @@ export function applyVendorTurnIdle(
   const assistant = options?.assistantId
     ? session.messages.find((message) => message.id === options.assistantId)
     : [...session.messages].reverse().find((message) => message.role === "assistant" && !message.kind);
+  const assistantId = assistant?.id ?? options?.assistantId;
+  // Hosts emit done then return from *Prompt. A second idle on the same
+  // assistant must not close a turn the queue flusher already opened.
+  if (assistantId && session.goal?.lastIdleAssistantId === assistantId) {
+    return session;
+  }
   const closed: Session = {
     ...session,
     status: "idle",
@@ -197,7 +203,7 @@ export function applyVendorTurnIdle(
     safetyPaused: options?.safetyPaused,
     failed: options?.failed,
     compacted: options?.compacted,
-    assistantId: assistant?.id ?? options?.assistantId,
+    assistantId,
     now: options?.now,
   });
 }

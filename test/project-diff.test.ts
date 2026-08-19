@@ -667,8 +667,8 @@ test("findSourceFile walks .walk and skips .git; created stats do not walk", () 
 });
 
 test("absolute cite outside the project is not joined onto the project folder", () => {
-  const project = path.join("C:", "Users", "lgovo", "Projects", "talk-in-talk-in");
-  const real = path.join("C:", "Users", "lgovo", "openclaw", "openclaw.json");
+  const project = path.join("C:", "Users", "someone", "Projects", "talk-in-talk-in");
+  const real = path.join("C:", "Users", "someone", "openclaw", "openclaw.json");
   const decoy = path.join(project, "openclaw.json");
   const files = new Set([real]);
   const dirs = new Set([project, path.dirname(real), path.dirname(project)]);
@@ -693,8 +693,8 @@ test("absolute cite outside the project is not joined onto the project folder", 
   assert.equal(missing.missing, true);
   assert.equal(missing.path, real);
 
-  const dotted = path.join("C:", "Users", "lgovo", ".openclaw", "openclaw.json");
-  const citedMissing = path.join("C:", "Users", "lgovo", "openclaw", "openclaw.json");
+  const dotted = path.join("C:", "Users", "someone", ".openclaw", "openclaw.json");
+  const citedMissing = path.join("C:", "Users", "someone", "openclaw", "openclaw.json");
   const key = (item: string) => item.replaceAll("\\", "/").toLowerCase();
   assert.equal(key(dottedConfigAlt(citedMissing)), key(dotted));
   const hidden = {

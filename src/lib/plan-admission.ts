@@ -92,7 +92,9 @@ export function applyAuditorWaveAdmission(
       gate: next.gate,
     });
     if (!evidence) continue;
-    const targets = next.steps.filter((step) => step.status === "running" || (step.evidenceRequired && step.status !== "completed" && step.status !== "failed" && step.status !== "cancelled"));
+    const targets = next.steps.filter((step) =>
+      step.status === "running" || Boolean(step.assignedSessionId) && step.status !== "completed" && step.status !== "failed" && step.status !== "cancelled",
+    );
     for (const step of targets) {
       const recorded = recordPlanEvidence(next, step.id, { ...evidence, id: `${evidence.id}_${step.id}` }, now);
       next = planFrom(recorded, next);
@@ -115,7 +117,7 @@ export function joinAndAdmit(
   sessions: Session[],
   parentId: string,
   catalog: AuditorCatalogRow[],
-  ids: { childId: string; now?: number },
+  ids: { childId: string; now?: number; workerName?: string },
 ): PlanAuditorSpawn {
   return applyPlanAuditorSpawn(maybeEnqueueLineupJoin(sessions, parentId, ids.now), parentId, catalog, ids);
 }

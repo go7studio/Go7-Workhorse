@@ -12,6 +12,7 @@ import {
 import {
   approvePlanRun,
   assignPlanStep,
+  completePlanRun,
   parseAuditorReport,
   parseMarkdownPlan,
   parsePlanGate,
@@ -19,7 +20,7 @@ import {
   setPlanStepStatus,
   startPlanRun,
 } from "../src/lib/plan";
-import { addLineupRow, emptyLineup, lineupJoinPrompt, maybeEnqueueLineupJoin } from "../src/lib/lineup";
+import { addLineupRow, applyChildIdleSync, emptyLineup, lineupJoinPrompt, maybeEnqueueLineupJoin } from "../src/lib/lineup";
 import { admitSpawn, deskRoleOf, formatAuditorPrompt, toolsForDeskRole, vendorTextForSpawn } from "../src/lib/subagents";
 import { AUDITOR_SESSION_RULES, sessionRulesFor } from "../src/lib/workhorse-rules";
 import type { Session } from "../src/lib/types";
@@ -240,4 +241,95 @@ test("store joins then admits through joinAndAdmit", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /joinAndAdmit\(/);
   assert.match(store, /applyPlanAuditorSpawn\(/);
+});
+
+test("an ordinary checklist plan completes without an auditor", () => {
+  let plan = parseMarkdownPlan({ markdown: "### Task 1: Write copy\n", now: 1 });
+  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  const stepId = plan.steps[0]!.id;
+  plan = setPlanStepStatus(plan, stepId, "running", { now: 4 }).plan;
+  plan = recordPlanEvidence(plan, stepId, {
+    id: "e1",
+    kind: "note",
+    label: "done",
+    value: "shipped the copy",
+    recordedAt: 5,
+  }, 5).plan;
+  plan = setPlanStepStatus(plan, stepId, "completed", { now: 6 }).plan;
+  assert.equal(completePlanRun(plan, 7).ok, true);
+  const spawned = joinAndAdmit([parent({ planRun: plan })], "sess_parent", [{ provider: "grok", canCall: true }], {
+    childId: "sess_auditor",
+  });
+  assert.equal(spawned.auditor, undefined);
+});
+
+test("full objective: builder wave then auditor receipt completes the step", () => {
+  let plan = parseMarkdownPlan({
+    markdown: "### Task 1: Add\nNamed test gate: `npm test`\n",
+    now: 1,
+    id: "plan_obj",
+  });
+  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  const stepId = plan.steps[0]!.id;
+  const assigned = assignPlanStep(plan, stepId, {
+    sessionId: "sess_wren",
+    provider: "codex",
+    model: "gpt-5.4",
+    rationale: "fence A",
+    skills: [],
+    tools: [],
+    constraints: [],
+  }, 4);
+  assert.equal(assigned.ok, true);
+  if (!assigned.ok) throw new Error(assigned.error);
+  plan = setPlanStepStatus(assigned.plan, stepId, "running", { now: 5 }).plan;
+  const wren = builder("sess_wren", "codex");
+  const lineup = addLineupRow(emptyLineup("/repo", 10, "assign bots", "desk"), {
+    childId: "sess_wren",
+    title: "Wren",
+    slice: "add",
+    folder: "/repo",
+    vendor: "codex",
+    status: "completed",
+    startedAt: 10,
+    finishedAt: 11,
+    report: "add done",
+  });
+  const first = joinAndAdmit(
+    [parent({ planRun: plan, lineup }), wren],
+    "sess_parent",
+    [
+      { provider: "codex", canCall: true },
+      { provider: "grok", canCall: true, model: "grok-4.6" },
+    ],
+    { childId: "sess_auditor", now: 12, workerName: "Piper" },
+  );
+  assert.equal(first.auditor?.id, "sess_auditor");
+  assert.equal(first.sessions.find((session) => session.id === "sess_parent")?.planRun?.steps[0]?.status, "running");
+
+  let sessions = first.sessions.map((session) =>
+    session.id === "sess_auditor"
+      ? {
+          ...session,
+          messages: [{
+            id: "a1",
+            role: "assistant" as const,
+            text: `HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`,
+            createdAt: 20,
+          }],
+        }
+      : session,
+  );
+  sessions = applyChildIdleSync(sessions, "sess_auditor", "completed", {
+    report: `HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`,
+    now: 21,
+  });
+  const second = joinAndAdmit(sessions, "sess_parent", [{ provider: "grok", canCall: true }], {
+    childId: "sess_unused",
+    now: 22,
+  });
+  const done = second.sessions.find((session) => session.id === "sess_parent")?.planRun;
+  assert.equal(done?.steps[0]?.status, "completed");
+  assert.equal(done?.steps[0]?.evidence.some((row) => row.role === "auditor" && row.head === HEAD), true);
+  assert.equal(completePlanRun(done!, 23).ok, true);
 });

@@ -224,3 +224,44 @@ test("installWorkhorseLink connects the hosts asked for, reports a missing CLI a
     assert.ok(all.written.some((item) => item.target === host) || all.skipped.some((item) => item.target === host), `${host} was attempted`);
   }
 });
+
+test("every mutating Link call shares the envelope: a retried ask_chat posts once", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-"));
+  const statePath = path.join(dir, "state.json");
+  // A chat is one with at least one user message; the catalog lists nothing else.
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      settings: {},
+      sessions: [{ id: "chat_1", title: "Desk", provider: "grok", projectId: null, messages: [{ id: "m1", role: "user", text: "hello", createdAt: 1 }] }],
+    }),
+  );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let posts = 0;
+  setWorkhorseDeskAsk(async () => {
+    posts += 1;
+    return { text: JSON.stringify({ ok: true, delivered: posts }) };
+  });
+  try {
+    const ask = (id: number) =>
+      handleWorkhorseRpc(
+        { jsonrpc: "2.0", id, method: "tools/call", params: { name: "workhorse_ask_chat", arguments: { chat: "chat_1", message: "status?", fromSessionId: "chat_1", idempotencyKey: "ask-once", wait: false } } },
+      ) as Promise<{ error?: { message?: string }; result?: { content?: Array<{ text?: string }> } }>;
+    const first = await ask(1);
+    assert.equal(first.error, undefined, first.error?.message);
+    const again = await ask(2);
+    assert.equal(again.result?.content?.[0]?.text, first.result?.content?.[0]?.text, "the retry got the first answer back");
+    assert.equal(posts, 1, "the message was posted once");
+    const body = JSON.parse(first.result?.content?.[0]?.text ?? "{}") as { envelope?: { idempotencyKey: string } };
+    assert.equal(body.envelope?.idempotencyKey, "ask-once", "the reply names the key it ran under");
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

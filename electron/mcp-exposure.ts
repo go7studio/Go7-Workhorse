@@ -1,7 +1,7 @@
 import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from "../src/lib/agent-runtime";
 import { WORKER_DESK_TOOLS } from "../src/lib/subagents";
-import { LINK_TOOLS } from "../src/lib/workhorse-link";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
+import type { DeskRole } from "../src/lib/workhorse-rules";
 
 export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_capabilities",
@@ -59,9 +59,6 @@ export function mcpExposureProfile(raw: unknown): McpExposureProfile {
   return "desk";
 }
 
-/** Workhorse Link's seven names are the contract; the external profile must answer every one. */
-export const LINK_CONTRACT_TOOLS = LINK_TOOLS;
-
 export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boolean {
   if (profile === "desk") return true;
   if (profile === "worker") return (WORKER_DESK_TOOLS as readonly string[]).includes(tool);
@@ -74,7 +71,7 @@ export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boo
  * Workhorse worker chat is a `worker` whatever transport it arrived on, because
  * the caller session decides what the caller is, not the pipe.
  */
-export function profileForCaller(envProfile: McpExposureProfile, callerRole: "orchestrator" | "worker" | undefined): McpExposureProfile {
+export function profileForCaller(envProfile: McpExposureProfile, callerRole: DeskRole | undefined): McpExposureProfile {
   if (envProfile === "external-runtime") return envProfile;
   if (callerRole === "worker") return "worker";
   return envProfile;

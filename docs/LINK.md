@@ -84,7 +84,9 @@ A call that changes the desk carries:
 `workhorse_list_chats`; without one, delegation returns `context_required`.
 Send `traceId` and `idempotencyKey`; Workhorse creates any you leave out and
 echoes the three it ran under in the reply's `envelope`. A retry with the same
-`idempotencyKey` returns the first answer, not a second worker.
+`idempotencyKey` returns the first answer: not a second worker from
+`delegate`, not a second pass from `continue_mission`, not the same message
+posted twice by `ask_chat`.
 
 Workhorse owns hop counting and cycle detection. Capacity is advisory:
 delegation rechecks Watch, permissions, connection and callability every

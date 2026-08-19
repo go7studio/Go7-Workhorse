@@ -46,7 +46,7 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
 import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
-import { LinkReplayCache, linkEnvelope, linkHandshake } from "../src/lib/workhorse-link";
+import { LINK_MUTATING_TOOLS, LinkReplayCache, linkEnvelope, linkHandshake, type LinkEnvelope } from "../src/lib/workhorse-link";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 
 type JsonRpc = {
@@ -1457,6 +1457,7 @@ function withLinkEnvelope(text: string, envelope: { traceId: string; idempotency
   try {
     const parsed = JSON.parse(text) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if ("envelope" in (parsed as Record<string, unknown>)) return text;
       return JSON.stringify(
         { ...(parsed as Record<string, unknown>), envelope: { traceId: envelope.traceId, idempotencyKey: envelope.idempotencyKey, supplied: envelope.supplied } },
         null,
@@ -1482,14 +1483,24 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   if (name === "workhorse_capabilities") {
     return JSON.stringify(linkHandshake({ deskOnline: deskIsOnline() }), null, 2);
   }
-  if (name === "workhorse_delegate") {
-    // The execution envelope. A repeat of the same idempotencyKey is the same
-    // request — a harness retrying after a dropped pipe — and gets the first
-    // answer, not a second worker. Workhorse fills what the caller left out
-    // and says so in the reply.
+  // Every call that changes the desk carries the execution envelope. A repeat
+  // of the same idempotencyKey is the same request — a harness retrying after
+  // a dropped pipe — and gets the first answer: not a second worker, not the
+  // same message posted twice. Workhorse fills what the caller left out and
+  // says so in the reply.
+  if ((LINK_MUTATING_TOOLS as readonly string[]).includes(name)) {
     const envelope = linkEnvelope(args, (prefix) => `${prefix}_${Math.random().toString(36).slice(2, 12)}`, from);
     const replayed = linkReplay.get(envelope.idempotencyKey);
     if (replayed) return replayed;
+    const answer = withLinkEnvelope(await callMutatingTool(name, args, from, envelope), envelope);
+    linkReplay.put(envelope.idempotencyKey, answer);
+    return answer;
+  }
+  return callDeskTool(name, args, from);
+}
+
+async function callMutatingTool(name: string, args: Record<string, unknown>, from: string | undefined, envelope: LinkEnvelope): Promise<string> {
+  if (name === "workhorse_delegate") {
     const task = typeof args.task === "string" ? args.task : "";
     // A mission mints its own trace id when the caller sent none; only a
     // plain delegate falls back to the envelope's generated one.
@@ -1528,15 +1539,24 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         traceId: effectiveTraceId,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
-    ).then((text) => {
-      const answer = withLinkEnvelope(text, { ...envelope, traceId: effectiveTraceId ?? envelope.traceId });
-      linkReplay.put(envelope.idempotencyKey, answer);
-      return answer;
-    });
+    ).then((text) => withLinkEnvelope(text, { ...envelope, traceId: effectiveTraceId ?? envelope.traceId }));
   }
   if (name === "workhorse_continue_mission") {
     return continueMission(args, typeof args.fromSessionId === "string" ? args.fromSessionId : from);
   }
+  if (name === "workhorse_ask_chat") {
+    const chat = typeof args.chat === "string" ? args.chat : "";
+    const message = typeof args.message === "string" ? args.message : "";
+    if (!message.trim()) throw new Error("message is required");
+    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
+    const wait = args.wait === true || (args.wait !== false && currentMcpProfile() !== "external-runtime");
+    return askChat(chat, message, parent, envelope.supplied.includes("traceId") ? envelope.traceId : undefined, wait);
+  }
+  throw new Error(`Unknown mutating tool ${name}`);
+}
+
+/** Everything else: reads, and the desk-only tools an orchestrator or the desk itself may call. */
+async function callDeskTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
     return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
   }
@@ -1546,14 +1566,6 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const transcript = sessionTranscript(readState(), chat, limit, from);
     if (!transcript) throw new Error(`No Workhorse chat matches “${chat}”`);
     return JSON.stringify(transcript, null, 2);
-  }
-  if (name === "workhorse_ask_chat") {
-    const chat = typeof args.chat === "string" ? args.chat : "";
-    const message = typeof args.message === "string" ? args.message : "";
-    if (!message.trim()) throw new Error("message is required");
-    const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
-    const wait = args.wait === true || (args.wait !== false && currentMcpProfile() !== "external-runtime");
-    return askChat(chat, message, parent, typeof args.traceId === "string" ? args.traceId : undefined, wait);
   }
   if (name === "workhorse_spawn_agent") {
     const prompt = typeof args.prompt === "string" ? args.prompt : typeof args.message === "string" ? args.message : "";
@@ -2117,16 +2129,27 @@ function isMcpEntry(): boolean {
  */
 export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
-  const flag = (name: string): string | undefined => {
-    const index = rest.indexOf(`--${name}`);
-    return index >= 0 ? rest[index + 1] : undefined;
-  };
-  const positional = rest.filter((item, index) => !item.startsWith("--") && !(index > 0 && rest[index - 1]?.startsWith("--") && rest[index - 1] !== "--callable"));
+  // Flags that take a value; anything else starting with -- is a switch.
+  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass"]);
+  const flags = new Map<string, string>();
+  const positional: string[] = [];
+  for (let index = 0; index < rest.length; index += 1) {
+    const item = rest[index]!;
+    if (VALUE_FLAGS.has(item)) {
+      flags.set(item.slice(2), rest[index + 1] ?? "");
+      index += 1;
+    } else if (item.startsWith("--")) {
+      flags.set(item.slice(2), "true");
+    } else {
+      positional.push(item);
+    }
+  }
+  const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
     "usage: link capabilities | capacity [--provider <id>] [--callable] | delegate --chat <id> --task <text> [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>]";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
-    return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(rest.includes("--callable") ? { callableOnly: true } : {}) } };
+    return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
   }
   if (sub === "delegate") {
     const task = flag("task");

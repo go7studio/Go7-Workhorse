@@ -525,6 +525,15 @@
       "rubric": ["SET-01", "SET-02"],
       "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx", "src/ui/RoutingPane.tsx", "src/ui/LearningPane.tsx", "src/lib/usage.ts"],
       "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-059",
+      "behavior": "Fresh-worker seed and structured handoff fields remain typed across MCP, the peer bridge, routing, persistence, and worker launch.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S5", "ORC-S8", "ORC-S9"],
+      "rubric": ["ORC-10", "ORC-16", "ORC-17"],
+      "sourceFiles": ["electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/fresh-spawn.test.ts"],
+      "verification": ["eval:validate", "verify"]
     }
   ]
 }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ChatImage, MissionIteration } from "../src/lib/types";
+import type { ChatImage, MissionIteration, WorkerHandoff, WorkerSeed } from "../src/lib/types";
 
 export type PeerAction =
   | "list"
@@ -57,6 +57,9 @@ export type PeerAsk = {
   bot?: string;
   /** Name of the worker to hand this slice back to — Wren, Dexter, Marlow. */
   worker?: string;
+  /** Inherit reuses compatible context; fresh accepts only a structured handoff. */
+  seed?: WorkerSeed;
+  handoff?: WorkerHandoff;
   chats?: "keep" | "remove";
   onlyThis?: boolean;
   scope?: string;

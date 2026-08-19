@@ -222,6 +222,8 @@ export type LaunchExternalInput = AuthorizeExternalInput & {
   hopLimit?: number;
   now?: number;
   startRuntime: (request: RuntimeStartRequest) => Promise<ExternalTask | null>;
+  /** Persist the visible running task before the external CLI is allowed to block. */
+  onStarted?: (started: Extract<StartExternalTaskResult, { ok: true }>) => void | Promise<void>;
 };
 
 export async function launchExternalAssignment(input: LaunchExternalInput): Promise<StartExternalTaskResult> {
@@ -249,6 +251,7 @@ export async function launchExternalAssignment(input: LaunchExternalInput): Prom
     explicitTarget: explicit,
   });
   if (!started.ok || started.duplicate) return started;
+  await input.onStarted?.(started);
   const live = await input.startRuntime({
     ref: started.task.ref,
     prompt: input.prompt,

@@ -6,8 +6,10 @@ import path from "node:path";
 import {
   CURRENT_STATE_VERSION,
   readComposerDraftFile,
+  readStringMapFile,
   readVersionedState,
   writeComposerDraftFile,
+  writeStringMapFile,
   writeVersionedState,
 } from "../electron/state-persistence";
 
@@ -72,5 +74,16 @@ test("composer drafts write a sidecar and vanish when empty", () => {
   assert.equal((readComposerDraftFile(file).sess_1 as { text?: string })?.text, "still typing");
   writeComposerDraftFile(file, {});
   assert.deepEqual(readComposerDraftFile(file), {});
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("file instance baselines survive a process restart", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-instances-"));
+  const file = path.join(dir, "file-instances.json");
+  writeStringMapFile(file, new Map([["/repo/new.txt", "first\nsecond\n"]]));
+  const restored = readStringMapFile(file);
+  assert.equal(restored.get("/repo/new.txt"), "first\nsecond\n");
+  fs.writeFileSync(file, "{broken", "utf8");
+  assert.equal(readStringMapFile(file).size, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });

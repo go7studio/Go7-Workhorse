@@ -82,6 +82,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   installLinkCommand: () => ipcRenderer.invoke("agentRuntime:installLinkCommand"),
   startExternalRuntimeTask: (request: import("../src/lib/external-task").RuntimeStartRequest) =>
     ipcRenderer.invoke("agentRuntime:start", request) as Promise<import("../src/lib/types").ExternalTask | null>,
+  cancelExternalRuntimeTask: (taskId: string) =>
+    ipcRenderer.invoke("agentRuntime:cancel", taskId) as Promise<boolean>,
   syncJobs: (sessions: import("../src/lib/types").Session[]) =>
     ipcRenderer.invoke("jobs:sync", sessions) as Promise<import("./job-engine").DurableJobEvent[]>,
   onJobDue: (handler: (events: import("./job-engine").DurableJobEvent[]) => void) => {

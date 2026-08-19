@@ -292,6 +292,7 @@ type WorkhorseBridge = {
   startExternalRuntimeTask?: (
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
+  cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
 };
 
 interface Window {

@@ -172,6 +172,7 @@ import {
   queueWakeDelayMs,
   reconcileIdleChildren,
   reconcilePersistedLineups,
+  setLineupRowStatus,
   stampLineupUserText,
 } from "./lineup";
 import { applyPlanAuditorSpawn, joinAndAdmit } from "./plan-admission";
@@ -3945,6 +3946,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: "unknown" });
                 return;
               }
+              await window.workhorse?.cancelExternalRuntimeTask?.(id);
               const next = {
                 ...store,
                 byId: { ...store.byId, [id]: { ...task, status: "cancelled" as const, finishedAt: Date.now() } },
@@ -4149,6 +4151,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 },
                 startRuntime: (request) =>
                   window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
+                onStarted: (running) => {
+                  setState((current) => ({
+                    ...current,
+                    externalTasks: running.store,
+                    sessions: current.sessions.map((session) =>
+                      session.id === caller.id
+                        ? {
+                            ...session,
+                            lineup: addLineupRow(session.lineup, running.row),
+                            ...(running.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: running.grant } : session.planRun } : {}),
+                          }
+                        : session,
+                    ),
+                  }));
+                },
               });
               if (!started.ok) {
                 await replyAsk({ error: started.code });
@@ -4161,7 +4178,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   session.id === caller.id
                     ? {
                         ...session,
-                        lineup: addLineupRow(session.lineup, started.row),
+                        lineup: setLineupRowStatus(session.lineup, started.task.id, started.row.status, {
+                          report: started.task.result,
+                          finishedAt: started.task.finishedAt,
+                          correlationId: started.task.envelope.traceId,
+                        }) ?? addLineupRow(session.lineup, started.row),
                         ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
                       }
                     : session,

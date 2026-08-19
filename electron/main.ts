@@ -52,14 +52,14 @@ import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, type EnsureWorktreeInput } from "./worktree-host";
 import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
 import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig } from "./mcp-install";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readVersionedState, writeComposerDraftFile, writeVersionedState } from "./state-persistence";
+import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -100,7 +100,41 @@ const CLAUDE_AUTH_SESSION = "auth:claude";
 export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
 
 /** Union of written file versions for the review. Survives later deletes of created lines. */
-const fileInstances = new Map<string, string>();
+let fileInstances = new Map<string, string>();
+const externalRuntimeProcesses = new Map<string, ChildProcess>();
+
+function runExternalRuntimeProcess(taskId: string, file: string, args: string[]) {
+  return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
+    const child = execFile(
+      file,
+      args,
+      { encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (externalRuntimeProcesses.get(taskId) === child) externalRuntimeProcesses.delete(taskId);
+        const rawCode = (error as { code?: string | number } | null)?.code;
+        const code = typeof rawCode === "number"
+          ? rawCode
+          : error
+            ? 1
+            : 0;
+        resolve({ status: code, stdout: stdout ?? "", stderr: stderr ?? "" });
+      },
+    );
+    externalRuntimeProcesses.set(taskId, child);
+  });
+}
+
+function cancelExternalRuntimeProcess(taskId: string): boolean {
+  const child = externalRuntimeProcesses.get(taskId);
+  if (!child) return false;
+  externalRuntimeProcesses.delete(taskId);
+  if (process.platform === "win32" && child.pid) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+  } else {
+    child.kill("SIGTERM");
+  }
+  return true;
+}
 
 function requireSessionCwd(value?: string | null): string {
   const cwd = resolveSessionCwd(value);
@@ -172,6 +206,10 @@ type Persistable = Record<string, unknown>;
 
 function statePath() {
   return path.join(app.getPath("userData"), "workhorse-state.json");
+}
+
+function fileInstancesPath() {
+  return path.join(app.getPath("userData"), "file-instances.json");
 }
 
 let credentials: CredentialStore | null = null;
@@ -447,6 +485,7 @@ app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
   claimLinkedFolders();
+  fileInstances = readStringMapFile(fileInstancesPath());
   void archiveWorkhorseWorkerThreads()
     .then((result) => {
       if (result.archived > 0) console.info(`Archived ${result.archived} Workhorse Codex worker logs.`);
@@ -726,13 +765,13 @@ app.whenReady().then(async () => {
       request: import("../src/lib/external-task").RuntimeStartRequest,
     ) => {
       const io = {
-        exec: (file: string, args: string[]) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 120_000, windowsHide: true });
-          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-        },
+        exec: (file: string, args: string[]) => runExternalRuntimeProcess(request.taskId, file, args),
       };
       return startRuntimeTask(io, request);
     },
+  );
+  ipcMain.handle("agentRuntime:cancel", (_event, taskId: unknown) =>
+    typeof taskId === "string" ? cancelExternalRuntimeProcess(taskId) : false,
   );
 
   ipcMain.handle("grok:peer-result", (_event, payload: { id: string } & PeerAskResult) => {
@@ -857,16 +896,19 @@ app.whenReady().then(async () => {
     return readFileDiff(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [], {
       created: created === true,
       instances: fileInstances,
+      recordInstance: false,
     });
   });
 
   ipcMain.handle("project:record-write", (_event, filePath: string, roots: string[] = []) => {
     if (typeof filePath !== "string" || !filePath.trim()) return "";
-    return recordFileInstance(
+    const recorded = recordFileInstance(
       filePath,
       Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : [],
       { instances: fileInstances },
     );
+    if (recorded) writeStringMapFile(fileInstancesPath(), fileInstances);
+    return recorded;
   });
 
   ipcMain.handle("project:read-file", (_event, filePath: string, roots: string[] = []) => {

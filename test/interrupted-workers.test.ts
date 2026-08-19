@@ -189,3 +189,36 @@ test("a lineup row written as failed by the old build is healed with its worker"
   assert.equal(healed.find((s) => s.id === "sess_parent")!.lineup!.rows[0]!.status, "interrupted",
     "or the wave and the worker disagree about what happened");
 });
+
+test("worker-heavy restart reconciliation stays linear at ten thousand chats", () => {
+  const sessions: Session[] = [];
+  for (let index = 0; index < 5_000; index += 1) {
+    const parentId = `parent_${index}`;
+    const childId = `child_${index}`;
+    sessions.push({
+      ...worker(parentId, `Parent ${index}`),
+      parentId: undefined,
+      hidden: undefined,
+      agentRun: undefined,
+      lineup: {
+        id: `lineup_${index}`,
+        folder: "/repo",
+        startedAt: 1,
+        joinOwner: "external-runtime",
+        rows: [{ childId, title: "Slice", slice: "slice", folder: "/repo", vendor: "Grok", status: "running", startedAt: 1 }],
+      },
+    });
+    sessions.push({
+      ...worker(childId, `Worker ${index}`),
+      parentId,
+      agentRun: { status: "interrupted", startedAt: 1, finishedAt: 2, isolation: "shared", error: "restart" },
+    });
+  }
+  const started = performance.now();
+  const healed = reconcilePersistedLineups(sessions, 3);
+  const elapsed = performance.now() - started;
+  assert.equal(healed.length, 10_000);
+  assert.equal(healed[0]?.lineup?.rows[0]?.status, "interrupted");
+  assert.equal(healed.at(-2)?.lineup?.rows[0]?.status, "interrupted");
+  assert.ok(elapsed < 1_500, `worker-heavy restart took ${elapsed.toFixed(1)}ms`);
+});

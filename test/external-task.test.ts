@@ -97,6 +97,43 @@ test("blanket plan grant plus a name starts a task and calls the runtime starter
   assert.equal(launched.run.kind, "external");
 });
 
+test("a running harness task is exposed before its CLI finishes", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const order: string[] = [];
+  const launched = launchExternalAssignment({
+    explicitTarget: "hermes/default",
+    grant: createWaveGrant({ waveId: "visible", runtimeId: "hermes", agentId: "default" }),
+    prompt: "long task",
+    store: emptyTaskStore(),
+    now: 15,
+    onStarted: (running) => {
+      order.push(`visible:${running.task.status}`);
+      assert.equal(running.row.status, "running");
+    },
+    startRuntime: async (request) => {
+      order.push("runtime");
+      await gate;
+      return {
+        id: request.taskId,
+        ref: request.ref,
+        status: "completed",
+        startedAt: 15,
+        finishedAt: 17,
+        result: "done",
+        envelope: request.envelope,
+        grantId: "",
+      };
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["visible:running", "runtime"]);
+  release();
+  const finished = await launched;
+  assert.equal(finished.ok, true);
+  if (finished.ok) assert.equal(finished.task.status, "completed");
+});
+
 test("outbound hop past the limit is hop_limit and does not start the runtime", async () => {
   let called = false;
   const limited = await launchExternalAssignment({
@@ -192,4 +229,7 @@ test("desk spawn path and main IPC wire the runtime starter", () => {
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /agentRuntime:start/);
   assert.match(main, /startRuntimeTask/);
+  assert.match(main, /agentRuntime:cancel/);
+  assert.match(main, /runExternalRuntimeProcess/);
+  assert.doesNotMatch(main.slice(main.indexOf('"agentRuntime:start"'), main.indexOf('"grok:peer-result"')), /spawnSync\(file/);
 });

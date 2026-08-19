@@ -323,18 +323,22 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
 
 /** Repair interrupted persisted workers before any new runtime calls can start. */
 export function reconcilePersistedLineups(sessions: Session[], now = Date.now()): Session[] {
-  let next = sessions;
+  const next = [...sessions];
+  const indexes = new Map(next.map((session, index) => [session.id, index]));
+  let changed = false;
   for (const child of sessions) {
     if (!child.parentId || !child.agentRun || child.agentRun.status === "running") continue;
-    const parent = next.find((session) => session.id === child.parentId);
+    const parentIndex = indexes.get(child.parentId);
+    const childIndex = indexes.get(child.id);
+    if (parentIndex === undefined || childIndex === undefined) continue;
+    const parent = next[parentIndex];
     const row = parent?.lineup?.rows.find((item) => item.childId === child.id);
     if (!row) continue;
     const workerName = child.workerName ?? workerNameFromTitle(child.title);
     const title = workerName ? workerTaskTitle(workerName, row.title) : child.title;
     if (workerName && (workerName !== child.workerName || title !== child.title)) {
-      next = next.map((session) =>
-        session.id === child.id ? { ...session, workerName, title } : session,
-      );
+      next[childIndex] = { ...next[childIndex]!, workerName, title };
+      changed = true;
     }
     // A row written by an older build says "failed" for the same interruption
     // its worker now reports as interrupted. Heal that too, or the wave and
@@ -350,18 +354,32 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
           // row says the slice is unfinished so a join cannot claim it is done.
           ? "interrupted" as const
           : "failed" as const;
-    next = applyChildIdleSync(next, child.id, rowStatus, {
-      report: childReportText(child),
-      error: child.agentRun.error,
-      now,
+    const report = childReportText(child);
+    const lineup = setLineupRowStatus(parent!.lineup, child.id, rowStatus, {
+      report,
+      finishedAt: child.agentRun.finishedAt ?? now,
       correlationId: child.agentRun.correlationId,
     });
+    if (lineup !== parent!.lineup) {
+      const messages = parent!.messages.map((message) =>
+        message.kind === "subagent" && message.subagentSessionId === child.id
+          ? { ...message, toolStatus: rowStatus === "completed" ? "completed" : "failed" }
+          : message,
+      );
+      next[parentIndex] = { ...parent!, lineup, messages };
+      changed = true;
+    }
   }
-  for (const parent of next) {
+  for (let index = 0; index < next.length; index += 1) {
+    const parent = next[index]!;
     if (!parent.lineup) continue;
-    next = maybeEnqueueLineupJoin(next, parent.id, now);
+    const reconciled = maybeEnqueueLineupJoin([parent], parent.id, now)[0]!;
+    if (reconciled !== parent) {
+      next[index] = reconciled;
+      changed = true;
+    }
   }
-  return next;
+  return changed ? next : sessions;
 }
 
 export function looksLikeJoinPrompt(text: string): boolean {

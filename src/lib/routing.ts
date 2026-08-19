@@ -17,6 +17,7 @@ import type { WatchPlans, WatchVendorStatus } from "./watch";
 export type RoutingCapacity = {
   usedPercent?: number;
   resetsAt?: string;
+  period?: "weekly" | "monthly" | "unknown";
 };
 
 export type RoutingCandidate = {
@@ -97,6 +98,7 @@ export function routingCandidatesForDesk(
         capacity: {
           usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
           resetsAt: product?.resetsAt ?? laneCapacity?.resetsAt ?? capacity?.resetsAt,
+          period: plan?.period ?? laneCapacity?.period ?? capacity?.period,
         },
       });
     }
@@ -116,6 +118,7 @@ export function routingCandidatesForDesk(
         capacity: {
           usedPercent: product?.usagePercent ?? capacity?.usedPercent,
           resetsAt: product?.resetsAt ?? capacity?.resetsAt,
+          period: plan?.period ?? capacity?.period,
         },
       });
     }
@@ -213,25 +216,84 @@ export function effortForRoutingTier(
   return withEffort(provider, model, override ?? preferred);
 }
 
-/** Weekly allowance draw at this instant. A positive delta means spare capacity. */
+/** Time horizon the vendor's allowance actually resets over, in ms. */
+export function routingPeriodMs(capacity: RoutingCapacity | undefined, now = Date.now()): number {
+  const MS_DAY = 24 * 60 * 60 * 1000;
+  const MS_WEEK = 7 * MS_DAY;
+  if (capacity?.period === "monthly") return 30 * MS_DAY;
+  if (capacity?.period === "weekly") return MS_WEEK;
+  const reset = capacity?.resetsAt ? Date.parse(capacity.resetsAt) : NaN;
+  if (Number.isFinite(reset)) {
+    const distance = reset - now;
+    // > 14 days to reset looks monthly. <= 14 days looks weekly. Anything in
+    // between leans weekly so the common Cursor 30-day case falls into the
+    // monthly bucket.
+    if (distance > 14 * MS_DAY) return 30 * MS_DAY;
+    return MS_WEEK;
+  }
+  return MS_WEEK;
+}
+
+/** Time remaining until the vendor's allowance resets, in ms (Infinity when unknown). */
+export function routingResetMs(capacity: RoutingCapacity | undefined, now = Date.now()): number {
+  if (!capacity?.resetsAt) return Number.POSITIVE_INFINITY;
+  const reset = Date.parse(capacity.resetsAt);
+  if (!Number.isFinite(reset)) return Number.POSITIVE_INFINITY;
+  return reset - now;
+}
+
+/**
+ * Allowance draw at this instant, scaled to the vendor's real reset cadence.
+ * A positive delta means spare capacity.
+ */
 export function weeklyDrawState(capacity: RoutingCapacity | undefined, now = Date.now()): {
   usedPercent?: number;
   expectedUsedPercent?: number;
   delta?: number;
+  periodMs?: number;
+  resetMs?: number;
 } {
   if (capacity?.usedPercent === undefined || !Number.isFinite(capacity.usedPercent)) return {};
   const usedPercent = clamp(capacity.usedPercent, 0, 1000);
   const reset = capacity.resetsAt ? Date.parse(capacity.resetsAt) : NaN;
+  const periodMs = routingPeriodMs(capacity, now);
   let elapsed = 0;
   if (Number.isFinite(reset)) {
-    elapsed = clamp(1 - (reset - now) / (7 * 24 * 60 * 60 * 1000), 0, 1);
+    elapsed = clamp(1 - (reset - now) / periodMs, 0, 1);
   } else {
     const date = new Date(now);
     const day = (date.getDay() + 6) % 7;
     elapsed = clamp((day + (date.getHours() * 60 + date.getMinutes()) / 1440) / 7, 0, 1);
   }
   const expectedUsedPercent = elapsed * 100;
-  return { usedPercent, expectedUsedPercent, delta: expectedUsedPercent - usedPercent };
+  const resetMs = Number.isFinite(reset) ? reset - now : undefined;
+  return {
+    usedPercent,
+    expectedUsedPercent,
+    delta: expectedUsedPercent - usedPercent,
+    periodMs,
+    resetMs,
+  };
+}
+
+/**
+ * Scale a flat reserve penalty so a vendor close to its reset window is
+ * spent down rather than benched. Returns a value in [0, 1] used to weight
+ * the penalty the caller wants to apply. At <=24h to reset the vendor is
+ * treated as ending its period right now (1.0); at >=7 days the penalty
+ * applies in full (1.0 too); it tapers off between 24h and 7d so a vendor
+ * with 2 days to reset still keeps most of the original protection.
+ *
+ *   resetMs  <= 1 day   -> 0   (spend it down, no penalty)
+ *   resetMs  >= 7 days  -> 1   (full protection)
+ *   in between          -> linear interpolation from 0 to 1
+ */
+export function reservePenaltyWeight(resetMs: number | undefined): number {
+  if (resetMs === undefined || !Number.isFinite(resetMs)) return 1;
+  const MS_DAY = 24 * 60 * 60 * 1000;
+  if (resetMs <= MS_DAY) return 0;
+  if (resetMs >= 7 * MS_DAY) return 1;
+  return (resetMs - MS_DAY) / (6 * MS_DAY);
 }
 
 function supports(profile: ModelRoutingProfile, required: Partial<ModelInputCapabilities>): boolean {
@@ -257,7 +319,12 @@ export function rankRoutingCandidates(
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
     if (routingIdentityExcluded(candidate, request.exclude)) continue;
     const gap = candidate.profile.intelligence - minimum;
-    let score = 100 + (gap < 0 ? gap * 30 : -gap * 5);
+    // On deep work we want fit to dominate. The over-fit penalty gets softer
+    // for higher tiers and the gap penalty gets harder if the model falls
+    // below the bar.
+    const overfitPenalty = tier === "deep" ? 2 : tier === "balanced" ? 4 : 6;
+    const underfitPenalty = tier === "deep" ? 40 : tier === "balanced" ? 30 : 25;
+    let score = 100 + (gap < 0 ? gap * underfitPenalty : -gap * overfitPenalty);
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);
     score -= candidate.profile.cost * (tier === "quick" ? 5 : tier === "balanced" ? 3 : 1);
     if (candidate.profile.local) score += tier === "deep" ? 1 : 8;
@@ -271,9 +338,20 @@ export function rankRoutingCandidates(
     }
     const draw = weeklyDrawState(candidate.capacity, request.now);
     if (settings.capacityAware && draw.usedPercent !== undefined && draw.delta !== undefined) {
-      if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8;
-      else if (draw.delta < 0) score += clamp(draw.delta, -50, 0) * 0.45;
-      if (draw.usedPercent >= 100 - settings.reservePercent) score -= 70;
+      // Cap the capacity term so it does not outvote fit on deep work where
+      // intelligence is what matters. Quick work still benefits from spare
+      // capacity being worth more, balanced sits in between.
+      const capacityWeight = tier === "deep" ? 0.25 : tier === "quick" ? 0.9 : 0.7;
+      if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
+      else if (draw.delta < 0) score += clamp(draw.delta, -50, 0) * 0.45 * capacityWeight;
+      // Hoarding a quota that resets within hours is waste. The flat -70
+      // assumes a weekly window and a vendor with days of runway left; here
+      // we taper the penalty as the reset approaches so a vendor that's
+      // about to refresh is spent down instead of benched.
+      if (draw.usedPercent >= 100 - settings.reservePercent) {
+        const weight = reservePenaltyWeight(draw.resetMs);
+        if (weight > 0) score -= 70 * weight;
+      }
     }
     ranked.push({
       ...candidate,

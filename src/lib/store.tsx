@@ -124,7 +124,7 @@ import {
   reconcileTaskStoreOnRestart,
 } from "./external-task";
 import { chooseRoutingDecision, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
-import type { AgentSystemsSettings } from "./types";
+import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -3937,18 +3937,96 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "cancel-agent") {
               const id = (payload.name || payload.message || "").trim();
+              if (!id) {
+                await replyAsk({ error: "unknown" });
+                return;
+              }
+              // Workhorse worker sessions live in `state.sessions`; external
+              // agent runs (OpenClaw / Hermes) live in `externalTasks`. A cancel
+              // must cover BOTH, must actually stop the vendor run, must be
+              // idempotent on a second call, and must preserve partial results
+              // (messages, reports, changed files).
+              const worker = latest.sessions.find(
+                (session) => session.id === id && Boolean(session.parentId),
+              );
+              if (worker) {
+                const parentId = payload.fromSessionId?.trim() || "";
+                const allowed =
+                  !parentId ||
+                  worker.id === parentId ||
+                  descendantSessionIds(latest.sessions, parentId).includes(worker.id);
+                if (!allowed) {
+                  await replyAsk({ error: "unknown" });
+                  return;
+                }
+                // Idempotent: a worker already in a terminal state keeps its
+                // finishedAt and is returned unchanged. The vendor is not
+                // poked again, so a second cancel is a no-op.
+                const existing = worker.agentRun;
+                if (existing && existing.status !== "running") {
+                  const settled = stateRef.current.sessions.find((session) => session.id === worker.id) ?? worker;
+                  await replyAsk({ text: JSON.stringify(workerStatusSnapshot(settled), null, 2) });
+                  return;
+                }
+                if (existing && existing.status === "running") {
+                  cancelVendorSession(worker);
+                }
+                const finishedAt = Date.now();
+                setState((currentState) => ({
+                  ...currentState,
+                  sessions: currentState.sessions.map((session) => {
+                    if (session.id !== worker.id) return session;
+                    const baseRun: AgentRun = session.agentRun
+                      ? { ...session.agentRun }
+                      : { status: "running", startedAt: finishedAt, isolation: "shared" };
+                    return {
+                      ...session,
+                      status: "idle",
+                      agentRun: {
+                        ...baseRun,
+                        status: "cancelled" as const,
+                        finishedAt,
+                        error: baseRun.error?.trim() ? baseRun.error : "Cancelled by the orchestrator before the worker finished.",
+                      },
+                    };
+                  }),
+                }));
+                const settled = stateRef.current.sessions.find((session) => session.id === worker.id);
+                if (!settled) {
+                  await replyAsk({ error: "unknown" });
+                  return;
+                }
+                await replyAsk({ text: JSON.stringify(workerStatusSnapshot(settled), null, 2) });
+                return;
+              }
               const store = normalizeTaskStore(latest.externalTasks);
               const task = store.byId[id];
               if (!task) {
                 await replyAsk({ error: "unknown" });
                 return;
               }
+              // Idempotent on external tasks too: a second cancel returns the
+              // existing terminal state without rewriting finishedAt.
+              if (
+                task.status === "cancelled" ||
+                task.status === "completed" ||
+                task.status === "failed" ||
+                task.status === "unknown"
+              ) {
+                await replyAsk({ text: JSON.stringify(task, null, 2) });
+                return;
+              }
+              const cancelledTask: ExternalTask = {
+                ...task,
+                status: "cancelled",
+                finishedAt: task.finishedAt ?? Date.now(),
+              };
               const next = {
                 ...store,
-                byId: { ...store.byId, [id]: { ...task, status: "cancelled" as const, finishedAt: Date.now() } },
+                byId: { ...store.byId, [id]: cancelledTask },
               };
               setState((current) => ({ ...current, externalTasks: next }));
-              await replyAsk({ text: JSON.stringify(next.byId[id], null, 2) });
+              await replyAsk({ text: JSON.stringify(cancelledTask, null, 2) });
               return;
             }
             if (action === "await-agents") {
@@ -3977,10 +4055,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const waveIdSet = new Set(waveIds);
               const shouldWait = awaitAgentsWaits({ wait: payload.wait, parentStatus: parentLive?.status });
               if (shouldWait) {
-                const timeoutMs =
+                // Cursor-based long poll. The desk owns joining, so the
+                // server-side wait is short even when the parent asked us to
+                // sit. Anything longer belongs on a desk-driven wake-up.
+                const cursorSeconds =
                   typeof payload.timeoutSeconds === "number"
-                    ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
-                    : 10 * 60 * 1_000;
+                    ? Math.max(5, Math.min(30, payload.timeoutSeconds))
+                    : 15;
+                const timeoutMs = cursorSeconds * 1_000;
                 const deadline = Date.now() + timeoutMs;
                 while (parentHasRunningChildren(stateRef.current.sessions, parentId, waveIdSet) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, 400));

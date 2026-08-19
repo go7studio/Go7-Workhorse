@@ -61,6 +61,7 @@ export type GrokIpcEvent =
       model: string;
       projectId?: string;
       provider?: import("../src/lib/types").ProviderId;
+      customBotId?: string;
       inputTokens: number;
       outputTokens: number;
       cacheReadTokens: number;

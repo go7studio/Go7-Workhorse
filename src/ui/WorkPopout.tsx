@@ -5,8 +5,8 @@ import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
-import { formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow } from "../lib/turns";
-import type { ChatMessage, Session } from "../lib/types";
+import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
+import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
 
@@ -80,7 +80,6 @@ function WorkRow({
   active,
   visible,
   threads,
-  sessions,
   onOpenThread,
   now,
 }: {
@@ -89,7 +88,6 @@ function WorkRow({
   active: boolean;
   visible: DisplayWorkStep[];
   threads: ChatMessage[];
-  sessions?: Session[];
   onOpenThread?: (id: string) => void;
   now: number;
 }) {
@@ -111,7 +109,7 @@ function WorkRow({
   }
   if (row.type === "subagent") {
     const marker = row.step.message;
-    const child = sessions?.find((item) => item.id === marker.subagentSessionId);
+    const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
     const childLive =
       child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
     const title = marker.fromTitle || marker.text || child?.title || "Subagent";
@@ -121,7 +119,7 @@ function WorkRow({
       : undefined;
     const stepId = child?.agentRun?.planStepId;
     const planStep = stepId
-      ? store.sessions.flatMap((session) => session.planRun?.steps ?? []).find((item) => item.id === stepId)
+      ? store.sessions.find((session) => session.planRun?.steps?.some((item) => item.id === stepId))?.planRun?.steps?.find((item) => item.id === stepId)
       : undefined;
     const childMs = childLive ? now - marker.createdAt : undefined;
     return (
@@ -244,16 +242,23 @@ function WorkRow({
   );
 }
 
+function hideSpawnTool(message: ChatMessage, hasThreads: boolean): boolean {
+  if (!hasThreads) return false;
+  if (isSpawnTool(message)) return true;
+  const info = describePeerTool(splitToolLine(message.text).title, splitToolLine(message.text).detail);
+  return info?.kind === "call" || info?.kind === "ask";
+}
+
 export const WorkPopout = memo(function WorkPopout({
-  steps,
-  sessions,
+  block,
+  peeled,
   startedAt,
   workedMs,
   live,
   onOpenThread,
 }: {
-  steps: DisplayWorkStep[];
-  sessions?: Session[];
+  block: Extract<TranscriptBlock, { type: "reply" }>;
+  peeled?: { thought: string; body: string };
   startedAt: number;
   workedMs?: number;
   live: boolean;
@@ -262,27 +267,21 @@ export const WorkPopout = memo(function WorkPopout({
   const [now, setNow] = useState(Date.now());
   const { open: bodyOpen, onToggle: onBodyToggle } = useFoldOpen(false);
   const { open: earlierOpen, onToggle: onEarlierToggle } = useFoldOpen(false);
-  const threads = steps.filter((step) => step.type === "subagent").map((step) => step.message);
-  const tools = steps.filter((step) => step.type === "tool").map((step) => step.message);
-  const anyChildLive = threads.some((marker) => {
-    const child = sessions?.find((item) => item.id === marker.subagentSessionId);
-    return child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
-  });
+  const threads = block.subagents;
+  const tools = block.tools;
+  const anyChildLive = threads.some((marker) => marker.toolStatus === "running");
   useEffect(() => {
     if (!live && !anyChildLive) return;
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
   }, [live, anyChildLive]);
   const workTools = threads.length ? tools.filter((tool) => !isSpawnTool(tool)) : tools;
+  const hasInner = block.steps.some((step) => step.type !== "tool" || !hideSpawnTool(step.message, threads.length > 0));
+  const steps = bodyOpen && hasInner ? displayWorkSteps(block, { live, peeled }) : [];
   const visible = steps.filter((step) => {
-    if (step.type === "tool" && threads.length && isSpawnTool(step.message)) return false;
-    if (step.type === "tool" && threads.length) {
-      const info = describePeerTool(splitToolLine(step.message.text).title, splitToolLine(step.message.text).detail);
-      if (info?.kind === "call" || info?.kind === "ask") return false;
-    }
+    if (step.type === "tool" && hideSpawnTool(step.message, threads.length > 0)) return false;
     return true;
   });
-  const hasInner = visible.length > 0;
   const hasWork = hasInner || live;
   const stamp = <TimeStamp at={startedAt} />;
   if (!hasWork) return stamp;
@@ -292,7 +291,7 @@ export const WorkPopout = memo(function WorkPopout({
     : resolveWorkedMs(
         startedAt,
         workedMs,
-        visible.flatMap((step) => (step.type === "thought" ? [] : [step.message.createdAt])),
+        [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
       );
   const label = live
     ? `Working · ${formatWorked(elapsed ?? 0)}`
@@ -339,7 +338,6 @@ export const WorkPopout = memo(function WorkPopout({
                     active={false}
                     visible={visible}
                     threads={threads}
-                    sessions={sessions}
                     onOpenThread={onOpenThread}
                     now={now}
                   />
@@ -358,7 +356,6 @@ export const WorkPopout = memo(function WorkPopout({
                 active={isActiveWorkRow(rows, rowIndex, live)}
                 visible={visible}
                 threads={threads}
-                sessions={sessions}
                 onOpenThread={onOpenThread}
                 now={now}
               />

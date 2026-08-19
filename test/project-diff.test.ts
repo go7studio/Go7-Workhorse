@@ -112,6 +112,8 @@ test("new file is all adds of the real after; delete is all deletes of the real 
 test("Project Home lists +/- stats and FileViewer colors add/del lines", () => {
   const home = readFileSync(path.join(ROOT, "src", "ui", "ProjectHome.tsx"), "utf8");
   assert.match(home, /projectFileChanges/);
+  assert.match(home, /editsIdle/);
+  assert.match(home, /requestAnimationFrame/);
   assert.match(home, /label="Changes"/);
   assert.match(home, /FileViewer/);
   assert.match(home, /editStats/);
@@ -309,7 +311,8 @@ test("Project Home list stats stay cheap after they are known", () => {
   assert.match(diffStat, /countMotion/);
   assert.doesNotMatch(diffStat, /requestAnimationFrame\(tick\).*countMotion/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
-  assert.match(css, /\.project-overview \.edited-block\.compact \.edited-files-slot[\s\S]*?transition:\s*none/);
+  assert.match(css, /\.project-overview \.edited-block\.compact,\s*\.project-overview \.edited-block\.compact\.fill\s*\{[^}]*width:\s*100%/);
+  assert.match(css, /\.project-overview \.edited-block\.compact \.file-list/);
 });
 
 test("first harvest does not do N sync full-file reads on the first call", async () => {

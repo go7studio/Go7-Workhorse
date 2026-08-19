@@ -21,6 +21,7 @@ import {
   eventTotal,
   formatPlanReset,
   leftoverForCard,
+  planRingView,
   weeklyPlanLeftover,
 } from "./usage";
 import { cursorUsageLane, cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
@@ -55,6 +56,8 @@ export type WatchVendorStatus = {
   provider: ProviderId;
   color?: string;
   leftover?: number;
+  ringLeft?: number;
+  ringLabel?: string;
   usedPercent?: number;
   resetsAt?: string;
   prepaidBalance?: number;
@@ -320,7 +323,12 @@ export function rollingAllowed(dailyLimit: number, weekDay: number, days = 7): n
   return Math.min(100, slice * Math.max(1, weekDay));
 }
 
-export function weekUsedFromLeftover(leftover?: number, usedPercent?: number): number | undefined {
+export function weekUsedFromLeftover(
+  leftover?: number,
+  usedPercent?: number,
+  plan?: GrokPlanUsage,
+): number | undefined {
+  if (plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product))) return undefined;
   const raw =
     typeof leftover === "number" && Number.isFinite(leftover)
       ? 100 - leftover
@@ -441,7 +449,7 @@ export function evaluateWatchHold(input: {
   const now = input.now ?? Date.now();
   const day = dayKey(now);
   const plan = leftoverForCard(row, input.plans);
-  const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent);
+  const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent, plan);
   const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
   const cycle = weekDayIndex(resetsAt, now, plan?.period);
   const allowedPercent = rollingAllowed(watch.dailyLimitPercent, cycle.day, cycle.days);
@@ -617,8 +625,9 @@ export function watchVendorStatuses(input: {
     const key = String(card.focus);
     const leftover = leftoverPercentForKey(key, input.plans, input.settings);
     const plan = leftoverForCard(card, input.plans);
+    const ring = planRingView(card, input.plans);
     const slice = eventsForWatchKey(input.usage, key, input.settings);
-    const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent);
+    const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent, plan);
     const today = todayTokens(slice, now);
     const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
     const weekDay = weekDayIndex(resetsAt, now, plan?.period);
@@ -655,6 +664,8 @@ export function watchVendorStatuses(input: {
       provider: card.provider,
       color: card.color,
       leftover,
+      ringLeft: ring ? ring.value * 100 : leftover,
+      ringLabel: ring?.label ?? (leftover != null ? `${Math.round(leftover)}%` : undefined),
       usedPercent,
       resetsAt,
       prepaidBalance: plan && plan.prepaidBalance > 0 ? plan.prepaidBalance : undefined,

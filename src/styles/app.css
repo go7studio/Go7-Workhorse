@@ -606,6 +606,12 @@ html.pane-dragging * {
   overflow: hidden;
   container-type: size;
   container-name: session;
+  --notices-dock: 0px;
+}
+
+.session-notices {
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .agent-thread {
@@ -1339,12 +1345,22 @@ html.pane-dragging * {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(var(--composer-input, 80px) + 8px);
+  bottom: calc(var(--composer-input, 80px) + var(--notices-dock, 0px) + 16px);
   z-index: 32;
   grid-template-rows: 1fr;
   min-height: 40px;
   max-height: 40px;
   overflow: visible;
+}
+
+.session-edits-slot.open.away {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.session-edits-slot.open.away,
+.session-edits-slot.open.away .edited-block {
+  transition: none;
 }
 
 .session-edits {
@@ -1384,6 +1400,8 @@ html.pane-dragging * {
   bottom: 0;
   left: auto;
   z-index: 3;
+  display: flex;
+  flex-direction: column-reverse;
   overflow: hidden;
   transition: opacity 200ms var(--ease), transform 200ms var(--ease), width 200ms var(--ease);
 }
@@ -1403,7 +1421,8 @@ html.pane-dragging * {
 }
 
 .session-edits .edited-bar {
-  width: auto;
+  flex: 0 0 auto;
+  width: 100%;
 }
 
 .session-edits .edited-block.compact.open,
@@ -1414,17 +1433,19 @@ html.pane-dragging * {
   container-name: changes;
 }
 
-.session-edits .edited-block.compact.open .edited-bar,
-.session-edits .edited-block.compact.closing .edited-bar {
+.session-edits .edited-toggle {
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-edits .edited-block.compact .edited-toggle {
+  flex: 1 1 auto;
   width: 100%;
+  padding: 6px 10px;
 }
 
 .session-edits .edited-block.compact:not(.open):not(.closing) .edited-toggle {
-  flex: 0 0 auto;
-  justify-content: flex-start;
-  gap: 8px;
-  width: auto;
-  padding: 6px 10px;
   border-radius: 980px;
 }
 
@@ -1446,10 +1467,6 @@ html.pane-dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.session-edits .edited-toggle {
-  min-width: 0;
 }
 
 .session-edits .edited-toggle .row-meta {
@@ -1545,19 +1562,17 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
-.session-edits .edited-block.compact:not(.open):hover {
-  background: var(--bg-hover);
-}
-
 .edited-block.compact .edited-files-slot {
   display: grid;
   grid-template-rows: 0fr;
   overflow: hidden;
-  transition: grid-template-rows 200ms var(--ease);
+  opacity: 0;
+  transition: grid-template-rows 220ms var(--ease), opacity 180ms var(--ease);
 }
 
 .edited-block.compact.open .edited-files-slot {
   grid-template-rows: 1fr;
+  opacity: 1;
 }
 
 .edited-block.compact:not(.open) .edited-files-slot {
@@ -1574,6 +1589,7 @@ html.pane-dragging * {
 }
 
 .edited-block.compact .file-list {
+  min-width: min(420px, 100%);
   max-height: 148px;
   padding: 0 10px 0 4px;
   scrollbar-gutter: stable;
@@ -1611,6 +1627,19 @@ html.pane-dragging * {
   margin: 0 0 16px;
   color: var(--text-tertiary);
   font-size: 12px;
+}
+
+button.transcript-earlier {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.transcript-earlier:hover {
+  color: var(--text-secondary);
 }
 
 .turn {
@@ -1829,6 +1858,39 @@ html.pane-dragging * {
   color: var(--text-secondary);
 }
 
+.turn.crew-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: auto;
+  max-width: none;
+  margin: 14px 12px 18px;
+}
+
+.turn.crew-done::before,
+.turn.crew-done::after {
+  content: "";
+  flex: 1 1 24px;
+  height: 1px;
+  background: var(--line);
+}
+
+.crew-done-card {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.crew-done-card strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap;
+}
+
 .turn.reply .say.final {
   margin-top: 2px;
 }
@@ -1852,6 +1914,7 @@ html.pane-dragging * {
 
 .work-pop {
   margin: 0 0 12px;
+  overflow-anchor: auto;
 }
 
 .work-pop > summary {
@@ -2961,14 +3024,18 @@ html.pane-dragging * {
   background: transparent;
 }
 
-.project-overview .edited-block.compact {
+.project-overview .edited-block.compact,
+.project-overview .edited-block.compact.fill {
+  width: 100%;
+  max-width: none;
   background: var(--bg-solid);
   border: 1px solid var(--line);
   border-radius: 14px;
 }
 
-.project-overview .edited-block.compact .edited-files-slot {
-  transition: none;
+.project-overview .edited-block.compact.fill.open,
+.project-overview .edited-block.compact.fill.closing {
+  width: 100%;
 }
 
 .project-overview .edited-block.compact .file-list,
@@ -3860,6 +3927,59 @@ html.pane-dragging * {
   margin-left: 16px;
 }
 
+.crew-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms var(--ease), opacity 160ms var(--ease);
+}
+
+.crew-slot.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.crew-slot:not(.open) {
+  pointer-events: none;
+}
+
+.crew-slot-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.crew-slot-inner > .chat-row {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 160ms var(--ease), transform 180ms var(--ease);
+}
+
+.crew-slot.open .crew-slot-inner > .chat-row {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(1) { transition-delay: 16ms; }
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(2) { transition-delay: 36ms; }
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(3) { transition-delay: 56ms; }
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(4) { transition-delay: 76ms; }
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(5) { transition-delay: 96ms; }
+.crew-slot.open .crew-slot-inner > .chat-row:nth-child(6) { transition-delay: 116ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .crew-slot,
+  .crew-slot.open,
+  .crew-slot-inner > .chat-row,
+  .crew-slot.open .crew-slot-inner > .chat-row,
+  .crew-twist,
+  .crew-twist.open {
+    transition: none;
+    transform: none;
+  }
+}
+
 .crew-twist {
   position: relative;
   z-index: 2;
@@ -3869,10 +3989,12 @@ html.pane-dragging * {
   padding: 0 6px;
   font-size: 11px;
   color: var(--text-tertiary);
+  transition: color 160ms var(--ease), transform 160ms var(--ease);
 }
 
 .crew-twist.open {
   color: var(--text);
+  transform: scale(1.06);
   box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 70%, transparent);
 }
 
@@ -5028,26 +5150,28 @@ html.pane-dragging * {
 
 .usage-limits-head {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.usage-limits-head .usage-ranges {
-  margin: 0;
-}
-
-.usage-limits-tools {
+.usage-limits-head .context-meter-wrap {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
-.usage-limits-tools .context-meter-wrap {
-  position: relative;
+.usage-limits-head .context-meter.quiet {
+  padding: 0;
+}
+
+.usage-limits-windows,
+.usage-limits-foot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin: 0;
 }
 
 .usage-limit.unlimited .usage-split-track i {
@@ -5055,10 +5179,13 @@ html.pane-dragging * {
 }
 
 .usage-limit-note {
-  margin: 2px 10px 0;
+  display: block;
+  width: 100%;
+  margin: 0;
   font-size: 13px;
   line-height: 18px;
   color: var(--text-tertiary);
+  text-align: center;
 }
 
 .bot-context-row {
@@ -5639,6 +5766,14 @@ html.pane-dragging * {
 
 .context-meter:hover {
   background: var(--bg-hover);
+}
+
+.context-meter.quiet {
+  cursor: default;
+}
+
+.context-meter.quiet:hover {
+  background: none;
 }
 
 .context-ring {
@@ -7755,6 +7890,7 @@ html.pane-dragging * {
 .bot-model-more:hover {
   text-decoration: underline;
 }
+
 
 /* The default model is approved by definition — shown, never toggleable. */
 .bot-models .setup-models button[disabled] {

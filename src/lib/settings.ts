@@ -61,6 +61,25 @@ export function normalizeAgentSystems(raw: unknown): AgentSystemsSettings {
   };
 }
 
+const INBOUND_PROJECT_PREFIX = "project:";
+
+/** Settings select value: empty is Chats, project:id is a project, else a chat. */
+export function inboundParentSelectValue(systems?: AgentSystemsSettings): string {
+  if (systems?.inboundSessionId) return systems.inboundSessionId;
+  if (systems?.inboundProjectId) return `${INBOUND_PROJECT_PREFIX}${systems.inboundProjectId}`;
+  return "";
+}
+
+export function agentSystemsFromInboundSelect(value: string): AgentSystemsSettings {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  if (trimmed.startsWith(INBOUND_PROJECT_PREFIX)) {
+    const inboundProjectId = trimmed.slice(INBOUND_PROJECT_PREFIX.length).trim();
+    return inboundProjectId ? { inboundProjectId } : {};
+  }
+  return { inboundSessionId: trimmed };
+}
+
 export function normalizeProfile(raw: unknown): Profile {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS.profile };
   const record = raw as Partial<Profile>;

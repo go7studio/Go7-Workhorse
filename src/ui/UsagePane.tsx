@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FuelRing } from "./FuelRing";
-import { shortModelName, usageModelLabel } from "../lib/models";
+import { modelsFor, shortModelName, usageModelLabel } from "../lib/models";
 import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStore } from "../lib/store";
 import type { ProviderId, UsageRange } from "../lib/types";
@@ -12,6 +12,7 @@ import {
   cursorLaneEvents,
   deskUsageCards,
   leftoverForCard,
+  leftoverMissingCopy,
   planRingView,
   pickClaudeWindow,
   pickPlanWindow,
@@ -39,6 +40,8 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "month", label: "Month" },
   { id: "all", label: "All" },
 ];
+
+const planWindowByFocus = new Map<string, string>();
 
 type Focus = ProviderId | `bot:${string}` | "overview" | "cursor:cursor-models" | "cursor:other-models";
 
@@ -341,14 +344,30 @@ export function UsagePane({
     cursorPlan,
     refreshCursorPlan,
     customPlans,
+    customPlanKnown,
     refreshCustomPlans,
     settings,
   } = useStore();
   const [focus, setFocus] = useState<Focus>("overview");
-  const [claudeWindow, setClaudeWindow] = useState("weekly_all");
+  const [claudeWindow, setClaudeWindowState] = useState(
+    () => planWindowByFocus.get("overview") ?? "weekly_all",
+  );
+  const setClaudeWindow = (id: string, key = String(focus)) => {
+    planWindowByFocus.set(key, id);
+    setClaudeWindowState(id);
+  };
   useEffect(() => {
     if (homeSignal > 0) setFocus("overview");
   }, [homeSignal]);
+  useEffect(() => {
+    const key = String(focus);
+    const saved = planWindowByFocus.get(key);
+    if (saved) {
+      setClaudeWindowState(saved);
+      return;
+    }
+    setClaudeWindowState(focus === "claude" ? "weekly_all" : "");
+  }, [focus]);
   const range = usageRange ?? "month";
   const events = (usage ?? []).filter((event) => inRange(event, range));
   const cards = deskUsageCards(events, settings);
@@ -492,7 +511,7 @@ export function UsagePane({
             </div>
             <div className="usage-brains">
               {cards.map((row, index) => {
-                const ring = planRingView(row, deskPlans, claudeWindow);
+                const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)));
                 const chip = planWindowChip(leftoverForCard(row, deskPlans));
                 return (
                   <button
@@ -549,28 +568,27 @@ export function UsagePane({
             <div className="usage-limits">
               <div className="usage-limits-head">
                 <span className="sheet-label">Plan usage limits</span>
-                <div className="usage-limits-tools">
-                  {focused.provider !== "cursor" ? (
-                    <ContextMeter
-                      fallbackWindow={focusedBot?.contextWindow}
-                      matchProvider={focused.provider}
-                      matchBotId={focusedBot?.id}
-                    />
-                  ) : null}
-                  <div className="actions usage-ranges">
-                    {windowTabs.map((item) => (
-                      <button
-                        key={item.id}
-                        className={windowPick?.product === item.id ? "tiny active-kind" : "tiny"}
-                        type="button"
-                        onClick={() => setClaudeWindow(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {focused.provider !== "cursor" ? (
+                  <ContextMeter
+                    referenceOnly
+                    fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
+                  />
+                ) : null}
               </div>
+              {windowTabs.length > 0 ? (
+                <div className="actions usage-ranges usage-limits-windows">
+                  {windowTabs.map((item) => (
+                    <button
+                      key={item.id}
+                      className={windowPick?.product === item.id ? "tiny active-kind" : "tiny"}
+                      type="button"
+                      onClick={() => setClaudeWindow(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {timeWindows.map((item) => (
                 <button
                   key={item.product}
@@ -594,7 +612,11 @@ export function UsagePane({
                   {item.unlimited ? <span>No weekly cap on this seat</span> : item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
                 </button>
               ))}
-              {planCopy ? <p className="usage-limit-note">{planCopy}</p> : null}
+              {planCopy ? (
+                <div className="usage-limits-foot">
+                  <p className="usage-limit-note">{planCopy}</p>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="usage-plan">
@@ -609,15 +631,17 @@ export function UsagePane({
                 <span className="sheet-label">Weekly allowance</span>
                 <p>
                   {planCopy ??
-                    (planLoaderFor(focused)
-                      ? "Loading weekly plan usage…"
-                      : `Restart Workhorse to load ${planName} plan usage.`)}
+                    leftoverMissingCopy({
+                      hasKey: focused.provider !== "custom" || Boolean(focusedBot?.apiKey?.trim()),
+                      fetchKnown: focused.provider === "custom" && Boolean(focusedBot && customPlanKnown[focusedBot.id]),
+                      canLoad: planLoaderFor(focused),
+                      planName,
+                    })}
                 </p>
                 {focused.provider !== "cursor" ? (
                   <ContextMeter
-                    fallbackWindow={focusedBot?.contextWindow}
-                    matchProvider={focused.provider}
-                    matchBotId={focusedBot?.id}
+                    referenceOnly
+                    fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
                   />
                 ) : null}
               </div>

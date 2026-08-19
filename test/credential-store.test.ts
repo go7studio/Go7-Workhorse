@@ -50,12 +50,19 @@ test("volatile credential mode keeps secrets in memory and never creates a vault
   const file = path.join(root, "credentials.json");
   const vault = new CredentialStore(file, cipher, true);
   const protectedState = protectStateCredentials(
-    { settings: { llms: { custom: { apiKey: "session-secret" } }, customBots: [] } },
+    { settings: { llms: { custom: { apiKey: "session-secret" } }, customBots: [{ id: "bot-kimi", apiKey: "syn_live" }] } },
     vault,
   );
   assert.equal(fs.existsSync(file), false);
+  // The vault is memory-only, so the key stays on the row. A restart of the
+  // same state file can still hydrate it — Dev used to strip it and lose Kimi.
+  assert.equal(protectedState.settings.llms.custom.apiKey, "session-secret");
+  assert.equal(protectedState.settings.customBots[0].apiKey, "syn_live");
   assert.equal(hydrateStateCredentials(protectedState, vault).settings.llms.custom.apiKey, "session-secret");
-  assert.equal(hydrateStateCredentials(protectedState, new CredentialStore(file, cipher, true)).settings.llms.custom.apiKey, "");
+  assert.equal(
+    hydrateStateCredentials(protectedState, new CredentialStore(file, cipher, true)).settings.customBots[0].apiKey,
+    "syn_live",
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 

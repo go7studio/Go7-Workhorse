@@ -83,17 +83,36 @@ function looksUnlimited(value: unknown): boolean {
 
 function limitLooksUnlimited(value: unknown): boolean {
   if (looksUnlimited(value)) return true;
-  const amount = numberVal(value);
-  return amount === 0 || amount === -1;
+  return numberVal(value) === -1;
 }
 
-/** Weekly with no cap, or a 0% weekly leftover next to a live 5h window. */
+/** MiniMax: 1 = limited, 2 = exhausted, 3 = unlimited. Count fields are often 0 even on a cap. */
+function statusIsUnlimited(value: unknown): boolean {
+  return numberVal(value) === 3 || looksUnlimited(value);
+}
+
+function statusIsCapped(value: unknown): boolean {
+  const status = numberVal(value);
+  return status === 1 || status === 2;
+}
+
+/** Weekly with no cap. A 0 remaining percent is spent, not unlimited. */
 export function weeklyIsUnlimited(
   row: Record<string, unknown>,
   root: Record<string, unknown>,
   weeklyLeft: number | undefined,
-  intervalLeft: number | undefined,
+  _intervalLeft?: number | undefined,
 ): boolean {
+  const weeklyStatus = firstDefined(
+    row.current_weekly_status,
+    row.weekly_status,
+    root.current_weekly_status,
+    root.weekly_status,
+  );
+  // Status 3 is MiniMax's "unlimited" flag, but general seats still send a
+  // remaining percent (often 100). Trust that number so Watch/Usage can track.
+  if (statusIsUnlimited(weeklyStatus) && weeklyLeft === undefined) return true;
+  if (statusIsCapped(weeklyStatus)) return false;
   const flags = [
     row.weekly_unlimited,
     row.weeklyUnlimited,
@@ -104,17 +123,11 @@ export function weeklyIsUnlimited(
     root.unlimited,
   ];
   if (flags.some(looksUnlimited)) return true;
-  const caps = [
-    row.weekly_limit,
-    row.weekly_quota,
-    row.weekly_total,
-    row.current_weekly_total_count,
-    row.weekly_limit_count,
-    row.weekly_total_count,
-  ];
+  const caps = [row.weekly_limit, row.weekly_quota, row.weekly_total, row.weekly_limit_count];
   if (caps.some(limitLooksUnlimited)) return true;
   if (looksUnlimited(firstDefined(row.current_weekly_remaining_percent, row.weekly_remaining_percent))) return true;
-  return (weeklyLeft === undefined || weeklyLeft === 0) && intervalLeft != null && intervalLeft > 0;
+  if (weeklyLeft !== undefined) return false;
+  return false;
 }
 
 function leftoverOf(row: Record<string, unknown>, ...keys: string[]): number | undefined {
@@ -239,8 +252,11 @@ export function parseCustomPlanUsage(raw: unknown, model?: string): CustomPlanUs
     ?? leftoverOf(root, "current_weekly_remaining_percent", "weekly_remaining_percent");
   const fallbackLeft = leftoverOf(row, "usage_percent", "usagePercent", "remaining_percent") ?? leftoverOf(root, "usage_percent");
   const unlimited = weeklyIsUnlimited(row, root, weeklyLeft, intervalLeft);
+  const intervalUnlimited = statusIsUnlimited(
+    firstDefined(row.current_interval_status, row.interval_status, root.current_interval_status),
+  );
   const intervalReset =
-    unixToIso(row.interval_end_time ?? row.current_interval_end_time ?? row.next_interval_end_time) ??
+    unixToIso(row.end_time ?? row.interval_end_time ?? row.current_interval_end_time ?? row.next_interval_end_time) ??
     (typeof row.interval_resets_at === "string" ? row.interval_resets_at : undefined) ??
     remainingMsToIso(row.remains_time);
   const weeklyReset =
@@ -248,7 +264,15 @@ export function parseCustomPlanUsage(raw: unknown, model?: string): CustomPlanUs
     (typeof row.resets_at === "string" ? row.resets_at : undefined) ??
     remainingMsToIso(row.weekly_remains_time ?? root.weekly_remains_time);
   const products: CustomPlanUsage["products"] = [];
-  if (intervalLeft !== undefined) {
+  if (intervalUnlimited) {
+    products.push({
+      product: "session",
+      label: "5h",
+      usagePercent: 0,
+      unlimited: true,
+      resetsAt: intervalReset,
+    });
+  } else if (intervalLeft !== undefined) {
     products.push({
       product: "session",
       label: "5h",
@@ -330,6 +354,9 @@ export async function fetchCustomPlanUsage(input: {
           });
         },
       );
+      req.setTimeout(12_000, () => {
+        req.destroy(new Error("timeout"));
+      });
       req.on("error", reject);
     });
     if (status < 200 || status >= 300) return undefined;

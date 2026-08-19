@@ -28,6 +28,7 @@ export const EditedList = memo(function EditedList({
   stats,
   empty,
   compact = false,
+  fill = false,
   startOpen,
   showLineStats = true,
   label = "Edited",
@@ -39,6 +40,8 @@ export const EditedList = memo(function EditedList({
   stats: Record<string, { added: number; deleted: number }>;
   empty?: string;
   compact?: boolean;
+  /** Full-width card (project home). Width stays put; only the file list folds. */
+  fill?: boolean;
   startOpen?: boolean;
   showLineStats?: boolean;
   label?: string;
@@ -71,9 +74,20 @@ export const EditedList = memo(function EditedList({
       setOpen((value) => !value);
       return;
     }
-    const el = boxRef.current;
     const ms = prefersReducedMotion() ? 0 : FOLD_MS;
     clearTimeout(closeTimer.current);
+    if (fill) {
+      if (open) {
+        setOpen(false);
+        setClosing(true);
+        closeTimer.current = setTimeout(() => setClosing(false), ms);
+        return;
+      }
+      setClosing(false);
+      setOpen(true);
+      return;
+    }
+    const el = boxRef.current;
     if (open) {
       const from = el?.offsetWidth ?? 420;
       const to = pillWidth.current || from;
@@ -119,8 +133,8 @@ export const EditedList = memo(function EditedList({
   return (
     <div
       ref={boxRef}
-      className={`link-block edited-block${compact ? " compact" : ""}${compact && open ? " open" : ""}${compact && closing ? " closing" : ""}`}
-      style={compact && boxWidth != null ? { width: boxWidth } : undefined}
+      className={`link-block edited-block${compact ? " compact" : ""}${fill ? " fill" : ""}${compact && open ? " open" : ""}${compact && closing ? " closing" : ""}`}
+      style={compact && !fill && boxWidth != null ? { width: boxWidth } : undefined}
     >
       {compact ? (
         <div className="edited-bar">

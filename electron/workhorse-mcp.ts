@@ -67,6 +67,7 @@ function readState(): {
   sessions?: unknown[];
   projects?: unknown[];
   settings?: unknown;
+  activeSessionId?: unknown;
   usage?: UsageEvent[];
   deskPlans?: WatchPlans;
   watchPermits?: WatchPermits;
@@ -773,15 +774,12 @@ function fromSessionId(override?: string): string {
   return override?.trim() || process.env.WORKHORSE_FROM_SESSION || "";
 }
 
-function configuredInboundParent(): string {
-  return inboundSessionIdFromState(readState());
-}
-
 export function resolveExternalSpawnFrom(from?: string): string {
+  const state = readState();
   const hit = resolveMcpSpawnFrom({
     profile: currentMcpProfile(),
     fromSessionId: fromSessionId(from),
-    inboundSessionId: configuredInboundParent(),
+    inboundSessionId: inboundSessionIdFromState(state),
   });
   return "parentId" in hit ? hit.parentId : "";
 }
@@ -1104,9 +1102,6 @@ async function spawnAgent(
 ): Promise<string> {
   if (!input.prompt.trim()) throw new Error("prompt is required");
   const fromId = resolveExternalSpawnFrom(from);
-  if (currentMcpProfile() === "external-runtime" && !fromId) {
-    throw new Error("context_required");
-  }
   const caller = callerSession(fromId);
   const isNested = deskRoleOf(caller) === "worker";
   if (isNested && caller?.id) {

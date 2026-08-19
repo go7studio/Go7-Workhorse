@@ -42,7 +42,8 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
-import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor } from "./titles";
+import { deskPersistBodyEqual } from "./desk-persist";
+import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
   autoAllowPermission,
@@ -430,6 +431,7 @@ export type Store = AppState & {
   cursorPlan?: import("./types").GrokPlanUsage;
   refreshCursorPlan: () => void;
   customPlans: Record<string, import("./types").GrokPlanUsage | undefined>;
+  customPlanKnown: Record<string, boolean>;
   refreshCustomPlans: () => void;
   quit: () => void;
   appUpdate: AppUpdateOffer | null;
@@ -684,10 +686,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [claudePlan, setClaudePlan] = useState<GrokPlanUsage | undefined>();
   const [cursorPlan, setCursorPlan] = useState<GrokPlanUsage | undefined>();
   const [customPlans, setCustomPlans] = useState<Record<string, GrokPlanUsage | undefined>>({});
+  const [customPlanKnown, setCustomPlanKnown] = useState<Record<string, boolean>>({});
   const [editMessageId, setEditMessageId] = useState<string | null>(null);
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
   const [watchRestore, setWatchRestore] = useState<{ text: string; images?: import("./types").ChatImage[] } | null>(null);
   const persistTimer = useRef<number | null>(null);
+  const persistBody = useRef<AppState | null>(null);
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
@@ -807,6 +811,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready || !window.workhorse) return;
+    const previous = persistBody.current;
+    persistBody.current = state;
+    // A chat click only changes the selection. Cloning the whole desk here
+    // freezes the renderer so other chats cannot be selected.
+    if (previous && deskPersistBodyEqual(previous, state)) return;
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
     const busy = state.sessions.some((session) => session.status === "running" || session.status === "needs-input");
     persistTimer.current = window.setTimeout(() => {
@@ -2192,6 +2201,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             parentId: session.parentId,
             hidden: session.hidden,
             role: deskRoleOf(session),
+            customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
             config: {
               baseUrl: custom.baseUrl,
               apiKey: custom.apiKey,
@@ -2903,6 +2913,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               parentId: session.parentId,
               hidden: session.hidden,
               role,
+              customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
               config: {
                 baseUrl: custom.baseUrl,
                 apiKey: custom.apiKey,
@@ -3950,23 +3961,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           const exposure = mcpExposureProfile(payload.exposureProfile);
           const runningVisible = latest.sessions.find((item) => item.status === "running" && !isHiddenSession(item));
-          if (payload.mode === "spawn") {
+          const openChat =
+            latest.sessions.find((item) => item.id === latest.activeSessionId && !isHiddenSession(item)) ??
+            runningVisible;
+          const inboundSessionId = latest.settings.agentSystems?.inboundSessionId;
+          const inboundProjectId = latest.settings.agentSystems?.inboundProjectId;
+          if (payload.mode === "spawn" && (payload.fromSessionId || inboundSessionId)) {
             const parentHit = inboundSpawnParent({
               profile: exposure,
               fromSessionId: payload.fromSessionId,
-              defaultSessionId: latest.settings.agentSystems?.inboundSessionId,
-              runningVisibleSessionId: runningVisible?.id,
+              defaultSessionId: inboundSessionId,
+              runningVisibleSessionId: exposure === "external-runtime" ? undefined : openChat?.id,
             });
             if ("code" in parentHit) {
               await replyAsk({ error: "context_required" });
               return;
             }
           }
-          const caller =
+          let caller =
             latest.sessions.find((item) => item.id === payload.fromSessionId) ??
-            (exposure === "external-runtime"
-              ? latest.sessions.find((item) => item.id === latest.settings.agentSystems?.inboundSessionId)
-              : runningVisible);
+            latest.sessions.find((item) => item.id === inboundSessionId) ??
+            (exposure === "external-runtime" ? undefined : openChat);
+          let inboundHost: Session | undefined;
+          if (payload.mode === "spawn" && !caller && exposure === "external-runtime") {
+            const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
+            if (!remembered) {
+              await replyAsk({ error: "context_required" });
+              return;
+            }
+            const project = inboundProjectId
+              ? latest.projects.find((item) => item.id === inboundProjectId) ?? null
+              : null;
+            const title = titleFromIntent(payload.description?.trim() || payload.message.trim());
+            const opened = openDraft(latest.sessions, {
+              id: uid("sess"),
+              projectId: project?.id ?? null,
+              provider: remembered.provider,
+              model: remembered.model,
+              customBotId: remembered.customBotId,
+              effort: withEffort(remembered.provider, remembered.model, remembered.effort),
+              title,
+              titleLocked: false,
+              mode: remembered.mode ?? "ask",
+              sandbox: remembered.sandbox ?? "off",
+              environment: { kind: "local" },
+              securityPolicy: { network: "allowed", root: "allowed" },
+              status: "idle",
+              contextUsed: 0,
+              messages: [],
+              routingMode: "manual",
+            });
+            inboundHost = { ...opened.session, title, titleLocked: false };
+            caller = inboundHost;
+          }
           const parent = caller;
           if (payload.mode === "spawn") {
             if (!caller) {
@@ -4461,13 +4508,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
-            setState((current) => ({
+            setState((current) => {
+              const base =
+                inboundHost && !current.sessions.some((item) => item.id === inboundHost.id)
+                  ? [inboundHost, ...current.sessions]
+                  : current.sessions;
+              return {
               ...current,
               sessions: [
-                ...current.sessions.map((item) =>
+                ...base.map((item) =>
                   item.id === parent.id
                     ? {
                         ...item,
+                        title: parent.title,
+                        titleLocked: parent.titleLocked,
+                        projectId: parent.projectId,
                         lineup: stampLineupUserText(
                           addLineupRow(
                             item.lineup ?? emptyLineup(admitted.cwd, startedAt),
@@ -4512,7 +4567,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ).map((item) => (item.id === childId ? child : item)),
                 ...(priorWorker ? [] : [child]),
               ],
-            }));
+            };
+            });
             const childCwd = sessionExecutionCwd(environment, root);
             const waitForReply = spawnWaitsForReply(payload);
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
@@ -5422,18 +5478,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               contextUsed: occupancyForSession(session, folded, grokContextSeen.current[event.sessionId]),
             });
           }
-        } else if (session?.provider === "cursor") {
+        } else if (session?.provider === "cursor" || session?.provider === "custom") {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           const assistant = [...session.messages].reverse().find((item) => item.role === "assistant");
           const user = [...session.messages].reverse().find((item) => item.role === "user");
           const estimated = estimateTurnTokens(user?.text ?? "", (assistant?.text ?? "").trim() || queued);
           if (usageHasBilledTokens({ ...estimated, cacheReadTokens: 0, cacheWriteTokens: 0 })) {
             recordUsage({
-              provider: "cursor",
+              provider: session.provider,
               model: session.model,
               projectId: session.projectId ?? undefined,
               sessionId: session.id,
-              lane: cursorUsageLane(session.model),
+              customBotId: session.provider === "custom" ? session.customBotId : undefined,
+              lane: session.provider === "cursor" ? cursorUsageLane(session.model) : undefined,
               inputTokens: estimated.inputTokens,
               outputTokens: estimated.outputTokens,
               cacheReadTokens: 0,
@@ -6113,6 +6170,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
         .then((plan) => {
           setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
+          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         })
         .catch(() => {
           setCustomPlans((current) => {
@@ -6120,6 +6178,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             delete next[bot.id];
             return next;
           });
+          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         });
     }
   }, []);
@@ -6168,7 +6227,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...current,
       settings: {
         ...current.settings,
-        agentSystems: normalizeAgentSystems({ ...current.settings.agentSystems, ...patch }),
+        agentSystems: normalizeAgentSystems({
+          inboundSessionId: patch.inboundSessionId ?? "",
+          inboundProjectId: patch.inboundProjectId ?? "",
+        }),
       },
     }));
   }, []);
@@ -6508,6 +6570,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cursorPlan,
       refreshCursorPlan,
       customPlans,
+      customPlanKnown,
       refreshCustomPlans,
       quit,
       appUpdate,
@@ -6626,6 +6689,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cursorPlan,
       refreshCursorPlan,
       customPlans,
+      customPlanKnown,
       refreshCustomPlans,
       quit,
       appUpdate,

@@ -10,7 +10,7 @@ import { ChatRow, type ChatRowDesk } from "./ChatRow";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
-import { buildSidebarChatIndex, sameSidebarSessions, type SidebarChatIndex } from "../lib/sidebar-index";
+import { buildSidebarChatIndex, sameSidebarSessions, type NestedSidebarSession, type SidebarChatIndex } from "../lib/sidebar-index";
 
 type SidebarStore = Pick<
   Store,
@@ -77,6 +77,29 @@ function rowDesk(store: SidebarStore, index: SidebarChatIndex, session: Session)
   };
 }
 
+function CrewList({
+  session,
+  open,
+  store,
+  index,
+}: {
+  session: NestedSidebarSession;
+  open: boolean;
+  store: SidebarStore;
+  index: SidebarChatIndex;
+}) {
+  if (session.workers.length === 0) return null;
+  return (
+    <div className={`crew-slot${open ? " open" : ""}`} aria-hidden={!open}>
+      <div className="crew-slot-inner">
+        {session.workers.map((worker) => (
+          <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatIndex }) {
   const chats = index.liveByProject.get(null) ?? [];
   const archived = index.archivedByProject.get(null) ?? [];
@@ -102,9 +125,7 @@ function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatI
               setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
             }
           />
-          {openCrew[session.id]
-            ? session.workers.map((worker) => <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />)
-            : null}
+          <CrewList session={session} open={Boolean(openCrew[session.id])} store={store} index={index} />
         </div>
       ))}
       {archived.length > 0 && (
@@ -219,11 +240,7 @@ function ProjectFolder({
                   setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
                 }
               />
-              {openCrew[session.id]
-                ? session.workers.map((worker) => (
-                    <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />
-                  ))
-                : null}
+              <CrewList session={session} open={Boolean(openCrew[session.id])} store={store} index={index} />
             </div>
           ))}
           {chats.length > PROJECT_CHAT_LIMIT && hidden > 0 && (

@@ -227,15 +227,6 @@ function sentenceWords(text: string): string[] {
     .filter((word) => word.length > 3);
 }
 
-function isRestatementOf(earlier: string, later: string): boolean {
-  if (polarityKey(earlier) && polarityKey(later)) return true;
-  const words = sentenceWords(earlier);
-  if (words.length < 3) return false;
-  const laterWords = new Set(sentenceWords(later));
-  const overlap = words.filter((word) => laterWords.has(word)).length;
-  return overlap / words.length >= 0.72;
-}
-
 function isConclusionParagraph(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed || /\s{2,}>\s/.test(trimmed)) return false;
@@ -351,13 +342,25 @@ function unitsFromParagraph(para: string, paraIndex: number): ReplyUnit[] {
 
 function dropRestatedAnswers(units: ReplyUnit[]): ReplyUnit[] {
   const answers = units.filter((unit) => unit.kind === "answer");
+  const wordLists = answers.map((item) => sentenceWords(item.text));
+  const wordSets = wordLists.map((words) => new Set(words));
+  const polarities = answers.map((item) => polarityKey(item.text));
   const drop = new Set<number>();
   for (let i = 0; i < answers.length; i += 1) {
-    const earlier = answers[i];
+    const earlier = wordLists[i];
+    const earlierPolarity = polarities[i];
     if (!earlier) continue;
     for (let j = i + 1; j < answers.length; j += 1) {
-      const later = answers[j];
-      if (later && isRestatementOf(earlier.text, later.text)) {
+      const later = wordSets[j];
+      if (!later) continue;
+      if (earlierPolarity && polarities[j]) {
+        drop.add(i);
+        break;
+      }
+      if (earlier.length < 3) continue;
+      let overlap = 0;
+      for (const word of earlier) if (later.has(word)) overlap += 1;
+      if (overlap / earlier.length >= 0.72) {
         drop.add(i);
         break;
       }
@@ -418,7 +421,10 @@ function peelPlanningUnits(
 const LOCKED_TAIL =
   /(?<=[.!?])\s+(?=(?:This chat|Here(?:'s| is)|I want to|What I can do|The honest answer|There are more|Done\b|Sure[—,]|Sorry[, ]|No files were|Yes\s*[—–-]))/i;
 
-export function peelPlanningPreamble(text: string, live = false): { thought: string; body: string } {
+const PEEL_CACHE_MAX = 48;
+const peelCache = new Map<string, { thought: string; body: string }>();
+
+function peelPlanningPreambleUncached(text: string, live: boolean): { thought: string; body: string } {
   if (!text) return { thought: "", body: text ?? "" };
   const tagged = peelThinkTags(text);
   const source = tagged.body || text;
@@ -439,6 +445,19 @@ export function peelPlanningPreamble(text: string, live = false): { thought: str
     }
   }
   return peelPlanningUnits(source, tagged.thought, live);
+}
+
+export function peelPlanningPreamble(text: string, live = false): { thought: string; body: string } {
+  const key = `${live ? "1" : "0"}:${text ?? ""}`;
+  const hit = peelCache.get(key);
+  if (hit) return hit;
+  const next = peelPlanningPreambleUncached(text, live);
+  if (peelCache.size >= PEEL_CACHE_MAX) {
+    const oldest = peelCache.keys().next().value;
+    if (oldest !== undefined) peelCache.delete(oldest);
+  }
+  peelCache.set(key, next);
+  return next;
 }
 
 function normalizeOverlap(text: string): string {

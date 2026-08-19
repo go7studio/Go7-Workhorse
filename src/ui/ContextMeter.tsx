@@ -71,27 +71,48 @@ function ContextRows({ rows }: { rows: ContextCategory[] }) {
   );
 }
 
+export function placeContextPop(input: {
+  meter: { top: number; bottom: number; left: number; right: number; width: number; height: number };
+  pop: { width: number; height: number };
+  viewport: { width: number; height: number };
+  gap?: number;
+}): { top: number; left: number } {
+  const gap = input.gap ?? 8;
+  const { meter, pop, viewport } = input;
+  const maxLeft = Math.max(12, viewport.width - pop.width - 12);
+  const left = Math.min(Math.max(12, meter.left + meter.width / 2 - pop.width / 2), maxLeft);
+  const below = meter.bottom + gap;
+  const fitsBelow = below + pop.height <= viewport.height - 12;
+  const top = fitsBelow ? below : Math.max(12, meter.top - pop.height - gap);
+  return { top, left };
+}
+
 export function ContextMeter({
   session: sessionProp,
   compact = false,
   fallbackWindow,
   matchProvider,
   matchBotId,
+  referenceOnly = false,
 }: {
   session?: Session | null;
   compact?: boolean;
   fallbackWindow?: number;
   matchProvider?: import("../lib/types").ProviderId;
   matchBotId?: string;
+  /** Catalog window size only — do not bind to a live chat. */
+  referenceOnly?: boolean;
 } = {}) {
   const liveSession = useActiveSession();
   const matchedSession =
-    matchProvider &&
-    (!liveSession ||
-      liveSession.provider !== matchProvider ||
-      (matchBotId ? liveSession.customBotId !== matchBotId : false))
+    referenceOnly
       ? undefined
-      : liveSession;
+      : matchProvider &&
+          (!liveSession ||
+            liveSession.provider !== matchProvider ||
+            (matchBotId ? liveSession.customBotId !== matchBotId : false))
+        ? undefined
+        : liveSession;
   const session = sessionProp ?? matchedSession;
   const store = useStore();
   const customWindow =
@@ -100,8 +121,9 @@ export function ContextMeter({
       : undefined) ?? store.settings?.llms.custom.contextWindow ?? fallbackWindow;
   const [open, setOpen] = useState(false);
   const [live, setLive] = useState<ChatContextStats | null>(null);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
 
   const windowSize = session
     ? contextWindowFor(session.provider, session.model, customWindow)
@@ -121,7 +143,14 @@ export function ContextMeter({
     const place = () => {
       const box = root.current?.getBoundingClientRect();
       if (!box) return;
-      setAnchor({ top: box.bottom + 8, right: Math.max(12, window.innerWidth - box.right) });
+      const popBox = pop.current?.getBoundingClientRect();
+      setAnchor(
+        placeContextPop({
+          meter: box,
+          pop: { width: popBox?.width || 292, height: popBox?.height || 220 },
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+        }),
+      );
     };
     place();
     const onPointer = (event: MouseEvent) => {
@@ -146,6 +175,7 @@ export function ContextMeter({
   }, [session?.id]);
 
   useEffect(() => {
+    if (referenceOnly) return;
     if (!session || session.provider !== "grok") return;
     if (!window.workhorse?.grokSessionInfo) return;
     let cancelled = false;
@@ -158,7 +188,7 @@ export function ContextMeter({
     return () => {
       cancelled = true;
     };
-  }, [session?.id, session?.provider, session?.status]);
+  }, [referenceOnly, session?.id, session?.provider, session?.status]);
 
   const stats = live ?? estimate;
   const shownUsed = stats?.used ?? 0;
@@ -168,16 +198,12 @@ export function ContextMeter({
   if ((!session || !estimate || !stats) && fallbackWindow && fallbackWindow > 0) {
     return (
       <div className="context-meter-wrap">
-        <button
-          type="button"
-          className="context-meter"
-          title={`${formatWindow(fallbackWindow)} context window`}
-        >
+        <span className="context-meter quiet">
           <span className="context-copy">
             <strong>{formatWindow(fallbackWindow)}</strong>
             <em>context</em>
           </span>
-        </button>
+        </span>
       </div>
     );
   }
@@ -229,10 +255,11 @@ export function ContextMeter({
       </button>
       {open && (
         <div
+          ref={pop}
           className="context-pop"
           role="dialog"
           aria-label="This chat’s context"
-          style={anchor ? { top: anchor.top, right: anchor.right } : { top: 56, right: 22 }}
+          style={anchor ? { top: anchor.top, left: anchor.left } : { top: 56, left: 12 }}
         >
           <header>
             <strong>Retained context</strong>

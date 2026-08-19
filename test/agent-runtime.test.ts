@@ -163,9 +163,12 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(settingsUi, /allowedAgents/);
   assert.match(settingsUi, /aria-pressed=\{allowed\.has/);
   assert.doesNotMatch(settingsUi, /llm-mark[^"]*"[^>]*runtime/);
-  // Inbound parent offers chats only: inboundProjectId is normalised but not
-  // read on the inbound path, so a project option would be a lie.
-  assert.doesNotMatch(settingsUi, /inboundProjectId/);
+  assert.match(settingsUi, /inboundParentSelectValue/);
+  assert.match(settingsUi, /agentSystemsFromInboundSelect/);
+  assert.match(settingsUi, /project:\$\{project.id\}/);
+  assert.match(settingsUi, />Chats</);
+  assert.doesNotMatch(settingsUi, />This chat</);
+  assert.doesNotMatch(settingsUi, />None</);
   assert.match(settingsUi, /<optgroup/);
   assert.doesNotMatch(settingsUi, /id: "agents"/);
   assert.doesNotMatch(settingsUi, /id: "harnesses"/);

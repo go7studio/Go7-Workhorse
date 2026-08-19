@@ -27,21 +27,22 @@ export function ProjectHome() {
   const [hidden, setHidden] = useState<string[]>([]);
   const [stats, setStats] = useState<Record<string, { added: number; deleted: number }>>({});
   const [heldVisible, setHeldVisible] = useState<ProjectEdit[]>([]);
+  const [editsIdle, setEditsIdle] = useState(false);
   const fetchedStats = useRef<Record<string, string>>({});
   const roots = useMemo(() => project?.folders.map((folder) => folder.path) ?? [], [project]);
   const writesKey = useMemo(
-    () => (project ? projectWritesKey(store.sessions, project.id) : ""),
-    [project?.id, store.sessions],
+    () => (project && editsIdle ? projectWritesKey(store.sessions, project.id) : ""),
+    [project?.id, store.sessions, editsIdle],
   );
   const changes = useMemo(
     () =>
-      project
+      project && editsIdle
         ? projectFileChanges(
             store.sessions.filter((session) => session.projectId === project.id),
             roots,
           )
         : { created: [], edited: [] },
-    [writesKey, roots, project],
+    [writesKey, roots, project, editsIdle],
   );
   const listed = useMemo(() => [...changes.created, ...changes.edited], [changes]);
   const visible = useMemo(
@@ -61,6 +62,9 @@ export function ProjectHome() {
     setHeldVisible([]);
     setStats({});
     fetchedStats.current = {};
+    setEditsIdle(false);
+    const idle = requestAnimationFrame(() => setEditsIdle(true));
+    return () => cancelAnimationFrame(idle);
   }, [project?.id]);
 
   useEffect(() => {
@@ -224,7 +228,8 @@ export function ProjectHome() {
         </div>
 
         <EditedList
-          compact={display.length > 0}
+          compact={display.length > 0 || !editsIdle}
+          fill
           startOpen
           label="Changes"
           edits={display}

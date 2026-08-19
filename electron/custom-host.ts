@@ -42,6 +42,7 @@ export type CustomPromptInput = {
   parentId?: string;
   hidden?: boolean;
   role?: import("../src/lib/workhorse-rules").DeskRole;
+  customBotId?: string;
   config: CustomHttpConfig;
 };
 
@@ -370,6 +371,7 @@ export class CustomSessionHost {
         model: input.model || input.config.model,
         projectId: input.projectId,
         provider: "custom",
+        customBotId: input.customBotId,
         source: "request",
         ...usage,
       });
@@ -382,6 +384,7 @@ export class CustomSessionHost {
         model: input.model || input.config.model,
         projectId: input.projectId,
         provider: "custom",
+        customBotId: input.customBotId,
         source: "gauge",
         inputTokens: 0,
         outputTokens: 0,

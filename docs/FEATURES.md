@@ -24,7 +24,8 @@ They do not get a Usage ring. Settings → LLMs → Install MCP writes a restric
 Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
 if Hermes is already installed. Those apps launch the packaged helper. No token
 is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
-chat you pick. Delete, rename, credentials, and elevate stay blocked.
+chat you pick. Unnamed inbound spawns create a new chat in Chats by default, or
+in a project you pick, titled from the prompt. Delete, rename, credentials, and elevate stay blocked.
 An explicit request to work with Workhorse delegates before direct execution;
 blocked delegation returns the Workhorse error before any fallback.
 A harness may choose the first coordinating brain; unassigned workers still route independently.
@@ -62,7 +63,8 @@ transcript rather than as a path.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
 - Each chat row shows how old the last prompt is in a compact form such as
-  `25m`, `2h`, or `3d`. Hover the stamp for the full time.
+  `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
+  folds them on the count button; they ease open and closed.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share
@@ -86,9 +88,10 @@ transcript rather than as a path.
 - **Terminal** — chat-scoped, in that same directory.
 - **Git review** — a compact Changes control beside the composer opens the
   changed files and diffs for the work a chat did. Click a row to open the
-  file beside the chat or as the project-home pane. +0/−0 stays hidden.
-  Line stats load in the background and do not re-diff the list once they
-  are known.
+  file beside the chat or as the project-home pane. On the project home the
+  Changes card stays full width and the file list folds open and closed.
+  +0/−0 stays hidden. Line stats load in the background and do not re-diff
+  the list once they are known.
 - **Change instances** — a created file’s lines stay green. A later prompt that
   deletes some of them keeps those lines as red instances in the review, instead
   of shrinking the green count against empty / HEAD. Paths such as
@@ -156,6 +159,8 @@ transcript rather than as a path.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own
   name and colour. Large catalogs are grouped, frontier-first, searchable, and
   explicitly approved; one key keeps one ring with separate model rows.
+  Dev shells keep a pasted key on the bot itself, because their credential
+  vault is memory-only and used to drop leftover tracking on restart.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

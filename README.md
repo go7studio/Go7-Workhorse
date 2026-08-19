@@ -123,6 +123,14 @@ flowchart TD
 
 Each adapter runs the vendor's own CLI, under the login you already hold.
 
+## Name and licence
+
+The code is MIT, in [LICENSE](LICENSE). The name **Go7 Workhorse** and the horse
+are not — see [TRADEMARKS.md](TRADEMARKS.md). Fork it freely; ship it under your
+own name and icon, so people can tell whose build they are running.
+
+Security policy and what counts as in scope: [SECURITY.md](SECURITY.md).
+
 ## Contributing
 
 Repository shape and versioning rules are in [CONTRIBUTING.md](CONTRIBUTING.md).

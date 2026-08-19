@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -105,6 +106,7 @@ import { handleWorkhorseRpc } from "../electron/workhorse-mcp";
 import {
   executeCustomTool,
   limitCustomToolResult,
+  resolveWorkspacePath,
   MAX_CUSTOM_TOOL_RESULT_CHARS,
 } from "../electron/custom-tools";
 import {
@@ -1945,4 +1947,62 @@ test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMa
   assert.equal(fromModelNick.model, resolveModelHint("Sol")?.model);
   assert.equal(fromModelNick.model, defaultModel("codex").id);
   assert.notEqual(fromModelNick.model, "Sol");
+});
+
+
+/**
+ * A worker reads a file carrying hostile instructions and follows them. It
+ * needs no other foothold, so this is the shortest real attack on the app —
+ * and comparing normalized strings let it through: a symlink sitting inside
+ * the workspace passed `startsWith` while pointing anywhere.
+ */
+test("the sandbox contains the real path, not the spelling of it", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-contain-"));
+  const workspace = path.join(tmp, "workspace");
+  const secrets = path.join(tmp, "secrets");
+  mkdirSync(workspace);
+  mkdirSync(secrets);
+  writeFileSync(path.join(secrets, "key.txt"), "not for the agent");
+  symlinkSync(secrets, path.join(workspace, "escape"));
+
+  // A file inside the workspace is still fine.
+  writeFileSync(path.join(workspace, "notes.md"), "ok");
+  assert.equal(
+    resolveWorkspacePath("notes.md", workspace, [], "workspace"),
+    path.join(workspace, "notes.md"),
+  );
+
+  // Reading through the link must not pass, though every string in it starts
+  // with the workspace.
+  assert.throws(
+    () => resolveWorkspacePath("escape/key.txt", workspace, [], "workspace"),
+    /outside the workspace/,
+    "a symlink read escaped the sandbox",
+  );
+
+  // Nor may a write to a file that does not exist yet, under the same link.
+  assert.throws(
+    () => resolveWorkspacePath("escape/planted.txt", workspace, [], "workspace"),
+    /outside the workspace/,
+    "a symlink write escaped the sandbox",
+  );
+
+  // Sandbox off is an explicit choice and still means off.
+  assert.equal(
+    resolveWorkspacePath("escape/key.txt", workspace, [], "off"),
+    path.join(workspace, "escape", "key.txt"),
+  );
+
+  // Windows treats these as one directory, so containment has to as well, or
+  // the sandbox refuses a path the filesystem considers inside it.
+  const cased = { realpath: (value: string) => value, platform: "win32" as NodeJS.Platform };
+  assert.equal(
+    resolveWorkspacePath(path.join(path.sep, "Work", "repo", "file.ts"), path.join(path.sep, "work", "repo"), [], "workspace", cased),
+    path.join(path.sep, "Work", "repo", "file.ts"),
+  );
+  assert.throws(
+    () => resolveWorkspacePath(path.join(path.sep, "Work", "repo", "file.ts"), path.join(path.sep, "work", "repo"), [], "workspace", { ...cased, platform: "linux" }),
+    /outside the workspace/,
+    "case folding must not leak onto a case-sensitive platform",
+  );
 });

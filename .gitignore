@@ -12,3 +12,13 @@ Thumbs.db
 !.env.example
 eval/runs/
 eval/config.json
+
+# Operator material. None of this belongs in a public tree: signing identity,
+# the desk's own local state, and per-machine agent config.
+.claude/
+*.p12
+*.cer
+*.key
+*.mobileprovision
+workhorse-state.json
+credentials.json

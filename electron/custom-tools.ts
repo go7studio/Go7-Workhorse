@@ -548,18 +548,54 @@ export function parseOpenAiToolCall(raw: unknown): CustomToolUse | null {
   return { id, name: normalizeCustomToolName(name), input };
 }
 
+/**
+ * The real path, not the spelling of it. A symlink on POSIX or a junction on
+ * Windows sits inside the workspace and points anywhere; comparing normalized
+ * strings says it is contained when it is not. A worker that reads a file
+ * carrying hostile instructions can then write outside the sandbox without any
+ * other foothold, which is the shortest real attack on this app.
+ *
+ * A write target usually does not exist yet, so resolve the nearest ancestor
+ * that does and keep the remainder: a new file cannot be contained by a
+ * directory that is itself a link out.
+ */
+function realPathOrNearest(target: string, realpath: (value: string) => string): string {
+  const tail: string[] = [];
+  let current = path.normalize(target);
+  for (;;) {
+    try {
+      return tail.length === 0 ? realpath(current) : path.join(realpath(current), ...tail.slice().reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.normalize(target);
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** Windows and macOS treat these as one path, so containment has to as well. */
+function samePathCase(value: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? value.toLowerCase() : value;
+}
+
 export function resolveWorkspacePath(
   requested: string | undefined,
   cwd: string,
   folders: string[],
   sandbox: SandboxProfile,
+  options?: { realpath?: (value: string) => string; platform?: NodeJS.Platform },
 ): string {
   const base = cwd.trim() || process.cwd();
   const raw = (requested ?? "").trim() || base;
   const abs = path.normalize(path.isAbsolute(raw) ? raw : path.join(base, raw));
   if (sandbox === "off") return abs;
-  const roots = [base, ...folders.map((item) => item.trim()).filter(Boolean)].map((item) => path.normalize(item));
-  const allowed = roots.some((root) => abs === root || abs.startsWith(`${root}${path.sep}`));
+  const realpath = options?.realpath ?? ((value: string) => fs.realpathSync(value));
+  const platform = options?.platform ?? process.platform;
+  const real = samePathCase(realPathOrNearest(abs, realpath), platform);
+  const roots = [base, ...folders.map((item) => item.trim()).filter(Boolean)]
+    .map((item) => samePathCase(realPathOrNearest(path.normalize(item), realpath), platform));
+  const allowed = roots.some((root) => real === root || real.startsWith(`${root}${path.sep}`));
   if (!allowed) throw new Error(`Path is outside the workspace: ${abs}`);
   return abs;
 }

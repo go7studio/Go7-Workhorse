@@ -26,6 +26,8 @@ const TOP_LEVEL = new Set([
   "AGENTS.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
+  "SECURITY.md",
+  "TRADEMARKS.md",
   "GOAL.md",
   "LICENSE",
   "README.md",

@@ -276,3 +276,71 @@ export function installReportMessage(report: InstallReport): string {
   const missed = report.skipped.length ? ` ${report.skipped.map((item) => `${name(item.target)}: ${item.reason}`).join(" · ")}` : "";
   return `Connected ${list} to Workhorse Link. ${names.length === 1 ? "It launches" : "They launch"} this app’s helper. No token stored.${missed}`;
 }
+
+/**
+ * The `workhorse` command: a launcher that runs the packaged helper's Link CLI
+ * with the same three variables every host config carries. Written into the
+ * app's own data folder with the exact paths baked in, so it is right for
+ * this install and regenerated on every Install.
+ */
+export function linkCliLauncherScript(platform: "darwin" | "win32" | "linux", launch: ExternalMcpLaunch): string {
+  const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+  if (platform === "win32") {
+    const sets = Object.entries(launch.env).map(([key, value]) => `set "${key}=${value}"`).join("\r\n");
+    return `@echo off\r\n${sets}\r\n"${launch.command}" ${launch.args.map((arg) => `"${arg}"`).join(" ")} link %*\r\n`;
+  }
+  const exports = Object.entries(launch.env).map(([key, value]) => `export ${key}=${q(value)}`).join("\n");
+  return `#!/bin/sh\n# Go7 Workhorse Link CLI. Written by the app; re-install from Settings after an update.\n${exports}\nexec ${q(launch.command)} ${launch.args.map(q).join(" ")} link "$@"\n`;
+}
+
+export type InstallCommandReport = {
+  ok: boolean;
+  launcher: string;
+  /** Where the short name landed, when it did. */
+  linked?: string;
+  message: string;
+};
+
+/**
+ * Put `workhorse` on PATH. macOS and Linux: a symlink into the first of the
+ * usual bin folders that this user can write — no privilege prompt from the
+ * app; when none is writable the report carries the one `ln -s` to run.
+ * Windows: the launcher is written and its folder named; PATH is the user's
+ * to change, and the report says so rather than editing it.
+ */
+export function installLinkCommand(input: {
+  platform: "darwin" | "win32" | "linux";
+  dataDir: string;
+  launch: ExternalMcpLaunch;
+  io: InstallIo & { symlink?: (target: string, linkPath: string) => void; writable?: (dir: string) => boolean; unlink?: (path: string) => void };
+}): InstallCommandReport {
+  const name = input.platform === "win32" ? "workhorse.cmd" : "workhorse";
+  const binDir = `${input.dataDir.replace(/[\\/]+$/, "")}${input.platform === "win32" ? "\\" : "/"}bin`;
+  const launcher = `${binDir}${input.platform === "win32" ? "\\" : "/"}${name}`;
+  input.io.mkdirp(binDir);
+  input.io.writeFile(launcher, linkCliLauncherScript(input.platform, input.launch));
+  if (input.platform === "win32") {
+    return { ok: true, launcher, message: `Wrote ${launcher}. Add ${binDir} to your PATH to run \`workhorse\` from any shell.` };
+  }
+  const candidates = ["/usr/local/bin", "/opt/homebrew/bin"];
+  for (const dir of candidates) {
+    if (!input.io.existsSync(dir) || !(input.io.writable?.(dir) ?? false)) continue;
+    const linkPath = `${dir}/workhorse`;
+    try {
+      if (input.io.existsSync(linkPath)) input.io.unlink?.(linkPath);
+      input.io.symlink?.(launcher, linkPath);
+      return { ok: true, launcher, linked: linkPath, message: `\`workhorse\` is on your PATH at ${linkPath}. Try \`workhorse capabilities\`.` };
+    } catch {
+      /* try the next folder */
+    }
+  }
+  return {
+    ok: true,
+    launcher,
+    message: `Wrote ${launcher}. No bin folder here is writable without sudo; to put it on PATH run: sudo ln -sf ${q(launcher)} /usr/local/bin/workhorse`,
+  };
+}
+
+function q(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}

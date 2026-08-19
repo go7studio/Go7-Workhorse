@@ -32,8 +32,8 @@ never includes keys or chat content. The first call,
 `workhorse_capabilities`, says what this desk offers. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
-The same helper is a JSON CLI for a harness without MCP. See
-[docs/LINK.md](LINK.md).
+The same helper is a JSON CLI for a harness without MCP, and Install
+workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
 
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse

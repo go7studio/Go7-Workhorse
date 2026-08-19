@@ -84,7 +84,9 @@ A call that changes the desk carries:
 `workhorse_list_chats`; without one, delegation returns `context_required`.
 Send `traceId` and `idempotencyKey`; Workhorse creates any you leave out and
 echoes the three it ran under in the reply's `envelope`. A retry with the same
-`idempotencyKey` returns the first answer, not a second worker.
+`idempotencyKey` returns the first answer: not a second worker from
+`delegate`, not a second pass from `continue_mission`, not the same message
+posted twice by `ask_chat`.
 
 Workhorse owns hop counting and cycle detection. Capacity is advisory:
 delegation rechecks Watch, permissions, connection and callability every
@@ -95,13 +97,22 @@ time.
 The same helper is a JSON CLI. Every subcommand is one tool call through the
 same handler — same permissions, same answers.
 
+**Settings → LLMs → Workhorse Link → Install workhorse command** writes a
+launcher with this install's exact paths and puts `workhorse` on your PATH
+where that needs no password (`/usr/local/bin` or `/opt/homebrew/bin` on
+macOS). If neither is writable, it shows the one `ln -s` to run. On Windows it
+writes `workhorse.cmd` and names the folder to add to PATH; it does not edit
+PATH for you.
+
 ```bash
-"<binary>" "<workhorse-mcp.js>" link capabilities
-"<binary>" "<workhorse-mcp.js>" link capacity --callable
-"<binary>" "<workhorse-mcp.js>" link delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
-"<binary>" "<workhorse-mcp.js>" link status <workerId>
-"<binary>" "<workhorse-mcp.js>" link follow-up <workerId> "Check the failing test" --chat <sessionId>
+workhorse capabilities
+workhorse capacity --callable
+workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
+workhorse status <workerId>
+workhorse follow-up <workerId> "Check the failing test" --chat <sessionId>
 ```
 
-Set the same three environment variables as the MCP config. Output is JSON on
-stdout; exit 1 with `{"error": …}` on failure.
+Without the command, the same calls are
+`"<binary>" "<workhorse-mcp.js>" link …` with the three environment variables
+from the MCP config set. Output is JSON on stdout; exit 1 with `{"error": …}`
+on failure.

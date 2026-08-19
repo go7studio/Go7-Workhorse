@@ -848,10 +848,8 @@ export class GrokAgent {
   ): Promise<GrokPromptResult> {
     let collected = "";
     let thoughts = "";
-    let sawBilled = false;
     const prevChunk = handlers.onChunk;
     const prevThought = handlers.onThought;
-    const prevUsage = handlers.onUsage;
     this.handlers = {
       ...handlers,
       onChunk: (chunk) => {
@@ -862,10 +860,6 @@ export class GrokAgent {
         thoughts += chunk;
         prevThought?.(chunk);
       },
-      onUsage: (usage) => {
-        if (usageHasBilledTokens(usage)) sawBilled = true;
-        prevUsage?.(usage);
-      },
     };
     const result = await this.request("session/prompt", {
       sessionId: this.sessionId,
@@ -873,15 +867,14 @@ export class GrokAgent {
     });
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to
-    // keep. Mid-turn snapshots (sawBilled) are the same tokens seen early;
-    // sending the total tagged `turn` lets the store replace them rather than
-    // add to them. The old code did the reverse and zeroed the total whenever a
-    // snapshot had arrived, leaving the ledger to guess from the snapshots.
+    // keep. Mid-turn snapshots are the same tokens seen early; sending the
+    // total tagged `turn` lets the store replace them rather than add to them.
+    // The old code did the reverse and zeroed the total whenever a snapshot
+    // had arrived, leaving the ledger to guess from the snapshots.
     const usage = parseGrokUsage(result) ?? parseGrokUsage(asRecord(result._meta));
     if (usage) {
       handlers.onUsage?.({ ...usage, source: usageHasBilledTokens(usage) ? "turn" : "gauge" });
     }
-    void sawBilled;
     const titled = titleFromRecord(result) ?? titleFromRecord(asRecord(result._meta));
     if (titled) handlers.onTitle?.(titled);
     const fromResult = extractUpdateText({

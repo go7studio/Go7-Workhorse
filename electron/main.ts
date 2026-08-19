@@ -52,7 +52,7 @@ import { CredentialStore, hydrateStateCredentials, protectStateCredentials } fro
 import { DurableJobEngine } from "./job-engine";
 import { spawnSync } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
-import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig } from "./mcp-install";
+import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig } from "./mcp-install";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
@@ -616,6 +616,39 @@ app.whenReady().then(async () => {
 
   // The generic MCP configuration — for a client Link has no writer for.
   ipcMain.handle("agentRuntime:linkConfig", () => workhorseLinkGenericConfig(linkLaunch()));
+
+  // The `workhorse` command: a launcher with this install's exact paths, and
+  // a symlink onto PATH where one can be made without a privilege prompt.
+  ipcMain.handle("agentRuntime:installLinkCommand", () => {
+    const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
+    const launch = workhorseExternalMcpLaunch(linkLaunch());
+    const report = installLinkCommand({
+      platform,
+      dataDir: app.getPath("userData"),
+      launch,
+      io: {
+        existsSync: (file) => fs.existsSync(file),
+        readFile: (file) => fs.readFileSync(file, "utf8"),
+        writeFile: (file, text) => {
+          fs.writeFileSync(file, text, { mode: 0o755 });
+        },
+        mkdirp: (dir) => {
+          fs.mkdirSync(dir, { recursive: true });
+        },
+        writable: (dir) => {
+          try {
+            fs.accessSync(dir, fs.constants.W_OK);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        unlink: (file) => fs.unlinkSync(file),
+        symlink: (target, linkPath) => fs.symlinkSync(target, linkPath),
+      },
+    });
+    return { ok: report.ok, message: report.message };
+  });
 
   ipcMain.handle("agentRuntime:installMcp", (_event, hosts?: unknown) => {
     const home = app.getPath("home");

@@ -21,8 +21,11 @@ import {
   UPDATE_REPO,
   updateInstallKind,
   versionFromRef,
-  winInstallerLaunch,
-  winReplaceScript,
+  winSchtasksCreate,
+  winSchtasksRun,
+  winUpdateTaskXml,
+  winUpdateTaskXmlBytes,
+  winWmiCreate,
   type AppUpdateApplyResult,
   type AppUpdateCheckResult,
 } from "../src/lib/app-update";
@@ -170,24 +173,17 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
     if (!response.ok) throw new Error(`Download failed (${response.status}).`);
     fs.writeFileSync(setup, Buffer.from(await response.arrayBuffer()));
 
-    const helper = path.join(tmp, "replace.vbs");
-    fs.writeFileSync(
-      helper,
-      winReplaceScript({
-        pid: process.pid,
-        setup,
-        tmp,
-        exe: process.execPath,
-      }),
-      { encoding: "utf8" },
-    );
-    const launch = winInstallerLaunch(helper);
-    const child = spawn(launch.command, launch.args, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
+    const xmlPath = path.join(tmp, "update-task.xml");
+    fs.writeFileSync(xmlPath, winUpdateTaskXmlBytes(winUpdateTaskXml({ command: setup })));
+    const create = winSchtasksCreate({ xmlPath });
+    const runTask = winSchtasksRun();
+    try {
+      await run(create.command, create.args, tmp, 30_000);
+      await run(runTask.command, runTask.args, tmp, 30_000);
+    } catch {
+      const wmi = winWmiCreate(setup);
+      await run(wmi.command, wmi.args, tmp, 30_000);
+    }
   } catch (error) {
     try {
       fs.rmSync(tmp, { recursive: true, force: true });

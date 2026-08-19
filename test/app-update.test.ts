@@ -186,9 +186,16 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(sidebar, /"Update now"/);
   assert.match(sidebar, /Try update again/);
   const dock = sidebar.indexOf('<footer className="sidebar-dock">');
-  const updateAction = sidebar.indexOf("<SidebarUpdate store={store} />", dock);
   const settingsAction = sidebar.indexOf(">Settings<", dock);
-  assert.ok(dock >= 0 && updateAction > dock && settingsAction > updateAction);
+  const updateAction = sidebar.indexOf("<SidebarUpdate />", dock);
+  assert.ok(dock >= 0 && settingsAction > dock && updateAction > settingsAction);
+  assert.match(sidebar, /memo\(function SidebarUpdate\(\)/);
+  assert.match(sidebar, /useStoreSelector\(selectSidebarUpdateStore, sameSidebarUpdateStore\)/);
+  const sidebarStore = sidebar.slice(sidebar.indexOf("type SidebarStore"), sidebar.indexOf("type SidebarUpdateStore"));
+  assert.doesNotMatch(sidebarStore, /appUpdate/);
+  const styles = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(styles, /\.sidebar-update:hover \.sidebar-update-copy/);
   const brand = sidebar.slice(sidebar.indexOf('<div className="brand">'), dock);
   assert.doesNotMatch(brand, /<SidebarUpdate/);
   // Check now used to return null on every GitHub error and every current

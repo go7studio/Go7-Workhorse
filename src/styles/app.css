@@ -450,27 +450,64 @@ html.pane-dragging * {
   padding: 6px 0 10px;
   border-top: 1px solid var(--line);
   background: var(--bg-sidebar);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-settings {
+  min-width: 0;
 }
 
 .sidebar-update {
-  margin-bottom: 3px;
+  position: relative;
+  width: 35px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  transition: background 160ms var(--ease), transform 160ms var(--ease);
 }
 
 .sidebar-update:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-solid));
+  background: var(--bg-hover);
+}
+
+.sidebar-update:active {
+  transform: scale(0.96);
 }
 
 .sidebar-update:disabled {
   cursor: default;
 }
 
-.sidebar-update > span:last-child {
-  min-width: 0;
+.sidebar-update-copy {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: calc(100% + 5px);
+  min-width: max-content;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-solid);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 130ms var(--ease), transform 130ms var(--ease);
 }
 
-.sidebar-update .row-title {
+.sidebar-update:hover .sidebar-update-copy,
+.sidebar-update:focus-visible .sidebar-update-copy {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sidebar-update-copy .row-title {
   color: var(--accent);
 }
 

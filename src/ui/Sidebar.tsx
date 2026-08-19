@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
@@ -23,9 +23,6 @@ type SidebarStore = Pick<
   | "activeSessionId"
   | "panel"
   | "sidebarWidth"
-  | "appUpdate"
-  | "appUpdateBusy"
-  | "appUpdateError"
   | "setSidebarWidth"
   | "toggleWorkhorseTheme"
   | "openSheet"
@@ -41,6 +38,13 @@ type SidebarStore = Pick<
   | "deleteSession"
   | "openSettings"
   | "closeSettings"
+>;
+
+type SidebarUpdateStore = Pick<
+  Store,
+  | "appUpdate"
+  | "appUpdateBusy"
+  | "appUpdateError"
   | "applyAppUpdate"
 >;
 
@@ -58,10 +62,20 @@ function sameSidebarStore(left: SidebarStore, right: SidebarStore): boolean {
     left.activeProjectId === right.activeProjectId &&
     left.activeSessionId === right.activeSessionId &&
     left.panel === right.panel &&
-    left.sidebarWidth === right.sidebarWidth &&
+    left.sidebarWidth === right.sidebarWidth
+  );
+}
+
+function selectSidebarUpdateStore(store: Store): SidebarUpdateStore {
+  return store;
+}
+
+function sameSidebarUpdateStore(left: SidebarUpdateStore, right: SidebarUpdateStore): boolean {
+  return (
     left.appUpdate === right.appUpdate &&
     left.appUpdateBusy === right.appUpdateBusy &&
-    left.appUpdateError === right.appUpdateError
+    left.appUpdateError === right.appUpdateError &&
+    left.applyAppUpdate === right.applyAppUpdate
   );
 }
 
@@ -279,18 +293,17 @@ function SettingsPulse({ store }: { store: Pick<SidebarStore, "usage" | "session
   );
 }
 
-function SidebarUpdate({ store }: { store: SidebarStore }) {
+const SidebarUpdate = memo(function SidebarUpdate() {
+  const store = useStoreSelector(selectSidebarUpdateStore, sameSidebarUpdateStore);
   const offer = store.appUpdate;
   if (!offer) return null;
   const label = store.appUpdateBusy ? "Updating…" : store.appUpdateError ? "Try update again" : "Update now";
   const detail = store.appUpdateError ? "Update failed" : `Workhorse ${offer.version}`;
-  const title = store.appUpdateError || `Update to Workhorse ${offer.version}`;
   return (
     <button
-      className={`row sidebar-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
+      className={`sidebar-update${store.appUpdateBusy ? " busy" : ""}${store.appUpdateError ? " error" : ""}`}
       type="button"
       aria-label={`${label}. ${detail}`}
-      title={title}
       disabled={store.appUpdateBusy}
       onClick={() => {
         if (!store.appUpdate) return;
@@ -303,13 +316,13 @@ function SidebarUpdate({ store }: { store: SidebarStore }) {
           <path d="M9 8.7v5.1m-2-1.9 2 2 2-2" />
         </svg>
       </span>
-      <span>
+      <span className="sidebar-update-copy" aria-hidden="true">
         <span className="row-title">{label}</span>
         <span className="row-meta">{detail}</span>
       </span>
     </button>
   );
-}
+});
 
 export function Sidebar() {
   const store = useStoreSelector(selectSidebarStore, sameSidebarStore);
@@ -450,9 +463,8 @@ export function Sidebar() {
         <LooseChats store={store} index={index} />
       </div>
       <footer className="sidebar-dock">
-        <SidebarUpdate store={store} />
         <button
-          className={store.panel === "settings" || store.panel === "add-bot" ? "row active" : "row"}
+          className={`row sidebar-settings${store.panel === "settings" || store.panel === "add-bot" ? " active" : ""}`}
           type="button"
           onClick={() =>
             store.panel === "settings" || store.panel === "add-bot" ? store.closeSettings() : store.openSettings()
@@ -463,6 +475,7 @@ export function Sidebar() {
             <SettingsPulse store={store} />
           </span>
         </button>
+        <SidebarUpdate />
       </footer>
     </aside>
   );

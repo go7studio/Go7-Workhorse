@@ -180,7 +180,8 @@ contents, environment variables, URLs and credential values.
 Settings → Profile can check GitHub for a newer desk. A Mac installer
 downloads that release's disk image, replaces the app, and opens it. A Windows
 installer downloads the Setup exe, installs after Workhorse quits, and opens
-the new build. When one is ready, Update now appears above Settings.
+the new build. When one is ready, a blue update control appears at the far
+right of Settings. Hover it to see Update now and the version it will install.
 
 ## Platforms
 

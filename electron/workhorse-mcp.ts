@@ -44,7 +44,8 @@ import { listDeskSkills, publicDeskSkills, readDeskSkill } from "./desk-export-h
 import { resolveRequestedSkills } from "../src/lib/skills-catalog";
 import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
-import { normalizeTaskStore, reconcileExternalTask } from "../src/lib/external-task";
+import { normalizeTaskStore } from "../src/lib/external-task";
+import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 
 type JsonRpc = {
@@ -1562,13 +1563,22 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
       timeoutMs: 8_000,
       inbox: false,
     }).catch(() => "");
-    return text || JSON.stringify({ agents: [] }, null, 2);
+    if (text.trim()) return text;
+    const raw = readState() as { agentCatalog?: ExternalAgent[]; agentRuntimes?: AgentRuntimeStatus[] };
+    return JSON.stringify(
+      projectExternalAgentCatalog({
+        agents: Array.isArray(raw.agentCatalog) ? raw.agentCatalog : [],
+        runtimes: Array.isArray(raw.agentRuntimes) ? raw.agentRuntimes : [],
+      }),
+      null,
+      2,
+    );
   }
   if (name === "workhorse_agent_status") {
     const id = typeof args.id === "string" ? args.id : "";
     const store = normalizeTaskStore((readState() as { externalTasks?: unknown }).externalTasks);
     const task = store.byId[id];
-    if (task) return JSON.stringify(reconcileExternalTask(task, null), null, 2);
+    if (task) return JSON.stringify(task, null, 2);
     const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
     return postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id, traceId: typeof args.traceId === "string" ? args.traceId : undefined }, parent), { timeoutMs: 8_000, inbox: false });
   }

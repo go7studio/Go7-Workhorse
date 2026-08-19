@@ -57,6 +57,11 @@ export const EMPTY_CUSTOM_DRAFT: CustomLlm = {
   source: "manual",
 };
 
+/** On the desk: URL plus a vaulted or present key. Persist may omit plaintext. */
+export function customBotAttached(bot: Pick<CustomBot, "baseUrl" | "apiKey" | "credentialId">): boolean {
+  return Boolean(bot.baseUrl?.trim() && (bot.apiKey?.trim() || bot.credentialId?.trim()));
+}
+
 export function normalizeCustomBot(raw: unknown): CustomBot | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<CustomBot>;

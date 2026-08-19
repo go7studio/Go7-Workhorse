@@ -134,6 +134,39 @@ export function catalogFromStatuses(statuses: AgentRuntimeStatus[]): ExternalAge
   return statuses.flatMap(defaultCatalogAgents);
 }
 
+export type PublicExternalAgent = {
+  id: string;
+  name: string;
+  runtime: AgentRuntimeId;
+  reachable: boolean;
+  authenticated: boolean;
+  asOf: string;
+};
+
+/** Discovery for harness MCP. Catalog only — never task history or workspace paths. */
+export function projectExternalAgentCatalog(input: {
+  agents: ExternalAgent[];
+  runtimes?: AgentRuntimeStatus[];
+  now?: number;
+}): { asOf: string; agents: PublicExternalAgent[] } {
+  const asOf = new Date(input.now ?? Date.now()).toISOString();
+  const byRuntime = new Map((input.runtimes ?? []).map((item) => [item.runtimeId, item]));
+  const agents: PublicExternalAgent[] = [];
+  for (const agent of input.agents) {
+    if (!isAgentRuntimeId(agent.runtimeId) || !agent.agentId.trim()) continue;
+    const runtime = byRuntime.get(agent.runtimeId);
+    agents.push({
+      id: `${agent.runtimeId}/${agent.agentId}`,
+      name: agent.name || `${agent.runtimeId}/${agent.agentId}`,
+      runtime: agent.runtimeId,
+      reachable: Boolean(runtime?.reachable),
+      authenticated: Boolean(runtime?.authenticated),
+      asOf,
+    });
+  }
+  return { asOf, agents };
+}
+
 export function parseCatalogAgents(runtimeId: AgentRuntimeId, raw: unknown): ExternalAgent[] {
   if (!isAgentRuntimeId(runtimeId)) return [];
   if (!Array.isArray(raw)) return [];

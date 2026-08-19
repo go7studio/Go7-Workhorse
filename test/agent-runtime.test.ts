@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
+  acceptInboundEnvelope,
   authorizeExternalCall,
   allowedExternalCandidates,
   canCallCatalogHasExternal,
@@ -82,6 +83,7 @@ test("blanket plan grant authorizes one named agent from the set", () => {
   if (named.ok) assert.equal(named.ref.agentId, "main");
   const picked = authorizeExternalCall({
     grant,
+    routing: { enabled: true, includeExternalAgents: true },
     selectFrom: [
       { runtimeId: "hermes", agentId: "default" },
       { runtimeId: "openclaw", agentId: "main" },
@@ -114,13 +116,23 @@ test("the owner selects which discovered harness agents Auto may call", () => {
 
 test("wave grant names one agent and consumes once", () => {
   const grant = createWaveGrant({ waveId: "plan_1", runtimeId: "openclaw", agentId: "main", now: 10 });
-  const first = authorizeExternalCall({ grant, routing: { enabled: false } });
+  const first = authorizeExternalCall({ grant, routing: { enabled: true, includeExternalAgents: true } });
   assert.equal(first.ok, true);
   const spent = consumeGrant(grant, 11);
   assert.equal(spent.consumedAt, 11);
-  const second = authorizeExternalCall({ grant: spent, routing: { enabled: false } });
+  const second = authorizeExternalCall({ grant: spent, routing: { enabled: true, includeExternalAgents: true } });
   assert.equal(second.ok, false);
   if (!second.ok) assert.equal(second.code, "grant_required");
+});
+
+test("unnamed harness pick needs Routing, Include harnesses, and a grant", () => {
+  const grant = createWaveGrant({ waveId: "plan_1", runtimeId: "openclaw", agentId: "main", now: 10 });
+  assert.equal(authorizeExternalCall({ grant, routing: { enabled: false, includeExternalAgents: true } }).ok, false);
+  assert.equal(authorizeExternalCall({ grant, routing: { enabled: true, includeExternalAgents: false } }).ok, false);
+  assert.equal(authorizeExternalCall({ routing: { enabled: true, includeExternalAgents: true } }).ok, false);
+  const allowed = authorizeExternalCall({ grant, routing: { enabled: true, includeExternalAgents: true } });
+  assert.equal(allowed.ok, true);
+  if (allowed.ok) assert.equal(allowed.ref.agentId, "main");
 });
 
 test("canCall catalog cannot include external ids", () => {
@@ -180,6 +192,9 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(store, /allowedExternalCandidates/);
   assert.match(store, /caller\.planRun\?\.externalGrant/);
   assert.match(store, /exposure !== "external-runtime"/);
+  assert.match(store, /decideDispatch\(/);
+  assert.match(store, /routing: latest\.settings\.routing/);
+  assert.match(store, /acceptInboundEnvelope/);
   assert.match(store, /if \(ready\) void refreshAgentRuntimes\(\)/);
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
   assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors\./);
@@ -187,6 +202,31 @@ test("Settings keeps seven tabs; Harnesses live under LLMs; include defaults off
   assert.match(addBot, /Imported MiniMax key from OpenClaw config\. This is not harness integration\./);
   const picker = readFileSync(path.join(ROOT, "src", "ui", "SessionSetup.tsx"), "utf8");
   assert.doesNotMatch(picker, /openclaw|hermes/);
+});
+
+test("inbound envelope rejects a client hop-count reset and a trimmed visited list", () => {
+  const stored = createEnvelope({ origin: "openclaw", visitedSystems: ["openclaw", "workhorse"], hopCount: 2, traceId: "t1", idempotencyKey: "i1" });
+  const reset = acceptInboundEnvelope({
+    stored,
+    claimed: { hopCount: 0, visitedSystems: ["openclaw"], traceId: "t1" },
+    caller: "openclaw",
+  });
+  assert.equal(reset.ok, false);
+  if (!reset.ok) assert.equal(reset.code, "hop_limit");
+  const trimmed = acceptInboundEnvelope({
+    stored,
+    claimed: { hopCount: 2, visitedSystems: ["openclaw"], traceId: "t1" },
+    caller: "openclaw",
+  });
+  assert.equal(trimmed.ok, false);
+  if (!trimmed.ok) assert.equal(trimmed.code, "cycle_rejected");
+  const fresh = acceptInboundEnvelope({ caller: "openclaw", claimed: { hopCount: 0, visitedSystems: [] } });
+  assert.equal(fresh.ok, true);
+  if (fresh.ok) {
+    assert.ok(fresh.envelope.visitedSystems.includes("openclaw"));
+    assert.ok(fresh.envelope.visitedSystems.includes("workhorse"));
+    assert.equal(fresh.envelope.hopCount, 1);
+  }
 });
 
 test("envelope rejects a second hop to the same agent system and hop past the limit", () => {

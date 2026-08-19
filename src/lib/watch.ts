@@ -12,7 +12,7 @@ import type {
   WatchPermits,
   WatchSettings,
 } from "./types";
-import { customBotEnabled } from "./custom-bots";
+import { customBotAttached, customBotEnabled } from "./custom-bots";
 import { defaultModel, modelsFor } from "./models";
 import {
   cursorLaneEvents,
@@ -874,7 +874,7 @@ export function deskCallCatalog(input: {
             .map((item) => ({ id: item.id, name: item.name })),
         ],
         kind: "custom",
-        connected: Boolean(bot.baseUrl?.trim() && bot.apiKey?.trim()),
+        connected: customBotAttached(bot),
         enabled: customBotEnabled(bot),
         leftover: status?.leftover,
         usedPercent: status?.usedPercent,

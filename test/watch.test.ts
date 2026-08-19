@@ -758,6 +758,34 @@ test("a full context window never holds a send the way a spent daily bank does",
   assert.notEqual(spent?.reason, undefined);
 });
 
+test("a vaulted custom bot is callable without a plaintext key", () => {
+  const vaulted: CustomBot = { ...bot, apiKey: "", credentialId: "cred_kimi" };
+  const rows = deskCallCatalog({
+    settings: {
+      watch: { ...DEFAULT_WATCH, lockDaily: false },
+      customBots: [vaulted],
+      usageBudgets: {},
+      llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } },
+    },
+    usage: [],
+    plans: { custom: { bot_minimax: plan(73) } },
+    permits: {},
+  });
+  const row = rows.find((item) => item.id === "bot:bot_minimax");
+  assert.equal(row?.canCall, true);
+  assert.notEqual(row?.status, "not_connected");
+  const snap = projectCapacitySnapshot(rows, {
+    now: Date.parse("2026-08-19T12:00:00.000Z"),
+    plans: { custom: { bot_minimax: plan(73) } },
+    settings: { customBots: [vaulted] },
+  });
+  const kimi = snap.rows.find((item) => item.id === "bot:bot_minimax");
+  assert.equal(kimi?.availability.canCall, true);
+  assert.notEqual(kimi?.availability.status, "not_connected");
+  assert.equal(kimi?.meter.remainingPercent, 73);
+  assert.doesNotMatch(JSON.stringify(snap), /sk-|cred_kimi/);
+});
+
 function capacityRow(partial: Partial<DeskCallRow> & Pick<DeskCallRow, "id" | "name" | "provider" | "kind">): DeskCallRow {
   return {
     canCall: true,

@@ -828,6 +828,18 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
           contextWindow: 200_000,
           createdAt: 1,
         },
+        {
+          id: "bot_kimi",
+          name: "Kimi K3",
+          color: "#bf5af2",
+          baseUrl: "https://api.synthetic.new/openai/v1",
+          model: "hf:moonshotai/Kimi-K3",
+          apiKey: "",
+          credentialId: "cred_kimi",
+          api: "openai-completions",
+          contextWindow: 524_288,
+          createdAt: 1,
+        },
       ],
       routing: { enabled: true, includeExternalAgents: false },
       watch: { lockDaily: false },
@@ -857,6 +869,7 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
       },
       custom: {
         bot_minimax: { usedPercent: 45, leftPercent: 55, period: "weekly", prepaidBalance: 0, products: [] },
+        bot_kimi: { usedPercent: 27, leftPercent: 73, period: "weekly", prepaidBalance: 0, products: [] },
       },
     },
   };
@@ -893,7 +906,13 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     assert.equal(first.version, 1);
     assert.ok(first.rows.some((row) => row.id === "grok"));
     assert.equal(first.rows.filter((row) => row.provider === "cursor").length, 2);
-    assert.equal(first.rows.filter((row) => row.kind === "custom").length, 1);
+    assert.equal(first.rows.filter((row) => row.kind === "custom").length, 2);
+    const kimi = first.rows.find((row) => row.id === "bot:bot_kimi") as
+      | { availability?: { canCall?: boolean; status?: string }; meter?: { remainingPercent?: number } }
+      | undefined;
+    assert.equal(kimi?.availability?.canCall, true);
+    assert.notEqual(kimi?.availability?.status, "not_connected");
+    assert.equal(kimi?.meter?.remainingPercent, 73);
     assert.equal(
       first.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes")),
       false,
@@ -920,6 +939,12 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     assert.doesNotMatch(encoded, /Secret Title/);
     assert.doesNotMatch(encoded, /Trap Project/);
     assert.doesNotMatch(encoded, /chat_secret/);
+    assert.doesNotMatch(encoded, /cred_kimi/);
+    const mcpSrc = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+    assert.doesNotMatch(
+      mcpSrc.slice(mcpSrc.indexOf("function queryCapacity"), mcpSrc.indexOf("function probeRuntime")),
+      /fetchCustomPlanUsage/,
+    );
     const second = mcpToolText(
       await handleWorkhorseRpc({
         jsonrpc: "2.0",
@@ -976,4 +1001,80 @@ test("Settings and FEATURES name leftover share without a new tab", () => {
   assert.match(features, /OpenClaw and Hermes are \*\*harnesses\*\*, not vendors/);
   assert.match(features, /query leftover and availability/);
   assert.match(features, /never includes keys or\s+chat content/);
+});
+
+test("workhorse_list_external_agents lists the catalog, not past tasks", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-ext-catalog-"));
+  const statePath = path.join(dir, "workhorse-state.json");
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      agentCatalog: [
+        { runtimeId: "openclaw", agentId: "main", name: "openclaw/main", workspace: "/Users/foo/.openclaw" },
+        { runtimeId: "hermes", agentId: "research", name: "hermes/research" },
+      ],
+      agentRuntimes: [
+        { runtimeId: "openclaw", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+        { runtimeId: "hermes", binaryPresent: true, configPresent: true, authenticated: true, reachable: true },
+      ],
+      externalTasks: {
+        byId: {
+          ext_old: {
+            id: "ext_old",
+            ref: { runtimeId: "openclaw", agentId: "main" },
+            status: "completed",
+            startedAt: 1,
+            finishedAt: 2,
+            envelope: { traceId: "t", idempotencyKey: "k", origin: "workhorse", visitedSystems: ["workhorse"], hopCount: 1 },
+            grantId: "g1",
+          },
+        },
+        byKey: { k: "ext_old" },
+      },
+    }),
+  );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH, url: process.env.WORKHORSE_BRIDGE_URL };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  delete process.env.WORKHORSE_BRIDGE_URL;
+  try {
+    const listed = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "workhorse_list_external_agents", arguments: {} },
+        }),
+      ),
+    ) as { agents: Array<{ id: string; status?: string }> };
+    assert.deepEqual(
+      listed.agents.map((item) => item.id),
+      ["openclaw/main", "hermes/research"],
+    );
+    assert.equal(
+      listed.agents.some((item) => item.id === "ext_old" || item.status === "completed"),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(listed), /\/Users\/foo|\.openclaw|ext_old/);
+    const status = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "workhorse_agent_status", arguments: { id: "ext_old" } },
+        }),
+      ),
+    ) as { status?: string };
+    assert.equal(status.status, "completed");
+  } finally {
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.url === undefined) delete process.env.WORKHORSE_BRIDGE_URL;
+    else process.env.WORKHORSE_BRIDGE_URL = previous.url;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

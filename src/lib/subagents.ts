@@ -1143,6 +1143,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
     ...(typeof row.usedTokens === "number" && row.usedTokens >= 0 ? { usedTokens: Math.floor(row.usedTokens) } : {}),
+    ...(typeof row.budgetBaseline === "number" && row.budgetBaseline >= 0 ? { budgetBaseline: Math.floor(row.budgetBaseline) } : {}),
     ...(Array.isArray(row.changedFiles) ? { changedFiles: row.changedFiles.filter((item): item is string => typeof item === "string") } : {}),
     ...(Array.isArray(row.conflictFiles) ? { conflictFiles: row.conflictFiles.filter((item): item is string => typeof item === "string") } : {}),
     ...(typeof row.error === "string" && row.error.trim()

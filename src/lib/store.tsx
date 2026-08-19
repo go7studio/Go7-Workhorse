@@ -231,6 +231,7 @@ import {
   usageHasBilledTokens,
   usageHomeForReport,
 } from "./usage";
+import { applyWorkerBudgetUsage } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import { isVendorRateLimitError, turnEndedWithoutProse, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
 import { cursorUsageLane } from "./cursor-lane";
@@ -5588,12 +5589,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
-          const usedTokens = Math.max(
-            liveSession.agentRun.usedTokens ?? 0,
-            Math.max(0, event.inputTokens) + Math.max(0, event.outputTokens),
-          );
-          const exceeded = Boolean(liveSession.agentRun.tokenBudget && usedTokens > liveSession.agentRun.tokenBudget);
-          if (exceeded) cancelVendorSession(liveSession);
+          const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
+          if (spend.exceeded) cancelVendorSession(liveSession);
           setState((current) => ({
             ...current,
             sessions: withSubagentStatus(
@@ -5601,21 +5598,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 session.id === event.sessionId && session.agentRun
                   ? {
                       ...session,
-                      status: exceeded ? "idle" : session.status,
+                      status: spend.exceeded ? "idle" : session.status,
                       agentRun: {
                         ...session.agentRun,
-                        usedTokens,
-                        ...(exceeded ? {
+                        usedTokens: spend.usedTokens,
+                        budgetBaseline: spend.budgetBaseline,
+                        ...(spend.exceeded ? {
                           status: "budget-exceeded" as const,
                           finishedAt: Date.now(),
-                          error: `Subagent exceeded its ${session.agentRun.tokenBudget} token budget.`,
+                          error: `Subagent exceeded its ${session.agentRun.tokenBudget} token ceiling on this slice’s new work.`,
                         } : {}),
                       },
                     }
                   : session,
               ),
               event.sessionId,
-              exceeded ? "failed" : "running",
+              spend.exceeded ? "failed" : "running",
             ),
           }));
         }

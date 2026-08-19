@@ -278,6 +278,8 @@ export type AgentRun = {
   timeoutMs?: number;
   tokenBudget?: number;
   usedTokens?: number;
+  /** Fresh input at the first meter this slice. Later input growth is new work. */
+  budgetBaseline?: number;
   isolation: "worktree" | "shared";
   /** inherit keeps prior conversation. fresh starts cold with only a handoff. */
   seed?: WorkerSeed;

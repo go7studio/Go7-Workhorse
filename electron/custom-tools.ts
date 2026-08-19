@@ -164,7 +164,11 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override; otherwise derived from quick, balanced, or deep" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
-        tokenBudget: { type: "number", description: "Optional total token ceiling" },
+        tokenBudget: {
+          type: "number",
+          description:
+            "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway.",
+        },
         isolation: { type: "string", description: "worktree (default) or shared" },
         seed: {
           type: "string",

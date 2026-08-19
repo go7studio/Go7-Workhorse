@@ -143,10 +143,12 @@ transcript rather than as a path.
   step log. The log is per chat. It is never shared across vendors.
 - **Subagents** — lifecycle records, runtime and token ceilings, cascading
   cancellation, changed-file review, and worktree isolation where the project
-  supports it. A worker gets a worker's context: the short worker rules and
-  only the desk tools it may call — read and ask chats, one bounded helper,
-  ask to raise a block, read skills and references. It cannot create, rename,
-  move or delete anything on the desk, and is not shown those tools.
+  supports it. A token ceiling meters this slice’s new work, not leftover or
+  the size of the repo the worker read. A worker gets a worker's context: the
+  short worker rules and only the desk tools it may call — read and ask chats,
+  one bounded helper, ask to raise a block, read skills and references. It
+  cannot create, rename, move or delete anything on the desk, and is not shown
+  those tools.
 - **Plans** — multi-step work that continues after a worker joins. A checklist
   plan you tick yourself still completes on ordinary evidence. When workers run
   the plan, a step finishes when another vendor re-runs the named test at that

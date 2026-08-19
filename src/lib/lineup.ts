@@ -1,3 +1,4 @@
+import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
 import { withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
@@ -181,6 +182,7 @@ export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { con
       "The auditor’s named gate at that worktree commit is what counts. You cannot mark a plan step done.",
       "Write a short user-facing update. Do not treat a builder report as admission.",
       "Keep going until the plan completes or is truthfully blocked.",
+      OBJECTIVE_ASK_RULE,
     );
   } else {
     lines.push(

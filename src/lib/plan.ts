@@ -300,6 +300,11 @@ export function stepHasAuditorAdmission(step: PlanStep): boolean {
   return list.some((item) => isAuditorGateEvidence(item, step.assignedSessionId));
 }
 
+/** Auditor receipt is required only when a builder was assigned this step. */
+export function stepNeedsAuditorAdmission(step: PlanStep): boolean {
+  return step.evidenceRequired && Boolean(step.assignedSessionId);
+}
+
 function normalizeStep(raw: unknown): PlanStep | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<PlanStep>;
@@ -674,8 +679,15 @@ export function setPlanStepStatus(
   const qualifyingEvidence = step.reopenedAt === undefined
     ? step.evidence
     : step.evidence.filter((evidence) => evidence.recordedAt >= step.reopenedAt!);
-  if (status === "completed" && step.evidenceRequired && !stepHasAuditorAdmission({ ...step, evidence: qualifyingEvidence })) {
-    return failed("Plan step needs auditor evidence at a git SHA before completion.");
+  if (status === "completed" && step.evidenceRequired) {
+    const current = { ...step, evidence: qualifyingEvidence };
+    if (stepNeedsAuditorAdmission(current)) {
+      if (!stepHasAuditorAdmission(current)) {
+        return failed("Plan step needs auditor evidence at a git SHA before completion.");
+      }
+    } else if (qualifyingEvidence.length === 0) {
+      return failed("Plan step needs evidence before completion.");
+    }
   }
   const updated: PlanStep = {
     ...step,
@@ -696,8 +708,11 @@ export function completePlanRun(plan: PlanRun, now = Date.now()): PlanTransition
   if (plan.steps.length === 0 || plan.steps.some((step) => step.status !== "completed")) {
     return failed("Every plan step must be completed first.");
   }
-  if (plan.steps.some((step) => step.evidenceRequired && !stepHasAuditorAdmission(step))) {
-    return failed("Every required plan step needs auditor evidence at a git SHA.");
+  if (plan.steps.some((step) => stepNeedsAuditorAdmission(step) && !stepHasAuditorAdmission(step))) {
+    return failed("Every builder step needs auditor evidence at a git SHA.");
+  }
+  if (plan.steps.some((step) => step.evidenceRequired && !step.assignedSessionId && step.evidence.length === 0)) {
+    return failed("Every required plan step needs evidence.");
   }
   return succeeded(changed(plan, { status: "completed", completedAt: now }, now));
 }

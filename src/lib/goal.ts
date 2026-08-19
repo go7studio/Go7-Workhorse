@@ -1,3 +1,4 @@
+import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import type { ProviderId, Session, WorkerHandoff } from "./types";
 
@@ -224,6 +225,7 @@ export function goalContinuePrompt(state: GoalState): string {
     if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
     if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
   }
+  lines.push("", OBJECTIVE_ASK_RULE);
   return lines.join("\n");
 }
 

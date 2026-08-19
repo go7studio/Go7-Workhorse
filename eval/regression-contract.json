@@ -73,7 +73,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi"],
       "scenarios": ["ORC-S6", "ORC-S7"],
       "rubric": ["ORC-09", "ORC-13", "ORC-15"],
-      "sourceFiles": ["src/lib/plan.ts", "src/lib/plan-admission.ts", "src/lib/subagents.ts", "scripts/workhorse-eval-plan-fixture.mjs", "test/plan.test.ts", "test/plan-admission.test.ts"],
+      "sourceFiles": ["src/lib/plan.ts", "src/lib/plan-admission.ts", "src/lib/ask-default.ts", "src/lib/subagents.ts", "scripts/workhorse-eval-plan-fixture.mjs", "test/plan.test.ts", "test/plan-admission.test.ts", "test/ask-default.test.ts"],
       "verification": ["eval:plan-fixture-check"]
     },
     {

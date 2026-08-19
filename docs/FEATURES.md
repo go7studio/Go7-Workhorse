@@ -144,9 +144,13 @@ transcript rather than as a path.
   only the desk tools it may call — read and ask chats, one bounded helper,
   ask to raise a block, read skills and references. It cannot create, rename,
   move or delete anything on the desk, and is not shown those tools.
-- **Plans** — multi-step work that continues after a worker joins. A plan
-  step finishes when another vendor re-runs the named test at that worktree’s
-  commit. The builder cannot mark it done.
+- **Plans** — multi-step work that continues after a worker joins. A checklist
+  plan you tick yourself still completes on ordinary evidence. When workers run
+  the plan, a step finishes when another vendor re-runs the named test at that
+  worktree’s commit. The builder cannot mark it done. During that run, a
+  product question carries a recommendation and a default, and work continues
+  on that default. Elevate still waits. One blocked slice does not stop the
+  others.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. The desk routes
   the work it hands out on its own: when a chat spawns a worker without naming

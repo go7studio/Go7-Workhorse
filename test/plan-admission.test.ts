@@ -11,6 +11,7 @@ import {
 } from "../src/lib/plan-admission";
 import {
   approvePlanRun,
+  assignPlanStep,
   parseAuditorReport,
   parseMarkdownPlan,
   parsePlanGate,
@@ -54,7 +55,7 @@ function builder(id: string, provider: Session["provider"] = "codex"): Session {
   });
 }
 
-test("a note cannot complete a plan step; auditor SHA+gate+last line can", () => {
+test("a builder note cannot complete a step; auditor SHA+gate+last line can", () => {
   let plan = parseMarkdownPlan({
     markdown: "### Task 1: Add\nNamed test gate: `npm test`\n",
     now: 1,
@@ -63,16 +64,28 @@ test("a note cannot complete a plan step; auditor SHA+gate+last line can", () =>
   assert.equal(plan.gate, "npm test");
   plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
   const stepId = plan.steps[0]!.id;
-  plan = setPlanStepStatus(plan, stepId, "running", { now: 4 }).plan;
+  const assigned = assignPlanStep(plan, stepId, {
+    sessionId: "sess_wren",
+    provider: "codex",
+    model: "gpt-5.4",
+    rationale: "builder slice",
+    skills: [],
+    tools: [],
+    constraints: [],
+  }, 4);
+  assert.equal(assigned.ok, true);
+  if (!assigned.ok) throw new Error(assigned.error);
+  plan = assigned.plan;
+  plan = setPlanStepStatus(plan, stepId, "running", { now: 5 }).plan;
   plan = recordPlanEvidence(plan, stepId, {
     id: "note",
     kind: "note",
     label: "builder",
     value: "I ran the tests",
-    recordedAt: 5,
+    recordedAt: 6,
     sessionId: "sess_wren",
-  }, 5).plan;
-  assert.equal(setPlanStepStatus(plan, stepId, "completed", { now: 6 }).ok, false);
+  }, 6).plan;
+  assert.equal(setPlanStepStatus(plan, stepId, "completed", { now: 7 }).ok, false);
   const parsed = parseAuditorReport(`HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`);
   assert.equal(parsed?.head, HEAD);
   const evidence = auditorEvidenceFromReport(`HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`, {

@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.7](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.6...v0.6.7) (2026-08-19)
+
+
+### Bug Fixes
+
+* reopen Workhorse after a Windows in-app update ([#79](https://github.com/go7studio/Go7-Workhorse/issues/79)) ([eaa7441](https://github.com/go7studio/Go7-Workhorse/commit/eaa744136331d808fc69cb4c57fba0b7b188ea52))
+
 ## [0.6.6](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.5...v0.6.6) (2026-08-19)
 
 

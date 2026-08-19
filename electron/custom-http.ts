@@ -3,6 +3,7 @@ import type { ChatImage, EffortLevel, ModelInputCapabilities } from "../src/lib/
 import { attachmentPromptBlock, isPicture } from "../src/lib/images";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
 import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
+import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
 import {
   customHttpTools,
   customHttpToolsOpenAi,
@@ -121,7 +122,7 @@ export function customMessagesUrl(baseUrl: string, api: CustomApiKind): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   if (api === "openai-completions") {
     if (/\/chat\/completions$/i.test(trimmed)) return trimmed;
-    if (/\/v1$/i.test(trimmed)) return `${trimmed}/chat/completions`;
+    if (/\/(v1|openai)$/i.test(trimmed)) return `${trimmed}/chat/completions`;
     return `${trimmed}/v1/chat/completions`;
   }
   if (/\/v1\/messages$/i.test(trimmed)) return trimmed;
@@ -624,6 +625,7 @@ export async function streamCustomHttp(
     authorization: `Bearer ${apiKey}`,
     "x-api-key": apiKey,
     "anthropic-version": "2023-06-01",
+    ...customHttpIdentityHeaders(baseUrl),
   };
 
   const run = async (payload: Record<string, unknown>) => {
@@ -787,7 +789,7 @@ export async function streamCustomHttp(
 function modelsUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   if (/\/models$/i.test(trimmed)) return trimmed;
-  if (/\/v1$/i.test(trimmed)) return `${trimmed}/models`;
+  if (/\/(v1|openai)$/i.test(trimmed)) return `${trimmed}/models`;
   return `${trimmed}/v1/models`;
 }
 
@@ -804,6 +806,7 @@ async function fetchListedContext(
         accept: "application/json",
         authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
+        ...customHttpIdentityHeaders(baseUrl),
       },
     });
     if (!response.ok) return undefined;
@@ -832,6 +835,7 @@ export async function probeCustomHttp(
     authorization: `Bearer ${apiKey}`,
     "x-api-key": apiKey,
     "anthropic-version": "2023-06-01",
+    ...customHttpIdentityHeaders(baseUrl),
   };
   try {
     const body =

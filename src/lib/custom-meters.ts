@@ -61,6 +61,13 @@ export const CUSTOM_METERS: CustomMeterSpec[] = [
     docs: "https://docs.aimlapi.com/api-references/service-endpoints/account-balance",
     remainsUrl: (url) => `${url.protocol}//api.aimlapi.com/v2/billing`,
   },
+  {
+    id: "vercel",
+    host: /(^|\.)ai-gateway\.vercel\.sh$/i,
+    kind: "prepaid",
+    docs: "https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api",
+    remainsUrl: (url) => `${url.protocol}//${url.hostname}/v1/credits`,
+  },
 ];
 
 function asUrl(baseUrl: string): URL | undefined {

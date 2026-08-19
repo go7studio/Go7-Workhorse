@@ -1,4 +1,5 @@
 import https from "node:https";
+import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
 
 /**
  * Ask a custom provider which models it serves.
@@ -54,7 +55,7 @@ export async function fetchCustomModels(input: {
     "x-api-key": apiKey,
     "anthropic-version": "2023-06-01",
     Accept: "application/json",
-    "User-Agent": "go7-workhorse",
+    ...customHttpIdentityHeaders(input.baseUrl),
   };
   try {
     if (input.fetchImpl) {

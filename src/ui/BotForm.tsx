@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { BOT_COLORS } from "../lib/custom-bots";
 import {
-  PROVIDER_PRESETS,
   detectProviderFromKey,
   detectProviderFromUrl,
   draftFromProvider,
   fillEmptyFromProvider,
   findProvider,
+  providerPresetsByBilling,
 } from "../lib/provider-catalog";
 import { groupModelIds, modelChipLabel, parseModelId, visibleModelGroups } from "../lib/model-groups";
 import { ColorWheel } from "./ColorWheel";
@@ -202,6 +202,7 @@ export function BotForm({
     if (!preset) return;
     onChange(fillEmptyFromProvider({ ...value, baseUrl: "", model: "", contextWindow: 128_000 }, preset));
   };
+  const billingGroups = providerPresetsByBilling();
   return (
     <div className="add-bot-form">
       {identityOnly ? null : (
@@ -212,12 +213,21 @@ export function BotForm({
             onChange={(event) => applyProvider(event.target.value)}
           >
             <option value="">Custom URL</option>
-            {PROVIDER_PRESETS.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
+            {billingGroups.map(({ group, presets }) => (
+              <optgroup key={group.id} label={group.label}>
+                {presets.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
+          {matched ? (
+            <p className="row-meta">
+              {billingGroups.find((item) => item.group.id === matched.billing)?.group.copy} {matched.hint}
+            </p>
+          ) : null}
         </label>
       )}
       <label className="field">

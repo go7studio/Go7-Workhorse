@@ -1577,7 +1577,7 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.match(settings, /updateCustomBot/);
   assert.match(settings, /BotForm/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /PROVIDER_PRESETS/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /providerPresetsByBilling/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /detectProviderFromKey/);
   assert.match(addBot, /Your own/);
   assert.match(addBot, /createCustomBot/);

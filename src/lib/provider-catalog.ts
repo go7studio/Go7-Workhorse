@@ -1,5 +1,7 @@
 export type CatalogApi = "openai-completions" | "anthropic-messages";
 
+export type ProviderBillingKind = "subscription" | "gateway" | "direct";
+
 export type CatalogModel = {
   id: string;
   name: string;
@@ -13,9 +15,32 @@ export type ProviderPreset = {
   color: string;
   baseUrl: string;
   api: CatalogApi;
+  billing: ProviderBillingKind;
   models: CatalogModel[];
   keyPrefixes: string[];
 };
+
+export const PROVIDER_BILLING_GROUPS: {
+  id: ProviderBillingKind;
+  label: string;
+  copy: string;
+}[] = [
+  {
+    id: "subscription",
+    label: "Subscription plans",
+    copy: "A membership or token plan on that host.",
+  },
+  {
+    id: "gateway",
+    label: "Gateway credits / BYOK",
+    copy: "Prepaid gateway credits, or your own keys through that gateway.",
+  },
+  {
+    id: "direct",
+    label: "Direct API billing",
+    copy: "Pay that host per token or from a prepaid balance.",
+  },
+];
 
 /** Documented baselines. No keys. Probe /v1/models when the host reports context. */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -26,6 +51,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#ff9f0a",
     baseUrl: "https://api.minimax.io/v1",
     api: "openai-completions",
+    billing: "subscription",
     keyPrefixes: ["sk-cp-"],
     models: [
       { id: "MiniMax-M3", name: "MiniMax M3", contextWindow: 1_000_000 },
@@ -40,6 +66,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#bf5af2",
     baseUrl: "https://api.synthetic.new/openai/v1",
     api: "openai-completions",
+    billing: "subscription",
     keyPrefixes: ["syn_"],
     models: [
       { id: "syn:large:text", name: "syn:large:text", contextWindow: 524_288 },
@@ -56,6 +83,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#64d2ff",
     baseUrl: "https://openrouter.ai/api/v1",
     api: "openai-completions",
+    billing: "gateway",
     keyPrefixes: ["sk-or-"],
     models: [{ id: "openrouter/auto", name: "OpenRouter Auto", contextWindow: 128_000 }],
   },
@@ -66,6 +94,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#ff375f",
     baseUrl: "https://api.groq.com/openai/v1",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: ["gsk_"],
     models: [{ id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", contextWindow: 131_072 }],
   },
@@ -76,6 +105,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#0071e3",
     baseUrl: "https://api.deepseek.com",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", contextWindow: 1_000_000 },
@@ -89,6 +119,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#30d158",
     baseUrl: "https://api.together.ai/v1",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [{ id: "meta-llama/Llama-3.3-70B-Instruct-Turbo", name: "Llama 3.3 70B Turbo", contextWindow: 131_072 }],
   },
@@ -99,6 +130,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#ffd60a",
     baseUrl: "https://api.fireworks.ai/inference/v1",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [{ id: "accounts/fireworks/models/llama-v3p3-70b-instruct", name: "Llama 3.3 70B", contextWindow: 131_072 }],
   },
@@ -109,6 +141,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#ffb340",
     baseUrl: "https://router.huggingface.co/v1",
     api: "openai-completions",
+    billing: "gateway",
     keyPrefixes: ["hf_"],
     models: [{ id: "meta-llama/Llama-3.3-70B-Instruct", name: "Llama 3.3 70B", contextWindow: 131_072 }],
   },
@@ -119,6 +152,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#5e5ce6",
     baseUrl: "https://api.novita.ai/openai",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [{ id: "deepseek/deepseek-v3.1", name: "DeepSeek V3.1", contextWindow: 128_000 }],
   },
@@ -129,6 +163,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#7d7aff",
     baseUrl: "https://api.cerebras.ai/v1",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [{ id: "llama-3.3-70b", name: "Llama 3.3 70B", contextWindow: 131_072 }],
   },
@@ -139,10 +174,62 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     color: "#ac8e68",
     baseUrl: "https://api.aimlapi.com/v1",
     api: "openai-completions",
+    billing: "direct",
     keyPrefixes: [],
     models: [{ id: "meta-llama/Llama-3.3-70B-Instruct-Turbo", name: "Llama 3.3 70B", contextWindow: 131_072 }],
   },
+  {
+    id: "kimi",
+    name: "Kimi Code",
+    hint: "Kimi Code membership. Leftover stays unknown until the host publishes leftover JSON.",
+    color: "#e85d04",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    api: "openai-completions",
+    billing: "subscription",
+    keyPrefixes: [],
+    models: [
+      { id: "kimi-for-coding", name: "Kimi K2.7 Code", contextWindow: 256_000 },
+      { id: "k3-256k", name: "Kimi K3 256K", contextWindow: 256_000 },
+      { id: "k3", name: "Kimi K3", contextWindow: 1_000_000 },
+      { id: "kimi-for-coding-highspeed", name: "Kimi K2.7 Code HighSpeed", contextWindow: 256_000 },
+    ],
+  },
+  {
+    id: "vercel",
+    name: "Vercel AI Gateway",
+    hint: "Gateway credits and BYOK. Official credits ping fills prepaid, not a leftover ring.",
+    color: "#171717",
+    baseUrl: "https://ai-gateway.vercel.sh/v1",
+    api: "openai-completions",
+    billing: "gateway",
+    keyPrefixes: [],
+    models: [
+      { id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1 Free", contextWindow: 256_000 },
+      { id: "alibaba/qwen3.7-flash", name: "Qwen 3.7 Flash", contextWindow: 991_000 },
+    ],
+  },
+  {
+    id: "gemini",
+    name: "Gemini API",
+    hint: "Gemini API pay-as-you-go. Leftover stays unknown until the host publishes leftover JSON.",
+    color: "#4285f4",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    api: "openai-completions",
+    billing: "direct",
+    keyPrefixes: [],
+    models: [{ id: "gemini-3.7-flash", name: "Gemini 3.7 Flash", contextWindow: 1_000_000 }],
+  },
 ];
+
+export function providerPresetsByBilling(): {
+  group: (typeof PROVIDER_BILLING_GROUPS)[number];
+  presets: ProviderPreset[];
+}[] {
+  return PROVIDER_BILLING_GROUPS.map((group) => ({
+    group,
+    presets: PROVIDER_PRESETS.filter((item) => item.billing === group.id),
+  })).filter((item) => item.presets.length > 0);
+}
 
 export function findProvider(id: string | undefined): ProviderPreset | undefined {
   if (!id) return undefined;

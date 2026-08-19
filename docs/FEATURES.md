@@ -42,10 +42,13 @@ error before any fallback.
 
 One custom API connection can approve several models. Chats and Auto routing use only that list while Usage keeps one connection ring and separate model rows.
 Add a bot lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,
-Fireworks, Hugging Face, Novita, Cerebras, and AI/ML API. Leftover pings only
+Fireworks, Hugging Face, Novita, Cerebras, AI/ML API, Vercel AI Gateway,
+Kimi Code, and Gemini API. Presets are grouped as subscription plans,
+gateway credits or BYOK, and direct API billing. Leftover pings only
 official key-only JSON meters (MiniMax, Synthetic, OpenRouter). DeepSeek,
-Novita, and AI/ML API fill prepaid balance. Together, Fireworks, Groq,
-Hugging Face, and Cerebras stay unknown until those hosts publish leftover JSON.
+Novita, AI/ML API, and Vercel AI Gateway fill prepaid balance. Together,
+Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, and Gemini stay
+unknown until those hosts publish leftover JSON.
 
 ## Files you can hand a chat
 

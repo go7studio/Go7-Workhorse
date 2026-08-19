@@ -1,5 +1,6 @@
 import https from "node:https";
 import { customMeterForUrl, customPlanRemainsUrl } from "../src/lib/custom-meters";
+import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
@@ -71,6 +72,10 @@ function parseNovitaBalance(root: Record<string, unknown>): CustomPlanUsage | un
 function parseAimlBilling(root: Record<string, unknown>): CustomPlanUsage | undefined {
   const balance = numberVal(firstDefined(root.current_balance, root.balance));
   return prepaidPlan(balance);
+}
+
+function parseVercelCredits(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  return prepaidPlan(numberVal(root.balance));
 }
 
 function pickMiniMaxRow(raw: Record<string, unknown>, model?: string): Record<string, unknown> | undefined {
@@ -252,6 +257,7 @@ export function parseCustomPlanUsage(raw: unknown, model?: string, meterId?: str
   if (meterId === "deepseek") return parseDeepSeekBalance(root);
   if (meterId === "novita") return parseNovitaBalance(root);
   if (meterId === "aimlapi") return parseAimlBilling(root);
+  if (meterId === "vercel") return parseVercelCredits(root);
   if (meterId === "openrouter") return parseOpenRouterKeyUsage(root);
   if (meterId === "synthetic") return parseSyntheticQuotas(root);
   const row = pickMiniMaxRow(root, model) ?? root;
@@ -351,6 +357,7 @@ export async function fetchCustomPlanUsage(input: {
           Authorization: `Bearer ${apiKey}`,
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...customHttpIdentityHeaders(input.baseUrl),
         },
       });
       if (!response.ok) return undefined;
@@ -364,7 +371,7 @@ export async function fetchCustomPlanUsage(input: {
           headers: {
             Authorization: `Bearer ${apiKey}`,
             Accept: "application/json",
-            "User-Agent": "go7-workhorse",
+            ...customHttpIdentityHeaders(input.baseUrl),
           },
         },
         (res) => {

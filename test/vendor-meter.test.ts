@@ -119,10 +119,10 @@ test("prepaid custom meters fill balance and do not invent leftover percent", ()
 test("custom leftover meters are a closed official list and catalog hosts stay custom bots", () => {
   assert.deepEqual(
     CUSTOM_METERS.map((item) => item.id),
-    ["minimax", "synthetic", "openrouter", "deepseek", "novita", "aimlapi"],
+    ["minimax", "synthetic", "openrouter", "deepseek", "novita", "aimlapi", "vercel"],
   );
   const ids = PROVIDER_PRESETS.map((item) => item.id);
-  for (const id of ["minimax", "synthetic", "openrouter", "groq", "deepseek", "together", "fireworks", "huggingface", "novita", "cerebras", "aimlapi"]) {
+  for (const id of ["minimax", "synthetic", "openrouter", "groq", "deepseek", "together", "fireworks", "huggingface", "novita", "cerebras", "aimlapi", "vercel", "kimi", "gemini"]) {
     assert.ok(ids.includes(id), id);
   }
   assert.equal(ids.includes("openclaw"), false);

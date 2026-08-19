@@ -10,6 +10,8 @@ import {
   macInstallerArch,
   macReplaceScript,
   offerFromRelease,
+  winInstallerArgs,
+  winInstallerLaunch,
   packagedUpdateMissingMessage,
   parseHdiutilAttach,
   pickLatestTagOffer,
@@ -149,13 +151,19 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
     pid: 4242,
     setup: "C:\\tmp\\workhorse-setup.exe",
     tmp: "C:\\tmp\\workhorse-update-1",
+    exe: "C:\\Users\\lgovo\\AppData\\Local\\Programs\\Go7 Workhorse\\Go7 Workhorse.exe",
   });
-  assert.match(winScript, /\$pidToWait = 4242/);
-  assert.match(winScript, /Get-Process -Id \$pidToWait/);
-  assert.match(winScript, /\/S/);
-  assert.match(winScript, /--updated/);
-  assert.match(winScript, /--force-run/);
+  assert.deepEqual(winInstallerArgs(), ["/S", "--updated"]);
+  assert.match(winScript, /pid = 4242/);
+  assert.match(winScript, /Win32_Process Where ProcessId/);
+  assert.match(winScript, /\/S --updated/);
+  assert.doesNotMatch(winScript, /--force-run/);
   assert.match(winScript, /workhorse-setup\.exe/);
+  assert.match(winScript, /Go7 Workhorse\.exe/);
+  assert.match(winScript, /WScript\.Shell/);
+  const launch = winInstallerLaunch("C:\\tmp\\workhorse-update-1\\replace.vbs");
+  assert.equal(launch.command, "explorer.exe");
+  assert.deepEqual(launch.args, ["C:\\tmp\\workhorse-update-1\\replace.vbs"]);
 });
 
 test("update check is wired through main, preload, and the sidebar action", () => {
@@ -196,7 +204,13 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(updater, /installWinNsis/);
   assert.match(updater, /pickWinSetupAsset/);
   assert.match(updater, /winReplaceScript/);
+  assert.match(updater, /winInstallerLaunch/);
+  assert.match(updater, /replace\.vbs/);
   assert.match(updater, /hdiutil/);
+  const nsis = readFileSync(path.join(ROOT, "build", "installer.nsh"), "utf8");
+  assert.match(nsis, /customInstall/);
+  assert.match(nsis, /APP_EXECUTABLE_FILENAME/);
+  assert.match(nsis, /Exec /);
   assert.doesNotMatch(updater, /hdiutil attach[^\n]*-quiet/);
   assert.match(updater, /error: message\.slice/);
   assert.doesNotMatch(updater, /catch \{\s*return null;\s*\}/);

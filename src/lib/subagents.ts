@@ -1,7 +1,20 @@
 import { isExternalAgentAddress } from "./agent-runtime";
+import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
 import { findSession, type SessionSnapshot } from "./session-bridge";
-import type { AgentRun, ChatMessage, EffortLevel, MissionIteration, ProviderId, Session, WorkerHandoff, WorkerSeed } from "./types";
+import type {
+  AgentRun,
+  AgentRunEvent,
+  BudgetPhase,
+  ChatMessage,
+  EffortLevel,
+  ExecutionOwner,
+  MissionIteration,
+  ProviderId,
+  Session,
+  WorkerHandoff,
+  WorkerSeed,
+} from "./types";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
 
 export type { DeskRole };
@@ -604,6 +617,10 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
+    ...(worker.agentRun?.executionOwner ? { executionOwner: worker.agentRun.executionOwner } : {}),
+    ...(worker.agentRun?.takeoverReason ? { takeoverReason: worker.agentRun.takeoverReason } : {}),
+    ...(typeof worker.agentRun?.usedTokens === "number" ? { usedTokens: worker.agentRun.usedTokens } : {}),
+    ...(worker.agentRun?.budgetPhase ? { budgetPhase: worker.agentRun.budgetPhase } : {}),
     ...(worker.agentRun?.status !== "running" && report ? { report } : {}),
     routingMode: worker.routingMode ?? "manual",
     ...(worker.routingDecision ? { routingDecision: worker.routingDecision } : {}),
@@ -1064,7 +1081,115 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
     previousWorkerIds: Array.isArray(row.previousWorkerIds)
       ? [...new Set(row.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
       : [],
+    ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
   };
+}
+
+const BUDGET_PHASES: BudgetPhase[] = ["produce", "verify", "handoff", "exhausted"];
+const EXECUTION_OWNERS: ExecutionOwner[] = ["workhorse", "parent"];
+const RUN_EVENT_TYPES: AgentRunEvent["type"][] = [
+  "budget-warn",
+  "budget-verify",
+  "budget-handoff",
+  "budget-exceeded",
+  "takeover",
+];
+
+function normalizeBudgetPhase(value: unknown): BudgetPhase | undefined {
+  return typeof value === "string" && (BUDGET_PHASES as string[]).includes(value) ? (value as BudgetPhase) : undefined;
+}
+
+function normalizeExecutionOwner(value: unknown): ExecutionOwner | undefined {
+  return typeof value === "string" && (EXECUTION_OWNERS as string[]).includes(value)
+    ? (value as ExecutionOwner)
+    : undefined;
+}
+
+function normalizeRunEvents(raw: unknown): AgentRunEvent[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const events = raw.flatMap((item): AgentRunEvent[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<AgentRunEvent>;
+    if (typeof row.at !== "number" || typeof row.detail !== "string" || !row.detail.trim()) return [];
+    if (typeof row.type !== "string" || !(RUN_EVENT_TYPES as string[]).includes(row.type)) return [];
+    return [{ at: row.at, type: row.type as AgentRunEvent["type"], detail: row.detail.trim() }];
+  });
+  return events.length > 0 ? events.slice(-20) : undefined;
+}
+
+export function appendRunEvent(run: AgentRun, event: AgentRunEvent): AgentRun {
+  return { ...run, events: [...(run.events ?? []), event].slice(-20) };
+}
+
+export function markExecutionTakeover(run: AgentRun, reason: string, at = Date.now()): AgentRun {
+  if (run.executionOwner === "parent") return run;
+  const detail = reason.trim() || "Parent took over this run.";
+  return appendRunEvent(
+    {
+      ...run,
+      executionOwner: "parent",
+      takeoverReason: detail,
+      takeoverAt: at,
+    },
+    { at, type: "takeover", detail },
+  );
+}
+
+/**
+ * Record that the parent finished Workhorse-assigned work itself.
+ * A recorded fact plus a visible notice — not a lock.
+ */
+export function recordParentTakeover(
+  sessions: Session[],
+  parentId: string,
+  reason: string,
+  at = Date.now(),
+): Session[] {
+  const parent = sessions.find((session) => session.id === parentId);
+  if (!parent || (parent.hidden && parent.agentRun)) return sessions;
+  const crew = sessions.filter((session) => session.parentId === parentId && session.agentRun);
+  if (crew.length === 0 && !parent.lineup?.rows.length) return sessions;
+  const detail = reason.trim() || "Parent applied shell or patch changes after handing the work to Workhorse.";
+  const notice = (): ChatMessage => ({
+    id: uid("msg"),
+    role: "system",
+    text: `Parent took over: ${detail}`,
+    createdAt: at,
+  });
+  let changed = false;
+  const next = sessions.map((session) => {
+    if (session.id === parentId) {
+      const run = session.agentRun ? markExecutionTakeover(session.agentRun, detail, at) : session.agentRun;
+      const already = session.messages.some(
+        (message) => message.role === "system" && message.text.startsWith("Parent took over:"),
+      );
+      changed = true;
+      return {
+        ...session,
+        ...(run ? { agentRun: run } : {}),
+        messages: already ? session.messages : [...session.messages, notice()],
+      };
+    }
+    if (session.parentId === parentId && session.agentRun && session.agentRun.executionOwner !== "parent") {
+      changed = true;
+      const already = session.messages.some(
+        (message) => message.role === "system" && message.text.startsWith("Parent took over:"),
+      );
+      return {
+        ...session,
+        agentRun: markExecutionTakeover(session.agentRun, detail, at),
+        messages: already ? session.messages : [...session.messages, notice()],
+      };
+    }
+    return session;
+  });
+  return changed ? next : sessions;
+}
+
+export function crewHasParentTakeover(sessions: Pick<Session, "parentId" | "agentRun">[], parentId: string): boolean {
+  return sessions.some(
+    (session) => session.parentId === parentId && session.agentRun?.executionOwner === "parent",
+  );
 }
 
 export type MissionContinuationDecision =
@@ -1220,8 +1345,23 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+    ...(typeof row.missionTokenBudget === "number" && row.missionTokenBudget > 0
+      ? { missionTokenBudget: Math.floor(row.missionTokenBudget) }
+      : {}),
     ...(typeof row.usedTokens === "number" && row.usedTokens >= 0 ? { usedTokens: Math.floor(row.usedTokens) } : {}),
+    ...(typeof row.lifetimeUsedTokens === "number" && row.lifetimeUsedTokens >= 0
+      ? { lifetimeUsedTokens: Math.floor(row.lifetimeUsedTokens) }
+      : {}),
     ...(typeof row.budgetBaseline === "number" && row.budgetBaseline >= 0 ? { budgetBaseline: Math.floor(row.budgetBaseline) } : {}),
+    ...(normalizeBudgetPhase(row.budgetPhase) ? { budgetPhase: normalizeBudgetPhase(row.budgetPhase) } : {}),
+    ...(typeof row.budgetWarnedAt === "number" && row.budgetWarnedAt > 0 ? { budgetWarnedAt: row.budgetWarnedAt } : {}),
+    ...(typeof row.budgetHandoffAt === "number" && row.budgetHandoffAt > 0 ? { budgetHandoffAt: row.budgetHandoffAt } : {}),
+    ...(normalizeExecutionOwner(row.executionOwner) ? { executionOwner: normalizeExecutionOwner(row.executionOwner) } : {}),
+    ...(typeof row.takeoverReason === "string" && row.takeoverReason.trim()
+      ? { takeoverReason: row.takeoverReason.trim() }
+      : {}),
+    ...(typeof row.takeoverAt === "number" && row.takeoverAt > 0 ? { takeoverAt: row.takeoverAt } : {}),
+    ...(normalizeRunEvents(row.events) ? { events: normalizeRunEvents(row.events) } : {}),
     ...(Array.isArray(row.changedFiles) ? { changedFiles: row.changedFiles.filter((item): item is string => typeof item === "string") } : {}),
     ...(Array.isArray(row.conflictFiles) ? { conflictFiles: row.conflictFiles.filter((item): item is string => typeof item === "string") } : {}),
     ...(typeof row.error === "string" && row.error.trim()

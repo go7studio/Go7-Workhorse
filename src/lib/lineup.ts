@@ -1,7 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import { crewHasParentTakeover, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
@@ -151,7 +151,10 @@ export function markLineupNotified(lineup: DeskLineup, now = Date.now()): DeskLi
   return { ...lineup, notifiedAt: now };
 }
 
-export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { continuePlan?: boolean }): string {
+export function lineupJoinPrompt(
+  lineup: DeskLineup | undefined,
+  options?: { continuePlan?: boolean; parentTookOver?: boolean },
+): string {
   const user = lineup?.userText?.trim() || "(unknown)";
   const id = lineup?.id?.trim() || "(none)";
   const folder = lineup?.folder?.trim() || "(none)";
@@ -191,6 +194,9 @@ export function lineupJoinPrompt(lineup: DeskLineup | undefined, options?: { con
       "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
     );
   }
+  if (options?.parentTookOver) {
+    lines.push("The parent took over this run. Do not claim a fully Workhorse-owned completion.");
+  }
   return lines.join("\n").trim();
 }
 
@@ -216,6 +222,7 @@ export function formatAwaitAgentsSnapshot(input: {
     effort?: Session["effort"];
     exclusions?: string[];
     mission?: import("./types").MissionIteration;
+    executionOwner?: import("./types").ExecutionOwner;
   }>;
   wait?: boolean;
 }): string {
@@ -235,7 +242,9 @@ export function formatAwaitAgentsSnapshot(input: {
       lineup: snapshot,
       howToUse:
         running.length === 0
-          ? "All workers finished and their reports are above. Join them now, in your own words: one list, worst first, naming which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
+          ? input.reports?.some((row) => row.executionOwner === "parent")
+            ? "Workers finished, but the parent took over. Do not claim a fully Workhorse-owned completion. Join the reports and say who did the finishing work."
+            : "All workers finished and their reports are above. Join them now, in your own words: one list, worst first, naming which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
     null,
@@ -510,7 +519,10 @@ export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, no
   const broken = applyLineupTurnBreak(sessions, parentId, now);
   const delay = joinDelayMs(parent.lineup);
   const queued = enqueuePrompt(broken, parentId, {
-    text: lineupJoinPrompt(parent.lineup, { continuePlan: parent.planRun?.status === "running" }),
+    text: lineupJoinPrompt(parent.lineup, {
+      continuePlan: parent.planRun?.status === "running",
+      parentTookOver: crewHasParentTakeover(sessions, parentId),
+    }),
     hideUser: true,
     joinAttempt: 1,
     ...(delay > 0 ? { notBefore: now + delay } : {}),

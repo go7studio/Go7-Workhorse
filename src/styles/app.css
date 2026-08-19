@@ -3313,6 +3313,8 @@ html.pane-dragging * {
 }
 
 .diff-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 20px;
   display: block;
   padding: 1px 20px 1px 16px;
   border-left: 3px solid transparent;

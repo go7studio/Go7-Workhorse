@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./performance.test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -2041,7 +2042,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-file/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /FileOpenProvider/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{session\.messages/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /nearby=\{nearby\}/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "turns.ts"), "utf8"), /recentTranscriptText/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "FileOpen.tsx"), "utf8"), /harvestFilePath/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /setWindowOpenHandler/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /shell\.openExternal/);
@@ -4590,7 +4592,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(sidebar, /function ProjectFolder/);
   assert.match(sidebar, /className=\{`project-folder/);
-  assert.match(sidebar, /useProjectSessions\(project\.id\)/);
+  assert.match(sidebar, /index\.liveByProject\.get\(project\.id\)/);
   assert.match(sidebar, /startSession\(project\.id\)/);
   assert.match(sidebar, /startSession\(null\)/);
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
@@ -4691,9 +4693,9 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(css, /\.chat-move-panel/);
   assert.match(css, /\.place-project/);
   assert.match(sidebar, /Show more/);
-  assert.match(sidebar, /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(sidebar, /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(sidebar, /settingsOpen/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /panel !== "settings"/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /!desk\.settingsOpen/);
   assert.equal(PROJECT_CHAT_LIMIT, 5);
   const rows = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id: String(id) }));
   assert.deepEqual(visibleProjectChats(rows, false).map((item) => item.id), ["1", "2", "3", "4", "5"]);
@@ -8123,10 +8125,10 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   });
   assert.equal(persisted?.lineup?.rows.length, 2);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /addLineupRow/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nestProjectChats/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "sidebar-index.ts"), "utf8"), /nestProjectChats/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /openCrew/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /workersOpen=\{Boolean\(openCrew/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /nested\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8"), /chats\.length > PROJECT_CHAT_LIMIT && hidden > 0/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /currentColor 70%/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /crew-twist/);
 

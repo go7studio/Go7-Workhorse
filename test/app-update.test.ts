@@ -178,11 +178,11 @@ test("update check is wired through main, preload, and the sidebar action", () =
   assert.match(sidebar, /"Update now"/);
   assert.match(sidebar, /Try update again/);
   const dock = sidebar.indexOf('<footer className="sidebar-dock">');
-  const updateAction = sidebar.indexOf("<SidebarUpdate />", dock);
+  const updateAction = sidebar.indexOf("<SidebarUpdate store={store} />", dock);
   const settingsAction = sidebar.indexOf(">Settings<", dock);
   assert.ok(dock >= 0 && updateAction > dock && settingsAction > updateAction);
   const brand = sidebar.slice(sidebar.indexOf('<div className="brand">'), dock);
-  assert.doesNotMatch(brand, /<SidebarUpdate \/>/);
+  assert.doesNotMatch(brand, /<SidebarUpdate/);
   // Check now used to return null on every GitHub error and every current
   // build, so the button did nothing a person could see. A miss has to say
   // so, and a packaged Mac or Windows desk has to install the release

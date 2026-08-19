@@ -1,4 +1,4 @@
-import { useEffect, useState, type SyntheticEvent } from "react";
+import { memo, useEffect, useState, type SyntheticEvent } from "react";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -244,7 +244,7 @@ function WorkRow({
   );
 }
 
-export function WorkPopout({
+export const WorkPopout = memo(function WorkPopout({
   steps,
   sessions,
   startedAt,
@@ -368,4 +368,4 @@ export function WorkPopout({
       ) : null}
     </details>
   );
-}
+});

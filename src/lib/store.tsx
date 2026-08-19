@@ -1,13 +1,14 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { StoreContext, useStore } from "./store-context";
-export { useStore };
+import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
+export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
 import { grokGoalAfterTurnIdle, isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
@@ -700,6 +701,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
+  const selectorStore = useRef<Store | null>(null);
+  const selectorListeners = useRef(new Set<() => void>());
+  const selectorRuntime = useMemo(
+    () => ({
+      getSnapshot: () => {
+        if (!selectorStore.current) throw new Error("Workhorse store is not ready");
+        return selectorStore.current;
+      },
+      subscribe: (listener: () => void) => {
+        selectorListeners.current.add(listener);
+        return () => selectorListeners.current.delete(listener);
+      },
+    }),
+    [],
+  );
   stateRef.current = state;
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
   useEffect(() => {
@@ -6528,7 +6544,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
+  selectorStore.current = value;
+  useLayoutEffect(() => {
+    for (const listener of selectorListeners.current) listener();
+  }, [value]);
+
+  return (
+    <StoreRuntimeContext.Provider value={selectorRuntime}>
+      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+    </StoreRuntimeContext.Provider>
+  );
 }
 
 export function useActiveProject() {

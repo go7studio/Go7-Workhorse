@@ -488,7 +488,10 @@ export function appendUserMessage(
 }
 
 export function lastUserMessage(session: Pick<Session, "messages">) {
-  return [...session.messages].reverse().find((message) => message.role === "user");
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    if (session.messages[index]?.role === "user") return session.messages[index];
+  }
+  return undefined;
 }
 
 export function lastTalkedAt(session: Pick<Session, "messages">): number | undefined {

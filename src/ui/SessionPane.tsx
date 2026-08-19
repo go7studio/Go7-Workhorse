@@ -1,18 +1,20 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
-import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
+import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
-import { brainCaption, brainStamp, messageBrain } from "../lib/session";
+import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
 import {
   displayWorkSteps,
-  groupTranscript,
+  createTranscriptGrouper,
   isDeskNotice,
   lastReplyIndex,
   nextTranscriptPaintStart,
+  recentTranscriptText,
   transcriptPaintStart,
+  type TranscriptBlock,
 } from "../lib/turns";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
 import { useActiveSession, useStore } from "../lib/store";
@@ -32,8 +34,81 @@ import { TurnActions } from "./TurnActions";
 import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
+import type { AppState, ProviderId, Session } from "../lib/types";
 
 const SCROLL_SLACK = 96;
+
+const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
+  if (isDeskNotice(block.message)) return null;
+  return (
+    <article className="turn system chat">
+      <div className="say"><MessageBody text={block.message.text} /></div>
+    </article>
+  );
+});
+
+const AssistantTurn = memo(function AssistantTurn({
+  block,
+  live,
+  provider,
+  model,
+  customBotId,
+  settings,
+  cwd,
+  vendorSessionId,
+  sessions,
+  onFork,
+  onOpenThread,
+}: {
+  block: Extract<TranscriptBlock, { type: "reply" }>;
+  live: boolean;
+  provider: ProviderId;
+  model: string;
+  customBotId?: string;
+  settings: AppState["settings"];
+  cwd: string;
+  vendorSessionId?: string;
+  sessions?: Session[];
+  onFork: (id: string) => void;
+  onOpenThread: (id: string) => void;
+}) {
+  const assistantText = block.assistant.text ?? "";
+  const peeled = peelPlanningPreamble(assistantText, live);
+  const steps = displayWorkSteps(block, { live });
+  const body = unsquashSentences(peeled.body);
+  const who = brainCaption(
+    messageBrain(block.assistant, { provider, model, ...(customBotId ? { customBotId } : {}) }),
+    settings.customBots,
+    settings.llms,
+  );
+  return (
+    <article className={`turn assistant reply${live ? " live" : ""}`}>
+      <div className="turn-who">
+        <span className={`dot ${who.provider}`} style={who.color ? { background: who.color } : undefined} aria-hidden="true" />
+        {who.name}
+      </div>
+      <WorkPopout
+        steps={steps}
+        sessions={sessions}
+        startedAt={block.assistant.createdAt}
+        workedMs={block.assistant.workedMs}
+        live={live}
+        onOpenThread={onOpenThread}
+      />
+      {body ? (
+        <div className={`say final${live ? " streaming" : ""}`}>
+          <MessageBody text={body} cwd={cwd} vendorSessionId={vendorSessionId} />
+          {!live ? (
+            <TurnActions actions={[
+              { id: "copy", label: "Copy", run: () => copyText(body) },
+              { id: "fork", label: "Fork", run: () => onFork(block.assistant.id) },
+            ]} />
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+});
 
 function pinnedToBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_SLACK;
@@ -61,6 +136,7 @@ export function SessionPane() {
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
   const heldEditsRef = useRef<ProjectEdit[]>([]);
+  const transcriptGrouper = useRef(createTranscriptGrouper());
   const working = session?.status === "running";
   const project = store.projects.find((item) => item.id === session?.projectId);
   const localCwd = project ? primaryFolder(project)?.path ?? "" : "";
@@ -76,14 +152,13 @@ export function SessionPane() {
     () => [...new Set(fileRootKey ? fileRootKey.split("\n") : [])],
     [fileRootKey],
   );
+  const writesKey = useMemo(() => (session ? projectWritesKey([session]) : ""), [session?.messages]);
   const edits = useMemo(() => {
     if (!session || !editsIdle) return extraEdits;
     return mergeEdits(projectEdits([session], roots), extraEdits);
-  }, [session?.id, session?.messages, roots, extraEdits, editsIdle]);
-  const blocks = useMemo(
-    () => (session ? groupTranscript(session.messages) : []),
-    [session?.messages],
-  );
+  }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
+  const blocks = session ? transcriptGrouper.current.group(session.messages) : [];
+  const nearby = useMemo(() => recentTranscriptText(session?.messages ?? []), [session?.messages]);
   const sessionId = session?.id ?? "";
   const paintFrom = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
   const shownBlocks = blocks.slice(paintFrom);
@@ -231,7 +306,7 @@ export function SessionPane() {
     <FileOpenProvider
       roots={fileRoots}
       provider={session.provider}
-      nearby={session.messages.map((message) => message.text).join("\n")}
+      nearby={nearby}
       onOpen={(file) => {
         const known = edits.find((item) => sameEditPath(item.path, file.path));
         const next = known ? { ...file, kind: file.kind ?? known.kind } : file;
@@ -309,58 +384,23 @@ export function SessionPane() {
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
           }
-          if (block.type === "system") {
-            if (isDeskNotice(block.message)) return null;
-            return (
-              <article key={block.message.id} className="turn system chat">
-                <div className="say">
-                  <MessageBody text={block.message.text} />
-                </div>
-              </article>
-            );
-          }
+          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} />;
           const live = working && index === liveIndex;
-          const assistantText = block.assistant.text ?? "";
-          const peeled = peelPlanningPreamble(assistantText, live);
-          const steps = displayWorkSteps(block, { live });
-          const body = unsquashSentences(peeled.body);
-          const who = brainCaption(
-            messageBrain(block.assistant, brainStamp(session)),
-            store.settings.customBots,
-            store.settings.llms,
-          );
           return (
-            <article key={block.assistant.id} className={`turn assistant reply${live ? " live" : ""}`}>
-              <div className="turn-who">
-                <span
-                  className={`dot ${who.provider}`}
-                  style={who.color ? { background: who.color } : undefined}
-                  aria-hidden="true"
-                />
-                {who.name}
-              </div>
-              <WorkPopout
-                steps={steps}
-                sessions={store.sessions}
-                startedAt={block.assistant.createdAt}
-                workedMs={block.assistant.workedMs}
-                live={live}
-                onOpenThread={store.selectSession}
-              />
-              {body ? (
-                <div className={`say final${live ? " streaming" : ""}`}>
-                  <MessageBody text={body} cwd={cwd} vendorSessionId={session.vendorSessionId} />
-                  {!live ? (
-                    <TurnActions
-                      actions={[
-                        { id: "copy", label: "Copy", run: () => copyText(body) },
-                        { id: "fork", label: "Fork", run: () => store.forkFrom(block.assistant.id) },
-                      ]}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-            </article>
+            <AssistantTurn
+              key={block.assistant.id}
+              block={block}
+              live={live}
+              provider={session.provider}
+              model={session.model}
+              customBotId={session.customBotId}
+              settings={store.settings}
+              cwd={cwd}
+              vendorSessionId={session.vendorSessionId}
+              sessions={block.subagents.length ? store.sessions : undefined}
+              onFork={store.forkFrom}
+              onOpenThread={store.selectSession}
+            />
           );
         })}
       </div>

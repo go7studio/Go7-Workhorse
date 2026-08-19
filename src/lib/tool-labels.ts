@@ -177,7 +177,26 @@ function lastUserIndex(messages: ChatMessage[]): number {
   return 0;
 }
 
-function matchChat(sessions: Session[], query: string): Session | null {
+type ListedChat = {
+  id: string;
+  title: string;
+  projectId: string | null;
+  projectName: null;
+  provider: Session["provider"];
+  model: string;
+  status: Session["status"];
+  archived: boolean;
+  preview: string;
+  sidebar: string;
+  messageCount: number;
+};
+
+function matchChat(
+  sessions: Session[],
+  byId: Map<string, Session>,
+  listed: ListedChat[],
+  query: string,
+): Session | null {
   const needle = query.trim();
   if (!needle) return null;
   if (
@@ -186,32 +205,35 @@ function matchChat(sessions: Session[], query: string): Session | null {
   ) {
     return null;
   }
-  const listed = sessions
-    .filter((session) => !isHiddenSession(session) && !session.archivedAt)
-    .map((session) => ({
-      id: session.id,
-      title: session.title,
-      projectId: session.projectId,
-      projectName: null,
-      provider: session.provider,
-      model: session.model,
-      status: session.status,
-      archived: Boolean(session.archivedAt),
-      preview: "",
-      sidebar: "",
-      messageCount: session.messages.length,
-    }));
   const found = findSessionForLink(listed, needle);
-  return found ? sessions.find((session) => session.id === found.id) ?? null : null;
+  return found ? byId.get(found.id) ?? null : null;
 }
 
 function lastUserMessage(session: Session): ChatMessage | undefined {
-  return [...session.messages].reverse().find((message) => message.role === "user");
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    if (session.messages[index]?.role === "user") return session.messages[index];
+  }
+  return undefined;
 }
 
 export function chatLinksFromSessions(sessions: Session[]): ChatLink[] {
   const links: ChatLink[] = [];
   const seen = new Set<string>();
+  const visible = sessions.filter((session) => !isHiddenSession(session) && !session.archivedAt);
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const listed: ListedChat[] = visible.map((session) => ({
+    id: session.id,
+    title: session.title,
+    projectId: session.projectId,
+    projectName: null,
+    provider: session.provider,
+    model: session.model,
+    status: session.status,
+    archived: false,
+    preview: "",
+    sidebar: "",
+    messageCount: session.messages.length,
+  }));
   const add = (link: ChatLink) => {
     const key = `${link.sessionId}:${link.kind}`;
     if (seen.has(key)) return;
@@ -219,8 +241,7 @@ export function chatLinksFromSessions(sessions: Session[]): ChatLink[] {
     links.push(link);
   };
 
-  for (const session of sessions) {
-    if (isHiddenSession(session) || session.archivedAt) continue;
+  for (const session of visible) {
     const lastUser = lastUserMessage(session);
     if ((session.status === "running" || session.status === "needs-input") && lastUser?.kind === "peer") {
       add({
@@ -231,8 +252,7 @@ export function chatLinksFromSessions(sessions: Session[]): ChatLink[] {
     }
   }
 
-  for (const session of sessions) {
-    if (isHiddenSession(session) || session.archivedAt) continue;
+  for (const session of visible) {
     const start = lastUserIndex(session.messages);
     const live = session.status === "running" || session.status === "needs-input";
     if (!live) continue;
@@ -240,7 +260,7 @@ export function chatLinksFromSessions(sessions: Session[]): ChatLink[] {
       const peer = peerToolFromMessage(message);
       if (!peer || peer.kind === "list") continue;
       if (message.toolStatus && prettyToolStatus(message.toolStatus) !== "working") continue;
-      const target = matchChat(sessions, peer.target);
+      const target = matchChat(sessions, byId, listed, peer.target);
       if (!target || target.id === session.id) continue;
       const targetUser = lastUserMessage(target);
       if (targetUser && targetUser.kind !== "peer" && peer.kind !== "read") continue;

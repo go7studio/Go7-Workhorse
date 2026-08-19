@@ -8,7 +8,7 @@ import {
   type ProjectEdit,
 } from "../lib/project-edits";
 import { deskInk, deskLabel } from "../lib/settings";
-import { useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
 import { DiffStat } from "./DiffStat";
 
 const FOLD_MS = 200;
@@ -46,7 +46,7 @@ export const EditedList = memo(function EditedList({
   onOpen: (file: ProjectEdit) => void;
   onDismiss?: (file: ProjectEdit) => void;
 }) {
-  const store = useStore();
+  const settings = useStoreSelector((store) => store.settings);
   const [open, setOpen] = useState(startOpen ?? !compact);
   const [closing, setClosing] = useState(false);
   const [boxWidth, setBoxWidth] = useState<number | null>(null);
@@ -155,8 +155,8 @@ export const EditedList = memo(function EditedList({
             const showRowStat = showLineStats && added != null && deleted != null && (added > 0 || deleted > 0);
             const kindLabel = item.kind === "created" ? "Created" : "Edited";
             const count = `${item.edits} ${unit}${item.edits === 1 || unit === "new" ? "" : "s"}`;
-            const ink = deskInk(item, store.settings);
-            const who = deskLabel(item, store.settings);
+            const ink = deskInk(item, settings);
+            const who = deskLabel(item, settings);
             return (
               <li key={editPathKey(item.path)} className={onDismiss ? "file-item" : undefined}>
                 <button

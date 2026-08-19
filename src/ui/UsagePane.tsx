@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FuelRing } from "./FuelRing";
-import { shortModelName, usageModelLabel } from "../lib/models";
+import { modelsFor, shortModelName, usageModelLabel } from "../lib/models";
 import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStore } from "../lib/store";
 import type { ProviderId, UsageRange } from "../lib/types";
@@ -552,9 +552,8 @@ export function UsagePane({
                 <div className="usage-limits-tools">
                   {focused.provider !== "cursor" ? (
                     <ContextMeter
-                      fallbackWindow={focusedBot?.contextWindow}
-                      matchProvider={focused.provider}
-                      matchBotId={focusedBot?.id}
+                      referenceOnly
+                      fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
                     />
                   ) : null}
                   <div className="actions usage-ranges">
@@ -615,9 +614,8 @@ export function UsagePane({
                 </p>
                 {focused.provider !== "cursor" ? (
                   <ContextMeter
-                    fallbackWindow={focusedBot?.contextWindow}
-                    matchProvider={focused.provider}
-                    matchBotId={focusedBot?.id}
+                    referenceOnly
+                    fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
                   />
                 ) : null}
               </div>

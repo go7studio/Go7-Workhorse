@@ -440,7 +440,7 @@ function StockBotDetail({
       />
 
       <div className="bot-context-row">
-        <ContextMeter fallbackWindow={modelsFor(id)[0]?.contextWindow} matchProvider={id} />
+        <ContextMeter referenceOnly fallbackWindow={modelsFor(id)[0]?.contextWindow} />
         <p className="row-meta">{llmDetailCopy(id, link)}</p>
       </div>
       {id === "codex" ? <CodexNativeStatus /> : null}
@@ -661,7 +661,7 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
       <BotRoutingFields bot={bot} />
 
       <div className="bot-context-row">
-        <ContextMeter fallbackWindow={bot.contextWindow} matchProvider="custom" matchBotId={bot.id} />
+        <ContextMeter referenceOnly fallbackWindow={bot.contextWindow} />
         <p className="row-meta">
           {probing
             ? "Testing API…"

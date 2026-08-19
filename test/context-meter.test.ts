@@ -30,11 +30,13 @@ test("Usage and Settings context meters are catalog size, not a live chat", () =
   assert.match(usage, /referenceOnly/);
   assert.match(usage, /modelsFor\(focused.provider\)/);
   assert.doesNotMatch(usage, /matchProvider=\{focused.provider\}/);
+  assert.match(usage, /usage-limits-windows/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.usage-limits-windows\s*\{[^}]*justify-content:\s*center/);
   const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
   assert.match(settings, /referenceOnly fallbackWindow=\{modelsFor\(id\)\[0\]\?\.contextWindow\}/);
   assert.match(settings, /referenceOnly fallbackWindow=\{bot.contextWindow\}/);
   const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(meter, /if \(referenceOnly\) return;/);
   assert.match(meter, /context-meter quiet/);
   assert.match(css, /\.context-meter\.quiet/);

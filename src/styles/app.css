@@ -5037,26 +5037,26 @@ html.pane-dragging * {
 
 .usage-limits-head {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.usage-limits-head .usage-ranges {
-  margin: 0;
-}
-
-.usage-limits-tools {
+.usage-limits-head .context-meter-wrap {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
-.usage-limits-tools .context-meter-wrap {
-  position: relative;
+.usage-limits-head .context-meter.quiet {
+  padding: 0;
+}
+
+.usage-limits-windows {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: 0;
 }
 
 .usage-limit.unlimited .usage-split-track i {

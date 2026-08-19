@@ -12,6 +12,7 @@ import {
   cursorLaneEvents,
   deskUsageCards,
   leftoverForCard,
+  leftoverMissingCopy,
   planRingView,
   pickClaudeWindow,
   pickPlanWindow,
@@ -341,6 +342,7 @@ export function UsagePane({
     cursorPlan,
     refreshCursorPlan,
     customPlans,
+    customPlanKnown,
     refreshCustomPlans,
     settings,
   } = useStore();
@@ -549,27 +551,27 @@ export function UsagePane({
             <div className="usage-limits">
               <div className="usage-limits-head">
                 <span className="sheet-label">Plan usage limits</span>
-                <div className="usage-limits-tools">
-                  {focused.provider !== "cursor" ? (
-                    <ContextMeter
-                      referenceOnly
-                      fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
-                    />
-                  ) : null}
-                  <div className="actions usage-ranges">
-                    {windowTabs.map((item) => (
-                      <button
-                        key={item.id}
-                        className={windowPick?.product === item.id ? "tiny active-kind" : "tiny"}
-                        type="button"
-                        onClick={() => setClaudeWindow(item.id)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                {focused.provider !== "cursor" ? (
+                  <ContextMeter
+                    referenceOnly
+                    fallbackWindow={focusedBot?.contextWindow ?? modelsFor(focused.provider)[0]?.contextWindow}
+                  />
+                ) : null}
               </div>
+              {windowTabs.length > 0 ? (
+                <div className="actions usage-ranges usage-limits-windows">
+                  {windowTabs.map((item) => (
+                    <button
+                      key={item.id}
+                      className={windowPick?.product === item.id ? "tiny active-kind" : "tiny"}
+                      type="button"
+                      onClick={() => setClaudeWindow(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {timeWindows.map((item) => (
                 <button
                   key={item.product}
@@ -608,9 +610,12 @@ export function UsagePane({
                 <span className="sheet-label">Weekly allowance</span>
                 <p>
                   {planCopy ??
-                    (planLoaderFor(focused)
-                      ? "Loading weekly plan usage…"
-                      : `Restart Workhorse to load ${planName} plan usage.`)}
+                    leftoverMissingCopy({
+                      hasKey: focused.provider !== "custom" || Boolean(focusedBot?.apiKey?.trim()),
+                      fetchKnown: focused.provider === "custom" && Boolean(focusedBot && customPlanKnown[focusedBot.id]),
+                      canLoad: planLoaderFor(focused),
+                      planName,
+                    })}
                 </p>
                 {focused.provider !== "cursor" ? (
                   <ContextMeter

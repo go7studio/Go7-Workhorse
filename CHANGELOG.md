@@ -8,6 +8,34 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.8](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.7...v0.6.8) (2026-08-19)
+
+
+### Features
+
+* harnesses can query leftover as a read-only MCP tool ([d9785fb](https://github.com/go7studio/Go7-Workhorse/commit/d9785fbb7254f3ec4a5d04d665a9eab2054e400a))
+* leftover query for harnesses, vaulted bots, and mesh gates ([b252a29](https://github.com/go7studio/Go7-Workhorse/commit/b252a298db4dc2fa08501cb4ce677fbe53724f88))
+* standard leftover wiring for major custom hosts ([98c6a46](https://github.com/go7studio/Go7-Workhorse/commit/98c6a4636c5f1f2e7a442e043a8ff0ecb49bac3f))
+* the workhorse command — Link's CLI on your PATH ([89efc4a](https://github.com/go7studio/Go7-Workhorse/commit/89efc4af01e68224d1dcf33c5371307bcc4ccf4e))
+* Workhorse Link — one way in for every outside harness ([fe51c6a](https://github.com/go7studio/Go7-Workhorse/commit/fe51c6a07ab5dfade6d62e42d00c35a829b25b03))
+* Workhorse Link — one way in for every outside harness ([0044a23](https://github.com/go7studio/Go7-Workhorse/commit/0044a23c8b998aebbed718816f0de59be7c6e9b8))
+
+
+### Bug Fixes
+
+* a named desk spawn does not pick a harness ([9725d67](https://github.com/go7studio/Go7-Workhorse/commit/9725d674164b43bf3d93282e3c3a7cc1b1106dfb))
+* a named desk spawn does not pick a harness ([61d98f5](https://github.com/go7studio/Go7-Workhorse/commit/61d98f55ece2590fde429e5a125909801272055c))
+* every mutating Link call carries the envelope, and the dead ends are gone ([68d82a0](https://github.com/go7studio/Go7-Workhorse/commit/68d82a09d63f0f09ea52e24c8d3dea3faa018314))
+* every mutating Link call carries the envelope; the workhorse command ([605f5d4](https://github.com/go7studio/Go7-Workhorse/commit/605f5d4613f74555055d8da663d755cd75b82c32))
+* idle a goal round once, and never on compact-done ([15de90c](https://github.com/go7studio/Go7-Workhorse/commit/15de90cd13b0998d59ea5a3113681db6200e3bc1))
+* keep studio identity and signing material out of the repo ([90f97e5](https://github.com/go7studio/Go7-Workhorse/commit/90f97e59e68263234a7e0eadc87993617694a749))
+* keep the update control beside Settings ([f910008](https://github.com/go7studio/Go7-Workhorse/commit/f91000883a586d8d39aaa076789c6f6fd94fc807))
+* make usage metering authoritative ([88559c2](https://github.com/go7studio/Go7-Workhorse/commit/88559c295fbd8edd46a416198414181a6c4d8c65))
+* privileged IPC channels answer only the desk window ([eee5201](https://github.com/go7studio/Go7-Workhorse/commit/eee5201c0eedb286f2ee2bb270ad683ae1e7f398))
+* run goal rounds, the turn log, and compact occupancy on the live path ([9bf7eba](https://github.com/go7studio/Go7-Workhorse/commit/9bf7ebab5824ca447553621a2be25a33f3f4647a))
+* the sandbox contains the real path, and the repo says what it protects ([a09138a](https://github.com/go7studio/Go7-Workhorse/commit/a09138a1ff4521dce3db7e33fa63743859d8b845))
+* vaulted custom bots stay callable, and harness mesh uses one policy ([2651d19](https://github.com/go7studio/Go7-Workhorse/commit/2651d195bce02dce2a862d9d0a563af29185857b))
+
 ## [0.6.7](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.6...v0.6.7) (2026-08-19)
 
 

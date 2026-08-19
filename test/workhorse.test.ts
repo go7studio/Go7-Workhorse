@@ -6744,6 +6744,10 @@ test("shouldLoadVendorSession chooses new vs load vs reuse", () => {
   assert.equal(shouldLoadVendorSession({ vendorSessionId: "v1", nextKey: "a" }), "load");
   assert.equal(shouldLoadVendorSession({ vendorSessionId: "v1", existingSlotKey: "a", nextKey: "a" }), "reuse");
   assert.equal(shouldLoadVendorSession({ vendorSessionId: "v1", existingSlotKey: "old", nextKey: "new" }), "new");
+  assert.equal(
+    shouldLoadVendorSession({ vendorSessionId: "v1", existingSlotKey: "a", nextKey: "a", restartRuntime: true }),
+    "load",
+  );
 });
 
 function fakeAcp(script: {
@@ -6976,6 +6980,43 @@ test("GrokSessionHost loads a stored vendor id after dispose", async () => {
   assert.deepEqual(methods, ["initialize", "session/load", "session/prompt"]);
   assert.equal(result.vendorSessionId, "keep-me");
   assert.equal(result.opened, "session/load");
+});
+
+test("GrokSessionHost restarts a reused runtime and reloads its native session", async () => {
+  const launches: string[][] = [];
+  const host = new GrokSessionHost(() => {
+    const methods: string[] = [];
+    launches.push(methods);
+    return fakeAcp({ methods, nextId: "first-session" });
+  });
+  await host.prompt(
+    {
+      sessionId: "mission-worker",
+      text: "pass one",
+      model: "grok-4.6",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  await host.prompt(
+    {
+      sessionId: "mission-worker",
+      text: "pass two",
+      model: "grok-4.6",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+      vendorSessionId: "first-session",
+      restartRuntime: true,
+    },
+    () => undefined,
+  );
+  host.disposeAll();
+  assert.equal(launches.length, 2);
+  assert.deepEqual(launches[0], ["initialize", "session/new", "session/prompt"]);
+  assert.deepEqual(launches[1], ["initialize", "session/load", "session/prompt"]);
 });
 
 test("GrokSessionHost failed load falls back to session/new", async () => {
@@ -8024,6 +8065,9 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.ok(awaitTimer.timeoutMs > 45_000);
   assert.doesNotMatch(awaitTimer.timeoutError, /setting up that bot/);
   assert.equal(peerAskTimeoutMs({ mode: "bots", action: "create" }).timeoutMs, 45_000);
+  const mainPeerBridge = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.doesNotMatch(mainPeerBridge, /settlePeerAsk/);
+  assert.match(mainPeerBridge, /ipcMain\.handle\("grok:peer-result"/);
   const crew = addLineupRow(emptyLineup("D:\\Godot\\Projects\\spaceship-battle", 1), {
     childId: "sess_a",
     title: "HUD",

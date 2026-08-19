@@ -356,7 +356,9 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
         },
       },
     })) as { error?: { message?: string } };
-    assert.match(untracedLoop.error?.message ?? "", /traceId/);
+    assert.equal(untracedLoop.error, undefined, untracedLoop.error?.message);
+    assert.match(seenMissionIteration?.id ?? "", /^mission_/);
+    assert.equal(seenTrace, seenMissionIteration?.id);
 
     const awaited = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -434,7 +436,9 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
         status: "idle",
         messages: [{ id: "report", role: "assistant", text: "Implemented the first half.", createdAt: 2 }],
         agentRun: {
-          status: "completed",
+          // The renderer is already terminal below, but its debounced state
+          // write still says running. Immediate continuation must trust live.
+          status: "running",
           startedAt: 1,
           finishedAt: 2,
           isolation: "shared",
@@ -473,6 +477,15 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
             provider: "claude",
             model: "claude-sonnet-4-6",
             effort: "medium",
+            mission: {
+              id: "mission_trace",
+              mode: "adaptive",
+              objective: "Ship analytics",
+              acceptanceCriteria: ["Tests pass", "Live check passes"],
+              iteration: 1,
+              maxIterations: 3,
+              previousWorkerIds: [],
+            },
           }],
         }),
       };
@@ -502,6 +515,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
     assert.equal(spawned?.provider, undefined);
     assert.equal(spawned?.model, undefined);
     assert.equal(spawned?.effort, undefined);
+    assert.equal(spawned?.worker, "Wren");
     assert.equal(spawned?.missionIteration?.iteration, 2);
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);

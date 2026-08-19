@@ -2819,6 +2819,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           text: string,
           mcpServers: McpServerConfig[],
           images: import("./types").ChatImage[] = [],
+          restartRuntime = false,
         ) => {
           const snapshot = stateRef.current;
           const hold = evaluateWatchHold({
@@ -2860,6 +2861,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             parentId: session.parentId,
             hidden: session.hidden,
             role,
+            restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
           if (live === "custom") {
@@ -4475,6 +4477,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 }),
                 latest.settings.mcpServers,
                 spawnImages,
+                Boolean(priorWorker && payload.mission),
               );
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {

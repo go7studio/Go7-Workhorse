@@ -154,6 +154,7 @@ export class ClaudeSessionHost {
       vendorSessionId: input.vendorSessionId,
       existingSlotKey: slot?.key,
       nextKey: key,
+      restartRuntime: input.restartRuntime,
     });
     if (action === "reuse" && slot) return;
     slot?.agent.dispose();

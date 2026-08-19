@@ -424,17 +424,6 @@ const grokHost = new GrokSessionHost();
 const codexHost = new CodexSessionHost();
 const terminalHost = new TerminalHost();
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
-const peerWaiterBySession = new Map<string, string>();
-
-function settlePeerAsk(sessionId: string, result: PeerAskResult): boolean {
-  const id = peerWaiterBySession.get(sessionId);
-  if (!id) return false;
-  const waiter = peerWaiters.get(id);
-  peerWaiterBySession.delete(sessionId);
-  peerWaiters.delete(id);
-  waiter?.(result);
-  return Boolean(waiter);
-}
 
 process.on("uncaughtException", (error) => {
   console.error("workhorse uncaughtException", error);
@@ -554,8 +543,6 @@ app.whenReady().then(async () => {
       return await new Promise<PeerAskResult>((resolve) => {
         const timer = setTimeout(() => {
           peerWaiters.delete(id);
-          if (spawn && childSessionId) peerWaiterBySession.delete(childSessionId);
-          if (!bots && !spawn) peerWaiterBySession.delete(ask.toSessionId);
           if (spawn && childSessionId && !win.webContents.isDestroyed()) {
             win.webContents.send("grok:peer-cancel", { childSessionId, reason: "timed-out" });
           }
@@ -567,8 +554,6 @@ app.whenReady().then(async () => {
           clearTimeout(timer);
           resolve(value);
         });
-        if (spawn && childSessionId) peerWaiterBySession.set(childSessionId, id);
-        if (!bots && !spawn && ask.toSessionId) peerWaiterBySession.set(ask.toSessionId, id);
         win.webContents.send("grok:peer-ask", {
           id,
           ...ask,
@@ -663,9 +648,6 @@ app.whenReady().then(async () => {
     const waiter = peerWaiters.get(payload.id);
     if (!waiter) return false;
     peerWaiters.delete(payload.id);
-    for (const [sessionId, waiterId] of peerWaiterBySession) {
-      if (waiterId === payload.id) peerWaiterBySession.delete(sessionId);
-    }
     waiter("error" in payload && payload.error ? { error: payload.error } : { text: "text" in payload ? payload.text : "" });
     return true;
   });
@@ -1008,8 +990,6 @@ app.whenReady().then(async () => {
         console.error("workhorse codex event send failed", error);
       }
     });
-    const text = typeof result?.text === "string" ? result.text.trim() : "";
-    if (text) settlePeerAsk(input.sessionId, { text });
     return result;
   });
 
@@ -1034,8 +1014,6 @@ app.whenReady().then(async () => {
         console.error("workhorse claude event send failed", error);
       }
     });
-    const text = typeof result?.text === "string" ? result.text.trim() : "";
-    if (text) settlePeerAsk(input.sessionId, { text });
     return result;
   });
   ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
@@ -1059,8 +1037,6 @@ app.whenReady().then(async () => {
         console.error("workhorse cursor event send failed", error);
       }
     });
-    const text = typeof result?.text === "string" ? result.text.trim() : "";
-    if (text) settlePeerAsk(input.sessionId, { text });
     return result;
   });
   ipcMain.handle("cursor:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {
@@ -1079,8 +1055,6 @@ app.whenReady().then(async () => {
         console.error("workhorse custom event send failed", error);
       }
     });
-    const text = typeof result?.text === "string" ? result.text.trim() : "";
-    if (text) settlePeerAsk(raw.sessionId, { text });
     return result;
   });
   ipcMain.handle("custom:cancel", (_event, sessionId: string) => {
@@ -1102,8 +1076,6 @@ app.whenReady().then(async () => {
         console.error("workhorse grok event send failed", error);
       }
     });
-    const text = typeof result?.text === "string" ? result.text.trim() : "";
-    if (text) settlePeerAsk(input.sessionId, { text });
     return result;
   });
 

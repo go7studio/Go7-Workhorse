@@ -25,6 +25,8 @@ export type GrokSessionOpenInput = {
   parentId?: string;
   hidden?: boolean;
   role?: import("../src/lib/workhorse-rules").DeskRole;
+  /** Reopen the vendor runtime while loading the same native session. */
+  restartRuntime?: boolean;
 };
 
 export type GrokPromptInput = GrokSessionOpenInput & {
@@ -94,7 +96,9 @@ export function shouldLoadVendorSession(input: {
   vendorSessionId?: string;
   existingSlotKey?: string;
   nextKey: string;
+  restartRuntime?: boolean;
 }): "reuse" | "load" | "new" {
+  if (input.restartRuntime) return input.vendorSessionId?.trim() ? "load" : "new";
   if (input.existingSlotKey && input.existingSlotKey === input.nextKey) return "reuse";
   if (input.existingSlotKey && input.existingSlotKey !== input.nextKey) return "new";
   if (input.vendorSessionId?.trim()) return "load";
@@ -252,6 +256,7 @@ export class GrokSessionHost {
       vendorSessionId: input.vendorSessionId,
       existingSlotKey: slot?.key,
       nextKey: key,
+      restartRuntime: input.restartRuntime,
     });
     if (action === "reuse" && slot) return;
     slot?.agent.dispose();

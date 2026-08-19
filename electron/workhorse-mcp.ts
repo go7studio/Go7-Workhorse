@@ -26,8 +26,10 @@ import {
   nextMissionIteration,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
+  workerNameFromTitle,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
+import { uid } from "../src/lib/id";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import {
@@ -182,7 +184,7 @@ const TOOLS = [
         folder: { type: "string", description: "Optional absolute working folder" },
         wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
         fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
-        traceId: { type: "string", description: "Trace id for this orchestration loop" },
+        traceId: { type: "string", description: "Optional trace id for this orchestration loop; Workhorse creates one when an adaptive loop omits it" },
       },
       required: ["task", "fromSessionId"],
     },
@@ -1249,7 +1251,6 @@ async function awaitAgents(
 
 function missionIterationFromArgs(args: Record<string, unknown>, task: string, traceId?: string): MissionIteration | undefined {
   if (args.loop === undefined) return undefined;
-  if (!traceId?.trim()) throw new Error("adaptive loop needs a traceId");
   if (!args.loop || typeof args.loop !== "object" || Array.isArray(args.loop)) throw new Error("loop must be an object");
   const loop = args.loop as Record<string, unknown>;
   const acceptanceCriteria = Array.isArray(loop.acceptanceCriteria)
@@ -1258,8 +1259,9 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
   if (acceptanceCriteria.length === 0) throw new Error("adaptive loop needs acceptance criteria");
   const requestedMax = typeof loop.maxIterations === "number" && Number.isFinite(loop.maxIterations) ? Math.floor(loop.maxIterations) : 3;
   if (requestedMax < 2 || requestedMax > 8) throw new Error("maxIterations must be between 2 and 8");
+  const missionId = traceId?.trim() || uid("mission");
   return {
-    id: traceId.trim(),
+    id: missionId,
     mode: "adaptive",
     objective: task.trim(),
     acceptanceCriteria,
@@ -1277,6 +1279,7 @@ type AwaitMissionReport = {
   provider?: string;
   model?: string;
   effort?: string;
+  mission?: MissionIteration;
 };
 
 function missionContinuationPrompt(input: {
@@ -1316,13 +1319,8 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     : [];
   const remainingWork = typeof args.remainingWork === "string" ? args.remainingWork.trim() : "";
   if (!remainingWork) throw new Error("remainingWork is required");
-  const sessions = (readState().sessions ?? []).map(normalizeSession).filter((session): session is NonNullable<typeof session> => session !== null);
   const previousPass = typeof args.previousPass === "number" ? Math.floor(args.previousPass) : 0;
   if (previousPass < 1) throw new Error("previousPass is required");
-  const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass);
-  if (!next.ok) throw new Error(next.error);
-  const requestedTrace = typeof args.traceId === "string" ? args.traceId.trim() : "";
-  if (requestedTrace && requestedTrace !== next.mission.id) throw new Error("traceId does not match this mission");
   const snapshotText = await awaitAgents(parentId, undefined, false, undefined, previousWorkerIds);
   let snapshot: { running?: string[]; reports?: AwaitMissionReport[] };
   try {
@@ -1331,7 +1329,28 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     throw new Error("could not read the previous mission pass");
   }
   if ((snapshot.running ?? []).length > 0) throw new Error("previous mission pass is still running");
+  const liveReports = new Map((snapshot.reports ?? []).map((report) => [report.childSessionId, report]));
+  const sessions = (readState().sessions ?? [])
+    .map(normalizeSession)
+    .filter((session): session is NonNullable<typeof session> => session !== null)
+    .map((session) => {
+      const live = liveReports.get(session.id);
+      if (!live?.mission || !session.agentRun) return session;
+      const status: "completed" | "failed" | "cancelled" | "timed-out" | "budget-exceeded" =
+        live.status === "failed" || live.status === "cancelled" || live.status === "timed-out" || live.status === "budget-exceeded"
+        ? live.status
+        : "completed";
+      return { ...session, status: "idle" as const, agentRun: { ...session.agentRun, status, mission: live.mission } };
+    });
+  const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass);
+  if (!next.ok) throw new Error(next.error);
+  const requestedTrace = typeof args.traceId === "string" ? args.traceId.trim() : "";
+  if (requestedTrace && requestedTrace !== next.mission.id) throw new Error("traceId does not match this mission");
   const source = sessions.filter((session) => previousWorkerIds.includes(session.id));
+  const coordinator = previousWorkerIds
+    .map((id) => source.find((session) => session.id === id))
+    .find(Boolean);
+  const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
   const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions") =>
     [...new Set(source.flatMap((session) => session.agentRun?.[key] ?? []).filter(Boolean))];
   const evidence = Array.isArray(args.evidence)
@@ -1341,6 +1360,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     {
       prompt: missionContinuationPrompt({ mission: next.mission, remainingWork, evidence, reports: snapshot.reports ?? [] }),
       description: typeof args.description === "string" ? args.description : `Mission pass ${next.mission.iteration}`,
+      worker: coordinatorName,
       mission: true,
       missionIteration: next.mission,
       route: "auto",
@@ -1370,6 +1390,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
     const task = typeof args.task === "string" ? args.task : "";
     const traceId = typeof args.traceId === "string" ? args.traceId : undefined;
     const missionIteration = missionIterationFromArgs(args, task, traceId);
+    const effectiveTraceId = missionIteration?.id ?? traceId;
     const initialBrain = args.initialBrain && typeof args.initialBrain === "object" && !Array.isArray(args.initialBrain)
       ? args.initialBrain as Record<string, unknown>
       : {};
@@ -1399,7 +1420,7 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
         wait: args.wait === true,
         mission: true,
         missionIteration,
-        traceId,
+        traceId: effectiveTraceId,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );

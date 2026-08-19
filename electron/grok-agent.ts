@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { withDeskToolEnv } from "./desk-path";
-import { buildGrokLaunchSpec, grokSpawnArgs, type GrokLaunchInput, type GrokLaunchSpec } from "./grok-launch";
+import { grokSpawnArgs, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { buildAcpPrompt } from "../src/lib/images";
@@ -492,8 +492,6 @@ export function compactFromResult(
     tokensAfter: fromUpdate?.tokensAfter,
   };
 }
-
-
 
 export function consumeAcpMessages(buffer: string): { messages: JsonRpcMessage[]; rest: string } {
   const parsed = consumeAcpBuffers(Buffer.from(buffer, "utf8"));
@@ -1203,17 +1201,3 @@ export class GrokAgent {
   }
 }
 
-export async function runGrokOneShot(
-  input: GrokLaunchInput & { prompt: string },
-  handlers: GrokAgentHandlers = {},
-): Promise<GrokOneShotResult> {
-  const spec = buildGrokLaunchSpec(input);
-  const agent = new GrokAgent(spec);
-  try {
-    const started = await agent.start();
-    const prompted = await agent.prompt(input.prompt, handlers);
-    return { ...started, ...prompted, spec };
-  } finally {
-    agent.dispose();
-  }
-}

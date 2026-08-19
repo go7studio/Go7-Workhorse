@@ -1,7 +1,6 @@
 import { parseCatalogAgents, type ExternalAgent } from "../src/lib/external-catalog";
 import { createEnvelope, newId } from "../src/lib/agent-runtime";
 import type { ExternalAgentRef, ExternalTask } from "../src/lib/types";
-import type { AgentCapabilities, ExternalSession } from "./openclaw-adapter";
 
 export type HermesIo = {
   exec: (file: string, args: string[]) => { status: number; stdout: string; stderr: string } | Promise<{ status: number; stdout: string; stderr: string }>;
@@ -41,45 +40,6 @@ export function parseHermesProfiles(text: string): ExternalAgent[] {
       .filter((name) => name && name.toLowerCase() !== "profile");
     if (names.length === 0) return [{ runtimeId: "hermes", agentId: "default", name: "hermes/default" }];
     return names.map((name) => ({ runtimeId: "hermes" as const, agentId: name, name: `hermes/${name}` }));
-  }
-}
-
-export function parseHermesSessions(text: string): ExternalSession[] {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    const list = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { sessions?: unknown }).sessions)
-        ? (parsed as { sessions: unknown[] }).sessions
-        : [];
-    const sessions: ExternalSession[] = [];
-    for (const item of list) {
-      if (!item || typeof item !== "object") continue;
-      const record = item as { id?: unknown; session?: unknown; profile?: unknown };
-      const id = typeof record.id === "string" ? record.id : typeof record.session === "string" ? record.session : "";
-      if (!id) continue;
-      sessions.push({
-        id,
-        agentId: typeof record.profile === "string" ? record.profile : "default",
-      });
-    }
-    return sessions;
-  } catch {
-    return [];
-  }
-}
-
-export function parseHermesInspect(text: string): AgentCapabilities {
-  try {
-    const parsed = JSON.parse(text) as { workspace?: unknown; workspaces?: unknown; sandbox?: unknown };
-    const workspaces = Array.isArray(parsed.workspaces)
-      ? parsed.workspaces.filter((item): item is string => typeof item === "string")
-      : typeof parsed.workspace === "string"
-        ? [parsed.workspace]
-        : [];
-    return { workspaces, ...(typeof parsed.sandbox === "string" ? { sandbox: parsed.sandbox } : {}) };
-  } catch {
-    return { workspaces: [] };
   }
 }
 

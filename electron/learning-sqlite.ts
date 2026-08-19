@@ -725,18 +725,4 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 }
 
-export function createSqliteStore(userData: string): SqliteMemoryStore {
-  return new SqliteMemoryStore(userData);
-}
-
-export function sqliteAvailable(): boolean {
-  try {
-    const db = new DatabaseSync(":memory:");
-    db.close();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export { learningDatabasePath, learningSidecarPaths } from "../src/lib/learning-paths";

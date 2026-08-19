@@ -43,10 +43,6 @@ export function hermesConfigPath(input: Pick<CatalogPaths, "home" | "platform">)
   return joinHome(input.home, ".hermes", "config.yaml");
 }
 
-export function hermesProfilesPath(input: Pick<CatalogPaths, "home" | "platform">): string {
-  return joinHome(input.home, ".hermes", "profiles.json");
-}
-
 function pathEntries(pathEnv: string | undefined, platform: CatalogPaths["platform"]): string[] {
   if (!pathEnv) return [];
   return pathEnv.split(platform === "win32" ? ";" : ":").filter(Boolean);

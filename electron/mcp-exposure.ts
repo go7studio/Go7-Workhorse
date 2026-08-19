@@ -42,7 +42,6 @@ export const EXTERNAL_RUNTIME_FORBIDDEN = [
   "workhorse_read_skill",
 ] as const;
 
-
 /**
  * `link` is the product-facing spelling of the external profile (Workhorse
  * Link); `external-runtime` stays the internal value every written config
@@ -122,17 +121,6 @@ export function inboundSessionIdFromState(state: { settings?: unknown } | undefi
   if (!state?.settings || typeof state.settings !== "object") return "";
   const systems = (state.settings as { agentSystems?: { inboundSessionId?: unknown } }).agentSystems;
   return typeof systems?.inboundSessionId === "string" ? systems.inboundSessionId.trim() : "";
-}
-
-export function inboundAmbientSessionIdFromState(state: { activeSessionId?: unknown; sessions?: unknown } | undefined): string {
-  const active = typeof state?.activeSessionId === "string" ? state.activeSessionId.trim() : "";
-  if (!active) return "";
-  if (!Array.isArray(state?.sessions)) return active;
-  const hit = state.sessions.find(
-    (item) => item && typeof item === "object" && (item as { id?: unknown }).id === active,
-  ) as { hidden?: boolean; archivedAt?: unknown } | undefined;
-  if (!hit || hit.hidden || hit.archivedAt) return "";
-  return active;
 }
 
 export function resolveMcpSpawnFrom(input: {

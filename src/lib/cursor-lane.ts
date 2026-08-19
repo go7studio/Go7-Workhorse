@@ -81,4 +81,3 @@ export function isCursorInnerTask(input: { method?: string; title?: string; tool
 export const CURSOR_ACP_NOT_INSTALLED =
   "Cursor ACP is not installed. Install the Cursor CLI (`agent`) or set CURSOR_ACP_BIN to a real file.";
 
-export const CURSOR_AGENT_FAILED_PREFIX = "Cursor agent failed:";

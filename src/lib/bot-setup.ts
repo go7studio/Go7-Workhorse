@@ -240,13 +240,6 @@ export function applyDeleteCustomBot(
   return { bots: bots.filter((item) => item.id !== removed.id), removed };
 }
 
-export function clearDeletedBotRefs<T extends { customBotId?: string }>(
-  items: T[],
-  botId: string,
-): T[] {
-  return items.map((item) => (item.customBotId === botId ? { ...item, customBotId: undefined } : item));
-}
-
 export function findListedBot(
   bots: PublicBotCard[],
   draft: { baseUrl: string; model: string; name?: string },

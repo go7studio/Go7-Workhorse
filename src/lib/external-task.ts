@@ -168,28 +168,6 @@ export function startExternalTask(input: StartExternalTaskInput): StartExternalT
   };
 }
 
-export function setExternalTaskStatus(
-  store: TaskStore,
-  taskId: string,
-  status: ExternalTaskStatus,
-  extra?: { result?: string; finishedAt?: number },
-): TaskStore {
-  const task = store.byId[taskId];
-  if (!task) return store;
-  return {
-    ...store,
-    byId: {
-      ...store.byId,
-      [taskId]: {
-        ...task,
-        status,
-        ...(extra?.result !== undefined ? { result: extra.result } : {}),
-        ...(extra?.finishedAt !== undefined ? { finishedAt: extra.finishedAt } : {}),
-      },
-    },
-  };
-}
-
 export type ExternalAdapter = {
   startTask: (request: { ref: ExternalAgentRef; prompt: string; envelope: CorrelationEnvelope }) => ExternalTask;
   status: (taskId: string) => ExternalTask | null;

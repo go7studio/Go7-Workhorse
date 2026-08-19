@@ -100,20 +100,6 @@ export async function listOpenClawAgents(io: OpenClawIo): Promise<ExternalAgent[
   return parseOpenClawAgentsList(result.stdout);
 }
 
-export async function listOpenClawSessions(io: OpenClawIo, agent?: ExternalAgentRef): Promise<ExternalSession[]> {
-  const args = ["sessions", "--all-agents", "--json"];
-  if (agent) args.push("--agent", agent.agentId);
-  const result = await io.exec(binary(io), args);
-  if (result.status !== 0) return [];
-  return parseOpenClawSessions(result.stdout);
-}
-
-export async function inspectOpenClaw(io: OpenClawIo, agent: ExternalAgentRef): Promise<AgentCapabilities> {
-  const result = await io.exec(binary(io), ["agent", "--agent", agent.agentId, "inspect", "--json"]);
-  if (result.status !== 0) return { workspaces: [] };
-  return parseOpenClawInspect(result.stdout);
-}
-
 export function taskFromOpenClawJson(text: string, ref: ExternalAgentRef, now = Date.now()): ExternalTask {
   let id = newId("oc", now);
   let status: ExternalTask["status"] = "running";

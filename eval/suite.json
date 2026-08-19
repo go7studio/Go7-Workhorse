@@ -905,7 +905,7 @@
             "Set a measurable /goal with an explicit evidence-based completion condition, allowed scope, budget, timeout, and maximum concurrency.",
             "Verify the parent records a plan or next action, delegates only bounded independent work, and continues useful local work while children run.",
             "Return one success, one recoverable child failure, and one needs-input result; verify the parent retries or reroutes within limits and surfaces the real question.",
-            "Force one helper past a small fixture token ceiling; verify it becomes budget-exceeded, is cancelled promptly, returns no completed report, and prevents an unqualified All workers finished or mission-complete claim.",
+            "Force one helper past a small fixture token ceiling; verify it is warned, asked to hand off from the reserved remainder, becomes budget-exceeded with a truthful stop report if it still overruns, returns no unqualified completed report, and prevents an unqualified All workers finished or mission-complete claim.",
             "Pause, restart Workhorse, and resume; verify goal, child lineage, checkpoints, budgets, and completed work persist without duplicate dispatch.",
             "Complete the goal and verify the parent marks complete only after evidence is reconciled; separately prove blocked and cancelled terminal states stop iteration."
           ]

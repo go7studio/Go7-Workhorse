@@ -266,6 +266,16 @@ export type WorkerHandoff = {
   blocker?: string;
 };
 
+export type ExecutionOwner = "workhorse" | "parent";
+
+export type BudgetPhase = "produce" | "verify" | "handoff" | "exhausted";
+
+export type AgentRunEvent = {
+  at: number;
+  type: "budget-warn" | "budget-verify" | "budget-handoff" | "budget-exceeded" | "takeover";
+  detail: string;
+};
+
 export type AgentRun = {
   /**
    * `interrupted` is the desk stopping, not the worker failing — Workhorse
@@ -276,10 +286,24 @@ export type AgentRun = {
   startedAt: number;
   finishedAt?: number;
   timeoutMs?: number;
+  /** This pass’s ceiling. Unset means unbounded. */
   tokenBudget?: number;
+  /** Mission-level ceiling when this pass is one of several. */
+  missionTokenBudget?: number;
+  /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
+  /** Sum of prior assignments on this worker. Not a ceiling. */
+  lifetimeUsedTokens?: number;
   /** Fresh input at the first meter this slice. Later input growth is new work. */
   budgetBaseline?: number;
+  budgetPhase?: BudgetPhase;
+  budgetWarnedAt?: number;
+  budgetHandoffAt?: number;
+  /** Who actually executed the work. Parent takeover is a recorded fact, not a lock. */
+  executionOwner?: ExecutionOwner;
+  takeoverReason?: string;
+  takeoverAt?: number;
+  events?: AgentRunEvent[];
   isolation: "worktree" | "shared";
   /** inherit keeps prior conversation. fresh starts cold with only a handoff. */
   seed?: WorkerSeed;
@@ -309,6 +333,8 @@ export type MissionIteration = {
   iteration: number;
   maxIterations: number;
   previousWorkerIds: string[];
+  /** Mission-level token ceiling. One pass cannot spend this whole amount. */
+  tokenBudget?: number;
 };
 
 export type WorkhorseWorkerRun = AgentRun & { kind?: "workhorse" };

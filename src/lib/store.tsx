@@ -98,7 +98,7 @@ import {
   normalizeProject,
   primaryFolder,
 } from "./project";
-import { isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
+import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
 import {
@@ -194,6 +194,8 @@ import {
   parseWorkerHandoff,
   workerStartMessages,
   reserveWorkerName,
+  recordParentTakeover,
+  appendRunEvent,
   scopedChildAgentIds,
   type WorkerNameReservation,
   type WorkerRecord,
@@ -232,7 +234,14 @@ import {
   usageHasBilledTokens,
   usageHomeForReport,
 } from "./usage";
-import { applyWorkerBudgetUsage } from "./worker-budget";
+import {
+  applyWorkerBudgetUsage,
+  beginAssignmentBudget,
+  BUDGET_HANDOFF_PROMPT,
+  missionUsedTokens,
+  needsBudgetHandoffTurn,
+  nextBudgetRunState,
+} from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import { isVendorRateLimitError, turnEndedWithoutProse, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
 import { cursorUsageLane } from "./cursor-lane";
@@ -3775,12 +3784,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     }
                   : session,
               );
-              setState((current) => ({ ...current, sessions }));
-              snapshotWriteInstance({ ...latest, sessions }, sessionId, title, path, `${title.toLowerCase()}:${path}`);
+              const withTakeover = recordParentTakeover(
+                sessions,
+                sessionId,
+                `Parent applied ${title} after handing the work to Workhorse.`,
+              );
+              setState((current) => ({ ...current, sessions: withTakeover }));
+              snapshotWriteInstance({ ...latest, sessions: withTakeover }, sessionId, title, path, `${title.toLowerCase()}:${path}`);
               void window.workhorse
                 ?.saveState({
                   ...latest,
-                  sessions: listedChats(sessions),
+                  sessions: listedChats(withTakeover),
                 })
                 .catch(() => undefined);
               await replyAsk({ text: JSON.stringify({ ok: true, sessionId, path, title }, null, 2) });
@@ -4601,10 +4615,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               workerNameReservations.current = reserved.reservations;
               workerName = reserved.name;
             }
+            const assignmentBudget = beginAssignmentBudget(priorWorker?.agentRun, {
+              tokenBudget,
+              mission: payload.missionIteration
+                ? {
+                    tokenBudget: payload.missionIteration.tokenBudget,
+                    usedTokens: missionUsedTokens(latest.sessions, payload.missionIteration.id),
+                    iteration: payload.missionIteration.iteration,
+                    maxIterations: payload.missionIteration.maxIterations,
+                  }
+                : undefined,
+            });
+            const childMission = payload.missionIteration
+              ? {
+                  ...payload.missionIteration,
+                  ...(assignmentBudget.missionTokenBudget
+                    ? { tokenBudget: assignmentBudget.missionTokenBudget }
+                    : {}),
+                }
+              : undefined;
             const child: Session = {
               // A reused worker keeps everything it already is — most of all
               // vendorSessionId, which IS its memory of the last slice. Only
-              // the run and the new message are fresh.
+              // the run and the new message are fresh. Budget and usedTokens
+              // come from THIS assignment, never the previous slice.
               ...(priorWorker ?? {}),
               id: childId,
               workerName,
@@ -4627,8 +4661,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 status: "running",
                 startedAt,
                 timeoutMs,
-                ...(tokenBudget ? { tokenBudget } : {}),
                 isolation,
+                executionOwner: "workhorse",
+                ...assignmentBudget,
                 ...(spawnSeed === "fresh" ? { seed: "fresh" as const } : {}),
                 ...(planStepId ? { planStepId } : {}),
                 ...(rationale ? { rationale } : {}),
@@ -4639,7 +4674,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
                 correlationId: childCorrelationId,
-                ...(payload.missionIteration ? { mission: payload.missionIteration } : {}),
+                ...(childMission ? { mission: childMission } : {}),
               },
               routingMode: routeDecision ? "auto" : "manual",
               routingDecision: routeDecision ?? undefined,
@@ -4744,27 +4779,74 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ? (await window.workhorse.listGitChanges(childCwd)).map((change) => `${change.status}:${change.path}`)
                   : [],
               );
-              const reply = await promptVendor(
-                child,
-                vendorTextForSpawn({
-                  seed: spawnSeed,
-                  handoff: spawnHandoff,
-                  fromTitle: parent.title?.trim() || "another agent",
-                  text: payload.message,
-                  folder: childCwd,
-                  project: project?.name,
-                  slice: payload.description,
-                  vendor: spec.title,
-                  constraints: assignedConstraints,
-                  skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
-                  capabilities: assignedCapabilities,
-                  mission: payload.mission === true,
-                  missionIteration: payload.missionIteration,
-                }),
-                latest.settings.mcpServers,
-                spawnImages,
-                Boolean(priorWorker && payload.mission),
-              );
+              let reply = "";
+              try {
+                reply = await promptVendor(
+                  child,
+                  vendorTextForSpawn({
+                    seed: spawnSeed,
+                    handoff: spawnHandoff,
+                    fromTitle: parent.title?.trim() || "another agent",
+                    text: payload.message,
+                    folder: childCwd,
+                    project: project?.name,
+                    slice: payload.description,
+                    vendor: spec.title,
+                    constraints: assignedConstraints,
+                    skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
+                    capabilities: assignedCapabilities,
+                    mission: payload.mission === true,
+                    missionIteration: payload.missionIteration,
+                  }),
+                  latest.settings.mcpServers,
+                  spawnImages,
+                  Boolean(priorWorker && payload.mission),
+                );
+              } catch (error) {
+                const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
+                if (liveRun?.status === "budget-exceeded") {
+                  terminalFailure = "budget-exceeded";
+                  throw error;
+                }
+                if (!needsBudgetHandoffTurn({ ...liveRun, status: liveRun?.status })) throw error;
+              }
+              const liveAfter = stateRef.current.sessions.find((item) => item.id === childId);
+              if (needsBudgetHandoffTurn(liveAfter?.agentRun) && liveAfter?.agentRun?.status === "running") {
+                const handoffAt = Date.now();
+                setState((current) => ({
+                  ...current,
+                  sessions: current.sessions.map((item) =>
+                    item.id === childId && item.agentRun
+                      ? {
+                          ...item,
+                          status: "running" as const,
+                          agentRun: appendRunEvent(
+                            {
+                              ...item.agentRun,
+                              budgetPhase: "handoff",
+                              budgetHandoffAt: handoffAt,
+                            },
+                            { at: handoffAt, type: "budget-handoff", detail: BUDGET_HANDOFF_PROMPT },
+                          ),
+                        }
+                      : item,
+                  ),
+                }));
+                try {
+                  reply = (await promptVendor(
+                    { ...liveAfter, status: "running" },
+                    BUDGET_HANDOFF_PROMPT,
+                    latest.settings.mcpServers,
+                  )) || reply;
+                } catch (error) {
+                  const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
+                  if (liveRun?.status === "budget-exceeded") {
+                    terminalFailure = "budget-exceeded";
+                    throw error;
+                  }
+                  throw error;
+                }
+              }
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
                 terminalFailure = terminalStatus;
@@ -5017,6 +5099,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 agentRun: item.agentRun
                   ? {
                       ...item.agentRun,
+                      ...beginAssignmentBudget(item.agentRun, {}),
+                      tokenBudget: undefined,
+                      usedTokens: undefined,
+                      budgetBaseline: undefined,
+                      budgetPhase: undefined,
+                      budgetWarnedAt: undefined,
+                      budgetHandoffAt: undefined,
+                      missionTokenBudget: undefined,
                       status: "running" as const,
                       startedAt,
                       finishedAt: undefined,
@@ -5379,6 +5469,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const status = (event.status ?? "").toLowerCase().replaceAll("_", " ");
         if ((status === "completed" || status === "complete") && toolIsFinished(event.status)) {
           snapshotWriteInstance(stateRef.current, event.sessionId, event.title, event.detail, event.toolCallId);
+          if (isParentTakeoverTool(event.title)) {
+            setState((current) => {
+              const sessions = recordParentTakeover(
+                current.sessions,
+                event.sessionId,
+                `Parent applied ${event.title} after handing the work to Workhorse.`,
+              );
+              return sessions === current.sessions ? current : { ...current, sessions };
+            });
+          }
         }
         return;
       }
@@ -5612,30 +5712,61 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
           const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
-          if (spend.exceeded) cancelVendorSession(liveSession);
+          const now = Date.now();
+          const next = nextBudgetRunState(liveSession.agentRun, spend, now);
+          if (next.action === "handoff" || next.action === "terminate") cancelVendorSession(liveSession);
           setState((current) => ({
             ...current,
             sessions: withSubagentStatus(
-              current.sessions.map((session) =>
-                session.id === event.sessionId && session.agentRun
-                  ? {
-                      ...session,
-                      status: spend.exceeded ? "idle" : session.status,
-                      agentRun: {
-                        ...session.agentRun,
-                        usedTokens: spend.usedTokens,
-                        budgetBaseline: spend.budgetBaseline,
-                        ...(spend.exceeded ? {
-                          status: "budget-exceeded" as const,
-                          finishedAt: Date.now(),
-                          error: `Subagent exceeded its ${session.agentRun.tokenBudget} token ceiling on this slice’s new work.`,
-                        } : {}),
-                      },
-                    }
-                  : session,
-              ),
+              current.sessions.map((session) => {
+                if (session.id !== event.sessionId || !session.agentRun) return session;
+                let agentRun: AgentRun = {
+                  ...session.agentRun,
+                  usedTokens: next.usedTokens,
+                  budgetBaseline: next.budgetBaseline,
+                  ...(next.budgetPhase ? { budgetPhase: next.budgetPhase } : {}),
+                  ...(next.budgetWarnedAt ? { budgetWarnedAt: next.budgetWarnedAt } : {}),
+                  ...(next.budgetHandoffAt ? { budgetHandoffAt: next.budgetHandoffAt } : {}),
+                  ...(next.status === "budget-exceeded"
+                    ? {
+                        status: "budget-exceeded" as const,
+                        finishedAt: next.finishedAt ?? now,
+                        error: next.error,
+                      }
+                    : {}),
+                };
+                if (next.action !== "none" && next.notice) {
+                  const type =
+                    next.action === "terminate"
+                      ? "budget-exceeded" as const
+                      : next.action === "handoff"
+                        ? "budget-verify" as const
+                        : "budget-warn" as const;
+                  agentRun = appendRunEvent(agentRun, { at: now, type, detail: next.notice });
+                }
+                const alreadyNoted =
+                  !next.notice ||
+                  session.messages.some((message) => message.role === "system" && message.text === next.notice);
+                return {
+                  ...session,
+                  status: next.action === "terminate" ? "idle" : session.status,
+                  agentRun,
+                  messages:
+                    next.notice && !alreadyNoted
+                      ? [
+                          ...session.messages,
+                          {
+                            id: uid("msg"),
+                            role: "system" as const,
+                            text: next.notice,
+                            createdAt: now,
+                          },
+                        ]
+                      : session.messages,
+                };
+              }),
               event.sessionId,
-              spend.exceeded ? "failed" : "running",
+              next.action === "terminate" ? "failed" : "running",
             ),
           }));
         }
@@ -5704,6 +5835,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
           const assistantId = grokAssistantId.current[event.sessionId];
+          const liveRun = current.sessions.find((session) => session.id === event.sessionId)?.agentRun;
+          const holdForHandoff =
+            liveRun?.status === "running" &&
+            (liveRun.budgetPhase === "verify" || liveRun.budgetPhase === "handoff");
           let sessions = withSubagentStatus(
             current.sessions.map((session) => {
               if (session.id !== event.sessionId) return session;
@@ -5751,10 +5886,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }, { assistantId, safetyPaused, failed: safetyPaused, compacted: event.stopReason === "compacted" });
             }),
             event.sessionId,
-            safetyPaused ? "failed" : "completed",
+            holdForHandoff ? "running" : safetyPaused ? "failed" : "completed",
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
-          if (finished?.parentId) {
+          if (finished?.parentId && !holdForHandoff) {
             sessions = applyChildIdleSync(sessions, event.sessionId, safetyPaused ? "failed" : "completed", {
               report: childReportText(finished),
               ...(safetyPaused ? { error: "Agent paused before completing its goal." } : {}),

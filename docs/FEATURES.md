@@ -144,7 +144,13 @@ transcript rather than as a path.
 - **Subagents** — lifecycle records, runtime and token ceilings, cascading
   cancellation, changed-file review, and worktree isolation where the project
   supports it. A token ceiling meters this slice’s new work, not leftover or
-  the size of the repo the worker read. A worker gets a worker's context: the
+  the size of the repo the worker read. One pass cannot spend the whole
+  mission. The last fifth is for verifying and handing off, not more producing.
+  The run is warned before it stops, and the stop report says what was left
+  unfinished. No ceiling means no limit. A reused worker starts a new count.
+  If the parent then does the work itself, the run records that the parent took
+  over instead of a fully Workhorse-owned completion.
+  A worker gets a worker's context: the
   short worker rules and only the desk tools it may call — read and ask chats,
   one bounded helper, ask to raise a block, read skills and references. It
   cannot create, rename, move or delete anything on the desk, and is not shown

@@ -148,7 +148,9 @@ function WorkRow({
           <span className="tool-status">
             {childLive
               ? `working · ${formatWorked(childMs ?? 0)}`
-              : child?.agentRun?.status === "interrupted"
+              : child?.agentRun?.executionOwner === "parent"
+                ? "parent took over"
+                : child?.agentRun?.status === "interrupted"
                 ? "interrupted"
                 : marker.toolStatus === "failed"
                   ? "failed"

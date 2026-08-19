@@ -438,11 +438,11 @@
     },
     {
       "id": "REG-049",
-      "behavior": "A helper that reaches its token ceiling becomes budget-exceeded and is stopped promptly; its parent preserves that unsuccessful terminal state, returns no completed report, and never turns a generic worker-wave notice into a completed mission claim.",
+      "behavior": "A helper that reaches its token ceiling is warned, then asked to verify and hand off from the reserved remainder, then becomes budget-exceeded with a truthful stop report if it still overruns; its parent preserves that unsuccessful terminal state, returns no unqualified completed report, and never turns a generic worker-wave notice into a completed mission claim. An unset ceiling is unbounded. A reused worker starts a new accounting window.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S4", "ORC-S9"],
       "rubric": ["ORC-06", "ORC-07", "ORC-17"],
-      "sourceFiles": ["src/lib/subagents.ts", "src/lib/store.tsx", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "eval/orchestration-contract.json"],
+      "sourceFiles": ["src/lib/worker-budget.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "src/lib/types.ts", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/worker-budget.test.ts", "eval/orchestration-contract.json"],
       "verification": ["eval:validate", "verify", "eval:harness-smoke"]
     },
     {

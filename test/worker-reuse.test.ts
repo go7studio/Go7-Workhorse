@@ -190,3 +190,13 @@ test("spawn refuses a named worker bound elsewhere instead of suffixing the name
   assert.match(store, /resolveNamedWorker/);
   assert.match(store, /namedResolution && !namedResolution\.ok/);
 });
+
+test("a reused worker’s new run starts a new budget window", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /beginAssignmentBudget\(priorWorker\?\.agentRun/);
+  assert.match(store, /executionOwner: "workhorse"/);
+  assert.match(store, /beginAssignmentBudget\(item\.agentRun, \{\}\)/);
+  assert.match(store, /tokenBudget: undefined/);
+  assert.match(store, /usedTokens: undefined/);
+  assert.match(store, /budgetBaseline: undefined/);
+});

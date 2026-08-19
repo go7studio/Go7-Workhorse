@@ -36,6 +36,17 @@ export function isWriteToolTitle(title: string): boolean {
   return WRITE_TITLE.test(head) || WRITE_HINT.test(text) || WRITE_HINT.test(key);
 }
 
+const PARENT_SHELL =
+  /^(bash|shell|zsh|cmd|powershell|pwsh|terminal|exec|execute|run_command|runcommand|run_terminal_command|command)$/i;
+
+/** Parent shell or patch work after a Workhorse dispatch. Not a worker’s own writes. */
+export function isParentTakeoverTool(title: string): boolean {
+  if (isWriteToolTitle(title)) return true;
+  const key = title.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const head = key.split(/[./\\]/)[0] ?? "";
+  return PARENT_SHELL.test(head);
+}
+
 export function writeChangeKind(title: string, nearby = ""): FileChangeKind | null {
   if (!isWriteToolTitle(title)) return null;
   const text = title.trim();

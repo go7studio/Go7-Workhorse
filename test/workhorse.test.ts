@@ -7816,6 +7816,29 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   );
   assert.equal(
     workerSidebarLabel({
+      id: "worker_takeover",
+      parentId: "orchestrator",
+      provider: "codex",
+      model: "gpt-5.6-terra",
+      effort: "medium",
+      title: "Certify Saga candidate",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "idle",
+      contextUsed: 0,
+      messages: [],
+      agentRun: {
+        status: "completed",
+        startedAt: 1,
+        isolation: "worktree",
+        executionOwner: "parent",
+        takeoverReason: "Parent applied patch after handing the work to Workhorse.",
+      },
+    }),
+    "GPT-5.6-Terra · Medium · Parent took over",
+  );
+  assert.equal(
+    workerSidebarLabel({
       id: "worker_pass_2",
       parentId: "orchestrator",
       provider: "claude",

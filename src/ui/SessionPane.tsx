@@ -35,6 +35,8 @@ import { TurnActions } from "./TurnActions";
 import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
+import { pinChangesDock } from "../lib/session-dock";
+import { followLatestTurn, pinnedToLatest, pinToLatest } from "../lib/transcript-scroll";
 import type { AppState, ProviderId, Session } from "../lib/types";
 
 const SCROLL_SLACK = 96;
@@ -111,10 +113,6 @@ const AssistantTurn = memo(function AssistantTurn({
   );
 });
 
-function pinnedToBottom(el: HTMLElement): boolean {
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_SLACK;
-}
-
 export function SessionPane() {
   const session = useActiveSession();
   const store = useStore();
@@ -132,7 +130,9 @@ export function SessionPane() {
   const [editsIdle, setEditsIdle] = useState(false);
   const [paint, setPaint] = useState({ id: "", from: 0 });
   const scroller = useRef<HTMLDivElement>(null);
+  const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
+  const userMoved = useRef(false);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
@@ -254,23 +254,43 @@ export function SessionPane() {
 
   useEffect(() => {
     followBottom.current = true;
+    userMoved.current = false;
   }, [session?.id]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && followBottom.current) el.scrollTop = el.scrollHeight;
+    if (el && followBottom.current) pinToLatest(el);
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
     const thread = scroller.current;
+    const content = stack.current;
     const wrap = pane.current?.querySelector(".composer-wrap");
-    if (!thread || !(wrap instanceof HTMLElement) || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (followBottom.current) thread.scrollTop = thread.scrollHeight;
-    });
-    observer.observe(wrap);
+    if (!thread || typeof ResizeObserver === "undefined") return;
+    const pin = () => {
+      if (followBottom.current) pinToLatest(thread);
+    };
+    const observer = new ResizeObserver(pin);
+    if (content) observer.observe(content);
+    if (wrap instanceof HTMLElement) observer.observe(wrap);
     return () => observer.disconnect();
   }, [session?.id]);
+
+  useEffect(() => {
+    const col = pane.current?.querySelector(".session-col");
+    if (!(col instanceof HTMLElement)) return;
+    const pin = () => {
+      const block = col.querySelector(".session-edits .edited-block");
+      pinChangesDock(col, block instanceof HTMLElement ? block : null);
+    };
+    pin();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(pin);
+    observer.observe(col);
+    const block = col.querySelector(".session-edits .edited-block");
+    if (block instanceof HTMLElement) observer.observe(block);
+    return () => observer.disconnect();
+  }, [session?.id, editsBarOpen, displayEdits.length]);
 
   if (!session) return null;
   const closeFilePane = () => {
@@ -371,12 +391,24 @@ export function SessionPane() {
       <div
         className="transcript"
         ref={scroller}
+        onWheel={() => {
+          userMoved.current = true;
+        }}
+        onTouchMove={() => {
+          userMoved.current = true;
+        }}
         onScroll={() => {
           const el = scroller.current;
-          if (el) followBottom.current = pinnedToBottom(el);
+          if (!el) return;
+          followBottom.current = followLatestTurn({
+            following: followBottom.current,
+            atBottom: pinnedToLatest(el, SCROLL_SLACK),
+            userInitiated: userMoved.current,
+          });
+          if (followBottom.current) userMoved.current = false;
         }}
       >
-        <div className="transcript-stack">
+        <div className="transcript-stack" ref={stack}>
         {paintFrom > 0 ? (
           <div className="transcript-earlier" aria-hidden="true">
             Loading earlier turns…
@@ -435,8 +467,10 @@ export function SessionPane() {
             ))}
         </div>
       ) : null}
-      <GoalBar />
-      <WatchBanners onSwitchModel={() => setSetupOpen(true)} setupOpen={setupOpen} />
+      <div className="session-notices">
+        <GoalBar />
+        <WatchBanners onSwitchModel={() => setSetupOpen(true)} setupOpen={setupOpen} />
+      </div>
       {setupOpen && <SessionSetup onClose={() => setSetupOpen(false)} />}
       <Composer
         key={session.id}

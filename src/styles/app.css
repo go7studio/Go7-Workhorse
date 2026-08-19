@@ -608,6 +608,15 @@ html.pane-dragging * {
   container-name: session;
 }
 
+.session-notices {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.session-col:has(.session-edits-slot.open) .session-notices:has(.watch-banners, .goal-bar) {
+  margin-bottom: var(--changes-dock, 48px);
+}
+
 .agent-thread {
   position: relative;
   flex: 0 0 auto;

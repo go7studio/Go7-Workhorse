@@ -4261,6 +4261,8 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(composerWrap, /flex:\s*0 0 auto/);
   assert.match(css, /\.session-edits-slot/);
   assert.match(css, /grid-template-rows:\s*0fr/);
+  assert.match(css, /--changes-dock/);
+  assert.match(pane, /session-notices/);
   const fileClose = css.match(/(?:^|\n)\.file-close-x\s*\{[^}]+\}/)?.[0] ?? "";
   assert.match(fileClose, /width:\s*22px/);
   assert.match(fileClose, /height:\s*22px/);
@@ -5727,7 +5729,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /transcript-stack/);
   assert.match(pane, /useLayoutEffect/);
   assert.match(pane, /MediaPaintProvider/);
-  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(stack\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(content\)/);
   assert.match(pane, /startTransition/);
   assert.match(pane, /requestAnimationFrame\(tick\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);

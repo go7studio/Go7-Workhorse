@@ -7,6 +7,7 @@ import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
+import { guardIpcSender } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
@@ -586,6 +587,10 @@ app.whenReady().then(async () => {
   debugStartup("desk hooks ready");
   process.env.WORKHORSE_MCP_COMMAND = process.execPath;
   process.env.WORKHORSE_MCP_SCRIPT = path.join(__dirname, "workhorse-mcp.js");
+
+  // Before any channel is registered, so every one of them is covered — and so
+  // is a channel written next month.
+  guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
 
   ipcMain.handle("agentRuntime:detect", () => {
     const home = app.getPath("home");

@@ -148,21 +148,53 @@ export function packagedUpdateMissingMessage(platform: string): string {
   return "This Workhorse build cannot install in place.";
 }
 
+export function winInstallerArgs(): string[] {
+  // --updated tells NSIS this is an in-place update (skip first-run).
+  // NSIS then will not start the app; the helper has to.
+  return ["/S", "--updated"];
+}
+
+/** Hidden VBScript: wait for the desk to quit, install, then open the new exe. */
 export function winReplaceScript(input: {
   pid: number;
   setup: string;
   tmp: string;
+  exe: string;
 }): string {
-  const quote = (value: string) => JSON.stringify(value);
-  return `$pidToWait = ${Number(input.pid)}
-$setup = ${quote(input.setup)}
-$tmp = ${quote(input.tmp)}
-while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
-Start-Sleep -Milliseconds 400
-$p = Start-Process -FilePath $setup -ArgumentList @('/S','--updated','--force-run') -Wait -PassThru
-Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
-if ($null -ne $p -and $p.ExitCode -ne 0) { exit $p.ExitCode }
-`;
+  const quote = (value: string) => value.replace(/"/g, '""');
+  const pid = Number(input.pid);
+  const setup = quote(input.setup);
+  const exe = quote(input.exe);
+  const tmp = quote(input.tmp);
+  const flags = winInstallerArgs().join(" ");
+  return [
+    'Set sh = CreateObject("WScript.Shell")',
+    'Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")',
+    `pid = ${pid}`,
+    "Do",
+    '  Set procs = wmi.ExecQuery("Select * from Win32_Process Where ProcessId = " & pid)',
+    "  If procs.Count = 0 Then Exit Do",
+    "  WScript.Sleep 200",
+    "Loop",
+    "WScript.Sleep 400",
+    `sh.Run """${setup}"" ${flags}", 0, True`,
+    `sh.Run """${exe}""", 1, False`,
+    `On Error Resume Next`,
+    `CreateObject("Scripting.FileSystemObject").DeleteFolder "${tmp}", True`,
+    "",
+  ].join("\r\n");
+}
+
+/**
+ * Ask Explorer to open the helper. Explorer is not in Electron's job, so the
+ * installer keeps running after we quit. A PowerShell waiter stays in the job
+ * and dies with the desk — then NSIS --updated never relaunches.
+ */
+export function winInstallerLaunch(wrapper: string): { command: string; args: string[] } {
+  return {
+    command: "explorer.exe",
+    args: [wrapper],
+  };
 }
 
 export function macReplaceScript(input: {

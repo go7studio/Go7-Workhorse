@@ -21,6 +21,7 @@ import {
   UPDATE_REPO,
   updateInstallKind,
   versionFromRef,
+  winInstallerLaunch,
   winReplaceScript,
   type AppUpdateApplyResult,
   type AppUpdateCheckResult,
@@ -169,17 +170,19 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
     if (!response.ok) throw new Error(`Download failed (${response.status}).`);
     fs.writeFileSync(setup, Buffer.from(await response.arrayBuffer()));
 
-    const helper = path.join(tmp, "replace.ps1");
+    const helper = path.join(tmp, "replace.vbs");
     fs.writeFileSync(
       helper,
       winReplaceScript({
         pid: process.pid,
         setup,
         tmp,
+        exe: process.execPath,
       }),
       { encoding: "utf8" },
     );
-    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper], {
+    const launch = winInstallerLaunch(helper);
+    const child = spawn(launch.command, launch.args, {
       detached: true,
       stdio: "ignore",
       windowsHide: true,

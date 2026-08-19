@@ -178,9 +178,9 @@ Settings can export a support report that excludes prompts, messages, file
 contents, environment variables, URLs and credential values.
 
 Settings → Profile can check GitHub for a newer desk. A Mac installer
-downloads that release's disk image and replaces the app. A Windows installer
-downloads the Setup exe and installs it after Workhorse quits. When one is
-ready, Update now appears above Settings.
+downloads that release's disk image, replaces the app, and opens it. A Windows
+installer downloads the Setup exe, installs after Workhorse quits, and opens
+the new build. When one is ready, Update now appears above Settings.
 
 ## Platforms
 

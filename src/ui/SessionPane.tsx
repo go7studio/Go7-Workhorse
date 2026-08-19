@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
@@ -6,7 +6,14 @@ import { sessionExecutionCwd } from "../lib/session-environment";
 import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
 import { brainCaption, brainStamp, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
-import { displayWorkSteps, groupTranscript, isDeskNotice, lastReplyIndex } from "../lib/turns";
+import {
+  displayWorkSteps,
+  groupTranscript,
+  isDeskNotice,
+  lastReplyIndex,
+  nextTranscriptPaintStart,
+  transcriptPaintStart,
+} from "../lib/turns";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
 import { useActiveSession, useStore } from "../lib/store";
 import { Composer } from "./Composer";
@@ -46,6 +53,8 @@ export function SessionPane() {
   const fetchedStats = useRef<Record<string, string>>({});
   const [heldEdits, setHeldEdits] = useState<ProjectEdit[]>([]);
   const [editsBarOpen, setEditsBarOpen] = useState(false);
+  const [editsIdle, setEditsIdle] = useState(false);
+  const [paint, setPaint] = useState({ id: "", from: 0 });
   const scroller = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const pane = useRef<HTMLElement>(null);
@@ -68,13 +77,16 @@ export function SessionPane() {
     [fileRootKey],
   );
   const edits = useMemo(() => {
-    if (!session) return extraEdits;
+    if (!session || !editsIdle) return extraEdits;
     return mergeEdits(projectEdits([session], roots), extraEdits);
-  }, [session?.id, session?.messages, roots, extraEdits]);
+  }, [session?.id, session?.messages, roots, extraEdits, editsIdle]);
   const blocks = useMemo(
     () => (session ? groupTranscript(session.messages) : []),
     [session?.messages],
   );
+  const sessionId = session?.id ?? "";
+  const paintFrom = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
+  const shownBlocks = blocks.slice(paintFrom);
   const hiddenPaths = session ? hiddenByChat[session.id] : undefined;
   const visible = useMemo(
     () => edits.filter((item) => !(hiddenPaths ?? []).some((path) => sameEditPath(path, item.path))),
@@ -97,7 +109,30 @@ export function SessionPane() {
     setEditsBarOpen(false);
     setStats({});
     fetchedStats.current = {};
+    setEditsIdle(false);
+    const idle = requestAnimationFrame(() => setEditsIdle(true));
+    return () => cancelAnimationFrame(idle);
   }, [session?.id]);
+
+  useEffect(() => {
+    const initial = transcriptPaintStart(blocks.length);
+    setPaint({ id: sessionId, from: initial });
+    if (!sessionId || initial === 0) return;
+    let current = initial;
+    let frame = 0;
+    let gone = false;
+    const tick = () => {
+      if (gone) return;
+      current = nextTranscriptPaintStart(current);
+      startTransition(() => setPaint({ id: sessionId, from: current }));
+      if (current > 0) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      gone = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     fetchedStats.current = {};
@@ -264,7 +299,13 @@ export function SessionPane() {
           if (el) followBottom.current = pinnedToBottom(el);
         }}
       >
-        {blocks.map((block, index) => {
+        {paintFrom > 0 ? (
+          <div className="transcript-earlier" aria-hidden="true">
+            Loading earlier turns…
+          </div>
+        ) : null}
+        {shownBlocks.map((block, offset) => {
+          const index = paintFrom + offset;
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
           }

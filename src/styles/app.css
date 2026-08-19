@@ -1577,6 +1577,12 @@ html.pane-dragging * {
   overscroll-behavior: contain;
 }
 
+.transcript-earlier {
+  margin: 0 0 16px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
 .turn {
   max-width: none;
   width: 100%;

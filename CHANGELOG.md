@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.5](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.4...v0.6.5) (2026-08-19)
+
+
+### Bug Fixes
+
+* make adaptive mission continuation reliable ([ba21a99](https://github.com/go7studio/Go7-Workhorse/commit/ba21a99e259724325d00bcc09f10a511baf24491))
+
 ## [0.6.4](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.3...v0.6.4) (2026-08-19)
 
 

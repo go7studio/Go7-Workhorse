@@ -1,7 +1,9 @@
 import https from "node:https";
+import { customMeterForUrl, customPlanRemainsUrl } from "../src/lib/custom-meters";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
+export { customPlanRemainsUrl };
 
 function numberVal(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -41,22 +43,34 @@ export function leftoverFromRemainingPercent(value: unknown): number | undefined
   return clampPercent(left);
 }
 
-export function customPlanRemainsUrl(baseUrl: string): string | undefined {
-  const trimmed = baseUrl.trim();
-  if (!trimmed) return undefined;
-  try {
-    const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    // Chat hosts are api.minimax.io; the documented remains path lives on www.
-    if (/minimax/i.test(url.hostname)) {
-      const host = /minimaxi\.com$/i.test(url.hostname) ? "www.minimaxi.com" : "www.minimax.io";
-      return `${url.protocol}//${host}/v1/token_plan/remains`;
-    }
-    if (/openrouter\.ai$/i.test(url.hostname)) return `${url.protocol}//${url.hostname}/api/v1/key`;
-    if (/(^|\.)synthetic\.new$/i.test(url.hostname)) return `${url.protocol}//api.synthetic.new/v2/quotas`;
-    return undefined;
-  } catch {
-    return undefined;
-  }
+/** Prepaid credits are not a weekly leftover ring. Do not invent 0 or 100. */
+function prepaidPlan(balance: number): CustomPlanUsage | undefined {
+  if (!Number.isFinite(balance) || balance < 0) return undefined;
+  return {
+    usedPercent: Number.NaN,
+    leftPercent: Number.NaN,
+    period: "unknown",
+    prepaidBalance: balance,
+    products: [{ product: "prepaid", label: "Balance", usagePercent: 0, unlimited: true }],
+  };
+}
+
+function parseDeepSeekBalance(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const rows = Array.isArray(root.balance_infos) ? root.balance_infos : [];
+  const usd = rows.find((row) => asRecord(row).currency === "USD") ?? rows[0];
+  const total = numberVal(asRecord(usd).total_balance);
+  return prepaidPlan(total);
+}
+
+function parseNovitaBalance(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const raw = numberVal(root.availableBalance);
+  if (!Number.isFinite(raw)) return undefined;
+  return prepaidPlan(raw / 10_000);
+}
+
+function parseAimlBilling(root: Record<string, unknown>): CustomPlanUsage | undefined {
+  const balance = numberVal(firstDefined(root.current_balance, root.balance));
+  return prepaidPlan(balance);
 }
 
 function pickMiniMaxRow(raw: Record<string, unknown>, model?: string): Record<string, unknown> | undefined {
@@ -231,15 +245,26 @@ function parseSyntheticQuotas(root: Record<string, unknown>): CustomPlanUsage | 
   };
 }
 
-export function parseCustomPlanUsage(raw: unknown, model?: string): CustomPlanUsage | undefined {
+export function parseCustomPlanUsage(raw: unknown, model?: string, meterId?: string): CustomPlanUsage | undefined {
   const wrapped = asRecord(raw);
   const nested = asRecord(wrapped.data);
   const root = Object.keys(nested).length && nested.limit == null ? { ...wrapped, ...nested } : wrapped;
+  if (meterId === "deepseek") return parseDeepSeekBalance(root);
+  if (meterId === "novita") return parseNovitaBalance(root);
+  if (meterId === "aimlapi") return parseAimlBilling(root);
+  if (meterId === "openrouter") return parseOpenRouterKeyUsage(root);
+  if (meterId === "synthetic") return parseSyntheticQuotas(root);
   const row = pickMiniMaxRow(root, model) ?? root;
   const openRouter = parseOpenRouterKeyUsage(root);
   if (openRouter) return openRouter;
   const synthetic = parseSyntheticQuotas(root);
   if (synthetic) return synthetic;
+  const deepseek = parseDeepSeekBalance(root);
+  if (deepseek) return deepseek;
+  const novita = parseNovitaBalance(root);
+  if (novita) return novita;
+  const aiml = parseAimlBilling(root);
+  if (aiml && (root.current_balance != null || root.autoDebitStatus != null)) return aiml;
   const intervalLeft = leftoverOf(
     row,
     "current_interval_remaining_percent",
@@ -316,6 +341,7 @@ export async function fetchCustomPlanUsage(input: {
   fetchImpl?: typeof fetch;
 }): Promise<CustomPlanUsage | undefined> {
   try {
+    const meter = customMeterForUrl(input.baseUrl);
     const url = customPlanRemainsUrl(input.baseUrl);
     const apiKey = input.apiKey.trim();
     if (!url || !apiKey) return undefined;
@@ -328,7 +354,7 @@ export async function fetchCustomPlanUsage(input: {
         },
       });
       if (!response.ok) return undefined;
-      return parseCustomPlanUsage(await response.json(), input.model);
+      return parseCustomPlanUsage(await response.json(), input.model, meter?.id);
     }
     // Electron's Chromium fetch can strip User-Agent and 429/empty these hosts.
     const { status, json } = await new Promise<{ status: number; json: unknown }>((resolve, reject) => {
@@ -360,7 +386,7 @@ export async function fetchCustomPlanUsage(input: {
       req.on("error", reject);
     });
     if (status < 200 || status >= 300) return undefined;
-    return parseCustomPlanUsage(json, input.model);
+    return parseCustomPlanUsage(json, input.model, meter?.id);
   } catch {
     return undefined;
   }

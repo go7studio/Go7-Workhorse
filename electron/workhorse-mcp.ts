@@ -25,6 +25,7 @@ import {
   isSpawnOnlyPrompt,
   nestedSpawnError,
   nextMissionIteration,
+  resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
   workerNameFromTitle,
@@ -197,7 +198,7 @@ const TOOLS = [
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
-        isolation: { type: "string", description: "worktree (default) or shared" },
+        isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         folder: { type: "string", description: "Optional absolute working folder" },
         wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
@@ -295,7 +296,7 @@ const TOOLS = [
         effort: { type: "string", description: "Explicit user override only; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
-        isolation: { type: "string", description: "worktree (default) or shared" },
+        isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         seed: {
           type: "string",
           description: "inherit (default) may reuse an idle worker. fresh starts cold with only a handoff — no parent conversation.",
@@ -1224,7 +1225,10 @@ async function spawnAgent(
         isolation: "shared" as const,
         route: input.route ?? "quick",
       }
-    : input;
+    : {
+        ...input,
+        isolation: resolveWorkerIsolation({ isolation: input.isolation }),
+      };
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
   const requestedSkills = skillQueries.length > 0
     ? resolveRequestedSkills(listDeskSkills(projectFoldersFromState()), skillQueries)

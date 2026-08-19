@@ -582,19 +582,119 @@ export function collectChildAgentReports(
     });
 }
 
+export const WORKER_REPORT_CHAR_LIMIT = 4_000;
+
+export type WorkerReportRef = {
+  messageId: string;
+  chars: number;
+  truncated: boolean;
+  omittedChars?: number;
+};
+
+export type WorkerProgressCheckpoint = {
+  phase: string;
+  currentStep: string;
+  lastActivityAt: number | null;
+  changedFiles: string[];
+  checksRun: string[];
+  blockers: string[];
+  partialReport: string | null;
+  reportRef: WorkerReportRef | null;
+};
+
+const CHECK_MARKERS: Array<[RegExp, string]> = [
+  [/\bnpm test\b/i, "npm test"],
+  [/\bnpm run build\b/i, "npm run build"],
+  [/\btypecheck\b|\btsc --noEmit\b|\btsc\b/i, "typecheck"],
+  [/\beslint\b|\bnpm run lint\b/i, "lint"],
+];
+
+function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage | undefined {
+  return [...(messages ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim());
+}
+
+export function boundWorkerReport(
+  text: string,
+  source: { messageId: string; limit?: number },
+): { report: string; truncated: boolean; reportRef: WorkerReportRef } {
+  const limit = source.limit ?? WORKER_REPORT_CHAR_LIMIT;
+  const chars = text.length;
+  if (chars <= limit) {
+    return {
+      report: text,
+      truncated: false,
+      reportRef: { messageId: source.messageId, chars, truncated: false },
+    };
+  }
+  const omittedChars = chars - limit;
+  return {
+    report: `${text.slice(0, limit).trimEnd()}\n\n[report truncated: ${omittedChars} chars omitted; full text is assistant message ${source.messageId} (${chars} chars)]`,
+    truncated: true,
+    reportRef: { messageId: source.messageId, chars, truncated: true, omittedChars },
+  };
+}
+
+function extractChecks(messages: ChatMessage[] | undefined): string[] {
+  const found = new Set<string>();
+  for (const message of messages ?? []) {
+    for (const [pattern, name] of CHECK_MARKERS) {
+      if (pattern.test(message.text)) found.add(name);
+    }
+  }
+  return [...found];
+}
+
+function extractBlockers(text: string | undefined): string[] {
+  if (!text) return [];
+  const blockers: string[] = [];
+  for (const match of text.matchAll(/^blocker:\s*(.+)$/gim)) {
+    const note = match[1]?.trim();
+    if (note) blockers.push(note);
+  }
+  if (/mission status:\s*blocked\b/i.test(text) && blockers.length === 0) blockers.push("Mission status: blocked");
+  return blockers;
+}
+
+export function workerProgressCheckpoint(
+  worker: Pick<Session, "status" | "agentRun" | "messages">,
+): WorkerProgressCheckpoint {
+  const messages = worker.messages ?? [];
+  const status = worker.agentRun?.status ?? worker.status;
+  const lastTool = [...messages].reverse().find((message) => message.kind === "tool" && message.text.trim());
+  const lastNote = lastAssistantReport(messages);
+  const lastAny = messages.length ? messages.reduce((latest, message) => (message.createdAt > latest.createdAt ? message : latest)) : null;
+  const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
+    || lastNote?.text.trim().split("\n")[0]?.trim()
+    || (status === "running" ? "started" : status);
+  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { messageId: lastNote.id }) : null;
+  return {
+    phase: status,
+    currentStep,
+    lastActivityAt: lastAny?.createdAt ?? worker.agentRun?.finishedAt ?? worker.agentRun?.startedAt ?? null,
+    changedFiles: worker.agentRun?.changedFiles ?? [],
+    checksRun: extractChecks(messages),
+    blockers: extractBlockers(lastNote?.text),
+    partialReport: bounded?.report ?? null,
+    reportRef: bounded?.truncated ? bounded.reportRef : null,
+  };
+}
+
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
 ): Record<string, unknown> {
-  const report = [...worker.messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && message.text.trim())
-    ?.text.trim();
+  const last = lastAssistantReport(worker.messages);
+  const raw = last?.text.trim();
+  const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
+  const status = worker.agentRun?.status ?? worker.status;
+  const checkpoint = workerProgressCheckpoint(worker);
   return {
     id: worker.id,
     title: worker.title,
     ...(worker.workerName ? { worker: worker.workerName } : {}),
     parentId: worker.parentId,
-    status: worker.agentRun?.status ?? worker.status,
+    status,
     provider: worker.provider,
     model: worker.model,
     effort: worker.effort,
@@ -604,7 +704,19 @@ export function workerStatusSnapshot(
     ...(worker.agentRun?.exclusions?.length ? { exclusions: worker.agentRun.exclusions } : {}),
     ...(worker.agentRun?.changedFiles?.length ? { changedFiles: worker.agentRun.changedFiles } : {}),
     ...(worker.agentRun?.mission ? { mission: worker.agentRun.mission } : {}),
-    ...(worker.agentRun?.status !== "running" && report ? { report } : {}),
+    ...(status !== "running" && bounded ? { report: bounded.report } : {}),
+    ...(status !== "running" && bounded?.truncated ? { reportRef: bounded.reportRef } : {}),
+    ...(status === "running"
+      ? {
+          phase: checkpoint.phase,
+          currentStep: checkpoint.currentStep,
+          lastActivityAt: checkpoint.lastActivityAt,
+          ...(checkpoint.checksRun.length ? { checksRun: checkpoint.checksRun } : {}),
+          ...(checkpoint.blockers.length ? { blockers: checkpoint.blockers } : {}),
+          ...(checkpoint.partialReport ? { partialReport: checkpoint.partialReport } : {}),
+          ...(checkpoint.reportRef ? { reportRef: checkpoint.reportRef } : {}),
+        }
+      : {}),
     routingMode: worker.routingMode ?? "manual",
     ...(worker.routingDecision ? { routingDecision: worker.routingDecision } : {}),
   };
@@ -1195,6 +1307,24 @@ export function nextMissionIteration(
   };
 }
 
+/**
+ * Independent writers default to a worktree. Nested bounded helpers stay
+ * shared. Anything not explicitly "shared" is worktree so omitted isolation
+ * cannot drop two writers into one dirty checkout.
+ */
+export function resolveWorkerIsolation(input: {
+  isolation?: string | null;
+  nested?: boolean;
+} = {}): "worktree" | "shared" {
+  if (input.nested) return "shared";
+  if (input.isolation === "shared") return "shared";
+  return "worktree";
+}
+
+export function workerMayWrite(role?: DeskRole): boolean {
+  return role !== "auditor";
+}
+
 export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;
@@ -1214,7 +1344,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
-    isolation: row.isolation === "worktree" ? "worktree" : "shared",
+    isolation: resolveWorkerIsolation({ isolation: row.isolation }),
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
     ...(row.role === "auditor" ? { role: "auditor" as const } : {}),
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
@@ -1258,6 +1388,103 @@ export function overlappingAgentFiles(
     }
   }
   return [...conflicts];
+}
+
+export type FileLease = {
+  sessionId: string;
+  path: string;
+  fingerprint: string;
+  claimedAt: number;
+};
+
+export function normalizeLeasePath(file: string): string {
+  return file.replaceAll("\\", "/").replace(/^\.\/+/, "");
+}
+
+export function fileContentsFingerprint(contents: string): string {
+  let hash = 2166136261;
+  let mix = 0;
+  for (let index = 0; index < contents.length; index += 1) {
+    const code = contents.charCodeAt(index);
+    hash ^= code;
+    hash = Math.imul(hash, 16777619);
+    mix = (mix + code * (index + 1)) >>> 0;
+  }
+  return `${(hash >>> 0).toString(16).padStart(8, "0")}${mix.toString(16).padStart(8, "0")}:${contents.length}`;
+}
+
+export function releaseSessionLeases(leases: FileLease[], sessionId: string): FileLease[] {
+  return leases.filter((lease) => lease.sessionId !== sessionId);
+}
+
+export function claimSharedFiles(input: {
+  leases: FileLease[];
+  sessionId: string;
+  isolation?: "worktree" | "shared";
+  role?: DeskRole;
+  files: Array<{ path: string; fingerprint: string }>;
+  now?: number;
+}): { ok: true; leases: FileLease[] } | { ok: false; error: string; conflicts: string[] } {
+  if (!workerMayWrite(input.role)) {
+    return { ok: false, error: "Review-only agents cannot write.", conflicts: input.files.map((file) => file.path) };
+  }
+  const now = input.now ?? Date.now();
+  const next = [...input.leases];
+  if (input.isolation === "worktree") {
+    for (const file of input.files) {
+      next.push({
+        sessionId: input.sessionId,
+        path: normalizeLeasePath(file.path),
+        fingerprint: file.fingerprint,
+        claimedAt: now,
+      });
+    }
+    return { ok: true, leases: next };
+  }
+  const conflicts: string[] = [];
+  for (const file of input.files) {
+    const path = normalizeLeasePath(file.path);
+    const key = path.toLowerCase();
+    const held = input.leases.find((lease) => lease.sessionId !== input.sessionId && normalizeLeasePath(lease.path).toLowerCase() === key);
+    if (held) conflicts.push(file.path);
+  }
+  if (conflicts.length) {
+    return {
+      ok: false,
+      error: `Shared-folder claim blocked: ${conflicts.join(", ")} already leased.`,
+      conflicts,
+    };
+  }
+  for (const file of input.files) {
+    next.push({
+      sessionId: input.sessionId,
+      path: normalizeLeasePath(file.path),
+      fingerprint: file.fingerprint,
+      claimedAt: now,
+    });
+  }
+  return { ok: true, leases: next };
+}
+
+export function assertSharedWrite(input: {
+  leases: FileLease[];
+  sessionId: string;
+  isolation?: "worktree" | "shared";
+  role?: DeskRole;
+  path: string;
+  currentFingerprint: string;
+}): { ok: true } | { ok: false; error: string } {
+  if (!workerMayWrite(input.role)) {
+    return { ok: false, error: "Review-only agents cannot write." };
+  }
+  if (input.isolation === "worktree") return { ok: true };
+  const key = normalizeLeasePath(input.path).toLowerCase();
+  const lease = input.leases.find((item) => item.sessionId === input.sessionId && normalizeLeasePath(item.path).toLowerCase() === key);
+  if (!lease) return { ok: false, error: `No shared-folder claim for ${input.path}.` };
+  if (lease.fingerprint !== input.currentFingerprint) {
+    return { ok: false, error: `File changed since claim: ${input.path}. Re-read before writing.` };
+  }
+  return { ok: true };
 }
 
 export function subagentTurns(

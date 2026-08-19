@@ -72,7 +72,9 @@ export function openClawMcpSetJson(launch: ExternalMcpLaunch): string {
 }
 
 function yamlQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:-]+$/.test(value) && !value.includes(":")) return value;
+  // MCP environment values are strings. Plain YAML scalars such as `1`,
+  // `true`, and `null` are typed by strict readers (Hermes uses Pydantic),
+  // so always quote them instead of relying on a reader's coercion.
   return JSON.stringify(value);
 }
 

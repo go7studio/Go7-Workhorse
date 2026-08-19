@@ -201,3 +201,30 @@ test("Cursor eval config covers authenticated ACP smoke and both usage pools", (
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-038"));
   assert.ok(regressions.regressions.some((item: any) => item.id === "REG-039"));
 });
+
+test("live eval preflight and provider smokes cover Cursor without premium defaults", () => {
+  const preflight = readFileSync(path.join(ROOT, "scripts", "workhorse-eval-preflight.ts"), "utf8");
+  const smoke = readFileSync(path.join(ROOT, "test", "provider-live-smoke.ts"), "utf8");
+  assert.match(preflight, /detectCursorLogin/);
+  assert.match(preflight, /"cursor-acp"/);
+  assert.match(smoke, /grok-4\.5/);
+  assert.match(smoke, /gpt-5\.6-luna/);
+  assert.match(smoke, /claude-haiku-4-5/);
+  assert.doesNotMatch(smoke, /\? "grok-4\.6"|\? "gpt-5\.6-sol"|\? "opus-5"/);
+});
+
+test("waiting harness delegates receive terminal worker budget errors", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const harnessSmoke = readFileSync(path.join(ROOT, "test", "external-harness-live-smoke.ts"), "utf8");
+  assert.match(store, /terminalFailure = terminalStatus/);
+  assert.match(store, /Worker ended \$\{terminalFailure\}/);
+  assert.match(harnessSmoke, /tokenBudget 6000/);
+});
+
+test("the local orchestration fixture cannot redispatch a hidden join", () => {
+  const output = execFileSync(process.execPath, [path.join(ROOT, "scripts", "workhorse-eval-fixture.mjs"), "--self-test"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  assert.match(output, /fixture self-test passed/);
+});

@@ -61,19 +61,19 @@ export function RoutingPane() {
       <div className="settings-group">
         <SwitchRow
           label="Route the work the desk hands out"
-          copy="When a chat spawns a worker without naming a bot, the desk picks the bot and effort for the slice. Off, the worker takes its parent's bot. Your own chats route only when you set one to Auto."
+          copy="Auto-pick a bot and effort for delegated work."
           on={routing.enabled}
           onChange={(on) => set({ enabled: on })}
         />
         <SwitchRow
           label="Include harnesses"
-          copy="When Routing is on, OpenClaw and Hermes may be chosen after a grant. Off, only an explicit name starts one."
+          copy="Let granted harnesses join Auto routing."
           on={routing.includeExternalAgents === true}
           onChange={(on) => set({ includeExternalAgents: on })}
         />
         <SwitchRow
           label="Allow local models"
-          copy="A local bot may win. It costs nothing and never leaves this machine."
+          copy="Let a free on-device bot win."
           on={routing.allowLocal}
           onChange={(on) => set({ allowLocal: on })}
         />
@@ -93,7 +93,7 @@ export function RoutingPane() {
         <div className={`settings-row${weighs ? "" : " off"}`}>
           <div className="settings-row-copy">
             <strong>Weekly reserve</strong>
-            <span>Hold back this much of each bot's week. A bot down to its reserve is skipped.</span>
+            <span>Skip bots at or below this weekly reserve.</span>
           </div>
           <div className="settings-control">
             <input
@@ -134,7 +134,7 @@ export function RoutingPane() {
         </div>
       </div>
       <p className="row-meta settings-note">
-        Quick is short asks — rename, format, list. Deep is debug, refactor, review, research. The rest is Balanced.
+        Quick is for short asks; Deep is for harder work.
       </p>
     </>
   );

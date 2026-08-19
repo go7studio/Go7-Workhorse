@@ -4450,6 +4450,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }));
             const childCwd = sessionExecutionCwd(environment, root);
             const waitForReply = spawnWaitsForReply(payload);
+            let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
             const markChildFailure = (error: unknown) => {
               const message = error instanceof Error ? error.message : String(error);
               setState((current) => {
@@ -4488,6 +4489,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               );
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
+                terminalFailure = terminalStatus;
                 setState((current) => {
                   const rowStatus = terminalStatus === "timed-out" ? "timed-out" as const : "failed" as const;
                   let sessions = applyChildIdleSync(current.sessions, childId, rowStatus, {
@@ -4574,7 +4576,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               markChildFailure(error);
               throw error;
             }
-            if (!fallback) return;
+            if (!fallback) {
+              if (terminalFailure) {
+                const failed = stateRef.current.sessions.find((item) => item.id === childId);
+                await replyAsk({
+                  error: failed?.agentRun?.error || `Worker ended ${terminalFailure}.`,
+                });
+              }
+              return;
+            }
             const finished = stateRef.current.sessions.find((item) => item.id === childId);
             await replyAsk({
               text: JSON.stringify(

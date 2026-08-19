@@ -49,6 +49,25 @@ test("OpenClaw list and start use injected exec, never the machine PATH", async 
   ]);
 });
 
+test("Workhorse external tasks isolate OpenClaw from the agent's prior chat", async () => {
+  let argv: string[] = [];
+  await startOpenClawTask(
+    {
+      exec: (_file, args) => {
+        argv = args;
+        return { status: 0, stdout: JSON.stringify({ status: "ok", text: "done" }), stderr: "" };
+      },
+    },
+    {
+      ref: { runtimeId: "openclaw", agentId: "main" },
+      prompt: "bounded task",
+      taskId: "workhorse_task_1",
+      now: 1,
+    },
+  );
+  assert.deepEqual(argv.slice(0, 6), ["agent", "--agent", "main", "--session-id", "workhorse_task_1", "--message"]);
+});
+
 test("OpenClaw current CLI completion payload becomes a terminal task", async () => {
   const task = await startOpenClawTask(
     {

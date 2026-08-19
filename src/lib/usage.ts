@@ -934,7 +934,7 @@ export function profileHorseTip(inks: ProfileHorseInk[]): ProfileHorseTip {
   if (used.length === 0) {
     return {
       title: "Your Workhorse",
-      blurb: "The native mark. It fills with the bots you spend tokens on.",
+      blurb: "Your usage colors the mark.",
       parts: [],
     };
   }

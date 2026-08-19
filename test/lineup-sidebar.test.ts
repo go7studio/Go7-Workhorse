@@ -149,7 +149,7 @@ test("Settings → Routing is the desk's own routing for spawned work: on by def
   // The Settings pane names what it governs.
   const pane = read("src/ui/RoutingPane.tsx");
   assert.match(pane, /Route the work the desk hands out/);
-  assert.match(pane, /Your own chats route only when you set one to Auto/);
+  assert.match(pane, /Auto-pick a bot and effort for delegated work/);
 });
 
 test("the desk routes a spawn unless the orchestrator names a bot, and picks effort for the slice", () => {

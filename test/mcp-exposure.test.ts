@@ -576,6 +576,8 @@ test("MCP install writes official OpenClaw and Hermes config, not a sidecar", ()
   assert.match(hermes, /workhorse:/);
   assert.match(hermes, /github:/);
   assert.match(hermes, /WORKHORSE_STATE_PATH:/);
+  assert.match(hermes, /ELECTRON_RUN_AS_NODE: "1"/);
+  assert.match(hermes, /WORKHORSE_MCP_PROFILE: "external-runtime"/);
   const again = upsertHermesMcpServers(hermes, { ...launch, env: { ...launch.env, WORKHORSE_STATE_PATH: "/new/state.json" } });
   assert.match(again, /\/new\/state.json/);
   assert.equal((again.match(/workhorse:/g) ?? []).length, 1);

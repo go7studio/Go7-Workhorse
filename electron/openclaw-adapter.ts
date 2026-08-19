@@ -185,12 +185,13 @@ export function taskFromOpenClawJson(text: string, ref: ExternalAgentRef, now = 
 
 export async function startOpenClawTask(
   io: OpenClawIo,
-  request: { ref: ExternalAgentRef; prompt: string; now?: number },
+  request: { ref: ExternalAgentRef; prompt: string; taskId?: string; now?: number },
 ): Promise<ExternalTask> {
   const result = await io.exec(binary(io), [
     "agent",
     "--agent",
     request.ref.agentId,
+    ...(request.taskId ? ["--session-id", request.taskId] : []),
     "--message",
     request.prompt,
     "--json",

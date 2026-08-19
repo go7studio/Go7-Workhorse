@@ -12,13 +12,13 @@ import type { CompileResult, LearningIndexStats, LearningMode, MemoryItem } from
 import { attachedCustomBots } from "../lib/settings";
 
 const MODES: { id: LearningMode; label: string; hint: string }[] = [
-  { id: "off", label: "Off", hint: "Learning is off. Nothing is recorded." },
-  { id: "capture", label: "Capture", hint: "Record redacted events. Do not compile." },
-  { id: "review", label: "Review", hint: "Propose memories. Approve before they become active." },
+  { id: "off", label: "Off", hint: "Nothing is recorded." },
+  { id: "capture", label: "Capture", hint: "Record redacted events without compiling." },
+  { id: "review", label: "Review", hint: "Propose memories for approval." },
   { id: "automatic", label: "Automatic", hint: "Promote statements that pass evidence gates." },
 ];
 
-const ACP_COMPILER_HINT = "The compiler must be a custom bot. ACP cannot do a title-less call.";
+const ACP_COMPILER_HINT = "Use a custom bot for title-less compiler calls.";
 
 export function LearningPane() {
   const store = useStore();

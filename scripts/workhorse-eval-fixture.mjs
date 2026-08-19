@@ -86,12 +86,19 @@ function hasToolResult(body) {
 function fixtureReply(body) {
   const active = activeUserRequest(body);
   const text = active.text;
+  const allText = requestText(body);
   const serialized = JSON.stringify(body?.messages ?? []);
   const afterTool = hasToolResult(body);
   const toolResults = currentToolResultText(body, active.index);
   const lastToolResult = lastToolResultText(body, active.index);
   const toolNames = currentToolNames(body, active.index);
   const runKey = Array.isArray(body?.messages) ? body.messages.length : 0;
+  // Hidden desk joins can be carried as system context while the last visible
+  // user message remains the original smoke marker. Match the whole request,
+  // otherwise the fixture mistakes a synthesis turn for another dispatch.
+  if (allText.includes("ORCHESTRATION CALL") && allText.includes("REPORTS")) {
+    return { content: "ORCHESTRATION_SUMMARY_OK" };
+  }
   if (text.includes("[WORKER_SMOKE]")) return { content: "WORKER_OK" };
   if (text.includes("[PEER_TARGET]")) return { content: "PEER_OK" };
   if (text.includes("[ORCHESTRATION_SMOKE]") && !afterTool) {
@@ -196,6 +203,12 @@ if (process.argv.includes("--self-test")) {
     { role: "user", content: "All workers finished." },
   ] });
   assert.equal(joined.tool, undefined);
+  const synthesis = fixtureReply({ messages: [{
+    role: "system",
+    content: "ORCHESTRATION CALL\n- User: [ORCHESTRATION_SMOKE]\n\nREPORTS\nWORKER_OK",
+  }, { role: "user", content: "[ORCHESTRATION_SMOKE]" }] });
+  assert.equal(synthesis.content, "ORCHESTRATION_SUMMARY_OK");
+  assert.equal(synthesis.tool, undefined);
   const peerList = fixtureReply({ messages: [{ role: "user", content: "[PEER_ID_SMOKE]" }] });
   assert.equal(peerList.tool?.name, "workhorse_list_chats");
   const peerAsk = fixtureReply({ messages: [

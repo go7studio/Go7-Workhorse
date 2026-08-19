@@ -59,7 +59,7 @@ function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string
       : "Claude not found.";
   }
   if (id === "cursor") {
-    if (link.needsAuth && !link.connected) return "Cursor Agent is installed. Sign in with agent login, then Recheck.";
+    if (link.needsAuth && !link.connected) return "Sign in to Cursor Agent, then Recheck.";
     return found || link.connected ? "Local Cursor Agent ready." : "Cursor ACP binary or login not found.";
   }
   return found ? "Marked for a future adapter" : "Not connected";
@@ -83,7 +83,7 @@ export function Settings() {
     void (async () => {
       const run = window.workhorse?.claudeSetupToken;
       if (!run) return;
-      setAuthMessage("Signing in. Finish in your browser.");
+      setAuthMessage("Finish sign-in in your browser.");
       const result = await run();
       setAuthMessage(result.ok ? "" : result.message || "Sign-in failed.");
       store.refreshClaudeLogin();
@@ -236,7 +236,7 @@ export function Settings() {
             <div className="settings-row">
               <div className="settings-row-copy">
                 <strong>Diagnostics</strong>
-                <span>{supportNote || "A support report. Private data excluded."}</span>
+                <span>{supportNote || "Export a private-data-free support report."}</span>
               </div>
               <div className="settings-control">
                 <button className="tiny" type="button" onClick={() => {
@@ -737,11 +737,7 @@ function AgentSystemsBlock() {
       <div className="settings-row settings-group-head">
         <div className="settings-row-copy">
           <strong>Harnesses</strong>
-          <span>
-            OpenClaw and Hermes are installed runtimes, not vendors. A plan can hand them a slice after a grant, and
-            through the MCP they can read this desk and spawn a worker on it. Install MCP writes that server into
-            whichever is installed. No token is stored.
-          </span>
+          <span>Installed runtimes the desk can grant work to.</span>
           {note ? <span className="settings-row-note">{note}</span> : null}
         </div>
         <div className="settings-control">
@@ -756,7 +752,7 @@ function AgentSystemsBlock() {
                 setNote(
                   result.message ||
                     (result.ok
-                      ? "Wrote the Workhorse MCP into OpenClaw and Hermes. They launch this app’s helper. No token stored."
+                      ? "Installed Workhorse MCP for the available harnesses."
                       : "Could not install."),
                 );
               });
@@ -805,10 +801,7 @@ function AgentSystemsBlock() {
       <label className="settings-row">
         <div className="settings-row-copy">
           <strong>Inbound parent</strong>
-          <span>
-            When OpenClaw or Hermes spawns a worker here without naming a chat, it lands under this one. None turns
-            such spawns away with context_required.
-          </span>
+          <span>Unnamed inbound work lands under this chat.</span>
         </div>
         <div className="settings-control">
           <select

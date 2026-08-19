@@ -75,7 +75,7 @@ test("learning defaults off and stays in Settings", () => {
   const pane = fs.readFileSync(path.join(ROOT, "src", "ui", "LearningPane.tsx"), "utf8");
   const sidebar = fs.readFileSync(path.join(ROOT, "src", "ui", "Sidebar.tsx"), "utf8");
   assert.match(settingsUi, /id: "learning"/);
-  assert.match(pane, /Learning is off/);
+  assert.match(pane, /Nothing is recorded/);
   assert.match(pane, /Private memory, on this disk only/);
   assert.doesNotMatch(sidebar, /setSettingsSection\("learning"\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /generate-title|generateTitle/);
@@ -608,7 +608,7 @@ test("compiler picker only lists attached custom bots", () => {
   const pane = fs.readFileSync(path.join(ROOT, "src", "ui", "LearningPane.tsx"), "utf8");
   assert.match(pane, /attachedCustomBots/);
   assert.match(pane, /eligibleLearningCompilers/);
-  assert.match(pane, /ACP cannot do a title-less call/);
+  assert.match(pane, /Use a custom bot for title-less compiler calls/);
   assert.match(pane, /Private memory, on this disk only/);
   assert.doesNotMatch(pane, /attachedStockVendors/);
   assert.doesNotMatch(pane, /modelsFor\(/);

@@ -55,6 +55,18 @@ test("the turn being sent right now is never replayed as well", () => {
   assert.deepEqual(withPlaceholder.map((item) => item.role), ["user", "assistant"]);
 });
 
+test("peer turns remain conversational history for custom bots", () => {
+  const history = customChatHistory([
+    msg("user", "First peer order", "peer"),
+    msg("assistant", "First peer result"),
+    msg("user", "Second peer order", "peer"),
+  ]);
+  assert.deepEqual(history, [
+    { role: "user", text: "First peer order" },
+    { role: "assistant", text: "First peer result" },
+  ]);
+});
+
 test("desk notices are not put in the model's mouth", () => {
   const history = customChatHistory([
     msg("user", "Do a thing"),

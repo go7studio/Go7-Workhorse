@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import { detectClaudeLogin } from "../electron/claude-login";
 import { detectCodexLogin } from "../electron/codex-login";
+import { detectCursorLogin } from "../electron/cursor-login";
 import { detectGrokLogin } from "../electron/grok-login";
 
 function binaryEvidence(value: string | null | undefined) {
@@ -11,6 +12,7 @@ function binaryEvidence(value: string | null | undefined) {
 const grok = detectGrokLogin();
 const codex = detectCodexLogin();
 const claude = detectClaudeLogin();
+const cursor = detectCursorLogin();
 
 const report = {
   schemaVersion: 1,
@@ -33,6 +35,12 @@ const report = {
       needsAuth: claude.needsAuth,
       acp: binaryEvidence(claude.acpBinary),
       cli: binaryEvidence(claude.cliBinary),
+    },
+    "cursor-acp": {
+      connected: cursor.connected,
+      needsAuth: cursor.needsAuth,
+      acp: binaryEvidence(cursor.binary),
+      prefix: cursor.prefixArgs.map((value) => path.basename(value)),
     },
   },
   redaction: {

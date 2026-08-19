@@ -73,7 +73,7 @@ export function Welcome() {
           </button>
         ) : (
           <button className="ghost" type="button" onClick={() => openSettings("llms")}>
-            Connect an agent
+            Add a bot
           </button>
         )}
       </div>

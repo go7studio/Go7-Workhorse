@@ -40,11 +40,11 @@ export function customChatHistory(
 ): CustomHistoryMessage[] {
   const maxChars = options?.maxChars ?? CUSTOM_HISTORY_MAX_CHARS;
 
-  // Only what was actually said. Tool, thought, compact, peer and subagent
-  // messages are the desk's own record of the turn, not the conversation.
+  // Only what was actually said. Peer user messages are real turns in the
+  // target chat; tool, thought, compact, and subagent rows are desk records.
   const spoken: CustomHistoryMessage[] = [];
   for (const message of messages) {
-    if (message.kind) continue;
+    if (message.kind && message.kind !== "peer") continue;
     if (message.role !== "user" && message.role !== "assistant") continue;
     const text = (message.text ?? "").trim();
     if (!text) continue;

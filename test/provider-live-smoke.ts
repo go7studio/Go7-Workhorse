@@ -1,4 +1,7 @@
 import { ClaudeSessionHost } from "../electron/claude-host";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { detectClaudeLogin } from "../electron/claude-login";
 import { CodexSessionHost } from "../electron/codex-host";
 import { detectCodexLogin } from "../electron/codex-login";
@@ -25,13 +28,14 @@ const detection =
 if (!detection.connected) throw new Error(`${provider} is not connected; no live call was made.`);
 
 const model =
-  provider === "grok"
-    ? "grok-4.6"
+  process.argv[3]?.trim() ||
+  (provider === "grok"
+    ? "grok-4.5"
     : provider === "codex"
-      ? "gpt-5.6-sol"
+      ? "gpt-5.6-luna"
       : provider === "claude"
-        ? "opus-5"
-        : process.argv[3]?.trim() || "composer-2.5";
+        ? "claude-haiku-4-5"
+        : "composer-2.5");
 const host =
   provider === "grok"
     ? new GrokSessionHost()
@@ -42,6 +46,7 @@ const host =
         : new CursorSessionHost();
 const events: GrokIpcEvent[] = [];
 const sessionId = `smoke-${provider}-${Date.now()}`;
+const smokeCwd = mkdtempSync(join(tmpdir(), `workhorse-${provider}-connectivity-`));
 
 try {
   const result = await Promise.race([
@@ -52,7 +57,7 @@ try {
         effort: "low",
         mode: "ask",
         sandbox: "read-only",
-        cwd: process.cwd(),
+        cwd: smokeCwd,
         text: "Connectivity check only. Do not use tools or inspect files. Return exactly: ADAPTER_OK",
         mcpServers: [],
         role: "orchestrator",
@@ -91,6 +96,7 @@ try {
   if (!exactReply) throw new Error(`${provider} did not follow the deterministic reply contract.`);
 } finally {
   host.disposeAll();
+  rmSync(smokeCwd, { recursive: true, force: true });
 }
 
 // ACP children can retain transport handles briefly after disposal; this

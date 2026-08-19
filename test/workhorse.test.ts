@@ -5192,7 +5192,7 @@ test("Profile horse fills with colors of bots you have used", () => {
     [...HORSE_NATIVE_INKS],
   );
   assert.equal(profileHorseTip(native).title, "Your Workhorse");
-  assert.match(profileHorseTip(native).blurb, /native mark/);
+  assert.match(profileHorseTip(native).blurb, /usage colors the mark/);
   assert.deepEqual(profileHorseTip(native).parts, []);
   assert.equal(profileHorseTip([]).title, "Your Workhorse");
 

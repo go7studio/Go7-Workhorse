@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "contractVersion": "0.6.5",
   "title": "Observed production regression coverage",
-  "observedThrough": "2026-08-18",
+  "observedThrough": "2026-08-19",
   "regressions": [
     {
       "id": "REG-001",
@@ -470,6 +470,60 @@
       "scenarios": ["MOD-S1", "REL-S3"],
       "rubric": ["MOD-01", "REL-06"],
       "sourceFiles": ["electron/claude-launch.ts", "test/claude-adapter.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-053",
+      "behavior": "Live readiness reports Grok, Codex, Claude, and Cursor before calls; deterministic adapter smokes keep explicit overrides and default to cheaper callable models in an empty temporary workspace.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
+      "scenarios": ["SET-S4"],
+      "rubric": ["SET-07"],
+      "sourceFiles": ["scripts/workhorse-eval-preflight.ts", "test/provider-live-smoke.ts", "test/eval-kit.test.ts"],
+      "verification": ["eval:preflight", "eval:smoke", "verify"]
+    },
+    {
+      "id": "REG-054",
+      "behavior": "The local orchestration fixture distinguishes a first worker request from a joined-report synthesis turn and cannot amplify one request into repeated dispatches.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["ORC-S4"],
+      "rubric": ["ORC-06", "ORC-07"],
+      "sourceFiles": ["scripts/workhorse-eval-fixture.mjs", "test/eval-kit.test.ts"],
+      "verification": ["eval:fixture-check", "verify"]
+    },
+    {
+      "id": "REG-055",
+      "behavior": "External harness tasks use clean task-scoped context, waiting delegates return terminal budget failures immediately, and a bounded two-turn loop proves real persisted Workhorse replies.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/openclaw-adapter.ts", "src/lib/store.tsx", "test/openclaw-adapter.test.ts", "test/external-harness-live-smoke.ts", "test/eval-kit.test.ts"],
+      "verification": ["eval:harness-smoke", "verify"]
+    },
+    {
+      "id": "REG-056",
+      "behavior": "Custom-provider replay retains correlated peer user turns so a harness follow-up reaches the same worker with its prior task context.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["CON-S4", "ORC-S9"],
+      "rubric": ["CON-07", "ORC-17"],
+      "sourceFiles": ["src/lib/custom-history.ts", "test/custom-history.test.ts", "test/external-harness-live-smoke.ts"],
+      "verification": ["eval:harness-smoke", "verify"]
+    },
+    {
+      "id": "REG-057",
+      "behavior": "Workhorse's Hermes MCP installer quotes every YAML scalar as a string, preserving strict environment validation and all external-runtime execution tools.",
+      "profiles": ["custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/mcp-install.ts", "test/mcp-exposure.test.ts", "test/external-harness-live-smoke.ts"],
+      "verification": ["eval:harness-smoke", "verify"]
+    },
+    {
+      "id": "REG-058",
+      "behavior": "Profile, Harnesses, Routing, and Learning keep explanatory product copy to direct one-line labels and hints.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["SET-S1", "SET-S2"],
+      "rubric": ["SET-01", "SET-02"],
+      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx", "src/ui/RoutingPane.tsx", "src/ui/LearningPane.tsx", "src/lib/usage.ts"],
       "verification": ["eval:validate", "verify"]
     }
   ]

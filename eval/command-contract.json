@@ -38,6 +38,7 @@
     "custom-kimi": [],
     "custom-anthropic": []
   },
+  "providerNativePolicy": "Provider-native arrays are non-normative baseline examples, not allowlists. Every run records the runtime-discovered palette and reports additions, removals, ownership collisions, and no-op commands as drift without hard-coding one installed vendor version.",
   "canonicalTranslations": [
     {
       "intent": "recurring work",

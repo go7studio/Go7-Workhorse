@@ -187,7 +187,7 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
       cwd: ROOT,
       mode: "ask",
     });
-    assert.ok(!/grok/i.test(spec.command));
+    assert.ok(!/grok/i.test(path.basename(spec.command)));
     assert.ok(!spec.argv.some((arg) => /grok/i.test(arg)));
     assert.ok(!spec.argv.includes("--sandbox"));
     assert.equal(spec.model, "claude-opus-5");

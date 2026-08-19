@@ -72,6 +72,9 @@ test("plan, device, learning, and performance contracts map to suite rubrics and
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
   assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
   for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
+  for (const file of performance.sourceFiles.filter((item: string) => /^test\/.*\.test\.ts$/.test(item))) {
+    assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
+  }
   assert.ok(manifest.scripts["eval:harness-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
@@ -125,8 +128,13 @@ test("eval baseline and contracts track the current product generation", () => {
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
   assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
   assert.equal(config.source.expectedVersion, manifest.version);
-  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "LRN-S3"]) assert.ok(scenario.has(id), id);
-  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "REL-08", "LRN-06"]) assert.ok(rubric.has(id), id);
+  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "REL-S6", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "REL-08", "REL-09", "LRN-06"]) assert.ok(rubric.has(id), id);
+  const setupBaseline = suite.areas.find((area: any) => area.id === "setup").rubric.find((item: any) => item.id === "SET-01").baseline;
+  assert.equal(setupBaseline.status, "partial");
+  assert.match(setupBaseline.basis, /Getting started.*inventories recognized harnesses/i);
+  const harnessBaseline = suite.areas.find((area: any) => area.id === "setup").rubric.find((item: any) => item.id === "SET-02").baseline;
+  assert.match(harnessBaseline.basis, /Settings and Welcome both enumerate/i);
   assert.ok(orchestration.lifecycleStates.includes("interrupted"));
   assert.ok(orchestration.lifecycleStates.includes("unknown"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_ask_chat"));
@@ -134,8 +142,11 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_continue_mission"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
+  const commands = json("eval/command-contract.json");
+  assert.match(commands.providerNativePolicy, /non-normative.*runtime-discovered/i);
   assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
   assert.match(orchestration.semantics.adaptiveMission, /one wave/i);
+  assert.match(orchestration.semantics.budgetTruth, /budget-exceeded is unsuccessful/i);
   assert.match(orchestration.routingContract.sequentialRule, /opt-in per mission/i);
   assert.equal(providers.profiles.some((profile: any) => ["openclaw", "hermes"].includes(profile.id)), false);
   assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);

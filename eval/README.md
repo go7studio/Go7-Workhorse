@@ -86,9 +86,9 @@ The validator checks:
 - every observed regression maps to valid profiles, scenarios, rubrics,
   source boundaries, and verification commands;
 - the large-desk performance contract maps its scale fixtures, rendering and
-  persistence boundaries, verification commands, and rubric items;
+  persistence boundaries, verification commands, rubric items, and default tests;
 - the baseline is a full commit and the example version matches package.json;
-- config profiles, native-command profiles, and provider profiles agree;
+- config and provider profiles agree; native-command examples stay runtime-discovered;
 - the Settings section inventory still matches the product.
 
 This makes adding a core command or Settings section without updating the eval
@@ -136,7 +136,7 @@ withheld below 60% coverage.
    project/chat navigation, search, progressive transcript/media/diff paint,
    streaming render isolation, compact persistence, and restart recovery.
 10. **Packaged/install lane:** compare source, package, running build, Windows
-   installer, macOS installer, and architecture-matched macOS update.
+   installer/update, macOS installer, and architecture-matched macOS update.
 11. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
 12. **Score and defect ledger:** retain exact reproductions separately from

@@ -426,6 +426,51 @@
       "rubric": ["ORC-17"],
       "sourceFiles": ["electron/workhorse-mcp.ts", "electron/main.ts", "electron/grok-host.ts", "electron/codex-host.ts", "electron/claude-host.ts", "electron/cursor-host.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-048",
+      "behavior": "Every deterministic performance test named by the performance contract runs inside the default npm test and verify gates; an existing but uninvoked test fails eval validation instead of producing false confidence.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["PRJ-S5", "REL-S3", "REL-S5"],
+      "rubric": ["PRJ-08", "REL-06", "REL-08"],
+      "sourceFiles": ["package.json", "eval/performance-contract.json", "scripts/workhorse-eval.mjs", "test/eval-kit.test.ts", "test/performance.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-049",
+      "behavior": "A helper that reaches its token ceiling becomes budget-exceeded and is stopped promptly; its parent preserves that unsuccessful terminal state, returns no completed report, and never turns a generic worker-wave notice into a completed mission claim.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S4", "ORC-S9"],
+      "rubric": ["ORC-06", "ORC-07", "ORC-17"],
+      "sourceFiles": ["src/lib/subagents.ts", "src/lib/store.tsx", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "eval/orchestration-contract.json"],
+      "verification": ["eval:validate", "verify", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-050",
+      "behavior": "A packaged Windows update selects and validates the expected Setup executable, quits only for a real installer launch, preserves the Workhorse identity, credential namespace, and state, relaunches, and leaves the existing install usable after every failure.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S3", "REL-S6"],
+      "rubric": ["REL-02", "REL-05", "REL-09"],
+      "sourceFiles": ["electron/app-update.ts", "electron/main.ts", "src/ui/Sidebar.tsx", "test/app-update.test.ts", "docs/FEATURES.md"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-051",
+      "behavior": "Workhorse-owned commands remain a fixed interoperable contract, while provider-native commands are captured from the live runtime and compared with non-normative examples; additions or removals become drift evidence instead of a hard-coded vendor-version failure.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
+      "scenarios": ["CMD-S1", "CMD-S3"],
+      "rubric": ["CMD-01", "CMD-02", "CMD-06"],
+      "sourceFiles": ["eval/command-contract.json", "scripts/workhorse-eval.mjs", "electron/grok-agent.ts", "src/lib/commands.ts", "test/eval-kit.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-052",
+      "behavior": "Provider launch tests identify the executable or adapter itself rather than rejecting an unrelated parent-folder name; an isolated worktree containing another vendor word still passes when the launched Claude command is Claude.",
+      "profiles": ["claude-acp"],
+      "scenarios": ["MOD-S1", "REL-S3"],
+      "rubric": ["MOD-01", "REL-06"],
+      "sourceFiles": ["electron/claude-launch.ts", "test/claude-adapter.test.ts"],
+      "verification": ["eval:validate", "verify"]
     }
   ]
 }

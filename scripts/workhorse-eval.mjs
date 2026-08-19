@@ -126,6 +126,9 @@ async function validate() {
   if (!sameMembers(Object.keys(commands.providerNative ?? {}), profileIds)) {
     problems.push("providerNative keys and provider-matrix profiles differ");
   }
+  if (!/runtime-discovered/i.test(commands.providerNativePolicy ?? "") || !/non-normative/i.test(commands.providerNativePolicy ?? "")) {
+    problems.push("providerNativePolicy must require non-normative runtime discovery");
+  }
   for (const profile of configExample.modelPolicy?.providerSmokeExceptions?.profiles ?? []) {
     if (!profileIds.includes(profile)) problems.push(`config smoke policy references unknown profile ${profile}`);
   }
@@ -283,6 +286,12 @@ async function validate() {
   }
   for (const command of performance.verificationCommands ?? []) {
     if (!packageManifest.scripts?.[command]) problems.push(`performance verification command is missing: ${command}`);
+  }
+  const defaultTestScript = packageManifest.scripts?.test ?? "";
+  for (const file of (performance.sourceFiles ?? []).filter((item) => /^test\/.*\.test\.ts$/.test(item))) {
+    if (!defaultTestScript.includes(file)) {
+      problems.push(`performance test is not in the default test gate: ${file}`);
+    }
   }
   for (const file of [executionPlan.fixture?.source, executionPlan.fixture?.oracle, deviceCapabilities.fixture].filter(Boolean)) {
     try {

@@ -81,7 +81,7 @@
           "scenarios": ["SET-S1"],
           "passCriteria": "Fresh launch exposes the five named concepts with labels or single-line copy, avoids repeated or multi-sentence helper prose, and can be reopened later.",
           "evidence": "First-launch screenshots, action transcript, and post-restart screenshot.",
-          "baseline": { "status": "not_found", "basis": "Static source walk: Welcome.tsx currently offers Create a project, Link an existing folder, and Connect an agent/Start a chat but no Getting Started flow." }
+          "baseline": { "status": "partial", "basis": "Static source walk: Welcome.tsx now labels Getting started, inventories recognized harnesses, and exposes project, folder, and chat actions; explicit permission orientation plus intentional dismiss/reopen state remain unproven." }
         },
         {
           "id": "SET-02",
@@ -93,7 +93,7 @@
           "scenarios": ["SET-S1", "SET-S2"],
           "passCriteria": "Grok, Codex, Claude, Cursor, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
           "evidence": "Harness inventory screenshots plus detection payloads with secrets removed.",
-          "baseline": { "status": "partial", "basis": "Static source walk: Settings has stock/custom rows and detection logic, while Welcome does not show the recognized inventory." }
+          "baseline": { "status": "partial", "basis": "Static source walk: Settings and Welcome both enumerate stock and custom connections with readiness labels; live evidence must still prove Ready, Recognized, Sign in needed, Unavailable, and Not found match binary, authentication, and ACP facts." }
         },
         {
           "id": "SET-03",
@@ -464,6 +464,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Open the slash palette in one chat per profile and capture the common command set.",
+            "Capture the runtime-discovered provider-native inventory, compare it with the non-normative baseline examples, and report additions or removals as drift instead of rejecting a newer vendor version.",
             "Exercise every documented alias through typed input, not only palette clicks.",
             "Verify provider-native commands appear only where supported and duplicate names resolve to the intended owner.",
             "Confirm unavailable capabilities are hidden or clearly labeled rather than accepted and ignored."
@@ -897,6 +898,7 @@
             "Set a measurable /goal with an explicit evidence-based completion condition, allowed scope, budget, timeout, and maximum concurrency.",
             "Verify the parent records a plan or next action, delegates only bounded independent work, and continues useful local work while children run.",
             "Return one success, one recoverable child failure, and one needs-input result; verify the parent retries or reroutes within limits and surfaces the real question.",
+            "Force one helper past a small fixture token ceiling; verify it becomes budget-exceeded, is cancelled promptly, returns no completed report, and prevents an unqualified All workers finished or mission-complete claim.",
             "Pause, restart Workhorse, and resume; verify goal, child lineage, checkpoints, budgets, and completed work persist without duplicate dispatch.",
             "Complete the goal and verify the parent marks complete only after evidence is reconciled; separately prove blocked and cancelled terminal states stop iteration."
           ]
@@ -1671,6 +1673,19 @@
             "Interrupt and relaunch from the copied state, then verify the newest durable chat, project, draft, goal, worker, attachment metadata, and sidebar nesting recover exactly once.",
             "Record state size, write count, backup count, recovery choice, and post-restart interaction evidence without reading or mutating production userData."
           ]
+        },
+        {
+          "id": "REL-S6",
+          "name": "Install a packaged Windows update without losing the desk",
+          "executor": "package",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Run a packaged Windows x64 build from an isolated install and offer a mocked newer release with the expected Setup executable.",
+            "Verify Workhorse selects the Windows installer, validates the asset, starts it only after the desk is ready to quit, and relaunches the same application identity.",
+            "Verify the credential-store namespace and isolated user state survive the update without repeated approval prompts.",
+            "Run unavailable, malformed, wrong-platform, download, launch, cancellation, and relaunch failures and verify the existing install and user state remain usable.",
+            "Verify source checkouts use the documented development update path and never impersonate the packaged updater."
+          ]
         }
       ],
       "rubric": [
@@ -1761,6 +1776,17 @@
           "scenarios": ["REL-S5"],
           "passCriteria": "Draft typing remains local until its normal flush boundary; active output is journalled at the declared cadence; state JSON is compact; recovery backups respect their interval; restart restores the newest compatible state once without duplicate work or attachment loss.",
           "evidence": "Injected-clock save trace, serialization and backup counters, state and backup sizes/hashes, restart record, recovered ids, and automated persistence-scale output."
+        },
+        {
+          "id": "REL-09",
+          "criterion": "Packaged Windows updates use the expected Setup executable, preserve application identity and user state, and fail recoverably.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S6"],
+          "passCriteria": "A packaged Windows build selects and validates the Setup asset, quits only for a real installer launch, relaunches the same app identity, preserves credential access and state, and leaves the prior install usable on every failure path.",
+          "evidence": "Release metadata, platform and asset decision, installer path/hash, process transition, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
         }
       ]
     },

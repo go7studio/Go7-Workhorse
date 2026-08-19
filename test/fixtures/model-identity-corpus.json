@@ -1,0 +1,1121 @@
+{
+  "note": "Exact runtime model ids observed across the desk's providers on 2026-08-19. Characterization corpus: these are the ids that must stay distinct. Not a picker, not an availability claim.",
+  "observedAt": "2026-08-19",
+  "variants": [
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-fable-5",
+      "displayName": "Fable 5"
+    },
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-haiku-4-5",
+      "displayName": "Haiku 4.5"
+    },
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-opus-4-8",
+      "displayName": "Opus 4.8"
+    },
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-opus-5",
+      "displayName": "Opus 5"
+    },
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-sonnet-4-6",
+      "displayName": "Sonnet 4.6"
+    },
+    {
+      "providerId": "claude",
+      "runtimeModelId": "claude-sonnet-5",
+      "displayName": "Sonnet 5"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.3-codex-spark",
+      "displayName": "GPT-5.3-Codex-Spark"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.4",
+      "displayName": "GPT-5.4"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.4-mini",
+      "displayName": "GPT-5.4-Mini"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.5",
+      "displayName": "GPT-5.5"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.6-luna",
+      "displayName": "GPT-5.6-Luna"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.6-sol",
+      "displayName": "GPT-5.6-Sol"
+    },
+    {
+      "providerId": "codex",
+      "runtimeModelId": "gpt-5.6-terra",
+      "displayName": "GPT-5.6-Terra"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "auto",
+      "displayName": "Auto (Cursor)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4-sonnet",
+      "displayName": "Claude Sonnet 4"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4-sonnet-thinking",
+      "displayName": "Claude Sonnet 4 Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.5-opus-high",
+      "displayName": "Claude Opus 4.5"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.5-opus-high-thinking",
+      "displayName": "Claude Opus 4.5 Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.5-sonnet",
+      "displayName": "Claude Sonnet 4.5"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.5-sonnet-thinking",
+      "displayName": "Claude Sonnet 4.5 Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-opus-high",
+      "displayName": "Claude Opus 4.6 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-opus-high-thinking",
+      "displayName": "Claude Opus 4.6 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-opus-max",
+      "displayName": "Claude Opus 4.6 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-opus-max-thinking",
+      "displayName": "Claude Opus 4.6 1M Max Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-sonnet-medium",
+      "displayName": "Claude Sonnet 4.6 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-4.6-sonnet-medium-thinking",
+      "displayName": "Claude Sonnet 4.6 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-high",
+      "displayName": "Claude Fable 5 1M (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-low",
+      "displayName": "Claude Fable 5 1M Low (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-max",
+      "displayName": "Claude Fable 5 1M Max (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-medium",
+      "displayName": "Claude Fable 5 1M Medium (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-thinking-high",
+      "displayName": "Claude Fable 5 1M Thinking (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-thinking-low",
+      "displayName": "Claude Fable 5 1M Low Thinking (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-thinking-max",
+      "displayName": "Claude Fable 5 1M Max Thinking (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-thinking-medium",
+      "displayName": "Claude Fable 5 1M Medium Thinking (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-thinking-xhigh",
+      "displayName": "Claude Fable 5 1M Extra High Thinking (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-fable-5-xhigh",
+      "displayName": "Claude Fable 5 1M Extra High (NO ZDR)"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-high",
+      "displayName": "Claude Opus 4.7 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-high-fast",
+      "displayName": "Claude Opus 4.7 1M High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-low",
+      "displayName": "Claude Opus 4.7 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-low-fast",
+      "displayName": "Claude Opus 4.7 1M Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-max",
+      "displayName": "Claude Opus 4.7 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-max-fast",
+      "displayName": "Claude Opus 4.7 1M Max Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-medium",
+      "displayName": "Claude Opus 4.7 1M Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-medium-fast",
+      "displayName": "Claude Opus 4.7 1M Medium Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-high",
+      "displayName": "Claude Opus 4.7 1M High Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-high-fast",
+      "displayName": "Claude Opus 4.7 1M High Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-low",
+      "displayName": "Claude Opus 4.7 1M Low Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-low-fast",
+      "displayName": "Claude Opus 4.7 1M Low Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-max",
+      "displayName": "Claude Opus 4.7 1M Max Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-max-fast",
+      "displayName": "Claude Opus 4.7 1M Max Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-medium",
+      "displayName": "Claude Opus 4.7 1M Medium Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-medium-fast",
+      "displayName": "Claude Opus 4.7 1M Medium Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-xhigh",
+      "displayName": "Claude Opus 4.7 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-thinking-xhigh-fast",
+      "displayName": "Claude Opus 4.7 1M Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-xhigh",
+      "displayName": "Claude Opus 4.7 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-7-xhigh-fast",
+      "displayName": "Claude Opus 4.7 1M Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-high",
+      "displayName": "Claude Opus 4.8 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-high-fast",
+      "displayName": "Claude Opus 4.8 1M Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-low",
+      "displayName": "Claude Opus 4.8 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-low-fast",
+      "displayName": "Claude Opus 4.8 1M Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-max",
+      "displayName": "Claude Opus 4.8 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-max-fast",
+      "displayName": "Claude Opus 4.8 1M Max Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-medium",
+      "displayName": "Claude Opus 4.8 1M Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-medium-fast",
+      "displayName": "Claude Opus 4.8 1M Medium Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-high",
+      "displayName": "Claude Opus 4.8 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-high-fast",
+      "displayName": "Claude Opus 4.8 1M Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-low",
+      "displayName": "Claude Opus 4.8 1M Low Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-low-fast",
+      "displayName": "Claude Opus 4.8 1M Low Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-max",
+      "displayName": "Claude Opus 4.8 1M Max Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-max-fast",
+      "displayName": "Claude Opus 4.8 1M Max Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-medium",
+      "displayName": "Claude Opus 4.8 1M Medium Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-medium-fast",
+      "displayName": "Claude Opus 4.8 1M Medium Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-xhigh",
+      "displayName": "Claude Opus 4.8 1M Extra High Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-thinking-xhigh-fast",
+      "displayName": "Claude Opus 4.8 1M Extra High Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-xhigh",
+      "displayName": "Claude Opus 4.8 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-4-8-xhigh-fast",
+      "displayName": "Claude Opus 4.8 1M Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-high",
+      "displayName": "Claude Opus 5 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-high-fast",
+      "displayName": "Claude Opus 5 1M Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-low",
+      "displayName": "Claude Opus 5 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-low-fast",
+      "displayName": "Claude Opus 5 1M Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-medium",
+      "displayName": "Claude Opus 5 1M Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-medium-fast",
+      "displayName": "Claude Opus 5 1M Medium Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-high",
+      "displayName": "Claude Opus 5 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-high-fast",
+      "displayName": "Claude Opus 5 1M Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-low",
+      "displayName": "Claude Opus 5 1M Low Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-low-fast",
+      "displayName": "Claude Opus 5 1M Low Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-max",
+      "displayName": "Claude Opus 5 1M Max Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-max-fast",
+      "displayName": "Claude Opus 5 1M Max Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-medium",
+      "displayName": "Claude Opus 5 1M Medium Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-medium-fast",
+      "displayName": "Claude Opus 5 1M Medium Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-xhigh",
+      "displayName": "Claude Opus 5 1M Extra High Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-opus-5-thinking-xhigh-fast",
+      "displayName": "Claude Opus 5 1M Extra High Thinking Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-high",
+      "displayName": "Claude Sonnet 5 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-low",
+      "displayName": "Claude Sonnet 5 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-max",
+      "displayName": "Claude Sonnet 5 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-medium",
+      "displayName": "Claude Sonnet 5 1M Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-thinking-high",
+      "displayName": "Claude Sonnet 5 1M Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-thinking-low",
+      "displayName": "Claude Sonnet 5 1M Low Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-thinking-max",
+      "displayName": "Claude Sonnet 5 1M Max Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-thinking-medium",
+      "displayName": "Claude Sonnet 5 1M Medium Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-thinking-xhigh",
+      "displayName": "Claude Sonnet 5 1M Extra High Thinking"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "claude-sonnet-5-xhigh",
+      "displayName": "Claude Sonnet 5 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "composer-2.5",
+      "displayName": "Composer 2.5"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "composer-2.5-fast",
+      "displayName": "Composer 2.5 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-high",
+      "displayName": "Cursor Grok 4.5"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-high-fast",
+      "displayName": "Cursor Grok 4.5 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-low",
+      "displayName": "Cursor Grok 4.5 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-low-fast",
+      "displayName": "Cursor Grok 4.5 Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-medium",
+      "displayName": "Cursor Grok 4.5 Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.5-medium-fast",
+      "displayName": "Cursor Grok 4.5 Medium Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-high",
+      "displayName": "Cursor Grok 4.6"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-high-fast",
+      "displayName": "Cursor Grok 4.6 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-low",
+      "displayName": "Cursor Grok 4.6 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-low-fast",
+      "displayName": "Cursor Grok 4.6 Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-medium",
+      "displayName": "Cursor Grok 4.6 Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-medium-fast",
+      "displayName": "Cursor Grok 4.6 Medium Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-xhigh",
+      "displayName": "Cursor Grok 4.6 Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "cursor-grok-4.6-xhigh-fast",
+      "displayName": "Cursor Grok 4.6 Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3-flash",
+      "displayName": "Gemini 3 Flash"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.1-pro",
+      "displayName": "Gemini 3.1 Pro"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.5-flash",
+      "displayName": "Gemini 3.5 Flash"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.6-flash-high",
+      "displayName": "Gemini 3.6 Flash"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.6-flash-low",
+      "displayName": "Gemini 3.6 Flash Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.6-flash-medium",
+      "displayName": "Gemini 3.6 Flash Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.6-flash-minimal",
+      "displayName": "Gemini 3.6 Flash Minimal"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.7-flash-high",
+      "displayName": "Gemini 3.7 Flash"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.7-flash-low",
+      "displayName": "Gemini 3.7 Flash Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gemini-3.7-flash-medium",
+      "displayName": "Gemini 3.7 Flash Medium"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "glm-5.2-high",
+      "displayName": "GLM 5.2"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "glm-5.2-max",
+      "displayName": "GLM 5.2 Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5-mini",
+      "displayName": "GPT-5 Mini"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.1",
+      "displayName": "GPT-5.1"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.1-high",
+      "displayName": "GPT-5.1 High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.1-low",
+      "displayName": "GPT-5.1 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2",
+      "displayName": "GPT-5.2"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-fast",
+      "displayName": "GPT-5.2 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-high",
+      "displayName": "GPT-5.2 High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-high-fast",
+      "displayName": "GPT-5.2 High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-low",
+      "displayName": "GPT-5.2 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-low-fast",
+      "displayName": "GPT-5.2 Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-xhigh",
+      "displayName": "GPT-5.2 Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.2-xhigh-fast",
+      "displayName": "GPT-5.2 Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex",
+      "displayName": "Codex 5.3"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-fast",
+      "displayName": "Codex 5.3 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-high",
+      "displayName": "Codex 5.3 High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-high-fast",
+      "displayName": "Codex 5.3 High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-low",
+      "displayName": "Codex 5.3 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-low-fast",
+      "displayName": "Codex 5.3 Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-xhigh",
+      "displayName": "Codex 5.3 Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.3-codex-xhigh-fast",
+      "displayName": "Codex 5.3 Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-high",
+      "displayName": "GPT-5.4 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-high-fast",
+      "displayName": "GPT-5.4 High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-low",
+      "displayName": "GPT-5.4 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-medium",
+      "displayName": "GPT-5.4 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-medium-fast",
+      "displayName": "GPT-5.4 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-mini-high",
+      "displayName": "GPT-5.4 Mini High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-mini-low",
+      "displayName": "GPT-5.4 Mini Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-mini-medium",
+      "displayName": "GPT-5.4 Mini"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-mini-none",
+      "displayName": "GPT-5.4 Mini None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-mini-xhigh",
+      "displayName": "GPT-5.4 Mini Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-nano-high",
+      "displayName": "GPT-5.4 Nano High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-nano-low",
+      "displayName": "GPT-5.4 Nano Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-nano-medium",
+      "displayName": "GPT-5.4 Nano"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-nano-none",
+      "displayName": "GPT-5.4 Nano None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-nano-xhigh",
+      "displayName": "GPT-5.4 Nano Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-xhigh",
+      "displayName": "GPT-5.4 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.4-xhigh-fast",
+      "displayName": "GPT-5.4 Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-extra-high",
+      "displayName": "GPT-5.5 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-extra-high-fast",
+      "displayName": "GPT-5.5 Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-high",
+      "displayName": "GPT-5.5 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-high-fast",
+      "displayName": "GPT-5.5 High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-low",
+      "displayName": "GPT-5.5 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-low-fast",
+      "displayName": "GPT-5.5 Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-medium",
+      "displayName": "GPT-5.5 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-medium-fast",
+      "displayName": "GPT-5.5 Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-none",
+      "displayName": "GPT-5.5 1M None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.5-none-fast",
+      "displayName": "GPT-5.5 None Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-high",
+      "displayName": "GPT-5.6 Luna 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-high-fast",
+      "displayName": "GPT-5.6 Luna High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-low",
+      "displayName": "GPT-5.6 Luna 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-low-fast",
+      "displayName": "GPT-5.6 Luna Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-max",
+      "displayName": "GPT-5.6 Luna 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-max-fast",
+      "displayName": "GPT-5.6 Luna Max Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-medium",
+      "displayName": "GPT-5.6 Luna 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-medium-fast",
+      "displayName": "GPT-5.6 Luna Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-none",
+      "displayName": "GPT-5.6 Luna 1M None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-none-fast",
+      "displayName": "GPT-5.6 Luna None Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-xhigh",
+      "displayName": "GPT-5.6 Luna 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-luna-xhigh-fast",
+      "displayName": "GPT-5.6 Luna Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-high",
+      "displayName": "GPT-5.6 Sol 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-high-fast",
+      "displayName": "GPT-5.6 Sol High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-low",
+      "displayName": "GPT-5.6 Sol 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-low-fast",
+      "displayName": "GPT-5.6 Sol Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-max",
+      "displayName": "GPT-5.6 Sol 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-max-fast",
+      "displayName": "GPT-5.6 Sol Max Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-medium",
+      "displayName": "GPT-5.6 Sol 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-medium-fast",
+      "displayName": "GPT-5.6 Sol Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-none",
+      "displayName": "GPT-5.6 Sol 1M None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-none-fast",
+      "displayName": "GPT-5.6 Sol None Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-xhigh",
+      "displayName": "GPT-5.6 Sol 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-sol-xhigh-fast",
+      "displayName": "GPT-5.6 Sol Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-high",
+      "displayName": "GPT-5.6 Terra 1M High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-high-fast",
+      "displayName": "GPT-5.6 Terra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-low",
+      "displayName": "GPT-5.6 Terra 1M Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-low-fast",
+      "displayName": "GPT-5.6 Terra Low Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-max",
+      "displayName": "GPT-5.6 Terra 1M Max"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-max-fast",
+      "displayName": "GPT-5.6 Terra Max Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-medium",
+      "displayName": "GPT-5.6 Terra 1M"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-medium-fast",
+      "displayName": "GPT-5.6 Terra Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-none",
+      "displayName": "GPT-5.6 Terra 1M None"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-none-fast",
+      "displayName": "GPT-5.6 Terra None Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-xhigh",
+      "displayName": "GPT-5.6 Terra 1M Extra High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "gpt-5.6-terra-xhigh-fast",
+      "displayName": "GPT-5.6 Terra Extra High Fast"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "kimi-k2.7-code",
+      "displayName": "Kimi K2.7 Code"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "kimi-k3-high",
+      "displayName": "Kimi K3 High"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "kimi-k3-low",
+      "displayName": "Kimi K3 Low"
+    },
+    {
+      "providerId": "cursor",
+      "runtimeModelId": "kimi-k3-max",
+      "displayName": "Kimi K3"
+    },
+    {
+      "providerId": "custom",
+      "runtimeModelId": "hf:moonshotai/Kimi-K3",
+      "displayName": "Kimi K3"
+    },
+    {
+      "providerId": "custom",
+      "runtimeModelId": "MiniMax-M2.7",
+      "displayName": "MiniMax M2.7"
+    },
+    {
+      "providerId": "custom",
+      "runtimeModelId": "MiniMax-M3",
+      "displayName": "MiniMax M3"
+    },
+    {
+      "providerId": "grok",
+      "runtimeModelId": "grok-4.5",
+      "displayName": "Grok 4.5"
+    },
+    {
+      "providerId": "grok",
+      "runtimeModelId": "grok-4.6",
+      "displayName": "Grok 4.6"
+    },
+    {
+      "providerId": "grok",
+      "runtimeModelId": "grok-build",
+      "displayName": "Grok Build"
+    }
+  ]
+}

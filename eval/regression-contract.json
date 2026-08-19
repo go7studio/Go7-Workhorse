@@ -408,6 +408,24 @@
       "rubric": ["CMD-03", "ORC-07", "ORC-17"],
       "sourceFiles": ["src/lib/goal.ts", "src/lib/vendor-send.ts", "src/lib/commands.ts", "src/lib/store.tsx", "electron/workhorse-mcp.ts", "test/workhorse.test.ts", "test/mcp-exposure.test.ts"],
       "verification": ["eval:validate", "eval:harness-smoke"]
+    },
+    {
+      "id": "REG-046",
+      "behavior": "Large desks use selector subscriptions, one-pass sidebar indexes, incremental and progressive transcript paint, bounded recent context, scheduled media and diff paint, stack-safe search, compact state writes, and interval-limited backups so navigation and recovery stay responsive without losing identity or the latest turn.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["PRJ-S5", "REL-S5"],
+      "rubric": ["PRJ-08", "REL-08"],
+      "sourceFiles": ["src/App.tsx", "src/lib/store-context.ts", "src/lib/store.tsx", "src/lib/sidebar-index.ts", "src/lib/search.ts", "src/lib/turns.ts", "src/lib/media-paint.ts", "src/ui/Sidebar.tsx", "src/ui/SessionPane.tsx", "src/ui/MediaPaint.tsx", "src/ui/FileViewer.tsx", "electron/main.ts", "test/performance.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-047",
+      "behavior": "Adaptive mission continuation creates a stable mission identity when traceId is omitted, trusts the authoritative live terminal report when persisted state lags, resumes the named coordinator and native provider session when supported, keeps descendant provider/model/effort on Auto, and removes internal continuation protocol from the user task.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S9"],
+      "rubric": ["ORC-17"],
+      "sourceFiles": ["electron/workhorse-mcp.ts", "electron/main.ts", "electron/grok-host.ts", "electron/codex-host.ts", "electron/claude-host.ts", "electron/cursor-host.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke"]
     }
   ]
 }

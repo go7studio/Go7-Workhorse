@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Large-desk rendering, navigation, and persistence contract",
+  "scaleFixture": {
+    "projects": 100,
+    "chats": 10000,
+    "transcriptMessages": 1000,
+    "searchMessages": 150000,
+    "liveWalkMinimum": {
+      "projects": 60,
+      "chats": 600,
+      "transcriptMessages": 600
+    }
+  },
+  "invariants": [
+    "Assistant prose streaming does not rerender the whole app shell or unrelated sidebar rows; visible status and tool changes still update.",
+    "Project, parent, worker, archived, and linked-chat views derive from one pass over sessions rather than a full rescan per row.",
+    "Completed transcript turns retain object identity while only the live tail rebuilds; model path context remains bounded.",
+    "Long transcripts paint in scheduled batches and remain pinned to the latest turn until the requested history is visible.",
+    "Media decode and large file diffs paint in bounded animation-frame batches without blocking chat navigation.",
+    "Search handles the declared corpus without spread-argument overflow and returns the newest matching timestamp.",
+    "Draft typing stays local until a normal flush boundary; state is compact and full recovery backups rotate on their own interval rather than every journal save.",
+    "A restart preserves session identity, parent nesting, selected chat, goal and worker state, attachments, and the newest durable message without duplicate dispatch."
+  ],
+  "sourceFiles": [
+    "src/App.tsx",
+    "src/lib/store-context.ts",
+    "src/lib/store.tsx",
+    "src/lib/sidebar-index.ts",
+    "src/lib/search.ts",
+    "src/lib/turns.ts",
+    "src/lib/media-paint.ts",
+    "src/ui/Sidebar.tsx",
+    "src/ui/SessionPane.tsx",
+    "src/ui/MediaPaint.tsx",
+    "src/ui/FileViewer.tsx",
+    "electron/main.ts",
+    "test/performance.test.ts",
+    "test/workhorse.test.ts"
+  ],
+  "verificationCommands": ["verify"],
+  "requiredRubric": ["PRJ-08", "REL-08"]
+}

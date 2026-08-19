@@ -6,8 +6,9 @@ evidence, cannot-judge versus real failure, manual follow-up, and a coverage
 floor, but changes the subject from a browser SaaS clone to a native
 multi-provider agent shell.
 
-The kit is activated. Live adapter smoke is one bounded call per installed
-stock harness.
+The kit is current and ready. The example remains baseline-only, zero-spend,
+and no-network until an evaluator activates a run. An activated live adapter
+smoke is one bounded call per explicitly enabled stock harness.
 
 ## What is different for Workhorse
 
@@ -84,6 +85,8 @@ The validator checks:
 - learning-memory commands and every LRN rubric item remain mapped;
 - every observed regression maps to valid profiles, scenarios, rubrics,
   source boundaries, and verification commands;
+- the large-desk performance contract maps its scale fixtures, rendering and
+  persistence boundaries, verification commands, and rubric items;
 - the baseline is a full commit and the example version matches package.json;
 - config profiles, native-command profiles, and provider profiles agree;
 - the Settings section inventory still matches the product.
@@ -129,11 +132,14 @@ withheld below 60% coverage.
    naming, reuse, concurrency, peer correlation, interruption, join, and resume.
 8. **Capability lane:** test Watch fallback, Kimi visual work, media, Godot,
    adb/Saga, and iOS simulator readiness.
-9. **Packaged/install lane:** compare source, package, running build, Windows
+9. **Performance lane:** load the isolated large-desk fixture, then measure
+   project/chat navigation, search, progressive transcript/media/diff paint,
+   streaming render isolation, compact persistence, and restart recovery.
+10. **Packaged/install lane:** compare source, package, running build, Windows
    installer, macOS installer, and architecture-matched macOS update.
-10. **Manual evidence:** credentials, support-report redaction, OS install/update,
+11. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
-11. **Score and defect ledger:** retain exact reproductions separately from
+12. **Score and defect ledger:** retain exact reproductions separately from
    rubric verdicts.
 
 ## Spend and safety fences
@@ -182,6 +188,8 @@ verdict.
 - execution-plan-contract.json — plan import, approval, routing, and resume rules.
 - device-capability-contract.json — read-only Godot, adb, and iOS probes.
 - regression-contract.json — durable coverage for observed production defects.
+- performance-contract.json — scale fixtures and rendering, navigation, and
+  persistence invariants.
 - config.example.json — no-secret run configuration.
 - schemas/ — evidence and results interchange formats.
 - scripts/workhorse-eval.mjs — validation, inventory, run initialization,

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "429525976a66c68cc63d2245ccc2ff45d32b3e76",
+  "baselineRef": "de199e717670dfc37645f661c8b21de6f16b02ff",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -208,6 +208,20 @@
             "Create, edit, and delete fixture files and verify the Changes list shows exact added and removed lines without crowding the row.",
             "Verify animated count changes settle on the exact underlying totals and never replace file identity or status."
           ]
+        },
+        {
+          "id": "PRJ-S5",
+          "name": "Keep a large desk responsive while chats and files paint",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Load an isolated fixture with at least 100 projects, 10,000 chats, one 1,000-message transcript, and one 150,000-message search corpus without calling a provider.",
+            "Expand projects, switch parent and child chats, open menus, search all chats, and return to the newest turn while recording interaction latency and renderer long tasks.",
+            "Stream assistant prose in the selected chat and verify the app shell and unrelated sidebar rows do not rerender while live status and tool changes still appear.",
+            "Open a long transcript and verify completed turns are reused, older turns paint progressively, the latest turn stays pinned, and input remains usable before the full history finishes painting.",
+            "Open image-heavy history and a large file diff; verify media decode and diff rows are scheduled in bounded batches without blanking, jumping, or blocking navigation.",
+            "Repeat search, project expansion, chat switching, Settings round-trip, project home, Changes, and file opening; verify identities, nesting, scroll position, and results stay correct after restart."
+          ]
         }
       ],
       "rubric": [
@@ -287,6 +301,17 @@
           "scenarios": ["PRJ-S4"],
           "passCriteria": "Ages derive from the last user prompt with full-time hover, the composer stops at half the pane and collapses, and each change row settles on exact real added and removed line counts without losing its file label.",
           "evidence": "Clock-controlled chat rows, transcript stamps, composer measurements, file snapshots, change rows, and final diff arithmetic."
+        },
+        {
+          "id": "PRJ-08",
+          "criterion": "Project, chat, search, transcript, media, Changes, file, and menu surfaces remain responsive and truthful as the desk grows.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["PRJ-S5"],
+          "passCriteria": "The scale fixture completes without a renderer hang or search overflow; visible interaction feedback begins within one second on the test machine; streaming does not invalidate unrelated shell/sidebar state; long transcripts, media, and diffs paint progressively while the newest turn, chat identity, nesting, and scroll intent remain stable.",
+          "evidence": "Fixture dimensions, performance timeline and long-task log, render counters, interaction timestamps, screenshots before/during/after progressive paint, selected session ids, scroll positions, and automated scale-test output."
         }
       ]
     },
@@ -946,6 +971,7 @@
             "Verify ordinary delegation remains one wave; then opt into an adaptive loop with acceptance criteria and a pass ceiling, finish pass one, and continue only its unmet work through workhorse_continue_mission.",
             "Let the coordinator's bounded leaf helper stop or return incomplete; verify the coordinator reports continue and the harness starts the required follow-up as a new parent-level pass without increasing the leaf envelope.",
             "Verify the continuation preserves criteria, exclusions, prior evidence, exact worker ids and previous pass, returns provider/model/effort to Auto routing, and shows Pass 2 in Mission Control.",
+            "Start a loop without supplying traceId and verify Workhorse creates and returns one stable mission identity; continue immediately from a live terminal worker while the saved snapshot still says running, and verify the same named coordinator can resume without pinning provider, model, or effort or leaking internal mission protocol into the task.",
             "Retry an old pass and exceed the pass ceiling; require both to stop before a provider call.",
             "Repeat with an explicit initialBrain and verify only the first coordinator uses it; every unassigned descendant returns to independent task- and capacity-aware routing.",
             "Name one external agent or consume one bounded wave grant, then launch it with a unique task id, trace, idempotency key, and explicit parent chat.",
@@ -1632,6 +1658,19 @@
             "Run unavailable, malformed, wrong-architecture, mount, copy, and relaunch failures and verify the existing app and user state remain usable.",
             "Verify source checkouts use the documented development update path and never impersonate the packaged updater."
           ]
+        },
+        {
+          "id": "REL-S5",
+          "name": "Persist and recover a large active desk without write amplification",
+          "executor": "restart",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Create a copied scale fixture with 10,000 chats, long transcripts, attachments, active drafts, a goal, and a running worker record.",
+            "Stream one assistant reply and type a draft; verify transcript updates do not serialize the whole desk on each token or keypress.",
+            "Trigger normal journal saves for more than one save interval and verify compact state writes continue while full recovery backups rotate no more than once per backup interval.",
+            "Interrupt and relaunch from the copied state, then verify the newest durable chat, project, draft, goal, worker, attachment metadata, and sidebar nesting recover exactly once.",
+            "Record state size, write count, backup count, recovery choice, and post-restart interaction evidence without reading or mutating production userData."
+          ]
         }
       ],
       "rubric": [
@@ -1711,6 +1750,17 @@
           "scenarios": ["REL-S4"],
           "passCriteria": "A packaged build selects the correct release asset, validates and replaces the installed app at its original path, relaunches, preserves signed identity and credential access, and leaves the old app usable on every failure path.",
           "evidence": "Release metadata, architecture and asset decision, mounted bundle identity, install path, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
+        },
+        {
+          "id": "REL-08",
+          "criterion": "Large active desks persist compactly and recover without serializing every streamed token or rotating full backups on every journal save.",
+          "weight": 3,
+          "type": "reliability",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["REL-S5"],
+          "passCriteria": "Draft typing remains local until its normal flush boundary; active output is journalled at the declared cadence; state JSON is compact; recovery backups respect their interval; restart restores the newest compatible state once without duplicate work or attachment loss.",
+          "evidence": "Injected-clock save trace, serialization and backup counters, state and backup sizes/hashes, restart record, recovered ids, and automated persistence-scale output."
         }
       ]
     },

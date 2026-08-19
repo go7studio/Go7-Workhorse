@@ -58,18 +58,20 @@ test("Godot suite evidence rejects exit-zero parse failures", async () => {
   assert.equal(parseGodotSuiteOutput("RESULT passed=788 failed=1", 0).ok, false);
 });
 
-test("plan and device contracts map to suite rubrics and commands", () => {
+test("plan, device, learning, and performance contracts map to suite rubrics and commands", () => {
   const suite = json("eval/suite.json");
   const plan = json("eval/execution-plan-contract.json");
   const devices = json("eval/device-capability-contract.json");
   const learning = json("eval/learning-memory-contract.json");
+  const performance = json("eval/performance-contract.json");
   const manifest = json("package.json");
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
-  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric]) assert.ok(rubric.has(id), id);
+  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric, ...performance.requiredRubric]) assert.ok(rubric.has(id), id);
   assert.ok(manifest.scripts[devices.probeCommand]);
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
   assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
+  for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
   assert.ok(manifest.scripts["eval:harness-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
@@ -105,6 +107,7 @@ test("observed regressions stay mapped to live suite coverage", () => {
     "test/openclaw-adapter.test.ts",
     "test/bidirectional-loop.test.ts",
     "test/mcp-exposure.test.ts",
+    "test/performance.test.ts",
   ]) {
     assert.ok(mappedSources.has(source), source);
   }
@@ -116,13 +119,14 @@ test("eval baseline and contracts track the current product generation", () => {
   const manifest = json("package.json");
   const orchestration = json("eval/orchestration-contract.json");
   const capabilities = json("eval/capability-contract.json");
+  const performance = json("eval/performance-contract.json");
   const providers = json("eval/provider-matrix.json");
   const scenario = new Set(suite.areas.flatMap((area: any) => area.scenarios.map((item: any) => item.id)));
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
   assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
   assert.equal(config.source.expectedVersion, manifest.version);
-  for (const id of ["PRJ-S4", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "LRN-S3"]) assert.ok(scenario.has(id), id);
-  for (const id of ["PRJ-07", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "LRN-06"]) assert.ok(rubric.has(id), id);
+  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "REL-08", "LRN-06"]) assert.ok(rubric.has(id), id);
   assert.ok(orchestration.lifecycleStates.includes("interrupted"));
   assert.ok(orchestration.lifecycleStates.includes("unknown"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_ask_chat"));
@@ -138,6 +142,9 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.match(orchestration.cascadeLimits.ordinaryLineupFanout, /one worker per callable bot/i);
   assert.match(capabilities.routing.rules.join(" "), /person-selected chat pinned/i);
   assert.match(capabilities.routing.rules.join(" "), /explicitly excluded providers, models, and bots/i);
+  assert.equal(performance.scaleFixture.chats, 10000);
+  assert.equal(performance.scaleFixture.searchMessages, 150000);
+  assert.match(performance.invariants.join(" "), /animation-frame batches/i);
   for (const id of ["custom-openai", "custom-kimi", "custom-anthropic"]) {
     const profile = providers.profiles.find((item: any) => item.id === id);
     assert.match(profile.discovery.join(" "), /user-approved/i);

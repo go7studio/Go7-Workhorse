@@ -13,6 +13,7 @@ const capabilityPath = path.join(evalDir, "capability-contract.json");
 const executionPlanPath = path.join(evalDir, "execution-plan-contract.json");
 const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json");
 const learningMemoryPath = path.join(evalDir, "learning-memory-contract.json");
+const performancePath = path.join(evalDir, "performance-contract.json");
 const regressionPath = path.join(evalDir, "regression-contract.json");
 const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
@@ -67,7 +68,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -76,6 +77,7 @@ async function validate() {
     json(executionPlanPath),
     json(deviceCapabilityPath),
     json(learningMemoryPath),
+    json(performancePath),
     json(regressionPath),
     json(configExamplePath),
     json(packagePath),
@@ -93,6 +95,7 @@ async function validate() {
     executionPlan.schemaVersion !== 1 ||
     deviceCapabilities.schemaVersion !== 1 ||
     learningMemory.schemaVersion !== 1 ||
+    performance.schemaVersion !== 1 ||
     regressions.schemaVersion !== 1 ||
     configExample.schemaVersion !== 1
   ) {
@@ -268,6 +271,19 @@ async function validate() {
       problems.push(`learning-memory source file is missing: ${file}`);
     }
   }
+  for (const rubric of performance.requiredRubric ?? []) {
+    if (!rubricSet.has(rubric)) problems.push(`performance contract references missing rubric ${rubric}`);
+  }
+  for (const file of performance.sourceFiles ?? []) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`performance source file is missing: ${file}`);
+    }
+  }
+  for (const command of performance.verificationCommands ?? []) {
+    if (!packageManifest.scripts?.[command]) problems.push(`performance verification command is missing: ${command}`);
+  }
   for (const file of [executionPlan.fixture?.source, executionPlan.fixture?.oracle, deviceCapabilities.fixture].filter(Boolean)) {
     try {
       await readFile(path.join(root, file), "utf8");
@@ -321,7 +337,7 @@ async function validate() {
       `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles, ` +
       `${regressionIds.length} regression contracts.`,
   );
-  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, regressions };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, regressions };
 }
 
 function list({ suite, commands, providers }) {

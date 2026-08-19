@@ -1,12 +1,14 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.2.0",
+  "contractVersion": "0.3.0",
   "title": "Imported executable plan contract",
   "formats": ["markdown"],
   "liveSmokeCommand": "eval:real-plan-smoke",
+  "admissionSmokeCommand": "eval:admission-smoke",
   "fixture": {
     "source": "eval/fixtures/plans/production-go-time.fixture.md",
-    "oracle": "scripts/workhorse-eval-plan-fixture.mjs"
+    "oracle": "scripts/workhorse-eval-plan-fixture.mjs",
+    "admissionOracle": "scripts/workhorse-eval-plan-admission.ts"
   },
   "states": [
     "imported",
@@ -34,7 +36,11 @@
     "User-defined assignment constraints are preserved in the worker brief and assignment evidence.",
     "A Watch-held route is never called; fallback requires a recorded reason and remains within the approved plan.",
     "Visual UI and UX tasks require a bounded Kimi K3 visual route unless the user overrides or accepts an explicit unavailable result.",
-    "Peer requests and replies carry plan id, task id, immutable sender and target ids, correlation id, reply id, and attempt."
+    "Peer requests and replies carry plan id, task id, immutable sender and target ids, correlation id, reply id, and attempt.",
+    "An ordinary unassigned checklist step completes from its required evidence without an auditor.",
+    "An assigned builder step cannot complete from its own note; a fresh read-only sibling auditor on a different callable vendor must return HEAD, GATE, LAST, and passing STATUS.",
+    "An auditor receipt applies only to assigned builder steps and cannot complete untouched checklist steps.",
+    "Elevate and vendor asks wait; a product ask on a running plan or active goal states a recommendation and default, then continues."
   ],
   "eventFields": [
     "eventId",
@@ -57,5 +63,5 @@
     "reason",
     "userOverride"
   ],
-  "requiredRubric": ["ORC-11", "ORC-12", "ORC-13", "CAP-09", "CAP-10"]
+  "requiredRubric": ["ORC-11", "ORC-12", "ORC-13", "ORC-18", "CAP-09", "CAP-10"]
 }

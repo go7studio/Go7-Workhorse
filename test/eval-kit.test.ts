@@ -34,6 +34,29 @@ test("plan fixture is approval-gated, routed, correlated, and restart-idempotent
   assert.equal(result.externalCalls, 0);
 });
 
+test("plan admission fixture executes the shipped checklist, auditor, and ask policies", async () => {
+  const { runAdmissionFixture } = await import("../scripts/workhorse-eval-plan-admission");
+  const result = runAdmissionFixture();
+  assert.deepEqual(result.checklist, { status: "completed", auditorSpawned: false });
+  assert.equal(result.objective.builderNoteAdmitted, false);
+  assert.equal(result.objective.auditorProvider, "grok");
+  assert.equal(result.objective.auditorRole, "auditor");
+  assert.equal(result.objective.builderStepStatus, "completed");
+  assert.equal(result.objective.untouchedStepStatus, "ready");
+  assert.match(result.objective.receiptHead, /^[a-f0-9]{40}$/);
+  assert.equal(result.objective.singleVendorBlocked, true);
+  assert.equal(result.objective.duplicateAuditorBlocked, true);
+  assert.equal(result.objective.invalidReceiptRejected, true);
+  assert.deepEqual(result.asks, {
+    elevate: "wait",
+    vendor: "wait",
+    runningPlanProduct: "default-and-continue",
+    activeGoalProduct: "default-and-continue",
+    ordinaryProduct: "wait",
+  });
+  assert.equal(result.externalCalls, 0);
+});
+
 test("device fixture probes Godot, Saga, and iOS without actions or raw ids", () => {
   const result = run("scripts/workhorse-eval-device-probes.mjs", [
     "--fixture",
@@ -72,6 +95,8 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
   assert.ok(manifest.scripts[learning.sqliteProbeCommand]);
+  assert.ok(manifest.scripts[plan.liveSmokeCommand]);
+  assert.ok(manifest.scripts[plan.admissionSmokeCommand]);
   for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const command of usage.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const file of performance.sourceFiles.filter((item: string) => /^test\/.*\.test\.ts$/.test(item))) {
@@ -136,8 +161,8 @@ test("eval baseline and contracts track the current product generation", () => {
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
   assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
   assert.equal(config.source.expectedVersion, manifest.version);
-  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "REL-S6", "LRN-S3"]) assert.ok(scenario.has(id), id);
-  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "CAP-13", "USG-08", "REL-07", "REL-08", "REL-09", "LRN-06"]) assert.ok(rubric.has(id), id);
+  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "ORC-S10", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "REL-S6", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "ORC-18", "CAP-13", "USG-08", "REL-07", "REL-08", "REL-09", "LRN-06"]) assert.ok(rubric.has(id), id);
   const setupBaseline = suite.areas.find((area: any) => area.id === "setup").rubric.find((item: any) => item.id === "SET-01").baseline;
   assert.equal(setupBaseline.status, "partial");
   assert.match(setupBaseline.basis, /Getting started.*inventories recognized harnesses/i);
@@ -156,6 +181,8 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
   assert.match(orchestration.semantics.adaptiveMission, /one wave/i);
   assert.match(orchestration.semantics.budgetTruth, /budget-exceeded is unsuccessful/i);
+  assert.match(orchestration.semantics.planAdmission, /sibling auditor.*another callable vendor/i);
+  assert.match(orchestration.semantics.planAdmission, /cannot complete an unassigned step/i);
   assert.match(orchestration.routingContract.sequentialRule, /opt-in per mission/i);
   assert.equal(providers.profiles.some((profile: any) => ["openclaw", "hermes"].includes(profile.id)), false);
   assert.equal(orchestration.cascadeLimits.planRootConcurrency, 2);

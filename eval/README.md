@@ -66,6 +66,7 @@ required provenance chain is selection → launch/request → runtime observatio
     npm run eval:media-fixtures
     npm run eval:fixture-check
     npm run eval:plan-fixture-check
+    npm run eval:admission-smoke
     npm run eval:device-probes -- --fixture eval/fixtures/device-capabilities.json
     npm run eval:capability-smoke
 
@@ -80,6 +81,8 @@ The validator checks:
 - every orchestration desk tool and source boundary in
   eval/orchestration-contract.json still exists and every ORC rubric item is
   mapped;
+- plan admission runs the shipped checklist, sibling-auditor, receipt, and
+  ask-default helpers without a provider call;
 - every routing/media source boundary in eval/capability-contract.json exists
   and every CAP rubric item is mapped;
 - learning-memory commands and every LRN rubric item remain mapped;
@@ -131,7 +134,8 @@ withheld below 60% coverage.
 6. **Cross-provider journeys:** goal, schedule, plan, compact, custom history,
    switching, permissions, continuity, usage, learning backfill, and recovery.
 7. **Orchestration lane:** import and approve the plan, then test routing,
-   naming, reuse, concurrency, peer correlation, interruption, join, and resume.
+   naming, reuse, concurrency, peer correlation, interruption, join, auditor
+   admission, ask defaults, and resume.
 8. **Capability lane:** test Watch fallback, Kimi visual work, media, Godot,
    adb/Saga, and iOS simulator readiness.
 9. **Performance lane:** load the isolated large-desk fixture, then measure

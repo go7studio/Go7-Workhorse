@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "e638525ebfa3cb53b700c15fc4f0a2f78e385c8f",
+  "baselineRef": "ddb4c3a65fa51d1d59a8b50e4c0fffaaa17d96f0",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -997,6 +997,20 @@
             "Reject a missing grant and unnamed target, duplicate idempotency key, repeated system, parentless inbound spawn, forbidden MCP mutation, and any hop beyond two before a provider call.",
             "Restart an unfinished external task and report unknown until reconciled; never invent completion or book external-system usage as a Workhorse provider."
           ]
+        },
+        {
+          "id": "ORC-S10",
+          "name": "Admit assigned plan work through an independent auditor",
+          "executor": "electron",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "steps": [
+            "Import an ordinary checklist, record its required evidence, complete it without assigning a builder, and verify no auditor is spawned.",
+            "Import and approve a plan with a named gate, assign one ready step to a builder, and leave another checklist step unassigned.",
+            "Finish the builder wave and verify the normal parent join still occurs, the builder's note cannot complete the assigned step, and Workhorse selects a fresh read-only sibling auditor from another callable vendor.",
+            "Return an auditor receipt containing the exact 40-character worktree HEAD, named GATE, final gate line in LAST, and passing STATUS; verify the assigned builder step completes.",
+            "Verify the same receipt does not add evidence to or complete the untouched checklist step, and a missing second callable vendor leaves the builder step incomplete.",
+            "Ask an Elevate question and a vendor-choice question and verify both wait; ask a product question during a running plan and active goal and verify each states a recommendation and default before continuing."
+          ]
         }
       ],
       "rubric": [
@@ -1196,6 +1210,17 @@
           "scenarios": ["ORC-S9"],
           "passCriteria": "An explicit request to work with Workhorse attempts Workhorse delegation before direct execution and reports the exact Workhorse error before fallback when blocked; a named or granted OpenClaw or Hermes agent supplies a bounded traced task and constraints without choosing a model, Workhorse auto-routing selects provider, model, and effort from task fit and capacity and returns its scored rationale, and the mission coordinator declares and explains a focused or split strategy; ordinary delegation stays one wave, while an explicitly enabled adaptive loop preserves acceptance criteria, exclusions, evidence, pass lineage, and a bounded ceiling; only terminal incomplete work continues, every continuation returns to independent Auto routing, Mission Control shows the pass, and stale or over-limit continuation stops before a provider call; the harness uses one real result to choose a second order under the explicit parent; await returns only the requested worker ids, trace, or active wave and never older reports from that parent; wait=true returns a structured completion envelope with the worker id and authoritative runtime identity; externally owned waves, including a reused worker from a finished wave, return once to the harness without a competing desk turn or unsolicited workers; a reused worker keeps its stable name across restart while showing the current slice, and late permission events cannot make terminal work look active; hidden worker briefs and joins preserve the assigned route; structured exclusions persist and reach every descendant; worker status reports authoritative provider, model, effort, lifecycle, exclusions, and route decision; both current CLIs close synchronously with duration, while cycles, excess hops, duplicates, forbidden tools, missing auth, and parentless spawns stop before an unintended provider call; external execution creates no Workhorse provider identity or usage event.",
           "evidence": "Tool discovery and ordering transcript, exact blocked-delegation error, mission strategy and worker roster, adaptive-loop contract and pass labels, harness catalog and grant, exact CLI invocation, MCP transcript with sequential dependent orders, parent/trace/worker-id/pass fields, Workhorse replies, worker id/name and reuse decision, task/run/row terminal states and duration, rejection ledger, provider catalog, and usage ledger."
+        },
+        {
+          "id": "ORC-18",
+          "criterion": "Assigned plan work is admitted only by an independent sibling auditor, while ordinary checklist evidence and product-question defaults remain usable.",
+          "weight": 3,
+          "type": "handoff",
+          "testability": "auto",
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+          "scenarios": ["ORC-S10"],
+          "passCriteria": "An unassigned checklist step completes from required evidence without an auditor; an assigned builder step rejects builder-only notes, spawns at most one fresh read-only auditor on a different callable vendor, and completes only from a matching HEAD/GATE/LAST/pass receipt; that receipt cannot complete an untouched step; Elevate and vendor asks wait while product asks on a running plan or active goal state a recommendation and default before continuing.",
+          "evidence": "Plan event and assignment records, builder and auditor session ids, callable-vendor catalog, sibling role and sandbox, receipt fields, untouched-step state, ask-policy result, and eval:admission-smoke output."
         }
       ]
     },

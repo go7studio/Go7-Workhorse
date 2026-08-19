@@ -81,6 +81,8 @@
       "src/lib/agent-runtime.ts",
       "src/lib/goal.ts",
       "src/lib/plan.ts",
+      "src/lib/plan-admission.ts",
+      "src/lib/ask-default.ts",
       "src/lib/turns.ts",
       "src/ui/ChatRow.tsx",
       "src/ui/GoalBar.tsx"
@@ -110,7 +112,8 @@
     "waveJoin": "A completed worker wave wakes and joins its accountable parent exactly once; later waves can continue the same orchestration. When OpenClaw or Hermes owns the wave, Workhorse returns the reports to that harness and never starts a competing desk orchestration turn.",
     "adaptiveMission": "Ordinary delegation is one wave. An explicit adaptive loop preserves acceptance criteria, exclusions, evidence, pass lineage, and a bounded ceiling; a terminal incomplete pass may continue through workhorse_continue_mission, and each new pass returns to independent Workhorse routing. Required follow-up stays at the parent mission level; a leaf helper remains an optional bounded check whose failure returns remaining work to that parent.",
     "budgetTruth": "A token ceiling is enforced as work runs, not only labelled afterward. Budget-exceeded is unsuccessful and reportless unless a truthful partial report was already recorded; a generic wave-finished notice never becomes child success or mission completion.",
-    "externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned harnesses, never providers, custom bots, usage rings, or bridge chats. Discovery is not permission: automatic routing requires Routing, Include harnesses, a selected agent, and one bounded plan grant; explicit named targets remain authoritative. An explicit request to work with Workhorse delegates through Workhorse before direct execution; a blocked delegation reports the exact Workhorse error before fallback. Each task supplies its task id, trace id, and explicit parent; dependent MCP orders preserve those fields. Inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops."
+    "externalAgentSystem": "OpenClaw and Hermes are discovered and called as permissioned harnesses, never providers, custom bots, usage rings, or bridge chats. Discovery is not permission: automatic routing requires Routing, Include harnesses, a selected agent, and one bounded plan grant; explicit named targets remain authoritative. An explicit request to work with Workhorse delegates through Workhorse before direct execution; a blocked delegation reports the exact Workhorse error before fallback. Each task supplies its task id, trace id, and explicit parent; dependent MCP orders preserve those fields. Inbound MCP is allowlisted; correlation rejects cycles, duplicate idempotency, and more than two hops.",
+    "planAdmission": "Ordinary checklist evidence remains human-completable. An assigned builder step needs an independent read-only sibling auditor on another callable vendor; only a receipt with the worktree HEAD, named gate, final gate line, and pass status admits that builder step. The same receipt cannot complete an unassigned step. Elevate and vendor asks wait, while product asks on an active plan or goal state a recommendation and default before continuing."
   },
   "cascadeLimits": {
     "model": "Automatic children use the capacity-aware quick tier; explicit assignments win",
@@ -162,6 +165,7 @@
     "contract": "eval/execution-plan-contract.json",
     "fixture": "eval/fixtures/plans/production-go-time.fixture.md",
     "oracle": "scripts/workhorse-eval-plan-fixture.mjs",
+    "admissionOracle": "scripts/workhorse-eval-plan-admission.ts",
     "approvalRequired": true,
     "maxRootConcurrency": 2,
     "completedRedispatch": false,
@@ -197,6 +201,7 @@
     "ORC-14",
     "ORC-15",
     "ORC-16",
-    "ORC-17"
+    "ORC-17",
+    "ORC-18"
   ]
 }

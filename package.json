@@ -43,6 +43,7 @@
     "eval:multi-model-smoke": "tsx test/custom-multi-model-live-smoke.ts",
     "eval:capability-smoke": "tsx test/capability-live-smoke.ts",
     "eval:plan-fixture-check": "node scripts/workhorse-eval-plan-fixture.mjs",
+    "eval:admission-smoke": "tsx scripts/workhorse-eval-plan-admission.ts",
     "eval:device-probes": "node scripts/workhorse-eval-device-probes.mjs",
     "eval:godot-suite": "node scripts/workhorse-eval-godot-suite.mjs",
     "eval:real-plan-smoke": "tsx test/real-world-plan-smoke.ts",

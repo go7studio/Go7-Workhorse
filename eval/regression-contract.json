@@ -570,6 +570,15 @@
       "rubric": ["SET-03"],
       "sourceFiles": ["src/lib/model-groups.ts", "src/ui/BotForm.tsx", "src/lib/provider-catalog.ts", "test/model-groups.test.ts", "test/custom-multi-model.test.ts"],
       "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-064",
+      "behavior": "Ordinary checklist evidence completes without an auditor; assigned builder work requires a fresh read-only sibling auditor on another callable vendor, and its HEAD/GATE/LAST/pass receipt cannot complete an untouched step. Elevate and vendor asks wait while product asks on active objectives carry a default and continue.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S10"],
+      "rubric": ["ORC-18"],
+      "sourceFiles": ["src/lib/plan.ts", "src/lib/plan-admission.ts", "src/lib/ask-default.ts", "src/lib/lineup.ts", "scripts/workhorse-eval-plan-admission.ts", "test/plan-admission.test.ts", "test/ask-default.test.ts"],
+      "verification": ["eval:admission-smoke", "verify"]
     }
   ]
 }

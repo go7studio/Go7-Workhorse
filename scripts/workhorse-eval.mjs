@@ -256,6 +256,9 @@ async function validate() {
   for (const rubric of planRubric) {
     if (!rubricSet.has(rubric)) problems.push(`execution-plan contract references missing rubric ${rubric}`);
   }
+  for (const command of [executionPlan.liveSmokeCommand, executionPlan.admissionSmokeCommand].filter(Boolean)) {
+    if (!packageManifest.scripts?.[command]) problems.push(`execution-plan command is missing: ${command}`);
+  }
   const deviceRubric = new Set(deviceCapabilities.requiredRubric ?? []);
   for (const rubric of deviceRubric) {
     if (!rubricSet.has(rubric)) problems.push(`device-capability contract references missing rubric ${rubric}`);
@@ -333,7 +336,12 @@ async function validate() {
       problems.push(`performance test is not in the default test gate: ${file}`);
     }
   }
-  for (const file of [executionPlan.fixture?.source, executionPlan.fixture?.oracle, deviceCapabilities.fixture].filter(Boolean)) {
+  for (const file of [
+    executionPlan.fixture?.source,
+    executionPlan.fixture?.oracle,
+    executionPlan.fixture?.admissionOracle,
+    deviceCapabilities.fixture,
+  ].filter(Boolean)) {
     try {
       await readFile(path.join(root, file), "utf8");
     } catch {

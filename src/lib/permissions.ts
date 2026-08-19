@@ -2,7 +2,7 @@ import { modeLabel, sandboxLabel } from "./commands";
 import { uid } from "./id";
 import { applySessionElevation } from "./session";
 import { toolNameKey } from "./tool-labels";
-import type { PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
+import type { PermissionGrant, PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
@@ -106,7 +106,11 @@ export function isQuietDeskTool(tool: string): boolean {
   return QUIET_DESK_TOOLS.has(toolNameKey(tool));
 }
 
-export function permissionGrantKey(tool: string): string {
+function grantText(value: string | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function permissionGrantKey(tool: string, detail?: string, filePath?: string): string {
   const key = toolNameKey(tool);
   if (
     QUIET_DESK_TOOLS.has(key) ||
@@ -117,18 +121,24 @@ export function permissionGrantKey(tool: string): string {
     return "workhorse";
   }
   if (/^(?:bash|shell|powershell|run_command|cd|ls|pwd|cat|sed|rg|grep|find|git|wc|head|tail|echo|mkdir|cp|mv|rm|touch|npm|npx|node|python|godot)(?:_|$)/.test(key)) {
-    return "shell";
+    return `shell:${grantText(detail) || key}`;
   }
-  if (/^(?:read|read_file|list|list_dir)(?:_|$)/.test(key)) return "read";
-  if (/^(?:write|write_file|edit|str_replace|search_replace)(?:_|$)/.test(key)) return "write";
-  return key || tool.trim().toLowerCase();
+  const target = grantText(filePath) || grantText(detail);
+  if (/^(?:read|read_file|list|list_dir)(?:_|$)/.test(key)) return `read:${target || key}`;
+  if (/^(?:write|write_file|edit|str_replace|search_replace)(?:_|$)/.test(key)) return `write:${target || key}`;
+  return `${key || grantText(tool)}:${target || key}`;
 }
 
-export function grantCovers(grants: string[] | undefined, tool: string): boolean {
+export function grantCovers(
+  grants: PermissionGrant[] | undefined,
+  tool: string,
+  detail?: string,
+  filePath?: string,
+  now = Date.now(),
+): boolean {
   if (!grants?.length) return false;
-  const key = permissionGrantKey(tool);
-  const raw = toolNameKey(tool);
-  return grants.includes(key) || grants.includes(raw);
+  const key = permissionGrantKey(tool, detail, filePath);
+  return grants.some((grant) => grant.expiresAt > now && grant.key === key);
 }
 
 export function enqueuePermission(
@@ -298,9 +308,15 @@ export function permissionPolicyAnswer(input: {
   return null;
 }
 
-export function autoAllowPermission(input: { tool: string; grants?: string[] }): PermissionAnswer | null {
+export function autoAllowPermission(input: {
+  tool: string;
+  detail?: string;
+  path?: string;
+  grants?: PermissionGrant[];
+  now?: number;
+}): PermissionAnswer | null {
   if (isQuietDeskTool(input.tool)) return "once";
-  if (grantCovers(input.grants, input.tool)) return "session";
+  if (grantCovers(input.grants, input.tool, input.detail, input.path, input.now)) return "session";
   return null;
 }
 
@@ -337,10 +353,21 @@ export function applyPermissionAnswer(
     sessions: state.sessions.map((session) => {
       if (session.id !== request.sessionId) return session;
       const next = elevate ? applySessionElevation(session, request.elevate ?? {}) : session;
-      const grants =
-        answer === "session" && request.kind !== "elevate" && request.kind !== "vendor"
-          ? [...new Set([...(next.permissionGrants ?? []), permissionGrantKey(request.tool)])]
-          : next.permissionGrants;
+      const now = Date.now();
+      const grant = answer === "session" && request.kind !== "elevate" && request.kind !== "vendor"
+        ? {
+            id: uid("grant"),
+            key: permissionGrantKey(request.tool, request.detail, request.path),
+            tool: request.tool,
+            detail: request.detail,
+            ...(request.path ? { path: request.path } : {}),
+            createdAt: now,
+            expiresAt: now + 24 * 60 * 60 * 1_000,
+          } satisfies PermissionGrant
+        : undefined;
+      const grants = grant
+        ? [...(next.permissionGrants ?? []).filter((item) => item.key !== grant.key), grant]
+        : next.permissionGrants;
       return {
         ...next,
         status: answer === "deny" ? "idle" : stillWaiting ? "needs-input" : "running",

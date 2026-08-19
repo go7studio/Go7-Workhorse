@@ -102,13 +102,13 @@ export function setLineupRowStatus(
   lineup: DeskLineup | undefined,
   childId: string,
   status: DeskLineupRowStatus,
-  extra?: { report?: string; finishedAt?: number },
+  extra?: { report?: string; finishedAt?: number; correlationId?: string },
 ): DeskLineup | undefined {
   if (!lineup) return undefined;
   return {
     ...lineup,
     rows: lineup.rows.map((row) =>
-      row.childId === childId
+      row.childId === childId && (!extra?.correlationId || row.correlationId === extra.correlationId)
         ? {
             ...row,
             status,
@@ -268,10 +268,11 @@ export function applyChildIdleSync(
   sessions: Session[],
   childId: string,
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
-  extra?: { report?: string; error?: string; now?: number },
+  extra?: { report?: string; error?: string; now?: number; correlationId?: string },
 ): Session[] {
   const now = extra?.now ?? Date.now();
   const child = sessions.find((session) => session.id === childId);
+  if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
   const nextStatus = agentStatusForRow(status);
   const next = sessions.map((session) => {
@@ -297,6 +298,7 @@ export function applyChildIdleSync(
     report,
     status,
     now,
+    extra?.correlationId,
   );
 }
 
@@ -313,6 +315,7 @@ export function reconcileIdleChildren(sessions: Session[], parentId: string, now
     next = applyChildIdleSync(next, session.id, report ? "completed" : "failed", {
       report,
       now,
+      correlationId: session.agentRun?.correlationId,
     });
   }
   return next;
@@ -351,6 +354,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
       report: childReportText(child),
       error: child.agentRun.error,
       now,
+      correlationId: child.agentRun.correlationId,
     });
   }
   for (const parent of next) {
@@ -548,13 +552,14 @@ export function applyLineupChildFinish(
   report: string,
   status: Exclude<DeskLineupRowStatus, "queued" | "running">,
   now = Date.now(),
+  correlationId?: string,
 ): Session[] {
   const child = sessions.find((session) => session.id === childId);
   const parentId = child?.parentId;
   if (!parentId) return sessions;
   return sessions.map((session) => {
     if (session.id !== parentId) return session;
-    const lineup = setLineupRowStatus(session.lineup, childId, status, { report, finishedAt: now });
+    const lineup = setLineupRowStatus(session.lineup, childId, status, { report, finishedAt: now, correlationId });
     return lineup ? { ...session, lineup } : session;
   });
 }

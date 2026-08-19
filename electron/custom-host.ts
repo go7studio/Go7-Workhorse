@@ -1,4 +1,4 @@
-import type { ChatImage, EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
+import type { ChatImage, EffortLevel, McpServerConfig, PermissionGrant, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 import { buildPolicyContext } from "../src/lib/context-preface";
 import {
   classifyElevationInput,
@@ -38,6 +38,7 @@ export type CustomPromptInput = {
   history?: CustomChatMessage[];
   mcpServers?: McpServerConfig[];
   securityPolicy?: SessionSecurityPolicy;
+  permissionGrants?: PermissionGrant[];
   folders?: string[];
   parentId?: string;
   hidden?: boolean;
@@ -665,6 +666,7 @@ export class CustomSessionHost {
             : customToolPolicy(use, {
                 mode,
                 sandbox,
+                grants: input.permissionGrants,
                 cwd: input.cwd,
                 sessionId: input.sessionId,
                 folders: input.folders,

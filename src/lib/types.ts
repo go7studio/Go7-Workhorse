@@ -493,8 +493,8 @@ export type Session = {
   lineup?: DeskLineup;
   /** Workhorse-owned executable plan for this orchestrator chat. */
   planRun?: PlanRun;
-  /** Tool families allowed for the rest of this vendor session. */
-  permissionGrants?: string[];
+  /** Exact operations allowed for the live vendor session. */
+  permissionGrants?: PermissionGrant[];
   /** Manual preserves the selected model. Auto may route before a new turn. */
   routingMode?: "auto" | "manual";
   routingDecision?: RoutingDecision;
@@ -514,6 +514,17 @@ export type PermissionRequest = {
     name: string;
     status: "day_bank" | "spent" | "disabled" | "ok";
   };
+};
+
+export type PermissionGrant = {
+  id: string;
+  /** Exact normalized scope. Broad legacy shell/write grants are discarded on load. */
+  key: string;
+  tool: string;
+  detail: string;
+  path?: string;
+  createdAt: number;
+  expiresAt: number;
 };
 
 export type Sheet = "project" | "reference" | null;

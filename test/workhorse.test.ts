@@ -154,6 +154,7 @@ import {
   wrapMarkdown,
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
+import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
@@ -376,11 +377,27 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(once.sessions[0].messages.at(-1)?.kind, "tool");
   assert.match(once.sessions[0].messages.at(-1)?.text ?? "", /Allowed once/);
   assert.match(sessionGrant.sessions[0].messages.at(-1)?.text ?? "", /Allowed for this session/);
-  assert.deepEqual(sessionGrant.sessions[0].permissionGrants, ["shell"]);
+  assert.equal(sessionGrant.sessions[0].permissionGrants?.[0]?.key, "shell:git status");
+  assert.equal(
+    autoAllowPermission({
+      tool: "run command",
+      detail: "git status",
+      grants: sessionGrant.sessions[0].permissionGrants,
+    }),
+    "session",
+  );
+  assert.equal(
+    autoAllowPermission({
+      tool: "run command",
+      detail: "rm -rf build",
+      grants: sessionGrant.sessions[0].permissionGrants,
+    }),
+    null,
+  );
   assert.equal(autoAllowPermission({ tool: "workhorse_workhorse_list_chats" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(autoAllowPermission({ tool: "workhorse_spawn_agent" }), "once");
-  assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat", grants: ["workhorse"] }), "once");
+  assert.equal(autoAllowPermission({ tool: "workhorse_ask_chat" }), "once");
   assert.equal(permissionResumeStatus({ hasOtherPending: true }), "needs-input");
   assert.equal(permissionResumeStatus({ hasOtherPending: false }), "running");
   assert.equal(
@@ -433,8 +450,8 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "off", tool: "shell", detail: "ls docs" }), "session");
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "workspace", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "session");
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "read-only", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "deny");
-  assert.equal(permissionGrantKey('cd /tmp/worktree && ls docs && echo "copy"'), "shell");
-  assert.equal(permissionGrantKey("Read src/app.ts"), "read");
+  assert.equal(permissionGrantKey("shell", 'cd /tmp/worktree && ls docs && echo "copy"'), 'shell:cd /tmp/worktree && ls docs && echo "copy"');
+  assert.equal(permissionGrantKey("Read", "src/app.ts", "src/app.ts"), "read:src/app.ts");
   assert.deepEqual(
     elevationForBlock({ mode: "ask", sandbox: "read-only", tool: "Write", detail: "notes.md", path: "notes.md" }),
     { sandbox: "off" },
@@ -509,6 +526,23 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(resolveGrokPermissionMode("plan"), "plan");
   assert.equal(resolveGrokPermissionMode("always-approve", "read-only"), "dontAsk");
   assert.equal(resolveGrokPermissionMode("accept-edits", "strict"), "dontAsk");
+});
+
+test("permission leases drop broad legacy grants and expired approvals", () => {
+  const now = 10_000;
+  const grants = normalizePermissionGrants([
+    "shell",
+    { id: "expired", key: "shell:git status", tool: "shell", detail: "git status", createdAt: 1, expiresAt: now },
+    { id: "exact", key: "shell:git status", tool: "shell", detail: "git status", createdAt: 2, expiresAt: now + 1 },
+  ], now);
+  assert.deepEqual(grants, [{
+    id: "exact",
+    key: "shell:git status",
+    tool: "shell",
+    detail: "git status",
+    createdAt: 2,
+    expiresAt: now + 1,
+  }]);
 });
 
 test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
@@ -4259,7 +4293,7 @@ test("project home lists edited files from write tools, not Choose a brain", () 
   assert.match(diffStat, /minus > 0/);
   assert.match(diffStat, /requestAnimationFrame/);
   assert.match(diffStat, /COUNT_MS/);
-  assert.match(pane, /fileRoots = useMemo/);
+  assert.match(pane, /const fileRoots = roots/);
   assert.match(pane, /fileRootKey/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.diff-line\.add/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.session-file/);

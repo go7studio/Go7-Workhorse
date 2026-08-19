@@ -247,6 +247,25 @@ test("a worker's usage files under its bot, not the orchestrator's vendor", asyn
     usageHomeForReport({ provider: "custom", model: "kimi-k3", customBotId: "bot_wfd6ghzwhfa7" }, cursorOwner, bots),
     { provider: "custom", customBotId: "bot_wfd6ghzwhfa7" },
   );
+  const collisionBots = [
+    ...bots,
+    { id: "bot_openrouter_a", name: "OpenRouter A", model: "claude-sonnet-4.6" },
+    { id: "bot_openrouter_b", name: "OpenRouter B", model: "claude-sonnet-4.6" },
+  ];
+  assert.deepEqual(
+    usageHomeForReport({ provider: "claude", model: "claude-sonnet-4.6" }, { provider: "claude" }, collisionBots),
+    { provider: "claude" },
+    "a stock Claude event cannot move to a custom meter by model name",
+  );
+  assert.deepEqual(
+    usageHomeForReport({ provider: "custom", model: "claude-sonnet-4.6" }, cursorOwner, collisionBots),
+    { provider: "custom" },
+    "an ambiguous untagged custom event cannot pick an arbitrary connection",
+  );
+  assert.deepEqual(
+    usageHomeForReport({ provider: "custom", model: "claude-sonnet-4.6", customBotId: "bot_openrouter_b" }, cursorOwner, collisionBots),
+    { provider: "custom", customBotId: "bot_openrouter_b" },
+  );
 
   // The event as it sits on disk today, verbatim, and its owning session.
   const stray = {

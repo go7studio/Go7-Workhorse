@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ensureManagedWorktree } from "../electron/worktree-host";
+import { resolveSessionCwd } from "../electron/grok-host";
 import { listGitChanges } from "../electron/project-diff";
 import {
   normalizeSessionEnvironment,
@@ -26,6 +27,9 @@ test("session environments normalize old saves and resolve an isolated cwd", () 
   );
   assert.equal(sessionExecutionCwd({ kind: "cloud", environmentId: "cloud-1", cwd: "/workspace" }, "/repo"), "/workspace");
   assert.equal(sessionExecutionCwd(undefined, "C:\\repo"), "C:\\repo");
+  assert.equal(resolveSessionCwd(undefined), "");
+  assert.equal(resolveSessionCwd("relative/project"), "");
+  assert.equal(resolveSessionCwd(path.resolve("bound-project")), path.resolve("bound-project"));
 });
 
 test("managed worktrees create once and reopen for the same chat", async (t) => {

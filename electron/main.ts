@@ -102,6 +102,12 @@ export { WORKHORSE_DEV_USER_DATA_DIR, WORKHORSE_USER_DATA_DIR };
 /** Union of written file versions for the review. Survives later deletes of created lines. */
 const fileInstances = new Map<string, string>();
 
+function requireSessionCwd(value?: string | null): string {
+  const cwd = resolveSessionCwd(value);
+  if (!cwd) throw new Error("This chat has no execution folder. Link a folder before running it.");
+  return cwd;
+}
+
 function packagedBuildChannel() {
   if (!app.isPackaged || process.platform !== "darwin") return app.isPackaged ? "release" : "development";
   try {
@@ -869,7 +875,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("project:git-changes", (_event, cwd: unknown) =>
-    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : process.cwd()),
+    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : ""),
   );
 
   ipcMain.handle("terminal:start", (event, raw: { sessionId?: string; cwd?: string }) =>
@@ -1066,7 +1072,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("codex:prompt", async (event, raw: CodexPromptInput) => {
     const input: CodexPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await codexHost.prompt(input, (payload) => {
       try {
@@ -1090,7 +1096,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("claude:prompt", async (event, raw: ClaudePromptInput) => {
     const input: ClaudePromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await claudeHost.prompt(input, (payload) => {
       try {
@@ -1113,7 +1119,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("cursor:prompt", async (event, raw: CursorPromptInput) => {
     const input: CursorPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await cursorHost.prompt(input, (payload) => {
       try {
@@ -1133,7 +1139,8 @@ app.whenReady().then(async () => {
 
   const customHost = new CustomSessionHost();
   ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
-    const result = await customHost.prompt(raw, (payload) => {
+    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
+    const result = await customHost.prompt(input, (payload) => {
       try {
         if (!event.sender.isDestroyed()) event.sender.send("custom:event", payload);
       } catch (error) {
@@ -1152,7 +1159,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:prompt", async (event, raw: GrokPromptInput) => {
     const input: GrokPromptInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     const result = await grokHost.prompt(input, (payload) => {
       try {
@@ -1175,7 +1182,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:compact", async (event, raw: GrokCompactInput) => {
     const input: GrokCompactInput = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     return grokHost.compact(input, (payload) => {
       try {
@@ -1196,7 +1203,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("grok:fork", async (event, raw: GrokPromptInput) => {
-    const input = { ...raw, cwd: resolveSessionCwd(raw.cwd) };
+    const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
     try {
       return await grokHost.fork(input, (payload) => {
         try {
@@ -1213,7 +1220,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("grok:rewind", async (event, raw: GrokPromptInput & { keepUserIndex: number }) => {
     const input = {
       ...raw,
-      cwd: resolveSessionCwd(raw.cwd),
+      cwd: requireSessionCwd(raw.cwd),
     };
     try {
       return await grokHost.rewind(input, (payload) => {

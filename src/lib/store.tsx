@@ -2252,6 +2252,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             history,
             mcpServers: stateRef.current.settings.mcpServers,
             securityPolicy: session.securityPolicy,
+            permissionGrants: session.permissionGrants,
             folders: project?.folders.map((folder) => folder.path) ?? [],
             parentId: session.parentId,
             hidden: session.hidden,
@@ -2964,6 +2965,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               history: customChatHistory(session.messages),
               mcpServers,
               securityPolicy: session.securityPolicy,
+              permissionGrants: session.permissionGrants,
               folders: project?.folders.map((folder) => folder.path) ?? [],
               parentId: session.parentId,
               hidden: session.hidden,
@@ -4133,7 +4135,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 routing: latest.settings.routing,
                 prompt: payload.message,
                 fromSessionId: caller.id,
-                workspace: latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path,
+                workspace: sessionExecutionCwd(
+                  caller.environment,
+                  latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path ?? "",
+                ),
                 store: taskStore,
                 envelope: storedEnvelope ?? {
                   origin: "workhorse",
@@ -4229,7 +4234,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnTokenBudget = isNested
               ? Math.min(5_000, Math.max(1, payload.tokenBudget ?? 5_000))
               : payload.tokenBudget;
-            const spawnIsolation = isNested ? "shared" : payload.isolation;
+            const spawnIsolation = isNested ? "shared" : payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
               projectFolder: boundProject?.folders[0]?.path ?? "",
@@ -4424,16 +4429,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // the worker away from the work it just did.
               environment = priorWorker.environment;
               isolation = priorWorker.environment.kind === "worktree" ? "worktree" : "shared";
-            } else if (isolation === "worktree" && root && window.workhorse?.ensureWorktree) {
-              const isolated = await window.workhorse.ensureWorktree({ sessionId: childId, root });
-              if (isolated.ok && isolated.path && isolated.gitRoot && isolated.head) {
-                environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
-              } else {
-                isolation = "shared";
+            } else if (isolation === "worktree") {
+              if (!root || !window.workhorse?.ensureWorktree) {
+                await replyAsk({ error: "Worktree isolation is unavailable for this folder." });
+                return;
               }
+              const isolated = await window.workhorse.ensureWorktree({ sessionId: childId, root });
+              if (!isolated.ok) {
+                await replyAsk({ error: isolated.message });
+                return;
+              }
+              if (!isolated.path || !isolated.gitRoot || !isolated.head) {
+                await replyAsk({ error: "Could not create the worker worktree." });
+                return;
+              }
+              environment = { kind: "worktree", path: isolated.path, gitRoot: isolated.gitRoot, head: isolated.head };
             } else {
               isolation = "shared";
             }
+            const childCwd = sessionExecutionCwd(environment, root);
             grokAssistantId.current[childId] = assistantId;
             const childCorrelationId = payload.traceId || learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
             learningTurns.current[childId] = { correlationId: childCorrelationId, agentRunId: assistantId, toolIds: [] };
@@ -4535,12 +4549,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         projectId: parent.projectId,
                         lineup: stampLineupUserText(
                           addLineupRow(
-                            item.lineup ?? emptyLineup(admitted.cwd, startedAt),
+                            item.lineup ?? emptyLineup(childCwd, startedAt),
                             {
                               childId,
                               title: spec.title,
                               slice: payload.description?.trim() || spec.title,
-                              folder: admitted.cwd,
+                              folder: childCwd,
                               vendor: spec.title,
                               status: "running",
                               startedAt,
@@ -4579,13 +4593,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ],
             };
             });
-            const childCwd = sessionExecutionCwd(environment, root);
             const waitForReply = spawnWaitsForReply(payload);
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
             const markChildFailure = (error: unknown) => {
               const message = error instanceof Error ? error.message : String(error);
               setState((current) => {
-                let sessions = applyChildIdleSync(current.sessions, childId, "failed", { report: message, error: message });
+                let sessions = applyChildIdleSync(current.sessions, childId, "failed", {
+                  report: message,
+                  error: message,
+                  correlationId: childCorrelationId,
+                });
                 sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", message);
                 const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
                 queueMicrotask(() => {
@@ -4629,6 +4646,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   let sessions = applyChildIdleSync(current.sessions, childId, rowStatus, {
                     report: childReportText(current.sessions.find((item) => item.id === childId)),
                     error: terminalStatus,
+                    correlationId: childCorrelationId,
                   });
                   sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", terminalStatus);
                   const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
@@ -4664,7 +4682,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       }
                     : item,
                 );
-                let sessions = applyChildIdleSync(withReply, childId, "completed", { report: fallback });
+                let sessions = applyChildIdleSync(withReply, childId, "completed", {
+                  report: fallback,
+                  correlationId: childCorrelationId,
+                });
                 sessions = settlePlanAssignment(sessions, parent.id, childId, "completed", fallback);
                 const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
                 queueMicrotask(() => {
@@ -5367,7 +5388,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }));
           return;
         }
-        const allowed = forced ?? autoAllowPermission({ tool: event.tool, grants: owner?.permissionGrants });
+        const allowed = forced ?? autoAllowPermission({
+          tool: event.tool,
+          detail: event.detail,
+          path: event.path,
+          grants: owner?.permissionGrants,
+        });
         if (allowed) {
           if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, allowed);
           else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, allowed);

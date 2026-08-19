@@ -208,6 +208,7 @@ type WorkhorseBridge = {
     history?: { role: "user" | "assistant"; text: string }[];
     mcpServers?: import("./lib/types").McpServerConfig[];
     securityPolicy?: import("./lib/types").SessionSecurityPolicy;
+    permissionGrants?: import("./lib/types").PermissionGrant[];
     folders?: string[];
     parentId?: string;
     hidden?: boolean;

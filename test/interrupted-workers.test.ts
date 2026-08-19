@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { LEGACY_INTERRUPTED_ERROR, normalizeAgentRun } from "../src/lib/subagents";
-import { lineupIsTerminal, reconcilePersistedLineups } from "../src/lib/lineup";
+import { applyChildIdleSync, lineupIsTerminal, reconcilePersistedLineups } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
 
@@ -87,6 +87,50 @@ test("the wave stops waiting on workers that can no longer answer", () => {
   assert.equal(lineupIsTerminal(healed.find((session) => session.id === "sess_parent")!.lineup), true, "no longer waiting");
   // And "interrupted" is not "completed", so a join cannot claim the slice is done.
   assert.equal(rows.some((row) => row.status === "completed"), false);
+});
+
+test("a late completion from an older worker run cannot finish the reused worker", () => {
+  const parent = {
+    ...worker("sess_parent", "Parent"),
+    parentId: undefined,
+    hidden: undefined,
+    agentRun: undefined,
+    lineup: {
+      id: "lineup_new",
+      folder: "/repo",
+      startedAt: 10,
+      rows: [{
+        childId: "sess_a",
+        title: "Current slice",
+        slice: "current",
+        folder: "/repo",
+        vendor: "Grok",
+        status: "running" as const,
+        startedAt: 10,
+        correlationId: "corr_new",
+      }],
+    },
+  } as Session;
+  const child = {
+    ...worker("sess_a", "Current slice"),
+    status: "running" as const,
+    agentRun: { status: "running" as const, startedAt: 10, isolation: "shared" as const, correlationId: "corr_new" },
+  };
+  const original = [parent, child];
+  const stale = applyChildIdleSync(original, "sess_a", "completed", {
+    report: "old result",
+    correlationId: "corr_old",
+  });
+  assert.equal(stale, original);
+  assert.equal(stale[1]?.agentRun?.status, "running");
+  assert.equal(stale[0]?.lineup?.rows[0]?.status, "running");
+
+  const current = applyChildIdleSync(stale, "sess_a", "completed", {
+    report: "current result",
+    correlationId: "corr_new",
+  });
+  assert.equal(current[1]?.agentRun?.status, "completed");
+  assert.equal(current[0]?.lineup?.rows[0]?.status, "completed");
 });
 
 test("resume puts the worker back to running and re-sends its brief", () => {

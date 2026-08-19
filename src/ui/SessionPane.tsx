@@ -151,17 +151,9 @@ export function SessionPane() {
   const project = store.projects.find((item) => item.id === session?.projectId);
   const localCwd = project ? primaryFolder(project)?.path ?? "" : "";
   const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;
-  const fallbackProject =
-    project ?? store.projects.find((item) => item.id === store.activeProjectId) ?? store.projects[0];
-  const folderKey = project?.folders.map((folder) => folder.path).join("\n") ?? "";
-  const extraFolderKey =
-    !project && fallbackProject ? fallbackProject.folders.map((folder) => folder.path).join("\n") : "";
-  const roots = useMemo(() => [...new Set([cwd, ...(folderKey ? folderKey.split("\n") : [])].filter(Boolean))], [cwd, folderKey]);
-  const fileRootKey = [cwd, folderKey, extraFolderKey].filter(Boolean).join("\n");
-  const fileRoots = useMemo(
-    () => [...new Set(fileRootKey ? fileRootKey.split("\n") : [])],
-    [fileRootKey],
-  );
+  const roots = useMemo(() => (cwd ? [cwd] : []), [cwd]);
+  const fileRoots = roots;
+  const fileRootKey = cwd;
   const writesKey = useMemo(() => (session ? projectWritesKey([session]) : ""), [session?.messages]);
   const edits = useMemo(() => {
     if (!session || !editsIdle) return extraEdits;

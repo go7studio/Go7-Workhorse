@@ -474,7 +474,7 @@ test("a budget-exceeded run keeps its partial report and still joins the parent"
   assert.match(join?.text ?? "", /Reached the ceiling after drafting the plan/);
 });
 
-test("budget exhaustion still produces a bounded handoff rather than vanishing", { skip: "intended contract: a sibling is wiring the ceiling into a WorkerHandoff; do not assert today’s empty path" }, () => {
+test("budget exhaustion still produces a bounded handoff rather than vanishing", () => {
   const spend = applyWorkerBudgetUsage(
     { tokenBudget: 5_000 },
     { inputTokens: 1_000, outputTokens: 6_000 },

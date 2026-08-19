@@ -34,7 +34,15 @@ test("Usage and Settings context meters are catalog size, not a live chat", () =
   assert.match(settings, /referenceOnly fallbackWindow=\{modelsFor\(id\)\[0\]\?\.contextWindow\}/);
   assert.match(settings, /referenceOnly fallbackWindow=\{bot.contextWindow\}/);
   const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   assert.match(meter, /if \(referenceOnly\) return;/);
+  assert.match(meter, /context-meter quiet/);
+  assert.match(css, /\.context-meter\.quiet/);
+  assert.match(css, /\.context-meter\.quiet:hover[\s\S]*background:\s*none/);
+  assert.doesNotMatch(
+    meter.slice(meter.indexOf("fallbackWindow && fallbackWindow > 0"), meter.indexOf("if (!session || !estimate || !stats) return null")),
+    /<button/,
+  );
   assert.match(meter, /left: anchor.left/);
   assert.doesNotMatch(meter, /right: anchor.right/);
 });

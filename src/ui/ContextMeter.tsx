@@ -198,16 +198,12 @@ export function ContextMeter({
   if ((!session || !estimate || !stats) && fallbackWindow && fallbackWindow > 0) {
     return (
       <div className="context-meter-wrap">
-        <button
-          type="button"
-          className="context-meter"
-          title={`${formatWindow(fallbackWindow)} context window`}
-        >
+        <span className="context-meter quiet">
           <span className="context-copy">
             <strong>{formatWindow(fallbackWindow)}</strong>
             <em>context</em>
           </span>
-        </button>
+        </span>
       </div>
     );
   }

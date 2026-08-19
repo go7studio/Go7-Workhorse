@@ -19,20 +19,26 @@ never pooled.
 OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
 whether each runtime is installed and lets you select its callable agents. A
 plan can grant selected agents for one wave, or you can name `openclaw/main`
-or `hermes/<profile>`. Those tasks join the lineup.
-They do not get a Usage ring. Settings → LLMs → Install MCP writes a restricted
-Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
-if Hermes is already installed. Those apps launch the packaged helper. No token
-is stored. They can list, read, and ask chats, query leftover and availability, and spawn a
-Workhorse worker on a chat you pick. The leftover check never includes keys or
-chat content. Unnamed inbound spawns create a new chat in Chats by default, or
-in a project you pick, titled from the prompt. Delete, rename, credentials, and elevate stay blocked.
-An explicit request to work with Workhorse delegates before direct execution;
-blocked delegation returns the Workhorse error before any fallback.
-A harness may choose the first coordinating brain; unassigned workers still route independently.
-A delegated mission states whether it stayed focused or split, and its results stay scoped to that worker wave.
-Delegation is one wave by default. An opt-in loop can route bounded follow-up passes against explicit acceptance criteria.
-Goal and Loop intent can choose focused, parallel, or sequential Auto-routed work.
+or `hermes/<profile>`. Those tasks join the lineup. They do not get a Usage
+ring.
+
+**Workhorse Link** is how any outside app calls this desk — Codex, Claude
+Code, Grok, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
+Link connects each with one button, through that app's own MCP tool; Copy
+generic MCP configuration covers the rest. Every app gets the same eight
+tools: capabilities, list/read/ask chats, query leftover and availability,
+delegate a task, continue a finished wave, worker status. The leftover check
+never includes keys or chat content. The first call,
+`workhorse_capabilities`, says what this desk offers. Delete, rename,
+credentials, bot setup and project changes are not offered and are refused.
+No token is stored. Connecting an app adds no vendor, login or Usage ring.
+The same helper is a JSON CLI for a harness without MCP. See
+[docs/LINK.md](LINK.md).
+
+Unnamed inbound spawns create a new chat in Chats by default, or in a project
+you pick, titled from the prompt. An explicit request to work with Workhorse
+delegates before direct execution; blocked delegation returns the Workhorse
+error before any fallback.
 
 One custom API connection can approve several models. Chats and Auto routing use only that list while Usage keeps one connection ring and separate model rows.
 Add a bot lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,

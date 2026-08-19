@@ -52,7 +52,8 @@ import { CredentialStore, hydrateStateCredentials, protectStateCredentials } fro
 import { DurableJobEngine } from "./job-engine";
 import { spawnSync } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
-import { installReportMessage, installWorkhorseExternalMcp } from "./mcp-install";
+import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig } from "./mcp-install";
+import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
@@ -607,17 +608,26 @@ app.whenReady().then(async () => {
     );
   });
 
-  ipcMain.handle("agentRuntime:installMcp", () => {
+  const linkLaunch = () => ({
+    command: process.env.WORKHORSE_MCP_COMMAND || process.execPath,
+    script: process.env.WORKHORSE_MCP_SCRIPT || path.join(__dirname, "workhorse-mcp.js"),
+    statePath: statePath(),
+  });
+
+  // The generic MCP configuration — for a client Link has no writer for.
+  ipcMain.handle("agentRuntime:linkConfig", () => workhorseLinkGenericConfig(linkLaunch()));
+
+  ipcMain.handle("agentRuntime:installMcp", (_event, hosts?: unknown) => {
     const home = app.getPath("home");
     const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
-    const command = process.env.WORKHORSE_MCP_COMMAND || process.execPath;
-    const script = process.env.WORKHORSE_MCP_SCRIPT || path.join(__dirname, "workhorse-mcp.js");
-    const report = installWorkhorseExternalMcp({
+    const wanted = Array.isArray(hosts)
+      ? hosts.filter((host): host is LinkHost => (LINK_HOSTS as string[]).includes(String(host)))
+      : undefined;
+    const report = installWorkhorseLink({
       home,
       platform,
-      command,
-      script,
-      statePath: statePath(),
+      ...linkLaunch(),
+      ...(wanted?.length ? { hosts: wanted } : {}),
       io: {
         existsSync: (file) => fs.existsSync(file),
         readFile: (file) => fs.readFileSync(file, "utf8"),
@@ -629,7 +639,10 @@ app.whenReady().then(async () => {
         },
         exec: (file, args) => {
           const result = spawnSync(file, args, { encoding: "utf8", timeout: 15_000, windowsHide: true });
-          return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+          // A missing binary is status null + ENOENT, not a failed run. Say
+          // which, so "not installed" is not reported as "exit 1".
+          const missing = result.error && (result.error as NodeJS.ErrnoException).code === "ENOENT";
+          return { status: missing ? 127 : result.status ?? 1, stdout: result.stdout ?? "", stderr: missing ? "ENOENT" : result.stderr ?? "" };
         },
       },
     });

@@ -1,8 +1,10 @@
 import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from "../src/lib/agent-runtime";
 import { WORKER_DESK_TOOLS } from "../src/lib/subagents";
+import { LINK_TOOLS } from "../src/lib/workhorse-link";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 
 export const EXTERNAL_RUNTIME_ALLOW = [
+  "workhorse_capabilities",
   "workhorse_delegate",
   "workhorse_continue_mission",
   "workhorse_list_bots",
@@ -41,10 +43,24 @@ export const EXTERNAL_RUNTIME_FORBIDDEN = [
 ] as const;
 
 
+/**
+ * `link` is the product-facing spelling of the external profile (Workhorse
+ * Link); `external-runtime` stays the internal value every written config
+ * carries, so a config from before the name existed still restricts. A
+ * value this build does not recognise is treated as the restricted profile,
+ * not the open desk: an unknown word in a harness config is far more likely
+ * a newer spelling than a grant of everything. Absent means the desk's own
+ * CLIs, which set nothing.
+ */
 export function mcpExposureProfile(raw: unknown): McpExposureProfile {
   if (raw === "worker" || raw === "external-runtime" || raw === "desk") return raw;
+  if (raw === "link") return "external-runtime";
+  if (typeof raw === "string" && raw.trim()) return "external-runtime";
   return "desk";
 }
+
+/** Workhorse Link's seven names are the contract; the external profile must answer every one. */
+export const LINK_CONTRACT_TOOLS = LINK_TOOLS;
 
 export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boolean {
   if (profile === "desk") return true;

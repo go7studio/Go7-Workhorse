@@ -6282,6 +6282,14 @@ button.transcript-earlier:hover {
   align-items: flex-start;
 }
 
+/* Workhorse Link: six Connect buttons. Wrap rather than overflow the pane. */
+.settings-control.link-connect {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 6px;
+  max-width: 60%;
+}
+
 .settings-group-head .settings-control {
   padding-top: 2px;
 }

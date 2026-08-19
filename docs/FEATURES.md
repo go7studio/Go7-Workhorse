@@ -23,8 +23,9 @@ or `hermes/<profile>`. Those tasks join the lineup.
 They do not get a Usage ring. Settings → LLMs → Install MCP writes a restricted
 Workhorse server into OpenClaw (`mcp.servers`), and into Hermes (`mcp_servers`)
 if Hermes is already installed. Those apps launch the packaged helper. No token
-is stored. They can list, read, and ask chats, and spawn a Workhorse worker on a
-chat you pick. Unnamed inbound spawns create a new chat in Chats by default, or
+is stored. They can list, read, and ask chats, query leftover and availability, and spawn a
+Workhorse worker on a chat you pick. The leftover check never includes keys or
+chat content. Unnamed inbound spawns create a new chat in Chats by default, or
 in a project you pick, titled from the prompt. Delete, rename, credentials, and elevate stay blocked.
 An explicit request to work with Workhorse delegates before direct execution;
 blocked delegation returns the Workhorse error before any fallback.

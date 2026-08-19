@@ -1047,6 +1047,161 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   );
 }
 
+export const CAPACITY_SNAPSHOT_VERSION = 1 as const;
+/** Cached official-meter age past this is stale. Six hours. */
+export const CAPACITY_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+export type CapacityMeterStatus = "known" | "unknown" | "unmetered";
+export type CapacityFreshness = "fresh" | "stale" | "unknown";
+export type CapacityReasonCode = Exclude<DeskCallStatus, "ok">;
+
+export type CapacityMeter = {
+  status: CapacityMeterStatus;
+  remainingPercent?: number;
+  usedPercent?: number;
+  resetsAt?: string;
+};
+
+export type CapacityRow = {
+  id: string;
+  kind: "vendor" | "custom";
+  provider: ProviderId;
+  name: string;
+  models: Array<{ id: string; name: string }>;
+  availability: {
+    canCall: boolean;
+    status: DeskCallStatus;
+    reasonCode?: CapacityReasonCode;
+  };
+  meter: CapacityMeter;
+};
+
+export type CapacitySnapshot = {
+  version: typeof CAPACITY_SNAPSHOT_VERSION;
+  asOf: string;
+  freshness: CapacityFreshness;
+  rows: CapacityRow[];
+};
+
+export type CapacitySnapshotQuery = {
+  now?: number;
+  fetchedAt?: number;
+  provider?: string;
+  callableOnly?: boolean;
+  plans?: WatchPlans;
+  settings?: { customBots: CustomBot[] };
+};
+
+function finitePercent(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isDeskCapacityProvider(value: string): value is ProviderId {
+  return value === "grok" || value === "claude" || value === "codex" || value === "cursor" || value === "custom";
+}
+
+function officialCapacityMeter(input: {
+  leftover?: number;
+  used?: number;
+  resetsAt?: string;
+  unmetered?: boolean;
+}): CapacityMeter {
+  if (input.unmetered) return { status: "unmetered" };
+  const remaining = finitePercent(input.leftover);
+  const used = finitePercent(input.used);
+  if (remaining == null && used == null) return { status: "unknown" };
+  return {
+    status: "known",
+    ...(remaining != null ? { remainingPercent: remaining } : {}),
+    ...(used != null ? { usedPercent: used } : {}),
+    ...(input.resetsAt ? { resetsAt: input.resetsAt } : {}),
+  };
+}
+
+function rowMatchesCapacityProvider(row: DeskCallRow, provider: string): boolean {
+  const needle = provider.trim().toLowerCase();
+  if (!needle) return true;
+  const id = row.id.toLowerCase();
+  return id === needle || row.provider === needle || id === `bot:${needle}`;
+}
+
+function publicCapacityModels(row: DeskCallRow): Array<{ id: string; name: string }> {
+  if (row.models && row.models.length > 0) {
+    return row.models.map((item) => ({ id: item.id, name: item.name }));
+  }
+  if (row.model) return [{ id: row.model, name: row.model }];
+  return [];
+}
+
+/** Official leftover/used only. Never `100 - leftover`. */
+export function capacityMeterForRow(
+  row: DeskCallRow,
+  plans?: WatchPlans,
+  settings?: { customBots: CustomBot[] },
+): CapacityMeter {
+  if (plans && settings) {
+    const leftover = leftoverPercentForKey(row.id, plans, settings);
+    const plan = leftoverForCard(deskRowForKey(row.id, settings), plans);
+    const unmetered = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
+    return officialCapacityMeter({
+      leftover,
+      used: plan?.usedPercent,
+      resetsAt: row.resetsAt ?? plan?.resetsAt,
+      unmetered,
+    });
+  }
+  return officialCapacityMeter({
+    leftover: row.leftoverPercent,
+    used: row.usedPercent,
+    resetsAt: row.resetsAt,
+  });
+}
+
+function snapshotFreshness(now: number, fetchedAt: number | undefined, rows: CapacityRow[]): CapacityFreshness {
+  if (fetchedAt != null && now - fetchedAt > CAPACITY_STALE_AFTER_MS) return "stale";
+  if (rows.some((row) => row.meter.status === "known")) return "fresh";
+  return "unknown";
+}
+
+/**
+ * Versioned leftover snapshot for harness MCP. Builds only public fields.
+ * Does not invent used from remaining, fold Cursor pools, or add a total.
+ */
+export function projectCapacitySnapshot(rows: DeskCallRow[], query: CapacitySnapshotQuery = {}): CapacitySnapshot {
+  const now = query.now ?? Date.now();
+  const fetchedAt = query.fetchedAt;
+  const provider = query.provider?.trim() ?? "";
+  const out: CapacityRow[] = [];
+  for (const row of rows) {
+    if (!isDeskCapacityProvider(row.provider)) continue;
+    if (row.kind !== "vendor" && row.kind !== "custom") continue;
+    if (/^(openclaw|hermes)(\/|$)/i.test(row.id)) continue;
+    if (provider && !rowMatchesCapacityProvider(row, provider)) continue;
+    if (query.callableOnly && !row.canCall) continue;
+    const status = row.status;
+    const reasonCode: CapacityReasonCode | undefined = status === "ok" ? undefined : status;
+    out.push({
+      id: row.id,
+      kind: row.kind,
+      provider: row.provider,
+      name: row.name,
+      models: publicCapacityModels(row),
+      availability: {
+        canCall: row.canCall,
+        status,
+        ...(reasonCode ? { reasonCode } : {}),
+      },
+      meter: capacityMeterForRow(row, query.plans, query.settings),
+    });
+  }
+  return {
+    version: CAPACITY_SNAPSHOT_VERSION,
+    asOf: new Date(fetchedAt ?? now).toISOString(),
+    freshness: snapshotFreshness(now, fetchedAt, out),
+    rows: out,
+  };
+}
+
 /** This chat’s vendor plus any vendor it is calling. */
 export function watchNoticeKeysForChat(
   session: Pick<Session, "provider" | "customBotId" | "id" | "messages">,

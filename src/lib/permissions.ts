@@ -82,6 +82,7 @@ export function looksLikeSearchOnly(tool: string, detail: string, filePath?: str
 const QUIET_DESK_TOOLS = new Set([
   "list_chats",
   "list_bots",
+  "query_capacity",
   "list_tools",
   "list_references",
   "read_chat",

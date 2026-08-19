@@ -14,6 +14,7 @@ import type { ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks,
 import {
   deskCallCatalog,
   formatDeskRoster,
+  projectCapacitySnapshot,
   type WatchPlans,
 } from "../src/lib/watch";
 import { isVendorDeclinedResult, vendorDeclinedForBot } from "../src/lib/vendor-decline";
@@ -357,6 +358,19 @@ const TOOLS = [
     description:
       "Inspect attached desk capacity. This is not required before workhorse_delegate and is not an instruction to choose a model. leftoverPercent is that vendor’s weekly plan remaining overall, not this prompt. For ordinary delegated work, leave routing fields unset and let Workhorse select; explicit user assignments win.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_query_capacity",
+    description:
+      "Read current leftover and availability for Workhorse vendors and custom accounts. This is not a reservation and records no usage. Prefer this over workhorse_list_bots when you need a machine-readable snapshot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        provider: { type: "string", description: "Optional vendor or custom account id" },
+        callableOnly: { type: "boolean", description: "If true, return only rows you can call now" },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "workhorse_probe_runtime",
@@ -859,6 +873,39 @@ function deskRoster() {
     permits: raw.watchPermits ?? {},
     dayMarks: raw.watchDayMarks,
   });
+}
+
+function stateFetchedAt(): number | undefined {
+  const dest = process.env.WORKHORSE_STATE_PATH;
+  if (!dest) return undefined;
+  try {
+    return fs.statSync(dest).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+function queryCapacity(args: Record<string, unknown>): string {
+  const raw = readState();
+  const settings = normalizeSettings(raw.settings);
+  const plans = raw.deskPlans ?? {};
+  const rows = deskCallCatalog({
+    settings,
+    usage: Array.isArray(raw.usage) ? raw.usage : [],
+    plans,
+    permits: raw.watchPermits ?? {},
+    dayMarks: raw.watchDayMarks,
+  });
+  return JSON.stringify(
+    projectCapacitySnapshot(rows, {
+      now: Date.now(),
+      fetchedAt: stateFetchedAt(),
+      provider: typeof args.provider === "string" ? args.provider : undefined,
+      callableOnly: args.callableOnly === true,
+      plans,
+      settings,
+    }),
+  );
 }
 
 function probeRuntime(): string {
@@ -1503,6 +1550,9 @@ async function callTool(name: string, args: Record<string, unknown>, from?: stri
   }
   if (name === "workhorse_list_bots") {
     return listBots(from);
+  }
+  if (name === "workhorse_query_capacity") {
+    return queryCapacity(args);
   }
   if (name === "workhorse_list_agents") {
     return listBots(from);

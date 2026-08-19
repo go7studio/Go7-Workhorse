@@ -306,11 +306,17 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
   };
   // The candidate list is /usr/local/bin then /opt/homebrew/bin. Neither is
   // our fake, so with no writable candidate the report names the ln -s to run.
-  const noBin = installLinkCommand({ platform: "darwin", dataDir: path.join(root, "data"), launch, io });
+  // This case simulates a macOS install, so the launcher path is built with
+  // "/" by the code under test whatever machine runs the suite. Compare the
+  // path the report returns; do not rebuild it with path.join, which would
+  // use "\\" on Windows and fail there only.
+  const dataDir = `${root.replace(/\\/g, "/")}/data`;
+  const noBin = installLinkCommand({ platform: "darwin", dataDir, launch, io });
   assert.equal(noBin.ok, true);
   assert.equal(noBin.linked, undefined);
-  assert.match(noBin.message, /sudo ln -sf '.*\/data\/bin\/workhorse' \/usr\/local\/bin\/workhorse/);
-  assert.ok(files.has(path.join(root, "data", "bin", "workhorse")), "the launcher is written regardless");
+  assert.equal(noBin.launcher, `${dataDir}/bin/workhorse`);
+  assert.ok(noBin.message.includes(`sudo ln -sf '${noBin.launcher}' /usr/local/bin/workhorse`), noBin.message);
+  assert.ok(files.has(noBin.launcher), "the launcher is written regardless");
   // Windows: written, and PATH is the person's to change — said, not done.
   const win = installLinkCommand({ platform: "win32", dataDir: "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse", launch, io });
   assert.equal(win.launcher, "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse\\bin\\workhorse.cmd");

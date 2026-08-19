@@ -579,6 +579,78 @@
       "rubric": ["ORC-18"],
       "sourceFiles": ["src/lib/plan.ts", "src/lib/plan-admission.ts", "src/lib/ask-default.ts", "src/lib/lineup.ts", "scripts/workhorse-eval-plan-admission.ts", "test/plan-admission.test.ts", "test/ask-default.test.ts"],
       "verification": ["eval:admission-smoke", "verify"]
+    },
+    {
+      "id": "REG-065",
+      "behavior": "Terminal, Review, file lookup, custom tools, providers, and external harness tasks use only the active chat's absolute execution folder; an unbound chat fails closed instead of borrowing the app or parent project directory.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["PRJ-S3", "SEC-S2", "ORC-S7"],
+      "rubric": ["PRJ-06", "SEC-02", "ORC-15"],
+      "sourceFiles": ["electron/grok-host.ts", "electron/project-diff.ts", "src/lib/session-environment.ts", "src/ui/SessionPane.tsx", "test/session-environment.test.ts", "test/project-diff.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-066",
+      "behavior": "Root workers default to isolated worktrees and a missing or failed worktree blocks dispatch without silently falling back to the shared checkout.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["SEC-S3", "ORC-S1"],
+      "rubric": ["SEC-06", "ORC-08"],
+      "sourceFiles": ["electron/worktree-host.ts", "src/lib/store.tsx", "test/session-environment.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-067",
+      "behavior": "Session approvals are exact, expiring tool-command-path leases; broad legacy grants and expired leases are discarded, while the same custom or ACP request is reused without another prompt.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["SEC-S1", "SEC-S4"],
+      "rubric": ["SEC-01", "SEC-07"],
+      "sourceFiles": ["src/lib/permission-grants.ts", "src/lib/permissions.ts", "electron/custom-tools.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-068",
+      "behavior": "A late terminal event can finish only its matching worker correlation, and worker-heavy ten-thousand-chat restart reconciliation stays indexed and within the performance budget.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S7", "REL-S5"],
+      "rubric": ["ORC-09", "REL-08"],
+      "sourceFiles": ["src/lib/lineup.ts", "test/interrupted-workers.test.ts", "eval/performance-contract.json"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-069",
+      "behavior": "OpenClaw and Hermes tasks are persisted and shown as running before their CLI finishes, cancellation reaches the live process tree, and restart never invents completion.",
+      "profiles": ["custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S7", "ORC-S9", "REL-S2"],
+      "rubric": ["ORC-15", "ORC-17", "REL-04"],
+      "sourceFiles": ["electron/agent-runtime-host.ts", "electron/main.ts", "src/lib/external-task.ts", "src/lib/store.tsx", "test/external-task.test.ts"],
+      "verification": ["eval:harness-smoke", "verify"]
+    },
+    {
+      "id": "REG-070",
+      "behavior": "An eval run preserves its initial commit, branch, dirty state, version, profiles, policy, and spend; finalization rejects source drift and sparse area sampling cannot produce a headline score.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["REL-S1", "REL-S3"],
+      "rubric": ["REL-01", "REL-06"],
+      "sourceFiles": ["scripts/workhorse-eval.mjs", "eval/suite.json", "test/eval-kit.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-071",
+      "behavior": "DeepSeek uses current V4 catalog identities and 1M context, maps thinking effort explicitly, replays reasoning_content across tool rounds, and records cache hit and miss tokens without inflation.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["MOD-S3", "USG-S1", "USG-S5"],
+      "rubric": ["MOD-02", "MOD-03", "MOD-04", "USG-08"],
+      "sourceFiles": ["src/lib/provider-catalog.ts", "electron/custom-http.ts", "electron/custom-host.ts", "test/custom-http.test.ts", "test/usage-metering.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-072",
+      "behavior": "File-instance review baselines survive process restart, and explicit provider, connection, and customBotId provenance wins over model-name collisions on Usage and Watch.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["PRJ-S3", "USG-S5", "REL-S2"],
+      "rubric": ["PRJ-06", "USG-08", "REL-03"],
+      "sourceFiles": ["electron/state-persistence.ts", "src/lib/usage.ts", "test/state-persistence.test.ts", "test/usage-metering.test.ts"],
+      "verification": ["eval:validate", "verify"]
     }
   ]
 }

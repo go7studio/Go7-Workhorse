@@ -669,7 +669,7 @@ app.whenReady().then(async () => {
   // is a channel written next month.
   guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
 
-  ipcMain.handle("agentRuntime:detect", () => {
+  const detectAgentRuntimes = () => {
     const home = app.getPath("home");
     const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
     return detectRuntimesOnHost(
@@ -682,7 +682,8 @@ app.whenReady().then(async () => {
         },
       },
     );
-  });
+  };
+  ipcMain.handle("agentRuntime:detect", detectAgentRuntimes);
 
   const linkLaunch = () => ({
     command: process.env.WORKHORSE_MCP_COMMAND || process.execPath,
@@ -987,7 +988,9 @@ app.whenReady().then(async () => {
       body: typeof payload?.body === "string" ? payload.body : "",
     }),
   );
-  const collectDiagnostics = async () => buildSupportReport({
+  const collectDiagnostics = async () => {
+    const runtimes = detectAgentRuntimes().statuses;
+    return buildSupportReport({
     state: readState(),
     version: APP_VERSION,
     userData: app.getPath("userData"),
@@ -996,8 +999,12 @@ app.whenReady().then(async () => {
       grok: await detectGrokLogin(),
       codex: await detectCodexLogin(),
       claude: await detectClaudeLogin(),
+      cursor: await detectCursorLogin(),
+      openclaw: { connected: runtimes.some((item) => item.runtimeId === "openclaw" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "openclaw")?.binaryPath },
+      hermes: { connected: runtimes.some((item) => item.runtimeId === "hermes" && item.reachable), binary: runtimes.find((item) => item.runtimeId === "hermes")?.binaryPath },
     },
-  });
+    });
+  };
   ipcMain.handle("diagnostics:collect", () => collectDiagnostics());
   ipcMain.handle("diagnostics:export", async () => {
     const result = await dialog.showSaveDialog({

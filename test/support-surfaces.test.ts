@@ -38,11 +38,13 @@ test("support report contains capabilities but never credential values or prompt
     },
     version: "test",
     userData: dir,
-    detections: { grok: { connected: true }, codex: {}, claude: {} },
+    detections: { grok: { connected: true }, codex: {}, claude: {}, cursor: { connected: true }, openclaw: { connected: true, binary: "/bin/openclaw" }, hermes: {} },
     encryptionAvailable: true,
   });
   const serialized = JSON.stringify(report);
   assert.match(serialized, /capabilities/);
+  assert.equal((report.providers.cursor as { connected: boolean }).connected, true);
+  assert.equal((report.harnesses.openclaw as { available: boolean }).available, true);
   assert.doesNotMatch(serialized, /sk-secret|do not export me|secret-prompt/);
   fs.rmSync(dir, { recursive: true, force: true });
 });

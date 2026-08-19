@@ -95,6 +95,8 @@ transcript rather than as a path.
 - **Sandbox profiles** — off, workspace, read-only, strict.
 - **One permission inbox.** Every prompt lands in the same place and is
   translated to each vendor's own protocol.
+- **Scoped approvals.** A session grant remembers the exact tool, command, and
+  path for 24 hours. Changed or expired requests ask again.
 - **Execution directory** — a chat runs in a linked folder or in a managed git
   worktree, isolated from your working copy.
 - **Terminal** — chat-scoped, in that same directory.
@@ -109,6 +111,7 @@ transcript rather than as a path.
   of shrinking the green count against empty / HEAD. Paths such as
   OpenClaw configs outside the project folder still resolve from the
   cite in the transcript.
+  The baseline survives an app restart.
 
 ## Spend
 
@@ -133,9 +136,9 @@ transcript rather than as a path.
   desk goal continues in rounds after a turn ends, until pause, clear, or the
   round cap. Each round is one turn on that chat’s vendor. Grok’s own `/goal`
   is still that vendor’s one-shot driver.
-- **Loops** — spawn a worker cold with only a bounded handoff (`seed: fresh`).
-  The worker gets no parent conversation. It keeps its own vendor, leftover
-  ring, and sandbox.
+- **Loops** — an opt-in goal that reassesses unfinished work for bounded rounds.
+- **Fresh workers** — a separate spawn option with only a bounded handoff
+  (`seed: fresh`) and no parent conversation.
 - **Turn log** — a chat can reconstruct model history from its own turn and
   step log. The log is per chat. It is never shared across vendors.
 - **Subagents** — lifecycle records, runtime and token ceilings, cascading
@@ -151,6 +154,9 @@ transcript rather than as a path.
   product question carries a recommendation and a default, and work continues
   on that default. Elevate still waits. One blocked slice does not stop the
   others.
+- **Harness tasks** — OpenClaw and Hermes work appears in the lineup before the
+  CLI finishes. Stop reaches the live process; restart marks uncertain work
+  unknown instead of complete.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. The desk routes
   the work it hands out on its own: when a chat spawns a worker without naming

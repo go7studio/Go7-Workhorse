@@ -78,8 +78,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     api: "openai-completions",
     keyPrefixes: [],
     models: [
-      { id: "deepseek-chat", name: "DeepSeek Chat", contextWindow: 128_000 },
-      { id: "deepseek-reasoner", name: "DeepSeek Reasoner", contextWindow: 128_000 },
+      { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", contextWindow: 1_000_000 },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", contextWindow: 1_000_000 },
     ],
   },
   {

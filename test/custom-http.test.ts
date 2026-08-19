@@ -8,6 +8,7 @@ import {
   applyAnthropicEvent,
   applyOpenAiChunk,
   buildAnthropicBody,
+  buildOpenAiBody,
   customMaxTokens,
   customMessagesUrl,
   customStreamError,
@@ -62,6 +63,68 @@ test("OpenAI-compatible tool calls wait for all streamed argument fragments", as
   assert.deepEqual(streamed.toolUses, [
     { id: "child-a", name: "workhorse_spawn_agent", input: { prompt: "read only", wait: false } },
   ]);
+});
+
+test("DeepSeek thinking tool loops replay reasoning and meter cache provenance", async () => {
+  const body = buildOpenAiBody({
+    model: "deepseek-v4-pro",
+    baseUrl: "https://api.deepseek.com",
+    effort: "xhigh",
+    messages: [
+      { role: "user", text: "inspect" },
+      {
+        role: "assistant",
+        text: "",
+        reasoning: "I need the file list.",
+        toolUses: [{ id: "call_1", name: "list_dir", input: { path: "." } }],
+      },
+      { role: "user", text: "", toolResults: [{ id: "call_1", name: "list_dir", content: "README.md" }] },
+    ],
+  }) as Record<string, any>;
+  assert.deepEqual(body.thinking, { type: "enabled" });
+  assert.equal(body.reasoning_effort, "max");
+  assert.equal(body.max_tokens, 8192);
+  assert.equal(body.messages[1].reasoning_content, "I need the file list.");
+  const off = buildOpenAiBody({ model: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com", effort: "off", messages: [] }) as Record<string, any>;
+  assert.deepEqual(off.thinking, { type: "disabled" });
+  assert.equal(off.reasoning_effort, undefined);
+  assert.deepEqual(parseCustomUsage({ usage: {
+    prompt_tokens: 1000,
+    completion_tokens: 50,
+    prompt_cache_hit_tokens: 900,
+    prompt_cache_miss_tokens: 100,
+  } }), { inputTokens: 100, outputTokens: 50, cacheReadTokens: 900, cacheWriteTokens: 0 });
+
+  let calls = 0;
+  const host = new CustomSessionHost(
+    async (_config, input) => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          text: "",
+          thought: "The directory must be listed.",
+          toolUses: [{ id: "call_1", name: "list_dir", input: { path: "." } }],
+        };
+      }
+      const assistant = input.messages.find((message) => message.role === "assistant" && message.toolUses?.length);
+      assert.equal(assistant?.reasoning, "The directory must be listed.");
+      return { text: "Done." };
+    },
+    { executeTool: async (use) => ({ id: use.id, name: use.name, content: "README.md" }) },
+  );
+  const reply = await host.prompt({
+    sessionId: "deepseek-loop",
+    text: "inspect",
+    model: "deepseek-v4-pro",
+    effort: "high",
+    cwd: path.resolve("fixture-workspace"),
+    mode: "always-approve",
+    sandbox: "off",
+    history: [],
+    config: { baseUrl: "https://api.deepseek.com", apiKey: "test", model: "deepseek-v4-pro", api: "openai-completions" },
+  }, () => undefined);
+  assert.equal(calls, 2);
+  assert.equal(reply.text, "Done.");
 });
 import {
   detectCustomLogin,

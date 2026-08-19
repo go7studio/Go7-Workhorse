@@ -446,7 +446,7 @@ export class CustomSessionHost {
             }
             messages = [
               ...messages,
-              { role: "assistant", text: result.text || text },
+              { role: "assistant", text: result.text || text, reasoning: result.thought },
               { role: "user", text: CONTINUE_NUDGE },
             ];
             messages = compactCustomTurnTranscript(messages, baseMessageCount, this.safety.maxTranscriptChars);
@@ -749,7 +749,7 @@ export class CustomSessionHost {
         }
         messages = [
           ...messages,
-          { role: "assistant", text: result.text || "", toolUses },
+          { role: "assistant", text: result.text || "", toolUses, reasoning: result.thought },
           { role: "user", text: "", toolResults: results },
         ];
         const roundFingerprint = customToolRoundFingerprint(toolUses, results);

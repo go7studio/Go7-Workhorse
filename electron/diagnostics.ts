@@ -10,6 +10,7 @@ export type SupportReport = {
   createdAt: string;
   app: { version: string; electron: string; node: string; platform: string; arch: string };
   providers: Record<string, unknown>;
+  harnesses: Record<string, unknown>;
   persistence: Record<string, boolean>;
   workload: { projects: number; chats: number; queued: number; scheduled: number; activeGoals: number; attentionFailures: number };
 };
@@ -27,7 +28,7 @@ export function buildSupportReport(input: {
   const settings = input.state.settings && typeof input.state.settings === "object" ? input.state.settings as Record<string, unknown> : {};
   const bots = Array.isArray(settings.customBots) ? settings.customBots as Record<string, unknown>[] : [];
   const providers: Record<string, unknown> = {};
-  for (const id of ["grok", "codex", "claude"] as const) {
+  for (const id of ["grok", "codex", "claude", "cursor"] as const) {
     providers[id] = {
       connected: Boolean(input.detections[id]?.connected),
       binaryDetected: Boolean(input.detections[id]?.binary),
@@ -44,6 +45,10 @@ export function buildSupportReport(input: {
     })),
     capabilities: PROVIDER_CAPABILITIES.custom,
   };
+  const harnesses = Object.fromEntries(["openclaw", "hermes"].map((id) => [id, {
+    available: Boolean(input.detections[id]?.connected),
+    binaryDetected: Boolean(input.detections[id]?.binary),
+  }]));
   const scheduled = sessions.flatMap((session) => Array.isArray(session.scheduledRuns) ? session.scheduledRuns as Record<string, unknown>[] : []);
   return {
     schemaVersion: 1,
@@ -56,6 +61,7 @@ export function buildSupportReport(input: {
       arch: os.arch(),
     },
     providers,
+    harnesses,
     persistence: {
       state: fs.existsSync(path.join(input.userData, "workhorse-state.json")),
       backup: fs.existsSync(path.join(input.userData, "workhorse-state.json.bak")),

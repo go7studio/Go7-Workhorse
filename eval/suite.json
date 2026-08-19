@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "ddb4c3a65fa51d1d59a8b50e4c0fffaaa17d96f0",
+  "baselineRef": "ed81fd8606c615891806b7d3946ce8b44b13c71c",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -195,7 +195,8 @@
             "Open the matched message and return to the project.",
             "Populate an earlier-sorted fixture directory with more than 800 decoy entries, then resolve a basename-only source path located later in the workspace tree.",
             "Review Git edits and verify each change instance reports real files plus added and removed line counts, including a zero-duration provider call.",
-            "Open the chat-scoped terminal in the local fixture workspace.",
+            "Open the chat-scoped terminal, Review, and a relative file from a child worktree; verify all three use that exact child folder and never the parent project or app launch directory.",
+            "Open an unbound chat and verify Terminal, Review, providers, custom tools, and harness delegation fail closed until an absolute folder is linked.",
             "Confirm archived chats and attention items remain scoped to their projects."
           ]
         },
@@ -357,6 +358,7 @@
             "Use a local fixture endpoint that records headers/body and can return a deliberately different response model.",
             "Send one request with each API shape and inspect the exact model, effort/thinking, history, tools, and auth fields.",
             "Return a mismatched model id, then an unsupported-model error.",
+            "Run a fixture DeepSeek V4 thinking tool round and verify reasoning_content is replayed, effort is mapped explicitly, and cache-hit and cache-miss tokens retain separate provenance.",
             "Verify Workhorse surfaces the mismatch/error rather than labeling the reply as the requested model."
           ]
         },
@@ -619,6 +621,8 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Approve one repeated fixture action for the session and repeat its exact scope.",
+            "Change the command arguments, file path, or tool and verify the prior lease does not apply; expire the lease and verify it prompts again.",
+            "Load broad legacy grant strings and verify they are discarded instead of becoming indefinite approvals.",
             "Verify Workhorse does not enqueue duplicate approvals for the same pending request.",
             "Unlock or approve the credential boundary once and repeat credential reads without a prompt loop.",
             "Confirm development and installed builds use separate credential namespaces.",
@@ -946,6 +950,8 @@
             "Start workers on different providers, models, and reasoning efforts and inspect the parent, sidebar, and child views.",
             "Verify each active row has visible activity, provider color, model, effort, task, status, and elapsed time.",
             "Interrupt one worker and restart while another completes; reconcile stale running records before dispatching more work.",
+            "Deliver a late completion from an older correlation after the worker is reused and verify it cannot finish or overwrite the current run.",
+            "Start and cancel one OpenClaw or Hermes task and verify its running row appears before the CLI returns and cancellation reaches the live process.",
             "Verify recovered and completed calls retain truthful duration and terminal workers stop animating or consuming slots.",
             "Complete an internal Codex worker and verify its native thread is archived while the Workhorse transcript remains inspectable and user-facing Codex chats remain listed.",
             "Resume the plan and verify it continues through later waves to a real terminal state."
@@ -1535,6 +1541,7 @@
             "Verify an authoritative turn replaces lower-quality token evidence, requests sum once, gauges book no tokens, and unknown creates no row.",
             "Run a routed worker and verify its usage home is the worker's actual bot rather than the orchestrator.",
             "Use two approved models on one custom connection and verify one connection ring retains separate truthful model rows.",
+            "Use the same model name on a stock provider and two custom connections; verify explicit provider and customBotId identity wins and ambiguous legacy events are not assigned arbitrarily.",
             "Verify canceled-before-send, failed preflight, and missing-usage ACP turns never invent tokens."
           ]
         }
@@ -1700,6 +1707,7 @@
             "Stream one assistant reply and type a draft; verify transcript updates do not serialize the whole desk on each token or keypress.",
             "Trigger normal journal saves for more than one save interval and verify compact state writes continue while full recovery backups rotate no more than once per backup interval.",
             "Interrupt and relaunch from the copied state, then verify the newest durable chat, project, draft, goal, worker, attachment metadata, and sidebar nesting recover exactly once.",
+            "Reconcile a worker-heavy 10,000-chat fixture within the numeric restart budget and verify file-review instance baselines survive the process boundary.",
             "Record state size, write count, backup count, recovery choice, and post-restart interaction evidence without reading or mutating production userData."
           ]
         },

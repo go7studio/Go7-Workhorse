@@ -98,5 +98,5 @@
     "test/custom-multi-model.test.ts",
     "test/vendor-meter.test.ts"
   ],
-  "verificationCommands": ["eval:validate", "verify"]
+  "verificationCommands": ["eval:validate", "eval:smoke", "verify"]
 }

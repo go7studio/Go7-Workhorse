@@ -801,6 +801,15 @@ function AgentSystemsBlock() {
           >
             Copy generic MCP configuration
           </button>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
+              void store.installLinkCommand().then((result) => setNote(result.message || (result.ok ? "Installed the workhorse command." : "Could not install the command.")));
+            }}
+          >
+            Install workhorse command
+          </button>
         </div>
       </div>
       {runtimes.map((runtime) => {

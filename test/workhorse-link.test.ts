@@ -265,3 +265,72 @@ test("every mutating Link call shares the envelope: a retried ask_chat posts onc
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the workhorse command: a launcher with this install's paths, linked onto PATH only where that needs no sudo", async () => {
+  const { installLinkCommand, linkCliLauncherScript, workhorseExternalMcpLaunch } = await import("../electron/mcp-install");
+  const { execFileSync } = await import("node:child_process");
+  const { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync: write } = await import("node:fs");
+  const launch = workhorseExternalMcpLaunch({ command: process.execPath, script: path.resolve("dist-electron/workhorse-mcp.js"), statePath: "/tmp/it's state.json" });
+
+  // Quoting: a path with an apostrophe must survive the shell. This is not a
+  // hypothetical — "Application Support" has a space, and people name disks.
+  const sh = linkCliLauncherScript("darwin", launch);
+  assert.match(sh, /^#!\/bin\/sh\n/);
+  assert.match(sh, /export WORKHORSE_STATE_PATH='\/tmp\/it'\\''s state\.json'/);
+  assert.match(sh, /exec '.*' '.*workhorse-mcp\.js' link "\$@"\n$/);
+  const cmd = linkCliLauncherScript("win32", launch);
+  assert.match(cmd, /^@echo off\r\n/);
+  assert.match(cmd, /set "WORKHORSE_MCP_PROFILE=external-runtime"\r\n/);
+  assert.match(cmd, /link %\*\r\n$/);
+
+  // Install into a fake data dir with a writable fake bin: the link is made.
+  const root = mkdtempSync(path.join(tmpdir(), "wh-cmd-"));
+  const fakeBin = path.join(root, "usrlocalbin");
+  mkdirSync(fakeBin);
+  const files = new Map<string, string>();
+  const links = new Map<string, string>();
+  const io = {
+    existsSync: (file: string) => file === fakeBin || files.has(file) || links.has(file),
+    readFile: (file: string) => files.get(file) ?? "",
+    writeFile: (file: string, text: string) => {
+      files.set(file, text);
+    },
+    mkdirp: () => undefined,
+    writable: (dir: string) => dir === fakeBin,
+    symlink: (target: string, linkPath: string) => {
+      links.set(linkPath, target);
+    },
+    unlink: (file: string) => {
+      links.delete(file);
+    },
+  };
+  // The candidate list is /usr/local/bin then /opt/homebrew/bin. Neither is
+  // our fake, so with no writable candidate the report names the ln -s to run.
+  const noBin = installLinkCommand({ platform: "darwin", dataDir: path.join(root, "data"), launch, io });
+  assert.equal(noBin.ok, true);
+  assert.equal(noBin.linked, undefined);
+  assert.match(noBin.message, /sudo ln -sf '.*\/data\/bin\/workhorse' \/usr\/local\/bin\/workhorse/);
+  assert.ok(files.has(path.join(root, "data", "bin", "workhorse")), "the launcher is written regardless");
+  // Windows: written, and PATH is the person's to change — said, not done.
+  const win = installLinkCommand({ platform: "win32", dataDir: "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse", launch, io });
+  assert.equal(win.launcher, "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse\\bin\\workhorse.cmd");
+  assert.match(win.message, /Add C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse\\bin to your PATH/);
+
+  // And the launcher actually runs: write the real script, execute it against
+  // the built helper, and read the handshake back. Skipped where there is no
+  // built helper (a fresh clone before `npm run build`).
+  if (process.platform !== "win32" && existsSync(path.resolve("dist-electron/workhorse-mcp.js"))) {
+    const statePath = path.join(root, "state.json");
+    write(statePath, JSON.stringify({ settings: {}, sessions: [] }));
+    const real = workhorseExternalMcpLaunch({ command: process.execPath, script: path.resolve("dist-electron/workhorse-mcp.js"), statePath });
+    const launcher = path.join(root, "workhorse");
+    write(launcher, linkCliLauncherScript("darwin", real));
+    chmodSync(launcher, 0o755);
+    const out = execFileSync(launcher, ["capabilities"], { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
+    const shake = JSON.parse(out) as { protocolVersion: number; tools: string[] };
+    assert.equal(shake.protocolVersion, 1);
+    assert.deepEqual(shake.tools, [...LINK_TOOLS]);
+    assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
+  }
+  rmSync(root, { recursive: true, force: true });
+});

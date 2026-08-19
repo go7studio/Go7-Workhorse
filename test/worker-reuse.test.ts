@@ -1,15 +1,22 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
+  WORKER_BOUND_ELSEWHERE_ERROR,
   WORKER_NAMES,
   findReusableWorker,
   nextWorkerName,
   reserveWorkerName,
+  resolveNamedWorker,
   workerTaskTitle,
   workerIsFree,
   workerNameFromTitle,
   type WorkerRecord,
 } from "../src/lib/subagents";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * A worker used to be anonymous and disposable. An orchestrator finished a
@@ -149,4 +156,37 @@ test("free means not running, by either signal", () => {
   assert.equal(workerIsFree({ status: "running" }), false);
   assert.equal(workerIsFree({ status: "idle", agentRun: { status: "running" } }), false);
   assert.equal(workerIsFree({ status: "idle", agentRun: { status: "completed" } }), true);
+});
+
+test("a named worker missing a project folder is still that address, not Wren 2", () => {
+  // Reproduced against main: Wren exists on this parent with projectId null
+  // (legacy save). findReusableWorker required an exact project match, missed
+  // Wren, and nextWorkerName then invented "Wren 2".
+  const legacy = worker({ projectId: null });
+  const found = findReusableWorker({ ...want, name: "Wren" }, [legacy], scope);
+  assert.equal(found?.id, "w1");
+  const named = resolveNamedWorker({ name: "Wren" }, [legacy], scope);
+  assert.equal(named.ok, true);
+  if (named.ok) assert.equal(named.worker?.id, "w1");
+});
+
+test("a named worker bound to another project is worker_bound_elsewhere, not Wren 2", () => {
+  const elsewhere = worker({ projectId: "p2" });
+  assert.equal(findReusableWorker({ ...want, name: "Wren" }, [elsewhere], scope), null);
+  const named = resolveNamedWorker({ name: "Wren" }, [elsewhere], scope);
+  assert.equal(named.ok, false);
+  if (!named.ok) assert.equal(named.error, WORKER_BOUND_ELSEWHERE_ERROR);
+  assert.notEqual(nextWorkerName(["Wren"]), "Wren", "the suffix path is what we refuse");
+});
+
+test("an explicit new name is kept; the desk does not swap it for Wren", () => {
+  const named = resolveNamedWorker({ name: "Dexter" }, [], scope);
+  assert.equal(named.ok, true);
+  if (named.ok && !named.worker) assert.equal(named.createName, "Dexter");
+});
+
+test("spawn refuses a named worker bound elsewhere instead of suffixing the name", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /resolveNamedWorker/);
+  assert.match(store, /namedResolution && !namedResolution\.ok/);
 });

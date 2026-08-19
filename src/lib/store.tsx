@@ -4055,10 +4055,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const waveIdSet = new Set(waveIds);
               const shouldWait = awaitAgentsWaits({ wait: payload.wait, parentStatus: parentLive?.status });
               if (shouldWait) {
-                const timeoutMs =
+                // Cursor-based long poll. The desk owns joining, so the
+                // server-side wait is short even when the parent asked us to
+                // sit. Anything longer belongs on a desk-driven wake-up.
+                const cursorSeconds =
                   typeof payload.timeoutSeconds === "number"
-                    ? Math.max(30, Math.min(3_600, payload.timeoutSeconds)) * 1_000
-                    : 10 * 60 * 1_000;
+                    ? Math.max(5, Math.min(30, payload.timeoutSeconds))
+                    : 15;
+                const timeoutMs = cursorSeconds * 1_000;
                 const deadline = Date.now() + timeoutMs;
                 while (parentHasRunningChildren(stateRef.current.sessions, parentId, waveIdSet) && Date.now() < deadline) {
                   await new Promise((resolve) => setTimeout(resolve, 400));

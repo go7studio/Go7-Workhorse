@@ -326,7 +326,7 @@ const TOOLS = [
       type: "object",
       properties: {
         wait: { type: "boolean", description: "false (default) status now. true waits for terminal state." },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second wait. Default 600." },
+        timeoutSeconds: { type: "number", description: "Optional 5-30 second cursor poll when wait=true. The desk owns joining, so longer waits belong on the desk." },
         workerIds: { type: "array", items: { type: "string" }, description: "Worker ids returned by this wave's delegate/spawn calls." },
         fromSessionId: { type: "string", description: "Parent Workhorse chat id used for the spawn." },
         traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
@@ -1331,6 +1331,19 @@ async function spawnAgent(
   return first;
 }
 
+/**
+ * Cursor-based cap for `workhorse_await_agents`.
+ *
+ * The desk owns joining — the parent delegates once, then re-checks briefly
+ * when the user asked it to sit. A ten-minute blocking HTTP call belongs on
+ * the desk, not on the parent. When `wait` is false the tool returns the
+ * current snapshot immediately and the caller uses this as a status poll.
+ */
+export function awaitAgentsCursorSeconds(wait: boolean | undefined, timeoutSeconds: number | undefined): number | undefined {
+  if (!wait) return undefined;
+  return Math.max(5, Math.min(30, timeoutSeconds ?? 15));
+}
+
 async function awaitAgents(
   from?: string,
   timeoutSeconds?: number,
@@ -1338,16 +1351,15 @@ async function awaitAgents(
   traceId?: string,
   workerIds?: string[],
 ): Promise<string> {
-  const timeoutMs = wait
-    ? Math.max(30, Math.min(3_600, timeoutSeconds ?? 600)) * 1_000 + 5_000
-    : 15_000;
+  const cursorSeconds = awaitAgentsCursorSeconds(wait, timeoutSeconds);
+  const timeoutMs = wait ? cursorSeconds! * 1_000 + 5_000 : 15_000;
   return postBridge(
     "/bots",
     botsAsk(
       {
         action: "await-agents",
         message: "await-agents",
-        timeoutSeconds,
+        timeoutSeconds: cursorSeconds,
         wait,
         ...(workerIds?.length ? { workerIds } : {}),
         ...(traceId?.trim() ? { traceId: traceId.trim() } : {}),

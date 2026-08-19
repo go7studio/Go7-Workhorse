@@ -23,6 +23,7 @@ import { ContextMeter } from "./ContextMeter";
 import { EditedList } from "./EditedList";
 import { FileOpenProvider } from "./FileOpen";
 import { FileViewer } from "./FileViewer";
+import { MediaPaintProvider } from "./MediaPaint";
 import { MessageBody } from "./MessageBody";
 import { PlaceInProject } from "./PlaceInProject";
 import { SessionSetup } from "./SessionSetup";
@@ -257,6 +258,7 @@ export function SessionPane() {
         setOpen(next);
       }}
     >
+    <MediaPaintProvider resetKey={session.id}>
     <section
       className={`session${open ? " has-file" : ""}`}
       ref={pane}
@@ -442,6 +444,7 @@ export function SessionPane() {
         </aside>
       ) : null}
     </section>
+    </MediaPaintProvider>
     </FileOpenProvider>
   );
 }

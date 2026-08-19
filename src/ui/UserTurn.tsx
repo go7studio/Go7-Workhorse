@@ -3,12 +3,19 @@ import { splitGoalCommand } from "../lib/commands";
 import { attachmentLabel, groupAttachments, imageSrc, isPicture } from "../lib/images";
 import { peerPromptParts } from "../lib/session-bridge";
 import { useStore } from "../lib/store";
-import type { ChatMessage } from "../lib/types";
+import type { ChatImage, ChatMessage } from "../lib/types";
 import { ImageZoom } from "./ImageZoom";
+import { useMediaPaintReady } from "./MediaPaint";
 import { MessageBody } from "./MessageBody";
 import { copyText } from "../lib/copy-text";
 import { TimeStamp } from "./TimeStamp";
 import { TurnActions } from "./TurnActions";
+
+function DeferredChatImage({ image }: { image: ChatImage }) {
+  const ready = useMediaPaintReady();
+  if (!ready) return <span className="say-image-pending" aria-hidden="true" />;
+  return <ImageZoom className="say-image" src={imageSrc(image)} alt={image.name} />;
+}
 
 export function UserTurn({ message, readOnly = false }: { message: ChatMessage; readOnly?: boolean }) {
   const store = useStore();
@@ -97,7 +104,7 @@ export function UserTurn({ message, readOnly = false }: { message: ChatMessage; 
                     </em>
                   </span>
                 ) : isPicture(group.file) ? (
-                  <ImageZoom key={group.file.id} className="say-image" src={imageSrc(group.file)} alt={group.file.name} />
+                  <DeferredChatImage key={group.file.id} image={group.file} />
                 ) : (
                   <span key={group.file.id} className="say-file" title={group.file.name}>
                     {group.file.name}

@@ -2463,6 +2463,26 @@ html.pane-dragging * {
   object-fit: cover;
 }
 
+.say-image-pending,
+.md-image-pending {
+  display: block;
+  border: 1px solid var(--line);
+  background: var(--bg-hover);
+}
+
+.say-images .say-image-pending {
+  width: 220px;
+  height: 160px;
+  border-radius: 12px;
+}
+
+.md-image-pending {
+  width: min(880px, 100%);
+  height: 180px;
+  margin: 10px 0 4px;
+  border-radius: 14px;
+}
+
 .image-zoom-open {
   display: table;
   width: auto;

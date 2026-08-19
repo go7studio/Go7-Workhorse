@@ -5,6 +5,7 @@ import { copyText } from "../lib/copy-text";
 import { harvestFilePath } from "../lib/project-edits";
 import { editFromMention, isOpenableSource, useFileOpen } from "./FileOpen";
 import { ImageZoom } from "./ImageZoom";
+import { useMediaPaintReady } from "./MediaPaint";
 
 function openWebUrl(url: string) {
   if (window.workhorse?.openExternal) {
@@ -25,9 +26,14 @@ function MdImage({
   cwd?: string;
   vendorSessionId?: string;
 }) {
-  const [src, setSrc] = useState(() => (looksLikeImageHref(href) && /^(data:|https?:)/i.test(href) ? href : ""));
+  const ready = useMediaPaintReady();
+  const [src, setSrc] = useState("");
   useEffect(() => {
-    if (src && /^(data:|https?:)/i.test(src) && !isHollowHref(href)) return;
+    if (!ready) return;
+    if (looksLikeImageHref(href) && /^(data:|https?:)/i.test(href) && !isHollowHref(href)) {
+      setSrc(href);
+      return;
+    }
     let gone = false;
     void window.workhorse?.mediaSrc?.(href, cwd, vendorSessionId).then((next) => {
       if (!gone && next) setSrc(next);
@@ -35,9 +41,9 @@ function MdImage({
     return () => {
       gone = true;
     };
-  }, [href, cwd, vendorSessionId, src]);
+  }, [ready, href, cwd, vendorSessionId]);
   if (!src) {
-    return alt ? <span className="md-image-fallback">{alt}</span> : null;
+    return <span className="md-image-pending" aria-hidden="true" />;
   }
   return (
     <figure className="md-figure">

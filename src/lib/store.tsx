@@ -2616,6 +2616,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (item.id === child.id) {
           return {
             ...item,
+            viewedAt: item.viewedAt ?? startedAt,
             agentRun: { ...item.agentRun!, status: "running" as const, startedAt, finishedAt: undefined, error: undefined },
           };
         }
@@ -4707,6 +4708,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               securityPolicy: parent.securityPolicy,
               environment,
               status: "running",
+              // The run start is the unread baseline. A later terminal time
+              // keeps the done dot until this worker chat is opened.
+              viewedAt: priorWorker?.viewedAt ?? startedAt,
               contextUsed: 0,
               agentRun: {
                 status: "running",
@@ -5157,6 +5161,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return {
                 ...item,
                 status: "running",
+                viewedAt: item.viewedAt ?? startedAt,
                 agentRun: item.agentRun
                   ? continueWorkerRun(item.agentRun, { now: startedAt, correlationId: peerCorrelationId })
                   : undefined,

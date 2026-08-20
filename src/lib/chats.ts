@@ -565,10 +565,11 @@ export function hasUnviewedFinish(
   const finishedAt = run.finishedAt;
   if (typeof finishedAt !== "number") return false;
   const viewedAt = session.viewedAt;
-  if (typeof viewedAt !== "number") return true;
+  // A start baseline distinguishes new finishes from legacy saved workers.
+  // Without it, every historical worker would light up after an upgrade.
+  if (typeof viewedAt !== "number") return false;
   return finishedAt > viewedAt;
 }
-
 
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {

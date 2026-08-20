@@ -176,6 +176,7 @@ export function applyPlanAuditorSpawn(
     securityPolicy: parent.securityPolicy,
     environment: parent.environment?.kind === "worktree" ? parent.environment : { kind: "local" },
     status: "idle",
+    viewedAt: now,
     contextUsed: 0,
     agentRun: {
       status: "running",

@@ -271,6 +271,7 @@ test("a parent may rise when a nested worker finishes", () => {
 test("a finished worker shows a done dot until that chat is opened", () => {
   const worker = {
     id: "worker",
+    viewedAt: 1,
     agentRun: {
       status: "completed" as const,
       startedAt: 1,
@@ -278,15 +279,22 @@ test("a finished worker shows a done dot until that chat is opened", () => {
       isolation: "worktree" as const,
     },
   };
-  assert.equal(hasUnviewedFinish(worker, null), true, "never opened");
+  assert.equal(hasUnviewedFinish(worker, null), true, "not opened since this run started");
   assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 50 }, null), true);
   assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 100 }, null), false);
   assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 50 }, "worker"), false, "active chat hides the dot");
   assert.equal(hasUnviewedFinish({ ...worker, agentRun: { ...worker.agentRun, status: "running" } }, null), false);
+  assert.equal(
+    hasUnviewedFinish({ ...worker, viewedAt: undefined }, null),
+    false,
+    "legacy finished workers do not all become unread after upgrade",
+  );
 });
 
 test("selectSession clears the done dot by stamping viewedAt", () => {
-  assert.match(read("src/lib/store.tsx"), /viewedAt: now/);
+  const store = read("src/lib/store.tsx");
+  assert.match(store, /viewedAt: now/);
+  assert.match(store, /viewedAt: priorWorker\?\.viewedAt \?\? startedAt/);
   assert.match(read("src/ui/ChatRow.tsx"), /hasUnviewedFinish/);
   assert.match(read("src/ui/ChatRow.tsx"), /row-finish-mark/);
 });

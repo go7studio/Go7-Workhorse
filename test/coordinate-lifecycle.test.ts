@@ -25,6 +25,7 @@ import {
   parseWorkerHandoff,
   resolveNamedWorker,
   WORKER_BOUND_ELSEWHERE_ERROR,
+  workerReportedBlocked,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
 import type { AgentRun, MissionIteration, Session } from "../src/lib/types";
@@ -475,6 +476,45 @@ test("a budget-exceeded run keeps its partial report and still joins the parent"
   const join = deskJoin(woken.find((session) => session.id === PARENT_ID));
   assert.ok(join, "budget-exceeded still wakes the parent; the worker must not vanish");
   assert.match(join?.text ?? "", /Reached the ceiling after drafting the plan/);
+});
+
+test("an explicit blocked report fails the worker and lineup instead of appearing completed", () => {
+  const report = "STATUS: blocked\nBlocker: the requested folder is not available.";
+  const child = workerSession(COORDINATOR_ID, "Wren · Asset command pass", "Wren", {
+    agentRun: {
+      status: "running",
+      startedAt: 1,
+      isolation: "worktree",
+      correlationId: "corr_blocked",
+    },
+    messages: [
+      { id: "u-blocked", role: "user", text: "Finish the asset command pass.", createdAt: 1 },
+      { id: "a-blocked", role: "assistant", text: report, createdAt: 2 },
+    ],
+  });
+  const parent = {
+    ...parentSession(),
+    lineup: addLineupRow(parentSession().lineup, {
+      childId: COORDINATOR_ID,
+      title: "Asset command pass",
+      slice: "Asset command pass",
+      folder: FOLDER,
+      vendor: "Wren",
+      status: "running",
+      startedAt: 1,
+      correlationId: "corr_blocked",
+    }, "desk"),
+  };
+  const outcome = workerReportedBlocked(report) ? "failed" as const : "completed" as const;
+  const settled = applyChildIdleSync([parent, child], COORDINATOR_ID, outcome, {
+    report,
+    error: "Worker reported blocked.",
+    now: 3,
+    correlationId: "corr_blocked",
+  });
+  assert.equal(settled.find((session) => session.id === COORDINATOR_ID)?.agentRun?.status, "failed");
+  assert.equal(settled.find((session) => session.id === PARENT_ID)?.lineup?.rows[0]?.status, "failed");
+  assert.equal(workerStatusSnapshot(settled.find((session) => session.id === COORDINATOR_ID)!).status, "failed");
 });
 
 test("budget exhaustion still produces a bounded handoff rather than vanishing", () => {

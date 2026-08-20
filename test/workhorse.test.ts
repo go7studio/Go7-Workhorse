@@ -98,6 +98,7 @@ import {
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
   withSubagentStatus,
+  workerReportedBlocked,
   workerStatusSnapshot,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
@@ -156,7 +157,7 @@ import {
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
-import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
+import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
@@ -3370,6 +3371,33 @@ test("new project can ship with dropped or picked source folders", () => {
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   assert.match(preload, /pathForFile/);
   assert.match(preload, /webUtils/);
+});
+
+test("an explicit worker folder recovers project context without becoming a filesystem boundary", () => {
+  const mission = emptyProject("Mission Control", ["/workspace/mission-control"]);
+  const dashboard = emptyProject("Mission Control Dashboard", ["/workspace/mission-control/dashboard"]);
+  const windows = emptyProject("Windows Project", ["C:\\Work\\Product"]);
+
+  assert.equal(
+    projectForSpawn([mission, dashboard], null, "/workspace/mission-control/dashboard/assets")?.id,
+    dashboard.id,
+    "the most specific linked project owns a nested working folder",
+  );
+  assert.equal(
+    projectForSpawn([windows], null, "c:\\work\\product\\src")?.id,
+    windows.id,
+    "Windows drive paths match without case drift",
+  );
+  assert.equal(
+    projectForSpawn([mission, dashboard], mission.id, "/some/other/repository")?.id,
+    mission.id,
+    "an existing project stays authoritative while a task visits another folder",
+  );
+  assert.equal(
+    projectForSpawn([mission], null, "/some/other/repository"),
+    undefined,
+    "an unmatched folder stays valid unfiled work instead of inventing a project",
+  );
 });
 
 test("create-project binds the exact name and does not attach the folder to another project", () => {
@@ -8036,6 +8064,19 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.doesNotMatch(workerTurn, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(workerTurn, new RegExp(CUSTOM_HTTP_PEER_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
+  const unfiledBrief = formatWorkerPrompt({
+    fromTitle: "Walt",
+    text: "Audit the linked dashboard.",
+    folder: "/workspace/mission-control/dashboard",
+  });
+  assert.match(unfiledBrief, /PROJECT: Unfiled chat/);
+  assert.match(unfiledBrief, /FOLDER: \/workspace\/mission-control\/dashboard/);
+  assert.doesNotMatch(unfiledBrief, /PROJECT:.*stop and say so/);
+  assert.equal(workerReportedBlocked("STATUS: blocked\nBlocker: project binding is missing"), true);
+  assert.equal(workerReportedBlocked("Mission status: blocked."), true);
+  assert.equal(workerReportedBlocked("Status: completed."), false);
+  assert.equal(workerReportedBlocked("The task mentioned STATUS: blocked inline, but the work completed."), false);
+
   assert.equal(isSpawnOnlyPrompt("please spawn MiniMax"), true);
   assert.equal(isSpawnOnlyPrompt("call subagents"), true);
   assert.equal(isSpawnOnlyPrompt("PLease call subagents to strip threw the project and give an indepth review on what it is"), true);
@@ -8076,7 +8117,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(UNBOUND_SPAWN_ERROR, /workhorse_create_project/);
   assert.match(UNBOUND_SPAWN_ERROR, /Do not refuse the parent turn/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /resolveOrBaseSessionCwd/);
-  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /still starts in the desk base/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /loose top-level chat can search from the desk base/);
   assert.match(WORKHORSE_SESSION_RULES, /missing linked folder does not fail this turn/);
 
   const nested = admitSpawn({

@@ -693,8 +693,15 @@ function extractBlockers(text: string | undefined): string[] {
     const note = match[1]?.trim();
     if (note) blockers.push(note);
   }
-  if (/mission status:\s*blocked\b/i.test(text) && blockers.length === 0) blockers.push("Mission status: blocked");
+  if (workerReportedBlocked(text) && blockers.length === 0) blockers.push("Worker reported blocked");
   return blockers;
+}
+
+/** A model may finish its turn while explicitly saying the assigned work did not finish. */
+export function workerReportedBlocked(text: string | undefined): boolean {
+  if (!text) return false;
+  const declarations = [...text.matchAll(/^\s*(?:mission\s+)?status:\s*(blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim)];
+  return declarations.at(-1)?.[1]?.toLowerCase() === "blocked";
 }
 
 export function workerProgressCheckpoint(
@@ -965,7 +972,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const lines = [
     input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
-    `PROJECT: ${project || "(none — stop and say so)"}`,
+    `PROJECT: ${project || "Unfiled chat"}`,
     `FOLDER: ${folder || "(none — stop and say so)"}`,
   ];
   if (slice) lines.push(`SLICE: ${slice}`);

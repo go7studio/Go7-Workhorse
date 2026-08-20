@@ -582,7 +582,7 @@
     },
     {
       "id": "REG-065",
-      "behavior": "Terminal, Review, file lookup, custom tools, providers, and external harness tasks use only the active chat's absolute execution folder; an unbound chat fails closed instead of borrowing the app or parent project directory.",
+      "behavior": "Bound chats, custom tools, providers, and harness tasks start from the active chat's execution folder instead of borrowing another chat's directory; terminal navigation and explicitly cited external Review files remain available, a loose top-level provider may search from the desk base, and worker or harness delegation with no absolute folder fails closed.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["PRJ-S3", "SEC-S2", "ORC-S7"],
       "rubric": ["PRJ-06", "SEC-02", "ORC-15"],
@@ -650,6 +650,15 @@
       "scenarios": ["PRJ-S3", "USG-S5", "REL-S2"],
       "rubric": ["PRJ-06", "USG-08", "REL-03"],
       "sourceFiles": ["electron/state-persistence.ts", "src/lib/usage.ts", "test/state-persistence.test.ts", "test/usage-metering.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-073",
+      "behavior": "A loose parent with an explicit folder receives a usable worker brief instead of PROJECT none; an existing linked project is recovered by the most specific folder match without confining cross-folder work, and an explicit terminal STATUS: blocked report fails the worker and lineup rather than recording completion.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["PRJ-S3", "ORC-S7"],
+      "rubric": ["PRJ-06", "ORC-09"],
+      "sourceFiles": ["src/lib/project.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/coordinate-lifecycle.test.ts"],
       "verification": ["eval:validate", "verify"]
     }
   ]

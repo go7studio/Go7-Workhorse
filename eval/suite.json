@@ -196,7 +196,9 @@
             "Populate an earlier-sorted fixture directory with more than 800 decoy entries, then resolve a basename-only source path located later in the workspace tree.",
             "Review Git edits and verify each change instance reports real files plus added and removed line counts, including a zero-duration provider call.",
             "Open the chat-scoped terminal, Review, and a relative file from a child worktree; verify all three use that exact child folder and never the parent project or app launch directory.",
-            "Open an unbound chat and verify Terminal, Review, providers, custom tools, and harness delegation fail closed until an absolute folder is linked.",
+            "From an unfiled parent, spawn with an explicit absolute folder: a matching linked project binds the parent and worker, while an unmatched folder stays truthful Unfiled work and still runs; a final STATUS: blocked report must fail the worker instead of appearing completed.",
+            "Verify the terminal starts in the working folder but can navigate elsewhere, and Review can open an explicitly cited absolute file outside that folder.",
+            "Open an unbound top-level chat and verify its provider can search from the desk base, while worker or harness delegation without an absolute folder fails closed instead of borrowing another chat's directory.",
             "Confirm archived chats and attention items remain scoped to their projects."
           ]
         },

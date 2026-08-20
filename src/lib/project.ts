@@ -213,6 +213,40 @@ export function findProjectByQuery<T extends { id: string; name: string; archive
   );
 }
 
+function folderKey(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+/**
+ * Keep an existing project authoritative. For an unfiled chat, an explicit
+ * working folder may recover the most specific live project that already
+ * links it. The folder is a starting context, not a filesystem boundary.
+ */
+export function projectForSpawn<T extends Pick<Project, "id" | "folders" | "archivedAt">>(
+  projects: T[],
+  currentProjectId: string | null | undefined,
+  workingFolder: string | null | undefined,
+): T | undefined {
+  const current = currentProjectId
+    ? projects.find((project) => project.id === currentProjectId)
+    : undefined;
+  if (current) return current;
+
+  const working = folderKey(workingFolder ?? "");
+  if (!working) return undefined;
+  let match: { project: T; rootLength: number } | undefined;
+  for (const project of projects) {
+    if (typeof project.archivedAt === "number") continue;
+    for (const folder of project.folders) {
+      const root = folderKey(folder.path);
+      if (!root || (working !== root && !working.startsWith(`${root}/`))) continue;
+      if (!match || root.length > match.rootLength) match = { project, rootLength: root.length };
+    }
+  }
+  return match?.project;
+}
+
 export function visibleProjectNames(projects: { name: string; archivedAt?: number | null }[]): string[] {
   return projects.filter((item) => typeof item.archivedAt !== "number").map((item) => item.name);
 }

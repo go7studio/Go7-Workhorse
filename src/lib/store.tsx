@@ -97,6 +97,7 @@ import {
   folderFromPath,
   normalizeProject,
   primaryFolder,
+  projectForSpawn,
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
@@ -206,6 +207,7 @@ import {
   withSubagentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
+  workerReportedBlocked,
 } from "./subagents";
 import {
   applySessionModelChange,
@@ -4304,7 +4306,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ text: JSON.stringify(started.run, null, 2) });
               return;
             }
-            const boundProject = latest.projects.find((item) => item.id === caller.projectId);
+            const boundProject = projectForSpawn(latest.projects, caller.projectId, payload.folder);
+            const spawnProjectId = boundProject?.id ?? null;
             const isNested = deskRoleOf(caller) === "worker";
             const catalog = deskCallCatalog({
               settings: latest.settings,
@@ -4452,7 +4455,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? resolveNamedWorker(
                   { name: askedWorkerName, seed: spawnSeed },
                   latest.sessions as unknown as WorkerRecord[],
-                  { parentId: parent.id, projectId: parent.projectId },
+                  { parentId: parent.id, projectId: spawnProjectId },
                 )
               : null;
             if (namedResolution && !namedResolution.ok) {
@@ -4481,7 +4484,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     latest.sessions as unknown as WorkerRecord[],
                     {
                       parentId: parent.id,
-                      projectId: parent.projectId,
+                      projectId: spawnProjectId,
                       // An unnamed inherit continues this parent's current
                       // wave. Anyone outside it is a different subject.
                       waveChildIds: parent.lineup?.rows.map((row) => row.childId),
@@ -4598,7 +4601,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const tokenBudget = typeof spawnTokenBudget === "number" && spawnTokenBudget > 0
               ? Math.floor(spawnTokenBudget)
               : undefined;
-            const project = boundProject ?? latest.projects.find((item) => item.id === parent.projectId);
+            const project = boundProject;
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
             let isolation: "worktree" | "shared" = spawnIsolation === "worktree" ? "worktree" : "shared";
@@ -4637,7 +4640,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               id: learningEvidenceId("execution", assistantId),
               kind: "execution",
               actorClass: "agent",
-              projectId: parent.projectId,
+              projectId: spawnProjectId,
               sessionId: childId,
               provider: spec.provider,
               model: spec.model,
@@ -4683,7 +4686,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...(priorWorker ?? {}),
               id: childId,
               workerName,
-              projectId: parent.projectId,
+              projectId: spawnProjectId,
               parentId: parent.id,
               hidden: true,
               provider: spec.provider,
@@ -4741,66 +4744,67 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ? [inboundHost, ...current.sessions]
                   : current.sessions;
               return {
-              ...current,
-              sessions: [
-                ...base.map((item) =>
-                  item.id === parent.id
-                    ? {
-                        ...item,
-                        title: parent.title,
-                        titleLocked: parent.titleLocked,
-                        projectId: parent.projectId,
-                        lineup: stampLineupUserText(
-                          addLineupRow(
-                            item.lineup ?? emptyLineup(childCwd, startedAt),
-                            {
-                              childId,
-                              title: spec.title,
-                              slice: payload.description?.trim() || spec.title,
-                              folder: childCwd,
-                              vendor: spec.title,
-                              status: "running",
-                              startedAt,
-                              correlationId: childCorrelationId,
-                              // The caller is known here and was being dropped, so a
-                              // Link wave could not say who drove it. Only for an
-                              // inbound harness: a desk wave has no caller to name.
-                              ...(exposure === "external-runtime" && payload.origin && payload.origin !== "workhorse"
-                                ? { caller: payload.origin }
-                                : {}),
-                              ...(payload.missionIteration ? {
-                                missionId: payload.missionIteration.id,
-                                iteration: payload.missionIteration.iteration,
-                              } : {}),
-                              ...(planStepId ? { planStepId } : {}),
-                              ...(rationale ? { rationale } : {}),
-                            },
-                            exposure === "external-runtime" ? "external-runtime" : "desk",
+                ...current,
+                activeProjectId: current.activeSessionId === parent.id ? spawnProjectId : current.activeProjectId,
+                sessions: [
+                  ...base.map((item) =>
+                    item.id === parent.id
+                      ? {
+                          ...item,
+                          title: parent.title,
+                          titleLocked: parent.titleLocked,
+                          projectId: spawnProjectId,
+                          lineup: stampLineupUserText(
+                            addLineupRow(
+                              item.lineup ?? emptyLineup(childCwd, startedAt),
+                              {
+                                childId,
+                                title: spec.title,
+                                slice: payload.description?.trim() || spec.title,
+                                folder: childCwd,
+                                vendor: spec.title,
+                                status: "running",
+                                startedAt,
+                                correlationId: childCorrelationId,
+                                // The caller is known here and was being dropped, so a
+                                // Link wave could not say who drove it. Only for an
+                                // inbound harness: a desk wave has no caller to name.
+                                ...(exposure === "external-runtime" && payload.origin && payload.origin !== "workhorse"
+                                  ? { caller: payload.origin }
+                                  : {}),
+                                ...(payload.missionIteration ? {
+                                  missionId: payload.missionIteration.id,
+                                  iteration: payload.missionIteration.iteration,
+                                } : {}),
+                                ...(planStepId ? { planStepId } : {}),
+                                ...(rationale ? { rationale } : {}),
+                              },
+                              exposure === "external-runtime" ? "external-runtime" : "desk",
+                            ),
+                            waveText,
                           ),
-                          waveText,
-                        ),
-                        ...(assignedPlan ? { planRun: assignedPlan } : {}),
-                        messages: [
-                          ...item.messages,
-                          {
-                            id: uid("msg"),
-                            role: "system" as const,
-                            kind: "subagent" as const,
-                            fromTitle: spec.title,
-                            subagentSessionId: childId,
-                            toolCallId: payload.id,
-                            toolStatus: "running",
-                            text: spec.title,
-                            createdAt: startedAt,
-                            correlationId: childCorrelationId,
-                          },
-                        ],
-                      }
-                    : item,
-                ).map((item) => (item.id === childId ? child : item)),
-                ...(priorWorker ? [] : [child]),
-              ],
-            };
+                          ...(assignedPlan ? { planRun: assignedPlan } : {}),
+                          messages: [
+                            ...item.messages,
+                            {
+                              id: uid("msg"),
+                              role: "system" as const,
+                              kind: "subagent" as const,
+                              fromTitle: spec.title,
+                              subagentSessionId: childId,
+                              toolCallId: payload.id,
+                              toolStatus: "running",
+                              text: spec.title,
+                              createdAt: startedAt,
+                              correlationId: childCorrelationId,
+                            },
+                          ],
+                        }
+                      : item,
+                  ).map((item) => (item.id === childId ? child : item)),
+                  ...(priorWorker ? [] : [child]),
+                ],
+              };
             });
             const waitForReply = spawnWaitsForReply(payload);
             let terminalFailure: "timed-out" | "cancelled" | "budget-exceeded" | undefined;
@@ -4914,6 +4918,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return "";
               }
               const fallback = reply || vendorEmptyReply(spec.provider);
+              const reportedBlocked = workerReportedBlocked(fallback);
               const afterChanges = window.workhorse?.listGitChanges && childCwd
                 ? await window.workhorse.listGitChanges(childCwd)
                 : [];
@@ -4938,11 +4943,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       }
                     : item,
                 );
-                let sessions = applyChildIdleSync(withReply, childId, "completed", {
+                const outcome = reportedBlocked ? "failed" as const : "completed" as const;
+                let sessions = applyChildIdleSync(withReply, childId, outcome, {
                   report: fallback,
+                  ...(reportedBlocked ? { error: "Worker reported blocked." } : {}),
                   correlationId: childCorrelationId,
                 });
-                sessions = settlePlanAssignment(sessions, parent.id, childId, "completed", fallback);
+                sessions = settlePlanAssignment(sessions, parent.id, childId, outcome, fallback);
                 const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
                 queueMicrotask(() => {
                   if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
@@ -5887,60 +5894,71 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const holdForHandoff =
             liveRun?.status === "running" &&
             (liveRun.budgetPhase === "verify" || liveRun.budgetPhase === "handoff");
-          let sessions = withSubagentStatus(
-            current.sessions.map((session) => {
-              if (session.id !== event.sessionId) return session;
-              return applyVendorTurnIdle({
-                ...session,
-                scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
-                  run.status === "running"
-                    ? { ...run, status: safetyPaused ? ("failed" as const) : ("completed" as const) }
-                    : run,
-                ),
-                messages: finishOpenToolMessages(
-                  failPeerAskMessages(
-                    assistantId
-                      ? (() => {
-                          // Did this turn leave anything behind? Thinking and tool
-                          // calls land as their own messages after the assistant
-                          // one, so ask the transcript rather than the message.
-                          const at = session.messages.findIndex((message) => message.id === assistantId);
-                          const worked =
-                            at >= 0 &&
-                            session.messages
-                              .slice(at + 1)
-                              .some((message) => message.kind === "thought" || message.kind === "tool");
-                          return session.messages.map((message) => {
-                            if (message.id !== assistantId) return message;
-                            const text = (message.text ?? "").trim() || queued.trim();
-                            return {
-                              ...message,
-                              text:
-                                text ||
-                                turnEndedWithoutProse({
-                                  provider: session.provider,
-                                  stopReason: event.stopReason,
-                                  worked,
-                                }),
-                              workedMs: Math.max(0, Date.now() - message.createdAt),
-                            };
-                          });
-                        })()
-                      : session.messages,
-                    { error: "the other chat did not answer" },
-                  ),
-                  safetyPaused ? "failed" : "completed",
-                ),
-              }, { assistantId, safetyPaused, failed: safetyPaused, compacted: event.stopReason === "compacted" });
-            }),
+          let sessions = current.sessions.map((session) => {
+            if (session.id !== event.sessionId) return session;
+            const messages = finishOpenToolMessages(
+              failPeerAskMessages(
+                assistantId
+                  ? (() => {
+                      // Did this turn leave anything behind? Thinking and tool
+                      // calls land as their own messages after the assistant
+                      // one, so ask the transcript rather than the message.
+                      const at = session.messages.findIndex((message) => message.id === assistantId);
+                      const worked =
+                        at >= 0 &&
+                        session.messages
+                          .slice(at + 1)
+                          .some((message) => message.kind === "thought" || message.kind === "tool");
+                      return session.messages.map((message) => {
+                        if (message.id !== assistantId) return message;
+                        const text = (message.text ?? "").trim() || queued.trim();
+                        return {
+                          ...message,
+                          text:
+                            text ||
+                            turnEndedWithoutProse({
+                              provider: session.provider,
+                              stopReason: event.stopReason,
+                              worked,
+                            }),
+                          workedMs: Math.max(0, Date.now() - message.createdAt),
+                        };
+                      });
+                    })()
+                  : session.messages,
+                { error: "the other chat did not answer" },
+              ),
+              safetyPaused ? "failed" : "completed",
+            );
+            const reportedBlocked = Boolean(session.parentId) && workerReportedBlocked(childReportText({ messages }));
+            const failed = safetyPaused || reportedBlocked;
+            return applyVendorTurnIdle({
+              ...session,
+              scheduledRuns: (session.scheduledRuns ?? []).map((run) =>
+                run.status === "running"
+                  ? { ...run, status: failed ? ("failed" as const) : ("completed" as const) }
+                  : run,
+              ),
+              messages,
+            }, { assistantId, safetyPaused, failed, compacted: event.stopReason === "compacted" });
+          });
+          const finishedTurn = sessions.find((session) => session.id === event.sessionId);
+          const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
+          const failed = safetyPaused || reportedBlocked;
+          sessions = withSubagentStatus(
+            sessions,
             event.sessionId,
-            holdForHandoff ? "running" : safetyPaused ? "failed" : "completed",
+            holdForHandoff ? "running" : failed ? "failed" : "completed",
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, safetyPaused ? "failed" : "completed", {
+            sessions = applyChildIdleSync(sessions, event.sessionId, failed ? "failed" : "completed", {
               report: childReportText(finished),
-              ...(safetyPaused ? { error: "Agent paused before completing its goal." } : {}),
+              ...(safetyPaused
+                ? { error: "Agent paused before completing its goal." }
+                : reportedBlocked
+                  ? { error: "Worker reported blocked." }
+                  : {}),
             });
             const admitted = joinAdmit(sessions, finished.parentId, current, plansRef.current);
             queueMicrotask(() => {

@@ -1,7 +1,5 @@
 import { isHollowHref } from "./markdown";
 
-const MEDIA_SCHEME = "workhorse-media://local/?p=";
-
 export type MediaDisplayContext = {
   cwd?: string;
   vendorSessionId?: string;

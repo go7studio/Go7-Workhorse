@@ -61,6 +61,8 @@ export type GrokAgentHandlers = {
   onCompact?: (compact: GrokCompactEvent) => void;
   onTitle?: (title: string) => void;
   onCommands?: (commands: Command[]) => void;
+  /** Codex bills from session jsonl instead of PromptResponse.usage (last request only). */
+  emitResultUsage?: boolean;
 };
 
 export type GrokPromptResult = {
@@ -161,7 +163,7 @@ const MESSAGE_UPDATE_KINDS = new Set([
 
 const THOUGHT_UPDATE_KINDS = new Set(["agent_thought_chunk", "agent_thought", "thought", "thought_chunk"]);
 
-const USAGE_UPDATE_KINDS = new Set(["usage_update", "turn_completed", "response_completed"]);
+const USAGE_UPDATE_KINDS = new Set(["usage_update", "turn_completed", "response_completed", "token_count"]);
 
 const TITLE_UPDATE_KINDS = new Set(["session_info_update", "session_info", "title_update"]);
 
@@ -601,7 +603,14 @@ export const parseAcpUsage = parseGrokUsage;
 export function parseGrokUsage(value: unknown): GrokUsageDraft | undefined {
   const record = asRecord(value);
   const nested = asRecord(record.usage);
-  const source = Object.keys(nested).length > 0 ? nested : record;
+  const info = asRecord(record.info);
+  const last = record.last_token_usage ?? nested.last_token_usage ?? info.last_token_usage;
+  const source =
+    last && typeof last === "object" && !Array.isArray(last)
+      ? asRecord(last)
+      : Object.keys(nested).length > 0
+        ? nested
+        : record;
   const input = usageNumber(
     source.inputTokens,
     source.input_tokens,
@@ -623,7 +632,12 @@ export function parseGrokUsage(value: unknown): GrokUsageDraft | undefined {
     source.cache_read_input_tokens,
     source.cache_read_tokens,
   );
-  const inclusiveCacheRead = usageNumber(source.cachedReadTokens, source.cached_read_tokens);
+  const inclusiveCacheRead = usageNumber(
+    source.cachedReadTokens,
+    source.cached_read_tokens,
+    source.cached_input_tokens,
+    source.cachedInputTokens,
+  );
   const cacheRead = exclusiveCacheRead ?? inclusiveCacheRead;
   const cacheWrite = usageNumber(
     source.cacheWriteTokens,
@@ -631,6 +645,8 @@ export function parseGrokUsage(value: unknown): GrokUsageDraft | undefined {
     source.cache_write_tokens,
     source.cacheCreationTokens,
     source.cache_creation_tokens,
+    source.cache_write_input_tokens,
+    source.cacheWriteInputTokens,
   );
   const contextUsed = usageNumber(source.contextUsed, source.context_used, source.used);
   const costRecord = asRecord(source.cost);
@@ -870,7 +886,7 @@ export class GrokAgent {
     // The old code did the reverse and zeroed the total whenever a snapshot
     // had arrived, leaving the ledger to guess from the snapshots.
     const usage = parseGrokUsage(result) ?? parseGrokUsage(asRecord(result._meta));
-    if (usage) {
+    if (usage && handlers.emitResultUsage !== false) {
       handlers.onUsage?.({ ...usage, source: usageHasBilledTokens(usage) ? "turn" : "gauge" });
     }
     const titled = titleFromRecord(result) ?? titleFromRecord(asRecord(result._meta));

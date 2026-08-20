@@ -155,7 +155,7 @@ import {
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
@@ -691,23 +691,43 @@ test("rewindToUserMessage keeps earlier turns and drops everything after the edi
   assert.match(css, /\.context-pop\s*\{[\s\S]*position:\s*fixed/);
 });
 
-test("sidebar last-talked clock uses the latest user prompt, not later assistant turns", () => {
+test("sidebar last-talked clock follows the parent report-back, not the original prompt", () => {
   const now = new Date(2026, 7, 17, 12, 0, 0).getTime();
   const empty: Pick<Session, "messages"> = { messages: [] };
   const assistantOnly: Pick<Session, "messages"> = {
     messages: [{ id: "a1", role: "assistant", text: "ready", createdAt: now }],
   };
+  const userAt = new Date(2026, 7, 17, 0, 18, 0).getTime();
+  const assistantAt = new Date(2026, 7, 17, 0, 19, 0).getTime();
   const talked: Pick<Session, "messages"> = {
     messages: [
       { id: "u1", role: "user", text: "first", createdAt: new Date(2026, 7, 16, 9, 0, 0).getTime() },
       { id: "a1", role: "assistant", text: "one", createdAt: new Date(2026, 7, 16, 9, 1, 0).getTime() },
-      { id: "u2", role: "user", text: "second", createdAt: new Date(2026, 7, 17, 0, 18, 0).getTime() },
-      { id: "a2", role: "assistant", text: "two", createdAt: new Date(2026, 7, 17, 0, 19, 0).getTime() },
+      { id: "u2", role: "user", text: "second", createdAt: userAt },
+      { id: "a2", role: "assistant", text: "two", createdAt: assistantAt },
     ],
   };
   assert.equal(lastTalkedAt(empty), undefined);
-  assert.equal(lastTalkedAt(assistantOnly), undefined);
-  assert.equal(lastTalkedAt(talked), new Date(2026, 7, 17, 0, 18, 0).getTime());
+  assert.equal(lastTalkedAt(assistantOnly), now);
+  assert.equal(lastTalkedAt(talked), assistantAt);
+  const parentPrompt = now - 25 * 60_000;
+  const joinAt = now - 60_000;
+  const parent: Pick<Session, "messages"> = {
+    messages: [
+      { id: "u", role: "user", text: "go", createdAt: parentPrompt },
+      { id: "a-old", role: "assistant", text: "working", createdAt: parentPrompt + 1 },
+      { id: "notice", role: "system", text: "All workers finished.", createdAt: joinAt - 1_000 },
+      { id: "a-join", role: "assistant", text: "report", createdAt: joinAt },
+    ],
+  };
+  assert.equal(lastTalkedAt(parent), joinAt);
+  assert.equal(formatLastTalked(lastTalkedAt(parent), now), "1m");
+  const older = { id: "older", messages: empty.messages };
+  const newer = { id: "newer", messages: talked.messages };
+  const idle = { id: "idle", messages: assistantOnly.messages };
+  assert.equal(lastProjectChat([]), undefined);
+  assert.equal(lastProjectChat([older, idle, newer])?.id, "idle");
+  assert.equal(lastProjectChat([older, newer])?.id, "newer");
   assert.equal(formatLastTalked(lastTalkedAt(talked), now), "11h");
   assert.equal(formatLastTalked(now - 25 * 60_000, now), "25m");
   assert.equal(formatLastTalked(now - 60 * 60_000, now), "1h");
@@ -1061,6 +1081,13 @@ test("adaptive missions continue one terminal pass at a time", () => {
 test("Workhorse chat tools read as talking to another chat", () => {
   assert.equal(prettyToolTitle("workhorse_workhorse_ask_chat"), "Ask chat");
   assert.equal(prettyToolTitle("workhorse_read_chat"), "Read chat");
+  assert.equal(prettyToolTitle("Mcp.Workhorse.Workhorse Read Skill"), "Read skill");
+  assert.equal(prettyToolTitle("Mcp.Workhorse.Workhorse List Bots"), "List bots");
+  assert.equal(prettyToolTitle("Mcp.Workhorse.Workhorse Spawn Agent"), "Call agent");
+  assert.equal(prettyToolTitle("Mcp.Figma.Get Design Context"), "Figma Get Design Context");
+  assert.equal(prettyToolTitle("Read"), "Read");
+  assert.equal(prettyToolTitle("Edit File"), "Edit File");
+  assert.equal(describePeerTool("Mcp.Workhorse.Workhorse Ask Chat", "Test")?.title, "Asking Test");
   assert.equal(permissionActionLabel("workhorse_workhorse_list_chats"), "list chats");
   assert.equal(
     formatPermissionDetail(
@@ -4793,6 +4820,11 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.doesNotMatch(settings, /MCP servers/);
   assert.doesNotMatch(settings, /Workhorse does not host MCP/);
   assert.match(sidebar, /project-new/);
+  assert.match(sidebar, /project-info/);
+  assert.match(sidebar, /lastProjectChat/);
+  assert.match(sidebar, /if \(last\) store\.selectSession\(last\.id\)/);
+  assert.match(sidebar, /store\.selectProject\(project\.id\)/);
+  assert.match(css, /\.tool-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(sidebar, /function LooseChats/);
   assert.match(sidebar, /section-label">Projects[\s\S]*<LooseChats/);
   assert.doesNotMatch(sidebar, /nest-new/);
@@ -5804,6 +5836,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /work-step/);
   assert.match(popout, /groupWorkRows/);
   assert.match(popout, /isActiveWorkRow/);
+  assert.match(popout, /reveal=\{tailIndex === packed\.tail\.length - 1\}/);
+  assert.match(popout, /useStartOpen/);
+  assert.match(popout, /fold\.current\.open = true/);
   assert.match(popout, /foldOpen/);
   assert.match(popout, /<details className="work-pop" onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
@@ -5835,6 +5870,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
   assert.match(pane, /transcriptOpen && session/);
   assert.match(pane, /followLatestClass/);
+  assert.doesNotMatch(pane, /CHAT_LOOKS/);
+  assert.doesNotMatch(pane, /chat-look-/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.turn-who \{[^}]*font-size:\s*15px/);
+  assert.match(css, /@keyframes work-open/);
+  assert.match(css, /\.work-body \{[^}]*animation:\s*work-open/);
+  assert.match(css, /\.work-fold\[open\] > \.work-fold-body/);
+  assert.match(css, /\.thought \{[^}]*animation:\s*work-open/);
   assert.match(pane, /follow-latest/);
   assert.match(pane, /TRANSCRIPT_LEAD_PX/);
   assert.match(pane, /data-turn-id/);

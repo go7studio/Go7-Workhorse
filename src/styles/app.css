@@ -1715,13 +1715,29 @@ html.pane-dragging * {
 .turn-who {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 590;
-  letter-spacing: -0.01em;
-  color: var(--text-secondary);
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.turn-who:has(.dot.grok) { color: var(--grok); }
+.turn-who:has(.dot.claude) { color: var(--claude); }
+.turn-who:has(.dot.codex) { color: var(--codex); }
+.turn-who:has(.dot.cursor) { color: var(--cursor); }
+.turn-who:has(.dot.custom) { color: var(--custom); }
+
+.turn-who .dot {
+  width: 9px;
+  height: 9px;
+  min-width: 9px;
+  min-height: 9px;
+  max-width: 9px;
+  max-height: 9px;
+  flex-basis: 9px;
 }
 
 .turn-stamp {
@@ -1949,10 +1965,10 @@ html.pane-dragging * {
 .thought-live-label {
   display: block;
   margin-bottom: 4px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 590;
   letter-spacing: 0.01em;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .work-pop {
@@ -1963,9 +1979,10 @@ html.pane-dragging * {
 .work-pop > summary {
   cursor: pointer;
   width: fit-content;
-  font-size: 12px;
-  font-weight: 510;
-  color: var(--text-tertiary);
+  padding: 3px 0;
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--text-secondary);
   list-style: none;
 }
 
@@ -1982,6 +1999,7 @@ html.pane-dragging * {
   border-right: 1px solid currentColor;
   border-bottom: 1px solid currentColor;
   transform: rotate(-45deg) translateY(-1px);
+  transition: transform 180ms var(--ease);
 }
 
 .work-pop[open] > summary::before {
@@ -2020,6 +2038,7 @@ html.pane-dragging * {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: color-mix(in srgb, var(--bg-solid) 72%, transparent);
+  animation: work-open 220ms var(--ease);
 }
 
 .work-body .thought {
@@ -2043,12 +2062,16 @@ html.pane-dragging * {
   gap: 4px;
 }
 
+.work-fold[open] > .work-fold-body {
+  animation: work-open 200ms var(--ease);
+}
+
 .work-fold > summary {
   cursor: pointer;
   width: fit-content;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 590;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   list-style: none;
 }
 
@@ -2216,8 +2239,13 @@ html.pane-dragging * {
 }
 
 .tool-name {
+  min-width: 0;
+  max-width: 28ch;
+  overflow: hidden;
   font-weight: 590;
   color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-status {
@@ -2233,9 +2261,10 @@ html.pane-dragging * {
 
 .thought {
   margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  animation: work-open 200ms var(--ease);
 }
 
 .thought .md {
@@ -2245,7 +2274,7 @@ html.pane-dragging * {
 }
 
 .turn.live .thought {
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
 .md {
@@ -4313,18 +4342,30 @@ html.pane-dragging * {
   transform: none;
 }
 
-.project-new {
+.project-new,
+.project-info {
   align-self: center;
   width: 26px;
   height: 26px;
   padding: 0;
   margin-right: 2px;
-  font-size: 16px;
   line-height: 1;
   color: var(--text-secondary);
 }
 
-.project-new:hover {
+.project-new {
+  font-size: 16px;
+}
+
+.project-info {
+  font-size: 13px;
+  font-weight: 650;
+  font-style: italic;
+}
+
+.project-new:hover,
+.project-info:hover,
+.project-info.active {
   color: var(--text);
 }
 
@@ -6548,6 +6589,29 @@ html.pane-dragging * {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes work-open {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-body,
+  .work-fold-body,
+  .thought {
+    animation: none;
+  }
+
+  .work-pop > summary::before {
+    transition: none;
   }
 }
 

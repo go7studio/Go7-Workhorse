@@ -2147,7 +2147,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.equal(relative.some((block) => block.type === "image"), true);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-image/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /ImageZoom/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /useMediaPaintReady/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /mdImageInitialSrc/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /useMediaPaintReady/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /MediaPaintProvider/);
   const scheduled: Array<() => void> = [];
   const queue = createMediaPaintQueue();
@@ -2165,7 +2166,15 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ImageZoom.tsx"), "utf8"), /transformOrigin/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.image-zoom/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /vendorSessionId/);
-  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /mediaFileCandidates/);
+  const mainSrc = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(mainSrc, /displaySrcForHref/);
+  assert.match(mainSrc, /resolveMediaProtocolFile/);
+  assert.match(mainSrc, /workhorse-media/);
+  assert.match(mainSrc, /protocol\.registerSchemesAsPrivileged/);
+  assert.match(mainSrc, /protocol\.handle\("workhorse-media"/);
+  assert.doesNotMatch(mainSrc, /fileToDataUrl/);
+  assert.doesNotMatch(mainSrc, /toString\("base64"\)/);
+  assert.doesNotMatch(mainSrc, /newestImageIn/);
   const guessed = mediaFileCandidates("images/1.jpg", {
     cwd: "C:\\Users\\someone\\Projects\\Go7-Workhorse",
     vendorSessionId: "019ff9cd-bab5-7b22-94ee-aa6a8fbd4b3b",

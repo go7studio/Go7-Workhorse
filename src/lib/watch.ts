@@ -555,11 +555,9 @@ function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: num
     });
   }
   if (status.dailyOver) {
-    const dayLabel = status.weekDay ? `Day ${status.weekDay.day} of ${status.weekDay.days}` : "Today";
+    const dayLabel = status.weekDay ? `Day ${status.weekDay.day}/${status.weekDay.days}` : "Today";
     const used = Math.round(status.usedPercent ?? status.todayUsed ?? 0);
     const over = Math.round(status.overPercent);
-    // "Over" is measured against an even weekly pace, so name that figure.
-    // 1% over on day 5 means 72% used where 71% was expected by now.
     const expected = Math.round(status.allowedPercent);
     notices.push({
       id: `daily:${status.key}:${dayKey(now)}`,
@@ -567,8 +565,8 @@ function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: num
       label: status.label,
       kind: "daily",
       tone: locked ? "hold" : "warn",
-      title: over > 0 ? `${status.label} is ${over}% over the expected pace` : `${status.label} used its daily bank`,
-      detail: `${dayLabel}: ${used}% of the week used, ${expected}% expected by now. Today's share is spent, so what is left covers the days remaining.`,
+      title: over > 0 ? `${status.label} is ${over}% over pace` : `${status.label} used its daily bank`,
+      detail: `${dayLabel} · ${used}% used · ${expected}% expected`,
     });
   }
   if (status.resetsAt && resetSoon(status.resetsAt, now)) {

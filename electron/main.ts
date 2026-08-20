@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
@@ -33,9 +33,9 @@ import { drainInboundJsonl } from "../src/lib/learning-inbound";
 import { learningInboundPath } from "../src/lib/learning-paths";
 import { peerAskTimeoutMs, watchPeerInbox, writeBridgeRecord, type PeerAsk } from "./peer-inbox";
 import { existingPeerReply } from "../src/lib/session-bridge";
-import { imageMime } from "../src/lib/images";
 import { listDropFiles } from "./drop-files";
-import { grokSessionDirs, mediaFileCandidates } from "./media-src";
+
+import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
 import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
@@ -191,6 +191,14 @@ try {
   /* Chromium cache may already be open */
 }
 
+// Custom schemes must be registered before the ready event.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "workhorse-media",
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
+  },
+]);
+
 const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
 const isPrimaryInstance = isMcpHelper || app.requestSingleInstanceLock();
 if (!isPrimaryInstance) {
@@ -324,64 +332,19 @@ function readState(): Persistable {
   return ready;
 }
 
-function fileToDataUrl(file: string): string | null {
-  try {
-    const mime = imageMime({ name: file });
-    if (!mime || !fs.existsSync(file)) return null;
-    const buf = fs.readFileSync(file);
-    if (buf.length <= 0 || buf.length > 12 * 1024 * 1024) return null;
-    return `data:${mime};base64,${buf.toString("base64")}`;
-  } catch {
-    return null;
-  }
-}
-
-function newestImageIn(root: string, since: number, maxDepth = 5): { file: string; at: number } | null {
-  if (!root || !fs.existsSync(root)) return null;
-  let best: { file: string; at: number } | null = null;
-  const visit = (dir: string, depth: number) => {
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const name of names) {
-      if (name.startsWith(".") && name !== ".grok") continue;
-      const full = path.join(dir, name);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(full);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory()) {
-        if (depth < maxDepth) visit(full, depth + 1);
-        continue;
-      }
-      if (!imageMime({ name }) || stat.mtimeMs < since) continue;
-      if (!best || stat.mtimeMs > best.at) best = { file: full, at: stat.mtimeMs };
-    }
-  };
-  visit(root, 0);
-  return best;
-}
-
 function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): string | null {
-  const raw = String(href ?? "").trim();
-  if (/^data:image\//i.test(raw) || /^https?:\/\//i.test(raw)) return raw;
-  const opts = { cwd, vendorSessionId };
-  for (const candidate of mediaFileCandidates(raw, opts)) {
-    const local = fileToDataUrl(candidate);
-    if (local) return local;
+  const src = displaySrcForHref(href, { cwd, vendorSessionId });
+  return src || null;
+}
+
+function handleMediaProtocol(request: Request): Promise<Response> | Response {
+  const file = resolveMediaProtocolFile(request.url);
+  if (!file) return new Response(null, { status: 404 });
+  try {
+    return net.fetch(pathToFileURL(file).href);
+  } catch {
+    return new Response(null, { status: 404 });
   }
-  const since = Date.now() - 20 * 60 * 1000;
-  let newest: { file: string; at: number } | null = null;
-  for (const root of grokSessionDirs(opts)) {
-    const found = newestImageIn(root, since);
-    if (found && (!newest || found.at > newest.at)) newest = found;
-  }
-  return newest ? fileToDataUrl(newest.file) : null;
 }
 
 let lastStateBackupAt = 0;
@@ -498,6 +461,7 @@ process.on("unhandledRejection", (error) => {
 app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
+  protocol.handle("workhorse-media", handleMediaProtocol);
   claimLinkedFolders();
   fileInstances = readStringMapFile(fileInstancesPath());
   void archiveWorkhorseWorkerThreads()

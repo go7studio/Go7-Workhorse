@@ -25,6 +25,8 @@ test("sweepStaleUserData drops leftover update installers and oversized Chromium
   const staleTmp = path.join(tmp, "workhorse-update-old");
   fs.mkdirSync(staleTmp);
   fs.writeFileSync(path.join(staleTmp, "setup.exe"), "x");
+  const strayFile = path.join(tmp, "workhorse-update-chip.png");
+  fs.writeFileSync(strayFile, "png");
 
   const swept = sweepStaleUserData(root, {
     cacheBytes: 4 * 1024,
@@ -38,6 +40,8 @@ test("sweepStaleUserData drops leftover update installers and oversized Chromium
   assert.ok(swept.removed.includes("Cache"));
   assert.ok(swept.removed.includes("Code Cache"));
   assert.ok(swept.removed.includes("workhorse-update-old"));
+  assert.ok(!swept.removed.includes("workhorse-update-chip.png"));
+  assert.ok(fs.existsSync(strayFile));
   assert.ok(!swept.removed.includes("GPUCache"));
   assert.ok(fs.existsSync(path.join(root, "workhorse-state.json")));
   assert.ok(!fs.existsSync(path.join(root, "pending-update-0.6.5.exe")));

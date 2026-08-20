@@ -205,7 +205,7 @@ test("MdImage first-paint helper is sync and skips data encode", () => {
   assert.equal(mdImageInitialSrc(""), "");
   assert.equal(mdImageInitialSrc("#"), "");
 
-  const roundTrip = "C:\\Users\\lgovo\\shot.png";
+  const roundTrip = "C:\\Users\\someone\\shot.png";
   assert.equal(mediaUrlToPath(pathToMediaUrl(roundTrip)), roundTrip);
 
   const display = readFileSync(path.join(ROOT, "src", "lib", "media-display.ts"), "utf8");

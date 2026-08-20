@@ -12,6 +12,7 @@ import type {
 import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
+import { outcomeIsVerified } from "./learning-policy";
 import { modelsFor, withEffort } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
@@ -274,7 +275,11 @@ export function inferRoutingTier(
   attachments: ChatImage[] = [],
   extras?: { role?: RoutingJobRole; parentTier?: RoutingTaskTier },
 ): RoutingTaskTier {
-  if (extras?.parentTier === "quick" || extras?.parentTier === "balanced" || extras?.parentTier === "deep") {
+  const jobRole = extras?.role === "auditor" || extras?.role === "worker" || extras?.role === "builder";
+  if (
+    !jobRole &&
+    (extras?.parentTier === "quick" || extras?.parentTier === "balanced" || extras?.parentTier === "deep")
+  ) {
     return extras.parentTier;
   }
   if (extras?.role === "auditor") return "deep";
@@ -402,28 +407,36 @@ function requiredIntelligence(tier: RoutingTaskTier): number {
   return 4;
 }
 
-export function outcomesFromAgentRuns(
-  rows: Array<{
-    provider: ProviderId;
-    model: string;
+/** Tally Learning outcome events. A live completed run is not verified. */
+export function outcomesFromLearningEvents(
+  events: Array<{
+    kind?: string;
+    tombstone?: boolean;
+    purged?: boolean;
+    provider?: ProviderId;
+    model?: string;
     customBotId?: string;
-    agentRun?: { status?: string };
+    payload?: Record<string, unknown>;
   }>,
 ): RoutingOutcomeTally[] {
   const map = new Map<string, RoutingOutcomeTally>();
-  for (const row of rows) {
-    const status = row.agentRun?.status;
-    if (status !== "completed" && status !== "failed") continue;
-    const key = `${row.provider}\0${row.model}\0${row.customBotId ?? ""}`;
+  for (const event of events) {
+    if (event.kind !== "outcome" || event.tombstone || event.purged) continue;
+    if (!event.provider || !event.model?.trim()) continue;
+    const signals = event.payload?.signals;
+    if (!outcomeIsVerified(signals && typeof signals === "object" ? signals : {})) continue;
+    const status = String(event.payload?.status ?? event.payload?.outcome ?? "").toLowerCase();
+    const failed = status === "failed" || status === "safety-paused" || status === "cancelled";
+    const key = `${event.provider}\0${event.model}\0${event.customBotId ?? ""}`;
     const current = map.get(key) ?? {
-      provider: row.provider,
-      model: row.model,
-      customBotId: row.customBotId,
+      provider: event.provider,
+      model: event.model,
+      customBotId: event.customBotId,
       verifiedSuccesses: 0,
       verifiedFailures: 0,
     };
-    if (status === "completed") current.verifiedSuccesses += 1;
-    else current.verifiedFailures += 1;
+    if (failed) current.verifiedFailures += 1;
+    else current.verifiedSuccesses += 1;
     map.set(key, current);
   }
   return [...map.values()];

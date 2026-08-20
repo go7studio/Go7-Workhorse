@@ -123,7 +123,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, outcomesFromAgentRuns, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
+import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, outcomesFromLearningEvents, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
 import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
@@ -479,6 +479,14 @@ type LearningTurnLink = {
   toolIds: string[];
 };
 
+const learningOutcomeEvents: Array<{
+  kind: "outcome";
+  provider?: ProviderId;
+  model?: string;
+  customBotId?: string;
+  payload: Record<string, unknown>;
+}> = [];
+
 function emitLearningEvent(draft: {
   id?: string;
   createdAt?: number;
@@ -493,7 +501,18 @@ function emitLearningEvent(draft: {
   correlationId?: string;
   agentRunId?: string;
   toolIds?: string[];
+  customBotId?: string;
 }) {
+  if (draft.kind === "outcome") {
+    learningOutcomeEvents.push({
+      kind: "outcome",
+      provider: draft.provider,
+      model: draft.model,
+      customBotId: draft.customBotId,
+      payload: draft.payload,
+    });
+    if (learningOutcomeEvents.length > 200) learningOutcomeEvents.splice(0, learningOutcomeEvents.length - 200);
+  }
   void window.workhorse?.learningRecord?.({
     id: draft.id ?? uid("lev"),
     createdAt: draft.createdAt ?? Date.now(),
@@ -1991,7 +2010,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           prompt: originalText,
           attachments: images,
           parentTier: hideUser ? session.routingDecision?.taskTier : undefined,
-          outcomes: outcomesFromAgentRuns(current.sessions),
+          outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
           current: {
             provider: session.provider,
             model: session.model,
@@ -4330,8 +4349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               attachments: payload.attachments,
               tier: routeTier ?? (isNested ? "quick" as const : undefined),
               role: spawnRole,
-              parentTier: caller.routingDecision?.taskTier,
-              outcomes: outcomesFromAgentRuns(latest.sessions),
+              outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
             };
             const routeCandidates = routeSpawn
@@ -4353,7 +4371,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               routeTier ??
               inferRoutingTier(payload.message, payload.attachments, {
                 role: spawnRole,
-                parentTier: caller.routingDecision?.taskTier,
               });
             const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested

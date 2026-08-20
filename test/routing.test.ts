@@ -10,7 +10,7 @@ import {
   effortForRoutingTier,
   inferRoutingTier,
   mergeInputRequirements,
-  outcomesFromAgentRuns,
+  outcomesFromLearningEvents,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingIdentityExcluded,
@@ -355,6 +355,35 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     settings,
   );
   assert.equal(quick?.model, "gpt-5.6-luna");
+
+  const parentAutoTier = "quick" as const;
+  const workerSpawn = {
+    prompt: "Quick: list these names",
+    role: "worker" as const,
+    parentTier: parentAutoTier,
+  };
+  const auditorSpawn = {
+    prompt: "Quick: list these names",
+    role: "auditor" as const,
+    parentTier: parentAutoTier,
+  };
+  const longWorker = {
+    prompt: "x".repeat(1300),
+    role: "worker" as const,
+    parentTier: parentAutoTier,
+  };
+  assert.equal(
+    inferRoutingTier(workerSpawn.prompt, [], { role: workerSpawn.role, parentTier: workerSpawn.parentTier }),
+    "balanced",
+  );
+  assert.equal(
+    inferRoutingTier(auditorSpawn.prompt, [], { role: auditorSpawn.role, parentTier: auditorSpawn.parentTier }),
+    "deep",
+  );
+  assert.equal(
+    inferRoutingTier(longWorker.prompt, [], { role: longWorker.role, parentTier: longWorker.parentTier }),
+    "deep",
+  );
 });
 
 test("verified worker outcomes tilt a close fit but leftover still splits two families that both fit", () => {
@@ -393,11 +422,32 @@ test("verified worker outcomes tilt a close fit but leftover still splits two fa
   );
   assert.equal(tilted?.model, "gpt-5.5");
 
-  const tallies = outcomesFromAgentRuns([
-    { provider: "codex", model: "gpt-5.6-terra", agentRun: { status: "failed" } },
-    { provider: "codex", model: "gpt-5.6-terra", agentRun: { status: "failed" } },
-    { provider: "codex", model: "gpt-5.5", agentRun: { status: "completed" } },
-    { provider: "codex", model: "gpt-5.5", agentRun: { status: "running" } },
+  const tallies = outcomesFromLearningEvents([
+    {
+      kind: "outcome",
+      provider: "codex",
+      model: "gpt-5.6-terra",
+      payload: { status: "failed", signals: { testsPassed: true } },
+    },
+    {
+      kind: "outcome",
+      provider: "codex",
+      model: "gpt-5.6-terra",
+      payload: { status: "failed", signals: { artifactChecked: true } },
+    },
+    {
+      kind: "outcome",
+      provider: "codex",
+      model: "gpt-5.5",
+      payload: { status: "completed", signals: { userAccepted: true } },
+    },
+    {
+      kind: "outcome",
+      provider: "codex",
+      model: "gpt-5.5",
+      payload: { status: "completed", signals: { agentClaimed: true } },
+    },
+    { kind: "outcome", provider: "codex", model: "gpt-5.5", payload: { status: "completed" } },
   ]);
   assert.equal(tallies.find((row) => row.model === "gpt-5.6-terra")?.verifiedFailures, 2);
   assert.equal(tallies.find((row) => row.model === "gpt-5.5")?.verifiedSuccesses, 1);
@@ -425,7 +475,8 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   assert.match(store, /routingCandidatesForDesk/);
   assert.match(store, /chooseRoutingDecision/);
   assert.match(store, /parentTier: hideUser \? session\.routingDecision\?\.taskTier/);
-  assert.match(store, /outcomesFromAgentRuns/);
+  assert.doesNotMatch(store, /parentTier: caller\.routingDecision/);
+  assert.match(store, /outcomesFromLearningEvents/);
   assert.match(store, /shouldAutoRouteSpawn/);
   assert.match(settingsUi, /id: "routing"/);
   assert.doesNotMatch(settingsUi, /id: "models"/);

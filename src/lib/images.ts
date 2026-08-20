@@ -74,6 +74,28 @@ const VIDEO_MIME_BY_EXT: Record<string, string> = {
   mkv: "video/x-matroska",
 };
 
+/**
+ * A text file's real type, for the paths where nobody hands us one. A drop from
+ * Finder carries File.type; a CLI attachment is just a path, and answering
+ * text/plain for every one of them loses html and markdown for no reason.
+ * Anything absent here is still text — it just falls back to text/plain.
+ */
+const TEXT_MIME_BY_EXT: Record<string, string> = {
+  md: "text/markdown",
+  markdown: "text/markdown",
+  html: "text/html",
+  htm: "text/html",
+  css: "text/css",
+  csv: "text/csv",
+  tsv: "text/tab-separated-values",
+  json: "application/json",
+  jsonc: "application/json",
+  xml: "application/xml",
+  svg: "image/svg+xml",
+  yml: "application/yaml",
+  yaml: "application/yaml",
+};
+
 const TEXT_EXT = new Set([
   "txt",
   "md",
@@ -164,7 +186,8 @@ export function attachmentKind(file: { name?: string; type?: string }): Attachme
 export function attachmentMime(file: { name?: string; type?: string }, kind = attachmentKind(file)): string {
   if (kind === "image") return imageMime(file) ?? "image/png";
   if (kind === "document" || kind === "audio" || kind === "video") return mappedMime(file, kind) ?? file.type ?? "application/octet-stream";
-  return file.type || "text/plain";
+  const ext = file.name?.toLowerCase().split(".").pop() ?? "";
+  return file.type || TEXT_MIME_BY_EXT[ext] || "text/plain";
 }
 
 export function isPicture(item: Pick<ChatImage, "kind" | "mimeType" | "name">): boolean {

@@ -58,7 +58,7 @@ import { parseMarkdownPlan } from "../src/lib/plan";
 import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
 import { LINK_MUTATING_TOOLS, LinkReplayCache, linkEnvelope, linkHandshake, type LinkEnvelope } from "../src/lib/workhorse-link";
-import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAdvertised, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
+import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAdvertised, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 import { effectiveLearningMode, learningCaptures } from "../src/lib/learning-policy";
 import {
   appendInboundJsonl,

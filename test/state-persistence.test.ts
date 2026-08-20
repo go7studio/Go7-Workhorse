@@ -3,6 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CURRENT_STATE_VERSION,
   readComposerDraftFile,
@@ -44,6 +45,15 @@ test("state reader falls back through backups after corruption", () => {
   assert.equal((result.state.sessions as Array<{ id: string }>)[0]?.id, "recovered");
   assert.equal(result.state.stateVersion, CURRENT_STATE_VERSION);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("hot state saves skip fsync so an 11MB desk does not stall the UI", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const persist = fs.readFileSync(path.join(root, "electron", "state-persistence.ts"), "utf8");
+  assert.match(persist, /fsync: options\.rotateBackups !== false/);
+  const main = fs.readFileSync(path.join(root, "electron", "main.ts"), "utf8");
+  assert.match(main, /sweepStaleUserData/);
+  assert.match(main, /disk-cache-size/);
 });
 
 test("hot state saves can skip rotating multi-megabyte backups", () => {

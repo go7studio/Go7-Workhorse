@@ -22,13 +22,13 @@ export function migrateState(raw: PersistableState): PersistableState {
   return { ...next, stateVersion: CURRENT_STATE_VERSION };
 }
 
-export function atomicWriteJson(file: string, value: unknown, mode?: number) {
+export function atomicWriteJson(file: string, value: unknown, mode?: number, options?: { fsync?: boolean }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const handle = fs.openSync(temp, "wx", mode);
   try {
     fs.writeFileSync(handle, JSON.stringify(value), "utf8");
-    fs.fsyncSync(handle);
+    if (options?.fsync !== false) fs.fsyncSync(handle);
   } finally {
     fs.closeSync(handle);
   }
@@ -130,6 +130,6 @@ export function writeVersionedState(
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
   if (options.rotateBackups !== false) rotateProtectedBackups(file, protect);
-  atomicWriteJson(file, protectedState);
+  atomicWriteJson(file, protectedState, undefined, { fsync: options.rotateBackups !== false });
   return protectedState;
 }

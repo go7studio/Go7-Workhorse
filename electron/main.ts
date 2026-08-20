@@ -58,6 +58,7 @@ import { installLinkCommand, installReportMessage, installWorkhorseLink, workhor
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
+import { sweepStaleUserData } from "./user-data-hygiene";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
@@ -176,6 +177,15 @@ function pinUserData() {
   }
 }
 pinUserData();
+try {
+  app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
+  const swept = sweepStaleUserData(app.getPath("userData"));
+  if (swept.removed.length) {
+    console.info(`Cleared leftover desk cache (${swept.removed.join(", ")}).`);
+  }
+} catch {
+  /* Chromium cache may already be open */
+}
 
 const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
 const isPrimaryInstance = isMcpHelper || app.requestSingleInstanceLock();

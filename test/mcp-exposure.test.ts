@@ -7,17 +7,20 @@ import { test } from "node:test";
 import {
   EXTERNAL_RUNTIME_ALLOW,
   EXTERNAL_RUNTIME_FORBIDDEN,
+  LINK_COMPAT_TOOLS,
   assertMcpToolAllowed,
   inboundDeskAction,
   inboundSessionIdFromState,
   inboundSpawnParent,
+  isMcpToolAdvertised,
   isMcpToolAllowed,
   mcpExposureProfile,
   profileForCaller,
   resolveInboundParent,
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
-import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, mcpToolInputSchema, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { LINK_TOOLS } from "../src/lib/workhorse-link";
 import { WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
   hermesConfigPath,
@@ -32,6 +35,17 @@ import {
   workhorseExternalMcpServer,
 } from "../electron/mcp-install";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
+
+test("Link lists the eight contract tools; older names still dispatch", () => {
+  for (const tool of LINK_TOOLS) {
+    assert.equal(isMcpToolAdvertised("external-runtime", tool), true, tool);
+  }
+  for (const tool of LINK_COMPAT_TOOLS) {
+    assert.equal(isMcpToolAllowed("external-runtime", tool), true, tool);
+    assert.equal(isMcpToolAdvertised("external-runtime", tool), false, tool);
+  }
+  assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
+});
 
 test("external-runtime allows execution discovery, delegation, chat, and worker lifecycle", () => {
   for (const tool of [
@@ -140,14 +154,14 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       result?: { tools?: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }> };
     };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
-    // The list a caller sees is the list it may call. Listing a tool the call
-    // will refuse only spends schema tokens and invites the attempt.
+    // The list a caller sees is the Link contract. Forbidden names stay off it.
+    // Older names still answer at dispatch so a harness that already calls them is not refused.
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
-    assert.ok(names.includes("workhorse_list_agents"));
-    assert.ok(names.includes("workhorse_list_bots"));
-    assert.ok(names.includes("workhorse_query_capacity"));
-    assert.ok(names.includes("workhorse_delegate"));
-    assert.ok(names.includes("workhorse_continue_mission"));
+    assert.deepEqual(names.slice().sort(), [...LINK_TOOLS].slice().sort());
+    assert.ok(!names.includes("workhorse_spawn_agent"));
+    assert.ok(!names.includes("workhorse_list_bots"));
+    assert.equal(isMcpToolAllowed("external-runtime", "workhorse_spawn_agent"), true);
+    assert.equal(isMcpToolAdvertised("external-runtime", "workhorse_spawn_agent"), false);
     const delegateFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_delegate")?.inputSchema?.properties ?? {};
     for (const field of ["task", "initialBrain", "loop", "constraints", "capabilities", "skills", "tools", "exclude", "folder", "wait", "fromSessionId", "traceId"]) {
       assert.ok(field in delegateFields, `workhorse_delegate publishes ${field}`);
@@ -156,13 +170,13 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
       assert.ok(!(field in delegateFields), `workhorse_delegate leaves ${field} to Workhorse routing`);
     }
     for (const toolName of ["workhorse_ask_chat", "workhorse_spawn_agent", "workhorse_await_agents", "workhorse_agent_status", "workhorse_cancel_agent"]) {
-      const properties = listed.result?.tools?.find((tool) => tool.name === toolName)?.inputSchema?.properties ?? {};
+      const properties = mcpToolInputSchema(toolName)?.properties ?? {};
       assert.ok("fromSessionId" in properties, `${toolName} publishes fromSessionId`);
       assert.ok("traceId" in properties, `${toolName} publishes traceId`);
     }
-    const awaitFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_await_agents")?.inputSchema?.properties ?? {};
+    const awaitFields = mcpToolInputSchema("workhorse_await_agents")?.properties ?? {};
     assert.ok("workerIds" in awaitFields, "workhorse_await_agents publishes wave worker ids");
-    const continueFields = listed.result?.tools?.find((tool) => tool.name === "workhorse_continue_mission")?.inputSchema?.properties ?? {};
+    const continueFields = mcpToolInputSchema("workhorse_continue_mission")?.properties ?? {};
     for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "fromSessionId", "traceId"]) {
       assert.ok(field in continueFields, `workhorse_continue_mission publishes ${field}`);
     }
@@ -892,7 +906,8 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
     assert.ok(names.includes("workhorse_query_capacity"));
-    assert.ok(names.includes("workhorse_list_bots"));
+    assert.ok(!names.includes("workhorse_list_bots"));
+    assert.equal(isMcpToolAllowed("external-runtime", "workhorse_list_bots"), true);
     assert.ok(!names.includes("workhorse_delete_chat"));
     assert.ok(!names.includes("workhorse_setup_custom_bot"));
     const first = JSON.parse(
@@ -1004,6 +1019,7 @@ test("Settings and FEATURES name leftover share without a new tab", () => {
   assert.match(features, /query leftover and availability/);
   assert.match(features, /never includes keys or\s+chat content/);
   assert.match(features, /inbound Workhorse Link calls from a harness/);
+  assert.match(features, /Older names still\s+answer/);
 });
 
 test("workhorse_list_external_agents lists the catalog, not past tasks", async () => {

@@ -58,7 +58,7 @@ import { parseMarkdownPlan } from "../src/lib/plan";
 import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
 import { LINK_MUTATING_TOOLS, LinkReplayCache, linkEnvelope, linkHandshake, type LinkEnvelope } from "../src/lib/workhorse-link";
-import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAllowed, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
+import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAdvertised, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 import { effectiveLearningMode, learningCaptures } from "../src/lib/learning-policy";
 import {
   appendInboundJsonl,
@@ -653,6 +653,10 @@ const TOOLS = [
     },
   },
 ];
+
+export function mcpToolInputSchema(name: string): { properties?: Record<string, unknown> } | undefined {
+  return TOOLS.find((tool) => tool.name === name)?.inputSchema as { properties?: Record<string, unknown> } | undefined;
+}
 
 type DeskAsk = (ask: PeerAsk) => Promise<{ text?: string; error?: string }>;
 let deskAsk: DeskAsk | null = null;
@@ -2144,10 +2148,11 @@ export async function handleWorkhorseRpc(
   if (message.method === "notifications/initialized" || message.method === "initialized") return undefined;
   if (message.method === "tools/list") {
     if (message.id === undefined) return undefined;
-    // The list a caller sees is the list it may call — same gate as tools/call,
-    // so a worker cannot learn a name here and use it there.
+    // The list a caller sees is the list it should learn. Forbidden names stay
+    // off it. Link shows the eight contract tools; older names still answer
+    // at dispatch so a harness that already calls them is not refused.
     const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(ctx?.fromSessionId)));
-    return { jsonrpc: "2.0", id: message.id, result: { tools: TOOLS.filter((tool) => isMcpToolAllowed(profile, tool.name)) } };
+    return { jsonrpc: "2.0", id: message.id, result: { tools: TOOLS.filter((tool) => isMcpToolAdvertised(profile, tool.name)) } };
   }
   if (message.method === "ping") {
     if (message.id === undefined) return undefined;

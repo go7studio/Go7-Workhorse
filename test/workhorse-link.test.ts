@@ -14,7 +14,7 @@ import {
   linkHandshake,
   linkHostCliArgs,
 } from "../src/lib/workhorse-link";
-import { EXTERNAL_RUNTIME_ALLOW, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
+import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, type InstallIo } from "../electron/mcp-install";
@@ -42,6 +42,7 @@ test("the Link contract: eight tools, four capabilities, one version — and the
     assert.equal(isMcpToolAllowed("external-runtime", tool), false, tool);
     assert.equal((EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool), false, tool);
   }
+  assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
   const shake = linkHandshake({ deskOnline: true });
   assert.equal(shake.protocolVersion, 1);
   assert.equal(shake.desk, "online");

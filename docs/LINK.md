@@ -72,6 +72,12 @@ Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and
 a call is refused.
 
+`workhorse_capabilities` and `tools/list` name those eight. Older names
+(`workhorse_spawn_agent`, `workhorse_list_bots`, `workhorse_list_projects`,
+`workhorse_list_agents`, `workhorse_list_external_agents`,
+`workhorse_await_agents`, `workhorse_cancel_agent`) still answer so a harness
+that already calls them is not refused. New harnesses should use the eight.
+
 When Settings → Learning is on, each Link call is stored on this machine as
 agent evidence. Keys and chat text stay out.
 

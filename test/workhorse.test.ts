@@ -63,7 +63,7 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
@@ -2638,8 +2638,8 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /puts THIS chat/);
   assert.match(WORKHORSE_SESSION_RULES, /After you ask the user to pick, stop/);
   assert.match(WORKHORSE_SESSION_RULES, /search likely folders first/i);
-  assert.match(WORKHORSE_SESSION_RULES, /D:\\ and C:\\/);
-  assert.match(WORKHORSE_SESSION_RULES, /If they name a drive/);
+  assert.match(WORKHORSE_SESSION_RULES, /Documents, Desktop, and Projects/);
+  assert.match(WORKHORSE_SESSION_RULES, /If they name a drive or folder/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
   assert.match(WORKHORSE_SESSION_RULES, /Never delete this chat on a bulk list/);
   assert.match(WORKHORSE_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);
@@ -2647,6 +2647,17 @@ test("session bridge lists, finds, and reads chats for peer tools", async () => 
   assert.match(WORKHORSE_SESSION_RULES, /Only tell the user it exists if that list shows/);
   assert.doesNotMatch(WORKHORSE_SESSION_RULES, /sidebar project/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not call it a sidebar anything/);
+  const publicLaw = [
+    WORKHORSE_SESSION_RULES,
+    CUSTOM_HTTP_SESSION_RULES,
+    CURSOR_SESSION_RULES,
+    readFileSync(path.join(ROOT, "skills", "setup", "SKILL.md"), "utf8"),
+  ].join("\n");
+  assert.doesNotMatch(publicLaw, /Godot\\Projects/);
+  assert.doesNotMatch(publicLaw, /D:\\ and C:\\/);
+  assert.doesNotMatch(publicLaw, /project\.godot/);
+  assert.doesNotMatch(publicLaw, /\/Users\//);
+  assert.doesNotMatch(publicLaw, /Look at the D drive/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /sidebar project/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /sidebar project/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /workhorse_create_project/);

@@ -187,7 +187,7 @@ macOS approval belongs to the signed app identity. One allow sticks across updat
 2. **Chat** from that project, or **New chat** from the welcome screen (creates an Untitled project).
 3. **Link folder** or **Add reference** when you want files, URLs, or notes on the project. Several folders are allowed.
 4. **New chat** starts with the last model. Change vendor, model, and brain level from the menu on the composer.
-5. **Talk** — Grok, Codex, and Claude run live. Custom uses the HTTP bot you created.
+5. **Talk** — Grok, Claude, Codex, and Cursor run live. Custom uses the HTTP bot you created.
 6. **Type `/`** — command palette. `/providers` goes back to this project’s home. `/settings` opens Profile, connected LLMs, skills, routing, learning, usage, and watch.
 7. **`/demo-permission`** — shows Allow once / Allow for session / Deny.
 8. **Review / Terminal** — inspect the real Git working tree or open a shell scoped to this chat's local folder or worktree.

@@ -2,6 +2,7 @@ import { isStockProviderId, parseExternalAgentRef, type ExternalErrorCode } from
 import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS } from "../src/lib/subagents";
 import type { McpExposureProfile, ProviderId } from "../src/lib/types";
 import type { DeskRole } from "../src/lib/workhorse-rules";
+import { LINK_TOOLS } from "../src/lib/workhorse-link";
 
 export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_capabilities",
@@ -18,6 +19,17 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_spawn_agent",
   "workhorse_await_agents",
   "workhorse_agent_status",
+  "workhorse_cancel_agent",
+] as const;
+
+/** Names a harness may still call. They are not the Link contract. */
+export const LINK_COMPAT_TOOLS = [
+  "workhorse_list_bots",
+  "workhorse_list_projects",
+  "workhorse_list_agents",
+  "workhorse_list_external_agents",
+  "workhorse_spawn_agent",
+  "workhorse_await_agents",
   "workhorse_cancel_agent",
 ] as const;
 
@@ -63,6 +75,17 @@ export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boo
   if (profile === "worker") return (WORKER_DESK_TOOLS as readonly string[]).includes(tool);
   if (profile === "auditor") return (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool);
   return (EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool);
+}
+
+/**
+ * The list a caller is shown. Link advertises the eight contract names.
+ * Older names still pass isMcpToolAllowed so a harness that already calls
+ * them is not refused.
+ */
+export function isMcpToolAdvertised(profile: McpExposureProfile, tool: string): boolean {
+  if (!isMcpToolAllowed(profile, tool)) return false;
+  if (profile === "external-runtime") return (LINK_TOOLS as readonly string[]).includes(tool);
+  return true;
 }
 
 /**

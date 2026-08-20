@@ -4455,13 +4455,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: namedResolution.error });
               return;
             }
-            // Reuse is a continuation protocol, not an idle pool. It used to be
-            // ambient: any free worker on this parent and project with the same
-            // bot took the next unnamed slice, whatever it was about. One Wren
-            // took an IP review, a Godot performance audit and a UI design review
-            // into one 135-message context; another reached 912. Inherit
-            // concatenates the whole prior transcript (workerStartMessages), so
-            // every unrelated slice paid for the last one.
+            // Reuse is a continuation protocol, not an idle pool. It used to
+            // hand the next unnamed slice to any free worker on this parent
+            // and project with the same bot. Inherit concatenates the whole
+            // prior transcript (workerStartMessages), so unrelated slices
+            // paid for the last one.
             //
             // Now it takes a decision: name the worker, or ask for inherit. A
             // bare spawn gets somebody with a clear head.

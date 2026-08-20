@@ -236,6 +236,12 @@ export type DeskLineupRow = {
   rationale?: string;
   constraints?: string[];
   kind?: "workhorse" | "external";
+  /**
+   * Which harness asked for this work, when one did. `runtimeId` below is the
+   * runtime a task was sent OUT to; this is the caller that came IN. A wave
+   * with no caller is the desk's own, and shows no attribution.
+   */
+  caller?: CorrelationOrigin;
   runtimeId?: AgentRuntimeId;
   agentId?: string;
   workspace?: string;

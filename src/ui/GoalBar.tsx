@@ -42,21 +42,6 @@ export function GoalBar() {
           </button>
         ))}
       </div>
-      {session?.lineup?.rows.some((row) => row.kind === "external") ? (
-        <div className="goal-bar-copy">
-          {session.lineup.rows
-            .filter((row) => row.kind === "external")
-            .map((row) => (
-              <span key={row.childId}>
-                {row.runtimeId}/{row.agentId} · {row.status}
-                {row.workspace ? ` · ${row.workspace}` : ""}
-                {row.finishedAt ? ` · ${Math.max(0, row.finishedAt - row.startedAt)}ms` : ""}
-                {row.report ? ` · ${row.report}` : ""}
-                {row.correlationId ? ` · ${row.correlationId}` : ""}
-              </span>
-            ))}
-        </div>
-      ) : null}
     </div>
   );
 }

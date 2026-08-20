@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, type SyntheticEvent } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
 import { collapseToolText, splitToolLine, toolIsFinished } from "../lib/grok-events";
 import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
@@ -39,11 +39,21 @@ function useFoldOpen(initial = false) {
   return { open, onToggle };
 }
 
-function ThoughtBlock({ text, live, id }: { text: string; live: boolean; id: string }) {
-  const { open, onToggle } = useFoldOpen(live);
+function useStartOpen(start: boolean) {
+  const el = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => {
+    if (start && el.current) el.current.open = true;
+  }, [start]);
+  return el;
+}
+
+function ThoughtBlock({ text, live, id, reveal = false }: { text: string; live: boolean; id: string; reveal?: boolean }) {
+  const { open, onToggle } = useFoldOpen(live || reveal);
+  const fold = useStartOpen(live || reveal);
   return (
     <details
       key={`${id}-${live ? "live" : "idle"}`}
+      ref={fold}
       className={`work-fold${live ? " thought-live" : ""}`}
       {...foldOpen(live)}
       onToggle={onToggle}
@@ -78,6 +88,7 @@ function WorkRow({
   row,
   rowIndex,
   active,
+  reveal = false,
   visible,
   threads,
   onOpenThread,
@@ -86,16 +97,18 @@ function WorkRow({
   row: GroupedWorkRow;
   rowIndex: number;
   active: boolean;
+  reveal?: boolean;
   visible: DisplayWorkStep[];
   threads: ChatMessage[];
   onOpenThread?: (id: string) => void;
   now: number;
 }) {
   const store = useStore();
+  const toolsFold = useStartOpen(active || reveal);
   if (row.type === "thought") {
     return (
       <div key={row.step.id} className="work-step" data-kind="thought">
-        <ThoughtBlock text={row.step.text} live={active} id={row.step.id} />
+        <ThoughtBlock text={row.step.text} live={active} id={row.step.id} reveal={reveal} />
       </div>
     );
   }
@@ -183,6 +196,7 @@ function WorkRow({
   return (
     <details
       key={`${firstId}-${active ? "live" : "idle"}`}
+      ref={toolsFold}
       className="work-fold work-step"
       data-kind="tool"
       {...foldOpen(active)}
@@ -356,6 +370,7 @@ export const WorkPopout = memo(function WorkPopout({
                 row={row}
                 rowIndex={rowIndex}
                 active={isActiveWorkRow(rows, rowIndex, live)}
+                reveal={tailIndex === packed.tail.length - 1}
                 visible={visible}
                 threads={threads}
                 onOpenThread={onOpenThread}

@@ -8,6 +8,32 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.13](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.12...v0.6.13) (2026-08-20)
+
+
+### Features
+
+* assign Auto and spawn from one family table and job tier ([c748c34](https://github.com/go7studio/Go7-Workhorse/commit/c748c34250e354ee0256110f2db4acbdb688bc02))
+* collapse Cursor live models into family bases for routing ([3a16613](https://github.com/go7studio/Go7-Workhorse/commit/3a1661313c1572e94eb5ac6e4324e25c98f09188))
+* **sidebar:** say who ran a wave and how it went, on the chat row ([1ca3d01](https://github.com/go7studio/Go7-Workhorse/commit/1ca3d019dd17f7ee5fc7948fab19436f51b9e9fe))
+* **sidebar:** say who ran a wave and how it went, on the chat row ([804d9d7](https://github.com/go7studio/Go7-Workhorse/commit/804d9d7c75ef8c6a3717bf39bc8c28f16b65b2bb))
+
+
+### Bug Fixes
+
+* a dead worker takes no new work, and reuse stays inside its wave ([772f3b0](https://github.com/go7studio/Go7-Workhorse/commit/772f3b05c2495183052df8a3e9776884aecae5b9))
+* a dead worker takes no new work, and reuse stays inside its wave ([6afe8fe](https://github.com/go7studio/Go7-Workhorse/commit/6afe8feadfcf3237a835c356984a12b6441c929a))
+* a wave says who asked for it, what it is, and how it really went ([1ff88a0](https://github.com/go7studio/Go7-Workhorse/commit/1ff88a007d4aa18904ac36ad1416b26f3beff734))
+* **mcp:** let a harness attach every file type the desk takes ([fd88545](https://github.com/go7studio/Go7-Workhorse/commit/fd885453ba4150db9fcfc7a2561bdb6f29cc5c2c))
+* **mcp:** let a harness attach every file type the desk takes ([7745af1](https://github.com/go7studio/Go7-Workhorse/commit/7745af176a119c55615c1104a30a0ffb74f8e772))
+* **mcp:** let a harness mark a slice an auditor, so the check routes deep ([8f1311f](https://github.com/go7studio/Go7-Workhorse/commit/8f1311f237964982299c3020caca9b6f7aeb0f1a))
+* **mcp:** let a harness mark a slice an auditor, so the check routes deep ([fa17043](https://github.com/go7studio/Go7-Workhorse/commit/fa17043a7eb2e2d5fa1a2852302fba8c8555dcbd))
+* reuse a worker on purpose, not because one was idle ([498dae5](https://github.com/go7studio/Go7-Workhorse/commit/498dae57c11071be9233ead0c41f9650212ca0d6))
+* reuse a worker on purpose, not because one was idle ([7e8ab60](https://github.com/go7studio/Go7-Workhorse/commit/7e8ab60df1e14570183597ea0bf4009e0848b921))
+* score Gemini as Gemini, not as mini ([1b9f79c](https://github.com/go7studio/Go7-Workhorse/commit/1b9f79cca99955c598a2f848df33cf6c7da284d9))
+* spawn job typing ignores parent Auto tier; rank verified Learning outcomes ([3261acf](https://github.com/go7studio/Go7-Workhorse/commit/3261acf7bfa306f11d5fc5affb0069ef67f66578))
+* **types:** declare the spawn role store.tsx already reads ([e08929a](https://github.com/go7studio/Go7-Workhorse/commit/e08929a095ea07d6ab07bb59e84cf2adf663946b))
+
 ## [0.6.12](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.11...v0.6.12) (2026-08-20)
 
 

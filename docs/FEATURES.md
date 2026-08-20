@@ -89,7 +89,10 @@ transcript rather than as a path.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
 - Each chat row shows how old the last prompt is in a compact form such as
-  `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
+  `25m`, `2h`, or `3d`. Hover the stamp for the full time. A finished worker
+  you have not opened since it landed shows a small done dot beside the stamp;
+  opening that chat clears it. While a worker is still going, its place in the
+  list stays fixed — tool ticks do not reshuffle nested rows. A parent with workers
   folds them on the count button; they ease open and closed.
 - A chat that ran a wave says so on its own row: who called it, and how it
   went — `OpenClaw · Working…`, or nothing at all once every worker finished

@@ -529,6 +529,46 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
   return undefined;
 }
 
+/** True while this row is still going — vendor turn or worker run. */
+export function sessionIsActive(session: Pick<Session, "status" | "agentRun">): boolean {
+  return (
+    session.status === "running" ||
+    session.status === "needs-input" ||
+    session.agentRun?.status === "running"
+  );
+}
+
+/**
+ * Sort key for the lineup. While a chat or worker is active, tool ticks must not
+ * reshuffle siblings — freeze at run start or the last user prompt. When a
+ * worker finishes, its terminal time may lift the parent.
+ */
+export function lineupSortAt(session: Pick<Session, "messages" | "status" | "agentRun">): number {
+  const run = session.agentRun;
+  if (sessionIsActive(session)) {
+    if (typeof run?.startedAt === "number") return run.startedAt;
+    const user = lastUserMessage(session);
+    if (typeof user?.createdAt === "number") return user.createdAt;
+  }
+  if (typeof run?.finishedAt === "number") return run.finishedAt;
+  return lastTalkedAt(session) ?? 0;
+}
+
+/** A finished worker the user has not opened since its terminal report. */
+export function hasUnviewedFinish(
+  session: Pick<Session, "id" | "agentRun" | "viewedAt">,
+  activeSessionId: string | null,
+): boolean {
+  if (session.id === activeSessionId) return false;
+  const run = session.agentRun;
+  if (!run || run.status === "running") return false;
+  const finishedAt = run.finishedAt;
+  if (typeof finishedAt !== "number") return false;
+  const viewedAt = session.viewedAt;
+  if (typeof viewedAt !== "number") return true;
+  return finishedAt > viewedAt;
+}
+
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
   const first = chats[0];

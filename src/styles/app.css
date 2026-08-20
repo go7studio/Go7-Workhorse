@@ -587,6 +587,20 @@ html.pane-dragging * {
   font-variant-numeric: tabular-nums;
 }
 
+.row-finish-mark {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px 0 0;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.chat-row.active .row-finish-mark {
+  display: none;
+}
+
 .row-meta {
   display: block;
   font-size: 11px;

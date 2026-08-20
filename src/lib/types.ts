@@ -532,6 +532,8 @@ export type Session = {
   /** Manual preserves the selected model. Auto may route before a new turn. */
   routingMode?: "auto" | "manual";
   routingDecision?: RoutingDecision;
+  /** When this chat was last opened. Clears the done dot after a worker finishes. */
+  viewedAt?: number;
 };
 
 export type PermissionRequest = {

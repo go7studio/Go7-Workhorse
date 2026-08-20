@@ -1175,12 +1175,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const selectSession = useCallback((id: string) => {
     setState((current) => {
       const session = current.sessions.find((item) => item.id === id);
+      const now = Date.now();
+      const sessions = current.sessions.map((item) => {
+        if (item.id === id || item.id === current.activeSessionId) return { ...item, viewedAt: now };
+        return item;
+      });
       return {
         ...current,
         panel: null,
         activeSessionId: id,
         activeProjectId: session?.projectId ?? null,
-        sessions: dropDrafts(current.sessions, id),
+        sessions: dropDrafts(sessions, id),
       };
     });
   }, []);

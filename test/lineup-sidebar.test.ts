@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { sidebarKeepsChat } from "../src/lib/chats";
+import { sidebarKeepsChat, lineupSortAt, hasUnviewedFinish, sessionIsActive } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
+import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { formatChatSidebar } from "../src/lib/session";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
@@ -162,4 +163,130 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
+});
+
+
+test("tool ticks do not reshuffle nested workers while they are running", () => {
+  const user = { id: "u1", role: "user" as const, text: "go", createdAt: 100 };
+  const parent = {
+    id: "parent",
+    projectId: "proj",
+    messages: [user],
+    status: "idle" as const,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "high" as const,
+    title: "Parent",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    contextUsed: 0,
+  };
+  const mkWorker = (id: string, startedAt: number, toolAt: number) => ({
+    id,
+    projectId: "proj",
+    parentId: parent.id,
+    hidden: true,
+    messages: [
+      user,
+      { id: "t1", role: "assistant" as const, text: "", kind: "tool" as const, createdAt: toolAt },
+    ],
+    status: "idle" as const,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "high" as const,
+    title: "Worker",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    contextUsed: 0,
+    agentRun: { status: "running" as const, startedAt, isolation: "worktree" as const },
+  });
+  const slow = mkWorker("slow", 200, 900);
+  const fast = mkWorker("fast", 500, 600);
+  assert.ok(sessionIsActive(slow));
+  assert.equal(lineupSortAt(slow), 200);
+  assert.equal(lineupSortAt(fast), 500);
+  const before = buildSidebarChatIndex([parent, slow, fast]);
+  const nestedBefore = before.liveByProject.get("proj")![0]!.workers.map((row) => row.id);
+  assert.deepEqual(nestedBefore, ["fast", "slow"]);
+  const bumped = mkWorker("fast", 500, 950);
+  const after = buildSidebarChatIndex([parent, slow, bumped]);
+  const nestedAfter = after.liveByProject.get("proj")![0]!.workers.map((row) => row.id);
+  assert.deepEqual(nestedAfter, nestedBefore, "a later tool tick must not reorder siblings");
+});
+
+test("a parent may rise when a nested worker finishes", () => {
+  const user = { id: "u1", role: "user" as const, text: "go", createdAt: 100 };
+  const parent = {
+    id: "parent",
+    projectId: "proj",
+    messages: [user],
+    status: "idle" as const,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "high" as const,
+    title: "Parent",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    contextUsed: 0,
+  };
+  const older = {
+    id: "older",
+    projectId: "proj",
+    messages: [{ id: "u2", role: "user" as const, text: "old", createdAt: 50 }],
+    status: "idle" as const,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "high" as const,
+    title: "Older",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    contextUsed: 0,
+  };
+  const worker = {
+    id: "worker",
+    projectId: "proj",
+    parentId: parent.id,
+    hidden: true,
+    messages: [user],
+    status: "idle" as const,
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    effort: "high" as const,
+    title: "Worker",
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    contextUsed: 0,
+    agentRun: {
+      status: "completed" as const,
+      startedAt: 200,
+      finishedAt: 800,
+      isolation: "worktree" as const,
+    },
+  };
+  const index = buildSidebarChatIndex([older, parent, worker]);
+  const roots = index.liveByProject.get("proj")!.map((row) => row.id);
+  assert.deepEqual(roots, ["parent", "older"], "a fresh worker finish lifts its parent above an older chat");
+});
+
+test("a finished worker shows a done dot until that chat is opened", () => {
+  const worker = {
+    id: "worker",
+    agentRun: {
+      status: "completed" as const,
+      startedAt: 1,
+      finishedAt: 100,
+      isolation: "worktree" as const,
+    },
+  };
+  assert.equal(hasUnviewedFinish(worker, null), true, "never opened");
+  assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 50 }, null), true);
+  assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 100 }, null), false);
+  assert.equal(hasUnviewedFinish({ ...worker, viewedAt: 50 }, "worker"), false, "active chat hides the dot");
+  assert.equal(hasUnviewedFinish({ ...worker, agentRun: { ...worker.agentRun, status: "running" } }, null), false);
+});
+
+test("selectSession clears the done dot by stamping viewedAt", () => {
+  assert.match(read("src/lib/store.tsx"), /viewedAt: now/);
+  assert.match(read("src/ui/ChatRow.tsx"), /hasUnviewedFinish/);
+  assert.match(read("src/ui/ChatRow.tsx"), /row-finish-mark/);
 });

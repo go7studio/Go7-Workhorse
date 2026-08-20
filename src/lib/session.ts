@@ -278,6 +278,8 @@ export function normalizeSession(raw: unknown): Session | null {
     planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",
     routingDecision: normalizeRoutingDecision(record.routingDecision),
+    // Only an explicit open stamps this — inventing from finishedAt would hide the done mark on reload.
+    viewedAt: typeof record.viewedAt === "number" && record.viewedAt > 0 ? record.viewedAt : undefined,
   };
 }
 

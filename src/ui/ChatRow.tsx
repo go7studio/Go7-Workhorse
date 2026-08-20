@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { lastTalkedAt } from "../lib/chats";
+import { hasUnviewedFinish, lastTalkedAt } from "../lib/chats";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
@@ -168,6 +168,7 @@ export function ChatRow({
   };
 
   const talkedAt = lastTalkedAt(session);
+  const unviewedFinish = hasUnviewedFinish(session, desk.activeSessionId);
 
   return (
     <div
@@ -242,6 +243,7 @@ export function ChatRow({
                         : rowLabel}
             </span>
           </span>
+          {unviewedFinish ? <span className="row-finish-mark" aria-label="Finished — not opened yet" title="Finished" /> : null}
           <TimeStamp at={talkedAt} className="row-talked" />
         </button>
       )}

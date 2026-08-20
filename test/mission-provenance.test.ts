@@ -5,6 +5,7 @@
  * are that wave, verbatim from the desk's own state.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
   LINEUP_FINISHED_NOTICE,
@@ -183,4 +184,25 @@ test("a live wave pulses a parent chat that is itself idle", () => {
 
 test("an ordinary chat is left alone", () => {
   assert.equal(missionRowLook({ lineup: undefined }, []), undefined);
+});
+
+test("a live wave reaches the dot and the title reaches the row", () => {
+  // missionRowLook is tested above, but nothing else covers the hop from that
+  // object into the DOM, and that hop is the whole feature: a parent chat's own
+  // status is idle for the entire time a wave runs, so without mission.running
+  // in the pulse the row sits still through four hours of work. Verified live —
+  // the two "Working…" rows animate 1.00 → 0.35 → 1.00 on a 1.1s cycle while
+  // every finished row holds flat at 1.00 — and pinned here in the same
+  // source-shape way as test/dead-ui.test.ts, for the same reason.
+  const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
+  assert.match(row, /session\.status === "running" \|\| mission\?\.running \? " pulse"/, "a live wave must pulse the dot");
+  assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
+  assert.match(row, /mission\?\.caller \|\| mission\?\.word/, "the meta line must render the wave");
+
+  // And the Sidebar has to hand it down — it owns the workers the state needs.
+  const sidebar = readFileSync(new URL("../src/ui/Sidebar.tsx", import.meta.url), "utf8");
+  const wired = [...sidebar.matchAll(/mission=\{missionRowLook\(session, session\.workers\)\}/g)];
+  const rows = [...sidebar.matchAll(/workerCount=\{session\.workers\.length\}/g)];
+  assert.equal(wired.length, rows.length, "every parent chat row must be given its wave");
+  assert.ok(wired.length >= 2, `expected both sidebar call sites, found ${wired.length}`);
 });

@@ -2,7 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { deskRoleOf } from "../src/lib/subagents";
 import fs from "node:fs";
 import path from "node:path";
-import { GrokAgent, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
+import { GrokAgent, usageHasBilledTokens, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
+import { harvestCodexSessionBills } from "./codex-usage";
 import { shouldLoadVendorSession, type GrokCompactInput, type GrokEventSink, type GrokPromptInput, type GrokSessionOpenInput } from "./grok-host";
 import { CODEX_ACP_NOT_INSTALLED } from "./codex-login";
 import { buildCodexLaunchSpec, codexSpawnArgs } from "./codex-launch";
@@ -120,8 +121,15 @@ export class CodexSessionHost {
     try {
       const handlers = this.handlersFor(input, emit);
       const chunks = createCodexChunkFilter(handlers.onChunk);
+      const startedAt = Date.now() - 2_000;
       const result = await slot.agent.prompt(text, { ...handlers, onChunk: chunks.push }, input.images ?? []);
       chunks.flush();
+      const bills = harvestCodexSessionBills(slot.agent.sessionId, startedAt);
+      if (bills.length > 0) {
+        for (const bill of bills) handlers.onUsage?.(bill);
+      } else if (result.usage && usageHasBilledTokens(result.usage)) {
+        handlers.onUsage?.({ ...result.usage, source: "request" });
+      }
       let nativeSessionArchived = false;
       if (input.parentId || input.hidden || input.role === "worker") {
         try {
@@ -184,6 +192,7 @@ export class CodexSessionHost {
       onTitle: (title: string) => emit({ type: "title" as const, sessionId: input.sessionId, title }),
       onCommands: (commands: import("../src/lib/types").Command[]) =>
         emit({ type: "commands" as const, sessionId: input.sessionId, commands }),
+      emitResultUsage: false,
     };
   }
 

@@ -943,6 +943,93 @@ test("CodexSessionHost archives internal workers but retains root chats", async 
   assert.equal(rootMethods.includes("session/delete"), false);
 });
 
+test("Codex token_count last_token_usage is billed as each request, not a context gauge", async () => {
+  const { harvestCodexJsonlBills } = await import("../electron/codex-usage.ts");
+  const last = parseGrokUsage({
+    sessionUpdate: "token_count",
+    info: {
+      last_token_usage: {
+        input_tokens: 21566,
+        cached_input_tokens: 11008,
+        cache_write_input_tokens: 0,
+        output_tokens: 307,
+        reasoning_output_tokens: 178,
+        total_tokens: 21873,
+      },
+      model_context_window: 258400,
+    },
+  });
+  assert.equal(last?.inputTokens, 10558);
+  assert.equal(last?.cacheReadTokens, 11008);
+  assert.equal(last?.outputTokens, 307);
+
+  const classified = classifyAcpUpdate({
+    sessionUpdate: "token_count",
+    info: {
+      last_token_usage: {
+        input_tokens: 21566,
+        cached_input_tokens: 11008,
+        output_tokens: 307,
+      },
+    },
+  });
+  assert.equal(classified.kind, "usage");
+  if (classified.kind !== "usage") throw new Error("expected usage");
+  assert.equal(classified.usage.source, "request");
+  assert.equal(classified.usage.inputTokens, 10558);
+
+  const gauge = classifyAcpUpdate({ sessionUpdate: "usage_update", used: 21873, size: 258400 });
+  assert.equal(gauge.kind, "usage");
+  if (gauge.kind !== "usage") throw new Error("expected usage");
+  assert.equal(gauge.usage.inputTokens, 0);
+  assert.equal(gauge.usage.contextUsed, 21873);
+
+  const jsonl = [
+    JSON.stringify({
+      timestamp: "2026-08-20T03:31:57.082Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 21566,
+            cached_input_tokens: 11008,
+            output_tokens: 307,
+            total_tokens: 21873,
+          },
+        },
+      },
+    }),
+    JSON.stringify({
+      timestamp: "2026-08-20T03:31:59.483Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 30331,
+            cached_input_tokens: 21248,
+            output_tokens: 58,
+            total_tokens: 30389,
+          },
+        },
+      },
+    }),
+  ].join("\n");
+  const bills = harvestCodexJsonlBills(jsonl);
+  assert.equal(bills.length, 2);
+  assert.equal(bills[0]?.source, "request");
+  assert.equal(bills[0]?.inputTokens, 10558);
+  assert.equal(bills[1]?.inputTokens, 9083);
+  assert.equal(
+    bills.reduce((sum, bill) => sum + bill.inputTokens + bill.outputTokens, 0),
+    10558 + 307 + 9083 + 58,
+  );
+  const host = readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8");
+  assert.match(host, /harvestCodexSessionBills/);
+  assert.match(host, /emitResultUsage: false/);
+});
+
 test("shared ACP usage parser and finalize do not double-count Codex turns", () => {
   const turn = parseAcpUsage({
     sessionUpdate: "turn_completed",

@@ -78,6 +78,7 @@ test("acpUpdateUsageSource names each ACP update for what it is", () => {
   assert.equal(acpUpdateUsageSource("usage_update", { ...none, inputTokens: 12 }), "request");
   assert.equal(acpUpdateUsageSource("turn_completed", { ...none, inputTokens: 12 }), "turn");
   assert.equal(acpUpdateUsageSource("response_completed", { ...none, outputTokens: 3 }), "turn");
+  assert.equal(acpUpdateUsageSource("token_count", { ...none, inputTokens: 12 }), "request");
 });
 
 test("OpenAI-shaped prompt_tokens has cache inside it; Anthropic-shaped input_tokens does not", () => {

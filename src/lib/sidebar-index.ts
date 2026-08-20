@@ -28,6 +28,7 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   const live = new Map<string | null, Session[]>();
   const archived = new Map<string | null, Session[]>();
   const parentsById = new Map(sessions.map((session) => [session.id, session]));
+  // Live chats freeze on the turn start so tool ticks do not reshuffle rows.
   const activityById = new Map(sessions.map((session) => [session.id, lineupSortAt(session)]));
   for (const session of sessions) {
     if (isDraftChat(session)) continue;

@@ -569,6 +569,7 @@ export function hasUnviewedFinish(
   return finishedAt > viewedAt;
 }
 
+
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
   const first = chats[0];

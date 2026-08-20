@@ -4460,7 +4460,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       seed: spawnSeed,
                     },
                     latest.sessions as unknown as WorkerRecord[],
-                    { parentId: parent.id, projectId: parent.projectId },
+                    {
+                      parentId: parent.id,
+                      projectId: parent.projectId,
+                      // An unnamed inherit continues this parent's current
+                      // wave. Anyone outside it is a different subject.
+                      waveChildIds: parent.lineup?.rows.map((row) => row.childId),
+                    },
                   )
                 : null);
             if (vendorSendTarget(spec.provider) === "preview") {

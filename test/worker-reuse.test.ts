@@ -12,6 +12,7 @@ import {
   resolveNamedWorker,
   workerTaskTitle,
   workerIsFree,
+  workerEndedWell,
   workerNameFromTitle,
   type WorkerRecord,
 } from "../src/lib/subagents";
@@ -38,7 +39,9 @@ const worker = (over: Partial<WorkerRecord> = {}): WorkerRecord => ({
   ...over,
 });
 
-const scope = { parentId: "boss", projectId: "p1" };
+// An unnamed pick only continues the parent's current wave, so the scope has
+// to say which workers are in it. These are the ids the fixtures below use.
+const scope = { parentId: "boss", projectId: "p1", waveChildIds: ["w1", "old", "recent"] };
 const want = { provider: "grok" as const, model: "grok-4.6", effort: "medium" as const };
 
 test("a name is given once and kept", () => {
@@ -149,6 +152,47 @@ test("the most recent worker on that bot is preferred", () => {
   // It knows the most about where this work got to.
   const crew = [worker({ id: "old" }), worker({ id: "recent", workerName: "Dexter" })];
   assert.equal(findReusableWorker(want, crew, scope)?.id, "recent");
+});
+
+test("a worker whose run ended badly is not handed new work", () => {
+  // workerIsFree only asks "busy?", so a run that died still read as
+  // available and inherit would carry that broken turn into the next slice.
+  for (const status of ["failed", "cancelled", "timed-out", "budget-exceeded", "interrupted"] as const) {
+    assert.equal(workerEndedWell({ agentRun: { status } }), false, status);
+    assert.equal(
+      findReusableWorker(want, [worker({ agentRun: { status } })], scope),
+      null,
+      `a ${status} worker must not take a new slice`,
+    );
+  }
+  // Clean, or never ran at all, is fine.
+  assert.equal(workerEndedWell({ agentRun: { status: "completed" } }), true);
+  assert.equal(workerEndedWell({}), true);
+  assert.equal(findReusableWorker(want, [worker({ agentRun: { status: "completed" } })], scope)?.id, "w1");
+});
+
+test("an unnamed pick stays inside the wave it is continuing", () => {
+  // The Wren that took an IP review, a Godot audit and a design review was
+  // idle, on the same bot, and from none of those waves.
+  const stranger = worker({ id: "elsewhere" });
+  assert.equal(findReusableWorker(want, [stranger], scope), null, "not in this wave");
+  assert.equal(
+    findReusableWorker(want, [worker()], { parentId: "boss", projectId: "p1" }),
+    null,
+    "no wave at all means start fresh",
+  );
+  assert.equal(
+    findReusableWorker(want, [worker()], { ...scope, waveChildIds: [] }),
+    null,
+    "an empty wave picks nobody",
+  );
+});
+
+test("naming a worker still reaches it, wave or no wave", () => {
+  // A name is a durable address; the caller already decided.
+  const named = { ...want, name: "Wren" };
+  assert.equal(findReusableWorker(named, [worker()], { parentId: "boss", projectId: "p1" })?.id, "w1");
+  assert.equal(findReusableWorker(named, [worker()], { ...scope, waveChildIds: [] })?.id, "w1");
 });
 
 test("free means not running, by either signal", () => {

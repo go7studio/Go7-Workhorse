@@ -72,7 +72,13 @@ test("continuity still works when it is asked for", () => {
     status: "idle",
   };
   const want = { provider: "grok" as const, model: "grok-4.6", effort: "high" as const };
-  const scope = { parentId: "boss", projectId: "p1" };
+  const scope = { parentId: "boss", projectId: "p1", waveChildIds: ["w1"] };
   assert.equal(findReusableWorker({ ...want, seed: "inherit" }, [idle], scope)?.id, "w1");
   assert.equal(findReusableWorker({ ...want, seed: "fresh" }, [idle], scope), null);
+  // ...and only inside the wave it is continuing.
+  assert.equal(
+    findReusableWorker({ ...want, seed: "inherit" }, [idle], { parentId: "boss", projectId: "p1" }),
+    null,
+    "no wave means nothing to continue",
+  );
 });

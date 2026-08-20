@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.12](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.11...v0.6.12) (2026-08-20)
+
+
+### Bug Fixes
+
+* keep earlier turns on screen when a new prompt is sent ([737b8bb](https://github.com/go7studio/Go7-Workhorse/commit/737b8bb4f9e3de1dca02f51e5d56efb734f7d913))
+* keep earlier turns on screen when a new prompt is sent ([0e8a64e](https://github.com/go7studio/Go7-Workhorse/commit/0e8a64ee4137fee621ab2965b42967e5e4133a5f))
+
 ## [0.6.11](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.10...v0.6.11) (2026-08-20)
 
 

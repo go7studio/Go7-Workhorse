@@ -279,7 +279,7 @@ const TOOLS = [
         worker: {
           type: "string",
           description:
-            "Name of a worker you already used (Wren, Dexter). Sends this slice back to that worker with everything it learned. Leave empty and the desk reuses an idle worker on the same bot, or starts a new one.",
+            "Name of a worker you already used (Wren, Dexter). Sends this slice back to that worker with everything it learned — use it when this slice continues that work. Leave empty and a new worker starts with a clear head.",
         },
         provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
         model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
@@ -299,7 +299,7 @@ const TOOLS = [
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         seed: {
           type: "string",
-          description: "inherit (default) may reuse an idle worker. fresh starts cold with only a handoff — no parent conversation.",
+          description: "Omit to start a new worker. inherit asks the desk to reuse any idle worker on the same bot and inherit its transcript. fresh starts cold with only a handoff — no parent conversation.",
         },
         handoff: {
           type: "object",

@@ -23,14 +23,14 @@ This live chat is the **orchestrator**. A missing linked folder does not fail th
 Then:
 
 1. `workhorse_list_bots`
-2. Write a lineup (name · vendor · folder · slice).
-3. `workhorse_spawn_agent` on **every** row whose `canCall` is true (`provider` + the **slice** as `prompt`) — including this chat’s own custom bot (`provider` custom, `chat` this bot’s name). The API key is already on the desk.
+2. One bounded assignment is one `workhorse_spawn_agent`. A second spawn only to independently check that worker’s output. Leave `model` unset so Auto ranks the slice by task fit, leftover, and cost. Fable is the extra pool for visual, creative, or complex work. Name a vendor only if they named one — a named vendor without a model still Auto-ranks that vendor’s models. Do not pick a model because it is first in the list. Spawn only a `canCall` row. The prompt is the **slice**.
+3. Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list. Then write a lineup (name · vendor · folder · slice) and spawn one worker per named slice on a `canCall` row — including this chat’s own custom bot (`provider` custom, `chat` this bot’s name). The API key is already on the desk.
 
 Each root spawn prompt is the job the worker will do — never a bare “please call subagents.” A worker may create one quick-route helper only when its assigned slice explicitly requires a second independent check. Workhorse caps that nested call at 5,000 tokens, shared isolation, and depth two; the helper cannot spawn again.
 
-To run several workers at once: `workhorse_spawn_agent` with `wait=false` for each slice, then **stop**. One short line of who is out is enough. Workers fill their own nested chats. The desk joins every report into one orchestration call when they finish. `workhorse_await_agents` (default) is a status snapshot — do not sit on it, and do not ask the user 1/2/3 if it is still running.
+To run several workers at once (only after they asked for that fan-out): `workhorse_spawn_agent` with `wait=false` for each slice, then **stop**. One short line of who is out is enough. Workers fill their own nested chats. The desk joins every report into one orchestration call when they finish. `workhorse_await_agents` (default) is a status snapshot — do not sit on it, and do not ask the user 1/2/3 if it is still running.
 
-Do not ask which vendor. Do not wait for Allow. Do not call `workhorse_request_vendor`. If `canCall` is false or the daily bank is spent, that vendor is a no-go — skip it. If stock vendors are a no-go, spawn the callable custom bots. If they asked for multiple and only one vendor is callable, spawn several of that vendor with split tasks. Only say nothing to spawn when zero rows are `canCall`.
+Do not ask which vendor. Do not wait for Allow. Do not call `workhorse_request_vendor`. If `canCall` is false or the daily bank is spent, that vendor is a no-go — skip it. If stock vendors are a no-go, spawn one callable custom bot. Do not spawn several of one vendor with split tasks to fill a crew. Only say nothing to spawn when zero rows are `canCall`.
 
 The user can also switch This chat → Vendor; that starts a new vendor instance on the same transcript.
 

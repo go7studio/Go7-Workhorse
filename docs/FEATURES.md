@@ -197,10 +197,15 @@ transcript rather than as a path.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
   Cursor Auto; that stays a named chat pick. The desk routes the work it
-  hands out on its own: when a chat spawns a worker without naming a bot, the
-  desk picks the bot and effort for the slice, and a named bot is used as
-  named. Settings → Routing turns that off, and tunes how any routing weighs
-  leftover, reserve, and local models.
+  hands out on its own: when a chat spawns a worker without naming a model,
+  the desk ranks the slice and picks bot and effort. A named model or bot is
+  used as named. A named vendor without a model still ranks that vendor’s
+  models. One assignment is one worker; a second only to check that output,
+  unless you asked for every vendor, all bots, several independent reviews,
+  or a named list. Equal-intelligence picks go to the cheaper slot. A model
+  with its own extra pool is kept for visual, creative, or complex work.
+  Settings → Routing turns that off, and tunes how any routing weighs leftover,
+  reserve, and local models.
 
 ## Memory
 

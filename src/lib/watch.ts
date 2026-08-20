@@ -1003,7 +1003,8 @@ function routingStrengths(row: DeskCallRow): string[] {
   const text = `${row.name} ${row.model ?? ""} ${(row.models ?? []).map((model) => `${model.id} ${model.name}`).join(" ")}`.toLowerCase();
   if (/kimi|moonshot/.test(text)) return ["visual audit", "images", "UI/UX"];
   if (/minimax-m3/.test(text)) return ["orchestration", "tools", "low cost"];
-  if (/5\.6-sol|opus|grok-4\.6/.test(text)) return ["deep reasoning", "architecture", "complex execution"];
+  if (/fable|mythos/.test(text)) return ["visual", "creative", "complex"];
+  if (/5\.6-sol|opus|grok-4\.6/.test(text)) return ["coding", "agent work", "cheaper frontier"];
   if (/5\.6-terra|sonnet|grok-4\.5/.test(text)) return ["implementation", "review", "balanced cost"];
   if (/5\.6-luna|haiku|mini/.test(text)) return ["quick tasks", "verification", "low cost"];
   return ["general work"];

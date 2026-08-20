@@ -8247,9 +8247,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   // The desk routes the work it hands out (Settings → Routing, on by default)
   // whenever the orchestrator names no bot; a named one wins.
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
-  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
   const inheritedPolicy = spawnExclusions(
     { agentRun: { status: "completed", startedAt: 1, isolation: "shared", exclusions: ["MiniMax M3"] } },
@@ -8568,6 +8570,18 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(WORKER_SESSION_RULES, /capacity-aware quick route.*5,000 tokens/);
   assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
+  assert.doesNotMatch(WORKHORSE_SESSION_RULES, /spawn every canCall|every row whose canCall/);
+  assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /spawn every canCall|every canCall row/);
+  assert.doesNotMatch(SPAWN_TURN_HINT, /Spawn every canCall/);
+  assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
+  assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
+  assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
+  assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);
+  assert.match(WORKHORSE_SESSION_RULES, /Fan-out only when they asked for every vendor/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn several of one vendor with split tasks to fill a crew/);
+  assert.match(SPAWN_TURN_HINT, /One bounded assignment is one workhorse_spawn_agent/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /One bounded assignment is one/);
   assert.match(WORKHORSE_SESSION_RULES, /one bounded quick-route helper/);
 });
 

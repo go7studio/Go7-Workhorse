@@ -321,6 +321,13 @@ export function parseClaudePlanUsage(raw: unknown): ClaudePlanUsage | undefined 
     if (session) products.push(session);
     if (week) products.push(week);
   }
+  const extra = asRecord(root.extra_usage ?? root.extraUsage);
+  if (extra.is_enabled === true) {
+    const extraProduct = windowProduct("extra_fable", "Fable extra", extra);
+    if (extraProduct) products.push(extraProduct);
+  }
+  const opusWeek = windowProduct("weekly_opus", "Opus", root.seven_day_opus ?? root.sevenDayOpus);
+  if (opusWeek) products.push(opusWeek);
   if (products.length === 0) return undefined;
   const weekly = products.find((row) => row.product === "weekly_all") ?? products.find((row) => row.label === "All models");
   const used = weekly?.usagePercent ?? products[0]?.usagePercent;

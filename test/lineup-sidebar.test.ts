@@ -102,8 +102,9 @@ test("a routed pick does not become the default for the next new chat", () => {
 //   Auto for anyone.
 //
 //   The desk routes the work it hands out: when a chat spawns a worker without
-//   naming a bot, the desk picks the bot and effort for the slice. That is
-//   Settings → Routing — on unless the person turns it off. A named bot wins.
+//   naming a model, the desk ranks the slice. A named vendor without a model
+//   still ranks that vendor's models. That is Settings → Routing — on unless
+//   the person turns it off. A named model or bot wins.
 // ---------------------------------------------------------------------------
 
 test("a person's chat routes only when that chat is set to Auto", () => {
@@ -156,9 +157,11 @@ test("Settings → Routing is the desk's own routing for spawned work: on by def
 
 test("the desk routes a spawn unless the orchestrator names a bot, and picks effort for the slice", () => {
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
-  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false, "a named provider wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false, "a named model wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false, "a named chat wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false, "a named custom bot wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);

@@ -202,6 +202,7 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  constrainRouteCandidatesForSpawn,
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
@@ -4362,7 +4363,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               exclude: effectiveExclusions,
             };
             const routeCandidates = routeSpawn
-              ? routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current)
+              ? constrainRouteCandidatesForSpawn(
+                  routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
+                  { provider: payload.provider },
+                )
               : [];
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)

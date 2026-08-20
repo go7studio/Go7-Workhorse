@@ -298,6 +298,7 @@ test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, 
   };
   assert.notDeepEqual(triple("grok", "grok-build"), [4, 3, 3]);
   assert.deepEqual(triple("claude", "claude-fable-5"), [10, 2, 5]);
+  assert.deepEqual(triple("claude", "claude-opus-5"), [10, 3, 4]);
   assert.notDeepEqual(triple("codex", "gpt-5.5"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.4"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.3-codex"), [4, 3, 3]);
@@ -505,6 +506,7 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   assert.doesNotMatch(store, /parentTier: caller\.routingDecision/);
   assert.match(store, /outcomesFromLearningEvents/);
   assert.match(store, /shouldAutoRouteSpawn/);
+  assert.match(store, /constrainRouteCandidatesForSpawn/);
   assert.match(settingsUi, /id: "routing"/);
   assert.doesNotMatch(settingsUi, /id: "models"/);
   assert.doesNotMatch(welcome, /brain picker|pick a model before/i);

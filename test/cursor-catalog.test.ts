@@ -138,7 +138,8 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-1
     const profile = routingProfileForModel("cursor", model);
     return [profile.intelligence, profile.speed, profile.cost] as const;
   };
-  assert.deepEqual(triple("claude-opus-5"), [10, 2, 5]);
+  assert.deepEqual(triple("claude-opus-5"), [9, 3, 4]);
+  assert.deepEqual(triple("claude-fable-5"), [10, 2, 5]);
   assert.deepEqual(triple("gpt-5.6-sol"), [10, 2, 5]);
   assert.deepEqual(triple("cursor-grok-4.6"), [10, 2, 5]);
   assert.deepEqual(triple("claude-sonnet-5"), [9, 3, 4]);

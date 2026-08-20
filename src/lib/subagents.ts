@@ -1,6 +1,7 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
+import type { RoutingCandidate } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import type {
   AgentRun,
@@ -521,23 +522,41 @@ export function rootSpawnError(
     : null;
 }
 
+function namedSpawnPick(value: unknown): boolean {
+  return typeof value === "string" && Boolean(value.trim());
+}
+
 /**
- * When a chat hands out work, the desk picks the bot for the slice unless the
- * orchestrator named one. This is the desk's own routing — Settings → Routing,
- * on unless the person turns it off. An explicit provider, model, or chat
- * always wins. It has nothing to do with a person's own chat, which routes
- * only when they set that chat to Auto.
+ * When a chat hands out work, the desk ranks the slice unless the
+ * orchestrator named a model or a sidebar chat. This is the desk's own
+ * routing — Settings → Routing, on unless the person turns it off. A named
+ * vendor without a model still ranks that vendor's models. Nothing is pinned
+ * to catalog-first. A person's own chat still routes only when they set
+ * that chat to Auto.
  */
 export function shouldAutoRouteSpawn(input: {
   routingEnabled: boolean;
   provider?: unknown;
   model?: unknown;
   chat?: unknown;
+  customBotId?: unknown;
 }): boolean {
   if (isExternalAgentAddress(input.provider) || isExternalAgentAddress(input.model) || isExternalAgentAddress(input.chat)) {
     return false;
   }
-  return input.routingEnabled && !input.provider && !input.model && !input.chat;
+  if (!input.routingEnabled) return false;
+  if (namedSpawnPick(input.model) || namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  return true;
+}
+
+/** Keep Auto inside a named vendor; unnamed spawn still ranks the whole desk. */
+export function constrainRouteCandidatesForSpawn(
+  candidates: RoutingCandidate[],
+  input: { provider?: unknown },
+): RoutingCandidate[] {
+  const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
+  if (!provider) return candidates;
+  return candidates.filter((row) => row.provider === provider);
 }
 
 export function spawnExclusions(

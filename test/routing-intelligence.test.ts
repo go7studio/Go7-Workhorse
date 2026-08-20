@@ -9,6 +9,7 @@ import {
   routingProfileForModel,
   type RoutingCandidate,
 } from "../src/lib/routing";
+import { constrainRouteCandidatesForSpawn } from "../src/lib/subagents";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
 
@@ -54,11 +55,13 @@ const bot = (
 test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   const intelligence = (provider: Parameters<typeof routingProfileForModel>[0], model: string) =>
     routingProfileForModel(provider, model).intelligence;
-  // Frontier
-  assert.equal(intelligence("claude", "claude-opus-5"), 10);
+  // Frontier — harder or more creative. Fable is not grouped with Opus.
+  assert.equal(intelligence("claude", "claude-fable-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("grok", "grok-4.6"), 10);
   assert.equal(intelligence("cursor", "cursor-grok-4.6-high"), 10);
+  // Enough for ordinary agent and UI coding
+  assert.equal(intelligence("claude", "claude-opus-5"), 9);
   // The understudy
   assert.equal(intelligence("claude", "claude-sonnet-5"), 9);
   // The balanced band
@@ -212,6 +215,7 @@ test("a failing incumbent loses its stickiness", () => {
 test("hard-work markers land deep even in a short prompt", () => {
   assert.equal(inferRoutingTier("List every concurrency bug in this lock-free queue and prove linearizability"), "deep");
   assert.equal(inferRoutingTier("fix this bug"), "deep", "expensive is the safe error direction");
+  assert.equal(inferRoutingTier("write a short story about the desk"), "deep", "creative work is harder work");
   assert.equal(inferRoutingTier("list the files in src"), "quick", "a real quick ask stays quick");
 });
 
@@ -299,7 +303,7 @@ test("deep falls back to the understudy when every frontier bot is at reserve", 
   const drained = { ...midWeek(90) };
   const rows = [
     bot("gpt-5.6-sol", 10, 2, 5, drained),
-    bot("claude-opus-5", 10, 2, 5, drained),
+    bot("claude-fable-5", 10, 2, 5, drained),
     bot("claude-sonnet-5", 9, 3, 4, midWeek(50)),
     bot("gpt-5.6-terra", 8, 4, 3, midWeek(50)),
     bot("MiniMax-M3", 7, 4, 2, {}, { paceUnmetered: true }),
@@ -310,8 +314,52 @@ test("deep falls back to the understudy when every frontier bot is at reserve", 
   // drained 10s do not sink to the floor — but they do fall below both the
   // understudy and the on-pace 8.
   const at = (model: string) => ranked.findIndex((row) => row.model === model);
-  for (const drainedTen of ["gpt-5.6-sol", "claude-opus-5"]) {
+  for (const drainedTen of ["gpt-5.6-sol", "claude-fable-5"]) {
     assert.ok(at(drainedTen) > at("claude-sonnet-5"), `${drainedTen} below the 9`);
     assert.ok(at(drainedTen) > at("gpt-5.6-terra"), `${drainedTen} below the on-pace 8`);
   }
+});
+
+test("Fable is not the Claude pick for ordinary UI work; it is for harder or creative slices", () => {
+  const claude = (id: string, name: string): RoutingCandidate => ({
+    provider: "claude",
+    model: id,
+    label: name,
+    connected: true,
+    profile: routingProfileForModel("claude", id),
+    capacity: midWeek(50),
+  });
+  const rows = [
+    claude("claude-fable-5", "Fable 5"),
+    claude("claude-opus-5", "Opus 5"),
+    claude("claude-sonnet-5", "Sonnet 5"),
+  ];
+  const uiPrompt = "Implement the bounded settings panel in Go7 Workhorse";
+  assert.equal(inferRoutingTier(uiPrompt, [], { role: "worker" }), "balanced");
+  const ui = rankRoutingCandidates(rows, { prompt: uiPrompt, role: "worker", now: NOW }, settings);
+  assert.notEqual(ui[0]?.model, "claude-fable-5", "catalog-first Fable is not the UI pick");
+  assert.equal(ui[0]?.model, "claude-opus-5");
+
+  const creativePrompt = "write a short story about the desk";
+  assert.equal(inferRoutingTier(creativePrompt, [], { role: "worker" }), "deep");
+  const creative = rankRoutingCandidates(rows, { prompt: creativePrompt, role: "worker", now: NOW }, settings);
+  assert.equal(creative[0]?.model, "claude-fable-5");
+
+  const namedClaude = constrainRouteCandidatesForSpawn(
+    [
+      ...rows,
+      {
+        provider: "codex",
+        model: "gpt-5.6-terra",
+        label: "GPT-5.6-Terra",
+        connected: true,
+        profile: routingProfileForModel("codex", "gpt-5.6-terra"),
+        capacity: midWeek(50),
+      },
+    ],
+    { provider: "claude" },
+  );
+  assert.deepEqual(namedClaude.map((row) => row.provider), ["claude", "claude", "claude"]);
+  const unnamed = constrainRouteCandidatesForSpawn(namedClaude, {});
+  assert.equal(unnamed.length, namedClaude.length);
 });

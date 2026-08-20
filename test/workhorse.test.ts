@@ -7641,8 +7641,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.equal(defaultModel("codex").name, "GPT-5.6-Sol");
   assert.equal(advertisedCodexWindow("gpt-5.6-sol", 272_000), 1_050_000);
   assert.equal(contextWindowFor("codex", "gpt-5.6-sol"), 1_050_000);
-  assert.equal(defaultModel("claude").id, "claude-sonnet-5");
-  assert.equal(defaultModel("claude").name, "Sonnet 5");
+  assert.equal(defaultModel("claude").id, "claude-fable-5");
   assert.equal(contextWindowFor("claude", "claude-fable-5"), 1_000_000);
   assert.equal(contextWindowFor("claude", "claude-opus-5"), 1_000_000);
   assert.equal(contextWindowFor("claude", "claude-sonnet-5"), 1_000_000);
@@ -7779,19 +7778,6 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     applyVendorCatalog(live);
     assert.equal(defaultModel("codex").id, "gpt-5.6-sol");
     assert.equal(defaultModel("codex").name, "GPT-5.6-Sol");
-  } finally {
-    resetVendorCatalog();
-  }
-
-  try {
-    applyVendorCatalog({
-      claude: [
-        { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
-        { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
-        { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
-      ],
-    });
-    assert.equal(defaultModel("claude").id, "claude-sonnet-5");
   } finally {
     resetVendorCatalog();
   }
@@ -8261,9 +8247,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   // The desk routes the work it hands out (Settings → Routing, on by default)
   // whenever the orchestrator names no bot; a named one wins.
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true }), true);
-  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
   const inheritedPolicy = spawnExclusions(
     { agentRun: { status: "completed", startedAt: 1, isolation: "shared", exclusions: ["MiniMax M3"] } },
@@ -8586,7 +8574,10 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /spawn every canCall|every canCall row/);
   assert.doesNotMatch(SPAWN_TURN_HINT, /Spawn every canCall/);
   assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
-  assert.match(WORKHORSE_SESSION_RULES, /Leave provider and model unset so Auto picks/);
+  assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
+  assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
+  assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);
   assert.match(WORKHORSE_SESSION_RULES, /Fan-out only when they asked for every vendor/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn several of one vendor with split tasks to fill a crew/);
   assert.match(SPAWN_TURN_HINT, /One bounded assignment is one workhorse_spawn_agent/);

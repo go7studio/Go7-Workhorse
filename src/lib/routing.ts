@@ -216,9 +216,9 @@ function profile(
  * overrides and Settings stay on the 1–5 the user authored (5 = frontier);
  * they are doubled at this one seam.
  *
- * Order is load-bearing: sonnet-4-6 before sonnet, minimax-m3 before minimax,
- * grok-4.6 before grok-4.5, mini/nano before gpt-5.4, sol/terra/luna before
- * any bare gpt-5.6.
+ * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
+ * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
+ * gpt-5.4, sol/terra/luna before any bare gpt-5.6.
  */
 export function routingProfileForModel(
   _provider: ProviderId,
@@ -242,8 +242,14 @@ export function routingProfileForModel(
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("grok-4.5")) {
     base = profile(8, 4, 3, { strengths: CODE });
-  } else if (slug.includes("opus") || slug.includes("fable")) {
+  } else if (slug.includes("fable") || slug.includes("mythos")) {
+    // Frontier: harder or more creative work. Not a default and not grouped
+    // with Opus — a bounded UI slice should not burn Fable.
     base = profile(10, 2, 5, { strengths: CODE_PROSE });
+  } else if (slug.includes("opus")) {
+    // Enough for ordinary agent and UI coding. Sits under Fable so Auto
+    // does not treat catalog-first Fable as the Claude pick.
+    base = profile(9, 3, 4, { strengths: CODE });
   } else if (slug.includes("sonnet-4-6") || slug.includes("sonnet-4.6")) {
     base = profile(8, 4, 3, { strengths: CODE_PROSE });
   } else if (slug.includes("sonnet")) {
@@ -393,16 +399,17 @@ export function inferRoutingTier(
   // agreed the safe error is expensive (frontier on trivia), not harmful (a
   // light model on "list every concurrency bug and prove linearizability").
   const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(lower);
+  const creative = /\b(creative|story|narrative|poem|fiction|worldbuild|invent a|brainstorm)\b/.test(lower);
   // A short prompt with a quick keyword still is not quick when it reads like
   // code: "classify this function" deserves the balanced band, not Luna.
   const quick = text.length < 180 && !looksCodey(text) && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
   if (extras?.role === "builder" || extras?.role === "worker") {
-    if (deep || long || (media && text.length > 240)) return "deep";
+    if (deep || creative || long || (media && text.length > 240)) return "deep";
     return "balanced";
   }
-  if (deep || long || (media && text.length > 240)) return "deep";
+  if (deep || creative || long || (media && text.length > 240)) return "deep";
   if (quick && !media) return "quick";
   return "balanced";
 }

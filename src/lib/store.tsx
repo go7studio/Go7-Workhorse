@@ -207,6 +207,8 @@ import {
   withSubagentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
+  continueWorkerRun,
+  vendorDisplayName,
   workerReportedBlocked,
 } from "./subagents";
 import {
@@ -4762,7 +4764,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 title: spec.title,
                                 slice: payload.description?.trim() || spec.title,
                                 folder: childCwd,
-                                vendor: spec.title,
+                                vendor: vendorDisplayName(spec.provider),
                                 status: "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
@@ -4842,7 +4844,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     folder: childCwd,
                     project: project?.name,
                     slice: payload.description,
-                    vendor: spec.title,
+                    vendor: vendorDisplayName(spec.provider),
                     constraints: assignedConstraints,
                     skills: assignedSkills.map((name, index) => ({ name, file: assignedSkillFiles[index] ?? "" })).filter((skill) => skill.file),
                     capabilities: assignedCapabilities,
@@ -4972,7 +4974,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         title: spec.title,
                         slice: payload.description?.trim() || spec.title,
                         folder: admitted.cwd,
-                        vendor: spec.title,
+                        vendor: vendorDisplayName(spec.provider),
                         status: "running",
                         startedAt,
                         ...(planStepId ? { planStepId } : {}),
@@ -5151,22 +5153,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...item,
                 status: "running",
                 agentRun: item.agentRun
-                  ? {
-                      ...item.agentRun,
-                      ...beginAssignmentBudget(item.agentRun, {}),
-                      tokenBudget: undefined,
-                      usedTokens: undefined,
-                      budgetBaseline: undefined,
-                      budgetPhase: undefined,
-                      budgetWarnedAt: undefined,
-                      budgetHandoffAt: undefined,
-                      missionTokenBudget: undefined,
-                      status: "running" as const,
-                      startedAt,
-                      finishedAt: undefined,
-                      error: undefined,
-                      correlationId: peerCorrelationId,
-                    }
+                  ? continueWorkerRun(item.agentRun, { now: startedAt, correlationId: peerCorrelationId })
                   : undefined,
                 messages: [
                   ...item.messages,

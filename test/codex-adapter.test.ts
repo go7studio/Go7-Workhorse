@@ -65,6 +65,16 @@ test("Codex skill-budget notices do not become assistant output", () => {
   ordinaryFilter.push("Warning: Skill descriptions changed in this release.");
   ordinaryFilter.flush();
   assert.deepEqual(ordinary, ["Warning: Skill descriptions changed in this release."]);
+
+  const complete: string[] = [];
+  const completeFilter = createCodexChunkFilter((text) => complete.push(text));
+  completeFilter.push(percentageWarning);
+  assert.deepEqual(complete, [], "a complete warning must not sit in pending waiting for more text");
+  completeFilter.flush();
+  assert.deepEqual(complete, []);
+  completeFilter.push(`${percentageWarning}\n\nADAPTER_OK`);
+  completeFilter.flush();
+  assert.deepEqual(complete, ["ADAPTER_OK"]);
 });
 
 test("Workhorse worker detection excludes user-facing Codex threads", () => {

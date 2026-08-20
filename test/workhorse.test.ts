@@ -9234,3 +9234,25 @@ test("the repo tracks no symlinks and states its working rules", () => {
     rmSync(apps, { recursive: true, force: true });
   }
 });
+
+test("reading a hidden worker by id still names its project", () => {
+  const transcript = sessionTranscript(
+    {
+      projects: [{ id: "proj_g24i62s0sppc", name: "OpenClaw SEO ASO" }],
+      sessions: [
+        {
+          id: "sess_mt1sgskp2vop6m",
+          title: "Piper · Mission Control integration",
+          projectId: "proj_g24i62s0sppc",
+          hidden: true,
+          provider: "codex",
+          model: "gpt-5.6-sol",
+          messages: [{ role: "user", text: "Integrate Marlow." }],
+        },
+      ],
+    },
+    "sess_mt1sgskp2vop6m",
+  );
+  assert.equal(transcript?.id, "sess_mt1sgskp2vop6m");
+  assert.equal(transcript?.projectName, "OpenClaw SEO ASO");
+});

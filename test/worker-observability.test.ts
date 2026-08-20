@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   WORKER_REPORT_CHAR_LIMIT,
   boundWorkerReport,
+  continueWorkerRun,
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import type { Session } from "../src/lib/types";
 
 function worker(overrides: Partial<Session> = {}): Session {
@@ -96,4 +102,49 @@ test("checkpoint extracts checks and blockers from the live transcript", () => {
   const checkpoint = workerProgressCheckpoint(running);
   assert.ok(checkpoint.checksRun.includes("npm test"));
   assert.ok(checkpoint.blockers.some((item) => /worktree default/i.test(item)));
+});
+
+test("a spawn brief that names build checks is not checksRun, and silence is not started", () => {
+  const piper = worker({
+    id: "sess_mt1sgskp2vop6m",
+    messages: [
+      {
+        id: "u1",
+        role: "user",
+        kind: "peer",
+        text: "Run deterministic tests, including `npm run typecheck`, `npm run lint`, and `npm run build` if available.",
+        createdAt: 1787246576816,
+      },
+      { id: "a1", role: "assistant", text: "", createdAt: 1787246576816 },
+      { id: "u2", role: "user", kind: "peer", text: "Progress checkpoint request from Walt.", createdAt: 1787250125161 },
+      { id: "a2", role: "assistant", text: "", createdAt: 1787250125161 },
+    ],
+    agentRun: { status: "running", startedAt: 1787246576816, isolation: "worktree", timeoutMs: 3_600_000 },
+  });
+  const snap = workerStatusSnapshot(piper);
+  assert.deepEqual(snap.checksRun ?? [], []);
+  assert.equal(snap.currentStep, "no vendor output");
+  assert.equal(snap.lastActivityAt, 1787250125161);
+  assert.notEqual(snap.currentStep, "started");
+});
+
+test("a checkpoint on a running worker keeps the original startedAt", () => {
+  const run = { status: "running" as const, startedAt: 100, isolation: "worktree" as const, timeoutMs: 3_600_000, usedTokens: 12 };
+  const continued = continueWorkerRun(run, { now: 999, correlationId: "trace_checkpoint" });
+  assert.equal(continued.startedAt, 100);
+  assert.equal(continued.usedTokens, 12);
+  assert.equal(continued.status, "running");
+  assert.equal(continued.correlationId, "trace_checkpoint");
+  const fresh = continueWorkerRun(
+    { status: "completed", startedAt: 100, finishedAt: 200, isolation: "worktree" },
+    { now: 999 },
+  );
+  assert.equal(fresh.startedAt, 999);
+  assert.equal(fresh.finishedAt, undefined);
+});
+
+test("peer ask of a running worker continues the same run clock", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /continueWorkerRun\(item\.agentRun/);
+  assert.match(store, /vendorDisplayName\(spec\.provider\)/);
 });

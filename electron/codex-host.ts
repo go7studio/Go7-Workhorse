@@ -29,10 +29,14 @@ const CODEX_SKILL_BUDGET_WARNING = new RegExp(
 );
 
 export function stripCodexRuntimeNotices(text: string): string {
+  CODEX_SKILL_BUDGET_WARNING.lastIndex = 0;
   return text.replace(CODEX_SKILL_BUDGET_WARNING, "");
 }
 
 function couldBeCodexSkillBudgetWarning(text: string): boolean {
+  // A complete warning is done. Holding it for a following chunk left Piper's
+  // assistant empty while Codex sat in the worktree with nothing else to send.
+  if (stripCodexRuntimeNotices(text) !== text) return false;
   if (CODEX_SKILL_BUDGET_PREFIX.startsWith(text)) return true;
   if (!text.startsWith(CODEX_SKILL_BUDGET_PREFIX)) return false;
   const remainder = text.slice(CODEX_SKILL_BUDGET_PREFIX.length);

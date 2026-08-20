@@ -15,6 +15,7 @@ import type {
   WorkerHandoff,
   WorkerSeed,
 } from "./types";
+import { beginAssignmentBudget } from "./worker-budget";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
 
 export type { DeskRole };
@@ -679,6 +680,7 @@ export function boundWorkerReport(
 function extractChecks(messages: ChatMessage[] | undefined): string[] {
   const found = new Set<string>();
   for (const message of messages ?? []) {
+    if (message.role !== "assistant") continue;
     for (const [pattern, name] of CHECK_MARKERS) {
       if (pattern.test(message.text)) found.add(name);
     }
@@ -711,15 +713,20 @@ export function workerProgressCheckpoint(
   const status = worker.agentRun?.status ?? worker.status;
   const lastTool = [...messages].reverse().find((message) => message.kind === "tool" && message.text.trim());
   const lastNote = lastAssistantReport(messages);
-  const lastAny = messages.length ? messages.reduce((latest, message) => (message.createdAt > latest.createdAt ? message : latest)) : null;
+  const lastMeaningful = [...messages].reverse().find((message) => {
+    if (message.kind === "tool" && message.text.trim()) return true;
+    if (message.role === "assistant" && message.kind !== "tool" && message.kind !== "thought" && message.text.trim()) return true;
+    if (message.role === "user" && message.text.trim()) return true;
+    return false;
+  });
   const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
     || lastNote?.text.trim().split("\n")[0]?.trim()
-    || (status === "running" ? "started" : status);
+    || (status === "running" ? "no vendor output" : status);
   const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { messageId: lastNote.id }) : null;
   return {
     phase: status,
     currentStep,
-    lastActivityAt: lastAny?.createdAt ?? worker.agentRun?.finishedAt ?? worker.agentRun?.startedAt ?? null,
+    lastActivityAt: lastMeaningful?.createdAt ?? worker.agentRun?.finishedAt ?? worker.agentRun?.startedAt ?? null,
     changedFiles: worker.agentRun?.changedFiles ?? [],
     checksRun: extractChecks(messages),
     blockers: extractBlockers(lastNote?.text),
@@ -1030,12 +1037,44 @@ export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   return { ok: true, cwd };
 }
 
+export function vendorDisplayName(provider: ProviderId): string {
+  return { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
+}
+
 export function subagentLabel(provider: ProviderId, model: string, description?: string): string {
   const named = description?.trim();
   if (named) return named;
-  const vendor = { grok: "Grok", claude: "Claude", codex: "Codex", cursor: "Cursor", custom: "Custom" }[provider];
+  const vendor = vendorDisplayName(provider);
   const short = model.replace(/^gpt-/, "").replace(/^grok-/, "");
   return short && short !== model ? `${vendor} · ${short}` : vendor;
+}
+
+/** Keep the original slice clock when a checkpoint hits a still-running worker. */
+export function continueWorkerRun(
+  run: AgentRun,
+  input: { now: number; correlationId?: string },
+): AgentRun {
+  const keepClock = run.status === "running" && typeof run.startedAt === "number" && run.startedAt > 0;
+  return {
+    ...run,
+    ...(keepClock ? {} : beginAssignmentBudget(run, {})),
+    status: "running",
+    startedAt: keepClock ? run.startedAt : input.now,
+    finishedAt: undefined,
+    error: undefined,
+    ...(keepClock
+      ? {}
+      : {
+          tokenBudget: undefined,
+          usedTokens: undefined,
+          budgetBaseline: undefined,
+          budgetPhase: undefined,
+          budgetWarnedAt: undefined,
+          budgetHandoffAt: undefined,
+          missionTokenBudget: undefined,
+        }),
+    ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+  };
 }
 
 function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {

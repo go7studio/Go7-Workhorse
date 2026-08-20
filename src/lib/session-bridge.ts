@@ -71,7 +71,7 @@ export function chatPreview(messages: unknown): string {
   return previewFrom(messages);
 }
 
-export function catalogSessions(state: LooseState, opts?: { fromSessionId?: string }): SessionSnapshot[] {
+function projectNames(state: LooseState): Map<string, string> {
   const projects = new Map<string, string>();
   if (Array.isArray(state.projects)) {
     for (const raw of state.projects) {
@@ -81,6 +81,11 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
       }
     }
   }
+  return projects;
+}
+
+export function catalogSessions(state: LooseState, opts?: { fromSessionId?: string }): SessionSnapshot[] {
+  const projects = projectNames(state);
   if (!Array.isArray(state.sessions)) return [];
   const crewSessions = state.sessions
     .map((raw) => asRecord(raw))
@@ -163,12 +168,16 @@ export function sessionTranscript(
 ): SessionTranscript | null {
   const listed = catalogSessions(state, { fromSessionId });
   const rawSessions = Array.isArray(state.sessions) ? state.sessions.map(asRecord) : [];
+  const names = projectNames(state);
   const exact = rawSessions.find((item) => typeof item.id === "string" && item.id === query.trim());
   const match = exact
     ? {
         id: exact.id as string,
         title: typeof exact.title === "string" ? exact.title : "Worker",
-        projectName: null,
+        projectName:
+          typeof exact.projectId === "string" && exact.projectId
+            ? names.get(exact.projectId) ?? null
+            : null,
         model: typeof exact.model === "string" ? exact.model : "",
       }
     : findSession(listed, query);

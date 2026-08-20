@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { lastTalkedAt } from "../lib/chats";
+import { chatUnseenFinish, lastTalkedAt } from "../lib/chats";
 import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
@@ -168,10 +168,11 @@ export function ChatRow({
   };
 
   const talkedAt = lastTalkedAt(session);
+  const unseen = chatUnseenFinish(session, desk.activeSessionId);
 
   return (
     <div
-      className={`chat-row${nested ? " nested-worker" : ""}${!desk.settingsOpen && session.id === desk.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
+      className={`chat-row${nested ? " nested-worker" : ""}${!desk.settingsOpen && session.id === desk.activeSessionId ? " active" : ""}${link ? " peer-link" : ""}${unseen ? " unseen" : ""}${menu || confirmDelete ? " menu-open" : ""}`}
       ref={root}
       draggable={!renaming}
       onDragStart={(event) => {
@@ -242,6 +243,7 @@ export function ChatRow({
                         : rowLabel}
             </span>
           </span>
+          {unseen ? <span className="chat-unseen" aria-label="Finished, not opened" /> : null}
           <TimeStamp at={talkedAt} className="row-talked" />
         </button>
       )}

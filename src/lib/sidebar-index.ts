@@ -1,4 +1,4 @@
-import { isDraftChat, lastTalkedAt } from "./chats";
+import { isDraftChat, lineupSortAt } from "./chats";
 import { nestProjectChats } from "./lineup";
 import { chatLinksFromSessions, type ChatLink } from "./tool-labels";
 import type { Session } from "./types";
@@ -28,7 +28,7 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   const live = new Map<string | null, Session[]>();
   const archived = new Map<string | null, Session[]>();
   const parentsById = new Map(sessions.map((session) => [session.id, session]));
-  const activityById = new Map(sessions.map((session) => [session.id, lastTalkedAt(session) ?? 0]));
+  const activityById = new Map(sessions.map((session) => [session.id, lineupSortAt(session) ?? 0]));
   for (const session of sessions) {
     if (isDraftChat(session)) continue;
     if (session.hidden && !session.parentId) continue;
@@ -108,6 +108,7 @@ export function sameSidebarSession(left: Session, right: Session): boolean {
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
     left.status === right.status &&
+    left.unseenFinish === right.unseenFinish &&
     left.composerDraft === right.composerDraft &&
     left.composerImages === right.composerImages &&
     left.agentRun?.status === right.agentRun?.status &&

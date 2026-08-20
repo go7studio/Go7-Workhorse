@@ -491,6 +491,8 @@ export type Session = {
   /** Provider that owns vendorSessionId. Cleared when This-chat vendor changes. */
   vendorProvider?: ProviderId;
   status: SessionStatus;
+  /** Set when this chat went idle while another was open. Cleared on open. */
+  unseenFinish?: boolean;
   messages: ChatMessage[];
   queue?: QueuedPrompt[];
   /** Persisted background runs. Electron main dispatches pending entries and recovers interrupted work. */

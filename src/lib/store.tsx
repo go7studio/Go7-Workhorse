@@ -33,6 +33,8 @@ import {
   applyComposerDrafts,
   sameComposerDraft,
   snapComposerDraft,
+  stampUnseenFinishes,
+  markChatViewed,
   type ComposerDraftSnap,
   moveChat,
   resolveListedChat,
@@ -744,7 +746,15 @@ function snapshotWriteInstance(
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(EMPTY);
+  const [state, pushState] = useState<AppState>(EMPTY);
+  const setState: typeof pushState = (update) => {
+    pushState((current) => {
+      const next = typeof update === "function" ? update(current) : update;
+      if (next === current || next.sessions === current.sessions) return next;
+      const sessions = stampUnseenFinishes(next.sessions, current.sessions, next.activeSessionId);
+      return sessions === next.sessions ? next : { ...next, sessions };
+    });
+  };
   const [ready, setReady] = useState(false);
   const [appUpdate, setAppUpdate] = useState<AppUpdateOffer | null>(null);
   const [appUpdateBusy, setAppUpdateBusy] = useState(false);
@@ -1180,7 +1190,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         panel: null,
         activeSessionId: id,
         activeProjectId: session?.projectId ?? null,
-        sessions: dropDrafts(current.sessions, id),
+        sessions: markChatViewed(dropDrafts(current.sessions, id), id),
       };
     });
   }, []);

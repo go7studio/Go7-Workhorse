@@ -1,5 +1,5 @@
 import { uid } from "./id";
-import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment } from "./types";
+import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment, SessionStatus } from "./types";
 
 export const PROJECT_CHAT_LIMIT = 5;
 
@@ -527,6 +527,68 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
     if (typeof at === "number" && at > 0) return at;
   }
   return undefined;
+}
+
+export function isLiveChatStatus(status: SessionStatus | undefined): boolean {
+  return status === "running" || status === "needs-input";
+}
+
+/**
+ * Sort key for the chat list. Frozen at the last user prompt while a chat is
+ * live so streaming assistant/tool ticks do not reorder siblings. After a
+ * terminal status, this is lastTalkedAt so a parent can rise when a child finishes.
+ */
+export function lineupSortAt(session: Pick<Session, "messages" | "status">): number | undefined {
+  if (!isLiveChatStatus(session.status)) return lastTalkedAt(session);
+  const user = lastUserMessage(session);
+  const at = user?.createdAt;
+  if (typeof at === "number" && at > 0) return at;
+  return lastTalkedAt(session);
+}
+
+export function chatUnseenFinish(
+  session: Pick<Session, "id" | "status" | "unseenFinish">,
+  activeSessionId: string | null,
+): boolean {
+  if (session.id === activeSessionId) return false;
+  if (isLiveChatStatus(session.status)) return false;
+  return session.unseenFinish === true;
+}
+
+/** Stamp chats that just left running/needs-input while another chat was open. */
+export function stampUnseenFinishes(
+  next: Session[],
+  prev: Session[],
+  activeSessionId: string | null,
+): Session[] {
+  if (next === prev) return next;
+  const prevById = new Map(prev.map((session) => [session.id, session]));
+  let changed = false;
+  const sessions = next.map((session) => {
+    const was = prevById.get(session.id);
+    if (!was) return session;
+    const becameIdle = isLiveChatStatus(was.status) && !isLiveChatStatus(session.status);
+    if (!becameIdle) return session;
+    if (session.id === activeSessionId) {
+      if (session.unseenFinish !== true) return session;
+      changed = true;
+      return { ...session, unseenFinish: undefined };
+    }
+    if (session.unseenFinish === true) return session;
+    changed = true;
+    return { ...session, unseenFinish: true };
+  });
+  return changed ? sessions : next;
+}
+
+export function markChatViewed(sessions: Session[], id: string): Session[] {
+  let changed = false;
+  const next = sessions.map((session) => {
+    if (session.id !== id || session.unseenFinish !== true) return session;
+    changed = true;
+    return { ...session, unseenFinish: undefined };
+  });
+  return changed ? next : sessions;
 }
 
 /** Most recently active chat in a project list. Empty lists return undefined. */

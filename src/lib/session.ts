@@ -247,6 +247,7 @@ export function normalizeSession(raw: unknown): Session | null {
         : undefined,
     vendorProvider: isProviderId(record.vendorProvider) ? record.vendorProvider : undefined,
     status: record.status === "needs-input" ? "needs-input" : "idle",
+    unseenFinish: record.unseenFinish === true ? true : undefined,
     messages: Array.isArray(record.messages)
       ? record.messages
           .map(normalizeMessage)

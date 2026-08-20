@@ -91,6 +91,9 @@ transcript rather than as a path.
 - Each chat row shows how old the last prompt is in a compact form such as
   `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
   folds them on the count button; they ease open and closed.
+- Live chats stay in place while they work. A parent can move up when a child
+  finishes. A chat that finishes while you are in another chat shows a small
+  mark until you open it.
 - A chat that ran a wave says so on its own row: who called it, and how it
   went — `OpenClaw · Working…`, or nothing at all once every worker finished
   clean. Failure is the only word in red; interrupted and timed-out work is

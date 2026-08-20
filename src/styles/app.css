@@ -587,6 +587,28 @@ html.pane-dragging * {
   font-variant-numeric: tabular-nums;
 }
 
+.chat-unseen {
+  flex: 0 0 6px;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-unseen-in 180ms var(--ease);
+}
+
+@keyframes chat-unseen-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .row-meta {
   display: block;
   font-size: 11px;
@@ -4046,9 +4068,11 @@ html.pane-dragging * {
   .crew-slot-inner > .chat-row,
   .crew-slot.open .crew-slot-inner > .chat-row,
   .crew-twist,
-  .crew-twist.open {
+  .crew-twist.open,
+  .chat-unseen {
     transition: none;
     transform: none;
+    animation: none;
   }
 }
 

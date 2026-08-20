@@ -3,11 +3,20 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { sidebarKeepsChat } from "../src/lib/chats";
+import {
+  chatUnseenFinish,
+  lastTalkedAt,
+  lineupSortAt,
+  markChatViewed,
+  sidebarKeepsChat,
+  stampUnseenFinishes,
+} from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
-import { formatChatSidebar } from "../src/lib/session";
+import { formatChatSidebar, normalizeSession } from "../src/lib/session";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
+import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
+import type { ChatMessage, Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -162,4 +171,108 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
+});
+
+const msg = (id: string, role: ChatMessage["role"], text: string, createdAt: number, extra?: Partial<ChatMessage>): ChatMessage => ({
+  id,
+  role,
+  text,
+  createdAt,
+  ...extra,
+});
+
+const chat = (id: string, extra: Partial<Session> = {}): Session => ({
+  id,
+  projectId: extra.projectId ?? "p",
+  provider: "codex",
+  model: "gpt-5.6-sol",
+  effort: "medium",
+  title: extra.title ?? id,
+  mode: "ask",
+  sandbox: "workspace-write",
+  status: extra.status ?? "idle",
+  messages: extra.messages ?? [],
+  contextUsed: 0,
+  ...extra,
+});
+
+test("streaming assistant and tool ticks do not reorder live workers", () => {
+  const parent = chat("parent", { messages: [msg("pu", "user", "go", 100)] });
+  const early = chat("early", {
+    parentId: parent.id,
+    hidden: true,
+    status: "running",
+    messages: [msg("eu", "user", "work", 200), msg("ea", "assistant", "start", 210)],
+  });
+  const late = chat("late", {
+    parentId: parent.id,
+    hidden: true,
+    status: "running",
+    messages: [msg("lu", "user", "work", 180), msg("la", "assistant", "start", 190)],
+  });
+  const first = buildSidebarChatIndex([parent, early, late]).liveByProject.get("p") ?? [];
+  assert.deepEqual(first[0]?.workers.map((worker) => worker.id), ["early", "late"]);
+
+  const ticked = {
+    ...late,
+    messages: [
+      ...late.messages,
+      { ...msg("lt", "assistant", "Read · working", 900), kind: "tool" as const, toolStatus: "running" as const },
+    ],
+  };
+  assert.ok((lastTalkedAt(ticked) ?? 0) > (lastTalkedAt(early) ?? 0));
+  assert.equal(lineupSortAt(ticked), 180);
+  assert.equal(lineupSortAt(early), 200);
+  const afterTick = buildSidebarChatIndex([parent, early, ticked]).liveByProject.get("p") ?? [];
+  assert.deepEqual(afterTick[0]?.workers.map((worker) => worker.id), ["early", "late"]);
+
+  const waiting = { ...ticked, status: "needs-input" as const };
+  assert.equal(lineupSortAt(waiting), 180);
+  const afterWait = buildSidebarChatIndex([parent, early, waiting]).liveByProject.get("p") ?? [];
+  assert.deepEqual(afterWait[0]?.workers.map((worker) => worker.id), ["early", "late"]);
+});
+
+test("a finished worker re-sorts, and its parent can rise", () => {
+  const sibling = chat("sib", { messages: [msg("su", "user", "hi", 300)] });
+  const parent = chat("parent", { messages: [msg("pu", "user", "go", 100)] });
+  const live = chat("live", {
+    parentId: parent.id,
+    hidden: true,
+    status: "running",
+    messages: [msg("lu", "user", "work", 180), msg("la", "assistant", "tick", 400)],
+  });
+  const done = chat("done", {
+    parentId: parent.id,
+    hidden: true,
+    status: "idle",
+    messages: [msg("du", "user", "work", 200), msg("da", "assistant", "report", 500)],
+  });
+  const chats = buildSidebarChatIndex([sibling, parent, live, done]).liveByProject.get("p") ?? [];
+  assert.deepEqual(chats.map((row) => row.id), ["parent", "sib"]);
+  assert.deepEqual(chats[0]?.workers.map((worker) => worker.id), ["done", "live"]);
+});
+
+test("a finish while another chat is open marks unseen until that chat is opened", () => {
+  const live = chat("w", { status: "running", messages: [msg("u", "user", "go", 1)] });
+  const idle = { ...live, status: "idle" as const, messages: [...live.messages, msg("a", "assistant", "done", 2)] };
+  const stamped = stampUnseenFinishes([idle], [live], "other");
+  assert.equal(stamped[0]!.unseenFinish, true);
+  assert.equal(chatUnseenFinish(stamped[0]!, "other"), true);
+  assert.equal(chatUnseenFinish(stamped[0]!, "w"), false);
+  const watched = stampUnseenFinishes([idle], [live], "w");
+  assert.equal(watched[0]!.unseenFinish, undefined);
+  assert.equal(markChatViewed(stamped, "w")[0]!.unseenFinish, undefined);
+  const restored = normalizeSession({ ...stamped[0]!, unseenFinish: true });
+  assert.equal(restored?.unseenFinish, true);
+  const store = read("src/lib/store.tsx");
+  assert.match(store, /stampUnseenFinishes/);
+  assert.match(store, /markChatViewed\(dropDrafts\(current\.sessions, id\), id\)/);
+  const row = read("src/ui/ChatRow.tsx");
+  assert.match(row, /chatUnseenFinish/);
+  assert.match(row, /className="chat-unseen"/);
+  assert.match(row, /Finished, not opened/);
+  assert.doesNotMatch(row, /sidebar anything/);
+  const features = read("docs/FEATURES.md");
+  assert.match(features, /small\s+mark until you open it/);
+  assert.doesNotMatch(features, /sidebar/i);
 });

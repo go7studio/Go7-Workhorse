@@ -40,24 +40,30 @@ import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
-  captureScrollAnchor,
+  captureViewportLock,
   countTurnsAboveViewport,
   followLatestTurn,
   keepScrollThroughPrepend,
-  keepViewportOnAnchor,
   pinnedToLatest,
   pinToLatest,
+  restoreViewportLock,
   shouldLoadEarlierWindow,
-  type ScrollAnchor,
+  type ViewportLock,
 } from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
-function turnBoxes(content: HTMLElement) {
+function turnLocks(scroller: HTMLElement, content: HTMLElement) {
+  const viewTop = scroller.getBoundingClientRect().top;
   return Array.from(content.querySelectorAll<HTMLElement>("[data-turn-id]"), (node) => {
     const rect = node.getBoundingClientRect();
-    return { id: node.dataset.turnId ?? "", top: rect.top, bottom: rect.bottom };
+    return {
+      id: node.dataset.turnId ?? "",
+      offsetTop: rect.top - viewTop + scroller.scrollTop,
+      height: rect.height,
+      bottom: rect.bottom,
+    };
   }).filter((turn) => turn.id);
 }
 
@@ -161,8 +167,11 @@ export function SessionPane() {
   const followBottom = useRef(true);
   const userMoved = useRef(false);
   const lastHeight = useRef(0);
-  const scrollAnchor = useRef<ScrollAnchor | null>(null);
+  const viewLock = useRef<ViewportLock | null>(null);
   const filling = useRef(false);
+  const frozen = useRef(false);
+  const applying = useRef(false);
+  const settleFrame = useRef(0);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
@@ -285,22 +294,56 @@ export function SessionPane() {
     followBottom.current = true;
     userMoved.current = false;
     lastHeight.current = 0;
-    scrollAnchor.current = null;
+    viewLock.current = null;
+    frozen.current = false;
+    if (settleFrame.current) cancelAnimationFrame(settleFrame.current);
+    settleFrame.current = 0;
   }, [session?.id]);
 
   const holdViewport = (el: HTMLElement) => {
+    applying.current = true;
     const content = stack.current;
-    if (content && keepViewportOnAnchor(el, turnBoxes(content), scrollAnchor.current)) return;
-    keepScrollThroughPrepend(el, lastHeight.current);
+    const locked = content
+      ? restoreViewportLock(
+          el,
+          turnLocks(el, content).find((turn) => turn.id === viewLock.current?.id),
+          viewLock.current,
+        )
+      : false;
+    if (!locked) keepScrollThroughPrepend(el, lastHeight.current);
+    applying.current = false;
   };
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    if (followBottom.current) pinToLatest(el);
+    if (followBottom.current && !viewLock.current) pinToLatest(el);
     else holdViewport(el);
     lastHeight.current = el.scrollHeight;
-    filling.current = false;
+    if (!frozen.current) {
+      filling.current = false;
+      return;
+    }
+    if (settleFrame.current) cancelAnimationFrame(settleFrame.current);
+    let stable = 0;
+    let prev = el.scrollHeight;
+    const settle = () => {
+      holdViewport(el);
+      if (el.scrollHeight === prev) stable += 1;
+      else {
+        stable = 0;
+        prev = el.scrollHeight;
+      }
+      lastHeight.current = el.scrollHeight;
+      if (stable >= 4) {
+        frozen.current = false;
+        filling.current = false;
+        settleFrame.current = 0;
+        return;
+      }
+      settleFrame.current = requestAnimationFrame(settle);
+    };
+    settleFrame.current = requestAnimationFrame(settle);
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
@@ -324,14 +367,16 @@ export function SessionPane() {
       });
     };
     const pin = () => {
+      if (viewLock.current && !followBottom.current) {
+        holdViewport(thread);
+        lastHeight.current = thread.scrollHeight;
+        return;
+      }
       if (followBottom.current) {
         if (skipPin) return;
         pinToLatest(thread);
         lastHeight.current = thread.scrollHeight;
-        return;
       }
-      holdViewport(thread);
-      lastHeight.current = thread.scrollHeight;
     };
     const observer = new ResizeObserver(pin);
     thread.addEventListener("toggle", onToggle, true);
@@ -466,7 +511,7 @@ export function SessionPane() {
         }}
         onScroll={() => {
           const el = scroller.current;
-          if (!el) return;
+          if (!el || applying.current || frozen.current) return;
           const atBottom = pinnedToLatest(el, SCROLL_SLACK);
           followBottom.current = followLatestTurn({
             following: followBottom.current,
@@ -475,24 +520,21 @@ export function SessionPane() {
           });
           if (followBottom.current) {
             userMoved.current = false;
-            scrollAnchor.current = null;
+            viewLock.current = null;
             lastHeight.current = el.scrollHeight;
             return;
           }
           const from = paint.id === sessionId ? paint.from : 0;
           const content = stack.current;
-          if (!content || filling.current || from <= 0) {
-            if (content && !filling.current) {
-              scrollAnchor.current = captureScrollAnchor(turnBoxes(content), el.getBoundingClientRect().top);
-              lastHeight.current = el.scrollHeight;
-            }
-            return;
-          }
-          const boxes = turnBoxes(content);
-          const viewportTop = el.getBoundingClientRect().top;
-          scrollAnchor.current = captureScrollAnchor(boxes, viewportTop);
+          if (!content) return;
+          const turns = turnLocks(el, content);
+          viewLock.current = captureViewportLock(el.scrollTop, turns);
           lastHeight.current = el.scrollHeight;
-          const above = countTurnsAboveViewport(boxes, viewportTop);
+          if (filling.current || from <= 0) return;
+          const above = countTurnsAboveViewport(
+            turns.map((turn) => ({ bottom: turn.bottom })),
+            el.getBoundingClientRect().top,
+          );
           if (
             shouldLoadEarlierWindow({
               hasEarlier: true,
@@ -503,6 +545,7 @@ export function SessionPane() {
             })
           ) {
             filling.current = true;
+            frozen.current = true;
             setPaint({ id: sessionId, from: nextTranscriptPaintStart(from, TRANSCRIPT_PAINT_CHUNK) });
           }
         }}

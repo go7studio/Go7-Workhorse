@@ -5834,8 +5834,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
   assert.match(pane, /transcriptOpen && session/);
   assert.match(pane, /keepScrollThroughPrepend/);
-  assert.match(pane, /keepViewportOnAnchor/);
-  assert.match(pane, /captureScrollAnchor/);
+  assert.match(pane, /captureViewportLock/);
+  assert.match(pane, /restoreViewportLock/);
+  assert.match(pane, /viewLock/);
   assert.match(pane, /data-turn-id/);
   assert.match(pane, /shouldLoadEarlierWindow/);
   assert.match(pane, /TRANSCRIPT_LOOKAHEAD/);

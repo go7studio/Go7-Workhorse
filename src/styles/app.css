@@ -1665,6 +1665,9 @@ html.pane-dragging * {
   max-width: none;
   width: 100%;
   margin: 0 0 18px;
+}
+
+.turn.live {
   animation: rise 280ms var(--ease);
 }
 

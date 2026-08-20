@@ -95,3 +95,36 @@ export function keepViewportOnAnchor(
   if (delta !== 0) el.scrollTop += delta;
   return true;
 }
+
+/**
+ * The turn the user is looking at, plus how far its top sits from the
+ * scroller's scrollTop. Re-applying that shift puts the same pixels back
+ * on screen after older history or late images change height.
+ */
+export type ViewportLock = { id: string; shift: number };
+
+export function captureViewportLock(
+  scrollTop: number,
+  turns: Array<{ id: string; offsetTop: number; height: number }>,
+): ViewportLock | null {
+  if (turns.length === 0) return null;
+  let chosen = turns[0];
+  for (const turn of turns) {
+    if (turn.offsetTop + turn.height > scrollTop) {
+      chosen = turn;
+      break;
+    }
+    chosen = turn;
+  }
+  return { id: chosen.id, shift: chosen.offsetTop - scrollTop };
+}
+
+export function restoreViewportLock(
+  el: { scrollTop: number },
+  turn: { offsetTop: number } | undefined,
+  lock: ViewportLock | null,
+): boolean {
+  if (!lock || !turn) return false;
+  el.scrollTop = turn.offsetTop - lock.shift;
+  return true;
+}

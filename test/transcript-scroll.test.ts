@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { pinNoticesDock } from "../src/lib/session-dock";
 import {
   captureScrollAnchor,
+  captureViewportLock,
   countTurnsAboveViewport,
   followLatestTurn,
   keepScrollThroughPrepend,
@@ -13,6 +14,7 @@ import {
   pinnedToLatest,
   pinnedToTop,
   pinToLatest,
+  restoreViewportLock,
   shouldLoadEarlierWindow,
 } from "../src/lib/transcript-scroll";
 
@@ -89,6 +91,20 @@ test("keepViewportOnAnchor holds the same turn still after older turns prepend",
   assert.equal(keepViewportOnAnchor(el, prepended, null), false);
 });
 
+test("viewport lock saves the seen turn and puts those same pixels back", () => {
+  const lock = captureViewportLock(400, [
+    { id: "old", offsetTop: 0, height: 300 },
+    { id: "seen", offsetTop: 320, height: 240 },
+    { id: "later", offsetTop: 580, height: 200 },
+  ]);
+  assert.deepEqual(lock, { id: "seen", shift: -80 });
+  const el = { scrollTop: 400 };
+  assert.equal(restoreViewportLock(el, { offsetTop: 1520 }, lock), true);
+  assert.equal(el.scrollTop, 1600);
+  assert.equal(restoreViewportLock(el, undefined, lock), false);
+  assert.equal(restoreViewportLock(el, { offsetTop: 10 }, null), false);
+});
+
 test("pinNoticesDock lifts Changes by the temp notice height", () => {
   const col = {
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
@@ -109,8 +125,10 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
   assert.match(pane, /keepScrollThroughPrepend/);
-  assert.match(pane, /keepViewportOnAnchor/);
-  assert.match(pane, /captureScrollAnchor/);
+  assert.match(pane, /captureViewportLock/);
+  assert.match(pane, /restoreViewportLock/);
+  assert.match(pane, /viewLock/);
+  assert.match(pane, /frozen/);
   assert.match(pane, /data-turn-id/);
   const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(userTurn, /data-turn-id=\{message\.id\}/);

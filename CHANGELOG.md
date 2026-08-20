@@ -8,6 +8,22 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.11](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.10...v0.6.11) (2026-08-20)
+
+
+### Bug Fixes
+
+* ease earlier turns in one at a time ([e9824c9](https://github.com/go7studio/Go7-Workhorse/commit/e9824c9ab6df9c8730e2664ccc6092d3a4fb6cce))
+* fill earlier turns before the user hits the top ([40dc37d](https://github.com/go7studio/Go7-Workhorse/commit/40dc37d1f760f677d267d293368678d0b1733ab8))
+* hold the transcript still when earlier turns load ([7154ad9](https://github.com/go7studio/Go7-Workhorse/commit/7154ad976bd242a8b62b013a6e93e72865f7f346))
+* hold the transcript still when earlier turns load ([9819e4d](https://github.com/go7studio/Go7-Workhorse/commit/9819e4dd54d0d11c99d65b97a833e19ac8c55f8b))
+* let earlier turns paint above a live scroll ([8d0ee6a](https://github.com/go7studio/Go7-Workhorse/commit/8d0ee6a1c472310495b742496bd7f635635d42a0))
+* load earlier turns when the user scrolls to the top ([53c4edd](https://github.com/go7studio/Go7-Workhorse/commit/53c4edd339c81e1225f92e2baae1bbd4dd92d26a))
+* load earlier turns when the user scrolls to the top ([34a4c3e](https://github.com/go7studio/Go7-Workhorse/commit/34a4c3e1f30bcf88c0f226da7dff3f18540403dd))
+* lock the transcript to the turn the user was looking at ([7a452f9](https://github.com/go7studio/Go7-Workhorse/commit/7a452f93a3d0a4cb921baa17eb3de81c789ab780))
+* page earlier turns in windows of ten ([91ed65c](https://github.com/go7studio/Go7-Workhorse/commit/91ed65c1c92ca2c382e2480cca2841778afbcb42))
+* remount the desk after a hot-reload crash ([ade10d9](https://github.com/go7studio/Go7-Workhorse/commit/ade10d9cb1d0de19c0977b24b76ab40411fd5091))
+
 ## [0.6.10](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.9...v0.6.10) (2026-08-20)
 
 

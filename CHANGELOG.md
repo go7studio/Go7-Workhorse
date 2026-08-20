@@ -8,6 +8,21 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.18](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.17...v0.6.18) (2026-08-20)
+
+
+### Bug Fixes
+
+* a silent Codex worker cannot look finished ([3a0362e](https://github.com/go7studio/Go7-Workhorse/commit/3a0362e9ffeac1ee39d3c3d013111e4e1d76da57))
+* assign Fable by cost and extra pool, not a lower score ([3804e02](https://github.com/go7studio/Go7-Workhorse/commit/3804e0265a3d4e4af6e9157abbedb3e4612cb5b8))
+* cap Chromium caches, copy state backups, and prune dead worktrees ([6e97362](https://github.com/go7studio/Go7-Workhorse/commit/6e973627abcae842bf42a306fcbacf300e665046))
+* cap Chromium caches, copy state backups, and prune dead worktrees ([d25c8f0](https://github.com/go7studio/Go7-Workhorse/commit/d25c8f08c5e5c4e5d2abfb0a20966f3c7c669d05))
+* clear leftover update caches and stop fsyncing every hot save ([3adb805](https://github.com/go7studio/Go7-Workhorse/commit/3adb80578a680787553627c4aa7593d9e869610f))
+* clear leftover update caches and stop fsyncing every hot save ([3558c0f](https://github.com/go7studio/Go7-Workhorse/commit/3558c0fef5f80829b148e1f8169bc44acf261d62))
+* one bounded spawn, Claude default stays Sonnet 5 ([e6536c4](https://github.com/go7studio/Go7-Workhorse/commit/e6536c403a1cbc2d08a71be9d6087a35f2aaee4c))
+* rank each spawn by intelligence, do not pin Claude ([a811ab6](https://github.com/go7studio/Go7-Workhorse/commit/a811ab60cc9c57bd2c7887cd692f2d7c7f7fb7fa))
+* rank spawn by intelligence, assign Fable by cost ([3b70f6a](https://github.com/go7studio/Go7-Workhorse/commit/3b70f6afc951241af02f0ea0538ff73d25cb47da))
+
 ## [0.6.17](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.16...v0.6.17) (2026-08-20)
 
 

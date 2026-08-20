@@ -36,29 +36,24 @@ test("pinToLatest writes scrollTop to the end of the thread", () => {
   assert.equal(el.scrollTop, 2400);
 });
 
-test("earlier turns load when the user reaches the top of a long chat", () => {
+test("earlier turns start filling as soon as the user leaves the latest turn", () => {
   assert.equal(pinnedToTop({ scrollTop: 0 }, 96), true);
-  assert.equal(pinnedToTop({ scrollTop: 40 }, 96), true);
   assert.equal(pinnedToTop({ scrollTop: 120 }, 96), false);
   assert.equal(
-    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: true, atBottom: false }),
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atBottom: false }),
     true,
   );
   assert.equal(
-    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: true, atBottom: true }),
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atBottom: true }),
     false,
     "a short thread is at the top and the bottom; do not fill the whole history",
   );
   assert.equal(
-    shouldLoadEarlierTurns({ hasEarlier: true, loading: true, atTop: true, atBottom: false }),
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: true, atBottom: false }),
     false,
   );
   assert.equal(
-    shouldLoadEarlierTurns({ hasEarlier: false, loading: false, atTop: true, atBottom: false }),
-    false,
-  );
-  assert.equal(
-    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: false, atBottom: false }),
+    shouldLoadEarlierTurns({ hasEarlier: false, loading: false, atBottom: false }),
     false,
   );
   const el = { scrollHeight: 4000, scrollTop: 80 };
@@ -90,8 +85,12 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /shouldLoadEarlierTurns/);
   assert.match(pane, /keepScrollThroughPrepend/);
   assert.match(pane, /setWantEarlier\(true\)/);
+  assert.match(pane, /TRANSCRIPT_PAINT_CHUNK/);
+  assert.doesNotMatch(pane, /startTransition\(\(\) => setPaint/);
   assert.doesNotMatch(pane, /Load earlier turns/);
   assert.doesNotMatch(pane, /transcript-earlier/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*none/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
   assert.match(pane, /if \(skipPin\) return/);
   assert.match(pane, /session-notices/);

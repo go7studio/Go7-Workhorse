@@ -5834,6 +5834,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /wantEarlier/);
   assert.match(pane, /shouldLoadEarlierTurns/);
   assert.match(pane, /keepScrollThroughPrepend/);
+  assert.match(pane, /TRANSCRIPT_PAINT_CHUNK/);
+  assert.doesNotMatch(pane, /startTransition\(\(\) => setPaint/);
   assert.doesNotMatch(pane, /Load earlier turns/);
   assert.match(pane, /if \(!transcriptOpen \|\| !wantEarlier\) return/);
   assert.doesNotMatch(pane, /block\.subagents\.length \? store\.sessions/);

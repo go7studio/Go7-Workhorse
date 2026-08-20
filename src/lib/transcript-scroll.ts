@@ -26,14 +26,17 @@ export function pinnedToTop(el: { scrollTop: number }, slack: number): boolean {
   return el.scrollTop <= slack;
 }
 
-/** Reach the top of a long chat (not a short thread that is both top and bottom). */
+/**
+ * Start filling as soon as the user leaves the latest turn, so earlier
+ * history is already in the thread before they reach the top.
+ * A short chat is at the top and the bottom; do not fill then.
+ */
 export function shouldLoadEarlierTurns(input: {
   hasEarlier: boolean;
   loading: boolean;
-  atTop: boolean;
   atBottom: boolean;
 }): boolean {
-  return input.hasEarlier && !input.loading && input.atTop && !input.atBottom;
+  return input.hasEarlier && !input.loading && !input.atBottom;
 }
 
 /** Keep the same turns in view when earlier history is prepended. */

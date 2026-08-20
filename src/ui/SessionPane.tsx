@@ -14,6 +14,7 @@ import {
   recentTranscriptText,
   scheduleAfterPaint,
   startTranscriptFill,
+  TRANSCRIPT_PAINT_CHUNK,
   transcriptPaintStart,
   type TranscriptBlock,
 } from "../lib/turns";
@@ -41,7 +42,6 @@ import {
   followLatestTurn,
   keepScrollThroughPrepend,
   pinnedToLatest,
-  pinnedToTop,
   pinToLatest,
   shouldLoadEarlierTurns,
 } from "../lib/transcript-scroll";
@@ -225,6 +225,9 @@ export function SessionPane() {
     if (!transcriptOpen) return;
     const initial = transcriptPaintStart(blocks.length);
     setPaint({ id: sessionId, from: initial });
+    if (initial <= 0) return;
+    const idle = window.setTimeout(() => setWantEarlier(true), 160);
+    return () => window.clearTimeout(idle);
   }, [sessionId, transcriptOpen]);
 
   useEffect(() => {
@@ -241,8 +244,9 @@ export function SessionPane() {
     };
     return startTranscriptFill(
       from,
-      (next) => startTransition(() => setPaint({ id: sessionId, from: next })),
+      (next) => setPaint({ id: sessionId, from: next }),
       { whenIdle, cancelIdle },
+      TRANSCRIPT_PAINT_CHUNK,
     );
   }, [sessionId, transcriptOpen, wantEarlier]);
 
@@ -471,7 +475,6 @@ export function SessionPane() {
             shouldLoadEarlierTurns({
               hasEarlier: paint.id === sessionId && paint.from > 0,
               loading: wantEarlier,
-              atTop: pinnedToTop(el, SCROLL_SLACK),
               atBottom,
             })
           ) {

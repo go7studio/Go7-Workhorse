@@ -98,7 +98,7 @@ function sweepTmpUpdates(tmpDir: string, now: number, removed: string[], addByte
     const full = path.join(tmpDir, name);
     try {
       const stat = fs.statSync(full);
-      if (now - stat.mtimeMs < DAY_MS) continue;
+      if (!stat.isDirectory() || now - stat.mtimeMs < DAY_MS) continue;
       const size = entryStats(full).bytes;
       if (removeEntry(full)) {
         removed.push(name);

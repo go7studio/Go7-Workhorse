@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
-import { hiddenProjectChatCount, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
+import { hiddenProjectChatCount, lastProjectChat, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
 import { folderSummary } from "../lib/project";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
@@ -203,7 +203,9 @@ function ProjectFolder({
           className={selected && !store.activeSessionId ? "row active" : "row"}
           type="button"
           onClick={() => {
-            store.selectProject(project.id);
+            const last = lastProjectChat(chats);
+            if (last) store.selectSession(last.id);
+            else store.selectProject(project.id);
             if (!open) onToggle();
           }}
           onDragOver={(event) => {
@@ -225,6 +227,18 @@ function ProjectFolder({
               {count === 0 ? folderSummary(project) : `${count} chat${count === 1 ? "" : "s"} · ${folderSummary(project)}`}
             </span>
           </span>
+        </button>
+        <button
+          className={`tiny project-info${selected && !store.activeSessionId ? " active" : ""}`}
+          type="button"
+          aria-label={`Open ${project.name} info`}
+          title="Project info"
+          onClick={(event) => {
+            event.stopPropagation();
+            store.selectProject(project.id);
+          }}
+        >
+          i
         </button>
         <button
           className="tiny project-new"

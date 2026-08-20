@@ -520,9 +520,29 @@ export function lastUserMessage(session: Pick<Session, "messages">) {
   return undefined;
 }
 
+/** Latest activity in this chat, including a hidden join/report-back after workers finish. */
 export function lastTalkedAt(session: Pick<Session, "messages">): number | undefined {
-  const last = lastUserMessage(session);
-  return typeof last?.createdAt === "number" && last.createdAt > 0 ? last.createdAt : undefined;
+  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
+    const at = session.messages[index]?.createdAt;
+    if (typeof at === "number" && at > 0) return at;
+  }
+  return undefined;
+}
+
+/** Most recently active chat in a project list. Empty lists return undefined. */
+export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
+  const first = chats[0];
+  if (!first) return undefined;
+  let best = first;
+  let bestAt = lastTalkedAt(best) ?? 0;
+  for (const chat of chats.slice(1)) {
+    const at = lastTalkedAt(chat) ?? 0;
+    if (at > bestAt) {
+      best = chat;
+      bestAt = at;
+    }
+  }
+  return best;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

@@ -2239,8 +2239,13 @@ html.pane-dragging * {
 }
 
 .tool-name {
+  min-width: 0;
+  max-width: 28ch;
+  overflow: hidden;
   font-weight: 590;
   color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-status {
@@ -4337,18 +4342,30 @@ html.pane-dragging * {
   transform: none;
 }
 
-.project-new {
+.project-new,
+.project-info {
   align-self: center;
   width: 26px;
   height: 26px;
   padding: 0;
   margin-right: 2px;
-  font-size: 16px;
   line-height: 1;
   color: var(--text-secondary);
 }
 
-.project-new:hover {
+.project-new {
+  font-size: 16px;
+}
+
+.project-info {
+  font-size: 13px;
+  font-weight: 650;
+  font-style: italic;
+}
+
+.project-new:hover,
+.project-info:hover,
+.project-info.active {
   color: var(--text);
 }
 

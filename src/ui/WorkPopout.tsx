@@ -20,7 +20,9 @@ function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
   const live = !toolIsFinished(tool.toolStatus);
   return (
     <p className={`tool-line${live ? " live" : " done"}${peer || info ? " peer" : ""}`}>
-      <span className="tool-name">{title}</span>
+      <span className="tool-name" title={title}>
+        {title}
+      </span>
       {status && <span className="tool-status">{status}</span>}
       {detail && <span className="tool-loc">{detail}</span>}
     </p>

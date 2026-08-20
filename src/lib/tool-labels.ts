@@ -60,15 +60,24 @@ export function isSubagentSpawnTitle(raw: string): boolean {
   return trimmed === SUBAGENT_SPAWN_TITLE || toolNameKey(trimmed) === "spawn_subagent";
 }
 
-export function toolNameKey(raw: string): string {
+function toolTokens(raw: string): string[] {
   return raw
     .trim()
     .toLowerCase()
-    .replace(/^(mcp[_:])+/g, "")
-    .replace(/^(workhorse[_:])+/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "");
+    .split(/[.:_\s-]+/)
+    .filter(Boolean);
+}
+
+function stripDeskPrefixes(tokens: string[]): string[] {
+  let index = 0;
+  while (index < tokens.length && (tokens[index] === "mcp" || tokens[index] === "workhorse")) {
+    index += 1;
+  }
+  return tokens.slice(index);
+}
+
+export function toolNameKey(raw: string): string {
+  return stripDeskPrefixes(toolTokens(raw)).join("_");
 }
 
 export function permissionActionLabel(raw: string): string {
@@ -109,18 +118,23 @@ export function formatPermissionDetail(raw: string, filePath?: string): string {
   return clipDetail(trimmed);
 }
 
+function mappedToolTitle(key: string): string | undefined {
+  return TOOL_NAMES[key]?.title;
+}
+
 export function prettyToolTitle(raw: string): string {
   const trimmed = raw.trim();
-  const key = toolNameKey(trimmed);
-  if (TOOL_NAMES[key]) return TOOL_NAMES[key].title;
-  if (!/workhorse|mcp[_:]/i.test(trimmed)) return trimmed;
-  const cleaned = trimmed
-    .replace(/^(mcp[_:])+/i, "")
-    .replace(/^(workhorse[_:])+/gi, "")
-    .replace(/[_-]+/g, " ")
-    .trim();
-  if (!cleaned || cleaned.toLowerCase() === trimmed.toLowerCase()) return trimmed;
-  return cleaned.replace(/\b\w/g, (ch) => ch.toUpperCase());
+  if (!trimmed) return trimmed;
+  const original = toolTokens(trimmed);
+  const tokens = stripDeskPrefixes(original);
+  const key = tokens.join("_");
+  const mapped =
+    mappedToolTitle(key) ??
+    (tokens.length >= 2 ? mappedToolTitle(tokens.slice(-2).join("_")) : undefined) ??
+    (tokens.length > 0 ? mappedToolTitle(tokens[tokens.length - 1] ?? "") : undefined);
+  if (mapped) return mapped;
+  if (!tokens.length || tokens.length === original.length) return trimmed;
+  return tokens.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join(" ");
 }
 
 export function prettyToolStatus(status?: string): string {

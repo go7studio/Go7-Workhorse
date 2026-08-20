@@ -110,3 +110,28 @@ test("after-pack only writes the development marker off the release path", () =>
     "the marker must follow WORKHORSE_RELEASE_BUILD, never a hardcoded channel",
   );
 });
+
+/**
+ * Correcting WORKHORSE_RELEASE_BUILD stops the cause that shipped v0.6.9. This
+ * gate stops the class: it reads the packaged app's own marker instead of
+ * trusting the flag that produced it, and it runs before the installer is
+ * uploaded, so a development-stamped build cannot become a release asset.
+ */
+test("a development-stamped build cannot be published", async () => {
+  const { verdictFor, channelOf } = await import("../scripts/assert-release-channel.mjs");
+
+  assert.equal(verdictFor("release", true).ok, true, "a release marker publishes");
+  assert.equal(verdictFor("development", true).ok, false, "a development marker must not publish");
+  assert.equal(verdictFor(null, true).ok, false, "an unreadable marker must not publish");
+  assert.equal(verdictFor("development", false).ok, true, "a test build is free to be development");
+
+  assert.equal(channelOf('{"channel":"release"}'), "release");
+  assert.equal(channelOf('{"channel":"development"}'), "development");
+  assert.equal(channelOf("not json"), null, "a damaged marker reads as unknown, never as release");
+
+  const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  const gate = workflow.indexOf("assert-release-channel.mjs");
+  const upload = workflow.indexOf("Keep the installer");
+  assert.ok(gate > 0, "the release workflow must run the channel gate");
+  assert.ok(gate < upload, "the gate must run before the installer is uploaded");
+});

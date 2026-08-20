@@ -164,6 +164,15 @@ jobs:
       - name: Packaged learning smoke
         run: node scripts/learning-packaged-smoke.mjs
 
+      # A build stamped "development" opens on the Dev user-data directory with
+      # volatile credentials. Installed over production that looks exactly like
+      # total data loss. v0.6.9 shipped that way, so the artifact is checked
+      # here rather than trusting the flag that produced it.
+      - name: Refuse a development-stamped release
+        env:
+          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true')) && '1' || '0' }}
+        run: node scripts/assert-release-channel.mjs
+
       # Held here rather than sent straight to the release, so a machine that
       # fails cannot leave half a release behind.
       - name: Keep the installer

@@ -14,6 +14,7 @@ import {
   leftoverForCard,
   leftoverMissingCopy,
   planRingView,
+  isLocalEndpoint,
   pickClaudeWindow,
   pickPlanWindow,
   claudeWindowTabs,
@@ -511,8 +512,12 @@ export function UsagePane({
             </div>
             <div className="usage-brains">
               {cards.map((row, index) => {
-                const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)));
-                const chip = planWindowChip(leftoverForCard(row, deskPlans));
+                // A model served from this machine has no allowance to draw.
+                const local = isLocalEndpoint(
+                  settings.customBots.find((bot) => `bot:${bot.id}` === row.focus)?.baseUrl,
+                );
+                const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)), { local });
+                const chip = planWindowChip(leftoverForCard(row, deskPlans), { local, provider: row.provider });
                 return (
                   <button
                     key={row.key}

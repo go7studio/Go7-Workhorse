@@ -22,6 +22,8 @@ import {
   formatPlanReset,
   leftoverForCard,
   planRingView,
+  planAllowance,
+  isLocalEndpoint,
   weeklyPlanLeftover,
 } from "./usage";
 import { cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
@@ -1151,8 +1153,16 @@ export function capacityMeterForRow(
 ): CapacityMeter {
   if (plans && settings) {
     const leftover = leftoverPercentForKey(row.id, plans, settings);
-    const plan = leftoverForCard(deskRowForKey(row.id, settings), plans);
-    const unmetered = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
+    const deskRow = deskRowForKey(row.id, settings);
+    const plan = leftoverForCard(deskRow, plans);
+    // One decision for every surface. Reading the flag alone missed the plan
+    // whose weekly gauge never moves, and this snapshot answered `known: 100`
+    // for it while the ring answered 0% — a guessed 100 either way.
+    const unmetered =
+      planAllowance(plan, {
+        provider: deskRow.provider,
+        local: isLocalEndpoint(deskRow.bot?.baseUrl),
+      }).status === "unmetered";
     return officialCapacityMeter({
       leftover,
       used: plan?.usedPercent,

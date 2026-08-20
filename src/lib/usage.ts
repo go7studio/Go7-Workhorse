@@ -482,6 +482,78 @@ export function cursorLanePlan(plan: GrokPlanUsage | undefined, key: CursorWatch
 
 const TIME_WINDOW = /^(session|weekly(_all|_scoped)?|primary|interval|five_hour|5h)$/i;
 const SHORT_WINDOW = /^(session|primary|interval|five_hour|5h)$/i;
+/**
+ * The allowance: what the subscription grants over its billing period. Codex
+ * calls its weekly `primary`, so this is by product id, not by label.
+ */
+const ALLOWANCE_WINDOW = /^(weekly(_all)?|primary)$/i;
+/** A rate limit that refills within hours. Not an allowance. */
+const BURST_WINDOW = /^(session|interval|five_hour|5h)$/i;
+
+function clampLeftover(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1|[a-z0-9-]+\.local)$/i;
+
+/** A model served from this machine. It has no allowance to report, ever. */
+export function isLocalEndpoint(baseUrl: string | undefined): boolean {
+  if (!baseUrl?.trim()) return false;
+  try {
+    return LOCAL_HOST.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export type PlanAllowance =
+  | { status: "known"; leftPercent: number; window?: GrokPlanProduct }
+  | { status: "unmetered"; why: "declared" | "dead-gauge" | "local" }
+  | { status: "unknown" };
+
+/**
+ * How much of this plan is left, decided once.
+ *
+ * The ring, the MCP capacity snapshot and routing each used to answer this
+ * their own way and disagree. On 2026-08-20 one MiniMax plan — weekly 0%, 5h
+ * 100% — read `0%` on the ring, `known: 100` to the MCP, and `unmetered` to
+ * routing. Kimi, weekly 47% used, read `100%` on the ring because the ring
+ * showed the 5h burst instead of the allowance.
+ *
+ * A burst window is a rate limit, not an allowance: spending it means wait
+ * twenty minutes, not the subscription is gone.
+ */
+export function planAllowance(
+  plan: GrokPlanUsage | undefined,
+  options: { local?: boolean; provider?: ProviderId } = {},
+): PlanAllowance {
+  // A model on this machine has no cap to report and never will.
+  if (options.local) return { status: "unmetered", why: "local" };
+  if (!plan) return { status: "unknown" };
+  const windows = planTimeWindows(plan);
+  const allowance =
+    options.provider === "claude"
+      ? windows.find((item) => item.product === "weekly_all")
+      : windows.find((item) => ALLOWANCE_WINDOW.test(item.product));
+  if (allowance?.unlimited) return { status: "unmetered", why: "declared" };
+  if (allowance) {
+    // A gauge reading exactly zero while a burst window drains is not a full
+    // allowance — it is a gauge that never moves. MiniMax reports an
+    // unlimited weekly seat that way, with no flag to say so.
+    const burstDrawn = windows.some(
+      (item) => BURST_WINDOW.test(item.product) && !item.unlimited && item.usagePercent > 0,
+    );
+    if (allowance.usagePercent === 0 && burstDrawn) return { status: "unmetered", why: "dead-gauge" };
+    return { status: "known", leftPercent: clampLeftover(100 - allowance.usagePercent), window: allowance };
+  }
+  const metered = windows.find((item) => !item.unlimited);
+  if (metered) {
+    return { status: "known", leftPercent: clampLeftover(100 - metered.usagePercent), window: metered };
+  }
+  if (windows.length > 0) return { status: "unmetered", why: "declared" };
+  if (Number.isFinite(plan.leftPercent)) return { status: "known", leftPercent: clampLeftover(plan.leftPercent) };
+  return { status: "unknown" };
+}
 
 export function isPlanTimeWindow(product: string): boolean {
   return TIME_WINDOW.test(product);
@@ -540,13 +612,21 @@ export function claudeWindowTabs(plan: GrokPlanUsage | undefined): { id: string;
   return (plan?.products ?? []).map((item) => ({ id: item.product, label: claudeWindowTab(item) }));
 }
 
-export function planWindowChip(plan: GrokPlanUsage | undefined): string | undefined {
+export function planWindowChip(
+  plan: GrokPlanUsage | undefined,
+  options: { local?: boolean; provider?: ProviderId } = {},
+): string | undefined {
   const windows = planTimeWindows(plan);
   if (windows.length === 0) return undefined;
+  const allowance = planAllowance(plan, options);
+  const deadGauge = allowance.status === "unmetered" && allowance.why === "dead-gauge";
   return windows
-    .map((item) =>
-      item.unlimited ? `${item.label}: ∞` : `${item.label}: ${Math.round(item.usagePercent)}%`,
-    )
+    .map((item) => {
+      // Once the allowance is judged unmetered, its gauge stops being a
+      // number worth printing: "Weekly: 0%" is the fiction we just saw through.
+      const uncapped = item.unlimited || (deadGauge && ALLOWANCE_WINDOW.test(item.product));
+      return uncapped ? `${item.label}: ∞` : `${item.label}: ${Math.round(item.usagePercent)}%`;
+    })
     .join(" · ");
 }
 
@@ -555,19 +635,28 @@ export function planRingView(
   row: Pick<DeskUsageCard, "focus" | "provider" | "key">,
   plans: Parameters<typeof leftoverForCard>[1],
   claudeWindow?: string,
-): { value: number; label: string; plan: GrokPlanUsage } | undefined {
+  options: { local?: boolean } = {},
+): { value: number; label: string; plan?: GrokPlanUsage; unmetered?: boolean } | undefined {
   const plan = leftoverForCard(row, plans);
-  if (!plan) return undefined;
-  const windows = planTimeWindows(plan);
-  if (windows.length > 0) {
-    const window = pickPlanWindow(plan, claudeWindow, row.provider);
-    if (window?.unlimited) return { value: 1, label: "∞", plan };
-    if (window) {
-      const left = Math.max(0, Math.min(100, 100 - window.usagePercent));
+  // A model on this machine reports no allowance because it has none. That is
+  // an answer, not a gap, so it reads ∞ rather than the "…" of a meter we
+  // tried and failed to read.
+  if (!plan) return options.local ? { value: 1, label: "∞", unmetered: true } : undefined;
+  // A window the person picked from the tabs wins: they asked for that one.
+  if (claudeWindow) {
+    const chosen = (plan.products ?? []).find((item) => item.product === claudeWindow);
+    if (chosen) {
+      if (chosen.unlimited) return { value: 1, label: "∞", plan, unmetered: true };
+      const left = clampLeftover(100 - chosen.usagePercent);
       return { value: left / 100, label: `${Math.round(left)}%`, plan };
     }
   }
-  return { value: plan.leftPercent / 100, label: `${Math.round(plan.leftPercent)}%`, plan };
+  const allowance = planAllowance(plan, { ...options, provider: row.provider });
+  if (allowance.status === "unmetered") return { value: 1, label: "∞", plan, unmetered: true };
+  if (allowance.status === "known") {
+    return { value: allowance.leftPercent / 100, label: `${Math.round(allowance.leftPercent)}%`, plan };
+  }
+  return undefined;
 }
 
 export function formatPlanReset(iso?: string, now = Date.now()): string {

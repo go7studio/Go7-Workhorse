@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.17](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.16...v0.6.17) (2026-08-20)
+
+
+### Bug Fixes
+
+* an uncapped plan reads ∞, and a metered week is no longer hidden ([5007010](https://github.com/go7studio/Go7-Workhorse/commit/50070106d9dac24ee27d89a036ad3ee4b880d2dd))
+* an uncapped plan reads ∞, and a metered week is no longer hidden ([4b5f975](https://github.com/go7studio/Go7-Workhorse/commit/4b5f975c5391caa48c5f955bb9530ba353183e95))
+* routing knows what the work is about ([fa412c3](https://github.com/go7studio/Go7-Workhorse/commit/fa412c36c8735b6809baa5a07bde7bf8651f8c6a))
+* routing knows what the work is about ([5ed41e0](https://github.com/go7studio/Go7-Workhorse/commit/5ed41e02c05e2490fcdc6d62b0466f823df54230))
+
 ## [0.6.16](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.15...v0.6.16) (2026-08-20)
 
 

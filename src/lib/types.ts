@@ -503,6 +503,8 @@ export type Session = {
   composerImages?: ChatImage[];
   contextUsed: number;
   archivedAt?: number | null;
+  /** Last moment the person had this chat open. A finish newer than this wears the done mark. */
+  viewedAt?: number;
   grokCommands?: Command[];
   /** Thread-scoped Codex/Grok Goal lifecycle. */
   goal?: {

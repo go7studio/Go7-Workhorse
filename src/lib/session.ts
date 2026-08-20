@@ -1,5 +1,5 @@
 import { modeLabel } from "./commands";
-import { normalizeQueuedPrompt } from "./chats";
+import { lastTalkedAt, normalizeQueuedPrompt } from "./chats";
 import { collapseToolText } from "./grok-events";
 import { normalizeImages } from "./images";
 import { defaultModel, effortLabel, modelName, normalizeModelId, withEffort } from "./models";
@@ -219,6 +219,12 @@ export function normalizeSession(raw: unknown): Session | null {
     typeof record.model === "string" && record.model ? record.model : defaultModel(provider).id,
   );
   const mode = parsePermissionMode(String(record.mode ?? "")) ?? "ask";
+  const messages = Array.isArray(record.messages)
+    ? record.messages
+        .map(normalizeMessage)
+        .filter((item): item is ChatMessage => item !== null && !isSessionIntro(item))
+    : [];
+  const agentRun = normalizeAgentRun(record.agentRun);
   return {
     id: record.id,
     projectId: typeof record.projectId === "string" && record.projectId ? record.projectId : null,
@@ -247,13 +253,15 @@ export function normalizeSession(raw: unknown): Session | null {
         : undefined,
     vendorProvider: isProviderId(record.vendorProvider) ? record.vendorProvider : undefined,
     status: record.status === "needs-input" ? "needs-input" : "idle",
-    messages: Array.isArray(record.messages)
-      ? record.messages
-          .map(normalizeMessage)
-          .filter((item): item is ChatMessage => item !== null && !isSessionIntro(item))
-      : [],
+    messages,
     contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
     archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : null,
+    // A save from before the done mark never stamped a look. Load those as
+    // seen, or one update would light up every finished chat at once.
+    viewedAt:
+      typeof record.viewedAt === "number" && record.viewedAt > 0
+        ? record.viewedAt
+        : agentRun?.finishedAt ?? lastTalkedAt({ messages }),
     permissionGrants: normalizePermissionGrants(record.permissionGrants),
     queue: (() => {
       if (!Array.isArray(record.queue)) return undefined;
@@ -273,7 +281,7 @@ export function normalizeSession(raw: unknown): Session | null {
       record.status === "needs-input"
         ? normalizeGoal(record.goal)
         : grokGoalAfterTurnIdle(provider, normalizeGoal(record.goal)),
-    agentRun: normalizeAgentRun(record.agentRun),
+    agentRun,
     lineup: normalizeLineup(record.lineup),
     planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",

@@ -917,16 +917,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectProject = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      panel: null,
-      activeProjectId: id,
-      activeSessionId: null,
-      sessions: dropDrafts(current.sessions),
-      projects: current.projects.map((project) =>
-        project.id === id ? { ...project, openedAt: Date.now() } : project,
-      ),
-    }));
+    setState((current) => {
+      // Leaving a chat for a project home is a look too — see selectSession.
+      const leavingId = current.activeSessionId;
+      const now = Date.now();
+      return {
+        ...current,
+        panel: null,
+        activeProjectId: id,
+        activeSessionId: null,
+        sessions: dropDrafts(current.sessions).map((item) =>
+          item.id === leavingId ? { ...item, viewedAt: now } : item,
+        ),
+        projects: current.projects.map((project) =>
+          project.id === id ? { ...project, openedAt: now } : project,
+        ),
+      };
+    });
   }, []);
 
   const linkFolder = useCallback(async (path?: string) => {
@@ -1175,12 +1182,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const selectSession = useCallback((id: string) => {
     setState((current) => {
       const session = current.sessions.find((item) => item.id === id);
+      // Opening a chat is the look that clears its done mark. The chat being
+      // left gets the same stamp, so a finish the person watched cannot mark
+      // its row later.
+      const now = Date.now();
+      const leavingId = current.activeSessionId;
       return {
         ...current,
         panel: null,
         activeSessionId: id,
         activeProjectId: session?.projectId ?? null,
-        sessions: dropDrafts(current.sessions, id),
+        sessions: dropDrafts(current.sessions, id).map((item) =>
+          item.id === id || item.id === leavingId ? { ...item, viewedAt: now } : item,
+        ),
       };
     });
   }, []);

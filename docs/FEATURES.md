@@ -97,6 +97,9 @@ transcript rather than as a path.
   unfinished, not wrong. A wave that came in over Link and was never named
   here takes the work's own name instead of the prompt's first few words, so
   long as its workers agree on one.
+- Chat rows hold their order while a chat works; a row moves only when you
+  prompt it or its work finishes. A chat that finishes while you are elsewhere
+  keeps a small dot on its row until you open it.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share

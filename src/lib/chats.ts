@@ -529,6 +529,47 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
   return undefined;
 }
 
+/** True while the chat is still at work: streaming, waiting on the person, or mid-wave. */
+export function chatStillWorking(session: Pick<Session, "status" | "agentRun">): boolean {
+  return (
+    session.status === "running" ||
+    session.status === "needs-input" ||
+    session.agentRun?.status === "running"
+  );
+}
+
+/**
+ * The stamp a chat holds its place in the lineup with. A chat at work keeps
+ * the stamp of the prompt that started the work, so streaming assistant and
+ * tool ticks cannot shuffle rows mid-run; the stamp moves once, to the last
+ * word, when the chat goes quiet. Six workers spawned together hold their
+ * spots for the whole run, and each rises only when its report lands.
+ */
+export function chatSortStamp(session: Pick<Session, "status" | "agentRun" | "messages">): number {
+  if (chatStillWorking(session)) {
+    return lastUserMessage(session)?.createdAt ?? session.agentRun?.startedAt ?? lastTalkedAt(session) ?? 0;
+  }
+  return lastTalkedAt(session) ?? 0;
+}
+
+/**
+ * Finished work the person has not opened yet: the chat sits quiet and its
+ * last word landed after their last look. The open chat never wears the mark,
+ * and opening a chat stamps `viewedAt`, which clears it. A missing stamp
+ * means never looked — loading an old save backfills it, so an update does
+ * not light up every finished chat at once.
+ */
+export function hasUnviewedFinish(
+  session: Pick<Session, "id" | "status" | "agentRun" | "messages" | "viewedAt">,
+  activeSessionId: string | null,
+): boolean {
+  if (session.id === activeSessionId) return false;
+  if (chatStillWorking(session)) return false;
+  const finishedAt = session.agentRun?.finishedAt ?? lastTalkedAt(session) ?? 0;
+  if (finishedAt <= 0) return false;
+  return finishedAt > (session.viewedAt ?? 0);
+}
+
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
   const first = chats[0];

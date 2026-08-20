@@ -587,6 +587,24 @@ html.pane-dragging * {
   font-variant-numeric: tabular-nums;
 }
 
+/* Work finished since the person last looked. Opening the chat clears it. */
+.chat-row .done-dot {
+  flex: 0 0 6px;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: done-dot-in 160ms var(--ease);
+}
+
+@keyframes done-dot-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
 .row-meta {
   display: block;
   font-size: 11px;

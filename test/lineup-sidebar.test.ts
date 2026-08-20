@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { sidebarKeepsChat } from "../src/lib/chats";
+import { chatSortStamp, hasUnviewedFinish, sidebarKeepsChat } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
-import { formatChatSidebar } from "../src/lib/session";
+import { formatChatSidebar, normalizeSession } from "../src/lib/session";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
+import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
+import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -162,4 +164,134 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
+});
+
+// ---------------------------------------------------------------------------
+// The lineup holds still while chats work. Six workers streaming tool ticks
+// used to trade places on every bump of the last message. A working chat now
+// holds the stamp of the prompt that started the work; its stamp moves once,
+// to the last word, when the work finishes. And a finish the person has not
+// opened wears a small dot until they do.
+// ---------------------------------------------------------------------------
+
+test("a working chat keeps the prompt's stamp until the work finishes", () => {
+  const prompt = { id: "u1", role: "user" as const, text: "go", createdAt: 100 };
+  const stream = [
+    prompt,
+    { id: "a1", role: "assistant" as const, text: "…", createdAt: 200 },
+    { id: "t1", role: "assistant" as const, kind: "tool" as const, text: "bash", createdAt: 300 },
+  ];
+  assert.equal(chatSortStamp({ status: "running", messages: stream }), 100, "streaming does not move the chat");
+  assert.equal(chatSortStamp({ status: "needs-input", messages: stream }), 100, "waiting on the person holds too");
+  assert.equal(
+    chatSortStamp({ status: "idle", agentRun: { status: "running", startedAt: 90 }, messages: stream }),
+    100,
+    "a wave pass between turns still holds",
+  );
+  assert.equal(chatSortStamp({ status: "idle", messages: stream }), 300, "quiet: the last word places the chat");
+});
+
+test("running workers hold their spots; a finish moves the child and lifts the parent", () => {
+  const prompt = (id: string, at: number) => ({ id: `${id}-u`, role: "user" as const, text: "slice", createdAt: at });
+  const parent = { id: "sess_wave", projectId: null, parentId: undefined, status: "running", contextUsed: 0, messages: [prompt("p", 10)] };
+  const other = {
+    id: "sess_other",
+    projectId: null,
+    parentId: undefined,
+    status: "idle",
+    contextUsed: 0,
+    messages: [prompt("o", 50), { id: "o-a", role: "assistant" as const, text: "hello", createdAt: 60 }],
+  };
+  const worker = (id: string, at: number) => ({
+    id,
+    projectId: null,
+    parentId: "sess_wave",
+    hidden: true,
+    status: "running",
+    contextUsed: 0,
+    agentRun: { status: "running" as const, startedAt: at },
+    messages: [prompt(id, at)],
+  });
+  const base = [parent, other, worker("sess_w1", 20), worker("sess_w2", 21), worker("sess_w3", 22)];
+  const quiet = buildSidebarChatIndex(base as unknown as Session[]).liveByProject.get(null)!;
+  assert.deepEqual(quiet.map((row) => row.id), ["sess_other", "sess_wave"], "a quiet chat outranks held prompts");
+  assert.deepEqual(quiet[1]!.workers.map((row) => row.id), ["sess_w3", "sess_w2", "sess_w1"]);
+
+  // Tool ticks land on every worker. Nothing moves.
+  const ticking = base.map((row) =>
+    row.parentId
+      ? {
+          ...row,
+          messages: [
+            ...row.messages,
+            { id: `${row.id}-t`, role: "assistant" as const, kind: "tool" as const, text: "read_file", createdAt: 900 },
+          ],
+        }
+      : row,
+  );
+  const held = buildSidebarChatIndex(ticking as unknown as Session[]).liveByProject.get(null)!;
+  assert.deepEqual(held.map((row) => row.id), ["sess_other", "sess_wave"]);
+  assert.deepEqual(held[1]!.workers.map((row) => row.id), ["sess_w3", "sess_w2", "sess_w1"], "streaming does not reorder siblings");
+
+  // sess_w1 finishes: it rises through its siblings, and its parent rises past the quiet chat.
+  const finished = ticking.map((row) =>
+    row.id === "sess_w1"
+      ? {
+          ...row,
+          status: "idle" as const,
+          agentRun: { status: "completed" as const, startedAt: 20, finishedAt: 1200 },
+          messages: [...row.messages, { id: "w1-report", role: "assistant" as const, text: "report", createdAt: 1200 }],
+        }
+      : row,
+  );
+  const moved = buildSidebarChatIndex(finished as unknown as Session[]).liveByProject.get(null)!;
+  assert.deepEqual(moved.map((row) => row.id), ["sess_wave", "sess_other"], "a parent may rise when a child finishes");
+  assert.deepEqual(moved[0]!.workers.map((row) => row.id), ["sess_w1", "sess_w3", "sess_w2"]);
+});
+
+test("the done mark shows on quiet unopened work and clears on a look", () => {
+  const done = {
+    id: "worker",
+    status: "idle" as const,
+    agentRun: { status: "completed" as const, startedAt: 10, finishedAt: 100 },
+    messages: [{ id: "r", role: "assistant" as const, text: "report", createdAt: 100 }],
+  };
+  assert.equal(hasUnviewedFinish(done, null), true, "never opened");
+  assert.equal(hasUnviewedFinish({ ...done, viewedAt: 50 }, null), true, "opened before the finish");
+  assert.equal(hasUnviewedFinish({ ...done, viewedAt: 100 }, null), false, "seen");
+  assert.equal(hasUnviewedFinish({ ...done, viewedAt: 50 }, "worker"), false, "the open chat never wears the mark");
+  assert.equal(hasUnviewedFinish({ ...done, status: "running" as const }, null), false, "still working");
+  assert.equal(
+    hasUnviewedFinish({ ...done, agentRun: { status: "running" as const, startedAt: 10 } }, null),
+    false,
+    "mid-wave",
+  );
+  // A plain chat marks too when its reply lands after the person left.
+  const plain = { id: "chat", status: "idle" as const, messages: done.messages };
+  assert.equal(hasUnviewedFinish(plain, null), true);
+  assert.equal(hasUnviewedFinish({ ...plain, viewedAt: 200 }, null), false);
+});
+
+test("an old save loads with every finish already seen", () => {
+  const raw = {
+    id: "sess_old",
+    messages: [{ id: "m", role: "assistant", text: "done", createdAt: 100 }],
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 100 },
+  };
+  const loaded = normalizeSession(raw)!;
+  assert.equal(loaded.viewedAt, 100, "a missing stamp backfills to the finish");
+  assert.equal(hasUnviewedFinish(loaded, null), false);
+  const kept = normalizeSession({ ...raw, viewedAt: 40 })!;
+  assert.equal(kept.viewedAt, 40, "a stored stamp is kept");
+  assert.equal(hasUnviewedFinish(kept, null), true);
+});
+
+test("the done mark is wired: stamp on open, mark on the row, held stamps in the index", () => {
+  const store = read("src/lib/store.tsx");
+  const select = store.slice(store.indexOf("const selectSession"), store.indexOf("const setComposerDraft"));
+  assert.match(select, /viewedAt: now/, "opening a chat stamps the look");
+  const row = read("src/ui/ChatRow.tsx");
+  assert.match(row, /hasUnviewedFinish\(session, desk\.activeSessionId\)/);
+  assert.match(row, /className="done-dot"/);
+  assert.match(read("src/lib/sidebar-index.ts"), /chatSortStamp\(session\)/);
 });

@@ -48,8 +48,11 @@ export function shouldLoadEarlierWindow(input: {
   atBottom: boolean;
   turnsAboveViewport: number;
   lookahead: number;
+  scrollTop?: number;
+  leadPx?: number;
 }): boolean {
   if (!input.hasEarlier || input.loading || input.atBottom) return false;
+  if (input.scrollTop != null && input.leadPx != null && input.scrollTop <= input.leadPx) return true;
   return input.turnsAboveViewport < input.lookahead;
 }
 
@@ -61,4 +64,70 @@ export function keepScrollThroughPrepend(
   if (previousHeight <= 0) return;
   const grown = el.scrollHeight - previousHeight;
   if (grown > 0) el.scrollTop += grown;
+}
+
+export type ScrollAnchor = { id: string; top: number };
+
+/** The first painted turn that intersects or sits below the viewport top. */
+export function captureScrollAnchor(
+  turns: Array<{ id: string; top: number; bottom: number }>,
+  viewportTop: number,
+): ScrollAnchor | null {
+  if (turns.length === 0) return null;
+  for (const turn of turns) {
+    if (turn.bottom > viewportTop) return { id: turn.id, top: turn.top };
+  }
+  const last = turns[turns.length - 1];
+  return { id: last.id, top: last.top };
+}
+
+/**
+ * Put the anchored turn back at the same screen Y after older turns (or
+ * late markdown/images) change height above it. Returns false when there
+ * is no matching turn so a height-delta fallback can run.
+ */
+export function keepViewportOnAnchor(
+  el: { scrollTop: number },
+  turns: Array<{ id: string; top: number }>,
+  anchor: ScrollAnchor | null,
+): boolean {
+  if (!anchor) return false;
+  const current = turns.find((turn) => turn.id === anchor.id);
+  if (!current) return false;
+  const delta = current.top - anchor.top;
+  if (delta !== 0) el.scrollTop += delta;
+  return true;
+}
+
+/**
+ * The turn the user is looking at, plus how far its top sits from the
+ * scroller's scrollTop. Re-applying that shift puts the same pixels back
+ * on screen after older history or late images change height.
+ */
+export type ViewportLock = { id: string; shift: number };
+
+export function captureViewportLock(
+  scrollTop: number,
+  turns: Array<{ id: string; offsetTop: number; height: number }>,
+): ViewportLock | null {
+  if (turns.length === 0) return null;
+  let chosen = turns[0];
+  for (const turn of turns) {
+    if (turn.offsetTop + turn.height > scrollTop) {
+      chosen = turn;
+      break;
+    }
+    chosen = turn;
+  }
+  return { id: chosen.id, shift: chosen.offsetTop - scrollTop };
+}
+
+export function restoreViewportLock(
+  el: { scrollTop: number },
+  turn: { offsetTop: number } | undefined,
+  lock: ViewportLock | null,
+): boolean {
+  if (!lock || !turn) return false;
+  el.scrollTop = turn.offsetTop - lock.shift;
+  return true;
 }

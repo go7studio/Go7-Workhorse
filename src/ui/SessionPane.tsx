@@ -14,6 +14,7 @@ import {
   recentTranscriptText,
   nextTranscriptPaintStart,
   scheduleAfterPaint,
+  TRANSCRIPT_LEAD_PX,
   TRANSCRIPT_LOOKAHEAD,
   TRANSCRIPT_PAINT_CHUNK,
   transcriptPaintStart,
@@ -42,7 +43,6 @@ import { pinNoticesDock } from "../lib/session-dock";
 import {
   countTurnsAboveViewport,
   followLatestTurn,
-  keepScrollThroughPrepend,
   pinnedToLatest,
   pinToLatest,
   shouldLoadEarlierWindow,
@@ -51,11 +51,15 @@ import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
+function followLatestClass(el: HTMLElement, following: boolean) {
+  el.classList.toggle("follow-latest", following);
+}
+
 const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
   if (isDeskNotice(block.message)) return null;
   if (block.message.text === LINEUP_FINISHED_NOTICE) {
     return (
-      <article className="turn crew-done" aria-label={LINEUP_FINISHED_NOTICE}>
+      <article className="turn crew-done" data-turn-id={block.message.id} aria-label={LINEUP_FINISHED_NOTICE}>
         <div className="crew-done-card">
           <strong>{LINEUP_FINISHED_NOTICE}</strong>
         </div>
@@ -63,7 +67,7 @@ const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<Transcri
     );
   }
   return (
-    <article className="turn system chat">
+    <article className="turn system chat" data-turn-id={block.message.id}>
       <div className="say"><MessageBody text={block.message.text} /></div>
     </article>
   );
@@ -101,7 +105,7 @@ const AssistantTurn = memo(function AssistantTurn({
     settings.llms,
   );
   return (
-    <article className={`turn assistant reply${live ? " live" : ""}`}>
+    <article className={`turn assistant reply${live ? " live" : ""}`} data-turn-id={block.assistant.id}>
       <div className="turn-who">
         <span className={`dot ${who.provider}`} style={who.color ? { background: who.color } : undefined} aria-hidden="true" />
         {who.name}
@@ -150,7 +154,6 @@ export function SessionPane() {
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const userMoved = useRef(false);
-  const lastHeight = useRef(0);
   const filling = useRef(false);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
@@ -273,15 +276,13 @@ export function SessionPane() {
   useEffect(() => {
     followBottom.current = true;
     userMoved.current = false;
-    lastHeight.current = 0;
   }, [session?.id]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    followLatestClass(el, followBottom.current);
     if (followBottom.current) pinToLatest(el);
-    else keepScrollThroughPrepend(el, lastHeight.current);
-    lastHeight.current = el.scrollHeight;
     filling.current = false;
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
@@ -432,7 +433,7 @@ export function SessionPane() {
         </div>
       </header>
       <div
-        className="transcript"
+        className="transcript follow-latest"
         ref={scroller}
         onWheel={() => {
           userMoved.current = true;
@@ -449,7 +450,11 @@ export function SessionPane() {
             atBottom,
             userInitiated: userMoved.current,
           });
-          if (followBottom.current) userMoved.current = false;
+          followLatestClass(el, followBottom.current);
+          if (followBottom.current) {
+            userMoved.current = false;
+            return;
+          }
           const from = paint.id === sessionId ? paint.from : 0;
           const content = stack.current;
           if (!content || filling.current || from <= 0) return;
@@ -466,6 +471,8 @@ export function SessionPane() {
               atBottom,
               turnsAboveViewport: above,
               lookahead: TRANSCRIPT_LOOKAHEAD,
+              scrollTop: el.scrollTop,
+              leadPx: TRANSCRIPT_LEAD_PX,
             })
           ) {
             filling.current = true;

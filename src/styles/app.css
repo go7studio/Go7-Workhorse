@@ -1650,6 +1650,10 @@ html.pane-dragging * {
   overflow-y: auto;
   padding: 28px 22px 20px;
   overscroll-behavior: contain;
+  overflow-anchor: auto;
+}
+
+.transcript.follow-latest {
   overflow-anchor: none;
 }
 
@@ -1665,6 +1669,9 @@ html.pane-dragging * {
   max-width: none;
   width: 100%;
   margin: 0 0 18px;
+}
+
+.turn.live {
   animation: rise 280ms var(--ease);
 }
 

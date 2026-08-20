@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
-import { defaultModel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsFor, withEffort } from "../lib/models";
+import { cursorFamilyId } from "../lib/cursor-catalog";
+import { defaultModel, effortStopAt, effortStopPos, effortsFor, findModel, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
@@ -171,7 +172,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div>
             <strong>Model</strong>
           </div>
-          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(modelsFor(session.provider).find((model) => model.id === session.model)?.contextWindow ?? 0)} context</span>
+          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(findModel(session.provider, session.model)?.contextWindow ?? 0)} context</span>
         </div>
 
         <div className="setup-subgroup">
@@ -265,8 +266,10 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="setup-effort setup-models" role="listbox" aria-label="Model">
-              {modelsFor(session.provider).map((model) => {
-                const on = session.model === model.id;
+              {modelsForPicker(session.provider).map((model) => {
+                const on =
+                  session.model === model.id ||
+                  (session.provider === "cursor" && cursorFamilyId(session.model) === model.id);
                 return (
                   <button
                     key={model.id}

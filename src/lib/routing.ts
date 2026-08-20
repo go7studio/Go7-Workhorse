@@ -10,8 +10,9 @@ import type {
   Settings,
 } from "./types";
 import { customBotEnabled, customBotModels } from "./custom-bots";
-import { modelsFor, withEffort } from "./models";
+import { cursorFamilyId } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
+import { modelsFor, withEffort } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export type RoutingCapacity = {
@@ -156,24 +157,37 @@ function profile(
   };
 }
 
-/** Honest defaults. Custom bot settings may override every field. */
+/** Honest defaults. Family intelligence/speed/cost live only here. */
 export function routingProfileForModel(
   provider: ProviderId,
   model: string,
   override?: Partial<ModelRoutingProfile>,
 ): ModelRoutingProfile {
   const slug = model.trim().toLowerCase();
+  const lightMini = (slug.includes("mini") && !slug.includes("minimax")) || slug.includes("nano");
   let base: ModelRoutingProfile;
-  if (slug.includes("5.6-sol") || slug.includes("opus") || slug.includes("grok-4.6")) {
+  if (slug.includes("5.6-sol") || slug.includes("opus") || slug.includes("fable") || slug.includes("grok-4.6")) {
     base = profile(5, 2, 5);
   } else if (slug.includes("5.6-terra") || slug.includes("sonnet") || slug.includes("grok-4.5")) {
     base = profile(4, 4, 3);
-  } else if (slug.includes("5.6-luna") || slug.includes("haiku") || slug.includes("mini")) {
+  } else if (slug.includes("5.6-luna") || slug.includes("haiku") || lightMini) {
     base = profile(3, 5, 1);
   } else if (slug.includes("minimax-m3")) {
     base = profile(4, 4, 2);
   } else if (slug.includes("minimax") || slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(3, 4, 1, { local: slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio") });
+  } else if (slug.includes("composer")) {
+    base = profile(4, 4, 2);
+  } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
+    base = profile(4, 5, 2);
+  } else if (slug.includes("gemini")) {
+    base = profile(3, 5, 2);
+  } else if (slug.includes("kimi")) {
+    base = profile(4, 3, 2);
+  } else if (slug.includes("glm")) {
+    base = profile(4, 3, 2);
+  } else if (/gpt-5\.[1-5]/.test(slug) || slug.includes("gpt-5.3")) {
+    base = profile(4, 4, 3);
   } else {
     base = profile(provider === "custom" ? 3 : 4, 3, 3);
   }
@@ -338,6 +352,15 @@ export function reservePenaltyWeight(resetMs: number | undefined): number {
   return (resetMs - MS_DAY) / (6 * MS_DAY);
 }
 
+function sameRoutingIdentity(
+  current: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+  candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+): boolean {
+  if (current.provider !== candidate.provider || current.customBotId !== candidate.customBotId) return false;
+  if (current.provider === "cursor") return cursorFamilyId(current.model) === cursorFamilyId(candidate.model);
+  return current.model === candidate.model;
+}
+
 function supports(profile: ModelRoutingProfile, required: Partial<ModelInputCapabilities>): boolean {
   return Object.entries(required).every(([key, needed]) => !needed || profile.inputs[key as keyof ModelInputCapabilities]);
 }
@@ -370,12 +393,7 @@ export function rankRoutingCandidates(
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);
     score -= candidate.profile.cost * (tier === "quick" ? 5 : tier === "balanced" ? 3 : 1);
     if (candidate.profile.local) score += tier === "deep" ? 1 : 8;
-    if (
-      request.current &&
-      request.current.provider === candidate.provider &&
-      request.current.model === candidate.model &&
-      request.current.customBotId === candidate.customBotId
-    ) {
+    if (request.current && sameRoutingIdentity(request.current, candidate)) {
       score += 4;
     }
     const draw = weeklyDrawState(candidate.capacity, request.now);

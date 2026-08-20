@@ -372,6 +372,11 @@ export type AdaptiveCandidate = {
   usedPercent?: number;
 };
 
+/**
+ * Ephemeral compiler pick for Learning, not desk Auto. Desk Auto and spawn
+ * use rankRoutingCandidates in routing.ts. This scorer stays here because the
+ * compiler must be an ephemeral HTTP slot, not a vendor ACP chat.
+ */
 export function selectAdaptiveRoute(input: {
   candidates: AdaptiveCandidate[];
   explicit?: { provider?: ProviderId; model?: string; customBotId?: string; effort?: EffortLevel | null };

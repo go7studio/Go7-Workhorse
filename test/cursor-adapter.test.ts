@@ -13,6 +13,7 @@ import { usageProviderForSession, leftoverForCard, byProvider, cursorLaneEvents 
 import { cursorUsageLane, cursorWatchLane, isCursorInnerTask } from "../src/lib/cursor-lane";
 import { asProviderId, normalizeSession } from "../src/lib/session";
 import { vendorSendTarget, vendorFailedMessage, previewOnlyReply } from "../src/lib/vendor-bridge";
+import { resetCursorBases } from "../src/lib/cursor-catalog";
 import { applyVendorCatalog, defaultModel, modelName, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { commandsForSession, vendorSkillOrigin } from "../src/lib/commands";
 import { catalogSkills, skillHomes } from "../src/lib/skills-catalog";
@@ -166,6 +167,7 @@ test("vendorFailedMessage prefixes Cursor, never Preview only", () => {
 });
 
 test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
+  resetCursorBases();
   const spec = buildCursorLaunchSpec({
     model: "composer-2.5",
     effort: "medium",

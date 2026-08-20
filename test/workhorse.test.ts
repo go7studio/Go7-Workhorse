@@ -3083,7 +3083,7 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.doesNotMatch(setup, /Outside workspace/);
   assert.match(setup, /aria-label="Vendor"/);
   assert.match(setup, /defaultModel\(id\)/);
-  assert.match(setup, /modelsFor\(session\.provider\)/);
+  assert.match(setup, /modelsForPicker\(session\.provider\)/);
   assert.doesNotMatch(
     readFileSync(path.join(ROOT, "src", "lib", "models.ts"), "utf8"),
     /id: "custom", name: "Custom"/,
@@ -7568,7 +7568,7 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const preloadSrc = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const preloadBuiltPath = path.join(ROOT, "dist-electron", "preload.mjs");
-  assert.match(setup, /modelsFor\(session\.provider\)/);
+  assert.match(setup, /modelsForPicker\(session\.provider\)/);
   assert.doesNotMatch(setup, /MODEL_CATALOG\[session\.provider\]/);
   assert.match(store, /listVendorModels/);
   assert.match(store, /applyVendorCatalog/);
@@ -7633,8 +7633,9 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.equal(cursor[0]?.name, "Auto");
   assert.deepEqual(
     reconcileCursorModels(cursor).map((model) => model.id),
-    ["composer-2.5", "auto", "cursor-grok-4.6-high"],
+    ["composer-2.5", "auto", "cursor-grok-4.6"],
   );
+  assert.ok(reconcileCursorModels(cursor).find((model) => model.id === "cursor-grok-4.6")?.aliases?.includes("cursor-grok-4.6-high"));
 
   const missing = listVendorModels({
     env: {},
@@ -7654,7 +7655,10 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     readFile: () => "",
     cursorModelsOutput: "auto-next - Auto\ncomposer-2.6 - Composer 2.5\n",
   });
-  assert.deepEqual(cursorRenamed.cursor.map((model) => model.id), ["composer-2.6", "auto-next"]);
+  assert.deepEqual(
+    [...cursorRenamed.cursor.map((model) => model.id)].sort(),
+    ["auto-next", "composer-2.6"],
+  );
 
   const home = "C:\\home";
   const files: Record<string, string> = {

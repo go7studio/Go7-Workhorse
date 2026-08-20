@@ -7,6 +7,7 @@ import {
   type GrokLaunchSpec,
 } from "./grok-launch";
 import { sessionRulesFor, type DeskRole } from "../src/lib/workhorse-rules";
+import { cursorSlugForEffort } from "../src/lib/cursor-catalog";
 import { normalizeModelId } from "../src/lib/models";
 import {
   detectCursorLogin,
@@ -31,9 +32,13 @@ export type CursorLaunchInput = {
 
 const DEFAULT_MODEL = "composer-2.5";
 
-export function resolveCursorModel(model: string | null | undefined): string {
+export function resolveCursorModel(
+  model: string | null | undefined,
+  effort?: EffortLevel | string | null,
+): string {
   const trimmed = model?.trim();
-  return normalizeModelId("cursor", trimmed || DEFAULT_MODEL);
+  const normalized = normalizeModelId("cursor", trimmed || DEFAULT_MODEL);
+  return cursorSlugForEffort(normalized, effort ?? null);
 }
 
 export function resolveCursorEffort(effort: EffortLevel | string | null | undefined): string {
@@ -62,8 +67,8 @@ export function buildCursorLaunchSpec(input: CursorLaunchInput): GrokLaunchSpec 
   const detected = detectCursorLogin(input.detect);
   let command = detected.binary ?? "";
   if (command && (isCursorAppCommand(command) || isGrokCommand(command))) command = "";
-  const model = resolveCursorModel(input.model);
   const effort = resolveCursorEffort(input.effort);
+  const model = resolveCursorModel(input.model, effort);
   const permissionMode = resolveCursorPermissionMode(input.mode);
   const argv = [...detected.prefixArgs, "--model", model, "acp"];
   const builtIn = workhorseMcpServer(input.sessionId);

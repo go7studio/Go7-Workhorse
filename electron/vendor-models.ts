@@ -13,7 +13,10 @@ import {
   type ReasoningLevel,
 } from "../src/lib/models";
 import type { ProviderId } from "../src/lib/types";
+import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary } from "./cursor-login";
+
+export { parseCursorModelsOutput };
 
 export type VendorModelListInput = {
   env?: NodeJS.Dict<string>;
@@ -27,47 +30,9 @@ export type VendorModelLists = Record<ProviderId, ModelInfo[]>;
 
 const GROK_LOCAL_ALIASES = new Set(["grok-build"]);
 
-function cursorModelName(value: string): string {
-  return value
-    .replace(/\s+\((?:default|current)\)\s*$/i, "")
-    .trim();
-}
-
-export function parseCursorModelsOutput(raw: string): ModelInfo[] {
-  const models: ModelInfo[] = [];
-  const seen = new Set<string>();
-  for (const line of raw.split(/\r?\n/)) {
-    const match = line.trim().match(/^(\S+)\s+-\s+(.+)$/);
-    const id = match?.[1]?.trim() ?? "";
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    models.push({
-      id,
-      name: cursorModelName(match?.[2] ?? id),
-      effort: true,
-      contextWindow: 200_000,
-    });
-  }
-  return models;
-}
-
-function cursorFamilyName(value: string): string {
-  return cursorModelName(value).replace(/\s+\(Cursor\)\s*$/i, "").trim().toLowerCase();
-}
-
+/** Live Cursor ids overlay the catalog as family bases. Empty live still falls back to stock. */
 export function reconcileCursorModels(live: ModelInfo[]): ModelInfo[] {
-  if (live.length === 0) return MODEL_CATALOG.cursor;
-  const rows: ModelInfo[] = [];
-  const seen = new Set<string>();
-  for (const stock of MODEL_CATALOG.cursor) {
-    const match =
-      live.find((model) => model.id === stock.id) ??
-      live.find((model) => cursorFamilyName(model.name) === cursorFamilyName(stock.name));
-    if (!match || seen.has(match.id)) continue;
-    seen.add(match.id);
-    rows.push({ ...stock, id: match.id });
-  }
-  return rows.length > 0 ? rows : MODEL_CATALOG.cursor;
+  return collapseCursorLive(live, MODEL_CATALOG.cursor);
 }
 
 function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {

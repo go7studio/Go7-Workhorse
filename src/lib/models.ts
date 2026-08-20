@@ -1,3 +1,4 @@
+import { cursorFamilyId } from "./cursor-catalog";
 import type { EffortLevel, ProviderId, SandboxProfile } from "./types";
 
 export type ReasoningLevel = {
@@ -12,6 +13,8 @@ export type ModelInfo = {
   effort: boolean;
   contextWindow: number;
   reasoningLevels?: ReasoningLevel[];
+  /** Other vendor ids that are this same family (effort/fast spellings). */
+  aliases?: string[];
 };
 
 export type ModelChoice = {
@@ -175,11 +178,47 @@ export const DEFAULT_CHOICE: ModelChoice = {
   mode: "ask",
 };
 
-export function findModel(provider: ProviderId, modelId: string): ModelInfo | undefined {
+function rowMatches(item: ModelInfo, modelId: string, canonicalId: string): boolean {
   return (
-    modelsFor(provider).find((item) => item.id === modelId) ??
-    MODEL_CATALOG[provider].find((item) => item.id === modelId)
+    item.id === modelId ||
+    item.id === canonicalId ||
+    item.aliases?.includes(modelId) === true ||
+    item.aliases?.includes(canonicalId) === true
   );
+}
+
+export function findModel(provider: ProviderId, modelId: string): ModelInfo | undefined {
+  const canonicalId = normalizeModelId(provider, modelId);
+  return (
+    modelsFor(provider).find((item) => rowMatches(item, modelId, canonicalId)) ??
+    MODEL_CATALOG[provider].find((item) => rowMatches(item, modelId, canonicalId))
+  );
+}
+
+/**
+ * Chips on the chat card. Cursor shows a short subset of the same catalog
+ * rows Auto ranks — not 204 effort spellings, and not a parallel stock list.
+ */
+const CURSOR_PICKER_FAMILIES = ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"];
+
+export function modelsForPicker(provider: ProviderId): ModelInfo[] {
+  const rows = modelsFor(provider);
+  if (provider !== "cursor") return rows;
+  const picked: ModelInfo[] = [];
+  const seen = new Set<string>();
+  const take = (row: ModelInfo | undefined) => {
+    if (!row || seen.has(row.id)) return;
+    seen.add(row.id);
+    picked.push(row);
+  };
+  for (const family of CURSOR_PICKER_FAMILIES) {
+    take(rows.find((row) => row.id === family || cursorFamilyId(row.id) === family));
+  }
+  for (const stock of MODEL_CATALOG.cursor) {
+    const family = cursorFamilyId(stock.id);
+    take(rows.find((row) => row.id === family || row.id === stock.id));
+  }
+  return picked.length > 0 ? picked : rows.slice(0, 4);
 }
 
 export function modelName(provider: ProviderId, modelId: string): string {

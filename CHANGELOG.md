@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.10](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.9...v0.6.10) (2026-08-20)
+
+
+### Features
+
+* group Add Bot presets by billing and add Vercel, Kimi Code, and Gemini ([36c7e24](https://github.com/go7studio/Go7-Workhorse/commit/36c7e24cb3f5feefde2c6628dc315c00537b0471))
+
+
+### Bug Fixes
+
+* a hand-fired release must still stamp channel=release ([387b3ad](https://github.com/go7studio/Go7-Workhorse/commit/387b3ad5fe63f1cf38eabcf7f8d6c0f675ed4182))
+* persist spawned workers, and salvage the usable half of three branches ([8419ba4](https://github.com/go7studio/Go7-Workhorse/commit/8419ba4b4cc5b44c324c41ca07b7c13ca195fb09))
+* **run:** hold a verify reserve, reset reused budgets, record takeover ([aa8cfbb](https://github.com/go7studio/Go7-Workhorse/commit/aa8cfbb4cdd5902e31207718629a4b43c6b91f2e))
+
 ## [0.6.9](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.8...v0.6.9) (2026-08-19)
 
 

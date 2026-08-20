@@ -113,6 +113,12 @@ export function cursorFamilyId(modelId: string): string {
   return parseCursorVariant(modelId).family;
 }
 
+/** Cursor Auto is a named chat pick. Workhorse Auto must not hand the job back to it. */
+export function isCursorAutoModel(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  return id === "auto" || id === "auto-smart" || cursorFamilyId(id) === "auto";
+}
+
 function cursorModelName(value: string): string {
   return value.replace(/\s+\((?:default|current)\)\s*$/i, "").trim();
 }

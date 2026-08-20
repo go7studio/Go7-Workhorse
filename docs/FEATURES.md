@@ -176,11 +176,12 @@ transcript rather than as a path.
   CLI finishes. Stop reaches the live process; restart marks uncertain work
   unknown instead of complete.
 - **Routing** — your own chat keeps the model you picked until you set it to
-  **Auto**; Auto picks the bot and effort for each message. The desk routes
-  the work it hands out on its own: when a chat spawns a worker without naming
-  a bot, the desk picks the bot and effort for the slice, and a named bot is
-  used as named. Settings → Routing turns that off, and tunes how any routing
-  weighs leftover, reserve, and local models.
+  **Auto**; Auto picks the bot and effort for each message. Auto does not pick
+  Cursor Auto; that stays a named chat pick. The desk routes the work it
+  hands out on its own: when a chat spawns a worker without naming a bot, the
+  desk picks the bot and effort for the slice, and a named bot is used as
+  named. Settings → Routing turns that off, and tunes how any routing weighs
+  leftover, reserve, and local models.
 
 ## Memory
 

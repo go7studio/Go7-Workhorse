@@ -75,6 +75,7 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
   const color =
     typeof record.color === "string" && /^#[0-9a-f]{6}$/i.test(record.color) ? record.color : BOT_COLORS[0].value;
   const routingProfile = normalizeRoutingProfile(record.routingProfile);
+  const routingProfiles = normalizeRoutingProfiles(record.routingProfiles);
   // The bot's own model always leads the list, so a connection saved before
   // models were listed keeps offering exactly what it always did.
   const listed = normalizeCustomModelList(record.models);
@@ -96,7 +97,30 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
     ...(models ? { models } : {}),
     ...(discovered ? { discovered } : {}),
     ...(routingProfile ? { routingProfile } : {}),
+    ...(routingProfiles ? { routingProfiles } : {}),
   };
+}
+
+function normalizeRoutingProfiles(raw: unknown): Record<string, Partial<ModelRoutingProfile>> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const next: Record<string, Partial<ModelRoutingProfile>> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = key.trim();
+    const profile = normalizeRoutingProfile(value);
+    if (!id || !profile) continue;
+    next[id] = profile;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/** Family score unless this approved id has its own override. Connection role is only the default model. */
+export function customModelRoutingOverride(
+  bot: Pick<CustomBot, "model" | "routingProfile" | "routingProfiles">,
+  modelId: string,
+): Partial<ModelRoutingProfile> | undefined {
+  const id = modelId.trim();
+  if (!id) return undefined;
+  return bot.routingProfiles?.[id] ?? (id === bot.model.trim() ? bot.routingProfile : undefined);
 }
 
 export function normalizeCustomBots(raw: unknown, fallback?: CustomLlm): CustomBot[] {

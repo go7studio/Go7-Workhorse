@@ -660,7 +660,10 @@ export type CustomBot = {
   contextWindow: number;
   createdAt: number;
   enabled?: boolean;
+  /** Override for the bot's default `model` only. Other approved ids use the family table. */
   routingProfile?: Partial<ModelRoutingProfile>;
+  /** Per-model overrides. Keyed by approved model id. */
+  routingProfiles?: Record<string, Partial<ModelRoutingProfile>>;
 };
 
 export type RoutingTaskTier = "quick" | "balanced" | "deep";

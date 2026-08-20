@@ -9,8 +9,8 @@ import type {
   RoutingTaskTier,
   Settings,
 } from "./types";
-import { customBotEnabled, customBotModels } from "./custom-bots";
-import { cursorFamilyId } from "./cursor-catalog";
+import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
+import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
 import { modelsFor, withEffort } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
@@ -31,12 +31,28 @@ export type RoutingCandidate = {
   capacity?: RoutingCapacity;
 };
 
+export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
+
+export type RoutingOutcomeTally = {
+  provider: ProviderId;
+  model: string;
+  customBotId?: string;
+  verifiedSuccesses: number;
+  verifiedFailures: number;
+};
+
 export type RoutingRequest = {
   prompt: string;
   attachments?: ChatImage[];
   /** Structured input needs. Never inferred from prompt words. */
   requirements?: Partial<ModelInputCapabilities>;
+  /** Explicit spawn route=. Wins over inference. */
   tier?: RoutingTaskTier;
+  /** Running-plan continue: keep the parent-asked tier. */
+  parentTier?: RoutingTaskTier;
+  role?: RoutingJobRole;
+  /** Verified worker success/fail already on the desk. Small rank weight. */
+  outcomes?: RoutingOutcomeTally[];
   now?: number;
   current?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
   exclude?: string[];
@@ -82,6 +98,7 @@ export function routingCandidatesForDesk(
     const capacity = status.get(provider === "cursor" ? "cursor:cursor-models" : provider);
     const plan = plans[provider];
     for (const model of modelsFor(provider)) {
+      if (provider === "cursor" && isCursorAutoModel(model.id)) continue;
       const slug = model.id.toLowerCase();
       const identityParts = slug
         .split("-")
@@ -117,7 +134,7 @@ export function routingCandidatesForDesk(
         label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
         customBotId: bot.id,
         connected: !capacity?.holding,
-        profile: routingProfileForModel("custom", model, bot.routingProfile),
+        profile: routingProfileForModel("custom", model, customModelRoutingOverride(bot, model)),
         capacity: {
           usedPercent: product?.usagePercent ?? capacity?.usedPercent,
           resetsAt: product?.resetsAt ?? capacity?.resetsAt,
@@ -176,7 +193,7 @@ export function routingProfileForModel(
     base = profile(4, 4, 2);
   } else if (slug.includes("minimax") || slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(3, 4, 1, { local: slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio") });
-  } else if (slug.includes("composer")) {
+  } else if (slug.includes("composer") || slug.includes("grok-build")) {
     base = profile(4, 4, 2);
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
     base = profile(4, 5, 2);
@@ -252,12 +269,26 @@ export function describeRoutingMiss(
   return "no capable route";
 }
 
-export function inferRoutingTier(prompt: string, attachments: ChatImage[] = []): RoutingTaskTier {
-  const text = prompt.trim().toLowerCase();
-  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent)\b/.test(text);
-  const quick = text.length < 180 && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(text);
+export function inferRoutingTier(
+  prompt: string,
+  attachments: ChatImage[] = [],
+  extras?: { role?: RoutingJobRole; parentTier?: RoutingTaskTier },
+): RoutingTaskTier {
+  if (extras?.parentTier === "quick" || extras?.parentTier === "balanced" || extras?.parentTier === "deep") {
+    return extras.parentTier;
+  }
+  if (extras?.role === "auditor") return "deep";
+  const text = prompt.trim();
+  const lower = text.toLowerCase();
+  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent)\b/.test(lower);
+  const quick = text.length < 180 && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
-  if (deep || (media && text.length > 240)) return "deep";
+  const long = text.length > 1200;
+  if (extras?.role === "builder" || extras?.role === "worker") {
+    if (deep || long || (media && text.length > 240)) return "deep";
+    return "balanced";
+  }
+  if (deep || long || (media && text.length > 240)) return "deep";
   if (quick && !media) return "quick";
   return "balanced";
 }
@@ -371,12 +402,60 @@ function requiredIntelligence(tier: RoutingTaskTier): number {
   return 4;
 }
 
+export function outcomesFromAgentRuns(
+  rows: Array<{
+    provider: ProviderId;
+    model: string;
+    customBotId?: string;
+    agentRun?: { status?: string };
+  }>,
+): RoutingOutcomeTally[] {
+  const map = new Map<string, RoutingOutcomeTally>();
+  for (const row of rows) {
+    const status = row.agentRun?.status;
+    if (status !== "completed" && status !== "failed") continue;
+    const key = `${row.provider}\0${row.model}\0${row.customBotId ?? ""}`;
+    const current = map.get(key) ?? {
+      provider: row.provider,
+      model: row.model,
+      customBotId: row.customBotId,
+      verifiedSuccesses: 0,
+      verifiedFailures: 0,
+    };
+    if (status === "completed") current.verifiedSuccesses += 1;
+    else current.verifiedFailures += 1;
+    map.set(key, current);
+  }
+  return [...map.values()];
+}
+
+function outcomeFor(
+  candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+  outcomes: RoutingOutcomeTally[] = [],
+): RoutingOutcomeTally | undefined {
+  return outcomes.find(
+    (row) =>
+      row.provider === candidate.provider &&
+      row.customBotId === candidate.customBotId &&
+      (row.model === candidate.model ||
+        (candidate.provider === "cursor" && cursorFamilyId(row.model) === cursorFamilyId(candidate.model))),
+  );
+}
+
+/** Small desk-memory tilt. Leftover still splits two families that both fit. */
+function outcomeTilt(tally: RoutingOutcomeTally | undefined): number {
+  if (!tally) return 0;
+  return clamp((tally.verifiedSuccesses - tally.verifiedFailures) * 1.5, -8, 8);
+}
+
 export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
   settings: RoutingSettings,
 ): RankedRoutingCandidate[] {
-  const tier = request.tier ?? inferRoutingTier(request.prompt, request.attachments);
+  const tier =
+    request.tier ??
+    inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
   const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
   const ranked: RankedRoutingCandidate[] = [];
@@ -396,6 +475,7 @@ export function rankRoutingCandidates(
     if (request.current && sameRoutingIdentity(request.current, candidate)) {
       score += 4;
     }
+    score += outcomeTilt(outcomeFor(candidate, request.outcomes));
     const draw = weeklyDrawState(candidate.capacity, request.now);
     if (settings.capacityAware && draw.usedPercent !== undefined && draw.delta !== undefined) {
       // Cap the capacity term so it does not outvote fit on deep work where
@@ -428,7 +508,9 @@ export function chooseRoutingDecision(
   request: RoutingRequest,
   settings: RoutingSettings,
 ): RoutingDecision | null {
-  const taskTier = request.tier ?? inferRoutingTier(request.prompt, request.attachments);
+  const taskTier =
+    request.tier ??
+    inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
   const winner = rankRoutingCandidates(candidates, { ...request, tier: taskTier }, settings)[0];
   if (!winner) return null;
   const draw = weeklyDrawState(winner.capacity, request.now);

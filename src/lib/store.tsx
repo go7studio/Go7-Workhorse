@@ -123,7 +123,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
+import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, outcomesFromAgentRuns, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
 import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
@@ -1990,6 +1990,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         {
           prompt: originalText,
           attachments: images,
+          parentTier: hideUser ? session.routingDecision?.taskTier : undefined,
+          outcomes: outcomesFromAgentRuns(current.sessions),
           current: {
             provider: session.provider,
             model: session.model,
@@ -4321,10 +4323,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
+            const spawnRole =
+              payload.role === "auditor" ? "auditor" as const : routeSpawn && !isNested ? "worker" as const : undefined;
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
               tier: routeTier ?? (isNested ? "quick" as const : undefined),
+              role: spawnRole,
+              parentTier: caller.routingDecision?.taskTier,
+              outcomes: outcomesFromAgentRuns(latest.sessions),
               exclude: effectiveExclusions,
             };
             const routeCandidates = routeSpawn
@@ -4341,7 +4348,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const spawnProvider = routeDecision?.provider ?? payload.provider;
             const spawnModel = routeDecision?.model ?? payload.model;
-            const selectedTier = routeDecision?.taskTier ?? routeTier ?? inferRoutingTier(payload.message, payload.attachments);
+            const selectedTier =
+              routeDecision?.taskTier ??
+              routeTier ??
+              inferRoutingTier(payload.message, payload.attachments, {
+                role: spawnRole,
+                parentTier: caller.routingDecision?.taskTier,
+              });
             const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))

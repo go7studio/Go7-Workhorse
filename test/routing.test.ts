@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   attachmentRequirements,
@@ -10,13 +10,17 @@ import {
   effortForRoutingTier,
   inferRoutingTier,
   mergeInputRequirements,
+  outcomesFromAgentRuns,
   rankRoutingCandidates,
+  routingCandidatesForDesk,
   routingIdentityExcluded,
   routingProfileForModel,
   shouldRouteSessionTurn,
   weeklyDrawState,
   type RoutingCandidate,
 } from "../src/lib/routing";
+import { applyVendorCatalog, modelsFor, resetVendorCatalog } from "../src/lib/models";
+import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
 import { resolveSpawnSpec } from "../src/lib/subagents";
 
@@ -273,6 +277,161 @@ test("no capable route is null with reasons, not a silent fallback winner", () =
   assert.equal(chooseRoutingDecision([textOnly], request, settings), null);
   assert.match(describeRoutingMiss([textOnly], request, settings), /images/);
 });
+
+afterEach(() => {
+  resetVendorCatalog();
+});
+
+test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, Composer, Gemini", () => {
+  const triple = (provider: "grok" | "claude" | "codex" | "cursor" | "custom", model: string) => {
+    const profile = routingProfileForModel(provider, model);
+    return [profile.intelligence, profile.speed, profile.cost] as const;
+  };
+  assert.notDeepEqual(triple("grok", "grok-build"), [4, 3, 3]);
+  assert.deepEqual(triple("claude", "claude-fable-5"), [5, 2, 5]);
+  assert.notDeepEqual(triple("codex", "gpt-5.5"), [4, 3, 3]);
+  assert.notDeepEqual(triple("codex", "gpt-5.4"), [4, 3, 3]);
+  assert.notDeepEqual(triple("codex", "gpt-5.3-codex"), [4, 3, 3]);
+  assert.notDeepEqual(triple("custom", "hf:moonshotai/Kimi-K3"), [3, 3, 3]);
+  assert.notDeepEqual(triple("custom", "hf:zai-org/GLM-5.2"), [3, 3, 3]);
+  assert.notDeepEqual(triple("custom", "MiniMax-M3"), [3, 3, 3]);
+  assert.notDeepEqual(triple("cursor", "composer-2.5"), [4, 3, 3]);
+  assert.deepEqual(triple("cursor", "gemini-3.1-pro"), [3, 5, 2]);
+  assert.deepEqual(triple("cursor", "gpt-5.4-mini"), [3, 5, 1]);
+});
+
+test("two approved models on one bot inherit family scores unless that model is overridden", () => {
+  const desk = normalizeSettings({
+    customBots: [
+      {
+        id: "bot_syn",
+        name: "Synthetic",
+        color: "#bf5af2",
+        baseUrl: "https://api.synthetic.new/openai/v1",
+        model: "hf:moonshotai/Kimi-K3",
+        models: ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"],
+        apiKey: "syn_x",
+        api: "openai-completions",
+        contextWindow: 128_000,
+        createdAt: 1,
+        routingProfile: { intelligence: 5, speed: 2, cost: 5 },
+      },
+    ],
+  });
+  const pool = routingCandidatesForDesk(desk);
+  const kimi = pool.find((row) => row.model === "hf:moonshotai/Kimi-K3");
+  const glm = pool.find((row) => row.model === "hf:zai-org/GLM-5.2");
+  assert.equal(kimi?.profile.intelligence, 5);
+  assert.ok(glm);
+  assert.notEqual(glm?.profile.intelligence, 5);
+  assert.notDeepEqual(
+    [glm?.profile.intelligence, glm?.profile.speed, glm?.profile.cost],
+    [3, 3, 3],
+  );
+});
+
+test("spawn route= beats keyword inference; auditor, builder, size, attachments, and parent tier teach the job", () => {
+  assert.equal(inferRoutingTier("Quick: list these names", [], { parentTier: "deep" }), "deep");
+  assert.equal(inferRoutingTier("Architect a production migration", [], { parentTier: "quick" }), "quick");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "auditor" }), "deep");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "builder" }), "balanced");
+  assert.equal(inferRoutingTier("Quick: list these names", [], { role: "worker" }), "balanced");
+  assert.equal(inferRoutingTier("x".repeat(1300)), "deep");
+  assert.equal(
+    inferRoutingTier("Please handle this file", [
+      { id: "doc", name: "spec.pdf", mimeType: "application/pdf", data: "AA==", kind: "document" },
+    ]),
+    "balanced",
+  );
+  const deep = chooseRoutingDecision(
+    [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")],
+    { prompt: "Quick: list these names", tier: "deep" },
+    settings,
+  );
+  assert.equal(deep?.model, "gpt-5.6-sol");
+  const quick = chooseRoutingDecision(
+    [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")],
+    { prompt: "Architect a production migration end-to-end", tier: "quick" },
+    settings,
+  );
+  assert.equal(quick?.model, "gpt-5.6-luna");
+});
+
+test("verified worker outcomes tilt a close fit but leftover still splits two families that both fit", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const spare = candidate("gpt-5.6-terra", 15);
+  const heavy = candidate("gpt-5.5", 85);
+  const leftover = chooseRoutingDecision(
+    [spare, heavy],
+    {
+      prompt: "Implement this form",
+      tier: "balanced",
+      now,
+      outcomes: [
+        { provider: "codex", model: "gpt-5.6-terra", verifiedSuccesses: 0, verifiedFailures: 6 },
+        { provider: "codex", model: "gpt-5.5", verifiedSuccesses: 6, verifiedFailures: 0 },
+      ],
+    },
+    settings,
+  );
+  assert.equal(leftover?.model, "gpt-5.6-terra");
+
+  const closeSpare = candidate("gpt-5.6-terra", 24);
+  const closeHeavy = candidate("gpt-5.5", 28);
+  const tilted = chooseRoutingDecision(
+    [closeSpare, closeHeavy],
+    {
+      prompt: "Implement this form",
+      tier: "balanced",
+      now,
+      outcomes: [
+        { provider: "codex", model: "gpt-5.6-terra", verifiedSuccesses: 0, verifiedFailures: 6 },
+        { provider: "codex", model: "gpt-5.5", verifiedSuccesses: 6, verifiedFailures: 0 },
+      ],
+    },
+    settings,
+  );
+  assert.equal(tilted?.model, "gpt-5.5");
+
+  const tallies = outcomesFromAgentRuns([
+    { provider: "codex", model: "gpt-5.6-terra", agentRun: { status: "failed" } },
+    { provider: "codex", model: "gpt-5.6-terra", agentRun: { status: "failed" } },
+    { provider: "codex", model: "gpt-5.5", agentRun: { status: "completed" } },
+    { provider: "codex", model: "gpt-5.5", agentRun: { status: "running" } },
+  ]);
+  assert.equal(tallies.find((row) => row.model === "gpt-5.6-terra")?.verifiedFailures, 2);
+  assert.equal(tallies.find((row) => row.model === "gpt-5.5")?.verifiedSuccesses, 1);
+});
+
+test("Workhorse Auto omits Cursor Auto from the pool; a named Cursor Auto id stays on the catalog", () => {
+  applyVendorCatalog({
+    cursor: [
+      { id: "auto", name: "Auto (Cursor)", effort: true, contextWindow: 200_000 },
+      { id: "composer-2.5", name: "Composer 2.5", effort: true, contextWindow: 200_000 },
+      { id: "cursor-grok-4.6", name: "Cursor Grok 4.6", effort: true, contextWindow: 200_000 },
+    ],
+  });
+  const desk = normalizeSettings({ llms: { cursor: { connected: true } } });
+  const pool = routingCandidatesForDesk(desk);
+  assert.equal(pool.some((row) => row.model === "auto" || row.model === "auto-smart"), false);
+  assert.ok(pool.some((row) => row.model === "composer-2.5"));
+  assert.ok(modelsFor("cursor").some((row) => row.id === "auto"));
+});
+
+test("Auto chat turns and unnamed spawn call the same ranker; no new Settings tab or New-chat brain picker", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const settingsUi = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const welcome = readFileSync(path.join(ROOT, "src", "ui", "Welcome.tsx"), "utf8");
+  assert.match(store, /routingCandidatesForDesk/);
+  assert.match(store, /chooseRoutingDecision/);
+  assert.match(store, /parentTier: hideUser \? session\.routingDecision\?\.taskTier/);
+  assert.match(store, /outcomesFromAgentRuns/);
+  assert.match(store, /shouldAutoRouteSpawn/);
+  assert.match(settingsUi, /id: "routing"/);
+  assert.doesNotMatch(settingsUi, /id: "models"/);
+  assert.doesNotMatch(welcome, /brain picker|pick a model before/i);
+});
+
 
 test("auto-route spawn fails closed when no candidate qualifies", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");

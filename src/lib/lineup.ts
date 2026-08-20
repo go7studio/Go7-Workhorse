@@ -7,6 +7,29 @@ import { isVendorRateLimitError } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
 
+/**
+ * What the transcript says when a wave ends. "All workers finished" is true of
+ * a clean wave and a lie about every other kind: `lineupIsTerminal` is only
+ * "nothing queued, nothing running", so a wave whose worker was interrupted or
+ * failed reported the same cheerful line. Naming the trouble here is what lets
+ * the chat row say the same word without the two contradicting each other.
+ */
+export function lineupFinishedNotice(lineup: DeskLineup | undefined): string {
+  const rows = lineup?.rows ?? [];
+  if (rows.length === 0) return LINEUP_FINISHED_NOTICE;
+  const count = (status: DeskLineupRowStatus) => rows.filter((row) => row.status === status).length;
+  const failed = count("failed");
+  const timedOut = count("timed-out");
+  const interrupted = count("interrupted");
+  const unknown = count("unknown");
+  if (failed + timedOut + interrupted + unknown === 0) return LINEUP_FINISHED_NOTICE;
+  const say = (n: number, word: string) => (n > 0 ? `${n} ${word}` : "");
+  const parts = [say(failed, "failed"), say(timedOut, "timed out"), say(interrupted, "interrupted"), say(unknown, "unknown")].filter(Boolean);
+  const done = rows.length - failed - timedOut - interrupted - unknown;
+  const head = done > 0 ? `${done} of ${rows.length} workers finished` : `No worker finished`;
+  return `${head} · ${parts.join(", ")}.`;
+}
+
 const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted", "unknown"];
 
 export function emptyLineup(
@@ -561,9 +584,13 @@ export function applyLineupTurnBreak(sessions: Session[], parentId: string, now 
     // One notice per lineup, not per chat: a second lineup in the same chat
     // used to get none because the first one's was still in the transcript.
     const since = session.lineup?.startedAt ?? 0;
+    const notice = lineupFinishedNotice(session.lineup);
     if (
       session.messages.some(
-        (message) => message.role === "system" && message.text === LINEUP_FINISHED_NOTICE && message.createdAt >= since,
+        (message) =>
+          message.role === "system" &&
+          message.createdAt >= since &&
+          (message.text === notice || message.text === LINEUP_FINISHED_NOTICE),
       )
     ) {
       return session;
@@ -575,7 +602,7 @@ export function applyLineupTurnBreak(sessions: Session[], parentId: string, now 
         {
           id: uid("msg"),
           role: "system",
-          text: LINEUP_FINISHED_NOTICE,
+          text: notice,
           createdAt: now,
         },
       ],
@@ -617,4 +644,99 @@ export function nestProjectChats<S extends { id: string; parentId?: string }>(
     }
   }
   return roots.map((chat) => ({ ...chat, workers: workers.get(chat.id) ?? [] }));
+}
+
+/**
+ * One reading of a wave, for every surface that shows it.
+ *
+ * The desk had three answers to "how is this wave going": the row status, the
+ * child session's `status`, and its `agentRun.status`. They disagree in the
+ * live process — a row can read `interrupted` while the child still says
+ * `running`, so a parent painted from the row would say Interrupted next to a
+ * fold saying Working…. That is a bug report, not a feature. Every surface
+ * reads this instead, so they cannot drift.
+ *
+ * A child that is still running wins over its own row: the row is the last
+ * thing written, the session is what is happening now.
+ */
+export type MissionState = {
+  live: number;
+  done: number;
+  failed: number;
+  timedOut: number;
+  interrupted: number;
+  unknown: number;
+  /** True while any worker is still going, whatever the rows say. */
+  running: boolean;
+  /** Working… | Interrupted | 2 failed | undefined when every worker completed. */
+  word?: string;
+  /** Failure earns the danger tone; an unfinished slice does not. */
+  tone?: "danger" | "quiet";
+};
+
+export function missionState(
+  lineup: DeskLineup | undefined,
+  children: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): MissionState | undefined {
+  const rows = lineup?.rows ?? [];
+  if (rows.length === 0) return undefined;
+  const byId = new Map(children.map((child) => [child.id, child]));
+  const counts = { live: 0, done: 0, failed: 0, timedOut: 0, interrupted: 0, unknown: 0 };
+  for (const row of rows) {
+    const child = byId.get(row.childId);
+    const childRuns = child?.status === "running" || child?.agentRun?.status === "running";
+    const status: DeskLineupRowStatus = childRuns ? "running" : row.status;
+    if (status === "queued" || status === "running") counts.live += 1;
+    else if (status === "failed") counts.failed += 1;
+    else if (status === "timed-out") counts.timedOut += 1;
+    else if (status === "interrupted") counts.interrupted += 1;
+    else if (status === "unknown") counts.unknown += 1;
+    else counts.done += 1;
+  }
+  const many = rows.length > 1;
+  let word: string | undefined;
+  let tone: MissionState["tone"];
+  if (counts.live > 0) {
+    word = "Working…";
+  } else if (counts.failed > 0) {
+    word = many ? `${counts.failed} failed` : "Failed";
+    tone = "danger";
+  } else if (counts.timedOut > 0) {
+    word = many ? `${counts.timedOut} timed out` : "Timed out";
+    tone = "danger";
+  } else if (counts.interrupted > 0) {
+    // Unfinished, not broken: it can be picked up again.
+    word = many ? `${counts.interrupted} interrupted` : "Interrupted";
+    tone = "quiet";
+  } else if (counts.unknown > 0) {
+    word = many ? `${counts.unknown} unknown` : "Unknown";
+    tone = "quiet";
+  }
+  return { ...counts, running: counts.live > 0, ...(word ? { word } : {}), ...(tone ? { tone } : {}) };
+}
+
+/** Who drove this wave, as a person reads it. Undefined for the desk's own work. */
+export function missionCaller(lineup: DeskLineup | undefined): string | undefined {
+  if (lineup?.joinOwner !== "external-runtime") return undefined;
+  const origin = lineup.rows.find((row) => row.caller)?.caller;
+  if (origin === "openclaw") return "OpenClaw";
+  if (origin === "hermes") return "Hermes";
+  // A wave from before the caller was recorded, or a client that sent none.
+  return "Harness";
+}
+
+/**
+ * The name a parent chat row should show. A chat's own title is the person's
+ * word for it and is kept. A Link wave was never named by the person — it
+ * lands on whatever chat the caller passed — so it takes the work's own name.
+ * Every row sharing one name means one job; several mean a split wave, and a
+ * count is honest where one slice's name would not be.
+ */
+export function missionTitle(lineup: DeskLineup | undefined): string | undefined {
+  if (lineup?.joinOwner !== "external-runtime") return undefined;
+  const named = lineup.rows.map((row) => row.title.trim()).filter(Boolean);
+  if (named.length === 0) return undefined;
+  const unique = [...new Set(named)];
+  if (unique.length === 1) return unique[0];
+  return `${lineup.rows.length} workers`;
 }

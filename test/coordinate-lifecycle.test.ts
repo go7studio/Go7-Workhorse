@@ -245,7 +245,10 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
 
   const joined = maybeEnqueueLineupJoin(sessions, PARENT_ID, 14);
   const liveParent = joined.find((session) => session.id === PARENT_ID);
-  assert.ok(liveParent?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
+  // One of the three reviewers failed. The transcript says so now instead of
+  // reporting a clean sweep, which is what let the chat row and the chat
+  // disagree about the same wave.
+  assert.ok(liveParent?.messages.some((message) => message.text === "2 of 3 workers finished · 1 failed."));
   const join = deskJoin(liveParent);
   assert.ok(join, "parent is woken with a desk join, not asked to poll");
   assert.match(join?.text ?? "", /Coordinator: feature landed/);

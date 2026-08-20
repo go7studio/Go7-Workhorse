@@ -4710,6 +4710,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               status: "running",
                               startedAt,
                               correlationId: childCorrelationId,
+                              // The caller is known here and was being dropped, so a
+                              // Link wave could not say who drove it. Only for an
+                              // inbound harness: a desk wave has no caller to name.
+                              ...(exposure === "external-runtime" && payload.origin && payload.origin !== "workhorse"
+                                ? { caller: payload.origin }
+                                : {}),
                               ...(payload.missionIteration ? {
                                 missionId: payload.missionIteration.id,
                                 iteration: payload.missionIteration.iteration,

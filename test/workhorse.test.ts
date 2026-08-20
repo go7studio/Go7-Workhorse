@@ -8706,7 +8706,10 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.ok(mixed);
   const joinedAfter = maybeEnqueueLineupJoin(reconciled, "orch", 12);
   const afterParent = joinedAfter.find((item) => item.id === "orch");
-  assert.ok(afterParent?.messages.some((message) => message.text === LINEUP_FINISHED_NOTICE));
+  // This wave really did lose a worker, and the transcript used to say "All
+  // workers finished." over it. The notice now counts what happened, so the
+  // chat and the chat row cannot tell the person different stories.
+  assert.ok(afterParent?.messages.some((message) => message.text === "3 of 4 workers finished · 1 failed."));
   const joinItem = afterParent?.queue?.find((item) => item.hideUser && item.text.includes("ORCHESTRATION CALL"));
   assert.ok(joinItem);
   assert.match(joinItem?.text ?? "", /own words/);
@@ -8755,7 +8758,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.equal(handedParent?.queue?.some((item) => item.joinAttempt != null), false, "queued desk join is dropped");
   assert.ok(handedParent?.lineup?.notifiedAt, "lineup stays marked, so nothing re-queues it");
   assert.equal(
-    handedParent?.messages.filter((message) => message.text === LINEUP_FINISHED_NOTICE).length,
+    handedParent?.messages.filter((message) => message.text === "3 of 4 workers finished · 1 failed.").length,
     1,
     "the finished notice is written once",
   );
@@ -8784,7 +8787,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   );
   const secondBreak = applyLineupTurnBreak(secondWave, "orch", 120);
   assert.equal(
-    secondBreak.find((item) => item.id === "orch")?.messages.filter((message) => message.text === LINEUP_FINISHED_NOTICE).length,
+    secondBreak.find((item) => item.id === "orch")?.messages.filter((message) => message.text === "3 of 4 workers finished · 1 failed.").length,
     2,
     "each lineup announces its own finish",
   );

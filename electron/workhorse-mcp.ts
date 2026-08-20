@@ -1484,7 +1484,13 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
   return spawnAgent(
     {
       prompt: missionContinuationPrompt({ mission: next.mission, remainingWork, evidence, reports: snapshot.reports ?? [] }),
-      description: typeof args.description === "string" ? args.description : `Mission pass ${next.mission.iteration}`,
+      // A continuation is the SAME mission, so it keeps the mission's name.
+      // Defaulting to "Mission pass 2" retitled the parent chat on every pass
+      // and the four-hour job's real name disappeared at the first follow-up.
+      description:
+        typeof args.description === "string" && args.description.trim()
+          ? args.description
+          : next.mission.objective?.trim() || `Mission pass ${next.mission.iteration}`,
       worker: coordinatorName,
       mission: true,
       missionIteration: next.mission,

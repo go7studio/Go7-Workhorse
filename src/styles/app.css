@@ -1650,6 +1650,7 @@ html.pane-dragging * {
   overflow-y: auto;
   padding: 28px 22px 20px;
   overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
 .transcript-stack {
@@ -1658,25 +1659,6 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-}
-
-.transcript-earlier {
-  margin: 0 0 16px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-}
-
-button.transcript-earlier {
-  appearance: none;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-
-button.transcript-earlier:hover {
-  color: var(--text-secondary);
 }
 
 .turn {

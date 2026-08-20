@@ -12,8 +12,10 @@ import {
   isDeskNotice,
   lastReplyIndex,
   recentTranscriptText,
+  nextTranscriptPaintStart,
   scheduleAfterPaint,
-  startTranscriptFill,
+  TRANSCRIPT_LOOKAHEAD,
+  TRANSCRIPT_PAINT_CHUNK,
   transcriptPaintStart,
   type TranscriptBlock,
 } from "../lib/turns";
@@ -37,7 +39,14 @@ import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
-import { followLatestTurn, pinnedToLatest, pinToLatest } from "../lib/transcript-scroll";
+import {
+  countTurnsAboveViewport,
+  followLatestTurn,
+  keepScrollThroughPrepend,
+  pinnedToLatest,
+  pinToLatest,
+  shouldLoadEarlierWindow,
+} from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
@@ -137,11 +146,12 @@ export function SessionPane() {
   const [editsIdle, setEditsIdle] = useState(false);
   const [paint, setPaint] = useState({ id: "", from: 0 });
   const [openFor, setOpenFor] = useState("");
-  const [wantEarlier, setWantEarlier] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const userMoved = useRef(false);
+  const lastHeight = useRef(0);
+  const filling = useRef(false);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
@@ -201,7 +211,7 @@ export function SessionPane() {
 
   useEffect(() => {
     if (!sessionId) return;
-    setWantEarlier(false);
+    filling.current = false;
     return scheduleAfterPaint(
       () => startTransition(() => setOpenFor(sessionId)),
       {
@@ -215,28 +225,8 @@ export function SessionPane() {
 
   useEffect(() => {
     if (!transcriptOpen) return;
-    const initial = transcriptPaintStart(blocks.length);
-    setPaint({ id: sessionId, from: initial });
+    setPaint({ id: sessionId, from: transcriptPaintStart(blocks.length) });
   }, [sessionId, transcriptOpen]);
-
-  useEffect(() => {
-    if (!transcriptOpen || !wantEarlier) return;
-    const from = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
-    if (!sessionId || from === 0) return;
-    const whenIdle = (cb: () => void) =>
-      typeof requestIdleCallback === "function"
-        ? requestIdleCallback(() => cb(), { timeout: 240 })
-        : window.setTimeout(cb, 32);
-    const cancelIdle = (id: number) => {
-      if (typeof cancelIdleCallback === "function") cancelIdleCallback(id);
-      else window.clearTimeout(id);
-    };
-    return startTranscriptFill(
-      from,
-      (next) => startTransition(() => setPaint({ id: sessionId, from: next })),
-      { whenIdle, cancelIdle },
-    );
-  }, [sessionId, transcriptOpen, wantEarlier]);
 
   useEffect(() => {
     fetchedStats.current = {};
@@ -283,11 +273,16 @@ export function SessionPane() {
   useEffect(() => {
     followBottom.current = true;
     userMoved.current = false;
+    lastHeight.current = 0;
   }, [session?.id]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && followBottom.current) pinToLatest(el);
+    if (!el) return;
+    if (followBottom.current) pinToLatest(el);
+    else keepScrollThroughPrepend(el, lastHeight.current);
+    lastHeight.current = el.scrollHeight;
+    filling.current = false;
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
@@ -448,24 +443,37 @@ export function SessionPane() {
         onScroll={() => {
           const el = scroller.current;
           if (!el) return;
+          const atBottom = pinnedToLatest(el, SCROLL_SLACK);
           followBottom.current = followLatestTurn({
             following: followBottom.current,
-            atBottom: pinnedToLatest(el, SCROLL_SLACK),
+            atBottom,
             userInitiated: userMoved.current,
           });
           if (followBottom.current) userMoved.current = false;
+          const from = paint.id === sessionId ? paint.from : 0;
+          const content = stack.current;
+          if (!content || filling.current || from <= 0) return;
+          const above = countTurnsAboveViewport(
+            Array.from(content.querySelectorAll(".turn"), (node) => ({
+              bottom: node.getBoundingClientRect().bottom,
+            })),
+            el.getBoundingClientRect().top,
+          );
+          if (
+            shouldLoadEarlierWindow({
+              hasEarlier: true,
+              loading: filling.current,
+              atBottom,
+              turnsAboveViewport: above,
+              lookahead: TRANSCRIPT_LOOKAHEAD,
+            })
+          ) {
+            filling.current = true;
+            setPaint({ id: sessionId, from: nextTranscriptPaintStart(from, TRANSCRIPT_PAINT_CHUNK) });
+          }
         }}
       >
         <div className="transcript-stack" ref={stack}>
-        {paintFrom > 0 ? (
-          <button
-            className="transcript-earlier"
-            type="button"
-            onClick={() => setWantEarlier(true)}
-          >
-            Load earlier turns…
-          </button>
-        ) : null}
         {shownBlocks.map((block, offset) => {
           const index = paintFrom + offset;
           if (block.type === "user") {

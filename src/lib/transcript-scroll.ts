@@ -21,3 +21,44 @@ export function followLatestTurn(input: {
 export function pinToLatest(el: { scrollHeight: number; scrollTop: number }): void {
   el.scrollTop = el.scrollHeight;
 }
+
+export function pinnedToTop(el: { scrollTop: number }, slack: number): boolean {
+  return el.scrollTop <= slack;
+}
+
+export function countTurnsAboveViewport(
+  turns: Array<{ bottom: number }>,
+  viewportTop: number,
+): number {
+  let count = 0;
+  for (const turn of turns) {
+    if (turn.bottom < viewportTop) count += 1;
+    else break;
+  }
+  return count;
+}
+
+/**
+ * Page in the next older window when fewer than `lookahead` loaded turns
+ * remain above the fold. Stay put at the latest turn (atBottom).
+ */
+export function shouldLoadEarlierWindow(input: {
+  hasEarlier: boolean;
+  loading: boolean;
+  atBottom: boolean;
+  turnsAboveViewport: number;
+  lookahead: number;
+}): boolean {
+  if (!input.hasEarlier || input.loading || input.atBottom) return false;
+  return input.turnsAboveViewport < input.lookahead;
+}
+
+/** Keep the same turns in view when earlier history is prepended. */
+export function keepScrollThroughPrepend(
+  el: { scrollTop: number; scrollHeight: number },
+  previousHeight: number,
+): void {
+  if (previousHeight <= 0) return;
+  const grown = el.scrollHeight - previousHeight;
+  if (grown > 0) el.scrollTop += grown;
+}

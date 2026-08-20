@@ -1,12 +1,12 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
 
 type Props = { children: ReactNode };
-type State = { error: string | null };
+type State = { error: string | null; gen: number };
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, gen: 0 };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error: error.message || "Something went wrong" };
   }
 
@@ -15,19 +15,23 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidMount() {
-    import.meta.hot?.on("vite:beforeUpdate", () => this.setState({ error: null }));
+    import.meta.hot?.on("vite:afterUpdate", () => {
+      this.setState((current) => ({ error: null, gen: current.gen + 1 }));
+    });
   }
 
   render() {
-    if (!this.state.error) return this.props.children;
-    return (
-      <div className="crash">
-        <h1>Workhorse hit a snag</h1>
-        <p>{this.state.error}</p>
-        <button type="button" onClick={() => this.setState({ error: null })}>
-          Try again
-        </button>
-      </div>
-    );
+    if (this.state.error) {
+      return (
+        <div className="crash">
+          <h1>Workhorse hit a snag</h1>
+          <p>{this.state.error}</p>
+          <button type="button" onClick={() => this.setState((current) => ({ error: null, gen: current.gen + 1 }))}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return <Fragment key={this.state.gen}>{this.props.children}</Fragment>;
   }
 }

@@ -314,9 +314,10 @@ export function groupWorkRows(steps: DisplayWorkStep[]): GroupedWorkRow[] {
 export const WORK_PACK_AFTER = 4;
 export const WORK_TAIL = 3;
 
-/** First paint of a chat: last turns only. Older blocks fill in on later frames. */
-export const TRANSCRIPT_FIRST_PAINT = 4;
-export const TRANSCRIPT_PAINT_CHUNK = 2;
+/** First paint of a chat: last turns only. Scroll up to page in the next chunk. */
+export const TRANSCRIPT_FIRST_PAINT = 10;
+export const TRANSCRIPT_PAINT_CHUNK = 10;
+export const TRANSCRIPT_LOOKAHEAD = 5;
 
 export function transcriptPaintStart(total: number, first = TRANSCRIPT_FIRST_PAINT): number {
   if (total <= first) return 0;
@@ -360,7 +361,7 @@ export function scheduleAfterPaint(show: () => void, timers: AfterPaintTimers): 
   };
 }
 
-/** Older turns fill after the first paint, one idle slice at a time. */
+/** Older turns ease in after the first paint, one timed slice at a time. */
 export function startTranscriptFill(
   from: number,
   publish: (next: number) => void,

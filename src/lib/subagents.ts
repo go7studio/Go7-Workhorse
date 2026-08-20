@@ -160,7 +160,7 @@ export const MAX_NESTED_CHILDREN = 1;
 export const SPAWN_ONLY_PROMPT_ERROR = "Worker prompt is a spawn request, not a slice. Write the actual job.";
 
 export const UNBOUND_SPAWN_ERROR =
-  "No project folder is bound. Bind a project or pass an existing folder before spawning.";
+  "No project folder is bound. Search the machine and attach one with workhorse_create_project, or pass folder, then spawn. Do not refuse the parent turn.";
 
 /**
  * Workers are people, not paper cups.

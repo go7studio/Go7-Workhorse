@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ensureManagedWorktree } from "../electron/worktree-host";
-import { resolveSessionCwd } from "../electron/grok-host";
+import { deskBaseCwd, resolveOrBaseSessionCwd, resolveSessionCwd } from "../electron/grok-host";
 import { listGitChanges } from "../electron/project-diff";
 import {
   normalizeSessionEnvironment,
@@ -30,6 +30,24 @@ test("session environments normalize old saves and resolve an isolated cwd", () 
   assert.equal(resolveSessionCwd(undefined), "");
   assert.equal(resolveSessionCwd("relative/project"), "");
   assert.equal(resolveSessionCwd(path.resolve("bound-project")), path.resolve("bound-project"));
+});
+
+test("unbound chats run from the desk base instead of failing", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-desk-base-"));
+  try {
+    assert.equal(deskBaseCwd(temp), path.join(temp, "base"));
+    const cwd = resolveOrBaseSessionCwd(undefined, temp);
+    assert.equal(cwd, path.join(temp, "base"));
+    assert.equal(fs.existsSync(cwd), true);
+    assert.equal(fs.statSync(cwd).isDirectory(), true);
+    const bound = path.resolve("bound-project");
+    assert.equal(resolveOrBaseSessionCwd(bound, temp), bound);
+    assert.equal(resolveOrBaseSessionCwd("relative/project", temp), path.join(temp, "base"));
+    assert.equal(resolveOrBaseSessionCwd(undefined, ""), "");
+    assert.equal(resolveSessionCwd(undefined), "");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("managed worktrees create once and reopen for the same chat", async (t) => {

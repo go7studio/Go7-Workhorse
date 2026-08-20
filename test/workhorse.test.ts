@@ -7773,7 +7773,11 @@ test("vendor preface lists extra folders and references, not cwd", () => {
   assert.match(machine, /exact name/);
   const noFolder = buildVendorPreface({ cwd: "", folders: [], references: [] });
   assert.match(noFolder, /No project folder is linked/);
+  assert.match(noFolder, /This turn still runs from the desk base/);
+  assert.match(noFolder, /workhorse_create_project/);
+  assert.match(noFolder, /Do not refuse because no folder is linked/);
   assert.match(noFolder, /Sandbox Off can take any absolute path/);
+  assert.doesNotMatch(noFolder, /app working directory/);
   const boxed = buildSessionPreface({
     cwd: "C:\\proj\\app",
     folders: ["C:\\proj\\app"],
@@ -8058,6 +8062,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   });
   assert.equal(unbound.ok, false);
   if (!unbound.ok) assert.equal(unbound.error, UNBOUND_SPAWN_ERROR);
+  assert.match(UNBOUND_SPAWN_ERROR, /workhorse_create_project/);
+  assert.match(UNBOUND_SPAWN_ERROR, /Do not refuse the parent turn/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /resolveOrBaseSessionCwd/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /still starts in the desk base/);
+  assert.match(WORKHORSE_SESSION_RULES, /missing linked folder does not fail this turn/);
 
   const nested = admitSpawn({
     parent: { parentId: "sess_orch", hidden: true },

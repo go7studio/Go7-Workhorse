@@ -51,7 +51,16 @@ export function buildVendorPreface(input: PrefaceInput): string {
   } else {
     lines.push("- No project folder is linked to this chat.");
     lines.push(
-      "- list_dir with no path lists the app working directory. Sandbox Off can take any absolute path on the machine, subject to Permission.",
+      "- This turn still runs from the desk base (empty bootstrap, not the project). Do not refuse because no folder is linked.",
+    );
+    lines.push(
+      "- Search likely folders with absolute paths, then attach with workhorse_create_project using this chat’s project name and the found folder. If that project already exists, that call links the folder.",
+    );
+    lines.push(
+      "- list_dir with no path lists the desk base. Sandbox Off can take any absolute path on the machine, subject to Permission.",
+    );
+    lines.push(
+      "- Do not spawn workers until a real project folder is bound, unless you pass folder on spawn.",
     );
   }
   if (extras.length > 0) {

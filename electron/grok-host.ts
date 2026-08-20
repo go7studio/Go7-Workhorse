@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { deskRoleOf } from "../src/lib/subagents";
 import { GrokAgent, spawnGrokProcess, type GrokPromptResult, type GrokSpawnFn, type GrokToolEvent } from "./grok-agent";
@@ -109,6 +110,31 @@ export function shouldLoadVendorSession(input: {
 export function resolveSessionCwd(folderPath?: string | null): string {
   const candidate = folderPath?.trim() ?? "";
   return candidate && path.isAbsolute(candidate) ? candidate : "";
+}
+
+/** Empty bootstrap under userData. Not the app launch directory and not a project. */
+export const DESK_BASE_DIR = "base";
+
+export function deskBaseCwd(userData?: string | null): string {
+  const root = userData?.trim() ?? "";
+  return root ? path.join(root, DESK_BASE_DIR) : "";
+}
+
+/**
+ * Bound project folder, or the desk base so an unbound chat can still start,
+ * search the machine, and then link a folder. Never the app launch cwd.
+ */
+export function resolveOrBaseSessionCwd(
+  folderPath?: string | null,
+  userData?: string | null,
+  mkdir: typeof fs.mkdirSync = fs.mkdirSync,
+): string {
+  const bound = resolveSessionCwd(folderPath);
+  if (bound) return bound;
+  const base = deskBaseCwd(userData);
+  if (!base) return "";
+  mkdir(base, { recursive: true });
+  return base;
 }
 
 export class GrokSessionHost {

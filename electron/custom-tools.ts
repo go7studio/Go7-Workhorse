@@ -239,7 +239,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   {
     name: "workhorse_create_project",
     description:
-      "Create a Workhorse project (a named desk entry under Projects, not a file). Pass the exact name and an existing absolute folder. This chat is placed in the new project. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
+      "Create a Workhorse project (a named desk entry under Projects, not a file). Pass the exact name. Folder is optional at create time. If you found a folder, pass that absolute path — if the project already exists, this links the folder onto it and moves this chat there. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
     input_schema: {
       type: "object",
       properties: {

@@ -164,7 +164,7 @@ export function routingProfileForModel(
   override?: Partial<ModelRoutingProfile>,
 ): ModelRoutingProfile {
   const slug = model.trim().toLowerCase();
-  const lightMini = (slug.includes("mini") && !slug.includes("minimax")) || slug.includes("nano");
+  const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
   let base: ModelRoutingProfile;
   if (slug.includes("5.6-sol") || slug.includes("opus") || slug.includes("fable") || slug.includes("grok-4.6")) {
     base = profile(5, 2, 5);

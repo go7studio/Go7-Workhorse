@@ -144,9 +144,12 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x and keep o
   assert.deepEqual(triple("claude-haiku-4-5"), [3, 5, 1]);
   assert.deepEqual(triple("gpt-5.6-luna"), [3, 5, 1]);
   assert.deepEqual(triple("gpt-5.4-mini"), [3, 5, 1]);
+  assert.deepEqual(triple("gpt-5-mini"), [3, 5, 1]);
+  assert.deepEqual(triple("gemini-3.7-flash"), [3, 5, 2]);
+  assert.deepEqual(triple("gemini-3.1-pro"), [3, 5, 2]);
+  assert.notDeepEqual(triple("gemini-3.1-pro"), [3, 5, 1], "gemini must not match the mini token");
   assert.notDeepEqual(triple("composer-2.5"), [4, 3, 3]);
   assert.notDeepEqual(triple("auto"), [4, 3, 3]);
-  assert.notDeepEqual(triple("gemini-3.7-flash"), [4, 3, 3]);
   assert.notDeepEqual(triple("kimi-k3"), [4, 3, 3]);
   assert.notDeepEqual(triple("glm-5.2"), [4, 3, 3]);
   assert.notDeepEqual(triple("gpt-5.5"), [4, 3, 3]);

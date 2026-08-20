@@ -136,11 +136,22 @@ test("a checkpoint on a running worker keeps the original startedAt", () => {
   assert.equal(continued.status, "running");
   assert.equal(continued.correlationId, "trace_checkpoint");
   const fresh = continueWorkerRun(
-    { status: "completed", startedAt: 100, finishedAt: 200, isolation: "worktree" },
+    {
+      status: "completed",
+      startedAt: 100,
+      finishedAt: 200,
+      isolation: "worktree",
+      usedTokens: 50,
+      tokenBudget: 1000,
+      budgetBaseline: 10,
+    },
     { now: 999 },
   );
   assert.equal(fresh.startedAt, 999);
   assert.equal(fresh.finishedAt, undefined);
+  assert.equal(fresh.usedTokens, undefined);
+  assert.equal(fresh.tokenBudget, undefined);
+  assert.equal(fresh.budgetBaseline, undefined);
 });
 
 test("peer ask of a running worker continues the same run clock", () => {

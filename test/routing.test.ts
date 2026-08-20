@@ -442,3 +442,24 @@ test("auto-route spawn fails closed when no candidate qualifies", () => {
   assert.match(gate, /no capable route/);
   assert.match(gate, /describeRoutingMiss/);
 });
+
+test("an auditor slice routes deep, and a harness can ask for one", () => {
+  // store.tsx has read payload.role since c748c34, but nothing sent it, so the
+  // auditor branch could never be true and every check was sized from its own
+  // prompt. A one-line gate command reads as "quick" — the cheapest model on
+  // the desk grading another model's work.
+  assert.equal(inferRoutingTier("Quick: run npm test and report"), "quick");
+  assert.equal(inferRoutingTier("Quick: run npm test and report", [], { role: "auditor" }), "deep");
+
+  // The tier is all role does here. Independence from the builder is a separate
+  // decision: plan admission makes it with pickAuditorVendor, and a harness
+  // makes it by naming the builder in exclude. Pinned so the tool description
+  // cannot quietly start claiming more than the code does.
+  const source = readFileSync(new URL("../electron/workhorse-mcp.ts", import.meta.url), "utf8");
+  assert.match(source, /role: \{ type: "string"/, "spawn must offer role");
+  assert.equal(
+    [...source.matchAll(/^\s*role: spawnInput\.role,$/gm)].length,
+    2,
+    "both spawn payloads must carry role, or delegate and spawn_agent disagree",
+  );
+});

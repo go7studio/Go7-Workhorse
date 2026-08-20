@@ -184,6 +184,13 @@ transcript rather than as a path.
 - **Harness tasks** — OpenClaw and Hermes work appears in the lineup before the
   CLI finishes. Stop reaches the live process; restart marks uncertain work
   unknown instead of complete.
+- **Auditors** — a slice that checks another worker's output can say so.
+  Spawn or delegate with `role: auditor` and the desk routes it deep instead
+  of sizing it from the prompt, so a one-line gate command does not get the
+  cheapest model on the desk to grade another model's work. It does not
+  restrict the worker or pick a different vendor from the builder; name the
+  builder in `exclude` for that. Plan admission spawns its own auditor and
+  picks a vendor the builders did not use.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
   Cursor Auto; that stays a named chat pick. The desk routes the work it

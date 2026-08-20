@@ -200,6 +200,7 @@ const TOOLS = [
           additionalProperties: false,
         },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
+        role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         constraints: { type: "array", items: { type: "string" }, description: "Task boundaries and acceptance requirements" },
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
@@ -1222,6 +1223,7 @@ async function spawnAgent(
     mission?: boolean;
     missionIteration?: MissionIteration;
     route?: "auto" | "quick" | "balanced" | "deep";
+    role?: "auditor";
     planStepId?: string;
     rationale?: string;
     skills?: string[];
@@ -1315,6 +1317,7 @@ async function spawnAgent(
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
     route: spawnInput.route,
+    role: spawnInput.role,
     planStepId: spawnInput.planStepId,
     rationale: spawnInput.rationale,
     skills: resolvedSkills,
@@ -1350,6 +1353,7 @@ async function spawnAgent(
       mission: spawnInput.mission,
       missionIteration: spawnInput.missionIteration,
       route: spawnInput.route,
+      role: spawnInput.role,
       planStepId: spawnInput.planStepId,
       rationale: spawnInput.rationale,
       skills: resolvedSkills,

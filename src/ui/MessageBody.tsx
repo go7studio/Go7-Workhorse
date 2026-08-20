@@ -28,11 +28,12 @@ function MdImage({
 }) {
   const [src, setSrc] = useState(() => mdImageInitialSrc(href, { cwd, vendorSessionId }));
   useEffect(() => {
-    setSrc(mdImageInitialSrc(href, { cwd, vendorSessionId }));
-    if (isPassThroughImageHref(href)) return;
+    const next = mdImageInitialSrc(href, { cwd, vendorSessionId });
+    setSrc(next);
+    if (!next || isPassThroughImageHref(href) || /^(blob:|workhorse-media:)/i.test(next)) return;
     let gone = false;
-    void window.workhorse?.mediaSrc?.(href, cwd, vendorSessionId).then((next) => {
-      if (!gone && next) setSrc(next);
+    void window.workhorse?.mediaSrc?.(href, cwd, vendorSessionId).then((resolved) => {
+      if (!gone && resolved) setSrc(resolved);
     });
     return () => {
       gone = true;

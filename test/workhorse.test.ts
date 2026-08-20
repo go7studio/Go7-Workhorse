@@ -2147,7 +2147,8 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.equal(relative.some((block) => block.type === "image"), true);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /md-image/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /ImageZoom/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /useMediaPaintReady/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /mdImageInitialSrc/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8"), /useMediaPaintReady/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /MediaPaintProvider/);
   const scheduled: Array<() => void> = [];
   const queue = createMediaPaintQueue();

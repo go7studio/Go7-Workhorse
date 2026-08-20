@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAnthropicBody, buildOpenAiBody } from "../electron/custom-http";
-import { displaySrcForHref, resolveMediaProtocolFile } from "../electron/media-src";
+import { displaySrcForHref, resolveDisplayFile, resolveMediaProtocolFile } from "../electron/media-src";
 import {
   attachmentKind,
   MAX_FILE_BYTES,
@@ -229,6 +229,51 @@ test("first-paint media URL carries cwd so the protocol can resolve a relative f
       existsSync: (candidate) => path.resolve(candidate) === path.resolve(file),
     });
     assert.equal(resolved, file);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex Windows image paths keep their own file under the project folder", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-codex-media."));
+  const cwd = path.join(root, "DungeonMaker");
+  const artifacts = path.join(cwd, "artifacts");
+  mkdirSync(artifacts, { recursive: true });
+  const floor1 = path.join(artifacts, "story_alignment_floor1_1280x720.png");
+  const floor2 = path.join(artifacts, "story_alignment_floor2_1280x720.png");
+  const decoy = path.join(cwd, "desktop_capture.png");
+  writeFileSync(floor1, Buffer.from("floor-one"));
+  writeFileSync(floor2, Buffer.from("floor-two"));
+  writeFileSync(decoy, Buffer.from("unrelated"));
+  const home = path.join(root, "absent-home");
+  const href1 = "/D:/Godot/Projects/Dungeon Maker/artifacts/story_alignment_floor1_1280x720.png";
+  const href2 = "/D:/Godot/Projects/Dungeon Maker/artifacts/story_alignment_floor2_1280x720.png";
+  try {
+    assert.equal(resolveDisplayFile(href1, { cwd, home }), floor1);
+    assert.equal(resolveDisplayFile(href2, { cwd, home }), floor2);
+    assert.notEqual(resolveDisplayFile(href1, { cwd, home }), decoy);
+    assert.notEqual(resolveDisplayFile(href2, { cwd, home }), decoy);
+    const first = mdImageInitialSrc(href1, { cwd });
+    assert.equal(
+      resolveMediaProtocolFile(first, {
+        existsSync: (candidate) => candidate === floor1 || candidate === floor2 || candidate === decoy,
+      }),
+      floor1,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing image href does not fall back to some other picture", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-media-no-swap."));
+  const cwd = path.join(root, "DungeonMaker");
+  mkdirSync(path.join(cwd, "artifacts"), { recursive: true });
+  const other = path.join(cwd, "artifacts", "unrelated.png");
+  writeFileSync(other, Buffer.from("nope"));
+  try {
+    const href = "/D:/Godot/Projects/Dungeon Maker/artifacts/missing_floor.png";
+    assert.equal(resolveDisplayFile(href, { cwd, home: path.join(root, "absent-home") }), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

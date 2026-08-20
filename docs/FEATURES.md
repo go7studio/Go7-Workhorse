@@ -117,7 +117,9 @@ transcript rather than as a path.
 - **Scoped approvals.** A session grant remembers the exact tool, command, and
   path for 24 hours. Changed or expired requests ask again.
 - **Execution directory** — a chat runs in a linked folder or in a managed git
-  worktree, isolated from your working copy.
+  worktree, isolated from your working copy. With no linked folder, the chat
+  still starts in the desk base so it can search the machine and then link a
+  folder. It does not fail the turn.
 - **Terminal** — chat-scoped, in that same directory.
 - **Git review** — a compact Changes control beside the composer opens the
   changed files and diffs for the work a chat did. Click a row to open the

@@ -18,7 +18,7 @@ Always pass the visible title. Never invent a session id.
 
 ## Call another agent here
 
-This live chat is the **orchestrator**. Bind the project folder first (move/create this chat into the project, or pass `folder`). Do not spawn into an unbound working directory.
+This live chat is the **orchestrator**. A missing linked folder does not fail this turn — search and attach (`workhorse_create_project`), then spawn, or pass `folder`. Do not spawn into an unbound working directory. Do not refuse the turn.
 
 Then:
 

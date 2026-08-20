@@ -22,7 +22,7 @@ A Workhorse project is a named desk entry under Projects. It is not a file on di
 
 1. Search likely folders first (`D:\` and `C:\`, Godot/Projects, the user’s Projects folder, names matching the request). If they name a drive, search that drive now — do not ask which copy.
 2. `workhorse_list_projects` so you do not duplicate a name.
-3. `workhorse_create_project` with `name` and the absolute `folder` you found. This chat is placed in that project. Do not ask the user for a path when a matching folder exists.
+3. `workhorse_create_project` with `name` and the absolute `folder` you found (folder can wait until you find it). If that project already exists, passing `folder` links it. This chat is placed in that project. Do not ask the user for a path when a matching folder exists.
 4. `workhorse_list_projects` again. Only tell the user it exists if that list shows the name and folder.
 5. Call it a project. Do not call it a sidebar anything.
 

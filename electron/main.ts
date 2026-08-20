@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { GrokSessionHost, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
+import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
@@ -137,7 +137,7 @@ function cancelExternalRuntimeProcess(taskId: string): boolean {
 }
 
 function requireSessionCwd(value?: string | null): string {
-  const cwd = resolveSessionCwd(value);
+  const cwd = resolveOrBaseSessionCwd(value, app.getPath("userData"));
   if (!cwd) throw new Error("This chat has no execution folder. Link a folder before running it.");
   return cwd;
 }

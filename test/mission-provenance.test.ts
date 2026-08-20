@@ -11,6 +11,7 @@ import {
   applyLineupTurnBreak,
   lineupFinishedNotice,
   missionCaller,
+  missionRowLook,
   missionState,
   missionTitle,
 } from "../src/lib/lineup";
@@ -61,7 +62,8 @@ test("a Link wave takes the work's name; the desk's own chat keeps the person's 
     joinOwner: "external-runtime",
     rows: [row({ childId: "a", title: "Read the catalog" }), row({ childId: "b", title: "Audit the router" })],
   });
-  assert.equal(missionTitle(split), "2 workers");
+  // A count is not a name: rows that disagree leave the chat's own title alone.
+  assert.equal(missionTitle(split), undefined);
   // Every row sharing one name is one job.
   const same = lineup({ joinOwner: "external-runtime", rows: [row({ childId: "a" }), row({ childId: "b" })] });
   assert.equal(missionTitle(same), "Mission Control orchestration");
@@ -91,7 +93,8 @@ test("the word at rest: failure is loud, unfinished is quiet, a clean wave says 
   assert.equal(at("failed")?.word, "Failed");
   assert.equal(at("failed")?.tone, "danger");
   assert.equal(at("timed-out")?.word, "Timed out");
-  assert.equal(at("timed-out")?.tone, "danger");
+  // A ceiling that fired is not a fault; it is warned, reported, and resumable.
+  assert.equal(at("timed-out")?.tone, "quiet");
   assert.equal(at("interrupted")?.word, "Interrupted");
   assert.equal(at("interrupted")?.tone, "quiet");
   // Several workers count; one names itself.
@@ -127,4 +130,57 @@ test("the transcript stops congratulating a wave that did not finish", () => {
   assert.equal(twice[0]?.messages.length, 1);
   const legacy = { ...parent, messages: [{ id: "m", role: "system", text: LINEUP_FINISHED_NOTICE, createdAt: 5 }] } as unknown as Session;
   assert.equal(applyLineupTurnBreak([legacy], "p1", 101)[0]?.messages.length, 1);
+});
+
+test("the row's whole reading of a wave comes from one place", () => {
+  // ChatRow renders what this returns and decides nothing itself. Everything a
+  // person is meant to read off a wave row is asserted here rather than in a
+  // component test that would need a DOM to say the same thing.
+  const link = lineup({ joinOwner: "external-runtime", rows: [row({ caller: "openclaw" })] });
+  const look = missionRowLook({ lineup: link }, [{ id: "child_1", status: "idle" }]);
+  assert.equal(look?.caller, "OpenClaw");
+  assert.equal(look?.title, "Mission Control orchestration");
+  assert.equal(look?.running, false);
+  assert.equal(look?.word, undefined, "work that finished says nothing — the row is quiet at rest");
+  assert.equal(look?.tone, undefined);
+});
+
+test("only failure is loud", () => {
+  // Grok's review: a sidebar that paints unfinished work red teaches people to
+  // stop reading red. Interrupted and timed-out work is unfinished, not wrong.
+  const failed = missionRowLook({ lineup: lineup({ rows: [row({ status: "failed" })] }) }, []);
+  assert.equal(failed?.tone, "danger");
+
+  for (const status of ["interrupted", "timed-out"] as const) {
+    const quiet = missionRowLook({ lineup: lineup({ rows: [row({ status })] }) }, []);
+    assert.ok(quiet?.word, `${status} still says what happened`);
+    assert.notEqual(quiet?.tone, "danger", `${status} is unfinished, not wrong`);
+  }
+});
+
+test("the meta line never repeats the worker count", () => {
+  // The fold button beside the row already says "3". Saying it again costs a
+  // third of a 252px row to tell someone something they are looking at.
+  const many = lineup({
+    rows: [row({ childId: "a" }), row({ childId: "b" }), row({ childId: "c" })],
+  });
+  const look = missionRowLook({ lineup: many }, [
+    { id: "a", status: "running" },
+    { id: "b", status: "idle" },
+    { id: "c", status: "idle" },
+  ]);
+  const meta = [look?.caller, look?.word].filter(Boolean).join(" · ");
+  assert.doesNotMatch(meta, /\d+\s*workers?/, `meta repeated the count: ${meta}`);
+});
+
+test("a live wave pulses a parent chat that is itself idle", () => {
+  // The parent's own status is idle the whole time a wave runs — the work is
+  // happening on the children. Without this the row looks finished for hours.
+  const look = missionRowLook({ lineup: lineup() }, [{ id: "child_1", status: "running" }]);
+  assert.equal(look?.running, true);
+  assert.equal(look?.word, "Working…");
+});
+
+test("an ordinary chat is left alone", () => {
+  assert.equal(missionRowLook({ lineup: undefined }, []), undefined);
 });

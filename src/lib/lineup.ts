@@ -702,8 +702,10 @@ export function missionState(
     word = many ? `${counts.failed} failed` : "Failed";
     tone = "danger";
   } else if (counts.timedOut > 0) {
+    // A ceiling firing is designed behaviour: the run is warned first and the
+    // stop report says what was left. Unfinished, and resumable — not wrong.
     word = many ? `${counts.timedOut} timed out` : "Timed out";
-    tone = "danger";
+    tone = "quiet";
   } else if (counts.interrupted > 0) {
     // Unfinished, not broken: it can be picked up again.
     word = many ? `${counts.interrupted} interrupted` : "Interrupted";
@@ -738,5 +740,48 @@ export function missionTitle(lineup: DeskLineup | undefined): string | undefined
   if (named.length === 0) return undefined;
   const unique = [...new Set(named)];
   if (unique.length === 1) return unique[0];
-  return `${lineup.rows.length} workers`;
+  // Rows that disagree have no single name, and a count is not a name. The
+  // desk's own state holds a three-worker Link wave on a chat titled "Walt site
+  // launch GA4 SEO review"; replacing that with "3 workers" loses the only
+  // words on the row that say what the work was, and repeats the number the
+  // fold button is already showing. Keep whatever the chat is called.
+  return undefined;
+}
+
+/** What a parent chat row shows for the wave it ran. Undefined = an ordinary row. */
+export type MissionRowLook = {
+  /** Replaces the chat title. Only a Link wave renames; a desk chat keeps the person's title. */
+  title?: string;
+  /** The harness that called, when one did. */
+  caller?: string;
+  /** Working… | Failed | 2 interrupted — absent when every worker completed. */
+  word?: string;
+  /** Failure is loud; unfinished work is quiet. */
+  tone?: "danger" | "quiet";
+  /** A live wave pulses the row even when the parent chat itself sits idle. */
+  running: boolean;
+};
+
+/**
+ * The row's whole reading of a wave, in one place, so ChatRow stays a
+ * renderer. Deliberately omits the worker count: the count button beside the
+ * row already says it, and repeating it in the meta line is noise on a
+ * sidebar that is 252px at its narrowest.
+ */
+export function missionRowLook(
+  session: Pick<Session, "lineup">,
+  workers: Array<Pick<Session, "id" | "status" | "agentRun">> = [],
+): MissionRowLook | undefined {
+  const state = missionState(session.lineup, workers);
+  if (!state) return undefined;
+  const title = missionTitle(session.lineup);
+  const caller = missionCaller(session.lineup);
+  if (!title && !caller && !state.word && !state.running) return undefined;
+  return {
+    ...(title ? { title } : {}),
+    ...(caller ? { caller } : {}),
+    ...(state.word ? { word: state.word } : {}),
+    ...(state.tone ? { tone: state.tone } : {}),
+    running: state.running,
+  };
 }

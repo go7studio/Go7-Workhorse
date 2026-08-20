@@ -596,6 +596,23 @@ html.pane-dragging * {
   text-overflow: ellipsis;
 }
 
+/* A wave's meta line: who called, then how it ended. Both sit inside
+   .row-meta, so they inherit its one-line ellipsis and vanish tidily when the
+   sidebar is dragged to its 252px floor. */
+.row-caller {
+  color: var(--text-secondary);
+}
+
+.row-state {
+  color: var(--text-tertiary);
+}
+
+/* Only failure is loud. Interrupted and timed-out work is unfinished, not
+   wrong, and a sidebar full of red teaches people to stop reading it. */
+.row-state.bad {
+  color: var(--danger);
+}
+
 .main {
   position: relative;
   z-index: 1;

@@ -4408,7 +4408,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
              * project, is reused; a busy one still gets a colleague, because
              * running several at once is the point of the desk.
              */
-            const spawnSeed = payload.seed === "fresh" ? "fresh" as const : undefined;
+            const spawnSeed =
+              payload.seed === "fresh" ? ("fresh" as const)
+              : payload.seed === "inherit" ? ("inherit" as const)
+              : undefined;
             const spawnHandoff = parseWorkerHandoff(payload.handoff);
             const askedWorkerName = typeof payload.worker === "string" ? payload.worker.trim() : "";
             const namedResolution = askedWorkerName
@@ -4422,8 +4425,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: namedResolution.error });
               return;
             }
+            // Reuse is a continuation protocol, not an idle pool. It used to be
+            // ambient: any free worker on this parent and project with the same
+            // bot took the next unnamed slice, whatever it was about. One Wren
+            // took an IP review, a Godot performance audit and a UI design review
+            // into one 135-message context; another reached 912. Inherit
+            // concatenates the whole prior transcript (workerStartMessages), so
+            // every unrelated slice paid for the last one.
+            //
+            // Now it takes a decision: name the worker, or ask for inherit. A
+            // bare spawn gets somebody with a clear head.
+            const wantsIdleReuse = !askedWorkerName && payload.seed === "inherit";
             const reusedWorker = namedResolution?.worker
-              ?? (!askedWorkerName
+              ?? (wantsIdleReuse
                 ? findReusableWorker(
                     {
                       provider: spec.provider,

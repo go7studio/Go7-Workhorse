@@ -199,8 +199,10 @@ transcript rather than as a path.
   Cursor Auto; that stays a named chat pick. The desk routes the work it
   hands out on its own: when a chat spawns a worker without naming a bot, the
   desk picks the bot and effort for the slice, and a named bot is used as
-  named. Settings → Routing turns that off, and tunes how any routing weighs
-  leftover, reserve, and local models.
+  named. One assignment is one worker unless you asked for every vendor, all
+  bots, several independent reviews, or a named list. Settings → Routing
+  turns that off, and tunes how any routing weighs leftover, reserve, and
+  local models.
 
 ## Memory
 

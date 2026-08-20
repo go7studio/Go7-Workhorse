@@ -19,6 +19,7 @@ import {
 } from "./claude-login";
 import { isInsideAsar, withDeskToolEnv } from "./desk-path";
 import { APP_VERSION } from "../src/lib/app-info";
+import { DEFAULT_MODEL_ID } from "../src/lib/models";
 
 export type ClaudeLaunchInput = {
   sessionId?: string;
@@ -55,7 +56,7 @@ export type ClaudeLaunchSpec = GrokLaunchSpec & {
   permissionMode: ClaudePermissionMode;
 };
 
-const DEFAULT_MODEL = "claude-sonnet-5";
+const DEFAULT_MODEL = DEFAULT_MODEL_ID.claude;
 
 const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   opus: "claude-opus-5",

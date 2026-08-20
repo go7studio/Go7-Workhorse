@@ -72,9 +72,9 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "grok-build", name: "Grok Build", effort: true, contextWindow: 500_000 },
   ],
   claude: [
+    { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
-    { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-haiku-4-5", name: "Haiku 4.5", effort: true, contextWindow: 200_000 },
     { id: "claude-opus-4-8", name: "Opus 4.8", effort: true, contextWindow: 1_000_000 },
     { id: "claude-sonnet-4-6", name: "Sonnet 4.6", effort: true, contextWindow: 1_000_000 },
@@ -272,8 +272,23 @@ export function shortModelName(provider: ProviderId, modelIdOrName: string): str
   return full;
 }
 
+/**
+ * Shipped default when the user or a spawn did not name a model. Live vendor
+ * caches may reorder the picker (Fable first, a new Codex slug); they cannot
+ * change which model a new Claude/Grok/Codex/Cursor/Custom chat starts on.
+ * Claude’s official default is Sonnet 5. Fable 5 stays a named frontier pick.
+ */
+export const DEFAULT_MODEL_ID: Record<ProviderId, string> = {
+  grok: "grok-4.6",
+  claude: "claude-sonnet-5",
+  codex: "gpt-5.6-sol",
+  cursor: "composer-2.5",
+  custom: "MiniMax-M3",
+};
+
 export function defaultModel(provider: ProviderId): ModelInfo {
-  return modelsFor(provider)[0] ?? MODEL_CATALOG[provider][0];
+  const pinned = DEFAULT_MODEL_ID[provider];
+  return findModel(provider, pinned) ?? modelsFor(provider)[0] ?? MODEL_CATALOG[provider][0];
 }
 
 /** 0–1 along the thinking slider. The last available level sits at the end of the bar. */

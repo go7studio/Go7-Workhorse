@@ -7641,7 +7641,8 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   assert.equal(defaultModel("codex").name, "GPT-5.6-Sol");
   assert.equal(advertisedCodexWindow("gpt-5.6-sol", 272_000), 1_050_000);
   assert.equal(contextWindowFor("codex", "gpt-5.6-sol"), 1_050_000);
-  assert.equal(defaultModel("claude").id, "claude-fable-5");
+  assert.equal(defaultModel("claude").id, "claude-sonnet-5");
+  assert.equal(defaultModel("claude").name, "Sonnet 5");
   assert.equal(contextWindowFor("claude", "claude-fable-5"), 1_000_000);
   assert.equal(contextWindowFor("claude", "claude-opus-5"), 1_000_000);
   assert.equal(contextWindowFor("claude", "claude-sonnet-5"), 1_000_000);
@@ -7778,6 +7779,19 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     applyVendorCatalog(live);
     assert.equal(defaultModel("codex").id, "gpt-5.6-sol");
     assert.equal(defaultModel("codex").name, "GPT-5.6-Sol");
+  } finally {
+    resetVendorCatalog();
+  }
+
+  try {
+    applyVendorCatalog({
+      claude: [
+        { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
+        { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
+        { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
+      ],
+    });
+    assert.equal(defaultModel("claude").id, "claude-sonnet-5");
   } finally {
     resetVendorCatalog();
   }
@@ -8568,6 +8582,15 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(WORKER_SESSION_RULES, /capacity-aware quick route.*5,000 tokens/);
   assert.doesNotMatch(WORKER_SESSION_RULES, /spawn every canCall/);
   assert.doesNotMatch(CUSTOM_HTTP_WORKER_RULES, /spawn every canCall/);
+  assert.doesNotMatch(WORKHORSE_SESSION_RULES, /spawn every canCall|every row whose canCall/);
+  assert.doesNotMatch(CUSTOM_HTTP_SESSION_RULES, /spawn every canCall|every canCall row/);
+  assert.doesNotMatch(SPAWN_TURN_HINT, /Spawn every canCall/);
+  assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
+  assert.match(WORKHORSE_SESSION_RULES, /Leave provider and model unset so Auto picks/);
+  assert.match(WORKHORSE_SESSION_RULES, /Fan-out only when they asked for every vendor/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn several of one vendor with split tasks to fill a crew/);
+  assert.match(SPAWN_TURN_HINT, /One bounded assignment is one workhorse_spawn_agent/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /One bounded assignment is one/);
   assert.match(WORKHORSE_SESSION_RULES, /one bounded quick-route helper/);
 });
 

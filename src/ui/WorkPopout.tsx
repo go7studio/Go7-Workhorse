@@ -40,11 +40,11 @@ function useFoldOpen(initial = false) {
 }
 
 function useStartOpen(start: boolean) {
-  const el = useRef<HTMLDetailsElement>(null);
+  const fold = useRef<HTMLDetailsElement>(null);
   useLayoutEffect(() => {
-    if (start && el.current) el.current.open = true;
+    if (start && fold.current) fold.current.open = true;
   }, [start]);
-  return el;
+  return fold;
 }
 
 function ThoughtBlock({ text, live, id, reveal = false }: { text: string; live: boolean; id: string; reveal?: boolean }) {

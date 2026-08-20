@@ -5806,7 +5806,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /isActiveWorkRow/);
   assert.match(popout, /reveal=\{tailIndex === packed\.tail\.length - 1\}/);
   assert.match(popout, /useStartOpen/);
-  assert.match(popout, /el\.current\.open = true/);
+  assert.match(popout, /fold\.current\.open = true/);
   assert.match(popout, /foldOpen/);
   assert.match(popout, /<details className="work-pop" onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);

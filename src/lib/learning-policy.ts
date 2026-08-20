@@ -453,9 +453,12 @@ export function selectAdaptiveRoute(input: {
     if (stats?.length) {
       const success = stats.reduce((sum, item) => sum + item.verifiedSuccesses, 0);
       const fail = stats.reduce((sum, item) => sum + item.verifiedFailures, 0);
-      score += success * 4 - fail * 6;
+      // Bounded, like the desk scorer's ±8 tilt: intelligence is 4 a unit, so
+      // an unbounded run of lucky outcomes could flip any fit gap — four
+      // verified successes used to outvote a 3-unit intelligence lead.
+      score += Math.max(-12, Math.min(12, success * 4 - fail * 6));
       const cost = stats.find((item) => item.avgCostUsd !== undefined)?.avgCostUsd;
-      if (cost !== undefined) score -= cost * 3;
+      if (cost !== undefined) score -= Math.min(15, cost * 3);
     }
     if (input.capacityAware && row.usedPercent !== undefined) score -= Math.max(0, row.usedPercent - 70) * 0.6;
     const entry = { provider: row.provider, model: row.model, customBotId: row.customBotId, score: Math.round(score * 10) / 10 };

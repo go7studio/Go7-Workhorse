@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   chooseRoutingDecision,
+  inferRoutingTier,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingProfileForModel,
@@ -174,6 +175,43 @@ test("quick goes to the light band, not to the unlimited mid model", () => {
   ];
   const winner = chooseRoutingDecision(rows, { prompt: "", tier: "quick", now: NOW }, settings);
   assert.equal(winner?.model, "gpt-5.6-luna");
+});
+
+test("routing never picks a model whose window cannot hold the conversation", () => {
+  const small = bot("small-window", 8, 4, 2, midWeek(10), { contextWindow: 128_000 });
+  const big = bot("big-window", 8, 4, 3, midWeek(50), { contextWindow: 1_000_000 });
+  // Without contextNeed both rank, and the roomier pace wins.
+  const free = rankRoutingCandidates([small, big], { prompt: "", tier: "balanced", now: NOW }, settings);
+  assert.equal(free.length, 2);
+  assert.equal(free[0]?.model, "small-window");
+  // A 300k conversation skips the 128k bot entirely — a failed send is not a
+  // worse pick, it is not a pick.
+  const gated = rankRoutingCandidates([small, big], { prompt: "", tier: "balanced", now: NOW, contextNeed: 300_000 }, settings);
+  assert.equal(gated.length, 1);
+  assert.equal(gated[0]?.model, "big-window");
+});
+
+test("a failing incumbent loses its stickiness", () => {
+  const incumbent = bot("terra-a", 8, 4, 3, midWeek(50));
+  const rival = bot("terra-b", 8, 4, 3, midWeek(50));
+  const current = { provider: "custom" as const, model: "terra-a" };
+  // Healthy incumbent: +4 keeps it first against an equal rival.
+  const healthy = rankRoutingCandidates([incumbent, rival], { prompt: "", tier: "balanced", now: NOW, current }, settings);
+  assert.equal(healthy[0]?.model, "terra-a");
+  // Two verified failures put its record negative: the +4 is gone and the
+  // tilt drags it below the rival, so a dead bot is not re-picked every send.
+  const failing = rankRoutingCandidates(
+    [incumbent, rival],
+    { prompt: "", tier: "balanced", now: NOW, current, outcomes: [{ provider: "custom", model: "terra-a", verifiedSuccesses: 0, verifiedFailures: 2 }] },
+    settings,
+  );
+  assert.equal(failing[0]?.model, "terra-b");
+});
+
+test("hard-work markers land deep even in a short prompt", () => {
+  assert.equal(inferRoutingTier("List every concurrency bug in this lock-free queue and prove linearizability"), "deep");
+  assert.equal(inferRoutingTier("fix this bug"), "deep", "expensive is the safe error direction");
+  assert.equal(inferRoutingTier("list the files in src"), "quick", "a real quick ask stays quick");
 });
 
 test("free capacity is a filler, not a merit", () => {

@@ -13,7 +13,7 @@ import { customBotEnabled, customBotModels, customModelRoutingOverride } from ".
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
 import { outcomeIsVerified } from "./learning-policy";
-import { modelsFor, withEffort } from "./models";
+import { modelsFor, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export type RoutingCapacity = {
@@ -32,6 +32,8 @@ export type RoutingCandidate = {
   capacity?: RoutingCapacity;
   /** The plan's pace gauge never moves (unlimited weekly); no capacity term. */
   paceUnmetered?: boolean;
+  /** Tokens this model can hold. A candidate that cannot hold the conversation is skipped. */
+  contextWindow?: number;
 };
 
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
@@ -59,6 +61,8 @@ export type RoutingRequest = {
   now?: number;
   current?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
   exclude?: string[];
+  /** Tokens the conversation already holds. Routing must not pick a model whose window cannot hold it. */
+  contextNeed?: number;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -118,6 +122,7 @@ export function routingCandidatesForDesk(
         model: model.id,
         label: model.name,
         connected: !capacity?.holding,
+        contextWindow: contextWindowFor(provider, model.id),
         profile: routingProfileForModel(provider, model.id),
         capacity: {
           usedPercent: product?.usagePercent ?? laneCapacity?.usedPercent ?? capacity?.usedPercent,
@@ -146,6 +151,7 @@ export function routingCandidatesForDesk(
         label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
         customBotId: bot.id,
         connected: !capacity?.holding,
+        contextWindow: contextWindowFor("custom", model, bot.contextWindow),
         profile: routingProfileForModel("custom", model, customModelRoutingOverride(bot, model)),
         ...(paceUnmetered ? { paceUnmetered: true } : {}),
         capacity: paceUnmetered
@@ -316,6 +322,10 @@ export function describeRoutingMiss(
     const need = INPUT_KEYS.filter((key) => required[key]);
     return `no vendor accepts ${need.join(", ") || "the required inputs"}`;
   }
+  if (request.contextNeed) {
+    const roomy = capable.filter((candidate) => !candidate.contextWindow || candidate.contextWindow >= request.contextNeed!);
+    if (roomy.length === 0) return "no vendor window holds this conversation";
+  }
   return "no capable route";
 }
 
@@ -334,7 +344,10 @@ export function inferRoutingTier(
   if (extras?.role === "auditor") return "deep";
   const text = prompt.trim();
   const lower = text.toLowerCase();
-  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent)\b/.test(lower);
+  // Hard-work markers route deep even in a short prompt. All three reviews
+  // agreed the safe error is expensive (frontier on trivia), not harmful (a
+  // light model on "list every concurrency bug and prove linearizability").
+  const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(lower);
   const quick = text.length < 180 && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
@@ -524,6 +537,10 @@ export function rankRoutingCandidates(
   for (const candidate of candidates) {
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
     if (routingIdentityExcluded(candidate, request.exclude)) continue;
+    // A model that cannot hold the conversation is not a worse pick, it is a
+    // failed send. Routing never knew the window before, so a 300k thread
+    // could rank onto a 128k bot and die on arrival.
+    if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) continue;
     const gap = candidate.profile.intelligence - minimum;
     // On deep work we want fit to dominate. The over-fit penalty gets softer
     // for higher tiers and the gap penalty gets harder if the model falls
@@ -542,10 +559,14 @@ export function rankRoutingCandidates(
     if (candidate.profile.local || candidate.paceUnmetered) {
       score += tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
     }
-    if (request.current && sameRoutingIdentity(request.current, candidate)) {
+    const tilt = outcomeTilt(outcomeFor(candidate, request.outcomes));
+    // Stickiness is for continuity, not loyalty: an incumbent whose verified
+    // record has gone negative does not keep its +4, or one dead bot gets
+    // re-picked every send while a healthy rival sits one point behind.
+    if (request.current && sameRoutingIdentity(request.current, candidate) && tilt >= 0) {
       score += 4;
     }
-    score += outcomeTilt(outcomeFor(candidate, request.outcomes));
+    score += tilt;
     const draw = weeklyDrawState(candidate.capacity, request.now);
     if (settings.capacityAware && draw.usedPercent !== undefined && draw.delta !== undefined) {
       // Cap the capacity term so it does not outvote fit on deep work where

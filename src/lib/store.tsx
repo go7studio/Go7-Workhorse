@@ -2016,6 +2016,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             model: session.model,
             customBotId: session.customBotId,
           },
+          // The conversation must fit the picked model. Spawn routing skips
+          // this on purpose: a worker starts a fresh session.
+          contextNeed: session.contextUsed || undefined,
         },
         current.settings.routing,
       );
@@ -2493,6 +2496,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sessionId: failedSession.id,
             provider: failedSession.provider,
             model: failedSession.model,
+            customBotId: failedSession.customBotId,
             effort: failedSession.effort,
             correlationId: turn.correlationId,
             agentRunId: assistantId,
@@ -5861,6 +5865,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sessionId: session.id,
             provider: session.provider,
             model: session.model,
+            customBotId: session.customBotId,
             effort: session.effort,
             correlationId: turn.correlationId,
             agentRunId: assistantId,
@@ -5980,6 +5985,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sessionId: failedSession.id,
             provider: failedSession.provider,
             model: failedSession.model,
+            customBotId: failedSession.customBotId,
             effort: failedSession.effort,
             correlationId: turn.correlationId,
             agentRunId: assistantId,

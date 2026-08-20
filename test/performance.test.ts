@@ -53,6 +53,26 @@ test("incremental transcript rebuilds only the live turn and matches full groupi
   assert.equal(incremental[1], initial[1]);
 });
 
+test("sending a new prompt keeps earlier transcript blocks", () => {
+  const first = [message("u1", "user", "first", 1), message("a1", "assistant", "done", 2), message("u2", "user", "second", 3), message("a2", "assistant", "ok", 4)];
+  const grouper = createTranscriptGrouper();
+  const initial = grouper.group(first);
+  const sent = [...first, message("u3", "user", "third", 5)];
+  const afterSend = grouper.group(sent);
+  assert.equal(afterSend.length, initial.length + 1);
+  assert.equal(afterSend[0], initial[0]);
+  assert.equal(afterSend[1], initial[1]);
+  assert.equal(afterSend[2], initial[2]);
+  assert.equal(afterSend[3], initial[3]);
+  assert.equal(afterSend[4]?.type, "user");
+  assert.deepEqual(afterSend, groupTranscript(sent));
+  const streamed = [...sent, message("a3", "assistant", "working", 6)];
+  const afterStream = grouper.group(streamed);
+  assert.equal(afterStream[0], initial[0]);
+  assert.equal(afterStream[3], initial[3]);
+  assert.deepEqual(afterStream, groupTranscript(streamed));
+});
+
 test("recent transcript context stays bounded and keeps the newest text", () => {
   const messages = Array.from({ length: 1_000 }, (_, index) => message(`m${index}`, "assistant", `line-${index}`.padEnd(80, "x"), index));
   const text = recentTranscriptText(messages, 1_000);

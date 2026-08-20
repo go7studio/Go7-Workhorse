@@ -181,7 +181,7 @@ export function SessionPane() {
   );
   const paintFrom = !transcriptOpen
     ? 0
-    : paint.id === sessionId
+    : paint.id === sessionId && paint.from < blocks.length
       ? paint.from
       : transcriptPaintStart(blocks.length);
   const shownBlocks = transcriptOpen ? blocks.slice(paintFrom) : [];

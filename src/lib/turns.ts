@@ -190,8 +190,10 @@ export function createTranscriptGrouper(): TranscriptGrouper {
       const boundary = messages[from];
       const cut = boundary?.role === "user"
         ? blocks.findIndex((block) => block.type === "user" && block.message.id === boundary.id)
-        : 0;
-      const prefix = cut < 0 ? [] : blocks.slice(0, cut);
+        : -1;
+      // A new prompt is not in the old blocks yet (cut === -1). Keep them and
+      // append. Dropping the prefix here emptied the transcript on send.
+      const prefix = cut >= 0 ? blocks.slice(0, cut) : from > 0 ? blocks : [];
       blocks = [...prefix, ...groupTranscript(messages.slice(from))];
       previous = messages;
       lastRebuiltFrom = from;

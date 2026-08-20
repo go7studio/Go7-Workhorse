@@ -1,7 +1,7 @@
 {
   "name": "go7-workhorse",
   "productName": "Go7 Workhorse",
-  "version": "0.6.13",
+  "version": "0.6.14",
   "private": true,
   "description": "One desk for every AI subscription you already pay for: Grok, Claude, Codex, Cursor and your own API keys, each under its own login, on Windows and macOS.",
   "keywords": [

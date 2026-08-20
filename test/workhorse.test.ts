@@ -5711,9 +5711,12 @@ test("Usage rings include every desk LLM even with no spend", () => {
   assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
   assert.equal(weeklyPlanLeftover(miniWindows), undefined);
   assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
+  // The ring is the allowance, and this one has no cap. It used to show the
+  // 5h burst instead — 83% — which is a rate limit wearing the allowance's
+  // clothes. The burst is still on the card, in the chip above.
   assert.equal(
     planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } })?.label,
-    "83%",
+    "∞",
   );
   assert.equal(
     planRingView(cards.find((card) => card.label === "MiniMax")!, { custom: { bot_mini: miniWindows } }, "weekly")

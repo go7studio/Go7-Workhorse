@@ -297,7 +297,7 @@ test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, 
     return [profile.intelligence, profile.speed, profile.cost] as const;
   };
   assert.notDeepEqual(triple("grok", "grok-build"), [4, 3, 3]);
-  assert.deepEqual(triple("claude", "claude-fable-5"), [5, 2, 5]);
+  assert.deepEqual(triple("claude", "claude-fable-5"), [10, 2, 5]);
   assert.notDeepEqual(triple("codex", "gpt-5.5"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.4"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.3-codex"), [4, 3, 3]);
@@ -305,8 +305,8 @@ test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, 
   assert.notDeepEqual(triple("custom", "hf:zai-org/GLM-5.2"), [3, 3, 3]);
   assert.notDeepEqual(triple("custom", "MiniMax-M3"), [3, 3, 3]);
   assert.notDeepEqual(triple("cursor", "composer-2.5"), [4, 3, 3]);
-  assert.deepEqual(triple("cursor", "gemini-3.1-pro"), [3, 5, 2]);
-  assert.deepEqual(triple("cursor", "gpt-5.4-mini"), [3, 5, 1]);
+  assert.deepEqual(triple("cursor", "gemini-3.1-pro"), [8, 4, 3]);
+  assert.deepEqual(triple("cursor", "gpt-5.4-mini"), [5, 5, 1]);
 });
 
 test("two approved models on one bot inherit family scores unless that model is overridden", () => {
@@ -330,7 +330,9 @@ test("two approved models on one bot inherit family scores unless that model is 
   const pool = routingCandidatesForDesk(desk);
   const kimi = pool.find((row) => row.model === "hf:moonshotai/Kimi-K3");
   const glm = pool.find((row) => row.model === "hf:zai-org/GLM-5.2");
-  assert.equal(kimi?.profile.intelligence, 5);
+  // The stored override is authored on the user 1–5 scale; 5 means frontier
+  // and reads back as 10 on routing's internal scale.
+  assert.equal(kimi?.profile.intelligence, 10);
   assert.ok(glm);
   assert.notEqual(glm?.profile.intelligence, 5);
   assert.notDeepEqual(

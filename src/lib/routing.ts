@@ -30,6 +30,8 @@ export type RoutingCandidate = {
   connected: boolean;
   profile: ModelRoutingProfile;
   capacity?: RoutingCapacity;
+  /** The plan's pace gauge never moves (unlimited weekly); no capacity term. */
+  paceUnmetered?: boolean;
 };
 
 export type RoutingJobRole = "orchestrator" | "worker" | "auditor" | "builder";
@@ -63,6 +65,7 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   score: number;
   expectedUsedPercent?: number;
   capacityDelta?: number;
+  usedPercent?: number;
 };
 
 export function shouldRouteSessionTurn(input: {
@@ -129,6 +132,14 @@ export function routingCandidatesForDesk(
     const plan = plans.custom?.[bot.id];
     for (const model of customBotModels(bot)) {
       const product = plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(model.toLowerCase()));
+      // MiniMax's weekly gauge reads 0 forever while its 5h session pool
+      // drains — an unlimited weekly. Pacing a gauge that never moves handed
+      // that bot a permanent spare-capacity subsidy and it won every lane
+      // below Deep. A dead gauge is no gauge: score the bot on fit alone.
+      const paceUnmetered =
+        plan !== undefined &&
+        plan.usedPercent === 0 &&
+        (plan.products ?? []).some((item) => item.usagePercent > 0);
       candidates.push({
         provider: "custom",
         model,
@@ -136,11 +147,14 @@ export function routingCandidatesForDesk(
         customBotId: bot.id,
         connected: !capacity?.holding,
         profile: routingProfileForModel("custom", model, customModelRoutingOverride(bot, model)),
-        capacity: {
-          usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-          resetsAt: product?.resetsAt ?? capacity?.resetsAt,
-          period: plan?.period ?? capacity?.period,
-        },
+        ...(paceUnmetered ? { paceUnmetered: true } : {}),
+        capacity: paceUnmetered
+          ? {}
+          : {
+              usedPercent: product?.usagePercent ?? capacity?.usedPercent,
+              resetsAt: product?.resetsAt ?? capacity?.resetsAt,
+              period: plan?.period ?? capacity?.period,
+            },
       });
     }
   }
@@ -175,45 +189,80 @@ function profile(
   };
 }
 
-/** Honest defaults. Family intelligence/speed/cost live only here. */
+/**
+ * Honest defaults. Family intelligence/speed/cost live only here.
+ *
+ * Intelligence is 1–10 inside routing: the old 1–5 scale collapsed the whole
+ * mid-field (Sonnet 5, GPT-5.5, Terra, MiniMax M3, Kimi, Composer) into one
+ * "4", so fit tied and cost plus pace decided every Balanced pick. Stored
+ * overrides and Settings stay on the 1–5 the user authored (5 = frontier);
+ * they are doubled at this one seam.
+ *
+ * Order is load-bearing: sonnet-4-6 before sonnet, minimax-m3 before minimax,
+ * grok-4.6 before grok-4.5, mini/nano before gpt-5.4, sol/terra/luna before
+ * any bare gpt-5.6.
+ */
 export function routingProfileForModel(
-  provider: ProviderId,
+  _provider: ProviderId,
   model: string,
   override?: Partial<ModelRoutingProfile>,
 ): ModelRoutingProfile {
   const slug = model.trim().toLowerCase();
   const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
   let base: ModelRoutingProfile;
-  if (slug.includes("5.6-sol") || slug.includes("opus") || slug.includes("fable") || slug.includes("grok-4.6")) {
-    base = profile(5, 2, 5);
-  } else if (slug.includes("5.6-terra") || slug.includes("sonnet") || slug.includes("grok-4.5")) {
-    base = profile(4, 4, 3);
-  } else if (slug.includes("5.6-luna") || slug.includes("haiku") || lightMini) {
-    base = profile(3, 5, 1);
+  if (lightMini) {
+    base = profile(5, 5, 1);
+  } else if (slug.includes("5.6-sol")) {
+    base = profile(10, 2, 5);
+  } else if (slug.includes("5.6-terra")) {
+    base = profile(8, 4, 3);
+  } else if (slug.includes("5.6-luna")) {
+    base = profile(5, 5, 1);
+  } else if (slug.includes("grok-4.6")) {
+    base = profile(10, 2, 5);
+  } else if (slug.includes("grok-4.5")) {
+    base = profile(8, 4, 3);
+  } else if (slug.includes("opus") || slug.includes("fable")) {
+    base = profile(10, 2, 5);
+  } else if (slug.includes("sonnet-4-6") || slug.includes("sonnet-4.6")) {
+    base = profile(8, 4, 3);
+  } else if (slug.includes("sonnet")) {
+    // Sonnet 5: above the balanced band, the understudy when the 10s drain.
+    base = profile(9, 3, 4);
+  } else if (slug.includes("haiku")) {
+    base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    base = profile(4, 4, 2);
-  } else if (slug.includes("minimax") || slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
-    base = profile(3, 4, 1, { local: slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio") });
+    base = profile(7, 4, 2);
+  } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
+    base = profile(4, 4, 1, { local: true });
+  } else if (slug.includes("minimax")) {
+    base = profile(6, 4, 2);
   } else if (slug.includes("composer") || slug.includes("grok-build")) {
-    base = profile(4, 4, 2);
+    base = profile(8, 4, 2);
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
-    base = profile(4, 5, 2);
+    base = profile(7, 5, 2);
   } else if (slug.includes("gemini")) {
-    base = profile(3, 5, 2);
-  } else if (slug.includes("kimi")) {
-    base = profile(4, 3, 2);
-  } else if (slug.includes("glm")) {
-    base = profile(4, 3, 2);
-  } else if (/gpt-5\.[1-5]/.test(slug) || slug.includes("gpt-5.3")) {
-    base = profile(4, 4, 3);
+    base = slug.includes("pro") ? profile(8, 4, 3) : profile(5, 5, 2);
+  } else if (slug.includes("kimi") || slug.includes("glm")) {
+    base = profile(7, 3, 2);
+  } else if (slug.includes("gpt-5.5") || slug.includes("gpt-5.4")) {
+    base = profile(8, 4, 3);
+  } else if (/gpt-5\.[1-3]/.test(slug)) {
+    base = profile(7, 4, 3);
   } else {
-    base = profile(provider === "custom" ? 3 : 4, 3, 3);
+    // Unknown slug, custom or stock alike: mid-field. A model nobody rated
+    // must not outrank the ones somebody did.
+    base = profile(6, 3, 3);
   }
+  // Stored overrides are 1–5 (5 = frontier); double them onto the internal
+  // scale. A value above 5 is already internal and passes through.
+  const asked = override?.intelligence;
+  const intelligence = asked === undefined ? base.intelligence : asked <= 5 ? asked * 2 : asked;
   return {
     ...base,
     ...(override ?? {}),
     inputs: { ...base.inputs, ...(override?.inputs ?? {}) },
-    intelligence: clamp(Math.round(override?.intelligence ?? base.intelligence), 1, 5),
+    intelligence: clamp(Math.round(intelligence), 1, 10),
     speed: clamp(Math.round(override?.speed ?? base.speed), 1, 5),
     cost: clamp(Math.round(override?.cost ?? base.cost), 1, 5),
   };
@@ -402,9 +451,9 @@ function supports(profile: ModelRoutingProfile, required: Partial<ModelInputCapa
 }
 
 function requiredIntelligence(tier: RoutingTaskTier): number {
-  if (tier === "deep") return 5;
-  if (tier === "quick") return 2;
-  return 4;
+  if (tier === "deep") return 10;
+  if (tier === "quick") return 4;
+  return 8;
 }
 
 /** Tally Learning outcome events. A live completed run is not verified. */
@@ -479,12 +528,20 @@ export function rankRoutingCandidates(
     // On deep work we want fit to dominate. The over-fit penalty gets softer
     // for higher tiers and the gap penalty gets harder if the model falls
     // below the bar.
-    const overfitPenalty = tier === "deep" ? 2 : tier === "balanced" ? 4 : 6;
-    const underfitPenalty = tier === "deep" ? 40 : tier === "balanced" ? 30 : 25;
+    const overfitPenalty = tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
+    const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
     let score = 100 + (gap < 0 ? gap * underfitPenalty : -gap * overfitPenalty);
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);
     score -= candidate.profile.cost * (tier === "quick" ? 5 : tier === "balanced" ? 3 : 1);
-    if (candidate.profile.local) score += tier === "deep" ? 1 : 8;
+    // Free capacity — a local model, or an unlimited plan whose gauge never
+    // moves — is a filler, not a merit. The old flat +8 meant "free, so use
+    // it", which put a local model ahead of a better-fitting metered one on
+    // every quick ask. Fit decides who is right for the task; free breaks
+    // ties and rises naturally when the metered field drains, because free
+    // candidates never take pace or reserve penalties.
+    if (candidate.profile.local || candidate.paceUnmetered) {
+      score += tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
+    }
     if (request.current && sameRoutingIdentity(request.current, candidate)) {
       score += 4;
     }
@@ -511,6 +568,7 @@ export function rankRoutingCandidates(
       score: Math.round(score * 10) / 10,
       expectedUsedPercent: draw.expectedUsedPercent,
       capacityDelta: draw.delta,
+      usedPercent: draw.usedPercent,
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));

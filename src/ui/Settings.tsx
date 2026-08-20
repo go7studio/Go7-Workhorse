@@ -461,7 +461,7 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
         : { intelligence: 4, speed: 4, cost: 3 };
     store.updateCustomBot(bot.id, { routingProfile: { ...current, ...values } });
   };
-  const role = current.intelligence >= 5 ? "deep" : current.speed >= 5 && current.cost <= 2 ? "quick" : "balanced";
+  const role = current.intelligence >= 9 ? "deep" : current.speed >= 5 && current.cost <= 2 ? "quick" : "balanced";
   const input = (key: keyof typeof current.inputs, value: boolean) =>
     store.updateCustomBot(bot.id, {
       routingProfile: { ...current, inputs: { ...current.inputs, [key]: value } },

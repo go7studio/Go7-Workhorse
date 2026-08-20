@@ -412,7 +412,9 @@ export function selectAdaptiveRoute(input: {
       };
     }
   }
-  const floor = input.riskFloor ?? 2;
+  // Intelligence arrives on routing's 1-10 scale now; the old floor of 2 and
+  // the x8 weight were authored for 1-5. Double the floor, halve the weight.
+  const floor = input.riskFloor ?? 4;
   const listed: AdaptiveSelection["candidates"] = [];
   let winner: AdaptiveSelection["candidates"][number] | undefined;
   for (const row of input.candidates) {
@@ -440,7 +442,7 @@ export function selectAdaptiveRoute(input: {
       });
       continue;
     }
-    let score = 40 + row.intelligence * 8 + row.speed * 2 - row.cost * 4;
+    let score = 40 + row.intelligence * 4 + row.speed * 2 - row.cost * 4;
     const stats = input.outcomes?.filter(
       (item) =>
         item.provider === row.provider &&

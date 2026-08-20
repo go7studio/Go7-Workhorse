@@ -133,32 +133,30 @@ test("live overlay keeps families beyond the stock four; empty live still falls 
   );
 });
 
-test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x and keep opus/sol/grok-4.6 at 5", () => {
+test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-10 scale", () => {
   const triple = (model: string) => {
     const profile = routingProfileForModel("cursor", model);
     return [profile.intelligence, profile.speed, profile.cost] as const;
   };
-  assert.deepEqual(triple("claude-opus-5"), [5, 2, 5]);
-  assert.deepEqual(triple("gpt-5.6-sol"), [5, 2, 5]);
-  assert.deepEqual(triple("cursor-grok-4.6"), [5, 2, 5]);
-  assert.deepEqual(triple("claude-sonnet-5"), [4, 4, 3]);
-  assert.deepEqual(triple("gpt-5.6-terra"), [4, 4, 3]);
-  assert.deepEqual(triple("cursor-grok-4.5"), [4, 4, 3]);
-  assert.deepEqual(triple("claude-haiku-4-5"), [3, 5, 1]);
-  assert.deepEqual(triple("gpt-5.6-luna"), [3, 5, 1]);
-  assert.deepEqual(triple("gpt-5.4-mini"), [3, 5, 1]);
-  assert.deepEqual(triple("gpt-5-mini"), [3, 5, 1]);
-  assert.deepEqual(triple("gemini-3.7-flash"), [3, 5, 2]);
-  assert.deepEqual(triple("gemini-3.1-pro"), [3, 5, 2]);
-  assert.notDeepEqual(triple("gemini-3.1-pro"), [3, 5, 1], "gemini must not match the mini token");
-  assert.notDeepEqual(triple("composer-2.5"), [4, 3, 3]);
-  assert.notDeepEqual(triple("auto"), [4, 3, 3]);
-  assert.notDeepEqual(triple("kimi-k3"), [4, 3, 3]);
-  assert.notDeepEqual(triple("glm-5.2"), [4, 3, 3]);
-  assert.notDeepEqual(triple("gpt-5.5"), [4, 3, 3]);
-  assert.notDeepEqual(triple("gpt-5.4"), [4, 3, 3]);
-  assert.notDeepEqual(triple("gpt-5.3-codex"), [4, 3, 3]);
-  assert.deepEqual(triple("gpt-5.4-mini"), [3, 5, 1], "mini stays light and is not smashed into GPT-5.4");
+  assert.deepEqual(triple("claude-opus-5"), [10, 2, 5]);
+  assert.deepEqual(triple("gpt-5.6-sol"), [10, 2, 5]);
+  assert.deepEqual(triple("cursor-grok-4.6"), [10, 2, 5]);
+  assert.deepEqual(triple("claude-sonnet-5"), [9, 3, 4]);
+  assert.deepEqual(triple("gpt-5.6-terra"), [8, 4, 3]);
+  assert.deepEqual(triple("cursor-grok-4.5"), [8, 4, 3]);
+  assert.deepEqual(triple("claude-haiku-4-5"), [5, 5, 1]);
+  assert.deepEqual(triple("gpt-5.6-luna"), [5, 5, 1]);
+  assert.deepEqual(triple("gpt-5.4-mini"), [5, 5, 1]);
+  assert.deepEqual(triple("gpt-5-mini"), [5, 5, 1]);
+  assert.deepEqual(triple("gemini-3.7-flash"), [5, 5, 2]);
+  assert.deepEqual(triple("gemini-3.1-pro"), [8, 4, 3], "a pro Gemini is not a flash");
+  assert.deepEqual(triple("composer-2.5"), [8, 4, 2]);
+  assert.deepEqual(triple("kimi-k3"), [7, 3, 2]);
+  assert.deepEqual(triple("glm-5.2"), [7, 3, 2]);
+  assert.deepEqual(triple("gpt-5.5"), [8, 4, 3]);
+  assert.deepEqual(triple("gpt-5.4"), [8, 4, 3]);
+  assert.deepEqual(triple("gpt-5.3-codex"), [7, 4, 3]);
+  assert.deepEqual(triple("gpt-5.4-mini"), [5, 5, 1], "mini stays light and is not smashed into GPT-5.4");
 });
 
 test("Composer-family and API-family Cursor rows still map to two leftover rings", () => {
@@ -183,7 +181,7 @@ test("Auto ranks collapsed bases, not 204 spellings; Quick/Balanced/Deep are sta
   assert.deepEqual(second, first);
   assert.ok(first.quick && first.balanced && first.deep);
   const deepProfile = routingProfileForModel("cursor", first.deep!);
-  assert.equal(deepProfile.intelligence, 5);
+  assert.equal(deepProfile.intelligence, 10);
 
   const winnerLane = cursorWatchLane(first.balanced!);
   const loaded =

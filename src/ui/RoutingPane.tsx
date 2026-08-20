@@ -13,9 +13,15 @@ const TIERS = [
 
 function spareCopy(winner: RankedRoutingCandidate | undefined): string {
   if (!winner) return "No match";
-  if (winner.capacityDelta == null) return winner.label;
+  // "Spare" used to be the pace delta, which read like a fuel gauge: Sol at
+  // 98% left showed "4% spare" the day its week began. Say what is left and
+  // how the draw compares to pace, separately.
+  if (winner.paceUnmetered) return `${winner.label} · unmetered`;
+  if (winner.capacityDelta == null || winner.usedPercent == null) return winner.label;
+  const left = Math.max(0, Math.round(100 - winner.usedPercent));
   const delta = Math.round(winner.capacityDelta);
-  return `${winner.label} · ${Math.abs(delta)}% ${delta >= 0 ? "spare" : "over"}`;
+  const pace = Math.abs(delta) < 10 ? "on pace" : delta > 0 ? `${delta}% under pace` : `${-delta}% over pace`;
+  return `${winner.label} · ${left}% left · ${pace}`;
 }
 
 export function RoutingPane() {
@@ -25,6 +31,7 @@ export function RoutingPane() {
     grok: store.grokPlan,
     codex: store.codexPlan,
     claude: store.claudePlan,
+    cursor: store.cursorPlan,
     custom: store.customPlans,
   };
   const statuses = watchVendorStatuses({
@@ -93,7 +100,7 @@ export function RoutingPane() {
         <div className={`settings-row${weighs ? "" : " off"}`}>
           <div className="settings-row-copy">
             <strong>Weekly reserve</strong>
-            <span>Skip bots at or below this weekly reserve.</span>
+            <span>Down-rank bots at or below this weekly reserve. A bank about to reset is spent down, not benched.</span>
           </div>
           <div className="settings-control">
             <input

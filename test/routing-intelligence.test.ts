@@ -55,13 +55,12 @@ const bot = (
 test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   const intelligence = (provider: Parameters<typeof routingProfileForModel>[0], model: string) =>
     routingProfileForModel(provider, model).intelligence;
-  // Frontier — harder or more creative. Fable is not grouped with Opus.
+  // Frontier intelligence. Opus 5 is as capable as Fable 5; cost assigns.
   assert.equal(intelligence("claude", "claude-fable-5"), 10);
+  assert.equal(intelligence("claude", "claude-opus-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("grok", "grok-4.6"), 10);
   assert.equal(intelligence("cursor", "cursor-grok-4.6-high"), 10);
-  // Enough for ordinary agent and UI coding
-  assert.equal(intelligence("claude", "claude-opus-5"), 9);
   // The understudy
   assert.equal(intelligence("claude", "claude-sonnet-5"), 9);
   // The balanced band
@@ -226,6 +225,7 @@ test("a short codey ask is not quick, and the domain is coding", () => {
   assert.equal(inferRoutingTier("classify these emails by sender"), "quick", "a real quick ask stays quick");
   assert.equal(inferTaskDomain("write the launch blog post for the new referral system"), "writing");
   assert.equal(inferTaskDomain("analyze the csv and plot a histogram of rows per day"), "data");
+  assert.equal(inferTaskDomain("compare these screenshots of the settings panel"), "visual");
   assert.equal(inferTaskDomain("what should we do next"), "general");
   assert.equal(inferTaskDomain("write a function that parses the manifest.json"), "coding", "code words beat write words");
 });
@@ -320,7 +320,16 @@ test("deep falls back to the understudy when every frontier bot is at reserve", 
   }
 });
 
-test("Fable is not the Claude pick for ordinary UI work; it is for harder or creative slices", () => {
+test("Opus 5 matches Fable intelligence; cost and task keep Fable for visual and creative work", () => {
+  const fable = routingProfileForModel("claude", "claude-fable-5");
+  const opus = routingProfileForModel("claude", "claude-opus-5");
+  assert.equal(fable.intelligence, opus.intelligence);
+  assert.ok(fable.cost > opus.cost, "Fable is the expensive extra pool");
+  assert.ok(opus.speed >= fable.speed);
+  assert.ok(opus.strengths?.includes("coding"));
+  assert.ok(fable.strengths?.includes("visual"));
+  assert.ok(fable.strengths?.includes("writing"));
+
   const claude = (id: string, name: string): RoutingCandidate => ({
     provider: "claude",
     model: id,
@@ -337,13 +346,17 @@ test("Fable is not the Claude pick for ordinary UI work; it is for harder or cre
   const uiPrompt = "Implement the bounded settings panel in Go7 Workhorse";
   assert.equal(inferRoutingTier(uiPrompt, [], { role: "worker" }), "balanced");
   const ui = rankRoutingCandidates(rows, { prompt: uiPrompt, role: "worker", now: NOW }, settings);
-  assert.notEqual(ui[0]?.model, "claude-fable-5", "catalog-first Fable is not the UI pick");
-  assert.equal(ui[0]?.model, "claude-opus-5");
+  assert.equal(ui[0]?.model, "claude-opus-5", "same intelligence, cheaper coding slot wins");
 
   const creativePrompt = "write a short story about the desk";
   assert.equal(inferRoutingTier(creativePrompt, [], { role: "worker" }), "deep");
   const creative = rankRoutingCandidates(rows, { prompt: creativePrompt, role: "worker", now: NOW }, settings);
   assert.equal(creative[0]?.model, "claude-fable-5");
+
+  const visualPrompt = "compare these screenshots of the settings panel";
+  assert.equal(inferTaskDomain(visualPrompt), "visual");
+  const visual = rankRoutingCandidates(rows, { prompt: visualPrompt, role: "worker", now: NOW }, settings);
+  assert.equal(visual[0]?.model, "claude-fable-5");
 
   const namedClaude = constrainRouteCandidatesForSpawn(
     [
@@ -362,4 +375,22 @@ test("Fable is not the Claude pick for ordinary UI work; it is for harder or cre
   assert.deepEqual(namedClaude.map((row) => row.provider), ["claude", "claude", "claude"]);
   const unnamed = constrainRouteCandidatesForSpawn(namedClaude, {});
   assert.equal(unnamed.length, namedClaude.length);
+});
+
+test("Fable leftover is the extra pool, not the shared Claude week", () => {
+  const desk = normalizeSettings({ llms: { claude: { connected: true } } });
+  const resetsAt = new Date(NOW + 3.5 * 24 * 3600 * 1000).toISOString();
+  const rows = routingCandidatesForDesk(desk, [], {
+    claude: {
+      usedPercent: 13,
+      leftPercent: 87,
+      period: "weekly",
+      products: [
+        { product: "weekly_all", label: "All models", usagePercent: 13, resetsAt },
+        { product: "extra_fable", label: "Fable extra", usagePercent: 40, resetsAt },
+      ],
+    },
+  });
+  assert.equal(rows.find((row) => row.model === "claude-fable-5")?.capacity?.usedPercent, 40);
+  assert.equal(rows.find((row) => row.model === "claude-opus-5")?.capacity?.usedPercent, 13);
 });

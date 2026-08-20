@@ -331,6 +331,15 @@ test("parseClaudePlanUsage reads current oauth five_hour / seven_day JSON", () =
   assert.equal(remaining?.usedPercent, 20);
   assert.equal(remaining?.leftPercent, 80);
   assert.equal(parseClaudePlanUsage({ extra_usage: { is_enabled: false } }), undefined);
+  const extra = parseClaudePlanUsage({
+    seven_day: { utilization: 13, resets_at: "2026-04-17T00:59:59Z" },
+    extra_usage: { is_enabled: true, utilization: 40, resets_at: "2026-05-01T00:00:00Z" },
+    seven_day_opus: { utilization: 22, resets_at: "2026-04-17T00:59:59Z" },
+  });
+  assert.deepEqual(
+    extra?.products.map((row) => `${row.label}:${row.usagePercent}`),
+    ["All models:13", "Fable extra:40", "Opus:22"],
+  );
 });
 
 test("resolveClaudePlanToken uses Claude Code credentials without reading the machine", async () => {

@@ -123,10 +123,14 @@ export function routingCandidatesForDesk(
       const identityParts = slug
         .split("-")
         .filter((part) => part.length > 2 && !["gpt", "grok", "claude", "model"].includes(part));
-      const product = plan?.products.find((item) => {
+      const namedProduct = plan?.products.find((item) => {
         const key = `${item.product} ${item.label}`.toLowerCase();
-        return key.includes(slug) || identityParts.some((part) => key.includes(part));
+        return identityParts.some((part) => key.includes(part));
       });
+      const sharedProduct = plan?.products.find(
+        (item) => item.product === "weekly_all" || item.label === "All models",
+      );
+      const product = namedProduct ?? sharedProduct ?? plan?.products.find((item) => `${item.product} ${item.label}`.toLowerCase().includes(slug));
       const laneCapacity =
         provider === "cursor" ? status.get(cursorWatchLane(model.id)) : capacity;
       candidates.push({
@@ -230,6 +234,7 @@ export function routingProfileForModel(
   let base: ModelRoutingProfile;
   const CODE = ["coding"] as const;
   const CODE_PROSE = ["coding", "writing"] as const;
+  const FABLE = ["coding", "writing", "visual"] as const;
   if (lightMini) {
     base = profile(5, 5, 1);
   } else if (slug.includes("5.6-sol")) {
@@ -243,13 +248,13 @@ export function routingProfileForModel(
   } else if (slug.includes("grok-4.5")) {
     base = profile(8, 4, 3, { strengths: CODE });
   } else if (slug.includes("fable") || slug.includes("mythos")) {
-    // Frontier: harder or more creative work. Not a default and not grouped
-    // with Opus — a bounded UI slice should not burn Fable.
-    base = profile(10, 2, 5, { strengths: CODE_PROSE });
+    // Same intelligence as Opus 5 at twice the price, and it draws a
+    // separate extra pool. Keep it for visual, creative, or complex work
+    // that named that specialist. Cost and leftover assign the rest.
+    base = profile(10, 2, 5, { strengths: FABLE });
   } else if (slug.includes("opus")) {
-    // Enough for ordinary agent and UI coding. Sits under Fable so Auto
-    // does not treat catalog-first Fable as the Claude pick.
-    base = profile(9, 3, 4, { strengths: CODE });
+    // Near-Fable intelligence at half the price. Default for agentic coding.
+    base = profile(10, 3, 4, { strengths: CODE });
   } else if (slug.includes("sonnet-4-6") || slug.includes("sonnet-4.6")) {
     base = profile(8, 4, 3, { strengths: CODE_PROSE });
   } else if (slug.includes("sonnet")) {
@@ -360,7 +365,7 @@ export function looksCodey(text: string): boolean {
   return (
     /```/.test(text) ||
     /\b[\w./-]+\.(ts|tsx|js|jsx|mjs|py|go|rs|rb|java|cs|cpp|cc|h|swift|kt|gd|sql|sh|bash|yml|yaml|toml|json)\b/i.test(text) ||
-    /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
+    /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|implement|component|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
     /=>|::|\(\)|\{\}|\[\]/.test(text)
   );
 }
@@ -373,6 +378,12 @@ export function inferTaskDomain(prompt: string, attachments: ChatImage[] = []): 
   const lower = text.toLowerCase();
   if (/\b(csv|sql|spreadsheet|dataset|dashboard|pivot|rows|columns|chart|plot|histogram|median|regression|analy[sz]e the (data|numbers))\b/.test(lower)) {
     return "data";
+  }
+  if (
+    attachments.some((item) => item.kind === "image") ||
+    /\b(screenshots?|mockups?|illustration|figma|visual|pixel|artwork|storyboard)\b/.test(lower)
+  ) {
+    return "visual";
   }
   if (/\b(write|draft|rewrite|blog|article|essay|email|newsletter|copy|caption|tagline|announcement|readme|docs?|documentation|prose|tone|headline|post)\b/.test(lower)) {
     return "writing";
@@ -517,6 +528,19 @@ function supports(profile: ModelRoutingProfile, required: Partial<ModelInputCapa
   return Object.entries(required).every(([key, needed]) => !needed || profile.inputs[key as keyof ModelInputCapabilities]);
 }
 
+function extraPoolAssignment(
+  profile: ModelRoutingProfile,
+  domain: TaskDomain,
+  tier: RoutingTaskTier,
+): number {
+  const extraPool =
+    profile.cost >= 5 &&
+    (profile.strengths?.includes("visual") === true || profile.strengths?.includes("writing") === true);
+  if (!extraPool) return 0;
+  if (domain === "visual" || domain === "writing") return 4;
+  return tier === "deep" ? -2 : -6;
+}
+
 function requiredIntelligence(tier: RoutingTaskTier): number {
   if (tier === "deep") return 10;
   if (tier === "quick") return 4;
@@ -599,10 +623,13 @@ export function rankRoutingCandidates(
     const gap = candidate.profile.intelligence - minimum;
     // On deep work we want fit to dominate. The over-fit penalty gets softer
     // for higher tiers and the gap penalty gets harder if the model falls
-    // below the bar.
+    // below the bar. Agentic coding pays for intelligence; cost assigns
+    // among models that can do the work.
     const overfitPenalty = tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
     const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
-    let score = 100 + (gap < 0 ? gap * underfitPenalty : -gap * overfitPenalty);
+    const codingFit =
+      domain === "coding" && candidate.profile.strengths?.includes("coding") === true && gap > 0;
+    let score = 100 + (gap < 0 ? gap * underfitPenalty : codingFit ? 0 : -gap * overfitPenalty);
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);
     score -= candidate.profile.cost * (tier === "quick" ? 5 : tier === "balanced" ? 3 : 1);
     // Free capacity — a local model, or an unlimited plan whose gauge never
@@ -617,6 +644,9 @@ export function rankRoutingCandidates(
     // Domain is a tie-break inside a band, never a fit substitute: +6 sits
     // below one intelligence unit (12-20) and beside the speed/cost spreads.
     if (domain !== "general" && candidate.profile.strengths?.includes(domain)) score += 6;
+    // Extra-pool specialists (high cost + visual/creative): spend them on
+    // that work. Equal-intelligence cheaper slots take ordinary coding.
+    score += extraPoolAssignment(candidate.profile, domain, tier);
     const tilt = outcomeTilt(outcomeFor(candidate, request.outcomes));
     // Stickiness is for continuity, not loyalty: an incumbent whose verified
     // record has gone negative does not keep its +4, or one dead bot gets

@@ -202,8 +202,10 @@ transcript rather than as a path.
   used as named. A named vendor without a model still ranks that vendor’s
   models. One assignment is one worker; a second only to check that output,
   unless you asked for every vendor, all bots, several independent reviews,
-  or a named list. Settings → Routing turns that off, and tunes how any
-  routing weighs leftover, reserve, and local models.
+  or a named list. Equal-intelligence picks go to the cheaper slot. A model
+  with its own extra pool is kept for visual, creative, or complex work.
+  Settings → Routing turns that off, and tunes how any routing weighs leftover,
+  reserve, and local models.
 
 ## Memory
 

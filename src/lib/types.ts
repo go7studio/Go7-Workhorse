@@ -677,7 +677,7 @@ export type ModelInputCapabilities = {
 };
 
 /** What a prompt is mostly about. Routing tie-breaks toward models strong there. */
-export type TaskDomain = "coding" | "writing" | "data" | "general";
+export type TaskDomain = "coding" | "writing" | "visual" | "data" | "general";
 
 export type ModelRoutingProfile = {
   /** 1 is lightweight; 5 is frontier reasoning. */

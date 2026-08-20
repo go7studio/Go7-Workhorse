@@ -1753,8 +1753,8 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(CUSTOM_HTTP_SESSION_RULES, /the rename did not take/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /puts THIS chat/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /search likely folders first/i);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /D:\\ and C:\\/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /If they name a drive/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Documents, Desktop, and Projects/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /If they name a drive or folder/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Do not ask the user for a path when a matching folder exists/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /Never delete this chat on a bulk list/);
   assert.match(CUSTOM_HTTP_SESSION_RULES, /onlyThis=true only when the user asked to delete this chat alone/);

@@ -189,7 +189,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   assert.equal(spec.sessionParams._meta?.rules, CURSOR_SESSION_RULES);
   assert.notEqual(spec.sessionParams._meta?.rules, WORKHORSE_SESSION_RULES);
   assert.match(spec.sessionParams._meta?.rules ?? "", /You are the Cursor Agent/);
-  assert.match(spec.sessionParams._meta?.rules ?? "", /Grok, Codex, Claude, and Cursor/);
+  assert.match(spec.sessionParams._meta?.rules ?? "", /Grok, Claude, Codex, and Cursor/);
   assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /Grok Build/);
   assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /\/goal is Grok/);
   assert.doesNotMatch(spec.sessionParams._meta?.rules ?? "", /Run Grok/);
@@ -699,7 +699,7 @@ test("Cursor applySessionConfig sets configId model", async () => {
 
 test("Cursor session rules and routing hydrate do not treat Cursor as Grok", () => {
   assert.match(CURSOR_SESSION_RULES, /You are the Cursor Agent/);
-  assert.match(CURSOR_SESSION_RULES, /Grok, Codex, Claude, and Cursor/);
+  assert.match(CURSOR_SESSION_RULES, /Grok, Claude, Codex, and Cursor/);
   assert.doesNotMatch(CURSOR_SESSION_RULES, /Grok Build/);
   assert.doesNotMatch(CURSOR_SESSION_RULES, /Run Grok/);
   assert.doesNotMatch(CURSOR_SESSION_RULES, /\/goal is Grok/);

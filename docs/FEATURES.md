@@ -29,7 +29,8 @@ generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
 delegate a task, continue a finished wave, worker status. The leftover check
 never includes keys or chat content. The first call,
-`workhorse_capabilities`, says what this desk offers. Delete, rename,
+`workhorse_capabilities`, says what this desk offers. Older names still
+answer so a harness that already calls them is not refused. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
 The same helper is a JSON CLI for a harness without MCP, and Install

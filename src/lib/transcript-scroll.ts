@@ -48,8 +48,11 @@ export function shouldLoadEarlierWindow(input: {
   atBottom: boolean;
   turnsAboveViewport: number;
   lookahead: number;
+  scrollTop?: number;
+  leadPx?: number;
 }): boolean {
   if (!input.hasEarlier || input.loading || input.atBottom) return false;
+  if (input.scrollTop != null && input.leadPx != null && input.scrollTop <= input.leadPx) return true;
   return input.turnsAboveViewport < input.lookahead;
 }
 

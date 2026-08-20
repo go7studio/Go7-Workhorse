@@ -14,6 +14,7 @@ import {
   recentTranscriptText,
   nextTranscriptPaintStart,
   scheduleAfterPaint,
+  TRANSCRIPT_LEAD_PX,
   TRANSCRIPT_LOOKAHEAD,
   TRANSCRIPT_PAINT_CHUNK,
   transcriptPaintStart,
@@ -40,31 +41,18 @@ import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
-  captureViewportLock,
   countTurnsAboveViewport,
   followLatestTurn,
-  keepScrollThroughPrepend,
   pinnedToLatest,
   pinToLatest,
-  restoreViewportLock,
   shouldLoadEarlierWindow,
-  type ViewportLock,
 } from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
-function turnLocks(scroller: HTMLElement, content: HTMLElement) {
-  const viewTop = scroller.getBoundingClientRect().top;
-  return Array.from(content.querySelectorAll<HTMLElement>("[data-turn-id]"), (node) => {
-    const rect = node.getBoundingClientRect();
-    return {
-      id: node.dataset.turnId ?? "",
-      offsetTop: rect.top - viewTop + scroller.scrollTop,
-      height: rect.height,
-      bottom: rect.bottom,
-    };
-  }).filter((turn) => turn.id);
+function followLatestClass(el: HTMLElement, following: boolean) {
+  el.classList.toggle("follow-latest", following);
 }
 
 const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
@@ -166,12 +154,7 @@ export function SessionPane() {
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const userMoved = useRef(false);
-  const lastHeight = useRef(0);
-  const viewLock = useRef<ViewportLock | null>(null);
   const filling = useRef(false);
-  const frozen = useRef(false);
-  const applying = useRef(false);
-  const settleFrame = useRef(0);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
@@ -293,57 +276,14 @@ export function SessionPane() {
   useEffect(() => {
     followBottom.current = true;
     userMoved.current = false;
-    lastHeight.current = 0;
-    viewLock.current = null;
-    frozen.current = false;
-    if (settleFrame.current) cancelAnimationFrame(settleFrame.current);
-    settleFrame.current = 0;
   }, [session?.id]);
-
-  const holdViewport = (el: HTMLElement) => {
-    applying.current = true;
-    const content = stack.current;
-    const locked = content
-      ? restoreViewportLock(
-          el,
-          turnLocks(el, content).find((turn) => turn.id === viewLock.current?.id),
-          viewLock.current,
-        )
-      : false;
-    if (!locked) keepScrollThroughPrepend(el, lastHeight.current);
-    applying.current = false;
-  };
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    if (followBottom.current && !viewLock.current) pinToLatest(el);
-    else holdViewport(el);
-    lastHeight.current = el.scrollHeight;
-    if (!frozen.current) {
-      filling.current = false;
-      return;
-    }
-    if (settleFrame.current) cancelAnimationFrame(settleFrame.current);
-    let stable = 0;
-    let prev = el.scrollHeight;
-    const settle = () => {
-      holdViewport(el);
-      if (el.scrollHeight === prev) stable += 1;
-      else {
-        stable = 0;
-        prev = el.scrollHeight;
-      }
-      lastHeight.current = el.scrollHeight;
-      if (stable >= 4) {
-        frozen.current = false;
-        filling.current = false;
-        settleFrame.current = 0;
-        return;
-      }
-      settleFrame.current = requestAnimationFrame(settle);
-    };
-    settleFrame.current = requestAnimationFrame(settle);
+    followLatestClass(el, followBottom.current);
+    if (followBottom.current) pinToLatest(el);
+    filling.current = false;
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
@@ -367,16 +307,8 @@ export function SessionPane() {
       });
     };
     const pin = () => {
-      if (viewLock.current && !followBottom.current) {
-        holdViewport(thread);
-        lastHeight.current = thread.scrollHeight;
-        return;
-      }
-      if (followBottom.current) {
-        if (skipPin) return;
-        pinToLatest(thread);
-        lastHeight.current = thread.scrollHeight;
-      }
+      if (skipPin) return;
+      if (followBottom.current) pinToLatest(thread);
     };
     const observer = new ResizeObserver(pin);
     thread.addEventListener("toggle", onToggle, true);
@@ -501,7 +433,7 @@ export function SessionPane() {
         </div>
       </header>
       <div
-        className="transcript"
+        className="transcript follow-latest"
         ref={scroller}
         onWheel={() => {
           userMoved.current = true;
@@ -511,28 +443,25 @@ export function SessionPane() {
         }}
         onScroll={() => {
           const el = scroller.current;
-          if (!el || applying.current || frozen.current) return;
+          if (!el) return;
           const atBottom = pinnedToLatest(el, SCROLL_SLACK);
           followBottom.current = followLatestTurn({
             following: followBottom.current,
             atBottom,
             userInitiated: userMoved.current,
           });
+          followLatestClass(el, followBottom.current);
           if (followBottom.current) {
             userMoved.current = false;
-            viewLock.current = null;
-            lastHeight.current = el.scrollHeight;
             return;
           }
           const from = paint.id === sessionId ? paint.from : 0;
           const content = stack.current;
-          if (!content) return;
-          const turns = turnLocks(el, content);
-          viewLock.current = captureViewportLock(el.scrollTop, turns);
-          lastHeight.current = el.scrollHeight;
-          if (filling.current || from <= 0) return;
+          if (!content || filling.current || from <= 0) return;
           const above = countTurnsAboveViewport(
-            turns.map((turn) => ({ bottom: turn.bottom })),
+            Array.from(content.querySelectorAll(".turn"), (node) => ({
+              bottom: node.getBoundingClientRect().bottom,
+            })),
             el.getBoundingClientRect().top,
           );
           if (
@@ -542,10 +471,11 @@ export function SessionPane() {
               atBottom,
               turnsAboveViewport: above,
               lookahead: TRANSCRIPT_LOOKAHEAD,
+              scrollTop: el.scrollTop,
+              leadPx: TRANSCRIPT_LEAD_PX,
             })
           ) {
             filling.current = true;
-            frozen.current = true;
             setPaint({ id: sessionId, from: nextTranscriptPaintStart(from, TRANSCRIPT_PAINT_CHUNK) });
           }
         }}

@@ -204,6 +204,7 @@ import {
   lastReplyIndex,
   nextTranscriptPaintStart,
   TRANSCRIPT_FIRST_PAINT,
+  TRANSCRIPT_LEAD_PX,
   TRANSCRIPT_LOOKAHEAD,
   TRANSCRIPT_PAINT_CHUNK,
   packWorkRows,
@@ -5833,14 +5834,15 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /scheduleAfterPaint/);
   assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
   assert.match(pane, /transcriptOpen && session/);
-  assert.match(pane, /keepScrollThroughPrepend/);
-  assert.match(pane, /captureViewportLock/);
-  assert.match(pane, /restoreViewportLock/);
-  assert.match(pane, /viewLock/);
+  assert.match(pane, /followLatestClass/);
+  assert.match(pane, /follow-latest/);
+  assert.match(pane, /TRANSCRIPT_LEAD_PX/);
   assert.match(pane, /data-turn-id/);
   assert.match(pane, /shouldLoadEarlierWindow/);
   assert.match(pane, /TRANSCRIPT_LOOKAHEAD/);
   assert.match(pane, /TRANSCRIPT_PAINT_CHUNK/);
+  assert.doesNotMatch(pane, /viewLock/);
+  assert.doesNotMatch(pane, /holdViewport/);
   assert.doesNotMatch(pane, /wantEarlier/);
   assert.doesNotMatch(pane, /startTranscriptFill/);
   assert.doesNotMatch(pane, /startTransition\(\(\) => setPaint/);
@@ -5853,6 +5855,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(TRANSCRIPT_FIRST_PAINT, 10);
   assert.equal(TRANSCRIPT_PAINT_CHUNK, 10);
   assert.equal(TRANSCRIPT_LOOKAHEAD, 5);
+  assert.equal(TRANSCRIPT_LEAD_PX, 800);
   assert.equal(transcriptPaintStart(10), 0);
   assert.equal(transcriptPaintStart(26), 16);
   assert.equal(nextTranscriptPaintStart(22), 12);

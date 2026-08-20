@@ -62,6 +62,8 @@ test("earlier turns page in when fewer than five loaded turns remain above the f
   assert.equal(shouldLoadEarlierWindow({ ...window, atBottom: true, turnsAboveViewport: 0 }), false);
   assert.equal(shouldLoadEarlierWindow({ ...window, loading: true }), false);
   assert.equal(shouldLoadEarlierWindow({ ...window, hasEarlier: false }), false);
+  assert.equal(shouldLoadEarlierWindow({ ...window, turnsAboveViewport: 12, scrollTop: 120, leadPx: 800 }), true);
+  assert.equal(shouldLoadEarlierWindow({ ...window, turnsAboveViewport: 12, scrollTop: 900, leadPx: 800 }), false);
   const el = { scrollHeight: 4000, scrollTop: 80 };
   keepScrollThroughPrepend(el, 2800);
   assert.equal(el.scrollTop, 1280);
@@ -124,11 +126,13 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /observer\.observe\(content\)/);
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
-  assert.match(pane, /keepScrollThroughPrepend/);
-  assert.match(pane, /captureViewportLock/);
-  assert.match(pane, /restoreViewportLock/);
-  assert.match(pane, /viewLock/);
-  assert.match(pane, /frozen/);
+  assert.match(pane, /followLatestClass/);
+  assert.match(pane, /follow-latest/);
+  assert.match(pane, /TRANSCRIPT_LEAD_PX/);
+  assert.doesNotMatch(pane, /viewLock/);
+  assert.doesNotMatch(pane, /frozen/);
+  assert.doesNotMatch(pane, /holdViewport/);
+  assert.doesNotMatch(pane, /restoreViewportLock/);
   assert.match(pane, /data-turn-id/);
   const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
   assert.match(userTurn, /data-turn-id=\{message\.id\}/);
@@ -143,7 +147,8 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.doesNotMatch(pane, /Load earlier turns/);
   assert.doesNotMatch(pane, /transcript-earlier/);
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
-  assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*none/);
+  assert.match(css, /\.transcript \{[^}]*overflow-anchor:\s*auto/);
+  assert.match(css, /\.transcript\.follow-latest \{[^}]*overflow-anchor:\s*none/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
   assert.match(pane, /if \(skipPin\) return/);
   assert.match(pane, /session-notices/);

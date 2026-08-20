@@ -318,6 +318,8 @@ export const WORK_TAIL = 3;
 export const TRANSCRIPT_FIRST_PAINT = 10;
 export const TRANSCRIPT_PAINT_CHUNK = 10;
 export const TRANSCRIPT_LOOKAHEAD = 5;
+/** Start the next page while the user still has room above the fold. */
+export const TRANSCRIPT_LEAD_PX = 800;
 
 export function transcriptPaintStart(total: number, first = TRANSCRIPT_FIRST_PAINT): number {
   if (total <= first) return 0;

@@ -1650,6 +1650,10 @@ html.pane-dragging * {
   overflow-y: auto;
   padding: 28px 22px 20px;
   overscroll-behavior: contain;
+  overflow-anchor: auto;
+}
+
+.transcript.follow-latest {
   overflow-anchor: none;
 }
 

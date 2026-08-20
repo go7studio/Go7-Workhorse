@@ -81,6 +81,12 @@ transcript rather than as a path.
 - Each chat row shows how old the last prompt is in a compact form such as
   `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
   folds them on the count button; they ease open and closed.
+- A chat that ran a wave says so on its own row: who called it, and how it
+  went — `OpenClaw · Working…`, or nothing at all once every worker finished
+  clean. Failure is the only word in red; interrupted and timed-out work is
+  unfinished, not wrong. A wave that came in over Link and was never named
+  here takes the work's own name instead of the prompt's first few words, so
+  long as its workers agree on one.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share

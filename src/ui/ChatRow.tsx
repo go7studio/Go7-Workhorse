@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { lastTalkedAt } from "../lib/chats";
+import type { MissionRowLook } from "../lib/lineup";
 import { clampMenuPosition } from "../lib/edit-menu";
 import { formatChatSidebar } from "../lib/session";
 import { effortLabel, modelName } from "../lib/models";
@@ -56,6 +57,7 @@ export function ChatRow({
   workerCount = 0,
   workersOpen = false,
   onToggleWorkers,
+  mission,
 }: {
   session: Session;
   desk: ChatRowDesk;
@@ -63,6 +65,8 @@ export function ChatRow({
   workerCount?: number;
   workersOpen?: boolean;
   onToggleWorkers?: () => void;
+  /** Set on a parent that ran a wave. Undefined on ordinary chats and workers. */
+  mission?: MissionRowLook;
 }) {
   const [menu, setMenu] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
@@ -205,23 +209,37 @@ export function ChatRow({
           }}
         >
           <span
-            className={`dot ${session.provider}${session.status === "running" ? " pulse" : ""}`}
+            className={`dot ${session.provider}${session.status === "running" || mission?.running ? " pulse" : ""}`}
             style={ink ? { background: ink, color: ink } : undefined}
           />
           <span>
             <span className="row-title" title="Double-click to rename">
-              {session.title}
+              {/* A chat's title is the person's word for it and is kept. A wave
+                  that arrived over Link was never named by anyone here — it
+                  lands on whatever chat the caller passed — so it shows the
+                  work's own name instead of "Opus 5 ping". */}
+              {mission?.title ?? session.title}
             </span>
             <span className={`row-meta${link ? " peer" : ""}`}>
               {link
                 ? link.label
                 : nested && (session.hidden || session.agentRun)
                   ? workerLabel
-                  : session.status === "running"
-                    ? "Working…"
-                    : session.status === "needs-input"
-                      ? "Needs you"
-                      : rowLabel}
+                  : mission?.caller || mission?.word
+                    ? (
+                        <>
+                          {mission.caller ? <span className="row-caller">{mission.caller}</span> : null}
+                          {mission.caller && mission.word ? " · " : null}
+                          {mission.word ? (
+                            <span className={mission.tone === "danger" ? "row-state bad" : "row-state"}>{mission.word}</span>
+                          ) : null}
+                        </>
+                      )
+                    : session.status === "running"
+                      ? "Working…"
+                      : session.status === "needs-input"
+                        ? "Needs you"
+                        : rowLabel}
             </span>
           </span>
           <TimeStamp at={talkedAt} className="row-talked" />

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
+import { missionRowLook } from "../lib/lineup";
 import { folderSummary } from "../lib/project";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
@@ -134,6 +135,7 @@ function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatI
             session={session}
             desk={rowDesk(store, index, session)}
             workerCount={session.workers.length}
+            mission={missionRowLook(session, session.workers)}
             workersOpen={Boolean(openCrew[session.id])}
             onToggleWorkers={() =>
               setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
@@ -249,6 +251,7 @@ function ProjectFolder({
                 session={session}
                 desk={rowDesk(store, index, session)}
                 workerCount={session.workers.length}
+            mission={missionRowLook(session, session.workers)}
                 workersOpen={Boolean(openCrew[session.id])}
                 onToggleWorkers={() =>
                   setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))

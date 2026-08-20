@@ -57,6 +57,13 @@ export type PeerAsk = {
   bot?: string;
   /** Name of the worker to hand this slice back to — Wren, Dexter, Marlow. */
   worker?: string;
+  /**
+   * Sibling that admits a plan step, matching AgentRun.role. store.tsx reads
+   * this to pick the spawn role; nothing on the desk sends it yet, so the
+   * auditor branch there is still inert. Declared because the read is real:
+   * without it `npm run build` fails and no release can be cut.
+   */
+  role?: "auditor";
   /** Inherit reuses compatible context; fresh accepts only a structured handoff. */
   seed?: WorkerSeed;
   handoff?: WorkerHandoff;

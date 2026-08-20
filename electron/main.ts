@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
@@ -49,7 +50,7 @@ import {
 import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
 import { ensureDeskRipgrep } from "./desk-path";
-import { ensureManagedWorktree, type EnsureWorktreeInput } from "./worktree-host";
+import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
 import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
 import { execFile, spawnSync, type ChildProcess } from "node:child_process";
@@ -179,7 +180,10 @@ function pinUserData() {
 pinUserData();
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
-  const swept = sweepStaleUserData(app.getPath("userData"));
+  const swept = sweepStaleUserData(app.getPath("userData"), {
+    appVersion: APP_VERSION,
+    tmpDir: os.tmpdir(),
+  });
   if (swept.removed.length) {
     console.info(`Cleared leftover desk cache (${swept.removed.join(", ")}).`);
   }
@@ -977,7 +981,15 @@ app.whenReady().then(async () => {
     );
   });
 
-  ipcMain.handle("state:load", () => readState());
+  ipcMain.handle("state:load", () => {
+    const loaded = readState();
+    const sessions = Array.isArray(loaded.sessions) ? loaded.sessions : [];
+    pruneOrphanWorktrees(
+      path.join(app.getPath("userData"), "worktrees"),
+      sessions.map((session) => (session && typeof session === "object" && typeof (session as { id?: unknown }).id === "string" ? (session as { id: string }).id : "")).filter(Boolean),
+    );
+    return loaded;
+  });
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (state && typeof state === "object") writeState(state);
   });

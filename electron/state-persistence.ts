@@ -74,16 +74,31 @@ export function readVersionedState(file: string): StateReadResult {
   return { state: { stateVersion: CURRENT_STATE_VERSION }, source: null, recovered: false };
 }
 
-function rotateProtectedBackups(file: string, protect: (state: PersistableState) => PersistableState) {
-  const sources = [file, `${file}.bak`, `${file}.bak.1`];
-  const targets = [`${file}.bak`, `${file}.bak.1`, `${file}.bak.2`];
-  const snapshots = sources.map((source) => {
-    const parsed = parseObject(source);
-    return parsed ? migrateState(protect(migrateState(parsed))) : null;
-  });
-  // Write oldest first so a later failure cannot destroy every valid generation.
-  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
-    if (snapshots[index]) atomicWriteJson(targets[index]!, snapshots[index]);
+function rotateFileBackups(file: string) {
+  const bak = `${file}.bak`;
+  const bak1 = `${file}.bak.1`;
+  const bak2 = `${file}.bak.2`;
+  try {
+    fs.rmSync(bak2, { force: true });
+  } catch {
+    /* missing */
+  }
+  try {
+    fs.renameSync(bak1, bak2);
+  } catch {
+    /* missing */
+  }
+  try {
+    fs.renameSync(bak, bak1);
+  } catch {
+    /* missing */
+  }
+  if (fs.existsSync(file)) {
+    try {
+      fs.copyFileSync(file, bak);
+    } catch {
+      /* live file may be locked */
+    }
   }
 }
 
@@ -129,7 +144,7 @@ export function writeVersionedState(
 ): PersistableState {
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
-  if (options.rotateBackups !== false) rotateProtectedBackups(file, protect);
+  if (options.rotateBackups !== false) rotateFileBackups(file);
   atomicWriteJson(file, protectedState, undefined, { fsync: options.rotateBackups !== false });
   return protectedState;
 }

@@ -18,19 +18,18 @@ const scrub = (state: Record<string, unknown>) => JSON.parse(
   JSON.stringify(state, (key, value) => key === "apiKey" ? undefined : value),
 ) as Record<string, unknown>;
 
-test("versioned state writes atomically and scrubs every rotated legacy backup", () => {
+test("versioned state writes atomically and copies backups without rewriting them as JSON", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-state-"));
   const file = path.join(dir, "state.json");
-  const legacy = JSON.stringify({ settings: { custom: { apiKey: "legacy-secret" } }, sessions: [{ id: "old" }] });
-  fs.writeFileSync(file, legacy, "utf8");
-  fs.writeFileSync(`${file}.bak`, legacy, "utf8");
-  fs.writeFileSync(`${file}.bak.1`, legacy, "utf8");
-  writeVersionedState(file, { sessions: [{ id: "new" }], settings: { custom: { apiKey: "new-secret" } } }, scrub);
-  for (const target of [file, `${file}.bak`, `${file}.bak.1`, `${file}.bak.2`]) {
-    const text = fs.readFileSync(target, "utf8");
-    assert.doesNotMatch(text, /legacy-secret|new-secret/);
-    assert.equal(JSON.parse(text).stateVersion, CURRENT_STATE_VERSION);
-  }
+  writeVersionedState(file, { sessions: [{ id: "first" }], settings: { custom: { apiKey: "new-secret" } } }, scrub);
+  writeVersionedState(file, { sessions: [{ id: "second" }], settings: { custom: { apiKey: "new-secret" } } }, scrub);
+  const live = fs.readFileSync(file, "utf8");
+  const bak = fs.readFileSync(`${file}.bak`, "utf8");
+  assert.doesNotMatch(live, /new-secret/);
+  assert.doesNotMatch(bak, /new-secret/);
+  assert.equal(JSON.parse(live).sessions[0].id, "second");
+  assert.equal(JSON.parse(bak).sessions[0].id, "first");
+  assert.equal(JSON.parse(live).stateVersion, CURRENT_STATE_VERSION);
   assert.equal(fs.readdirSync(dir).some((name) => name.includes(".tmp-") || name.includes(".replace-")), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -54,6 +53,7 @@ test("hot state saves skip fsync so an 11MB desk does not stall the UI", () => {
   const main = fs.readFileSync(path.join(root, "electron", "main.ts"), "utf8");
   assert.match(main, /sweepStaleUserData/);
   assert.match(main, /disk-cache-size/);
+  assert.match(main, /pruneOrphanWorktrees/);
 });
 
 test("hot state saves can skip rotating multi-megabyte backups", () => {

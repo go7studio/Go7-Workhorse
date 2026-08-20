@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   chooseRoutingDecision,
   inferRoutingTier,
+  inferTaskDomain,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingProfileForModel,
@@ -212,6 +213,61 @@ test("hard-work markers land deep even in a short prompt", () => {
   assert.equal(inferRoutingTier("List every concurrency bug in this lock-free queue and prove linearizability"), "deep");
   assert.equal(inferRoutingTier("fix this bug"), "deep", "expensive is the safe error direction");
   assert.equal(inferRoutingTier("list the files in src"), "quick", "a real quick ask stays quick");
+});
+
+test("a short codey ask is not quick, and the domain is coding", () => {
+  // Sol's example was 76 chars with \blist\b and a lock-free queue in it.
+  assert.equal(inferTaskDomain("classify this function ```js\nfor(;;){}\n```"), "coding");
+  assert.equal(inferRoutingTier("classify this function ```js\nfor(;;){}\n```"), "balanced", "codey blocks quick");
+  assert.equal(inferRoutingTier("classify these emails by sender"), "quick", "a real quick ask stays quick");
+  assert.equal(inferTaskDomain("write the launch blog post for the new referral system"), "writing");
+  assert.equal(inferTaskDomain("analyze the csv and plot a histogram of rows per day"), "data");
+  assert.equal(inferTaskDomain("what should we do next"), "general");
+  assert.equal(inferTaskDomain("write a function that parses the manifest.json"), "coding", "code words beat write words");
+});
+
+test("domain tie-breaks inside a band and never overturns fit", () => {
+  const composer = bot("composer-2.5", 8, 4, 2, midWeek(50), { profile: {
+    intelligence: 8, speed: 4, cost: 2, local: false, strengths: ["coding"],
+    inputs: { text: true, images: true, documents: true, audio: false, video: false },
+  } });
+  const sonnet46 = bot("claude-sonnet-4-6", 8, 4, 3, midWeek(50), { profile: {
+    intelligence: 8, speed: 4, cost: 3, local: false, strengths: ["coding", "writing"],
+    inputs: { text: true, images: true, documents: true, audio: false, video: false },
+  } });
+  // Writing work: only Sonnet has the strength, and it overcomes its one-point
+  // cost disadvantage.
+  const writing = rankRoutingCandidates([composer, sonnet46], { prompt: "draft the release announcement post", tier: "balanced", now: NOW }, settings);
+  assert.equal(writing[0]?.model, "claude-sonnet-4-6");
+  // Coding work: both have the strength, so the tie-break cancels and the
+  // cheaper bot wins as before.
+  const coding = rankRoutingCandidates([composer, sonnet46], { prompt: "refactor the parser ```ts\nx()\n```", tier: "balanced", now: NOW }, settings);
+  assert.equal(coding[0]?.model, "composer-2.5");
+  // And a domain strength never lifts a 7 over an 8 on balanced: +6 < 15.
+  const m3 = bot("MiniMax-M3", 7, 4, 2, {}, { paceUnmetered: true, profile: {
+    intelligence: 7, speed: 4, cost: 2, local: false, strengths: ["coding"],
+    inputs: { text: true, images: true, documents: true, audio: false, video: false },
+  } });
+  const plainEight = bot("gpt-5.6-terra", 8, 4, 3, midWeek(50));
+  const capped = rankRoutingCandidates([m3, plainEight], { prompt: "refactor the parser ```ts\nx()\n```", tier: "balanced", now: NOW }, settings);
+  assert.equal(capped[0]?.model, "gpt-5.6-terra");
+});
+
+test("excluding a family uses whole tokens, not substrings", () => {
+  const rows = [
+    bot("grok-build", 8, 4, 2),
+    bot("cursor-grok-4.6-high", 10, 2, 5),
+    bot("gpt-5.6-sol", 10, 2, 5, midWeek(50), { label: "Solaris Notes Bot" }),
+  ];
+  const grokked = rankRoutingCandidates(rows, { prompt: "", tier: "deep", now: NOW, exclude: ["grok"] }, settings);
+  assert.deepEqual(grokked.map((row) => row.model), ["gpt-5.6-sol"], "grok excludes the family");
+  const partial = rankRoutingCandidates(rows, { prompt: "", tier: "deep", now: NOW, exclude: ["rok"] }, settings);
+  assert.equal(partial.length, 3, "a substring is not a family");
+  const sol = rankRoutingCandidates(rows, { prompt: "", tier: "deep", now: NOW, exclude: ["sol"] }, settings);
+  assert.equal(sol.some((row) => row.model === "gpt-5.6-sol"), false, "sol is a real token of gpt-5.6-sol");
+  assert.equal(sol.some((row) => row.label === "Solaris Notes Bot"), false, "same row, excluded by model token");
+  const solaris = rankRoutingCandidates(rows, { prompt: "", tier: "deep", now: NOW, exclude: ["laris"] }, settings);
+  assert.equal(solaris.length, 3, "letters inside a label word exclude nothing");
 });
 
 test("free capacity is a filler, not a merit", () => {

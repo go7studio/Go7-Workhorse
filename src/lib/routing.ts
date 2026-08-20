@@ -8,6 +8,7 @@ import type {
   RoutingSettings,
   RoutingTaskTier,
   Settings,
+  TaskDomain,
 } from "./types";
 import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
@@ -63,6 +64,8 @@ export type RoutingRequest = {
   exclude?: string[];
   /** Tokens the conversation already holds. Routing must not pick a model whose window cannot hold it. */
   contextNeed?: number;
+  /** What the work is about. Omit to infer from the prompt. */
+  taskDomain?: TaskDomain;
 };
 
 export type RankedRoutingCandidate = RoutingCandidate & {
@@ -86,11 +89,20 @@ export function routingIdentityExcluded(
 ): boolean {
   const terms = exclude.map((item) => item.trim().toLowerCase()).filter(Boolean);
   if (terms.length === 0) return false;
-  const value = [identity.provider, identity.model, identity.label, identity.customBotId]
+  // Whole tokens, not substrings: "grok" still excludes grok-build and
+  // cursor-grok rows (the family), but "rok" or "sol" no longer knock out
+  // labels that merely contain those letters.
+  const tokens = [identity.provider, identity.model, identity.label, identity.customBotId]
     .filter((item): item is string => Boolean(item))
     .join(" ")
-    .toLowerCase();
-  return terms.some((term) => value.includes(term));
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return terms.some((term) => {
+    const want = term.split(/[^a-z0-9]+/).filter(Boolean);
+    if (want.length === 0) return false;
+    return tokens.some((_, index) => want.every((part, offset) => tokens[index + offset] === part));
+  });
 }
 
 export function routingCandidatesForDesk(
@@ -216,43 +228,45 @@ export function routingProfileForModel(
   const slug = model.trim().toLowerCase();
   const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
   let base: ModelRoutingProfile;
+  const CODE = ["coding"] as const;
+  const CODE_PROSE = ["coding", "writing"] as const;
   if (lightMini) {
     base = profile(5, 5, 1);
   } else if (slug.includes("5.6-sol")) {
-    base = profile(10, 2, 5);
+    base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-terra")) {
-    base = profile(8, 4, 3);
+    base = profile(8, 4, 3, { strengths: CODE });
   } else if (slug.includes("5.6-luna")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("grok-4.6")) {
-    base = profile(10, 2, 5);
+    base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("grok-4.5")) {
-    base = profile(8, 4, 3);
+    base = profile(8, 4, 3, { strengths: CODE });
   } else if (slug.includes("opus") || slug.includes("fable")) {
-    base = profile(10, 2, 5);
+    base = profile(10, 2, 5, { strengths: CODE_PROSE });
   } else if (slug.includes("sonnet-4-6") || slug.includes("sonnet-4.6")) {
-    base = profile(8, 4, 3);
+    base = profile(8, 4, 3, { strengths: CODE_PROSE });
   } else if (slug.includes("sonnet")) {
     // Sonnet 5: above the balanced band, the understudy when the 10s drain.
-    base = profile(9, 3, 4);
+    base = profile(9, 3, 4, { strengths: CODE_PROSE });
   } else if (slug.includes("haiku")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    base = profile(7, 4, 2);
+    base = profile(7, 4, 2, { strengths: CODE });
   } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
     base = profile(6, 4, 2);
   } else if (slug.includes("composer") || slug.includes("grok-build")) {
-    base = profile(8, 4, 2);
+    base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
     base = profile(7, 5, 2);
   } else if (slug.includes("gemini")) {
     base = slug.includes("pro") ? profile(8, 4, 3) : profile(5, 5, 2);
   } else if (slug.includes("kimi") || slug.includes("glm")) {
-    base = profile(7, 3, 2);
+    base = profile(7, 3, 2, { strengths: CODE });
   } else if (slug.includes("gpt-5.5") || slug.includes("gpt-5.4")) {
-    base = profile(8, 4, 3);
+    base = profile(8, 4, 3, { strengths: CODE });
   } else if (/gpt-5\.[1-3]/.test(slug)) {
     base = profile(7, 4, 3);
   } else {
@@ -329,6 +343,37 @@ export function describeRoutingMiss(
   return "no capable route";
 }
 
+/**
+ * Does this prompt look like it is about code? One definition serves two
+ * rules: the quick tier must not swallow a short-but-codey ask, and the
+ * domain tie-break should send code work to models strong at it. Sol's
+ * killer example was 76 characters with "list" in it and a lock-free queue
+ * to reason about.
+ */
+export function looksCodey(text: string): boolean {
+  return (
+    /```/.test(text) ||
+    /\b[\w./-]+\.(ts|tsx|js|jsx|mjs|py|go|rs|rb|java|cs|cpp|cc|h|swift|kt|gd|sql|sh|bash|yml|yaml|toml|json)\b/i.test(text) ||
+    /\b(function|class|import|const|async|await|struct|enum|interface|typedef|regex|compile|typecheck|stack trace|traceback|segfault|null pointer|exception|unit test|test suite|lint|refactor|api|endpoint|mutex|thread|queue|algorithm)\b/i.test(text) ||
+    /=>|::|\(\)|\{\}|\[\]/.test(text)
+  );
+}
+
+/** What the prompt is mostly about. Explicit request fields win over inference. */
+export function inferTaskDomain(prompt: string, attachments: ChatImage[] = []): TaskDomain {
+  const text = prompt.trim();
+  if (!text && attachments.length === 0) return "general";
+  if (looksCodey(text)) return "coding";
+  const lower = text.toLowerCase();
+  if (/\b(csv|sql|spreadsheet|dataset|dashboard|pivot|rows|columns|chart|plot|histogram|median|regression|analy[sz]e the (data|numbers))\b/.test(lower)) {
+    return "data";
+  }
+  if (/\b(write|draft|rewrite|blog|article|essay|email|newsletter|copy|caption|tagline|announcement|readme|docs?|documentation|prose|tone|headline|post)\b/.test(lower)) {
+    return "writing";
+  }
+  return "general";
+}
+
 export function inferRoutingTier(
   prompt: string,
   attachments: ChatImage[] = [],
@@ -348,7 +393,9 @@ export function inferRoutingTier(
   // agreed the safe error is expensive (frontier on trivia), not harmful (a
   // light model on "list every concurrency bug and prove linearizability").
   const deep = /\b(architect|migration|security|threat|root cause|debug|refactor|review|investigate|research|strategy|production|end[- ]to[- ]end|multi[- ]agent|bug|prove|concurrenc\w*|deadlock|race|lineariz\w*|crash|leak)\b/.test(lower);
-  const quick = text.length < 180 && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
+  // A short prompt with a quick keyword still is not quick when it reads like
+  // code: "classify this function" deserves the balanced band, not Luna.
+  const quick = text.length < 180 && !looksCodey(text) && /\b(reply|rename|format|translate|summari[sz]e|list|extract|classify|one[- ]line|quick)\b/.test(lower);
   const media = attachments.some((item) => item.kind === "audio" || item.kind === "video" || item.kind === "document");
   const long = text.length > 1200;
   if (extras?.role === "builder" || extras?.role === "worker") {
@@ -533,6 +580,7 @@ export function rankRoutingCandidates(
     inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
   const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
+  const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
@@ -559,6 +607,9 @@ export function rankRoutingCandidates(
     if (candidate.profile.local || candidate.paceUnmetered) {
       score += tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
     }
+    // Domain is a tie-break inside a band, never a fit substitute: +6 sits
+    // below one intelligence unit (12-20) and beside the speed/cost spreads.
+    if (domain !== "general" && candidate.profile.strengths?.includes(domain)) score += 6;
     const tilt = outcomeTilt(outcomeFor(candidate, request.outcomes));
     // Stickiness is for continuity, not loyalty: an incumbent whose verified
     // record has gone negative does not keep its +4, or one dead bot gets

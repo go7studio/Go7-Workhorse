@@ -676,6 +676,9 @@ export type ModelInputCapabilities = {
   video: boolean;
 };
 
+/** What a prompt is mostly about. Routing tie-breaks toward models strong there. */
+export type TaskDomain = "coding" | "writing" | "data" | "general";
+
 export type ModelRoutingProfile = {
   /** 1 is lightweight; 5 is frontier reasoning. */
   intelligence: number;
@@ -685,6 +688,8 @@ export type ModelRoutingProfile = {
   cost: number;
   local: boolean;
   inputs: ModelInputCapabilities;
+  /** Domains this family is notably strong in. Absent means no tilt either way. */
+  strengths?: readonly TaskDomain[];
 };
 
 export type RoutingSettings = {

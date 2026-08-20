@@ -7,6 +7,7 @@ import {
   collapseCursorCatalog,
   cursorFamilyId,
   cursorSlugForEffort,
+  isCursorAutoModel,
   parseCursorModelsOutput,
   parseCursorVariant,
   reconcileCursorModels,
@@ -18,9 +19,11 @@ import { applyVendorCatalog, modelsFor, modelsForPicker, MODEL_CATALOG, resetVen
 import {
   chooseRoutingDecision,
   rankRoutingCandidates,
+  routingCandidatesForDesk,
   routingProfileForModel,
   type RoutingCandidate,
 } from "../src/lib/routing";
+import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -229,6 +232,52 @@ test("chat picker is a short subset of the same catalog Auto ranks", () => {
   }
   assert.ok(chips.some((row) => row.id === "composer-2.5"));
   assert.ok(chips.some((row) => row.id === "auto"));
+});
+
+test("collapsed family ranking is smaller and not slower than ranking the 204-id fixture", () => {
+  const rawRows = fixtureRows();
+  assert.equal(rawRows.length, 204);
+  const bases = collapseCursorCatalog(rawRows);
+  assert.ok(bases.length < 204);
+  assert.equal(bases.length, 33);
+
+  const desk = normalizeSettings({ llms: { cursor: { connected: true } } });
+  applyVendorCatalog({ cursor: rawRows });
+  const rawPool = routingCandidatesForDesk(desk);
+  assert.equal(rawPool.some((row) => isCursorAutoModel(row.model)), false);
+  assert.ok(rawPool.length > 100, `uncollapsed desk pool ${rawPool.length}`);
+
+  applyVendorCatalog({ cursor: bases });
+  const collapsedPool = routingCandidatesForDesk(desk);
+  assert.equal(collapsedPool.some((row) => isCursorAutoModel(row.model)), false);
+  assert.ok(collapsedPool.length < 204);
+  assert.ok(collapsedPool.length < rawPool.length);
+  assert.equal(collapsedPool.length, bases.filter((row) => !isCursorAutoModel(row.id)).length);
+
+  const request = { prompt: "Implement this form", tier: "balanced" as const, now: Date.parse("2026-08-19T00:00:00Z") };
+  const collapsedPick = chooseRoutingDecision(collapsedPool, request, routingSettings);
+  assert.ok(collapsedPick);
+  assert.equal(isCursorAutoModel(collapsedPick.model), false);
+  const rawPick = chooseRoutingDecision(rawPool, request, routingSettings);
+  assert.ok(rawPick);
+  assert.equal(isCursorAutoModel(rawPick.model), false);
+
+  const rankOnce = (candidates: typeof rawPool) => rankRoutingCandidates(candidates, request, routingSettings);
+  rankOnce(rawPool);
+  rankOnce(collapsedPool);
+
+  const rounds = 40;
+  const timeMs = (candidates: typeof rawPool) => {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < rounds; i += 1) rankOnce(candidates);
+    return Number(process.hrtime.bigint() - start) / 1e6;
+  };
+  const rawMs = timeMs(rawPool) + timeMs(rawPool);
+  const collapsedMs = timeMs(collapsedPool) + timeMs(collapsedPool);
+  assert.ok(
+    collapsedMs <= rawMs,
+    `collapsed ${collapsedMs.toFixed(2)}ms must not exceed 204-id ${rawMs.toFixed(2)}ms over ${rounds * 2} ranks (pool ${collapsedPool.length} vs ${rawPool.length})`,
+  );
 });
 
 test("desk Auto and spawn score modelsFor; compiler pick is documented as a separate ephemeral scorer", () => {

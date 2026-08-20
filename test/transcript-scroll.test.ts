@@ -82,10 +82,10 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /observer\.observe\(content\)/);
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
-  assert.match(pane, /shouldLoadEarlierTurns/);
   assert.match(pane, /keepScrollThroughPrepend/);
   assert.match(pane, /setWantEarlier\(true\)/);
-  assert.match(pane, /TRANSCRIPT_PAINT_CHUNK/);
+  assert.match(pane, /TRANSCRIPT_FILL_MS/);
+  assert.doesNotMatch(pane, /shouldLoadEarlierTurns/);
   assert.doesNotMatch(pane, /startTransition\(\(\) => setPaint/);
   assert.doesNotMatch(pane, /Load earlier turns/);
   assert.doesNotMatch(pane, /transcript-earlier/);

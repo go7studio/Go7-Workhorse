@@ -75,7 +75,7 @@ transcript rather than as a path.
   under the source chat, with a managed worktree when the project has a Git
   folder — the same isolation subagents use.
 - Rewind to an earlier turn.
-- A long transcript opens on the latest turns. Earlier history fills in as you scroll up, without a jump.
+- A long transcript opens on the latest turns. Earlier history eases in one turn at a time.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
 - Each chat row shows how old the last prompt is in a compact form such as

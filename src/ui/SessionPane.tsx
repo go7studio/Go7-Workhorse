@@ -14,7 +14,7 @@ import {
   recentTranscriptText,
   scheduleAfterPaint,
   startTranscriptFill,
-  TRANSCRIPT_PAINT_CHUNK,
+  TRANSCRIPT_FILL_MS,
   transcriptPaintStart,
   type TranscriptBlock,
 } from "../lib/turns";
@@ -43,7 +43,6 @@ import {
   keepScrollThroughPrepend,
   pinnedToLatest,
   pinToLatest,
-  shouldLoadEarlierTurns,
 } from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
@@ -225,28 +224,20 @@ export function SessionPane() {
     if (!transcriptOpen) return;
     const initial = transcriptPaintStart(blocks.length);
     setPaint({ id: sessionId, from: initial });
-    if (initial <= 0) return;
-    const idle = window.setTimeout(() => setWantEarlier(true), 160);
-    return () => window.clearTimeout(idle);
+    if (initial > 0) setWantEarlier(true);
   }, [sessionId, transcriptOpen]);
 
   useEffect(() => {
     if (!transcriptOpen || !wantEarlier) return;
     const from = paint.id === sessionId ? paint.from : transcriptPaintStart(blocks.length);
     if (!sessionId || from === 0) return;
-    const whenIdle = (cb: () => void) =>
-      typeof requestIdleCallback === "function"
-        ? requestIdleCallback(() => cb(), { timeout: 240 })
-        : window.setTimeout(cb, 32);
-    const cancelIdle = (id: number) => {
-      if (typeof cancelIdleCallback === "function") cancelIdleCallback(id);
-      else window.clearTimeout(id);
-    };
     return startTranscriptFill(
       from,
       (next) => setPaint({ id: sessionId, from: next }),
-      { whenIdle, cancelIdle },
-      TRANSCRIPT_PAINT_CHUNK,
+      {
+        whenIdle: (cb) => window.setTimeout(cb, TRANSCRIPT_FILL_MS),
+        cancelIdle: (id) => window.clearTimeout(id),
+      },
     );
   }, [sessionId, transcriptOpen, wantEarlier]);
 
@@ -471,15 +462,6 @@ export function SessionPane() {
             userInitiated: userMoved.current,
           });
           if (followBottom.current) userMoved.current = false;
-          if (
-            shouldLoadEarlierTurns({
-              hasEarlier: paint.id === sessionId && paint.from > 0,
-              loading: wantEarlier,
-              atBottom,
-            })
-          ) {
-            setWantEarlier(true);
-          }
         }}
       >
         <div className="transcript-stack" ref={stack}>

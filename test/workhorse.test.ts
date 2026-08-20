@@ -16,6 +16,7 @@ import {
   extractCompactEvent,
   extractSessionTitle,
   extractToolEvent,
+  extractToolImages,
   extractUpdateText,
   isAcpSessionUpdateMethod,
   parseGrokUsage,
@@ -2179,6 +2180,68 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
     ),
   );
   assert.match(textFromContent({ type: "image", mimeType: "image/png", data: "abc", name: "shot" }), /!\[shot\]\(data:image\/png;base64,abc\)/);
+  assert.match(
+    textFromContent({ type: "image", mimeType: "image/png", data: "abc", uri: "/tmp/shot.png", name: "shot" }),
+    /!\[shot\]\(\/tmp\/shot\.png\)/,
+  );
+  assert.doesNotMatch(
+    textFromContent({ type: "image", mimeType: "image/png", data: "abc", uri: "/tmp/shot.png" }),
+    /base64/,
+  );
+
+  const saved =
+    "/Users/someone/.codex/generated_images/01a020e8-db8a-7472-b7b7-5f342908a529/exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a.png";
+  const imageTool = {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a",
+    title: "Image generation",
+    status: "completed",
+    content: [
+      { type: "content", content: { type: "text", text: "Revised prompt: a detailed chicken wing" } },
+      { type: "content", content: { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png", uri: saved } },
+    ],
+    rawOutput: { savedPath: saved, result: "iVBORw0KGgo=" },
+  };
+  assert.equal(classifyAcpUpdate(imageTool).kind, "tool");
+  const promoted = extractToolImages(imageTool);
+  assert.match(promoted, /!\[generated image\]\(/);
+  assert.match(promoted, /exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a\.png/);
+  assert.doesNotMatch(promoted, /iVBORw0KGgo/);
+  assert.doesNotMatch(promoted, /Revised prompt/);
+  assert.equal(
+    extractToolImages({
+      sessionUpdate: "tool_call",
+      toolCallId: "read-1",
+      title: "Read",
+      content: [{ type: "content", content: { type: "text", text: "src/a.ts file body" } }],
+    }),
+    "",
+  );
+  assert.match(
+    extractToolImages({ sessionUpdate: "tool_call_update", rawOutput: { savedPath: saved } }),
+    /exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a\.png/,
+  );
+  const agentSrc = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
+  assert.match(agentSrc, /extractToolImages\(update\)/);
+  assert.match(agentSrc, /onChunk\?\.\(images\)/);
+  const imagePeeled = peelPlanningPreamble(`![generated image](${saved})`);
+  assert.match(imagePeeled.body, /generated image/);
+  assert.match(imagePeeled.body, /exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a\.png/);
+  const imageBlocks = parseChatMarkdown(`![generated image](${saved})`);
+  assert.equal(imageBlocks[0]?.type, "image");
+  const fromCodex = mediaFileCandidates("exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a.png", {
+    home: "/Users/someone",
+    vendorSessionId: "01a020e8-db8a-7472-b7b7-5f342908a529",
+  });
+  assert.ok(
+    fromCodex.some(
+      (item) =>
+        item.includes(".codex") &&
+        item.includes("generated_images") &&
+        item.includes("01a020e8-db8a-7472-b7b7-5f342908a529") &&
+        item.endsWith("exec-f02b246f-d73b-4b5c-8ea9-61bcf162dc0a.png"),
+    ),
+  );
 
   assert.equal(
     unsquashSentences("Yes. I'll load the image skill and generate a sample so you can see the result.Yes. Here's a sample:"),

@@ -59,5 +59,10 @@ export function mediaFileCandidates(href: string, opts: MediaSrcOpts = {}): stri
   for (const root of grokSessionDirs(opts)) {
     for (const name of names) add(path.resolve(root, name));
   }
+  const home = opts.home ?? os.homedir();
+  const id = opts.vendorSessionId?.trim();
+  const codexRoot = path.join(home, ".codex", "generated_images");
+  if (id) add(path.resolve(codexRoot, id, base));
+  if (base) add(path.resolve(codexRoot, base));
   return out;
 }

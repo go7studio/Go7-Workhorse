@@ -291,16 +291,95 @@ export function textFromContent(content: unknown): string {
           ? record.path
           : "";
   if (record.type === "image" || (mime.startsWith("image/") && (data || uri))) {
-    const alt = typeof record.name === "string" && record.name.trim() ? record.name.trim() : "generated image";
-    if (data && mime) return `\n![${alt}](data:${mime};base64,${data})\n`;
-    if (uri) return `\n![${alt}](${uri})\n`;
+    return imageMarkdown(imageAlt(record), uri, mime, data);
   }
   if ((record.type === "resource_link" || record.type === "resource") && uri) {
-    const alt = typeof record.name === "string" && record.name.trim() ? record.name.trim() : "generated image";
-    return `\n![${alt}](${uri})\n`;
+    return imageMarkdown(imageAlt(record), uri, mime, data);
   }
   if (record.content !== undefined && record.content !== content) return textFromContent(record.content);
   if (record.message !== undefined && record.message !== content) return textFromContent(record.message);
+  return "";
+}
+
+function imageAlt(record: Record<string, unknown>): string {
+  for (const key of ["name", "title", "alt"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "generated image";
+}
+
+function imageUriOf(record: Record<string, unknown>): string {
+  for (const key of ["uri", "url", "path", "savedPath"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function looksLikeImageRef(value: string): boolean {
+  return (
+    /^data:image\//i.test(value) ||
+    /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(value) ||
+    (/^https?:\/\//i.test(value) && /(imagine|imagedelivery|twimg|grok\.com|x\.ai|cdn\.|generated)/i.test(value))
+  );
+}
+
+function imageMarkdown(alt: string, uri: string, mime: string, data: string): string {
+  const caption = alt.trim() || "generated image";
+  if (uri) return `\n![${caption}](${uri})\n`;
+  if (data && mime) return `\n![${caption}](data:${mime};base64,${data})\n`;
+  return "";
+}
+
+function isImagePayload(record: Record<string, unknown>, mime: string, data: string, uri: string): boolean {
+  if (record.type === "image") return Boolean(data || uri);
+  if (mime.startsWith("image/") && (data || uri)) return true;
+  if (record.type === "resource_link" && uri && looksLikeImageRef(uri)) return true;
+  return false;
+}
+
+/** Image blocks only. Tool text (file reads, revised prompts) stays on the tool row. */
+export function imageMarkdownFromContent(content: unknown): string {
+  if (!content) return "";
+  if (Array.isArray(content)) return content.map(imageMarkdownFromContent).filter(Boolean).join("");
+  const record = asRecord(content);
+  if (record.type === "text" || record.type === "diff" || record.type === "terminal") return "";
+  if (record.type === "content" && record.content !== undefined && record.content !== content) {
+    return imageMarkdownFromContent(record.content);
+  }
+  const mime = typeof record.mimeType === "string" ? record.mimeType : "";
+  const data = typeof record.data === "string" ? record.data : "";
+  const uri = imageUriOf(record);
+  if (isImagePayload(record, mime, data, uri)) return imageMarkdown(imageAlt(record), uri, mime, data);
+  const resource = asRecord(record.resource);
+  if (record.type === "resource" || resource.blob || resource.mimeType || resource.uri) {
+    const resourceMime = typeof resource.mimeType === "string" ? resource.mimeType : mime;
+    const resourceBlob = typeof resource.blob === "string" ? resource.blob : data;
+    const resourceUri = imageUriOf(resource) || uri;
+    if (isImagePayload(resource, resourceMime, resourceBlob, resourceUri) || resourceMime.startsWith("image/")) {
+      return imageMarkdown(imageAlt(record) !== "generated image" ? imageAlt(record) : imageAlt(resource), resourceUri, resourceMime, resourceBlob);
+    }
+    if (resourceUri && looksLikeImageRef(resourceUri)) {
+      return imageMarkdown(imageAlt(record), resourceUri, resourceMime, resourceBlob);
+    }
+  }
+  if (record.content !== undefined && record.content !== content) return imageMarkdownFromContent(record.content);
+  return "";
+}
+
+/**
+ * Codex (and Cursor) put generated PNGs on `tool_call` / `tool_call_update`
+ * content, not on `agent_message`. classifyAcpUpdate keeps those as tool rows,
+ * so the image has to be lifted separately or the transcript never shows it.
+ */
+export function extractToolImages(update: Record<string, unknown>): string {
+  const nested = asRecord(update.toolCall);
+  const fromContent = imageMarkdownFromContent(update.content ?? nested.content);
+  if (fromContent) return fromContent;
+  const raw = asRecord(update.rawOutput ?? nested.rawOutput);
+  const saved = typeof raw.savedPath === "string" ? raw.savedPath.trim() : "";
+  if (saved && looksLikeImageRef(saved)) return imageMarkdown("generated image", saved, "", "");
   return "";
 }
 
@@ -1123,6 +1202,8 @@ export class GrokAgent {
           toolCallId: String(params.toolCallId ?? params.agentId ?? method),
         });
         if (tool) this.handlers.onTool?.(tool);
+        const images = extractToolImages(params);
+        if (images) this.handlers.onChunk?.(images);
         return;
       }
       if (/compact/i.test(method)) {
@@ -1153,6 +1234,8 @@ export class GrokAgent {
     }
     if (classified.kind === "tool") {
       this.handlers.onTool?.(classified.tool);
+      const images = extractToolImages(update);
+      if (images) this.handlers.onChunk?.(images);
       return;
     }
     if (classified.kind === "compact") {

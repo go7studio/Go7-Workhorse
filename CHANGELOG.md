@@ -8,6 +8,23 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.15](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.14...v0.6.15) (2026-08-20)
+
+
+### Features
+
+* routing tells models apart, and free capacity is a filler, not a merit ([8c0bf53](https://github.com/go7studio/Go7-Workhorse/commit/8c0bf53bed360625745702fb96d8f2f2f5fb3429))
+* routing tells models apart, and free capacity is a filler, not a merit ([bd0a81e](https://github.com/go7studio/Go7-Workhorse/commit/bd0a81e98e90ef9d010d9ade65464b81dabbd4ec))
+
+
+### Bug Fixes
+
+* drop unused MCP allow import so typecheck passes ([1a8e6c2](https://github.com/go7studio/Go7-Workhorse/commit/1a8e6c292e6300335dbf66fe2737a53cc64f13a6))
+* keep session rules off one machine's folders ([59f04a2](https://github.com/go7studio/Go7-Workhorse/commit/59f04a272932c5224d789aea780e91f73fe29209))
+* keep session rules off one machine's folders ([c59d1cc](https://github.com/go7studio/Go7-Workhorse/commit/c59d1ccb3d0a181acf9ddf7b99660824aa8d8b03))
+* unbound chats start in the desk base instead of failing ([9e67867](https://github.com/go7studio/Go7-Workhorse/commit/9e67867066e36b73de0cfb08c8c0e7ee838e374a))
+* unbound chats start in the desk base instead of failing ([53680f0](https://github.com/go7studio/Go7-Workhorse/commit/53680f0d7e53257863e3b54d0cac35c7c0344c05))
+
 ## [0.6.14](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.13...v0.6.14) (2026-08-20)
 
 

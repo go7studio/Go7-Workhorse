@@ -5835,6 +5835,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
   assert.match(pane, /transcriptOpen && session/);
   assert.match(pane, /followLatestClass/);
+  assert.doesNotMatch(pane, /CHAT_LOOKS/);
+  assert.doesNotMatch(pane, /chat-look-/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.turn-who \{[^}]*font-size:\s*15px/);
+  assert.match(css, /@keyframes work-open/);
+  assert.match(css, /\.work-body \{[^}]*animation:\s*work-open/);
+  assert.match(css, /\.work-fold\[open\] > \.work-fold-body/);
+  assert.match(css, /\.thought \{[^}]*animation:\s*work-open/);
   assert.match(pane, /follow-latest/);
   assert.match(pane, /TRANSCRIPT_LEAD_PX/);
   assert.match(pane, /data-turn-id/);

@@ -74,3 +74,39 @@ test("a version that moved without the manifest was typed by hand, and does not 
   assert.equal(manifestVersionFrom('{ ".": "0.6.2" }'), "0.6.2");
   assert.equal(manifestVersionFrom("nope"), undefined);
 });
+
+/**
+ * v0.6.9 shipped stamped {"channel":"development"}. Its release run failed and
+ * was re-fired by hand, and on the workflow_dispatch path
+ * needs.detect-release.outputs.cut is not "true" — so WORKHORSE_RELEASE_BUILD
+ * resolved to "0", after-pack wrote the development marker, and the installed
+ * app read the Dev user-data directory with volatile credentials. The desk
+ * opened with none of the user's chats and no vendor logged in.
+ *
+ * Whatever the installers job is willing to build, it must be willing to stamp
+ * as a release. These two conditions have to stay in step.
+ */
+test("every build the installers job makes on macOS is stamped a release", () => {
+  const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+
+  const marker = workflow.match(/WORKHORSE_RELEASE_BUILD:\s*\$\{\{(.+?)\}\}/s);
+  assert.ok(marker, "release.yml must set WORKHORSE_RELEASE_BUILD");
+  const condition = marker![1];
+
+  assert.match(
+    condition,
+    /workflow_dispatch/,
+    "a hand-fired release still ships to users, so it must stamp channel=release",
+  );
+  assert.match(condition, /runner\.os == 'macOS'/, "only macOS needs the signed-release identity");
+  assert.match(condition, /cut == 'true'/, "an automatic cut must still stamp channel=release");
+});
+
+test("after-pack only writes the development marker off the release path", () => {
+  const afterPack = readFileSync(path.join(ROOT, "scripts", "after-pack.cjs"), "utf8");
+  assert.match(
+    afterPack,
+    /channel:\s*requiresStableIdentity\(env\)\s*\?\s*"release"\s*:\s*"development"/,
+    "the marker must follow WORKHORSE_RELEASE_BUILD, never a hardcoded channel",
+  );
+});

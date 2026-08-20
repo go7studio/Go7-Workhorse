@@ -917,16 +917,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectProject = useCallback((id: string) => {
-    setState((current) => ({
-      ...current,
-      panel: null,
-      activeProjectId: id,
-      activeSessionId: null,
-      sessions: dropDrafts(current.sessions),
-      projects: current.projects.map((project) =>
-        project.id === id ? { ...project, openedAt: Date.now() } : project,
-      ),
-    }));
+    setState((current) => {
+      const now = Date.now();
+      const leavingId = current.activeSessionId;
+      return {
+        ...current,
+        panel: null,
+        activeProjectId: id,
+        activeSessionId: null,
+        sessions: dropDrafts(current.sessions).map((item) =>
+          item.id === leavingId ? { ...item, viewedAt: now } : item,
+        ),
+        projects: current.projects.map((project) =>
+          project.id === id ? { ...project, openedAt: now } : project,
+        ),
+      };
+    });
   }, []);
 
   const linkFolder = useCallback(async (path?: string) => {

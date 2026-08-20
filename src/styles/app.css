@@ -594,7 +594,15 @@ html.pane-dragging * {
   height: 6px;
   margin: 0 2px 0 0;
   border-radius: 50%;
-  background: var(--text-secondary);
+  background: var(--accent);
+  animation: row-finish-in 160ms var(--ease);
+}
+
+@keyframes row-finish-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
 }
 
 .chat-row.active .row-finish-mark {

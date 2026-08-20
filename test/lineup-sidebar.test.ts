@@ -205,6 +205,7 @@ test("tool ticks do not reshuffle nested workers while they are running", () => 
   assert.ok(sessionIsActive(slow));
   assert.equal(lineupSortAt(slow), 200);
   assert.equal(lineupSortAt(fast), 500);
+  assert.equal(lineupSortAt({ ...slow, status: "needs-input" }), 200, "waiting on the person stays frozen");
   const before = buildSidebarChatIndex([parent, slow, fast]);
   const nestedBefore = before.liveByProject.get("proj")![0]!.workers.map((row) => row.id);
   assert.deepEqual(nestedBefore, ["fast", "slow"]);
@@ -295,6 +296,11 @@ test("selectSession clears the done dot by stamping viewedAt", () => {
   const store = read("src/lib/store.tsx");
   assert.match(store, /viewedAt: now/);
   assert.match(store, /viewedAt: priorWorker\?\.viewedAt \?\? startedAt/);
+  assert.match(
+    store,
+    /const leavingId = current\.activeSessionId[\s\S]*item\.id === leavingId \? \{ \.\.\.item, viewedAt: now \}/,
+    "leaving a chat for a project also stamps the look",
+  );
   assert.match(read("src/ui/ChatRow.tsx"), /hasUnviewedFinish/);
   assert.match(read("src/ui/ChatRow.tsx"), /row-finish-mark/);
 });

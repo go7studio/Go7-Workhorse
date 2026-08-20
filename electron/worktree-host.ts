@@ -90,3 +90,29 @@ export async function ensureManagedWorktree(
     return { ok: false, message: `Could not create the worktree: ${detail}` };
   }
 }
+
+/** Drop managed worktrees whose chats are gone so AppData cannot keep whole project copies. */
+export function pruneOrphanWorktrees(managedRoot: string, liveSessionIds: string[]): { removed: string[] } {
+  const removed: string[] = [];
+  if (!managedRoot.trim() || !fs.existsSync(managedRoot)) return { removed };
+  const live = new Set(liveSessionIds.map(safeSegment).filter(Boolean));
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(managedRoot);
+  } catch {
+    return { removed };
+  }
+  for (const name of names) {
+    const id = safeSegment(name);
+    if (!id || live.has(id)) continue;
+    const target = path.join(managedRoot, name);
+    if (!containedPath(managedRoot, target)) continue;
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      removed.push(name);
+    } catch {
+      /* in use */
+    }
+  }
+  return { removed };
+}

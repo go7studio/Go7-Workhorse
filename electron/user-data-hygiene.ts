@@ -2,22 +2,39 @@ import fs from "node:fs";
 import path from "node:path";
 
 const CHROMIUM_CACHE_DIRS = ["Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache"];
-const CACHE_SWEEP_BYTES = 80 * 1024 * 1024;
+const CODE_CACHE = "Code Cache";
+const CACHE_VERSION_FILE = ".workhorse-cache-version";
 const PENDING_UPDATE = /^pending-update-.*\.(exe|vbs|dmg)$/i;
+const STATE_TEMP = /^workhorse-state\.json\.(tmp|replace)-/;
+const TMP_UPDATE = /^workhorse-update-/;
+const OLD_IMPORT = /^pre-import-from-dev-/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const CACHE_SWEEP_BYTES = 48 * 1024 * 1024;
+export const CACHE_SWEEP_FILES = 2_000;
 
 export type UserDataSweep = {
   removed: string[];
   bytes: number;
 };
 
-function entrySize(target: string): number {
+export type SweepOptions = {
+  appVersion?: string;
+  tmpDir?: string;
+  now?: number;
+  cacheBytes?: number;
+  cacheFiles?: number;
+};
+
+function entryStats(target: string): { bytes: number; files: number } {
   try {
     const stat = fs.statSync(target);
-    if (!stat.isDirectory()) return stat.size;
+    if (!stat.isDirectory()) return { bytes: stat.size, files: 1 };
   } catch {
-    return 0;
+    return { bytes: 0, files: 0 };
   }
-  let total = 0;
+  let bytes = 0;
+  let files = 0;
   const stack = [target];
   while (stack.length) {
     const dir = stack.pop()!;
@@ -32,13 +49,16 @@ function entrySize(target: string): number {
       try {
         const stat = fs.statSync(full);
         if (stat.isDirectory()) stack.push(full);
-        else total += stat.size;
+        else {
+          bytes += stat.size;
+          files += 1;
+        }
       } catch {
         /* locked or gone */
       }
     }
   }
-  return total;
+  return { bytes, files };
 }
 
 function removeEntry(target: string): boolean {
@@ -50,11 +70,55 @@ function removeEntry(target: string): boolean {
   }
 }
 
+function readCacheVersion(root: string): string {
+  try {
+    return fs.readFileSync(path.join(root, CACHE_VERSION_FILE), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function writeCacheVersion(root: string, version: string) {
+  try {
+    fs.writeFileSync(path.join(root, CACHE_VERSION_FILE), version, "utf8");
+  } catch {
+    /* ignore */
+  }
+}
+
+function sweepTmpUpdates(tmpDir: string, now: number, removed: string[], addBytes: (n: number) => void) {
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(tmpDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!TMP_UPDATE.test(name)) continue;
+    const full = path.join(tmpDir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (now - stat.mtimeMs < DAY_MS) continue;
+      const size = entryStats(full).bytes;
+      if (removeEntry(full)) {
+        removed.push(name);
+        addBytes(size);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 /** Leftover NSIS downloads and oversized Chromium caches stall Windows launches. */
-export function sweepStaleUserData(root: string): UserDataSweep {
+export function sweepStaleUserData(root: string, options: SweepOptions = {}): UserDataSweep {
   const removed: string[] = [];
   let bytes = 0;
+  const now = options.now ?? Date.now();
+  const cacheBytes = options.cacheBytes ?? CACHE_SWEEP_BYTES;
+  const cacheFiles = options.cacheFiles ?? CACHE_SWEEP_FILES;
   if (!root.trim() || !fs.existsSync(root)) return { removed, bytes };
+  const versionChanged = Boolean(options.appVersion && readCacheVersion(root) !== options.appVersion);
   let names: string[] = [];
   try {
     names = fs.readdirSync(root);
@@ -63,8 +127,8 @@ export function sweepStaleUserData(root: string): UserDataSweep {
   }
   for (const name of names) {
     const full = path.join(root, name);
-    if (PENDING_UPDATE.test(name)) {
-      const size = entrySize(full);
+    if (PENDING_UPDATE.test(name) || STATE_TEMP.test(name) || (OLD_IMPORT.test(name) && now - entryMtime(full) > 14 * DAY_MS)) {
+      const size = entryStats(full).bytes;
       if (removeEntry(full)) {
         removed.push(name);
         bytes += size;
@@ -72,12 +136,24 @@ export function sweepStaleUserData(root: string): UserDataSweep {
       continue;
     }
     if (!CHROMIUM_CACHE_DIRS.includes(name)) continue;
-    const size = entrySize(full);
-    if (size < CACHE_SWEEP_BYTES) continue;
+    const stats = entryStats(full);
+    const tooBig = stats.bytes >= cacheBytes || stats.files >= cacheFiles;
+    const dropCodeCache = name === CODE_CACHE && versionChanged;
+    if (!tooBig && !dropCodeCache) continue;
     if (removeEntry(full)) {
       removed.push(name);
-      bytes += size;
+      bytes += stats.bytes;
     }
   }
+  if (options.tmpDir) sweepTmpUpdates(options.tmpDir, now, removed, (n) => { bytes += n; });
+  if (options.appVersion) writeCacheVersion(root, options.appVersion);
   return { removed, bytes };
+}
+
+function entryMtime(target: string): number {
+  try {
+    return fs.statSync(target).mtimeMs;
+  } catch {
+    return 0;
+  }
 }

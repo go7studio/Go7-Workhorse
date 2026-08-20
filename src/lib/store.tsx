@@ -249,7 +249,16 @@ import {
   nextBudgetRunState,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
-import { isVendorRateLimitError, turnEndedWithoutProse, vendorEmptyReply, vendorFailedMessage, vendorRateLimitNotice, vendorSendTarget } from "./vendor-bridge";
+import {
+  assistantHasVisibleReply,
+  isVendorRateLimitError,
+  settleEmptyAssistantText,
+  turnEndedWithoutProse,
+  turnWorkedAfterAssistant,
+  vendorFailedMessage,
+  vendorRateLimitNotice,
+  vendorSendTarget,
+} from "./vendor-bridge";
 import { cursorUsageLane } from "./cursor-lane";
 import {
   collectWatchNotices,
@@ -639,8 +648,6 @@ function presetFrom(
       (patch.provider ?? session.provider) === "custom" ? patch.customBotId ?? session.customBotId : undefined,
   };
 }
-
-const EMPTY_GROK_REPLY = "Grok finished without a visible reply.";
 
 function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
   if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
@@ -2316,8 +2323,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? applyVendorTurnIdle({
                     ...item,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !(entry.text ?? "").trim()
-                        ? { ...entry, text: reply || vendorEmptyReply("custom") }
+                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                        ? {
+                            ...entry,
+                            text: settleEmptyAssistantText({
+                              provider: "custom",
+                              reply,
+                              existingText: entry.text,
+                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                            }),
+                          }
                         : entry,
                     ),
                   }, { assistantId })
@@ -2345,8 +2360,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !(entry.text ?? "").trim()
-                        ? { ...entry, text: reply || vendorEmptyReply("claude") }
+                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                        ? {
+                            ...entry,
+                            text: settleEmptyAssistantText({
+                              provider: "claude",
+                              reply,
+                              existingText: entry.text,
+                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                            }),
+                          }
                         : entry,
                     ),
                   }, { assistantId })
@@ -2374,8 +2397,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !(entry.text ?? "").trim()
-                        ? { ...entry, text: reply || vendorEmptyReply("cursor") }
+                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                        ? {
+                            ...entry,
+                            text: settleEmptyAssistantText({
+                              provider: "cursor",
+                              reply,
+                              existingText: entry.text,
+                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                            }),
+                          }
                         : entry,
                     ),
                   }, { assistantId })
@@ -2407,8 +2438,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !(entry.text ?? "").trim()
-                        ? { ...entry, text: reply || vendorEmptyReply("codex") }
+                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                        ? {
+                            ...entry,
+                            text: settleEmptyAssistantText({
+                              provider: "codex",
+                              reply,
+                              existingText: entry.text,
+                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                            }),
+                          }
                         : entry,
                     ),
                   }, { assistantId })
@@ -2441,8 +2480,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...item,
                   vendorSessionId,
                   messages: item.messages.map((entry) =>
-                    entry.id === assistantId && !(entry.text ?? "").trim()
-                      ? { ...entry, text: reply || EMPTY_GROK_REPLY }
+                    entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                      ? {
+                          ...entry,
+                          text: settleEmptyAssistantText({
+                            provider: "grok",
+                            reply,
+                            existingText: entry.text,
+                            worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                          }),
+                        }
                       : entry,
                   ),
                 }, { assistantId })
@@ -4923,7 +4970,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 });
                 return "";
               }
-              const fallback = reply || vendorEmptyReply(spec.provider);
+              const liveChild = stateRef.current.sessions.find((item) => item.id === childId);
+              const worked = liveChild
+                ? turnWorkedAfterAssistant(liveChild.messages, assistantId)
+                : false;
+              const fallback = settleEmptyAssistantText({
+                provider: spec.provider,
+                reply,
+                existingText: liveChild?.messages.find((entry) => entry.id === assistantId)?.text,
+                worked,
+              });
               const reportedBlocked = workerReportedBlocked(fallback);
               const afterChanges = window.workhorse?.listGitChanges && childCwd
                 ? await window.workhorse.listGitChanges(childCwd)
@@ -4944,7 +5000,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             }
                           : undefined,
                         messages: item.messages.map((entry) =>
-                          entry.id === assistantId && !entry.text.trim() ? { ...entry, text: fallback } : entry,
+                          entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                            ? {
+                                ...entry,
+                                text: settleEmptyAssistantText({
+                                  provider: spec.provider,
+                                  reply,
+                                  existingText: entry.text,
+                                  worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                                }),
+                              }
+                            : entry,
                         ),
                       }
                     : item,
@@ -5006,13 +5072,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               markChildFailure(error);
               throw error;
             }
-            if (!fallback) {
-              if (terminalFailure) {
-                const failed = stateRef.current.sessions.find((item) => item.id === childId);
-                await replyAsk({
-                  error: failed?.agentRun?.error || `Worker ended ${terminalFailure}.`,
-                });
-              }
+            if (terminalFailure) {
+              const failed = stateRef.current.sessions.find((item) => item.id === childId);
+              await replyAsk({
+                error: failed?.agentRun?.error || `Worker ended ${terminalFailure}.`,
+              });
               return;
             }
             const finished = stateRef.current.sessions.find((item) => item.id === childId);
@@ -5179,7 +5243,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }));
           const runPeer = async () => {
             const reply = await promptVendor(target, prompt, stateRef.current.settings.mcpServers);
-            const fallback = reply || vendorEmptyReply(target.provider);
+            const liveTarget = stateRef.current.sessions.find((item) => item.id === target.id);
+            const fallback = settleEmptyAssistantText({
+              provider: target.provider,
+              reply,
+              existingText: liveTarget?.messages.find((entry) => entry.id === assistantId)?.text,
+              worked: liveTarget ? turnWorkedAfterAssistant(liveTarget.messages, assistantId) : false,
+            });
             const finishedAt = Date.now();
             setState((current) => ({
               ...current,
@@ -5193,7 +5263,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           ? { ...item.agentRun, status: "completed" as const, finishedAt, error: undefined }
                           : undefined,
                         messages: item.messages.map((entry) =>
-                          entry.id === assistantId && !entry.text.trim() ? { ...entry, text: fallback } : entry,
+                          entry.id === assistantId && !assistantHasVisibleReply(entry.text)
+                            ? {
+                                ...entry,
+                                text: settleEmptyAssistantText({
+                                  provider: target.provider,
+                                  reply,
+                                  existingText: entry.text,
+                                  worked: turnWorkedAfterAssistant(item.messages, assistantId),
+                                }),
+                              }
+                            : entry,
                         ),
                       }
                     : item,
@@ -5894,24 +5974,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       // Did this turn leave anything behind? Thinking and tool
                       // calls land as their own messages after the assistant
                       // one, so ask the transcript rather than the message.
-                      const at = session.messages.findIndex((message) => message.id === assistantId);
-                      const worked =
-                        at >= 0 &&
-                        session.messages
-                          .slice(at + 1)
-                          .some((message) => message.kind === "thought" || message.kind === "tool");
+                      const worked = turnWorkedAfterAssistant(session.messages, assistantId);
                       return session.messages.map((message) => {
                         if (message.id !== assistantId) return message;
                         const text = (message.text ?? "").trim() || queued.trim();
                         return {
                           ...message,
-                          text:
-                            text ||
-                            turnEndedWithoutProse({
-                              provider: session.provider,
-                              stopReason: event.stopReason,
-                              worked,
-                            }),
+                          text: assistantHasVisibleReply(text)
+                            ? text
+                            : turnEndedWithoutProse({
+                                provider: session.provider,
+                                stopReason: event.stopReason,
+                                worked,
+                              }),
                           workedMs: Math.max(0, Date.now() - message.createdAt),
                         };
                       });

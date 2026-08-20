@@ -315,6 +315,8 @@ const INPUT_KEYS: (keyof ModelInputCapabilities)[] = ["text", "images", "documen
 /**
  * Hard input needs come only from real attachments or structured requirements.
  * Prompt words such as UI, visual, or design are expertise hints, not modalities.
+ * profile.inputs.images means the model can *accept* image attachments — never
+ * that it can *generate* images (Grok /imagine is a separate preference below).
  */
 export function mergeInputRequirements(
   attachments: ChatImage[] = [],
@@ -326,6 +328,32 @@ export function mergeInputRequirements(
     if (requirements[key]) required[key] = true;
   }
   return required;
+}
+
+/**
+ * Ask to *produce* an image from text. Conservative: needs a generation verb
+ * plus an image noun, and skips analyze/describe-this-image phrasing.
+ */
+export function detectsImageGenerationIntent(prompt: string): boolean {
+  const text = prompt.trim().toLowerCase();
+  if (!text) return false;
+  if (
+    /\b(analy[sz]e|describe|explain|inspect|review|ocr|transcribe|caption|what(?:'s| is)|tell me about)\b/.test(text) &&
+    /\b(image|picture|photo|screenshot|illustration|drawing)\b/.test(text)
+  ) {
+    return false;
+  }
+  const imageNoun = /\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text);
+  if (!imageNoun) return false;
+  return (
+    /\b(generate|create|draw|imagine|paint|render|sketch)\b/.test(text) ||
+    /\bmake\b[\s\S]{0,40}\b(image|picture|illustration|photo|drawing|artwork)\b/.test(text)
+  );
+}
+
+/** Stock image generators only. Never infer from profile.inputs.images. */
+function candidateCanGenerateImages(candidate: RoutingCandidate): boolean {
+  return candidate.provider === "grok";
 }
 
 /** Why rankRoutingCandidates produced no winner. Empty when a route exists. */
@@ -610,6 +638,8 @@ export function rankRoutingCandidates(
     request.tier ??
     inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
   const required = mergeInputRequirements(request.attachments, request.requirements);
+  const wantsImageGen = detectsImageGenerationIntent(request.prompt);
+  const hasImageGenerator = wantsImageGen && candidates.some((item) => item.connected && candidateCanGenerateImages(item));
   const minimum = requiredIntelligence(tier);
   const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
   const ranked: RankedRoutingCandidate[] = [];
@@ -641,6 +671,9 @@ export function rankRoutingCandidates(
     if (candidate.profile.local || candidate.paceUnmetered) {
       score += tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
     }
+    // Prefer Grok (/imagine) when the prompt asks to generate an image.
+    // Soft boost only when a generator is among candidates — not a hard filter.
+    if (hasImageGenerator && candidateCanGenerateImages(candidate)) score += 60;
     // Domain is a tie-break inside a band, never a fit substitute: +6 sits
     // below one intelligence unit (12-20) and beside the speed/cost spreads.
     if (domain !== "general" && candidate.profile.strengths?.includes(domain)) score += 6;
@@ -702,6 +735,8 @@ export function chooseRoutingDecision(
         : draw.delta <= -10
           ? " · limited capacity"
           : " · on pace";
+  const imageGenReason =
+    detectsImageGenerationIntent(request.prompt) && candidateCanGenerateImages(winner) ? " · image generation" : "";
   return {
     at: request.now ?? Date.now(),
     taskTier,
@@ -710,7 +745,7 @@ export function chooseRoutingDecision(
     effort: effortForRoutingTier(winner.provider, winner.model, taskTier),
     customBotId: winner.customBotId,
     score: winner.score,
-    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}`,
+    reason: `${taskTier === "deep" ? "Deep" : taskTier === "quick" ? "Quick" : "Balanced"} · ${effortForRoutingTier(winner.provider, winner.model, taskTier) ?? "fixed"} effort${capacityReason}${imageGenReason}`,
     usedPercent: draw.usedPercent,
     expectedUsedPercent: draw.expectedUsedPercent,
   };

@@ -462,10 +462,8 @@ export function Composer({
             aria-expanded={setupOpen}
             onClick={onToggleSetup}
           >
-            {/* On Auto the model and effort are picked on every send, so
-                naming the last pick here read as the plan: this chip said
-                Composer 2.5 · High and the prompt went to Kimi K3. Say Auto;
-                the reply header names what actually answered. */}
+            {/* On Auto omit the model name (it would promise next-turn
+                vendor). Do show last/current thinking level when set. */}
             {session.routingMode === "auto" ? (
               <span className="dot auto" aria-hidden="true" />
             ) : (
@@ -473,7 +471,7 @@ export function Composer({
             )}
             <span>
               {session.routingMode === "auto"
-                ? `Auto · ${shortModeLabel(session.mode)}`
+                ? `Auto${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`
                 : `${modelName(session.provider, session.model)}${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`}
             </span>
             <span className="caret" aria-hidden="true" />

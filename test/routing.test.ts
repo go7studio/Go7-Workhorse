@@ -7,6 +7,7 @@ import {
   attachmentRequirements,
   chooseRoutingDecision,
   describeRoutingMiss,
+  detectsImageGenerationIntent,
   effortForRoutingTier,
   inferRoutingTier,
   mergeInputRequirements,
@@ -542,4 +543,74 @@ test("an auditor slice routes deep, and a harness can ask for one", () => {
     2,
     "both spawn payloads must carry role, or delegate and spawn_agent disagree",
   );
+});
+
+test("image-generation intent is conservative and does not treat input images as generation", () => {
+  assert.equal(detectsImageGenerationIntent("generate a detailed image of a chicken wing"), true);
+  assert.equal(detectsImageGenerationIntent("draw me a picture of a lighthouse"), true);
+  assert.equal(detectsImageGenerationIntent("imagine an illustration of a fox"), true);
+  assert.equal(detectsImageGenerationIntent("analyze this image and list the objects"), false);
+  assert.equal(detectsImageGenerationIntent("describe the attached photo"), false);
+  assert.equal(detectsImageGenerationIntent("what is in this screenshot"), false);
+  assert.equal(detectsImageGenerationIntent("Implement this form"), false);
+  assert.equal(detectsImageGenerationIntent("Polish the Mission Control UI visual design"), false);
+});
+
+test("Auto prefers Grok for image-generation prompts when Grok is connected", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.4", 10, { provider: "codex", label: "GPT-5.4" }),
+    candidate("grok-4.6", 30, { provider: "grok", label: "Grok 4.6" }),
+  ];
+  const decision = chooseRoutingDecision(
+    rows,
+    { prompt: "generate a detailed image of a chicken wing", now },
+    settings,
+  );
+  assert.equal(decision?.provider, "grok");
+  assert.equal(decision?.model, "grok-4.6");
+  assert.match(decision?.reason ?? "", /image generation/);
+});
+
+test("analyzing an attached image does not force image-gen preference toward Grok", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-luna", 10),
+    candidate("grok-4.6", 40, { provider: "grok", label: "Grok 4.6" }),
+  ];
+  const withoutIntent = chooseRoutingDecision(
+    rows,
+    { prompt: "Quick: classify this", tier: "quick", now },
+    settings,
+  );
+  const analyzeImage = chooseRoutingDecision(
+    rows,
+    {
+      prompt: "analyze this image and list the objects",
+      attachments: [{ id: "img", name: "wing.png", mimeType: "image/png", data: "AA==", kind: "image" }],
+      now,
+    },
+    settings,
+  );
+  assert.equal(withoutIntent?.model, "gpt-5.6-luna");
+  assert.equal(analyzeImage?.model, withoutIntent?.model);
+  assert.notEqual(analyzeImage?.provider, "grok");
+});
+
+test("non-image prompts keep the same ranking winners as before image-gen preference", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const rows = [
+    candidate("gpt-5.6-sol", 20),
+    candidate("gpt-5.6-terra", 20),
+    candidate("gpt-5.6-luna", 20),
+    candidate("grok-4.6", 20, { provider: "grok", label: "Grok 4.6" }),
+  ];
+  const quick = chooseRoutingDecision(rows, { prompt: "Quick: classify this", now }, settings);
+  const deep = chooseRoutingDecision(
+    rows,
+    { prompt: "Architect a production migration", now },
+    settings,
+  );
+  assert.equal(quick?.model, "gpt-5.6-luna");
+  assert.equal(deep?.model, "gpt-5.6-sol");
 });

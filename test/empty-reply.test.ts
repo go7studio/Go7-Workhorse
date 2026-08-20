@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { dispatchSummary, shouldEndDispatchTurn, spawnDispatchStarted } from "../electron/custom-host";
 import { buildPolicyContext, machineLine } from "../src/lib/context-preface";
-import { turnEndedWithoutProse, vendorEmptyReply } from "../src/lib/vendor-bridge";
+import {
+  assistantHasVisibleReply,
+  settleEmptyAssistantText,
+  turnEndedWithoutProse,
+  turnWorkedAfterAssistant,
+  vendorEmptyReply,
+} from "../src/lib/vendor-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -42,12 +48,51 @@ test("a turn that truly did nothing still says so", () => {
   assert.match(vendorEmptyReply("custom"), /finished without a visible reply/);
 });
 
+test("markdown image embeds count as a visible reply", () => {
+  assert.equal(assistantHasVisibleReply(""), false);
+  assert.equal(assistantHasVisibleReply("   "), false);
+  assert.equal(assistantHasVisibleReply("![A scene](https://example.com/out.png)"), true);
+  assert.equal(assistantHasVisibleReply("Here you go.\n\n![jelly](images/1.jpg)"), true);
+  assert.equal(
+    settleEmptyAssistantText({
+      provider: "codex",
+      reply: "",
+      existingText: "![generated](data:image/png;base64,abc)",
+      worked: false,
+    }),
+    "![generated](data:image/png;base64,abc)",
+  );
+  assert.equal(
+    settleEmptyAssistantText({
+      provider: "codex",
+      reply: "",
+      existingText: "",
+      worked: true,
+    }),
+    "",
+  );
+});
+
+test("turnWorkedAfterAssistant asks the transcript after the bubble", () => {
+  const messages = [
+    { id: "a1", kind: undefined },
+    { id: "t1", kind: "thought" },
+    { id: "tool1", kind: "tool" },
+  ];
+  assert.equal(turnWorkedAfterAssistant(messages, "a1"), true);
+  assert.equal(turnWorkedAfterAssistant([{ id: "a1" }], "a1"), false);
+  assert.equal(turnWorkedAfterAssistant(messages, "missing"), false);
+  const bridge = read("src/lib/vendor-bridge.ts");
+  assert.match(bridge, /message\.kind === "thought" \|\| message\.kind === "tool"/);
+});
+
 test("the store asks the transcript, because ChatMessage.thought is never written", () => {
   const store = read("src/lib/store.tsx");
   // The old guard read message.thought, which nothing assigns — thinking lands
   // as its own kind:"thought" message — so it always fell through to the notice.
   assert.doesNotMatch(store, /message\.thought\?\.trim\(\) \? "" : vendorEmptyReply/);
-  assert.match(store, /message\.kind === "thought" \|\| message\.kind === "tool"/);
+  assert.match(store, /turnWorkedAfterAssistant/);
+  assert.match(store, /settleEmptyAssistantText/);
   assert.match(store, /turnEndedWithoutProse\(\{/);
   assert.match(store, /stopReason: event\.stopReason/);
   // Still never assigned anywhere: if that changes, this test should be revisited.
@@ -56,6 +101,25 @@ test("the store asks the transcript, because ChatMessage.thought is never writte
     .split("\n")
     .filter((line) => /\bthought:\s/.test(line) && !/kind: "thought"|type: "thought"/.test(line));
   assert.deepEqual(assigns, [], "something now writes .thought — the transcript check may be redundant");
+});
+
+test("promise-path finish writers are worked-aware, not bare vendorEmptyReply", () => {
+  const store = read("src/lib/store.tsx");
+  // Critical smoking-gun sites: *Prompt completion used to fill empty bubbles with
+  // vendorEmptyReply even after tools ran (image gen → "Codex finished without…").
+  assert.doesNotMatch(store, /reply \|\| vendorEmptyReply\(/);
+  assert.doesNotMatch(store, /reply \|\| EMPTY_GROK_REPLY/);
+  for (const provider of ["custom", "claude", "cursor", "codex", "grok"] as const) {
+    assert.match(
+      store,
+      new RegExp(
+        String.raw`settleEmptyAssistantText\(\{\s*provider:\s*"${provider}"[\s\S]*?worked:\s*turnWorkedAfterAssistant`,
+      ),
+    );
+  }
+  // Spawn / peer fallbacks use the same helper — not bare vendorEmptyReply.
+  assert.match(store, /settleEmptyAssistantText\(\{\s*provider:\s*spec\.provider/);
+  assert.match(store, /settleEmptyAssistantText\(\{\s*provider:\s*target\.provider/);
 });
 
 test("a dispatch turn names the workers it started", () => {

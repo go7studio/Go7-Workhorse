@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.19](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.18...v0.6.19) (2026-08-20)
+
+
+### Bug Fixes
+
+* stream chat images and stop Codex first-open freeze ([#120](https://github.com/go7studio/Go7-Workhorse/issues/120)) ([16f3035](https://github.com/go7studio/Go7-Workhorse/commit/16f303512bfca9bc784281b209cb832aa68d7ce5))
+
 ## [0.6.18](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.17...v0.6.18) (2026-08-20)
 
 

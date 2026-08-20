@@ -203,7 +203,9 @@ import {
   isActiveWorkRow,
   lastReplyIndex,
   nextTranscriptPaintStart,
-  TRANSCRIPT_FILL_MS,
+  TRANSCRIPT_FIRST_PAINT,
+  TRANSCRIPT_LOOKAHEAD,
+  TRANSCRIPT_PAINT_CHUNK,
   packWorkRows,
   playWorkEvents,
   transcriptPaintStart,
@@ -5831,24 +5833,26 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /scheduleAfterPaint/);
   assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
   assert.match(pane, /transcriptOpen && session/);
-  assert.match(pane, /startTranscriptFill/);
-  assert.match(pane, /wantEarlier/);
   assert.match(pane, /keepScrollThroughPrepend/);
-  assert.match(pane, /TRANSCRIPT_FILL_MS/);
-  assert.doesNotMatch(pane, /shouldLoadEarlierTurns/);
+  assert.match(pane, /shouldLoadEarlierWindow/);
+  assert.match(pane, /TRANSCRIPT_LOOKAHEAD/);
+  assert.match(pane, /TRANSCRIPT_PAINT_CHUNK/);
+  assert.doesNotMatch(pane, /wantEarlier/);
+  assert.doesNotMatch(pane, /startTranscriptFill/);
   assert.doesNotMatch(pane, /startTransition\(\(\) => setPaint/);
   assert.doesNotMatch(pane, /Load earlier turns/);
-  assert.match(pane, /if \(!transcriptOpen \|\| !wantEarlier\) return/);
   assert.doesNotMatch(pane, /block\.subagents\.length \? store\.sessions/);
   assert.doesNotMatch(pane, /requestIdleCallback/);
   assert.doesNotMatch(pane, /requestAnimationFrame\(tick\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.transcript-stack/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /justify-content: flex-end/);
-  assert.equal(transcriptPaintStart(4), 0);
-  assert.equal(transcriptPaintStart(26), 22);
-  assert.equal(nextTranscriptPaintStart(22), 21);
+  assert.equal(TRANSCRIPT_FIRST_PAINT, 10);
+  assert.equal(TRANSCRIPT_PAINT_CHUNK, 10);
+  assert.equal(TRANSCRIPT_LOOKAHEAD, 5);
+  assert.equal(transcriptPaintStart(10), 0);
+  assert.equal(transcriptPaintStart(26), 16);
+  assert.equal(nextTranscriptPaintStart(22), 12);
   assert.equal(nextTranscriptPaintStart(1), 0);
-  assert.ok(TRANSCRIPT_FILL_MS >= 300);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /isDeskNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /LINEUP_FINISHED_NOTICE/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /crew-done/);

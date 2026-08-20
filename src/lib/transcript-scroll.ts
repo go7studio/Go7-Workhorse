@@ -26,17 +26,31 @@ export function pinnedToTop(el: { scrollTop: number }, slack: number): boolean {
   return el.scrollTop <= slack;
 }
 
+export function countTurnsAboveViewport(
+  turns: Array<{ bottom: number }>,
+  viewportTop: number,
+): number {
+  let count = 0;
+  for (const turn of turns) {
+    if (turn.bottom < viewportTop) count += 1;
+    else break;
+  }
+  return count;
+}
+
 /**
- * Start filling as soon as the user leaves the latest turn, so earlier
- * history is already in the thread before they reach the top.
- * A short chat is at the top and the bottom; do not fill then.
+ * Page in the next older window when fewer than `lookahead` loaded turns
+ * remain above the fold. Stay put at the latest turn (atBottom).
  */
-export function shouldLoadEarlierTurns(input: {
+export function shouldLoadEarlierWindow(input: {
   hasEarlier: boolean;
   loading: boolean;
   atBottom: boolean;
+  turnsAboveViewport: number;
+  lookahead: number;
 }): boolean {
-  return input.hasEarlier && !input.loading && !input.atBottom;
+  if (!input.hasEarlier || input.loading || input.atBottom) return false;
+  return input.turnsAboveViewport < input.lookahead;
 }
 
 /** Keep the same turns in view when earlier history is prepended. */

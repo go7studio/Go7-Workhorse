@@ -5832,7 +5832,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /transcriptOpen && session/);
   assert.match(pane, /startTranscriptFill/);
   assert.match(pane, /wantEarlier/);
-  assert.match(pane, /Load earlier turns/);
+  assert.match(pane, /shouldLoadEarlierTurns/);
+  assert.match(pane, /keepScrollThroughPrepend/);
+  assert.doesNotMatch(pane, /Load earlier turns/);
   assert.match(pane, /if \(!transcriptOpen \|\| !wantEarlier\) return/);
   assert.doesNotMatch(pane, /block\.subagents\.length \? store\.sessions/);
   assert.match(pane, /requestIdleCallback/);

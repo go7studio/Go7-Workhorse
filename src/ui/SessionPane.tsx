@@ -37,7 +37,14 @@ import { UserTurn } from "./UserTurn";
 import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
-import { followLatestTurn, pinnedToLatest, pinToLatest } from "../lib/transcript-scroll";
+import {
+  followLatestTurn,
+  keepScrollThroughPrepend,
+  pinnedToLatest,
+  pinnedToTop,
+  pinToLatest,
+  shouldLoadEarlierTurns,
+} from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
@@ -142,6 +149,7 @@ export function SessionPane() {
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
   const userMoved = useRef(false);
+  const lastHeight = useRef(0);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
   const editsBarOpenRef = useRef(false);
@@ -283,11 +291,15 @@ export function SessionPane() {
   useEffect(() => {
     followBottom.current = true;
     userMoved.current = false;
+    lastHeight.current = 0;
   }, [session?.id]);
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && followBottom.current) pinToLatest(el);
+    if (!el) return;
+    if (followBottom.current) pinToLatest(el);
+    else keepScrollThroughPrepend(el, lastHeight.current);
+    lastHeight.current = el.scrollHeight;
   }, [session?.id, session?.messages, session?.status, paintFrom]);
 
   useEffect(() => {
@@ -448,24 +460,26 @@ export function SessionPane() {
         onScroll={() => {
           const el = scroller.current;
           if (!el) return;
+          const atBottom = pinnedToLatest(el, SCROLL_SLACK);
           followBottom.current = followLatestTurn({
             following: followBottom.current,
-            atBottom: pinnedToLatest(el, SCROLL_SLACK),
+            atBottom,
             userInitiated: userMoved.current,
           });
           if (followBottom.current) userMoved.current = false;
+          if (
+            shouldLoadEarlierTurns({
+              hasEarlier: paint.id === sessionId && paint.from > 0,
+              loading: wantEarlier,
+              atTop: pinnedToTop(el, SCROLL_SLACK),
+              atBottom,
+            })
+          ) {
+            setWantEarlier(true);
+          }
         }}
       >
         <div className="transcript-stack" ref={stack}>
-        {paintFrom > 0 ? (
-          <button
-            className="transcript-earlier"
-            type="button"
-            onClick={() => setWantEarlier(true)}
-          >
-            Load earlier turns…
-          </button>
-        ) : null}
         {shownBlocks.map((block, offset) => {
           const index = paintFrom + offset;
           if (block.type === "user") {

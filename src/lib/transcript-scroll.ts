@@ -21,3 +21,27 @@ export function followLatestTurn(input: {
 export function pinToLatest(el: { scrollHeight: number; scrollTop: number }): void {
   el.scrollTop = el.scrollHeight;
 }
+
+export function pinnedToTop(el: { scrollTop: number }, slack: number): boolean {
+  return el.scrollTop <= slack;
+}
+
+/** Reach the top of a long chat (not a short thread that is both top and bottom). */
+export function shouldLoadEarlierTurns(input: {
+  hasEarlier: boolean;
+  loading: boolean;
+  atTop: boolean;
+  atBottom: boolean;
+}): boolean {
+  return input.hasEarlier && !input.loading && input.atTop && !input.atBottom;
+}
+
+/** Keep the same turns in view when earlier history is prepended. */
+export function keepScrollThroughPrepend(
+  el: { scrollTop: number; scrollHeight: number },
+  previousHeight: number,
+): void {
+  if (previousHeight <= 0) return;
+  const grown = el.scrollHeight - previousHeight;
+  if (grown > 0) el.scrollTop += grown;
+}

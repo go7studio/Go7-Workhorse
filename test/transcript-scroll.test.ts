@@ -4,7 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { pinNoticesDock } from "../src/lib/session-dock";
-import { followLatestTurn, pinnedToLatest, pinToLatest } from "../src/lib/transcript-scroll";
+import {
+  followLatestTurn,
+  keepScrollThroughPrepend,
+  pinnedToLatest,
+  pinnedToTop,
+  pinToLatest,
+  shouldLoadEarlierTurns,
+} from "../src/lib/transcript-scroll";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,6 +36,38 @@ test("pinToLatest writes scrollTop to the end of the thread", () => {
   assert.equal(el.scrollTop, 2400);
 });
 
+test("earlier turns load when the user reaches the top of a long chat", () => {
+  assert.equal(pinnedToTop({ scrollTop: 0 }, 96), true);
+  assert.equal(pinnedToTop({ scrollTop: 40 }, 96), true);
+  assert.equal(pinnedToTop({ scrollTop: 120 }, 96), false);
+  assert.equal(
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: true, atBottom: false }),
+    true,
+  );
+  assert.equal(
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: true, atBottom: true }),
+    false,
+    "a short thread is at the top and the bottom; do not fill the whole history",
+  );
+  assert.equal(
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: true, atTop: true, atBottom: false }),
+    false,
+  );
+  assert.equal(
+    shouldLoadEarlierTurns({ hasEarlier: false, loading: false, atTop: true, atBottom: false }),
+    false,
+  );
+  assert.equal(
+    shouldLoadEarlierTurns({ hasEarlier: true, loading: false, atTop: false, atBottom: false }),
+    false,
+  );
+  const el = { scrollHeight: 4000, scrollTop: 80 };
+  keepScrollThroughPrepend(el, 2800);
+  assert.equal(el.scrollTop, 1280);
+  keepScrollThroughPrepend(el, 0);
+  assert.equal(el.scrollTop, 1280);
+});
+
 test("pinNoticesDock lifts Changes by the temp notice height", () => {
   const col = {
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
@@ -48,6 +87,11 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /observer\.observe\(content\)/);
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
+  assert.match(pane, /shouldLoadEarlierTurns/);
+  assert.match(pane, /keepScrollThroughPrepend/);
+  assert.match(pane, /setWantEarlier\(true\)/);
+  assert.doesNotMatch(pane, /Load earlier turns/);
+  assert.doesNotMatch(pane, /transcript-earlier/);
   assert.match(pane, /addEventListener\("toggle", onToggle, true\)/);
   assert.match(pane, /if \(skipPin\) return/);
   assert.match(pane, /session-notices/);

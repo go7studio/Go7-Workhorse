@@ -737,19 +737,74 @@ test("available LLMs include a keyed custom bot when stock vendors are a no-go",
   assert.match(readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8"), /action: "list"/);
 });
 
-test("the daily-over banner names the pace it is measured against", () => {
-  // The screenshot case: day 5 of 7 with 72% of the week used.
-  // "1% over" is one point above an even pace, which the copy must state.
-  const expected = rollingAllowed(DAY_SHARE_PERCENT, 5);
-  assert.equal(Math.round(expected), 71);
-  assert.equal(Math.round(Math.max(0, 72 - expected)), 1);
+test("the daily-over banner is a short used-vs-expected line", () => {
+  // Screenshot case: Grok day 3 of 7, 61% used vs 43% expected → 18% over.
+  const grokNow = Date.parse("2026-08-13T18:00:00");
+  const grokReset = new Date(grokNow + 5 * 24 * 60 * 60 * 1000).toISOString();
+  assert.deepEqual(weekDayIndex(grokReset, grokNow), { day: 3, days: 7 });
+  assert.equal(Math.round(rollingAllowed(DAY_SHARE_PERCENT, 3)), 43);
+
+  const grokDaily = watchVendorStatuses({
+    settings: {
+      watch: DEFAULT_WATCH,
+      customBots: [],
+      usageBudgets: {},
+      llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+    },
+    usage: [],
+    plans: { grok: plan(39, { resetsAt: grokReset }) },
+    permits: {},
+    now: grokNow,
+  })
+    .find((row) => row.key === "grok")
+    ?.notices.find((notice) => notice.kind === "daily");
+  assert.equal(grokDaily?.title, "Grok is 18% over pace");
+  assert.equal(grokDaily?.detail, "Day 3/7 · 61% used · 43% expected");
+
+  // Cursor · API, monthly: day 9 of ~31, 61% used vs ~29% expected → ~32% over.
+  const cursorNow = Date.parse("2026-08-20T12:00:00");
+  const cursorReset = "2026-09-12T00:00:00.000Z";
+  const cursorCycle = weekDayIndex(cursorReset, cursorNow, "monthly");
+  const cursorExpected = Math.round(rollingAllowed(DAY_SHARE_PERCENT, cursorCycle.day, cursorCycle.days));
+  const cursorOver = Math.round(Math.max(0, 61 - rollingAllowed(DAY_SHARE_PERCENT, cursorCycle.day, cursorCycle.days)));
+  const cursorDaily = watchVendorStatuses({
+    settings: {
+      watch: DEFAULT_WATCH,
+      customBots: [],
+      usageBudgets: {},
+      llms: {
+        grok: { connected: false },
+        claude: { connected: false },
+        codex: { connected: false },
+        cursor: { connected: true },
+      },
+    },
+    usage: [],
+    plans: {
+      cursor: {
+        usedPercent: 61,
+        leftPercent: 39,
+        period: "monthly",
+        prepaidBalance: 0,
+        resetsAt: cursorReset,
+        products: [
+          { product: "cursor-models", label: "Cursor Models", usagePercent: 10, resetsAt: cursorReset },
+          { product: "other-models", label: "Other Models", usagePercent: 61, resetsAt: cursorReset },
+        ],
+      },
+    },
+    permits: {},
+    now: cursorNow,
+  })
+    .find((row) => row.key === "cursor:other-models")
+    ?.notices.find((notice) => notice.kind === "daily");
+  assert.equal(cursorDaily?.title, `Cursor · API is ${cursorOver}% over pace`);
+  assert.equal(cursorDaily?.detail, `Day ${cursorCycle.day}/${cursorCycle.days} · 61% used · ${cursorExpected}% expected`);
 
   const watchSource = readFileSync(path.join(ROOT, "src", "lib", "watch.ts"), "utf8");
-  assert.match(watchSource, /over the expected pace/);
-  assert.match(watchSource, /% expected by now/);
-  // The old wording gave a bare percentage with nothing to read it against.
-  assert.doesNotMatch(watchSource, /is \$\{over\}% over`/);
-  assert.doesNotMatch(watchSource, /leftover can last the rest of the week/);
+  assert.doesNotMatch(watchSource, /over the expected pace/);
+  assert.doesNotMatch(watchSource, /what is left covers the days remaining/);
+  assert.doesNotMatch(watchSource, /% expected by now/);
 });
 
 test("a full context window never holds a send the way a spent daily bank does", () => {

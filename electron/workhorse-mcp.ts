@@ -10,7 +10,17 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import {
+  attachmentKind,
+  attachmentMime,
+  MAX_AUDIO_BYTES,
+  MAX_DOCUMENT_BYTES,
+  MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES,
+  MAX_VIDEO_BYTES,
+} from "../src/lib/images";
 import {
   deskCallCatalog,
   formatDeskRoster,
@@ -1136,34 +1146,55 @@ function callerProjectFolder(session?: { projectId?: string | null }): string {
   return typeof pathValue === "string" ? pathValue.trim() : "";
 }
 
+/**
+ * The desk takes 84 file types when you drag one onto the window. This used to
+ * know 14, from a private table that drifted out of step with the real one, so
+ * html, svg, every Office document, most audio and most video arrived over the
+ * CLI as application/octet-stream and a model was handed a blob it could not
+ * read. It now asks the same classifier the drop path asks, and refuses what
+ * the desk would refuse instead of passing it through unnamed.
+ */
+const ATTACHMENT_CAP: Record<AttachmentKind, number> = {
+  image: MAX_IMAGE_BYTES,
+  file: MAX_FILE_BYTES,
+  document: MAX_DOCUMENT_BYTES,
+  audio: MAX_AUDIO_BYTES,
+  video: MAX_VIDEO_BYTES,
+};
+
+/** "256 KB", not "0 MB" — the text cap is smaller than a megabyte. */
+function describeBytes(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${Math.round(bytes / (1024 * 1024))} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
 export function spawnAttachments(files: string[] | undefined, cwd: string): ChatImage[] {
   if (!files?.length) return [];
   if (!cwd) throw new Error("Attach files only from a bound project folder");
-  const mimeFor = (file: string) => {
-    const ext = path.extname(file).toLowerCase();
-    return ({
-      ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
-      ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
-      ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".mp4": "video/mp4", ".mov": "video/quicktime",
-    } as Record<string, string>)[ext] ?? "application/octet-stream";
-  };
-  return files.slice(0, 8).map((file, index) => {
+  // The old code sliced to 8 and said nothing, so the 9th file onwards vanished
+  // between a caller that sent it and a chat that never saw it.
+  if (files.length > MAX_IMAGES) {
+    throw new Error(`Attach at most ${MAX_IMAGES} files at once — ${files.length} were given`);
+  }
+  return files.map((file, index) => {
     const resolved = path.resolve(cwd, file);
     const relative = path.relative(path.resolve(cwd), resolved);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Attachment is outside the project: ${file}`);
+    // Containment, not fussiness: workhorse_delegate is a Link tool, so any
+    // connected app can reach this. Without it, one call reads any file on the
+    // machine into a chat and out to a model.
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`Attachment is outside the project: ${file} — attach it from ${cwd}, or copy it in first`);
+    }
     const stat = fs.statSync(resolved);
     if (!stat.isFile()) throw new Error(`Attachment is not a file: ${file}`);
-    if (stat.size > 30 * 1024 * 1024) throw new Error(`Attachment is over 30 MB: ${file}`);
-    const mimeType = mimeFor(resolved);
-    const kind = mimeType.startsWith("image/") ? "image"
-      : mimeType.startsWith("audio/") ? "audio"
-        : mimeType.startsWith("video/") ? "video"
-          : mimeType === "application/pdf" ? "document"
-            : "file";
+    const name = path.basename(resolved);
+    const kind = attachmentKind({ name });
+    if (!kind) throw new Error(`Workhorse does not take ${path.extname(name) || "extensionless"} files: ${file}`);
+    const cap = ATTACHMENT_CAP[kind];
+    if (stat.size > cap) throw new Error(`Attachment is over ${describeBytes(cap)}: ${file} is ${describeBytes(stat.size)}`);
     return {
       id: `spawn_file_${Date.now()}_${index}`,
-      name: path.basename(resolved),
-      mimeType,
+      name,
+      mimeType: attachmentMime({ name }, kind),
       data: fs.readFileSync(resolved).toString("base64"),
       kind,
       sourcePath: resolved,

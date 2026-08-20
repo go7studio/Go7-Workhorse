@@ -58,9 +58,18 @@ Drag them onto the window, or paste them in.
 - **Audio** — mp3, wav, m4a, aac, flac, ogg, opus, webm
 - **Video** — mp4, mov, m4v, webm, avi, mkv
 - **Documents** — pdf, doc, docx, ppt, pptx, xls, xlsx, rtf, odt
-- **Text and code** — txt, md, json, csv, tsv, ts, tsx, js, py, rs, go, java,
-  rb, php, c, cpp, cs, sql, yml, toml, sh, and the rest of the usual list
+- **Text and code** — txt, md, html, css, json, xml, svg, csv, tsv, ts, tsx,
+  js, py, rs, go, java, rb, php, c, cpp, cs, sql, yml, toml, sh, and the rest
+  of the usual list
 - **Folders** — dropped whole, with dotfiles and build output skipped
+
+A harness gets the same list. `workhorse_delegate` takes a `files` array and
+reads each one the way a drop does, with the same size limits — 256 KB of
+text, 4 MB an image, 12 MB a document, 25 MB audio, 60 MB video — and at most
+24 at a time. Anything the desk would not take is refused by name rather than
+handed on as an unreadable blob. The paths must sit inside the chat's project
+folder: an app connected over Link can call this, and the desk will not read
+outside the folder you pointed it at.
 
 A chat can also read media the agent wrote, so a generated image shows in the
 transcript rather than as a path.

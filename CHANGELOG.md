@@ -8,6 +8,17 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.16](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.15...v0.6.16) (2026-08-20)
+
+
+### Bug Fixes
+
+* keep Codex skill notices out of replies ([87b5a81](https://github.com/go7studio/Go7-Workhorse/commit/87b5a8136f2359e4111f84a224e6f8cdc33e340f))
+* keep folder-bound workers active ([e89009a](https://github.com/go7studio/Go7-Workhorse/commit/e89009a5a792f3149472558cd438a89f8fea1038))
+* order live chats by recent activity ([26ce074](https://github.com/go7studio/Go7-Workhorse/commit/26ce07433624c223140570e1a2fe734312308459))
+* routing respects the context window, and history stays bounded ([4826f0a](https://github.com/go7studio/Go7-Workhorse/commit/4826f0ac23c9226d5b8984003a961c15b469edce))
+* routing respects the context window, and history stays bounded ([cf3efda](https://github.com/go7studio/Go7-Workhorse/commit/cf3efda63a100a19ea79d12e8b39724988b050aa))
+
 ## [0.6.15](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.14...v0.6.15) (2026-08-20)
 
 

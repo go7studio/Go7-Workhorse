@@ -64,6 +64,15 @@ test("routing tiers keep quick work light and deep work strong", () => {
 test("automatic routing applies only to a person's visible turn", () => {
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "Review this", hideUser: false }), true);
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "ORCHESTRATION CALL", hideUser: true }), false);
+  assert.equal(
+    shouldRouteSessionTurn({
+      routingMode: "auto",
+      text: "If unanswered, proceed with: REST",
+      hideUser: true,
+    }),
+    false,
+    "a hideUser plan continue must keep the parent pick, not re-rank the default text",
+  );
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "/goal status", hideUser: false }), false);
   assert.equal(shouldRouteSessionTurn({ routingMode: "manual", text: "Review this", hideUser: false }), false);
 });
@@ -384,6 +393,22 @@ test("spawn route= beats keyword inference; auditor, builder, size, attachments,
     inferRoutingTier(longWorker.prompt, [], { role: longWorker.role, parentTier: longWorker.parentTier }),
     "deep",
   );
+
+  const rows = [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")];
+  const workerPick = chooseRoutingDecision(rows, {
+    prompt: workerSpawn.prompt,
+    role: workerSpawn.role,
+    parentTier: workerSpawn.parentTier,
+  }, settings);
+  assert.equal(workerPick?.taskTier, "balanced");
+  assert.equal(workerPick?.effort, "medium");
+  const auditorPick = chooseRoutingDecision(rows, {
+    prompt: auditorSpawn.prompt,
+    role: auditorSpawn.role,
+    parentTier: auditorSpawn.parentTier,
+  }, settings);
+  assert.equal(auditorPick?.taskTier, "deep");
+  assert.equal(auditorPick?.model, "gpt-5.6-sol");
 });
 
 test("verified worker outcomes tilt a close fit but leftover still splits two families that both fit", () => {

@@ -15,11 +15,31 @@ export type CodexPromptInput = GrokPromptInput;
 export type CodexEventSink = GrokEventSink;
 type CodexSpawnFn = (spec: ReturnType<typeof buildCodexLaunchSpec>) => ChildProcessWithoutNullStreams;
 
-const CODEX_SKILL_BUDGET_WARNING =
-  "Warning: Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+const CODEX_SKILL_BUDGET_PREFIX = "Warning: Skill descriptions were shortened to fit the ";
+const CODEX_SKILL_BUDGET_SUFFIX =
+  "skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const CODEX_SKILL_BUDGET_WARNING = new RegExp(
+  `${escapeRegExp(CODEX_SKILL_BUDGET_PREFIX)}(?:\\d+(?:\\.\\d+)?%\\s+)?${escapeRegExp(CODEX_SKILL_BUDGET_SUFFIX)}(?:\\r?\\n){0,2}`,
+  "g",
+);
 
 export function stripCodexRuntimeNotices(text: string): string {
-  return text.replace(`${CODEX_SKILL_BUDGET_WARNING}\n\n`, "").replace(CODEX_SKILL_BUDGET_WARNING, "");
+  return text.replace(CODEX_SKILL_BUDGET_WARNING, "");
+}
+
+function couldBeCodexSkillBudgetWarning(text: string): boolean {
+  if (CODEX_SKILL_BUDGET_PREFIX.startsWith(text)) return true;
+  if (!text.startsWith(CODEX_SKILL_BUDGET_PREFIX)) return false;
+  const remainder = text.slice(CODEX_SKILL_BUDGET_PREFIX.length);
+  if (CODEX_SKILL_BUDGET_SUFFIX.startsWith(remainder)) return true;
+  if (/^\d+(?:\.\d*)?%?\s*$/.test(remainder)) return true;
+  const percentage = remainder.match(/^\d+(?:\.\d+)?%\s+/)?.[0];
+  return Boolean(percentage && CODEX_SKILL_BUDGET_SUFFIX.startsWith(remainder.slice(percentage.length)));
 }
 
 export function createCodexChunkFilter(emit: (text: string) => void) {
@@ -27,7 +47,7 @@ export function createCodexChunkFilter(emit: (text: string) => void) {
   return {
     push(chunk: string) {
       const combined = pending + chunk;
-      if (CODEX_SKILL_BUDGET_WARNING.startsWith(combined.trimEnd())) {
+      if (couldBeCodexSkillBudgetWarning(combined)) {
         pending = combined;
         return;
       }

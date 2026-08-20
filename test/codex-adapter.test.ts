@@ -46,14 +46,25 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("Codex skill-budget notices do not become assistant output", () => {
   const warning = "Warning: Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+  const percentageWarning = "Warning: Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
   assert.equal(stripCodexRuntimeNotices(`${warning}\n\nADAPTER_OK`), "ADAPTER_OK");
-  const chunks: string[] = [];
-  const filter = createCodexChunkFilter((text) => chunks.push(text));
-  filter.push(warning.slice(0, 80));
-  filter.push(`${warning.slice(80)}\n\n`);
-  filter.push("ADAPTER_OK");
-  filter.flush();
-  assert.deepEqual(chunks, ["ADAPTER_OK"]);
+  assert.equal(stripCodexRuntimeNotices(`${percentageWarning}\r\n\r\nADAPTER_OK`), "ADAPTER_OK");
+  for (const notice of [warning, percentageWarning]) {
+    for (let split = 1; split < notice.length; split += 1) {
+      const chunks: string[] = [];
+      const filter = createCodexChunkFilter((text) => chunks.push(text));
+      filter.push(notice.slice(0, split));
+      filter.push(`${notice.slice(split)}\n\nADAPTER_OK`);
+      filter.flush();
+      assert.deepEqual(chunks, ["ADAPTER_OK"], `split runtime notice at ${split}`);
+    }
+  }
+
+  const ordinary: string[] = [];
+  const ordinaryFilter = createCodexChunkFilter((text) => ordinary.push(text));
+  ordinaryFilter.push("Warning: Skill descriptions changed in this release.");
+  ordinaryFilter.flush();
+  assert.deepEqual(ordinary, ["Warning: Skill descriptions changed in this release."]);
 });
 
 test("Workhorse worker detection excludes user-facing Codex threads", () => {

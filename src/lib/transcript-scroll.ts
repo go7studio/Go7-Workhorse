@@ -62,3 +62,36 @@ export function keepScrollThroughPrepend(
   const grown = el.scrollHeight - previousHeight;
   if (grown > 0) el.scrollTop += grown;
 }
+
+export type ScrollAnchor = { id: string; top: number };
+
+/** The first painted turn that intersects or sits below the viewport top. */
+export function captureScrollAnchor(
+  turns: Array<{ id: string; top: number; bottom: number }>,
+  viewportTop: number,
+): ScrollAnchor | null {
+  if (turns.length === 0) return null;
+  for (const turn of turns) {
+    if (turn.bottom > viewportTop) return { id: turn.id, top: turn.top };
+  }
+  const last = turns[turns.length - 1];
+  return { id: last.id, top: last.top };
+}
+
+/**
+ * Put the anchored turn back at the same screen Y after older turns (or
+ * late markdown/images) change height above it. Returns false when there
+ * is no matching turn so a height-delta fallback can run.
+ */
+export function keepViewportOnAnchor(
+  el: { scrollTop: number },
+  turns: Array<{ id: string; top: number }>,
+  anchor: ScrollAnchor | null,
+): boolean {
+  if (!anchor) return false;
+  const current = turns.find((turn) => turn.id === anchor.id);
+  if (!current) return false;
+  const delta = current.top - anchor.top;
+  if (delta !== 0) el.scrollTop += delta;
+  return true;
+}

@@ -40,22 +40,32 @@ import { WorkPopout } from "./WorkPopout";
 import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
+  captureScrollAnchor,
   countTurnsAboveViewport,
   followLatestTurn,
   keepScrollThroughPrepend,
+  keepViewportOnAnchor,
   pinnedToLatest,
   pinToLatest,
   shouldLoadEarlierWindow,
+  type ScrollAnchor,
 } from "../lib/transcript-scroll";
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
+function turnBoxes(content: HTMLElement) {
+  return Array.from(content.querySelectorAll<HTMLElement>("[data-turn-id]"), (node) => {
+    const rect = node.getBoundingClientRect();
+    return { id: node.dataset.turnId ?? "", top: rect.top, bottom: rect.bottom };
+  }).filter((turn) => turn.id);
+}
+
 const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
   if (isDeskNotice(block.message)) return null;
   if (block.message.text === LINEUP_FINISHED_NOTICE) {
     return (
-      <article className="turn crew-done" aria-label={LINEUP_FINISHED_NOTICE}>
+      <article className="turn crew-done" data-turn-id={block.message.id} aria-label={LINEUP_FINISHED_NOTICE}>
         <div className="crew-done-card">
           <strong>{LINEUP_FINISHED_NOTICE}</strong>
         </div>
@@ -63,7 +73,7 @@ const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<Transcri
     );
   }
   return (
-    <article className="turn system chat">
+    <article className="turn system chat" data-turn-id={block.message.id}>
       <div className="say"><MessageBody text={block.message.text} /></div>
     </article>
   );
@@ -101,7 +111,7 @@ const AssistantTurn = memo(function AssistantTurn({
     settings.llms,
   );
   return (
-    <article className={`turn assistant reply${live ? " live" : ""}`}>
+    <article className={`turn assistant reply${live ? " live" : ""}`} data-turn-id={block.assistant.id}>
       <div className="turn-who">
         <span className={`dot ${who.provider}`} style={who.color ? { background: who.color } : undefined} aria-hidden="true" />
         {who.name}
@@ -151,6 +161,7 @@ export function SessionPane() {
   const followBottom = useRef(true);
   const userMoved = useRef(false);
   const lastHeight = useRef(0);
+  const scrollAnchor = useRef<ScrollAnchor | null>(null);
   const filling = useRef(false);
   const pane = useRef<HTMLElement>(null);
   const editsBarExit = useRef<number | undefined>(undefined);
@@ -274,13 +285,20 @@ export function SessionPane() {
     followBottom.current = true;
     userMoved.current = false;
     lastHeight.current = 0;
+    scrollAnchor.current = null;
   }, [session?.id]);
+
+  const holdViewport = (el: HTMLElement) => {
+    const content = stack.current;
+    if (content && keepViewportOnAnchor(el, turnBoxes(content), scrollAnchor.current)) return;
+    keepScrollThroughPrepend(el, lastHeight.current);
+  };
 
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     if (followBottom.current) pinToLatest(el);
-    else keepScrollThroughPrepend(el, lastHeight.current);
+    else holdViewport(el);
     lastHeight.current = el.scrollHeight;
     filling.current = false;
   }, [session?.id, session?.messages, session?.status, paintFrom]);
@@ -306,8 +324,14 @@ export function SessionPane() {
       });
     };
     const pin = () => {
-      if (skipPin) return;
-      if (followBottom.current) pinToLatest(thread);
+      if (followBottom.current) {
+        if (skipPin) return;
+        pinToLatest(thread);
+        lastHeight.current = thread.scrollHeight;
+        return;
+      }
+      holdViewport(thread);
+      lastHeight.current = thread.scrollHeight;
     };
     const observer = new ResizeObserver(pin);
     thread.addEventListener("toggle", onToggle, true);
@@ -449,16 +473,26 @@ export function SessionPane() {
             atBottom,
             userInitiated: userMoved.current,
           });
-          if (followBottom.current) userMoved.current = false;
+          if (followBottom.current) {
+            userMoved.current = false;
+            scrollAnchor.current = null;
+            lastHeight.current = el.scrollHeight;
+            return;
+          }
           const from = paint.id === sessionId ? paint.from : 0;
           const content = stack.current;
-          if (!content || filling.current || from <= 0) return;
-          const above = countTurnsAboveViewport(
-            Array.from(content.querySelectorAll(".turn"), (node) => ({
-              bottom: node.getBoundingClientRect().bottom,
-            })),
-            el.getBoundingClientRect().top,
-          );
+          if (!content || filling.current || from <= 0) {
+            if (content && !filling.current) {
+              scrollAnchor.current = captureScrollAnchor(turnBoxes(content), el.getBoundingClientRect().top);
+              lastHeight.current = el.scrollHeight;
+            }
+            return;
+          }
+          const boxes = turnBoxes(content);
+          const viewportTop = el.getBoundingClientRect().top;
+          scrollAnchor.current = captureScrollAnchor(boxes, viewportTop);
+          lastHeight.current = el.scrollHeight;
+          const above = countTurnsAboveViewport(boxes, viewportTop);
           if (
             shouldLoadEarlierWindow({
               hasEarlier: true,

@@ -59,7 +59,7 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
 
   if (editing && !readOnly) {
     return (
-      <article className="turn user chat">
+      <article className="turn user chat" data-turn-id={message.id}>
         <form
           className="prompt-edit"
           onSubmit={(event) => {
@@ -105,7 +105,7 @@ export const UserTurn = memo(function UserTurn({ message, readOnly = false }: { 
   const visible = peer?.text ?? message.text;
   const goal = splitGoalCommand(visible);
   return (
-    <article className={`turn user chat${peer ? " peer" : ""}`}>
+    <article className={`turn user chat${peer ? " peer" : ""}`} data-turn-id={message.id}>
       <div className="say-stack">
         <TimeStamp at={message.createdAt} />
         <div className="say">

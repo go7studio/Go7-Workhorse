@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { pinNoticesDock } from "../src/lib/session-dock";
 import {
+  captureScrollAnchor,
   countTurnsAboveViewport,
   followLatestTurn,
   keepScrollThroughPrepend,
+  keepViewportOnAnchor,
   pinnedToLatest,
   pinnedToTop,
   pinToLatest,
@@ -65,6 +67,28 @@ test("earlier turns page in when fewer than five loaded turns remain above the f
   assert.equal(el.scrollTop, 1280);
 });
 
+test("keepViewportOnAnchor holds the same turn still after older turns prepend", () => {
+  const turns = [
+    { id: "old-a", top: 10, bottom: 80 },
+    { id: "old-b", top: 90, bottom: 160 },
+    { id: "seen", top: 170, bottom: 260 },
+  ];
+  const anchor = captureScrollAnchor(turns, 165);
+  assert.deepEqual(anchor, { id: "seen", top: 170 });
+  const el = { scrollTop: 400 };
+  const prepended = [
+    { id: "old-a", top: 10 },
+    { id: "old-b", top: 90 },
+    { id: "seen", top: 890 },
+  ];
+  assert.equal(keepViewportOnAnchor(el, prepended, anchor), true);
+  assert.equal(el.scrollTop, 1120);
+  assert.equal(keepViewportOnAnchor(el, [{ id: "seen", top: 170 }], anchor), true);
+  assert.equal(el.scrollTop, 1120);
+  assert.equal(keepViewportOnAnchor(el, [{ id: "other", top: 10 }], anchor), false);
+  assert.equal(keepViewportOnAnchor(el, prepended, null), false);
+});
+
 test("pinNoticesDock lifts Changes by the temp notice height", () => {
   const col = {
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
@@ -85,6 +109,11 @@ test("SessionPane follows latest on start and ignores layout scroll unpinning", 
   assert.match(pane, /pinToLatest/);
   assert.match(pane, /followBottom\.current = true/);
   assert.match(pane, /keepScrollThroughPrepend/);
+  assert.match(pane, /keepViewportOnAnchor/);
+  assert.match(pane, /captureScrollAnchor/);
+  assert.match(pane, /data-turn-id/);
+  const userTurn = readFileSync(path.join(ROOT, "src", "ui", "UserTurn.tsx"), "utf8");
+  assert.match(userTurn, /data-turn-id=\{message\.id\}/);
   assert.match(pane, /shouldLoadEarlierWindow/);
   assert.match(pane, /countTurnsAboveViewport/);
   assert.match(pane, /nextTranscriptPaintStart/);

@@ -69,7 +69,7 @@ test("inherit seed still reuses an idle worker and keeps prior messages", () => 
   const reused = findReusableWorker(
     { provider: "grok", model: "grok-4.6", effort: "medium" },
     [idle()],
-    { parentId: "boss", projectId: "p1" },
+    { parentId: "boss", projectId: "p1", waveChildIds: ["w1"] },
   );
   assert.equal(reused?.workerName, "Wren");
   const messages = workerStartMessages({

@@ -272,6 +272,24 @@ export function workerIsFree(worker: Pick<WorkerRecord, "status" | "agentRun">):
 }
 
 /**
+ * Did this worker's last run end cleanly?
+ *
+ * `workerIsFree` only asks whether a worker is busy, so a run that ended
+ * `failed`, `cancelled`, `timed-out`, `budget-exceeded` or `interrupted`
+ * reads as available — new work could land on a worker that died mid-slice,
+ * and inherit would carry that broken turn into the next one. An interrupted
+ * worker is resumable, but resuming its own brief is a different act from
+ * handing it a new one.
+ *
+ * Naming a worker is still a decision the caller owns; this only filters the
+ * pool the desk picks from when nobody was named.
+ */
+export function workerEndedWell(worker: Pick<WorkerRecord, "agentRun">): boolean {
+  const status = worker.agentRun?.status;
+  return !status || status === "completed";
+}
+
+/**
  * The worker this slice should go back to, or null to start a new one.
  *
  * Scoped to the asking chat and its project, because a name means something
@@ -293,17 +311,26 @@ export function findReusableWorker(
     seed?: WorkerSeed;
   },
   workers: WorkerRecord[],
-  scope: { parentId: string; projectId: string | null },
+  scope: { parentId: string; projectId: string | null; waveChildIds?: readonly string[] },
 ): WorkerRecord | null {
   if (want.seed === "fresh") return null;
-  const mine = workers.filter(
-    (worker) =>
-      worker.hidden &&
-      !worker.archivedAt &&
-      worker.parentId === scope.parentId &&
-      worker.projectId === scope.projectId &&
-      workerIsFree(worker),
-  );
+  // Continuation, not an idle pool. An unnamed pick may only land on a worker
+  // from the wave this parent is actually running, and only one that finished
+  // cleanly. Without a wave there is nothing to continue, so nobody is picked
+  // and a fresh worker starts — which is the safe answer, not a missing one.
+  const wave = scope.waveChildIds;
+  const mine = wave
+    ? workers.filter(
+        (worker) =>
+          worker.hidden &&
+          !worker.archivedAt &&
+          worker.parentId === scope.parentId &&
+          worker.projectId === scope.projectId &&
+          workerIsFree(worker) &&
+          workerEndedWell(worker) &&
+          wave.includes(worker.id),
+      )
+    : [];
   const asked = want.name?.trim().toLowerCase();
   if (asked) {
     // Named is an address. A legacy worker that never received a project

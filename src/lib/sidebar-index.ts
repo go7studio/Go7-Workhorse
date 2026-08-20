@@ -1,4 +1,4 @@
-import { isDraftChat } from "./chats";
+import { isDraftChat, lastTalkedAt } from "./chats";
 import { nestProjectChats } from "./lineup";
 import { chatLinksFromSessions, type ChatLink } from "./tool-labels";
 import type { Session } from "./types";
@@ -12,11 +12,23 @@ export type SidebarChatIndex = {
   parentsById: Map<string, Session>;
 };
 
+function recentFirst(activityById: Map<string, number>) {
+  return (left: Session, right: Session) =>
+    (activityById.get(right.id) ?? 0) - (activityById.get(left.id) ?? 0);
+}
+
+function nestedActivityAt(session: NestedSidebarSession, activityById: Map<string, number>): number {
+  let latest = activityById.get(session.id) ?? 0;
+  for (const worker of session.workers) latest = Math.max(latest, activityById.get(worker.id) ?? 0);
+  return latest;
+}
+
 /** One desk pass replaces one full session scan per project and per chat row. */
 export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   const live = new Map<string | null, Session[]>();
   const archived = new Map<string | null, Session[]>();
   const parentsById = new Map(sessions.map((session) => [session.id, session]));
+  const activityById = new Map(sessions.map((session) => [session.id, lastTalkedAt(session) ?? 0]));
   for (const session of sessions) {
     if (isDraftChat(session)) continue;
     if (session.hidden && !session.parentId) continue;
@@ -27,7 +39,19 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
     else target.set(projectId, [session]);
   }
   const liveByProject = new Map<string | null, NestedSidebarSession[]>();
-  for (const [projectId, rows] of live) liveByProject.set(projectId, nestProjectChats(rows));
+  const compareRecent = recentFirst(activityById);
+  for (const [projectId, rows] of live) {
+    rows.sort(compareRecent);
+    const nested = nestProjectChats(rows);
+    const nestedActivityById = new Map(
+      nested.map((session) => [session.id, nestedActivityAt(session, activityById)]),
+    );
+    nested.sort(
+      (left, right) =>
+        (nestedActivityById.get(right.id) ?? 0) - (nestedActivityById.get(left.id) ?? 0),
+    );
+    liveByProject.set(projectId, nested);
+  }
   const linksBySession = new Map<string, ChatLink>();
   for (const link of chatLinksFromSessions(sessions)) linksBySession.set(link.sessionId, link);
   return { liveByProject, archivedByProject: archived, linksBySession, parentsById };

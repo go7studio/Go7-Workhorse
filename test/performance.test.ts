@@ -28,8 +28,30 @@ test("large desks build one sidebar index and preserve worker nesting", () => {
   const index = buildSidebarChatIndex(sessions);
   assert.equal(index.liveByProject.size, 100);
   assert.equal(index.liveByProject.get("p0")?.length, 100);
-  assert.equal(index.liveByProject.get("p0")?.[0]?.workers.length, 1);
+  assert.equal(index.liveByProject.get("p0")?.find((item) => item.id === parent.id)?.workers.length, 1);
   assert.equal(index.parentsById.size, 10_001);
+});
+
+test("sidebar index orders chat groups and workers by latest activity", () => {
+  const older = session("older", "p", [message("older-u", "user", "old", 100)]);
+  const parent = session("parent", "p", [message("parent-u", "user", "start", 200)]);
+  const newest = session("newest", "p", [message("newest-u", "user", "new", 300)]);
+  const olderWorker = {
+    ...session("older-worker", "p", [message("older-worker-u", "user", "work", 250)]),
+    parentId: parent.id,
+    hidden: true,
+  };
+  const newestWorker = {
+    ...session("newest-worker", "p", [message("newest-worker-u", "user", "work", 400)]),
+    parentId: parent.id,
+    hidden: true,
+  };
+
+  const index = buildSidebarChatIndex([older, parent, olderWorker, newest, newestWorker]);
+  const chats = index.liveByProject.get("p") ?? [];
+
+  assert.deepEqual(chats.map((chat) => chat.id), ["parent", "newest", "older"]);
+  assert.deepEqual(chats[0]?.workers.map((worker) => worker.id), ["newest-worker", "older-worker"]);
 });
 
 test("sidebar ignores streamed prose but sees visible status and tool changes", () => {

@@ -8,6 +8,18 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.14](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.13...v0.6.14) (2026-08-20)
+
+
+### Bug Fixes
+
+* book every Codex request including worker sessions ([1eb8dae](https://github.com/go7studio/Go7-Workhorse/commit/1eb8dae6a60ba65bed850d77fe332541e363f859))
+* Clear look, last chat, short tools, and Codex usage bills ([c14cd4f](https://github.com/go7studio/Go7-Workhorse/commit/c14cd4f48ee5b3484416483445c4680d2c1335e3))
+* open the last thought or tools fold when Worked expands ([455e3c7](https://github.com/go7studio/Go7-Workhorse/commit/455e3c765cb68770797c531a74870e23ce5d6678))
+* recover Worked fold after a duplicate-name compile crash ([6b0a6c2](https://github.com/go7studio/Go7-Workhorse/commit/6b0a6c2a3b1b9129f3e63c18c4627ff6fdc039a8))
+* ship the Clear transcript look and ease work folds open ([0906283](https://github.com/go7studio/Go7-Workhorse/commit/0906283709126d211c93c350c2a74a966ce67874))
+* short MCP tool names, last chat on project click, report-back clock ([a372a45](https://github.com/go7studio/Go7-Workhorse/commit/a372a45d0d97990c623b7dda6b960586f345c408))
+
 ## [0.6.13](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.12...v0.6.13) (2026-08-20)
 
 

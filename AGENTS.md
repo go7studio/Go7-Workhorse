@@ -30,7 +30,7 @@ src/styles/   design tokens and layout
 - Keep the UI learnable: few files, plain names, no extra frameworks.
 - Adapters live behind `src/lib/providers.ts`. Do not call vendor CLIs from React components.
 - Grok, Codex, Claude, and Cursor are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login. Cursor usage is two pools (Composer/Cursor Grok vs Other Models). Do not fold Cursor into Grok.
-- **Workhorse Link** is how an outside runtime talks to this desk: capabilities, capacity, chats, read, ask, delegate. Grok Bot and other hosts use that door. Custom HTTP includes a Grok Bot preset on 127.0.0.1. Do not rebind the desk bridge.
+- **Workhorse Link** is how an outside runtime talks to this desk: capabilities, capacity, chats, read, ask, delegate. Grok Bot reaches that CLI on this Mac. Custom HTTP includes a Grok Bot preset on 127.0.0.1:8787. Do not rebind the desk bridge.
 - Apple-like means space, hairlines, and short motion — not decoration.
 
 ## Working rules

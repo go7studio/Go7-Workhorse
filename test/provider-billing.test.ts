@@ -315,12 +315,15 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
     "http://127.0.0.1:8787/v1/chat/completions",
   );
   assert.equal(isGrokBotUrl(grokBot!.baseUrl), true);
-  assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), true);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:8787/v1/"), true);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:11434/v1"), false);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), false);
   assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);
   assert.equal(
     grokBotShimDownMessage(grokBot!.baseUrl, new Error("ECONNREFUSED")),
     "Grok Bot shim is down. Do not guess another host.",
   );
+  assert.equal(grokBotShimDownMessage("http://127.0.0.1:11434/v1", new Error("ECONNREFUSED")), "ECONNREFUSED");
   assert.equal(grokBotShimDownMessage("https://api.minimax.io/v1", new Error("ECONNREFUSED")), "ECONNREFUSED");
   assert.equal(customMeterForUrl(grokBot!.baseUrl), undefined);
   const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");

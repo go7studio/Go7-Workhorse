@@ -1547,6 +1547,14 @@ test("Grok Bot probe fails closed when the local shim is down", async () => {
   );
   assert.equal(remote.ok, false);
   assert.equal(remote.message, "fetch failed");
+  const ollama = await probeCustomHttp(
+    { baseUrl: "http://127.0.0.1:11434/v1", apiKey: "local", model: "llama", api: "openai-completions" },
+    async () => {
+      throw new Error("fetch failed");
+    },
+  );
+  assert.equal(ollama.ok, false);
+  assert.equal(ollama.message, "fetch failed");
 });
 
 test("custom usage streaming keeps one authoritative request snapshot", () => {

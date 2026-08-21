@@ -61,7 +61,7 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   const link = readFileSync(path.join(ROOT, "docs", "LINK.md"), "utf8");
   assert.match(features, /Grok Bot/);
   assert.match(agents, /Workhorse Link/);
-  assert.match(agents, /Grok Bot preset on 127\.0\.0\.1/);
+  assert.match(agents, /Grok Bot preset on 127\.0\.0\.1:8787/);
   assert.doesNotMatch(features, /\bRemote\b/);
   assert.doesNotMatch(agents, /\bRemote\b/);
   assert.doesNotMatch(link, /\bRemote\b/);

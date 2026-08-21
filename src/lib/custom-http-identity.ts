@@ -30,9 +30,20 @@ export function isGeminiApiUrl(baseUrl: string): boolean {
 
 const LOOPBACK = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
 
-/** Grok Bot's custom HTTP preset lives on loopback. Other local shims use the same door. */
+/** The Grok Bot Custom HTTP preset. Other loopback hosts (Ollama, the desk bridge) are not this door. */
+export const GROK_BOT_SHIM_PORT = "8787";
+
 export function isGrokBotUrl(baseUrl: string): boolean {
-  return LOOPBACK.test(hostnameOf(baseUrl));
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return false;
+  try {
+    const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`);
+    if (!LOOPBACK.test(url.hostname.toLowerCase())) return false;
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return port === GROK_BOT_SHIM_PORT;
+  } catch {
+    return false;
+  }
 }
 
 /** Connection refused on the Grok Bot shim. Do not guess another host. */

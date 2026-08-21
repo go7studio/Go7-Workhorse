@@ -224,6 +224,17 @@ function appIconPath() {
   return path.join(root, "assets", "app-icons", name);
 }
 
+function setDockIcon() {
+  if (process.platform !== "darwin" || !app.dock) return;
+  const icon = appIconPath();
+  if (!fs.existsSync(icon)) return;
+  try {
+    app.dock.setIcon(icon);
+  } catch (error) {
+    console.warn("Workhorse could not set its Dock icon", error);
+  }
+}
+
 type Persistable = Record<string, unknown>;
 
 function statePath() {
@@ -461,6 +472,7 @@ process.on("unhandledRejection", (error) => {
 app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
   if (!isPrimaryInstance) return;
+  setDockIcon();
   protocol.handle("workhorse-media", handleMediaProtocol);
   claimLinkedFolders();
   fileInstances = readStringMapFile(fileInstancesPath());

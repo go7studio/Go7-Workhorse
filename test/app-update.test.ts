@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -48,6 +48,30 @@ test("semver compare treats a GitHub tag as newer than the running desk", () => 
   assert.equal(offerFromRelease({ tag_name: "v0.1.0" }, "0.1.0"), null);
   assert.equal(offerFromRelease({ tag_name: "v0.3.0", draft: true }, "0.1.0"), null);
   assert.equal(pickLatestTagOffer([{ name: "v0.1.1" }, { name: "v0.2.0" }], "0.1.0")?.version, "0.2.0");
+});
+
+test("the macOS bundle and running Dock process use the Workhorse icon", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    build?: {
+      mac?: { icon?: string };
+      extraResources?: Array<{ from?: string; to?: string }>;
+    };
+  };
+  const icon = pkg.build?.mac?.icon;
+
+  assert.equal(icon, "assets/app-icons/go7-workhorse.icns");
+  assert.ok(icon && existsSync(path.join(ROOT, icon)), "the configured macOS icon must exist");
+  assert.ok(
+    pkg.build?.extraResources?.some(
+      (resource) => resource.from === "assets/app-icons" && resource.to === "assets/app-icons",
+    ),
+    "the runtime icon directory must be copied into packaged app resources",
+  );
+
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /process\.platform !== "darwin" \|\| !app\.dock/);
+  assert.match(main, /app\.dock\.setIcon\(icon\)/);
+  assert.match(main, /app\.whenReady\(\)\.then\([\s\S]*setDockIcon\(\)/);
 });
 
 test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", () => {

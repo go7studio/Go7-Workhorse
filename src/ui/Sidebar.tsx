@@ -13,7 +13,6 @@ import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
 import type { Project, Session } from "../lib/types";
 import { ChatRow, type ChatRowDesk } from "./ChatRow";
-import { CrewDotPreview } from "./CrewDotPreview";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
@@ -475,7 +474,6 @@ export function Sidebar() {
       ) : null}
 
       <div className="scroll">
-        <CrewDotPreview />
         <div className="section-label">Projects</div>
         {liveProjects.length === 0 && (
           <p className="row-meta" style={{ padding: "0 10px" }}>

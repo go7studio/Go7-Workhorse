@@ -115,7 +115,7 @@ test("crew dots map run state onto the vendor circle", () => {
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.failed/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.stopped/);
   assert.match(read("src/styles/crew-dots.css"), /\.dot\.needs-you/);
-  assert.match(read("src/ui/Sidebar.tsx"), /CrewDotPreview/);
+  assert.doesNotMatch(read("src/ui/Sidebar.tsx"), /CrewDotPreview/);
 });
 
 test("an auto-routed chat says Auto where a model name would read as the plan", () => {

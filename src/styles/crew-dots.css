@@ -27,27 +27,3 @@
     outline-offset: 2px;
   }
 }
-
-.crew-dot-preview {
-  margin: 8px 8px 12px;
-  padding: 8px 4px 6px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--bg-hover);
-}
-
-.crew-dot-preview .section-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.crew-dot-preview .chat-row {
-  pointer-events: none;
-}
-
-.crew-dot-preview .chat-open {
-  cursor: default;
-}

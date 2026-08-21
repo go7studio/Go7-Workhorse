@@ -209,7 +209,7 @@ test("custom leftover meters are a closed official list and catalog hosts stay c
     ["minimax", "synthetic", "openrouter", "deepseek", "novita", "aimlapi", "vercel"],
   );
   const ids = PROVIDER_PRESETS.map((item) => item.id);
-  for (const id of ["minimax", "synthetic", "openrouter", "groq", "deepseek", "together", "fireworks", "huggingface", "novita", "cerebras", "aimlapi", "vercel", "kimi", "gemini"]) {
+  for (const id of ["minimax", "synthetic", "openrouter", "groq", "deepseek", "together", "fireworks", "huggingface", "novita", "cerebras", "aimlapi", "vercel", "kimi", "gemini", "grok-bot"]) {
     assert.ok(ids.includes(id), id);
   }
   assert.equal(ids.includes("openclaw"), false);

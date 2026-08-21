@@ -1,6 +1,6 @@
 export type CatalogApi = "openai-completions" | "anthropic-messages";
 
-export type ProviderBillingKind = "subscription" | "gateway" | "direct";
+export type ProviderBillingKind = "subscription" | "gateway" | "direct" | "local";
 
 export type CatalogModel = {
   id: string;
@@ -39,6 +39,11 @@ export const PROVIDER_BILLING_GROUPS: {
     id: "direct",
     label: "Direct API billing",
     copy: "Pay that host per token or from a prepaid balance.",
+  },
+  {
+    id: "local",
+    label: "On this Mac",
+    copy: "A local OpenAI-compatible shim. Fail closed if it is down.",
   },
 ];
 
@@ -218,6 +223,17 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     billing: "direct",
     keyPrefixes: [],
     models: [{ id: "gemini-3.7-flash", name: "Gemini 3.7 Flash", contextWindow: 1_000_000 }],
+  },
+  {
+    id: "grok-bot",
+    name: "Grok Bot",
+    hint: "Local OpenAI-compatible shim on 127.0.0.1. Fail closed if it is down. Do not paste a pairing token.",
+    color: "#64d2ff",
+    baseUrl: "http://127.0.0.1:8787/v1",
+    api: "openai-completions",
+    billing: "local",
+    keyPrefixes: [],
+    models: [{ id: "grok-bot", name: "Grok Bot", contextWindow: 128_000 }],
   },
 ];
 

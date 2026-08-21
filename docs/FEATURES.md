@@ -23,7 +23,8 @@ or `hermes/<profile>`. Those tasks join the lineup. They do not get a Usage
 ring.
 
 **Workhorse Link** is how any outside app calls this desk — Codex, Claude
-Code, Grok, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
+Code, Grok, OpenClaw, Hermes, or any MCP client. Grok Bot uses the same
+Link CLI on this Mac; it is not a Connect button. Settings → LLMs → Workhorse
 Link connects each with one button, through that app's own MCP tool; Copy
 generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
@@ -48,12 +49,14 @@ error before any fallback.
 One custom API connection can approve several models. Chats and Auto routing use only that list while Usage keeps one connection ring and separate model rows.
 Add a bot lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,
 Fireworks, Hugging Face, Novita, Cerebras, AI/ML API, Vercel AI Gateway,
-Kimi Code, and Gemini API. Presets are grouped as subscription plans,
-gateway credits or BYOK, and direct API billing. Leftover pings only
+Kimi Code, Gemini API, and Grok Bot. Presets are grouped as subscription plans,
+gateway credits or BYOK, direct API billing, and on this Mac. Leftover pings only
 official key-only JSON meters (MiniMax, Synthetic, OpenRouter). DeepSeek,
 Novita, AI/ML API, and Vercel AI Gateway fill prepaid balance. Together,
 Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, and Gemini stay
-unknown until those hosts publish leftover JSON.
+unknown until those hosts publish leftover JSON. Grok Bot is a local
+OpenAI-compatible shim on 127.0.0.1. The connection fails closed if the
+shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 

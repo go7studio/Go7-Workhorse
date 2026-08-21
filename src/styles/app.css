@@ -4454,11 +4454,46 @@ html.pane-dragging * {
   border-bottom: 1.5px solid var(--text-tertiary);
   transform: translate(-50%, -50%) rotate(-45deg);
   transform-origin: 70% 70%;
-  transition: transform 220ms var(--ease);
+  transition: transform 220ms var(--ease), opacity 140ms var(--ease);
 }
 
 .project-folder.open .twist::before {
   transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.project-head .twist::before {
+  opacity: 0;
+}
+
+.project-head .twist::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  background: var(--text-tertiary);
+  opacity: 1;
+  transition: opacity 140ms var(--ease);
+  --project-folder-closed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M2 3.75h4.05l1.05 1.3H14v7.2A1.5 1.5 0 0 1 12.5 13.75h-9A1.5 1.5 0 0 1 2 12.25z'/%3E%3C/svg%3E");
+  --project-folder-open: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1.75 4h4.1l.95 1.15H14V6.4H3.55A1.6 1.6 0 0 0 2 8.25L3.2 13.5h10.15l-1.35-5.25H14.5V6.4h0'/%3E%3Cpath fill='black' d='M2.6 7.5h11.7L13.1 13.6H2.15z'/%3E%3C/svg%3E");
+  -webkit-mask: var(--project-folder-closed) center / contain no-repeat;
+  mask: var(--project-folder-closed) center / contain no-repeat;
+}
+
+.project-folder.open .project-head .twist::after {
+  -webkit-mask: var(--project-folder-open) center / contain no-repeat;
+  mask: var(--project-folder-open) center / contain no-repeat;
+}
+
+.project-head .twist:hover::before,
+.project-head .twist:focus-visible::before {
+  opacity: 1;
+}
+
+.project-head .twist:hover::after,
+.project-head .twist:focus-visible::after {
+  opacity: 0;
 }
 
 .project-chats-slot {

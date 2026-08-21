@@ -100,6 +100,9 @@ transcript rather than as a path.
   unfinished, not wrong. A wave that came in over Link and was never named
   here takes the work's own name instead of the prompt's first few words, so
   long as its workers agree on one.
+- A project row pulses and says `Working…` — `OpenClaw · Working…` when a
+  harness called it — while any chat or worker inside is running, folded or
+  open, so you can see where the desk is busy without opening anything.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share

@@ -1,5 +1,5 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
-import { enqueuePrompt } from "./chats";
+import { enqueuePrompt, sessionIsActive } from "./chats";
 import { uid } from "./id";
 import { crewHasParentTakeover, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session } from "./types";
@@ -31,6 +31,9 @@ export function lineupFinishedNotice(lineup: DeskLineup | undefined): string {
 }
 
 const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted", "unknown"];
+
+/** One word for live work, so a chat row and its project row cannot drift apart. */
+const WORKING = "Working…";
 
 export function emptyLineup(
   folder: string,
@@ -697,7 +700,7 @@ export function missionState(
   let word: string | undefined;
   let tone: MissionState["tone"];
   if (counts.live > 0) {
-    word = "Working…";
+    word = WORKING;
   } else if (counts.failed > 0) {
     word = many ? `${counts.failed} failed` : "Failed";
     tone = "danger";
@@ -784,4 +787,45 @@ export function missionRowLook(
     ...(state.tone ? { tone: state.tone } : {}),
     running: state.running,
   };
+}
+
+/** What a project row shows while work is live inside it. */
+export type ProjectLiveLook = {
+  /** The harness that called the live wave, when one did. */
+  caller?: string;
+  /** Working… — the only word a project says. How a wave ended is the chat's news. */
+  word: string;
+};
+
+/**
+ * Whether a project is working, and who asked for it — undefined when nothing
+ * inside it is live.
+ *
+ * A project is one closed fold holding chats that hold workers. Finding the
+ * project the desk is busy in meant opening both, so the mark is lifted to the
+ * row that is always on screen. Live means exactly what the chat rows inside
+ * already mean — a chat running or waiting on the person, a worker still
+ * going, or a wave with a slice unfinished — so a project and its chats cannot
+ * say different things.
+ *
+ * The caller is read from a live wave only. A finished OpenClaw wave beside a
+ * running desk chat is the desk working, and naming OpenClaw there would
+ * credit the wrong system. Where two harnesses are both working the project,
+ * the first in list order is named, which is the more recent.
+ */
+export function projectLiveLook<S extends Pick<Session, "id" | "status" | "agentRun" | "lineup">>(
+  chats: Array<S & { workers?: S[] }>,
+): ProjectLiveLook | undefined {
+  let live = false;
+  let caller: string | undefined;
+  for (const chat of chats) {
+    const workers = chat.workers ?? [];
+    const wave = missionState(chat.lineup, workers);
+    if (!wave?.running && !sessionIsActive(chat) && !workers.some((worker) => sessionIsActive(worker))) continue;
+    live = true;
+    if (wave?.running) caller = missionCaller(chat.lineup);
+    if (caller) break;
+  }
+  if (!live) return undefined;
+  return { ...(caller ? { caller } : {}), word: WORKING };
 }

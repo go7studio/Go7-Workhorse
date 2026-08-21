@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { sidebarKeepsChat, lineupSortAt, hasUnviewedFinish, sessionIsActive } from "../src/lib/chats";
-import { nestProjectChats } from "../src/lib/lineup";
+import { nestProjectChats, projectLiveLook } from "../src/lib/lineup";
 import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { formatChatSidebar } from "../src/lib/session";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
@@ -290,6 +290,160 @@ test("a finished worker shows a done dot until that chat is opened", () => {
     false,
     "legacy finished workers do not all become unread after upgrade",
   );
+});
+
+// ---------------------------------------------------------------------------
+// The project live mark.
+//
+//   A project is a fold over chats that are folds over workers. Finding the
+//   one the desk is busy in meant opening both, so the project row itself says
+//   Working… while anything inside it is live, and names the harness that
+//   asked when one did.
+// ---------------------------------------------------------------------------
+
+type LiveRowStatus = "queued" | "running" | "completed" | "failed";
+
+const chat = (id: string, status: "idle" | "running" | "needs-input" = "idle") => ({ id, status });
+
+const waveOf = (
+  rows: Array<{ childId: string; status: LiveRowStatus }>,
+  extra?: { joinOwner?: "desk" | "external-runtime"; caller?: "openclaw" | "hermes" },
+) => ({
+  id: `lineup_${rows.map((row) => row.childId).join("_")}`,
+  folder: "/repo",
+  startedAt: 1,
+  rows: rows.map((row) => ({
+    childId: row.childId,
+    title: "Slice",
+    slice: "do the slice",
+    folder: "/repo",
+    vendor: "claude",
+    status: row.status,
+    startedAt: 1,
+    ...(extra?.caller ? { caller: extra.caller } : {}),
+  })),
+  ...(extra?.joinOwner ? { joinOwner: extra.joinOwner } : {}),
+});
+
+const runningWorker = (id: string) => ({
+  ...chat(id),
+  agentRun: { status: "running" as const, startedAt: 1, isolation: "worktree" as const },
+});
+
+const finishedWorker = (id: string) => ({
+  ...chat(id),
+  agentRun: { status: "completed" as const, startedAt: 1, finishedAt: 9, isolation: "worktree" as const },
+});
+
+test("a project with nothing running says nothing", () => {
+  assert.equal(projectLiveLook([]), undefined, "an empty project");
+  assert.equal(projectLiveLook([{ ...chat("a"), workers: [] }]), undefined, "one idle chat");
+});
+
+test("a project works while any chat in it works, and stops naming a state when it ends", () => {
+  const idle = { ...chat("a"), workers: [] };
+  assert.deepEqual(projectLiveLook([idle, { ...chat("b", "running"), workers: [] }]), { word: "Working…" });
+  // Waiting on the person is the desk still holding the job, not finished work.
+  assert.deepEqual(projectLiveLook([idle, { ...chat("b", "needs-input"), workers: [] }]), { word: "Working…" });
+  assert.equal(projectLiveLook([idle, { ...chat("b"), workers: [] }]), undefined);
+});
+
+test("a running worker keeps its project working while the parent chat sits idle", () => {
+  // The whole point: this is two folds deep and must be visible on the row.
+  const parent = {
+    ...chat("parent"),
+    lineup: waveOf([{ childId: "w1", status: "running" }]),
+    workers: [runningWorker("w1")],
+  };
+  assert.deepEqual(projectLiveLook([parent]), { word: "Working…" });
+  // A queued slice with no worker session yet is still work in flight.
+  assert.deepEqual(
+    projectLiveLook([{ ...chat("parent"), lineup: waveOf([{ childId: "w1", status: "queued" }]), workers: [] }]),
+    { word: "Working…" },
+  );
+});
+
+test("the mark clears when the last worker finishes", () => {
+  // What applyChildIdleSync leaves behind: the row terminal, the worker idle
+  // with a terminal agentRun, the parent idle. Nothing is live, so the row
+  // goes back to its chat count and folder and the pulse stops.
+  const parent = {
+    ...chat("parent"),
+    lineup: waveOf([{ childId: "w1", status: "completed" }, { childId: "w2", status: "failed" }]),
+    workers: [finishedWorker("w1"), finishedWorker("w2")],
+  };
+  assert.equal(projectLiveLook([parent]), undefined);
+  // One worker of two still going holds the project open.
+  assert.deepEqual(
+    projectLiveLook([
+      {
+        ...chat("parent"),
+        lineup: waveOf([{ childId: "w1", status: "completed" }, { childId: "w2", status: "running" }]),
+        workers: [finishedWorker("w1"), runningWorker("w2")],
+      },
+    ]),
+    { word: "Working…" },
+  );
+  // A row still reading "running" over a worker that has gone idle is stale
+  // bookkeeping, not live work — missionState reads the session first.
+  assert.equal(
+    projectLiveLook([
+      {
+        ...chat("parent"),
+        lineup: waveOf([{ childId: "w1", status: "completed" }]),
+        workers: [finishedWorker("w1")],
+      },
+    ]),
+    undefined,
+  );
+});
+
+test("a live wave that came in over Link names the harness that called it", () => {
+  const linked = (caller: "openclaw" | "hermes") => ({
+    ...chat("parent"),
+    lineup: waveOf([{ childId: "w1", status: "running" }], { joinOwner: "external-runtime", caller }),
+    workers: [runningWorker("w1")],
+  });
+  assert.deepEqual(projectLiveLook([linked("openclaw")]), { caller: "OpenClaw", word: "Working…" });
+  assert.deepEqual(projectLiveLook([linked("hermes")]), { caller: "Hermes", word: "Working…" });
+  // The desk's own wave is not attributed to anyone.
+  assert.deepEqual(
+    projectLiveLook([
+      {
+        ...chat("parent"),
+        lineup: waveOf([{ childId: "w1", status: "running" }]),
+        workers: [runningWorker("w1")],
+      },
+    ]),
+    { word: "Working…" },
+  );
+});
+
+test("a finished Link wave does not put its name on work the desk is doing now", () => {
+  const done = {
+    ...chat("linked"),
+    lineup: waveOf([{ childId: "w1", status: "completed" }], { joinOwner: "external-runtime", caller: "openclaw" }),
+    workers: [finishedWorker("w1")],
+  };
+  const busy = { ...chat("mine", "running"), workers: [] };
+  assert.deepEqual(projectLiveLook([done, busy]), { word: "Working…" }, "the desk is working, not OpenClaw");
+  assert.deepEqual(projectLiveLook([busy, done]), { word: "Working…" }, "order does not change that");
+});
+
+test("the project row renders the live mark, and the pulse is a cousin of the update one", () => {
+  const sidebar = read("src/ui/Sidebar.tsx");
+  const head = sidebar.slice(sidebar.indexOf('<span className="row-title">{project.name}</span>'));
+  assert.match(head.slice(0, 900), /project-live-dot/, "the pulsing dot sits on the project row");
+  assert.match(head.slice(0, 900), /live\.caller \? <span className="row-caller">\{live\.caller\}<\/span> : null/);
+  assert.match(head.slice(0, 900), /<span className="row-state">\{live\.word\}<\/span>/);
+  assert.match(sidebar, /const live = projectLiveLook\(chats\)/);
+  const css = read("src/styles/app.css");
+  const dot = css.slice(css.indexOf(".project-live-dot {"), css.indexOf(".project-live-dot {") + 320);
+  assert.match(dot, /animation: sidebar-update-pulse 900ms var\(--ease\) infinite;/);
+  assert.match(dot, /background: var\(--ok\);/);
+  // Motion is optional; the mark is not.
+  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce) {\n  .project-chats-slot,"));
+  assert.match(reduced.slice(0, 700), /\.project-live-dot \{\s*animation: none;/);
 });
 
 test("selectSession clears the done dot by stamping viewedAt", () => {

@@ -36,6 +36,26 @@ Connecting an app is not adding a vendor. Claude Code connected through Link
 has no Claude provider, login, context or Usage ring of its own; Workhorse
 calling Claude's model through ACP is the other direction and stays separate.
 
+## Grok Bot return path
+
+Grok Bot talks into the desk through Link. To let Workhorse talk back, add one
+ordinary Custom HTTP bot in **Add a bot → Your own**:
+
+| Field | Value |
+| --- | --- |
+| Provider | Custom URL |
+| Bot name | Grok Bot |
+| Model | the model id exposed by the shim |
+| Base URL | `http://127.0.0.1:<shim-port>/v1` |
+| HTTP shape | OpenAI Chat Completions (inferred from the Custom URL) |
+
+Use only a Custom HTTP credential the shim itself requires. The Link bridge
+bearer token is not a bot key: do not paste it here or store it in
+`credentials.json`. The shim stays on loopback. If it is stopped or refuses a
+request, the Grok Bot call fails; Workhorse does not fall back to the Grok ACP
+vendor or another bot. This recipe adds no vendor slot, login, or shared Usage
+pool.
+
 ## Call `workhorse_capabilities` first
 
 ```json
@@ -135,11 +155,11 @@ The same helper is a JSON CLI. Every subcommand is one tool call through the
 same handler — same permissions, same answers.
 
 **Settings → LLMs → Workhorse Link → Install workhorse command** writes a
-launcher with this install's exact paths and puts `workhorse` on your PATH
-where that needs no password (`/usr/local/bin` or `/opt/homebrew/bin` on
-macOS). If neither is writable, it shows the one `ln -s` to run. On Windows it
-writes `workhorse.cmd` and names the folder to add to PATH; it does not edit
-PATH for you.
+launcher with this install's exact paths to `userData/bin/workhorse` (or
+`workhorse.cmd` on Windows). Reinstall it after an app update. The app does
+not create or replace PATH links; on macOS it shows the `ln -s` command for
+the operator-owned Homebrew link. On Windows it names the folder to add to
+PATH and does not edit PATH for you.
 
 ```bash
 workhorse capabilities

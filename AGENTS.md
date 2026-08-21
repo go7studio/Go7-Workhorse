@@ -25,6 +25,26 @@ src/ui/       the shell
 src/styles/   design tokens and layout
 ```
 
+## Agent I/O
+
+**Workhorse Link is the official agent I/O for outside runtimes.** Grok Bot
+and other harnesses use its restricted MCP profile or the matching JSON CLI
+to read capabilities and capacity, list and read chats, ask a live chat, and
+delegate work. The public CLI verbs are `capabilities`, `capacity`, `chats`,
+`read`, `ask`, `delegate`, `status`, and `follow-up`; they call the same Link
+handlers as MCP. Link does not expose credentials, permission changes, bot
+setup, deletes, renames, or project mutation.
+
+Settings writes the CLI launcher to `userData/bin/workhorse` on every
+install. Any Homebrew or other PATH symlink is operator-owned. Keep the desk
+bridge ephemeral and loopback-only at `listen(0, "127.0.0.1")`; never log or
+persist its bearer token in a client config.
+
+The return path from Workhorse to Grok Bot is an existing Custom HTTP bot
+named **Grok Bot**, pointed at the bot's `127.0.0.1` OpenAI Chat Completions
+shim. It is not another vendor, login, or Usage pool, and a stopped shim is a
+closed connection rather than permission to fall back to another bot.
+
 ## Rules
 
 - Keep the UI learnable: few files, plain names, no extra frameworks.

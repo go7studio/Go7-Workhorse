@@ -22,12 +22,16 @@ plan can grant selected agents for one wave, or you can name `openclaw/main`
 or `hermes/<profile>`. Those tasks join the lineup. They do not get a Usage
 ring.
 
-**Workhorse Link** is how any outside app calls this desk — Codex, Claude
-Code, Grok, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
-Link connects each with one button, through that app's own MCP tool; Copy
-generic MCP configuration covers the rest. Every app gets the same eight
-tools: capabilities, list/read/ask chats, query leftover and availability,
-delegate a task, continue a finished wave, worker status. The first call,
+**Workhorse Link** is the official agent I/O for any outside app that calls
+this desk — Codex, Claude Code, Grok Bot, OpenClaw, Hermes, or any MCP client.
+Settings → LLMs → Workhorse Link connects each with one button, through that
+app's own MCP tool; Copy generic MCP configuration covers the rest. Every app
+gets the same eight tools: capabilities, list/read/ask chats,
+query leftover and availability, delegate a task, continue a finished wave,
+worker status.
+The matching JSON CLI exposes `capabilities`, `capacity`, `chats`, `read`,
+`ask`, `delegate`, `status`, and `follow-up` through those same handlers. The
+first call,
 `workhorse_capabilities`, names follow-through: new slice, named worker,
 later status. Status says wait, done, or failed. List chats names live
 workers and their `id` when names repeat. Link never waits on a long worker.
@@ -35,10 +39,17 @@ The leftover check never includes keys or chat content. Older names still
 answer so a harness that already calls them is not refused. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
-The same helper is a JSON CLI for a harness without MCP (`chats`, `read`,
-`ask`, `delegate`, `status`, `follow-up`). `delegate --accept` starts an
-adaptive mission loop; `status` then `follow-up` continue it. Install
-workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
+`delegate --accept` starts an adaptive mission loop; `status` then
+`follow-up` continue it. Install workhorse command writes this install's
+launcher under Workhorse user data; PATH links remain yours. See
+[docs/LINK.md](LINK.md).
+
+**Grok Bot** is a Custom HTTP recipe, not another vendor slot. Name the bot
+Grok Bot, point its Custom URL at the local shim's
+`http://127.0.0.1:<port>/v1`, and use its OpenAI Chat Completions model id.
+Workhorse never substitutes the Grok ACP vendor or another bot when that shim
+is down; the call fails closed. The Link bridge bearer token is not this
+Custom bot's API key and is never copied into its credentials.
 
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse

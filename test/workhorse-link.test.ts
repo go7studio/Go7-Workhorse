@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   LINK_CAPABILITIES,
@@ -22,6 +23,7 @@ import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, type InstallIo } from "../electron/mcp-install";
 
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("the Link contract: eight tools, four capabilities, one version — and the profile answers every name", () => {
   assert.equal(LINK_PROTOCOL_VERSION, 1);
@@ -54,6 +56,30 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   assert.equal(shake.followThrough.namedWorker, "workhorse_ask_chat");
   assert.equal(shake.followThrough.later, "workhorse_agent_status");
   assert.equal(linkHandshake({ deskOnline: false }).desk, "offline");
+});
+
+test("the durable Grok Bot link stays inside Link and Custom HTTP boundaries", () => {
+  const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  const link = readFileSync(path.join(ROOT, "docs", "LINK.md"), "utf8");
+  const bridge = readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8");
+  const types = readFileSync(path.join(ROOT, "src", "lib", "types.ts"), "utf8");
+
+  assert.match(agents, /Workhorse Link is the official agent I\/O/);
+  for (const word of ["capabilities", "capacity", "chats", "read", "ask", "delegate"]) {
+    assert.match(agents, new RegExp(`\\b${word}\\b`), word);
+  }
+  assert.match(features, /official agent I\/O/);
+  assert.doesNotMatch(features, /^#{1,6}\s+Remote\b|^\s*[-*]\s+\*\*Remote\*\*|^\|[^\n]*\bRemote\b[^\n]*\|/im);
+
+  assert.match(link, /\| Bot name \| Grok Bot \|/);
+  assert.match(link, /http:\/\/127\.0\.0\.1:<shim-port>\/v1/);
+  assert.match(link, /\| HTTP shape \| OpenAI Chat Completions/);
+  assert.match(link, /call fails/);
+  assert.doesNotMatch(types, /ProviderId\s*=\s*[^;]*["']grok-bot["']/s);
+
+  assert.match(bridge, /server\.listen\(0, "127\.0\.0\.1"/);
+  assert.doesNotMatch(bridge, /0\.0\.0\.0/);
 });
 
 test("`link` is the product spelling of the external profile, and an unknown word fails closed", () => {
@@ -394,10 +420,10 @@ test("every mutating Link call shares the envelope: a retried ask_chat posts onc
   }
 });
 
-test("the workhorse command: a launcher with this install's paths, linked onto PATH only where that needs no sudo", async () => {
+test("the workhorse command: the app writes userData bin and leaves PATH links operator-owned", async () => {
   const { installLinkCommand, linkCliLauncherScript, workhorseExternalMcpLaunch } = await import("../electron/mcp-install");
   const { execFileSync } = await import("node:child_process");
-  const { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync: write } = await import("node:fs");
+  const { chmodSync, existsSync, readFileSync, writeFileSync: write } = await import("node:fs");
   const launch = workhorseExternalMcpLaunch({ command: process.execPath, script: path.resolve("dist-electron/workhorse-mcp.js"), statePath: "/tmp/it's state.json" });
 
   // Quoting: a path with an apostrophe must survive the shell. This is not a
@@ -411,40 +437,29 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
   assert.match(cmd, /set "WORKHORSE_MCP_PROFILE=external-runtime"\r\n/);
   assert.match(cmd, /link %\*\r\n$/);
 
-  // Install into a fake data dir with a writable fake bin: the link is made.
+  // Install into a fake data dir. The app writes only inside userData; it
+  // reports the operator-owned PATH link without touching that destination.
   const root = mkdtempSync(path.join(tmpdir(), "wh-cmd-"));
-  const fakeBin = path.join(root, "usrlocalbin");
-  mkdirSync(fakeBin);
   const files = new Map<string, string>();
-  const links = new Map<string, string>();
   const io = {
-    existsSync: (file: string) => file === fakeBin || files.has(file) || links.has(file),
+    existsSync: (file: string) => files.has(file),
     readFile: (file: string) => files.get(file) ?? "",
     writeFile: (file: string, text: string) => {
       files.set(file, text);
     },
     mkdirp: () => undefined,
-    writable: (dir: string) => dir === fakeBin,
-    symlink: (target: string, linkPath: string) => {
-      links.set(linkPath, target);
-    },
-    unlink: (file: string) => {
-      links.delete(file);
-    },
   };
-  // The candidate list is /usr/local/bin then /opt/homebrew/bin. Neither is
-  // our fake, so with no writable candidate the report names the ln -s to run.
   // This case simulates a macOS install, so the launcher path is built with
   // "/" by the code under test whatever machine runs the suite. Compare the
   // path the report returns; do not rebuild it with path.join, which would
   // use "\\" on Windows and fail there only.
   const dataDir = `${root.replace(/\\/g, "/")}/data`;
-  const noBin = installLinkCommand({ platform: "darwin", dataDir, launch, io });
-  assert.equal(noBin.ok, true);
-  assert.equal(noBin.linked, undefined);
-  assert.equal(noBin.launcher, `${dataDir}/bin/workhorse`);
-  assert.ok(noBin.message.includes(`sudo ln -sf '${noBin.launcher}' /usr/local/bin/workhorse`), noBin.message);
-  assert.ok(files.has(noBin.launcher), "the launcher is written regardless");
+  const mac = installLinkCommand({ platform: "darwin", dataDir, launch, io });
+  assert.equal(mac.ok, true);
+  assert.equal(mac.launcher, `${dataDir}/bin/workhorse`);
+  assert.ok(mac.message.includes(`ln -sf '${mac.launcher}' /opt/homebrew/bin/workhorse`), mac.message);
+  assert.ok(files.has(mac.launcher), "the launcher is written under userData");
+  assert.deepEqual([...files.keys()], [mac.launcher], "the app does not create a PATH link");
   // Windows: written, and PATH is the person's to change — said, not done.
   const win = installLinkCommand({ platform: "win32", dataDir: "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse", launch, io });
   assert.equal(win.launcher, "C:\\Users\\u\\AppData\\Roaming\\Go7 Workhorse\\bin\\workhorse.cmd");

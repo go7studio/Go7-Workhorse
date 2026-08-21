@@ -672,8 +672,8 @@ app.whenReady().then(async () => {
   // The generic MCP configuration — for a client Link has no writer for.
   ipcMain.handle("agentRuntime:linkConfig", () => workhorseLinkGenericConfig(linkLaunch()));
 
-  // The `workhorse` command: a launcher with this install's exact paths, and
-  // a symlink onto PATH where one can be made without a privilege prompt.
+  // The `workhorse` command: a launcher with this install's exact paths.
+  // PATH links are operator-owned; the app only writes under userData/bin.
   ipcMain.handle("agentRuntime:installLinkCommand", () => {
     const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
     const launch = workhorseExternalMcpLaunch(linkLaunch());
@@ -690,16 +690,6 @@ app.whenReady().then(async () => {
         mkdirp: (dir) => {
           fs.mkdirSync(dir, { recursive: true });
         },
-        writable: (dir) => {
-          try {
-            fs.accessSync(dir, fs.constants.W_OK);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        unlink: (file) => fs.unlinkSync(file),
-        symlink: (target, linkPath) => fs.symlinkSync(target, linkPath),
       },
     });
     return { ok: report.ok, message: report.message };

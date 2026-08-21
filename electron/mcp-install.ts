@@ -296,23 +296,19 @@ export function linkCliLauncherScript(platform: "darwin" | "win32" | "linux", la
 export type InstallCommandReport = {
   ok: boolean;
   launcher: string;
-  /** Where the short name landed, when it did. */
-  linked?: string;
   message: string;
 };
 
 /**
- * Put `workhorse` on PATH. macOS and Linux: a symlink into the first of the
- * usual bin folders that this user can write — no privilege prompt from the
- * app; when none is writable the report carries the one `ln -s` to run.
- * Windows: the launcher is written and its folder named; PATH is the user's
- * to change, and the report says so rather than editing it.
+ * Write `workhorse` under this app's userData. PATH remains operator-owned:
+ * macOS and Linux report a link command, while Windows names the folder to
+ * add. The app never creates, replaces, or removes a PATH entry itself.
  */
 export function installLinkCommand(input: {
   platform: "darwin" | "win32" | "linux";
   dataDir: string;
   launch: ExternalMcpLaunch;
-  io: InstallIo & { symlink?: (target: string, linkPath: string) => void; writable?: (dir: string) => boolean; unlink?: (path: string) => void };
+  io: InstallIo;
 }): InstallCommandReport {
   const name = input.platform === "win32" ? "workhorse.cmd" : "workhorse";
   const binDir = `${input.dataDir.replace(/[\\/]+$/, "")}${input.platform === "win32" ? "\\" : "/"}bin`;
@@ -322,22 +318,11 @@ export function installLinkCommand(input: {
   if (input.platform === "win32") {
     return { ok: true, launcher, message: `Wrote ${launcher}. Add ${binDir} to your PATH to run \`workhorse\` from any shell.` };
   }
-  const candidates = ["/usr/local/bin", "/opt/homebrew/bin"];
-  for (const dir of candidates) {
-    if (!input.io.existsSync(dir) || !(input.io.writable?.(dir) ?? false)) continue;
-    const linkPath = `${dir}/workhorse`;
-    try {
-      if (input.io.existsSync(linkPath)) input.io.unlink?.(linkPath);
-      input.io.symlink?.(launcher, linkPath);
-      return { ok: true, launcher, linked: linkPath, message: `\`workhorse\` is on your PATH at ${linkPath}. Try \`workhorse capabilities\`.` };
-    } catch {
-      /* try the next folder */
-    }
-  }
+  const linkPath = input.platform === "darwin" ? "/opt/homebrew/bin/workhorse" : "/usr/local/bin/workhorse";
   return {
     ok: true,
     launcher,
-    message: `Wrote ${launcher}. No bin folder here is writable without sudo; to put it on PATH run: sudo ln -sf ${q(launcher)} /usr/local/bin/workhorse`,
+    message: `Wrote ${launcher}. PATH links are operator-owned; to expose it as \`workhorse\` run: ln -sf ${q(launcher)} ${linkPath}`,
   };
 }
 

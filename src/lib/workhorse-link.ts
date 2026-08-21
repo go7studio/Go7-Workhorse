@@ -161,6 +161,37 @@ export function linkGenericMcpConfig(server: McpServerConfig): string {
   )}\n`;
 }
 
+/**
+ * One-shot Grok Bot install. Paste into Grok Bot once. The charge is the same
+ * Link launch every other host gets. Grok Bot must save it in permanent agent
+ * memory (not the remote box scratch disk). No bearer token.
+ */
+export function linkGrokBotOneshot(server: McpServerConfig, cli = "workhorse"): string {
+  const tools = LINK_TOOLS.join(", ");
+  const mcp = linkGenericMcpConfig(server).trim();
+  return `Workhorse Link — one-shot install for Grok Bot
+
+You are connecting to this user's Go7 Workhorse desk. Connecting is not adding a vendor, login, or Usage ring.
+
+Save this in permanent agent / session memory that survives a box reboot. The Mac holds the binaries. The remote box is scratch. Do not keep the only copy in this chat.
+
+1. On the user's Mac (local-exec), run:
+   ${cli} capabilities
+   If that fails: tell them to open Workhorse → Settings → LLMs → Install workhorse command, then retry.
+
+2. Mac-side MCP clients (Grok TUI, Cursor, Claude Code) use this launch. Do not exec these Mac paths on the remote box.
+
+${mcp}
+
+3. After install, talk only through Workhorse Link. First call is workhorse_capabilities (or \`${cli} capabilities\`). Tools: ${tools}.
+   fromSessionId is the parent id from workhorse_list_chats, never the worker.
+   New slice: workhorse_delegate. Named worker: workhorse_ask_chat. Later: workhorse_agent_status (next is wait, done, or failed).
+   Fail closed if the desk is offline and you need to delegate. Do not guess a stale port. Do not store a bearer token. Reread ~/Library/Application Support/Go7 Workhorse/workhorse-bridge.json at call time if you use HTTP; prefer the CLI/MCP launch above.
+
+4. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
+`;
+}
+
 export type LinkHost = "codex" | "claude" | "grok" | "openclaw" | "hermes";
 
 export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "openclaw", "hermes"];

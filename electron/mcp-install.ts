@@ -1,5 +1,5 @@
 import type { McpServerConfig } from "../src/lib/types";
-import { LINK_HOSTS, LINK_HOST_LABEL, linkGenericMcpConfig, linkHostCliArgs, type LinkHost } from "../src/lib/workhorse-link";
+import { LINK_HOSTS, LINK_HOST_LABEL, linkGenericMcpConfig, linkGrokBotOneshot, linkHostCliArgs, type LinkHost } from "../src/lib/workhorse-link";
 
 export const WORKHORSE_MCP_NAME = "workhorse";
 
@@ -161,6 +161,10 @@ export type InstallLinkInput = {
  */
 export function workhorseLinkGenericConfig(input: { command: string; script: string; statePath: string }): string {
   return linkGenericMcpConfig(workhorseExternalMcpServer(input));
+}
+
+export function workhorseLinkGrokBotOneshot(input: { command: string; script: string; statePath: string; cliPath?: string }): string {
+  return linkGrokBotOneshot(workhorseExternalMcpServer(input), input.cliPath ?? "workhorse");
 }
 
 /**

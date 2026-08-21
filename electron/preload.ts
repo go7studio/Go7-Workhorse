@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   detectAgentRuntimes: () => ipcRenderer.invoke("agentRuntime:detect"),
   installExternalMcp: (hosts?: string[]) => ipcRenderer.invoke("agentRuntime:installMcp", hosts),
   linkConfig: () => ipcRenderer.invoke("agentRuntime:linkConfig"),
+  linkGrokBotOneshot: () => ipcRenderer.invoke("agentRuntime:linkGrokBotOneshot"),
   installLinkCommand: () => ipcRenderer.invoke("agentRuntime:installLinkCommand"),
   startExternalRuntimeTask: (request: import("../src/lib/external-task").RuntimeStartRequest) =>
     ipcRenderer.invoke("agentRuntime:start", request) as Promise<import("../src/lib/types").ExternalTask | null>,

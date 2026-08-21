@@ -26,7 +26,8 @@ ring.
 Code, Grok, OpenClaw, Hermes, or any MCP client. Grok Bot uses the same
 Link CLI on this Mac; it is not a Connect button. Settings → LLMs → Workhorse
 Link connects each with one button, through that app's own MCP tool; Copy
-generic MCP configuration covers the rest. Every app gets the same eight
+generic MCP configuration covers the rest; Copy Grok Bot one-shot is the
+same launch plus install instructions to paste into Grok Bot once. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
 delegate a task, continue a finished wave, worker status. The first call,
 `workhorse_capabilities`, names follow-through: new slice, named worker,

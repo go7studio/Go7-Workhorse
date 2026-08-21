@@ -3104,17 +3104,19 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(pane, /ResizeObserver/);
   assert.match(pane, /composer-wrap/);
   assert.match(composer, /pinComposerInput/);
+  assert.match(composer, /querySelector\("\.composer-dock"\)/);
   assert.match(css, /--composer-input/);
   assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ var\(--notices-dock, 0px\) \+ 16px\)/);
   const col = {
     getBoundingClientRect: () => ({ bottom: 800 }),
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
   };
-  const form = { getBoundingClientRect: () => ({ top: 720 }) };
-  assert.equal(pinComposerInput(col, form), 80);
+  const dock = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, dock), 80);
   assert.equal(col.style.value, "--composer-input:80px");
-  const withThumbs = { getBoundingClientRect: () => ({ top: 720 }) };
-  assert.equal(pinComposerInput(col, withThumbs), 80);
+  const withQueue = { getBoundingClientRect: () => ({ top: 660 }) };
+  assert.equal(pinComposerInput(col, withQueue), 140);
+  assert.equal(col.style.value, "--composer-input:140px");
 });
 
 test("session setup is a compact right-side model and access inspector", () => {

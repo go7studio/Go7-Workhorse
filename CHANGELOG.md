@@ -8,6 +8,30 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.22](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.21...v0.6.22) (2026-08-21)
+
+
+### Features
+
+* pin Orchestrate and Mission from the composer + menu ([9a7156a](https://github.com/go7studio/Go7-Workhorse/commit/9a7156a8858169eba3397b75fecc425a876c7c07))
+* pin Orchestrate and Mission from the composer + menu ([3aa9f57](https://github.com/go7studio/Go7-Workhorse/commit/3aa9f57c0167a45f1924a1e533f3846fef5f64be))
+
+
+### Bug Fixes
+
+* Cursor-style project folders toggle closed without leaving the chat ([7e7cd8a](https://github.com/go7studio/Go7-Workhorse/commit/7e7cd8ad29725d52fc390dec529116c227e0ca8f))
+* drop the crew-dot preview card from the sidebar ([baf8c72](https://github.com/go7studio/Go7-Workhorse/commit/baf8c72610021a05de65bf09cee8cb293fc1a22e))
+* drop the loose Chats list under Projects ([40f401a](https://github.com/go7studio/Go7-Workhorse/commit/40f401a3c66b5442ad07c893d49f441a37569b91))
+* keep cancelled workers, leftover, and generic titles honest ([6c8c199](https://github.com/go7studio/Go7-Workhorse/commit/6c8c1998dcc3a076b192cf0aca826021f8347fd3))
+* keep model and effort on a running chat instead of Working ([5740e85](https://github.com/go7studio/Go7-Workhorse/commit/5740e8550477b4a314a3e849c1703d09f4392377))
+* keep the open chat listed when its project folder is closed ([b26a9cd](https://github.com/go7studio/Go7-Workhorse/commit/b26a9cd68262f0ea7cd4412da6bbf4fea578e3ba))
+* lift Changes above a queued prompt so it does not overlap ([8ab377d](https://github.com/go7studio/Go7-Workhorse/commit/8ab377d36287963c2ab81709c446b833417c8e28))
+* open project folder is a tray, chevron on whole-row hover ([ddf8805](https://github.com/go7studio/Go7-Workhorse/commit/ddf88058cc1a67e460f43caf8e3f20317fb623c8))
+* project rows show a folder that becomes a chevron on hover ([e6069e5](https://github.com/go7studio/Go7-Workhorse/commit/e6069e59e56afc90d1cd70b0b12a3d8a51ad2261))
+* show crew status on the vendor dot, not as words ([dd2dd7b](https://github.com/go7studio/Go7-Workhorse/commit/dd2dd7be825ddabf3c91c458eb4f85cc1a7f36b9))
+* show only the project name on sidebar folders ([7d0a1d3](https://github.com/go7studio/Go7-Workhorse/commit/7d0a1d32d1c00177d07d82081d920ff5765cb423))
+* show the chevron only while the pointer is on the project row ([36ad1d0](https://github.com/go7studio/Go7-Workhorse/commit/36ad1d07779e0632293a3c3c1a03b0c858728309))
+
 ## [0.6.21](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.20...v0.6.21) (2026-08-21)
 
 

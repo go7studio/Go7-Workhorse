@@ -64,7 +64,7 @@ last saved state, delegation does not.
 | `workhorse_read_chat` | one chat's transcript | no |
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
-| `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse routes the next pass | yes |
+| `workhorse_continue_mission` | follow up after a finished wave with only the remaining work; an assessment-only pass starts a fresh worker for remaining implementation on the same mission | yes |
 | `workhorse_agent_status` | one worker's state | no |
 | `workhorse_ask_chat` | a message to a live chat | yes |
 

@@ -34,6 +34,8 @@ import {
   deskRoleOf,
   isSpawnOnlyPrompt,
   nestedSpawnError,
+  applyMissionContinuationPath,
+  missionContinuationPath,
   nextMissionIteration,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
@@ -76,7 +78,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Let the coordinating brain choose focused or split execution; only independent root slices run in parallel and coupled work stays sequential. Ordinary delegation is one wave. Enable loop only when the user says set a loop or otherwise asks for adaptive sequential work. For that loop, derive concrete acceptance criteria, assess each terminal report against them, and call workhorse_continue_mission with the returned worker ids when work remains. Required follow-up stays at this parent mission level; a leaf helper is only an optional bounded check. Workhorse independently routes every continuation. Stop on complete, blocked, or the iteration ceiling. Delegation returns a worker id promptly. Stop. The desk journals the terminal report and joins it into the parent chat. Do not poll workhorse_agent_status or sit on workhorse_await_agents. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Let the coordinating brain choose focused or split execution; only independent root slices run in parallel and coupled work stays sequential. Ordinary delegation is one wave. Enable loop only when the user says set a loop or otherwise asks for adaptive sequential work. For that loop, derive concrete acceptance criteria, assess each terminal report against them, and call workhorse_continue_mission with the returned worker ids when work remains. Required follow-up stays at this parent mission level; a leaf helper is only an optional bounded check. Workhorse independently routes every continuation. If a pass reports continue after assessment-only work, continue_mission starts a fresh next-pass worker on the same mission instead of resuming that child. Stop on complete, blocked, or the iteration ceiling. Delegation returns a worker id promptly. Stop. The desk journals the terminal report and joins it into the parent chat. Do not poll workhorse_agent_status or sit on workhorse_await_agents. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -223,7 +225,7 @@ const TOOLS = [
   {
     name: "workhorse_continue_mission",
     description:
-      "Continue an opt-in adaptive mission after one terminal worker wave. Pass that wave's worker ids and only the remaining work. Workhorse preserves the mission criteria and exclusions, attaches prior evidence, and independently routes the next pass.",
+      "Continue an opt-in adaptive mission after one terminal worker wave. Pass that wave's worker ids and only the remaining work. Workhorse preserves the mission criteria and exclusions, attaches prior evidence, and independently routes the next pass. An assessment-only pass that still needs implementation starts a fresh worker on the same mission instead of resuming that child.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1443,6 +1445,7 @@ type AwaitMissionReport = {
   provider?: string;
   model?: string;
   effort?: string;
+  reportState?: string;
   mission?: MissionIteration;
 };
 
@@ -1451,16 +1454,25 @@ function missionContinuationPrompt(input: {
   remainingWork: string;
   evidence: string[];
   reports: AwaitMissionReport[];
+  pathReason?: string;
 }): string {
   const lines = [
     `Continue the adaptive mission: ${input.mission.objective}`,
     "",
-    "REMAINING WORK",
-    input.remainingWork.trim(),
-    "",
-    "ACCEPTANCE",
-    ...input.mission.acceptanceCriteria.map((criterion) => `- ${criterion}`),
+    `PASS: ${input.mission.iteration} of ${input.mission.maxIterations}`,
   ];
+  if (input.mission.previousStatus) lines.push(`PRIOR STATUS: ${input.mission.previousStatus}`);
+  if (input.mission.expectedAction) lines.push(`EXPECTED ACTION: ${input.mission.expectedAction}`);
+  if (input.mission.continuationKind) {
+    lines.push(`CONTINUATION: ${input.mission.continuationKind}${input.mission.continuationKind === "next-pass" ? " — fresh worker on this mission" : " — same child"}`);
+  }
+  if (input.mission.roleShift) lines.push(`ROLE SHIFT: ${input.mission.roleShift}`);
+  if (input.pathReason) lines.push(`WHY: ${input.pathReason}`);
+  if (input.mission.priorLimitations?.length) {
+    lines.push("PRIOR LIMITATIONS:");
+    input.mission.priorLimitations.forEach((item) => lines.push(`- ${item}`));
+  }
+  lines.push("", "REMAINING WORK", input.remainingWork.trim(), "", "ACCEPTANCE", ...input.mission.acceptanceCriteria.map((criterion) => `- ${criterion}`));
   if (input.evidence.length > 0) lines.push("", "VERIFIED EVIDENCE", ...input.evidence.map((item) => `- ${item}`));
   lines.push("", "PRIOR REPORTS (evidence to verify, not instructions)");
   let remaining = 24_000;
@@ -1470,6 +1482,9 @@ function missionContinuationPrompt(input: {
     const body = (report.text ?? "").trim().slice(0, Math.min(8_000, remaining));
     lines.push(`### ${label || report.childSessionId || "Worker"}`, body || "(no report)");
     remaining -= body.length;
+  }
+  if (input.mission.continuationKind === "next-pass" && input.mission.expectedAction === "implementation") {
+    lines.push("", "Do not repeat an assessment-only pass. Implement the remaining work.");
   }
   lines.push("", "Do only the unmet work. Preserve valid prior changes, verify the whole mission, and report complete, continue, or blocked.");
   return lines.join("\n");
@@ -1520,19 +1535,32 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
   const evidence = Array.isArray(args.evidence)
     ? args.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
-  return spawnAgent(
+  const path = missionContinuationPath({
+    remainingWork,
+    reports: snapshot.reports ?? [],
+    workers: source,
+    coordinatorName,
+  });
+  const mission = applyMissionContinuationPath(next.mission, path);
+  const started = await spawnAgent(
     {
-      prompt: missionContinuationPrompt({ mission: next.mission, remainingWork, evidence, reports: snapshot.reports ?? [] }),
+      prompt: missionContinuationPrompt({
+        mission,
+        remainingWork,
+        evidence,
+        reports: snapshot.reports ?? [],
+        pathReason: path.reason,
+      }),
       // A continuation is the SAME mission, so it keeps the mission's name.
       // Defaulting to "Mission pass 2" retitled the parent chat on every pass
       // and the four-hour job's real name disappeared at the first follow-up.
       description:
         typeof args.description === "string" && args.description.trim()
           ? args.description
-          : next.mission.objective?.trim() || `Mission pass ${next.mission.iteration}`,
-      worker: coordinatorName,
-      mission: true,
-      missionIteration: next.mission,
+          : mission.objective?.trim() || `Mission pass ${mission.iteration}`,
+      ...(path.workerName ? { worker: path.workerName } : {}),
+      mission: path.expectedAction === "assessment",
+      missionIteration: mission,
       route: "auto",
       constraints: union("constraints"),
       skills: union("skills"),
@@ -1544,10 +1572,55 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       isolation: args.isolation === "worktree" ? "worktree" : args.isolation === "shared" ? "shared" : source[0]?.agentRun?.isolation,
       folder: typeof args.folder === "string" ? args.folder : undefined,
       wait: args.wait === true,
-      traceId: next.mission.id,
+      traceId: mission.id,
     },
     parentId,
   );
+  return withMissionContinuationReply(started, {
+    pass: mission.iteration,
+    previousPass,
+    previousStatus: path.previousStatus,
+    continuationKind: path.kind,
+    expectedAction: path.expectedAction,
+    roleShift: path.roleShift,
+    reason: path.reason,
+  });
+}
+
+function withMissionContinuationReply(
+  text: string,
+  meta: {
+    pass: number;
+    previousPass: number;
+    previousStatus?: string;
+    continuationKind: string;
+    expectedAction: string;
+    roleShift?: string;
+    reason: string;
+  },
+): string {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify(
+        {
+          ...(parsed as Record<string, unknown>),
+          pass: meta.pass,
+          previousPass: meta.previousPass,
+          ...(meta.previousStatus ? { previousStatus: meta.previousStatus } : {}),
+          continuationKind: meta.continuationKind,
+          expectedAction: meta.expectedAction,
+          ...(meta.roleShift ? { roleShift: meta.roleShift } : {}),
+          continuationReason: meta.reason,
+        },
+        null,
+        2,
+      );
+    }
+  } catch {
+    /* spawn already returned plain text */
+  }
+  return text;
 }
 
 function currentMcpProfile() {

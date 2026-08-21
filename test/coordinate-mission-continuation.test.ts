@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextMissionIteration, normalizeMissionIteration } from "../src/lib/subagents";
+import {
+  applyMissionContinuationPath,
+  formatWorkerPrompt,
+  inferMissionPhaseAction,
+  missionContinuationPath,
+  nextMissionIteration,
+  normalizeMissionIteration,
+  workerReportedStatus,
+} from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
 
@@ -124,4 +132,114 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.equal(decision.ok, false);
   if (decision.ok) return;
   assert.match(decision.error, /do not share one mission contract/);
+});
+
+test("STATUS continue after assessment-only work starts a fresh next-pass worker", () => {
+  const report = [
+    "STATUS: continue",
+    "Assessment only. Next phase needs implementation authority.",
+  ].join("\n");
+  assert.equal(workerReportedStatus(report), "continue");
+  assert.equal(inferMissionPhaseAction(report), "assessment");
+  const path = missionContinuationPath({
+    remainingWork: "Implement now. Do not return another assessment-only pass.",
+    reports: [{ text: report, status: "completed", childSessionId: "worker_assess_1" }],
+    workers: [
+      worker("worker_assess_1", "parent", {
+        workerName: "Marlow",
+        title: "Marlow · Pass 1",
+        agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "worktree", changedFiles: [] },
+      }),
+    ],
+    coordinatorName: "Marlow",
+  });
+  assert.equal(path.kind, "next-pass");
+  assert.equal(path.expectedAction, "implementation");
+  assert.equal(path.previousStatus, "continue");
+  assert.equal(path.priorAction, "assessment");
+  assert.equal(path.roleShift, "assessment → implementation");
+  assert.equal(path.workerName, undefined);
+  assert.ok(path.priorLimitations.includes("no files changed"));
+  const mission = applyMissionContinuationPath(adaptiveMission({ iteration: 2, previousWorkerIds: ["worker_assess_1"] })!, path);
+  assert.equal(mission.continuationKind, "next-pass");
+  assert.equal(mission.expectedAction, "implementation");
+  const brief = formatWorkerPrompt({
+    fromTitle: "Walt",
+    text: "Implement now.",
+    folder: "/tmp/repo",
+    mission: true,
+    missionIteration: mission,
+  });
+  assert.match(brief, /ROLE: worker/);
+  assert.doesNotMatch(brief, /ROLE: mission coordinator/);
+  assert.match(brief, /Do not repeat an assessment-only pass/);
+});
+
+test("STATUS continue after an implementation pass resumes that child", () => {
+  const path = missionContinuationPath({
+    remainingWork: "Finish and verify the live path.",
+    reports: [{ text: "Implemented the first half.", status: "completed", childSessionId: "worker_pass_1" }],
+    workers: [
+      worker("worker_pass_1", "parent", {
+        workerName: "Wren",
+        title: "Wren · First pass",
+        agentRun: {
+          status: "completed",
+          startedAt: 1,
+          finishedAt: 2,
+          isolation: "shared",
+          changedFiles: ["src/lib/subagents.ts"],
+        },
+      }),
+    ],
+    coordinatorName: "Wren",
+  });
+  assert.equal(path.kind, "resume");
+  assert.equal(path.workerName, "Wren");
+  assert.equal(path.expectedAction, "implementation");
+});
+
+test("an empty assistant transcript is a first-class limitation, not a fake report", () => {
+  const path = missionContinuationPath({
+    remainingWork: "Implement the remaining work.",
+    reports: [{ text: "", status: "completed", childSessionId: "sess_empty", reportState: "empty" }],
+    workers: [
+      worker("sess_empty", "parent", {
+        workerName: "Piper",
+        messages: [
+          { id: "u1", role: "user", text: "Run npm test.", createdAt: 1 },
+          { id: "a1", role: "assistant", text: "", createdAt: 1 },
+        ],
+      }),
+    ],
+    coordinatorName: "Piper",
+  });
+  assert.equal(path.kind, "next-pass");
+  assert.ok(path.priorLimitations.includes("no assistant report"));
+  assert.equal(workerReportedStatus(""), undefined);
+  assert.equal(workerReportedStatus("STATUS: complete"), "complete");
+  assert.equal(workerReportedStatus("Mission status: blocked."), "blocked");
+});
+
+test("normalizeMissionIteration journals continuation pathing fields", () => {
+  const mission = normalizeMissionIteration({
+    id: "mission_abc",
+    mode: "adaptive",
+    objective: "Ship the verified feature",
+    acceptanceCriteria: ["Tests pass"],
+    iteration: 2,
+    maxIterations: 3,
+    previousWorkerIds: ["worker_assess_1"],
+    previousStatus: "continue",
+    expectedAction: "implementation",
+    continuationKind: "next-pass",
+    roleShift: "assessment → implementation",
+    priorLimitations: ["assessment-only", "no files changed"],
+  });
+  assert.ok(mission);
+  assert.equal(mission?.previousStatus, "continue");
+  assert.equal(mission?.expectedAction, "implementation");
+  assert.equal(mission?.continuationKind, "next-pass");
+  assert.equal(mission?.roleShift, "assessment → implementation");
+  assert.deepEqual(mission?.priorLimitations, ["assessment-only", "no files changed"]);
 });

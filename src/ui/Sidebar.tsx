@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, lastProjectChat, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
-import { missionRowLook } from "../lib/lineup";
+import { missionRowLook, projectLiveLook } from "../lib/lineup";
 import { folderSummary } from "../lib/project";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
@@ -188,6 +188,8 @@ function ProjectFolder({
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
   const count = chats.length + archived.length;
+  // Archived chats are put away, so only the live list can make a project work.
+  const live = projectLiveLook(chats);
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -224,7 +226,21 @@ function ProjectFolder({
           <span>
             <span className="row-title">{project.name}</span>
             <span className="row-meta">
-              {count === 0 ? folderSummary(project) : `${count} chat${count === 1 ? "" : "s"} · ${folderSummary(project)}`}
+              {/* While the project is working, that is the line. The chat count
+                  and the folder do not change while it runs, and they come
+                  back the moment it stops. */}
+              {live
+                ? (
+                    <>
+                      <span className="project-live-dot" aria-hidden="true" />
+                      {live.caller ? <span className="row-caller">{live.caller}</span> : null}
+                      {live.caller ? " · " : null}
+                      <span className="row-state">{live.word}</span>
+                    </>
+                  )
+                : count === 0
+                  ? folderSummary(project)
+                  : `${count} chat${count === 1 ? "" : "s"} · ${folderSummary(project)}`}
             </span>
           </span>
         </button>

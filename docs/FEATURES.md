@@ -102,7 +102,11 @@ transcript rather than as a path.
 - A chat that ran a wave says so on its own row: who called it, and how it
   went — `OpenClaw · Working…`, or nothing at all once every worker finished
   clean. Failure is the only word in red; interrupted and timed-out work is
+<<<<<<< HEAD
   unfinished, not wrong. The title on a row is always the chat's own.
+- A project row pulses and says `Working…` — `OpenClaw · Working…` when a
+  harness called it — while any chat or worker inside is running, folded or
+  open, so you can see where the desk is busy without opening anything.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share

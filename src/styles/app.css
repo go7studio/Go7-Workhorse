@@ -4391,6 +4391,22 @@ html.pane-dragging * {
   color: var(--text);
 }
 
+/* A working project, folded or open. The dot is the whole mark: 5px, one gap
+   of space, and the same opacity dip the update button uses — enough to catch
+   an eye crossing the sidebar, quiet enough to sit there all afternoon. It is
+   inline inside .row-meta so the line still ellipses at the 252px floor, and
+   there is no dot at all when the project is idle, so nothing shifts. */
+.project-live-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--ok);
+  animation: sidebar-update-pulse 900ms var(--ease) infinite;
+}
+
 .loose-chats {
   margin-bottom: 10px;
 }
@@ -4542,6 +4558,11 @@ html.pane-dragging * {
   .project-folder.open .project-chats > .nest-empty,
   .project-folder.open .project-chats > .archive-toggle {
     transition: none;
+  }
+
+  /* The dot stays — it is the mark. Only the motion goes. */
+  .project-live-dot {
+    animation: none;
   }
 }
 

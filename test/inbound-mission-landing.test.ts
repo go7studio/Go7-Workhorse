@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { linkMissionLanding, type LinkMissionChat } from "../src/lib/workhorse-link";
-import { missionRowLook } from "../src/lib/lineup";
+import { missionCaller, missionRowLook, normalizeLineup } from "../src/lib/lineup";
 import { workhorseExternalMcpLaunch, installWorkhorseLink, type InstallIo } from "../electron/mcp-install";
 import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { PeerAsk } from "../electron/peer-inbox";
@@ -221,4 +221,26 @@ test("the harness call carries its origin and its project, and naming a worker d
     }
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a saved OpenClaw caller still reads OpenClaw after load", () => {
+  const loaded = normalizeLineup({
+    id: "lineup_1",
+    folder: "/tmp",
+    startedAt: 1,
+    joinOwner: "external-runtime",
+    rows: [
+      {
+        childId: "sess_w",
+        title: "MC analytics repair",
+        slice: "MC analytics repair",
+        folder: "/tmp",
+        vendor: "Claude",
+        status: "running",
+        startedAt: 1,
+        caller: "openclaw",
+      },
+    ],
+  });
+  assert.equal(missionCaller(loaded), "OpenClaw");
 });

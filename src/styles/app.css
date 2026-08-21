@@ -4492,15 +4492,12 @@ html.pane-dragging * {
 }
 
 .project-head:hover .twist-folder,
-.project-head:focus-within .twist-folder,
 .project-head .twist:focus-visible .twist-folder,
-.project-folder.open .project-head:hover .twist-folder,
-.project-folder.open .project-head:focus-within .twist-folder {
+.project-folder.open .project-head:hover .twist-folder {
   opacity: 0;
 }
 
 .project-head:hover .twist::before,
-.project-head:focus-within .twist::before,
 .project-head .twist:focus-visible::before {
   opacity: 1;
 }

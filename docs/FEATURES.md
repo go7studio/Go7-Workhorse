@@ -23,11 +23,10 @@ or `hermes/<profile>`. Those tasks join the lineup. They do not get a Usage
 ring.
 
 **Workhorse Link** is how any outside app calls this desk — Codex, Claude
-Code, Grok, OpenClaw, Hermes, or any MCP client. Grok Bot uses the same
-Link CLI on this Mac; it is not a Connect button. Settings → LLMs → Workhorse
-Link connects each with one button, through that app's own MCP tool; Copy
-generic MCP configuration covers the rest; Copy Grok Bot one-shot is the
-same launch plus install instructions to paste into Grok Bot once. Every app gets the same eight
+Code, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
+Link connects each with one button. Connect Grok Bot copies the same launch
+plus install instructions to paste into Grok Bot once (Mac or Windows). Copy
+generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
 delegate a task, continue a finished wave, worker status. The first call,
 `workhorse_capabilities`, names follow-through: new slice, named worker,

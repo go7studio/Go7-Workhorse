@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LINK_HOSTS, LINK_HOST_LABEL } from "../lib/workhorse-link";
+import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -775,6 +775,21 @@ function AgentSystemsBlock() {
               type="button"
               key={host}
               onClick={() => {
+                if (linkHostConnectsByOneshot(host)) {
+                  void store.linkGrokBotOneshot().then(async (text) => {
+                    if (!text) {
+                      setNote("Workhorse desktop only.");
+                      return;
+                    }
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      setNote("Copied. Paste into Grok Bot once and tell it to save in permanent memory.");
+                    } catch {
+                      setNote(text);
+                    }
+                  });
+                  return;
+                }
                 void store.installExternalMcp([host]).then((result) => setNote(result.message || (result.ok ? `Connected ${LINK_HOST_LABEL[host]}.` : `Could not connect ${LINK_HOST_LABEL[host]}.`)));
               }}
             >
@@ -800,26 +815,6 @@ function AgentSystemsBlock() {
             }}
           >
             Copy generic MCP configuration
-          </button>
-          <button
-            className="tiny"
-            type="button"
-            onClick={() => {
-              void store.linkGrokBotOneshot().then(async (text) => {
-                if (!text) {
-                  setNote("Workhorse desktop only.");
-                  return;
-                }
-                try {
-                  await navigator.clipboard.writeText(text);
-                  setNote("Copied the Grok Bot one-shot. Paste it into Grok Bot once and tell it to save in permanent memory.");
-                } catch {
-                  setNote(text);
-                }
-              });
-            }}
-          >
-            Copy Grok Bot one-shot
           </button>
           <button
             className="tiny"

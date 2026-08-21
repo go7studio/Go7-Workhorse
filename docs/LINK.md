@@ -8,17 +8,13 @@ versioned contract.
 ## Connect
 
 **Settings → LLMs → Workhorse Link.** Connect Codex, Connect Claude, Connect
-Grok, Connect OpenClaw, Connect Hermes. Each writes the same launch into that
-app's own MCP config through its own tool (`codex mcp add`, `claude mcp add`,
-`grok mcp add`, `openclaw mcp set`, Hermes `config.yaml`). Nothing else is
-written, and no token is stored.
-
-**Grok Bot:** Copy Grok Bot one-shot, and paste it into Grok Bot once. It is
-the same launch plus install steps for this computer (Mac or Windows). Grok
-Bot must save it in permanent agent memory (the remote box is scratch).
-Connecting is not adding a vendor. Grok Bot talks through the Link CLI on
-the user's computer (`workhorse` / `workhorse.cmd`); the MCP JSON is for
-clients on that same machine. No token is stored.
+Grok, Connect Grok Bot, Connect OpenClaw, Connect Hermes. Codex, Claude, Grok,
+OpenClaw and Hermes write the same launch into that app's own MCP config
+through its own tool (`codex mcp add`, `claude mcp add`, `grok mcp add`,
+`openclaw mcp set`, Hermes `config.yaml`). **Connect Grok Bot** copies the
+same launch plus install steps for this computer (Mac or Windows); paste it
+into Grok Bot once and tell it to save in permanent agent memory (the remote
+box is scratch). Connecting is not adding a vendor. No token is stored.
 
 **Any other MCP client:** Copy generic MCP configuration, and paste it into
 that client's servers list:

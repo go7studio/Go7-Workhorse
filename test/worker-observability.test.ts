@@ -125,7 +125,25 @@ test("a spawn brief that names build checks is not checksRun, and silence is not
   assert.deepEqual(snap.checksRun ?? [], []);
   assert.equal(snap.currentStep, "no vendor output");
   assert.equal(snap.lastActivityAt, 1787250125161);
+  assert.equal(snap.reportState, "empty");
   assert.notEqual(snap.currentStep, "started");
+});
+
+test("a finished worker with no assistant report says empty instead of inventing checks", () => {
+  const done = worker({
+    id: "kid_silent",
+    status: "idle",
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "worktree" },
+    messages: [
+      { id: "u1", role: "user", text: "Run npm test and npm run build.", createdAt: 1 },
+      { id: "a1", role: "assistant", text: "", createdAt: 2 },
+    ],
+  });
+  const snap = workerStatusSnapshot(done);
+  assert.equal(snap.status, "completed");
+  assert.equal(snap.reportState, "empty");
+  assert.equal(Object.prototype.hasOwnProperty.call(snap, "report"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap, "reportedStatus"), false);
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

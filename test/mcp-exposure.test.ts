@@ -549,6 +549,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
     assert.equal(spawned?.worker, "Wren");
     assert.equal(spawned?.missionIteration?.iteration, 2);
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
+    assert.equal(spawned?.missionIteration?.continuationKind, "resume");
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
     assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);
     assert.deepEqual(spawned?.constraints, ["Keep changes scoped"]);
@@ -558,6 +559,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
     assert.match(spawned?.message ?? "", /PRIOR REPORTS/);
     assert.match(spawned?.message ?? "", /Implemented the first half/);
     assert.match(spawned?.message ?? "", /Finish and verify the live path/);
+    assert.match(spawned?.message ?? "", /CONTINUATION: resume/);
     const wrongTrace = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 62,
@@ -574,6 +576,125 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
       },
     })) as { error?: { message?: string } };
     assert.match(wrongTrace.error?.message ?? "", /traceId does not match/);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("assessment-only continue starts a fresh next-pass worker on the same mission", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-next-pass-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    sessions: [
+      { id: "parent_chat", title: "Desk", provider: "grok", model: "grok-4.6", projectId: null, messages: [] },
+      {
+        id: "worker_assess_1",
+        parentId: "parent_chat",
+        hidden: true,
+        title: "Marlow · Pass 1",
+        workerName: "Marlow",
+        provider: "claude",
+        model: "claude-opus-4-8",
+        effort: "high",
+        status: "idle",
+        messages: [{
+          id: "report",
+          role: "assistant",
+          text: "STATUS: continue\nAssessment only. Next phase needs implementation authority.",
+          createdAt: 2,
+        }],
+        agentRun: {
+          status: "completed",
+          startedAt: 1,
+          finishedAt: 2,
+          isolation: "worktree",
+          changedFiles: [],
+          mission: {
+            id: "mission_assess",
+            mode: "adaptive",
+            objective: "Ship the verified feature",
+            acceptanceCriteria: ["Tests pass"],
+            iteration: 1,
+            maxIterations: 3,
+            previousWorkerIds: [],
+          },
+        },
+      },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  setWorkhorseDeskAsk(async (ask) => {
+    if (ask.action === "await-agents") {
+      return {
+        text: JSON.stringify({
+          ok: true,
+          running: [],
+          reports: [{
+            title: "Marlow · Pass 1",
+            status: "completed",
+            text: "STATUS: continue\nAssessment only. Next phase needs implementation authority.",
+            childSessionId: "worker_assess_1",
+            provider: "claude",
+            model: "claude-opus-4-8",
+            effort: "high",
+            reportState: undefined,
+            mission: {
+              id: "mission_assess",
+              mode: "adaptive",
+              objective: "Ship the verified feature",
+              acceptanceCriteria: ["Tests pass"],
+              iteration: 1,
+              maxIterations: 3,
+              previousWorkerIds: [],
+            },
+          }],
+        }),
+      };
+    }
+    spawned = ask;
+    return { text: JSON.stringify({ ok: true, workerId: "sess_next", reused: false }) };
+  });
+  try {
+    const continued = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 71,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_assess_1"],
+          previousPass: 1,
+          remainingWork: "Implement now. Do not return another assessment-only pass.",
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(continued.error, undefined, continued.error?.message);
+    assert.equal(spawned?.worker, undefined);
+    assert.equal(spawned?.mission, false);
+    assert.equal(spawned?.missionIteration?.iteration, 2);
+    assert.equal(spawned?.missionIteration?.continuationKind, "next-pass");
+    assert.equal(spawned?.missionIteration?.expectedAction, "implementation");
+    assert.equal(spawned?.missionIteration?.previousStatus, "continue");
+    assert.equal(spawned?.missionIteration?.id, "mission_assess");
+    assert.match(spawned?.message ?? "", /Do not repeat an assessment-only pass/);
+    assert.match(spawned?.message ?? "", /CONTINUATION: next-pass/);
+    const reply = JSON.parse(continued.result?.content?.[0]?.text ?? "{}") as Record<string, unknown>;
+    assert.equal(reply.pass, 2);
+    assert.equal(reply.previousPass, 1);
+    assert.equal(reply.previousStatus, "continue");
+    assert.equal(reply.continuationKind, "next-pass");
+    assert.equal(reply.expectedAction, "implementation");
+    assert.equal(reply.reused, false);
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

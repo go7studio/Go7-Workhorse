@@ -331,6 +331,12 @@ export type AgentRun = {
   mission?: MissionIteration;
 };
 
+export type WorkerTerminalStatus = "complete" | "continue" | "blocked";
+
+export type MissionPhaseAction = "assessment" | "implementation" | "verification";
+
+export type MissionContinuationKind = "resume" | "next-pass";
+
 export type MissionIteration = {
   id: string;
   mode: "adaptive";
@@ -341,6 +347,16 @@ export type MissionIteration = {
   previousWorkerIds: string[];
   /** Mission-level token ceiling. One pass cannot spend this whole amount. */
   tokenBudget?: number;
+  /** Last terminal STATUS from the prior pass. */
+  previousStatus?: WorkerTerminalStatus;
+  /** What this pass is expected to do. */
+  expectedAction?: MissionPhaseAction;
+  /** Resume the same child, or start a fresh worker on this mission. */
+  continuationKind?: MissionContinuationKind;
+  /** Compact role change, such as assessment → implementation. */
+  roleShift?: string;
+  /** Short facts about what the prior worker could not do. */
+  priorLimitations?: string[];
 };
 
 export type WorkhorseWorkerRun = AgentRun & { kind?: "workhorse" };

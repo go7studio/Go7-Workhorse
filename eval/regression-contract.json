@@ -397,8 +397,8 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S9"],
       "rubric": ["ORC-17"],
-      "sourceFiles": ["electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "src/ui/ChatRow.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts"],
-      "verification": ["eval:validate", "eval:harness-smoke"]
+      "sourceFiles": ["electron/mcp-exposure.ts", "electron/peer-inbox.ts", "electron/workhorse-mcp.ts", "src/lib/types.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "src/ui/ChatRow.tsx", "test/mcp-exposure.test.ts", "test/workhorse.test.ts", "test/link-iteration-live-smoke.ts"],
+      "verification": ["eval:validate", "eval:harness-smoke", "eval:link-iteration"]
     },
     {
       "id": "REG-045",

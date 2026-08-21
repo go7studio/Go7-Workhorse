@@ -68,6 +68,18 @@ export function linkHandshake(input: { deskOnline: boolean }): LinkHandshake {
   };
 }
 
+/** Worker session id from a delegate/spawn reply. Names are not ids. */
+export function linkWorkerIdFromReply(text: string): string | undefined {
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const id = parsed.childSessionId;
+    if (typeof id === "string" && id.trim()) return id.trim();
+  } catch {
+    /* plain text */
+  }
+  return undefined;
+}
+
 export type LinkEnvelope = {
   fromSessionId?: string;
   traceId: string;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import {
   linkGenericMcpConfig,
   linkHandshake,
   linkHostCliArgs,
+  linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
@@ -252,6 +253,37 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
     name: "workhorse_delegate",
     args: { task: "Review this change", fromSessionId: "c1", idempotencyKey: "k9" },
   });
+  assert.deepEqual(
+    linkCliCall([
+      "delegate",
+      "--chat",
+      "c1",
+      "--task",
+      "Ship and certify",
+      "--accept",
+      "Tests pass",
+      "--accept",
+      "Marker file exists",
+      "--passes",
+      "2",
+      "--folder",
+      "/tmp/wh",
+      "--key",
+      "k-loop",
+    ]),
+    {
+      name: "workhorse_delegate",
+      args: {
+        task: "Ship and certify",
+        fromSessionId: "c1",
+        folder: "/tmp/wh",
+        loop: { acceptanceCriteria: ["Tests pass", "Marker file exists"], maxIterations: 2 },
+        idempotencyKey: "k-loop",
+      },
+    },
+  );
+  assert.equal(linkWorkerIdFromReply(JSON.stringify({ started: true, childSessionId: "sess_w1", worker: "Marlow" })), "sess_w1");
+  assert.equal(linkWorkerIdFromReply("not json"), undefined);
   assert.deepEqual(linkCliCall(["status", "w7"]), { name: "workhorse_agent_status", args: { id: "w7" } });
   assert.deepEqual(linkCliCall(["follow-up", "w7", "Check the failing test", "--chat", "c1", "--pass", "2", "--key", "k2"]), {
     name: "workhorse_continue_mission",
@@ -521,4 +553,85 @@ test("agent_status always returns next even for an external task", async () => {
     else process.env.WORKHORSE_STATE_PATH = previous.state;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("Link iteration: assign a mission loop, then status carries the report", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-iter-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: [{ id: "parent_chat", title: "Desk", provider: "grok", projectId: null, messages: [{ role: "user", text: "hi" }] }] }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let statuses = 0;
+  let seenLoop: { acceptanceCriteria?: string[]; maxIterations?: number } | undefined;
+  setWorkhorseDeskAsk(async (payload) => {
+    if (payload.mode === "spawn") {
+      seenLoop = payload.missionIteration;
+      return { text: JSON.stringify({ started: true, childSessionId: "sess_w1", worker: "Marlow" }) };
+    }
+    if (payload.action === "agent-status") {
+      statuses += 1;
+      if (statuses === 1) return { text: JSON.stringify({ id: "sess_w1", status: "running" }) };
+      return { text: JSON.stringify({ id: "sess_w1", status: "completed", report: "WH_OK file written" }) };
+    }
+    return { text: "{}" };
+  });
+  try {
+    const delegated = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Write the marker",
+          loop: { acceptanceCriteria: ["Marker file exists"], maxIterations: 2 },
+          fromSessionId: "parent_chat",
+          folder: dir,
+          wait: true,
+        },
+      },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    const body = JSON.parse(delegated.result?.content?.[0]?.text ?? "{}") as { childSessionId?: string };
+    assert.equal(linkWorkerIdFromReply(delegated.result?.content?.[0]?.text ?? ""), "sess_w1");
+    assert.equal(body.childSessionId, "sess_w1");
+    assert.deepEqual(seenLoop?.acceptanceCriteria, ["Marker file exists"]);
+    assert.equal(seenLoop?.maxIterations, 2);
+    const waiting = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_w1" } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const waitBody = JSON.parse(waiting.result?.content?.[0]?.text ?? "{}") as { next?: string };
+    assert.equal(waitBody.next, "wait");
+    const done = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_w1" } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const doneBody = JSON.parse(done.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    assert.equal(doneBody.next, "done");
+    assert.match(doneBody.report ?? "", /WH_OK/);
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the live Link iteration smoke is opt-in and covers goal, loop, mission, and status", () => {
+  const smoke = readFileSync(new URL("./link-iteration-live-smoke.ts", import.meta.url), "utf8");
+  assert.match(smoke, /WORKHORSE_LINK_ITERATION/);
+  assert.match(smoke, /set a loop to/);
+  assert.match(smoke, /workhorse_delegate/);
+  assert.match(smoke, /acceptanceCriteria/);
+  assert.match(smoke, /workhorse_agent_status/);
+  assert.match(smoke, /workhorse_continue_mission/);
+  assert.doesNotMatch(smoke, /wait:\s*true/);
 });

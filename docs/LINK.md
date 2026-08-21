@@ -102,7 +102,12 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
 
 Do not sit in a poll loop in the same turn. Do not spawn a second worker for
 the same slice. Do not pass `wait=true`; Link ignores it so the client is not
-blocked.
+blocked. A later process may call `workhorse_agent_status` until `next` is
+`done` or `failed`; that is monitoring, not a same-turn poll.
+
+A desk `/goal` or `/loop` is still the composer. Link assigns the objective as
+a mission: `workhorse_delegate` with `loop.acceptanceCriteria`. Remaining work
+is `workhorse_continue_mission`.
 
 ## Execution contract
 
@@ -143,6 +148,7 @@ workhorse chats
 workhorse read <sessionId>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
+workhorse delegate --chat <sessionId> --task "Ship and certify" --accept "Tests pass" --accept "Marker file exists" --passes 2 --folder <dir>
 workhorse status <workerId>
 workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
 ```

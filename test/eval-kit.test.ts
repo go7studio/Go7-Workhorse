@@ -144,6 +144,7 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
     assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
   }
   assert.ok(manifest.scripts["eval:harness-smoke"]);
+  assert.ok(manifest.scripts["eval:link-iteration"]);
   assert.ok(manifest.scripts["eval:multi-model-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));

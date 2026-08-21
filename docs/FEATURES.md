@@ -36,8 +36,9 @@ answer so a harness that already calls them is not refused. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
 The same helper is a JSON CLI for a harness without MCP (`chats`, `read`,
-`ask`, `delegate`, `status`, `follow-up`), and Install workhorse command
-puts it on your PATH. See [docs/LINK.md](LINK.md).
+`ask`, `delegate`, `status`, `follow-up`). `delegate --accept` starts an
+adaptive mission loop; `status` then `follow-up` continue it. Install
+workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
 
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse

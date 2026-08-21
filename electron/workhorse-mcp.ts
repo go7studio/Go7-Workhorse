@@ -2289,7 +2289,7 @@ function isMcpEntry(): boolean {
  *   <helper> link chats
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
- *   <helper> link delegate --chat <sessionId> --task "<text>" [--trace <id>] [--key <idempotencyKey>]
+ *   <helper> link delegate --chat <sessionId> --task "<text>" [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
  *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--key <idempotencyKey>]
  *
@@ -2299,12 +2299,16 @@ function isMcpEntry(): boolean {
 export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
-  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit"]);
+  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--folder", "--passes"]);
   const flags = new Map<string, string>();
+  const accepts: string[] = [];
   const positional: string[] = [];
   for (let index = 0; index < rest.length; index += 1) {
     const item = rest[index]!;
-    if (VALUE_FLAGS.has(item)) {
+    if (item === "--accept") {
+      accepts.push(rest[index + 1] ?? "");
+      index += 1;
+    } else if (VALUE_FLAGS.has(item)) {
       flags.set(item.slice(2), rest[index + 1] ?? "");
       index += 1;
     } else if (item.startsWith("--")) {
@@ -2315,7 +2319,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -2339,7 +2343,21 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
     const task = flag("task");
     const chat = flag("chat");
     if (!task || !chat) return { usage };
-    return { name: "workhorse_delegate", args: { task, fromSessionId: chat, ...(flag("trace") ? { traceId: flag("trace") } : {}), ...(flag("key") ? { idempotencyKey: flag("key") } : {}) } };
+    const criteria = accepts.map((item) => item.trim()).filter(Boolean);
+    const passes = Number(flag("passes") ?? "");
+    return {
+      name: "workhorse_delegate",
+      args: {
+        task,
+        fromSessionId: chat,
+        ...(flag("folder") ? { folder: flag("folder") } : {}),
+        ...(criteria.length
+          ? { loop: { acceptanceCriteria: criteria, ...(Number.isFinite(passes) && passes >= 2 ? { maxIterations: Math.min(8, Math.floor(passes)) } : {}) } }
+          : {}),
+        ...(flag("trace") ? { traceId: flag("trace") } : {}),
+        ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
+      },
+    };
   }
   if (sub === "status") {
     if (!positional[0]) return { usage };

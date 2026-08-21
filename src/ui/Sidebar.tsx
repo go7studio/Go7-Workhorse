@@ -3,7 +3,6 @@ import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import { hiddenProjectChatCount, lastProjectChat, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
-import { folderSummary } from "../lib/project";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
 import type { Project, Session } from "../lib/types";
@@ -187,7 +186,6 @@ function ProjectFolder({
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
-  const count = chats.length + archived.length;
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -221,12 +219,7 @@ function ProjectFolder({
             if (id) store.moveSession(id, project.id);
           }}
         >
-          <span>
-            <span className="row-title">{project.name}</span>
-            <span className="row-meta">
-              {count === 0 ? folderSummary(project) : `${count} chat${count === 1 ? "" : "s"} · ${folderSummary(project)}`}
-            </span>
-          </span>
+          <span className="row-title">{project.name}</span>
         </button>
         <button
           className={`tiny project-info${selected && !store.activeSessionId ? " active" : ""}`}

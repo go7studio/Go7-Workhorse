@@ -347,6 +347,9 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /WORKHORSE_MCP_PROFILE/);
   assert.match(text, /workhorse_delegate/);
   assert.match(text, /fromSessionId/);
+  assert.match(text, /Auto-approve every Workhorse Link tool/);
+  assert.match(text, /MCPTool\(workhorse__\*\)/);
+  assert.match(text, /Do not prompt the user for workhorse_list_chats/);
   assert.doesNotMatch(text, /gho_|ghp_|WORKHORSE_BRIDGE_TOKEN|Authorization: Bearer/i);
   assert.equal(workhorseLinkGrokBotOneshot(LAUNCH), text);
   const win = linkGrokBotOneshot(server, {

@@ -1,7 +1,13 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
-import { hiddenProjectChatCount, lastProjectChat, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
+import {
+  hiddenProjectChatCount,
+  lastProjectChat,
+  pinnedCollapsedChat,
+  PROJECT_CHAT_LIMIT,
+  visibleProjectChats,
+} from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
@@ -186,6 +192,7 @@ function ProjectFolder({
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
+  const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -268,6 +275,32 @@ function ProjectFolder({
           +
         </button>
       </div>
+      {pinned ? (
+        <div className="project-chats pinned">
+          <div className="project-chat-block">
+            <ChatRow
+              session={pinned}
+              desk={rowDesk(store, index, pinned)}
+              workerCount={pinned.workers.length}
+              mission={missionRowLook(pinned, pinned.workers)}
+              workersOpen={Boolean(
+                openCrew[pinned.id] || pinned.workers.some((worker) => worker.id === store.activeSessionId),
+              )}
+              onToggleWorkers={() =>
+                setOpenCrew((current) => ({ ...current, [pinned.id]: !current[pinned.id] }))
+              }
+            />
+            <CrewList
+              session={pinned}
+              open={Boolean(
+                openCrew[pinned.id] || pinned.workers.some((worker) => worker.id === store.activeSessionId),
+              )}
+              store={store}
+              index={index}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="project-chats-slot" aria-hidden={!open}>
         <div className="project-chats">
           {chats.length === 0 && archived.length === 0 && (

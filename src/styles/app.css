@@ -4528,6 +4528,11 @@ html.pane-dragging * {
   border-left: 1px solid var(--line);
 }
 
+.project-chats.pinned > .project-chat-block {
+  opacity: 1;
+  transform: none;
+}
+
 .project-chats > .project-chat-block,
 .project-chats > .nest-empty,
 .project-chats > .archive-toggle {

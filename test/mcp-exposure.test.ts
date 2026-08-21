@@ -352,7 +352,8 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenTimeout, 420);
     assert.equal(seenWait, false);
     assert.equal(seenMission, true);
-    assert.equal(seenMissionIteration, undefined);
+    const beforeLoop = seenMissionIteration;
+    assert.equal(beforeLoop, undefined);
     assert.match(delegated.result?.content?.[0]?.text ?? "", /parent_chat/);
 
     const looped = (await handleWorkhorseRpc({
@@ -725,7 +726,7 @@ test("a worker is offered only the desk tools it may call, and a hidden name is 
     assert.ok(worker.includes("workhorse_await_agents"));
     // Reshaping the desk does not.
     for (const name of ["workhorse_delete_project", "workhorse_create_project", "workhorse_setup_custom_bot", "workhorse_delete_bot", "workhorse_list_bots", "workhorse_query_capacity", "workhorse_plan", "workhorse_request_vendor"]) {
-      assert.ok(!worker.includes(name), `${name} is not offered to a worker`);
+      assert.ok(!worker.some((tool) => tool === name), `${name} is not offered to a worker`);
     }
     // Knowing the name is not enough.
     const called = (await handleWorkhorseRpc(

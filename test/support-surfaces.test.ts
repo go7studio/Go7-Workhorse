@@ -22,7 +22,7 @@ const session = {
 } as Session;
 
 test("global search finds titles and transcript text across projects", () => {
-  const projects = [{ id: "project-1", name: "Workhorse", folders: [], references: [] }];
+  const projects = [{ id: "project-1", name: "Workhorse", folders: [], references: [], createdAt: 1, openedAt: 1 }];
   assert.equal(searchChats([session], projects, "deployment")[0]?.messageId, "message-1");
   assert.equal(searchChats([session], projects, "Workhorse")[0]?.sessionId, "chat-1");
 });

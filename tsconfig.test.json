@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The suite runs under tsx, which resolves the real ".ts"/".tsx" paths the
+    // tests import. Nothing is emitted from this project.
+    "allowImportingTsExtensions": true,
+    // Several suites assert the behaviour of the plain-JS build scripts. Their
+    // shapes are inferred; the scripts themselves are not type-checked.
+    "allowJs": true,
+    "checkJs": false
+  },
+  // src/vite-env.d.ts carries the `window.workhorse` bridge that renderer code
+  // under test relies on; without it every src file this suite pulls in fails.
+  "include": ["test", "src/vite-env.d.ts"]
+}

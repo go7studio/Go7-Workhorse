@@ -30,13 +30,13 @@ test("OpenAI-compatible tool calls wait for all streamed argument fragments", as
     pending,
   );
   assert.equal(first.tool, undefined);
-  assert.deepEqual(seen, []);
+  assert.equal(seen.length, 0);
   applyOpenAiChunk(
     { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "mpt\":\"inspect safely\",\"wait\":false}" } }] } }] },
     { onToolUse: (tool) => seen.push(tool) },
     pending,
   );
-  assert.deepEqual(seen, []);
+  assert.equal(seen.length, 0);
   const finished = applyOpenAiChunk(
     { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
     { onToolUse: (tool) => seen.push(tool) },
@@ -430,7 +430,7 @@ test("custom host preface names workspace and live limits", async () => {
   const host = new CustomSessionHost(async (_config, input, handlers) => {
     seen.preface = input.preface;
     seen.text = input.messages.at(-1)?.text;
-    handlers.onChunk?.("This chat is read-only.");
+    handlers?.onChunk?.("This chat is read-only.");
     return { text: "This chat is read-only." };
   });
   const reply = await host.prompt(
@@ -1302,9 +1302,16 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(streamedResult.usage?.outputTokens, 12);
   assert.deepEqual(streamed, [{ inputTokens: 80, outputTokens: 12 }]);
 
-  const hostEvents: Array<{ type: string; inputTokens?: number; outputTokens?: number; model?: string }> = [];
+  const hostEvents: Array<{
+    type: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    model?: string;
+    source?: string;
+    contextUsed?: number;
+  }> = [];
   const host = new CustomSessionHost(async (_config, _input, handlers) => {
-    handlers.onUsage?.({ inputTokens: 80, outputTokens: 12, cacheReadTokens: 10, cacheWriteTokens: 0 });
+    handlers?.onUsage?.({ inputTokens: 80, outputTokens: 12, cacheReadTokens: 10, cacheWriteTokens: 0 });
     return {
       text: "pong",
       usage: { inputTokens: 80, outputTokens: 12, cacheReadTokens: 10, cacheWriteTokens: 0 },
@@ -1686,7 +1693,7 @@ test("a Workhorse agent can assemble, test, and create a custom desk slot", asyn
   const spawned = resolveSpawnSpec(
     { fromSessionId: "p", prompt: "hi", chat: "MiniMax" },
     [],
-    { provider: "grok", effort: "high" },
+    { provider: "grok", model: "grok-4.6", effort: "high" },
     [{ id: created.bot.id, name: "MiniMax", model: "MiniMax-M3" }],
   );
   assert.equal(spawned.provider, "custom");
@@ -1835,7 +1842,7 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
         { status: 200, headers: { "content-type": "text/event-stream" } },
       ),
   );
-  assert.equal(streamed.toolUses[0]?.name, "list_dir");
+  assert.equal(streamed.toolUses?.[0]?.name, "list_dir");
   assert.match(streamed.text, /Looking around/);
   assert.match(
     customStreamError({ type: "error", error: { type: "authentication_error", message: "invalid api key" } }) ?? "",
@@ -1913,16 +1920,16 @@ test("custom HTTP request includes tools and parses tool_use then gates by sandb
   assert.match(relative.content, /lib/);
 
   let rounds = 0;
-  const host = new CustomSessionHost(async (_config, input, handlers) => {
+  const host = new CustomSessionHost(async (_config, _input, handlers) => {
     rounds += 1;
     if (rounds === 1) {
-      handlers.onChunk?.("Checking the folder.");
+      handlers?.onChunk?.("Checking the folder.");
       return {
         text: "Checking the folder.",
         toolUses: [{ id: "h1", name: "list_dir", input: { path: ROOT } }],
       };
     }
-    handlers.onChunk?.("I see package.json.");
+    handlers?.onChunk?.("I see package.json.");
     return { text: "I see package.json." };
   });
   const events: { type: string; title?: string }[] = [];
@@ -1977,7 +1984,7 @@ test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMa
   assert.equal(codex?.provider, "codex");
   assert.equal(sol?.model, defaultModel("codex").id);
 
-  const miniParent = { provider: "custom" as const, effort: "medium" as const };
+  const miniParent = { provider: "custom" as const, model: "MiniMax-M3", effort: "medium" as const };
   const miniBots = [{ id: "bot_minimax", name: "MiniMax", model: "MiniMax-M3" }];
   const decoy = {
     id: "sess_mini",

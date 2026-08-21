@@ -27,9 +27,10 @@ test("only the desk window is answered", () => {
 });
 
 test("the guard wraps every channel, not each author's memory", () => {
-  const registered = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+  type Listener = (event: { senderFrame?: { url?: string } | null }, ...args: unknown[]) => unknown;
+  const registered = new Map<string, Listener>();
   const ipc = {
-    handle(channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) {
+    handle(channel: string, listener: Listener) {
       registered.set(channel, listener);
     },
   };

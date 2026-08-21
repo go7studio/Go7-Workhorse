@@ -11,9 +11,10 @@ import {
   recordPlanEvidence,
   setPlanStepStatus,
   startPlanRun,
+  type PlanTransition,
 } from "../src/lib/plan";
 import { addLineupRow, applyChildIdleSync, emptyLineup } from "../src/lib/lineup";
-import type { Session } from "../src/lib/types";
+import type { PlanRun, Session } from "../src/lib/types";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const RECEIPT = `HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`;
@@ -35,9 +36,10 @@ function session(overrides: Partial<Session> = {}): Session {
   };
 }
 
-function requirePlan<T extends { ok: boolean; plan?: unknown; error?: string }>(result: T) {
-  assert.equal(result.ok, true, result.error);
-  return result as T & { plan: NonNullable<T["plan"]> };
+/** Every transition this fixture drives is meant to succeed; a refusal is a fixture bug. */
+function planOf(result: PlanTransition): PlanRun {
+  if (!result.ok) throw new Error(result.error);
+  return result.plan;
 }
 
 function ordinaryChecklist() {
@@ -46,18 +48,18 @@ function ordinaryChecklist() {
     markdown: "# Checklist\n- [ ] Write copy\n",
     now: 1,
   });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
   const stepId = plan.steps[0]!.id;
-  plan = setPlanStepStatus(plan, stepId, "running", { now: 4 }).plan;
-  plan = recordPlanEvidence(plan, stepId, {
+  plan = planOf(setPlanStepStatus(plan, stepId, "running", { now: 4 }));
+  plan = planOf(recordPlanEvidence(plan, stepId, {
     id: "evidence_checklist",
     kind: "note",
     label: "done",
     value: "copy written",
     recordedAt: 5,
-  }, 5).plan;
-  plan = requirePlan(setPlanStepStatus(plan, stepId, "completed", { now: 6 })).plan;
-  const completed = requirePlan(completePlanRun(plan, 7)).plan;
+  }, 5));
+  plan = planOf(setPlanStepStatus(plan, stepId, "completed", { now: 6 }));
+  const completed = planOf(completePlanRun(plan, 7));
   const joined = joinAndAdmit([session({ planRun: completed })], "sess_parent", [
     { provider: "grok", canCall: true },
   ], { childId: "sess_unused", now: 8 });
@@ -71,10 +73,10 @@ function admittedObjective() {
     markdown: "# Objective\n### Task 1: Build\nNamed test gate: `npm test`\n### Task 2: Human follow-up\n",
     now: 10,
   });
-  plan = startPlanRun(approvePlanRun(plan, 11).plan, 12).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 11)), 12));
   const builderStepId = plan.steps[0]!.id;
   const untouchedStepId = plan.steps[1]!.id;
-  plan = requirePlan(assignPlanStep(plan, builderStepId, {
+  plan = planOf(assignPlanStep(plan, builderStepId, {
     sessionId: "sess_builder",
     provider: "codex",
     model: "gpt-5.4",
@@ -82,16 +84,16 @@ function admittedObjective() {
     skills: [],
     tools: [],
     constraints: [],
-  }, 13)).plan;
-  plan = setPlanStepStatus(plan, builderStepId, "running", { now: 14 }).plan;
-  plan = recordPlanEvidence(plan, builderStepId, {
+  }, 13));
+  plan = planOf(setPlanStepStatus(plan, builderStepId, "running", { now: 14 }));
+  plan = planOf(recordPlanEvidence(plan, builderStepId, {
     id: "evidence_builder_note",
     kind: "note",
     label: "builder",
     value: "tests passed",
     recordedAt: 15,
     sessionId: "sess_builder",
-  }, 15).plan;
+  }, 15));
   assert.equal(setPlanStepStatus(plan, builderStepId, "completed", { now: 16 }).ok, false);
 
   const builder = session({

@@ -529,6 +529,26 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
   return undefined;
 }
 
+/** The vendor is working, or the chat is holding for you. Either way it is live. */
+export function isLiveChat(session: Pick<Session, "status">): boolean {
+  return session.status === "running" || session.status === "needs-input";
+}
+
+/**
+ * Where a chat sits in a sidebar list. An idle chat sorts by its last activity,
+ * as it always has. A live one sorts by the turn that started it instead: three
+ * chats running at once each append tool lines and replies at their own pace,
+ * and sorting those by latest activity had the three titles trade places under
+ * the cursor every few seconds. A turn's own timestamp does not move until the
+ * run ends, so the running cohort holds the order it was sent in.
+ */
+export function sidebarOrderAt(session: Pick<Session, "status" | "messages">): number {
+  const talked = lastTalkedAt(session) ?? 0;
+  if (!isLiveChat(session)) return talked;
+  const started = lastUserMessage(session)?.createdAt;
+  return typeof started === "number" && started > 0 ? started : talked;
+}
+
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
   const first = chats[0];

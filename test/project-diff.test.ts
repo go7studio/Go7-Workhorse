@@ -10,6 +10,7 @@ import { countCreatedReview, growInstanceBaseline, instancePathKey, rememberInst
 import { countMotion } from "../src/lib/count";
 import { editListKey, markStatsFetched, planEditStatsHarvest, projectWritesKey, startEditStatsHarvest, takeEditStatsChunk } from "../src/lib/project-edits";
 import { countFileLines, dottedConfigAlt, findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance, resolveExistingFile, resolveStatFile } from "../electron/project-diff";
+import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -276,42 +277,24 @@ test("Project Home list stats stay cheap after they are known", () => {
   assert.equal(harvests, 0);
   assert.equal(gitShows, 0);
   assert.equal(editListKey(listed), editListKey(listed.map((item) => ({ ...item }))));
-  assert.equal(
-    projectWritesKey([
-      {
-        id: "s1",
-        projectId: "p1",
-        provider: "grok",
-        model: "grok-4.6",
-        effort: "high",
-        title: "Game",
-        mode: "ask",
-        sandbox: "off",
-        status: "idle",
-        contextUsed: 0,
-        messages: [
-          { id: "t1", role: "system", kind: "tool", text: "Write · completed — file-0.gd", createdAt: 10 },
-        ],
-      },
-    ], "p1"),
-    projectWritesKey([
-      {
-        id: "s1",
-        projectId: "p1",
-        provider: "grok",
-        model: "grok-4.6",
-        effort: "high",
-        title: "Game",
-        mode: "ask",
-        sandbox: "off",
-        status: "running",
-        contextUsed: 99,
-        messages: [
-          { id: "t1", role: "system", kind: "tool", text: "Write · completed — file-0.gd", createdAt: 10 },
-        ],
-      },
-    ], "p1"),
-  );
+  const idle: Session = {
+    id: "s1",
+    projectId: "p1",
+    provider: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    title: "Game",
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    contextUsed: 0,
+    messages: [
+      { id: "t1", role: "system", kind: "tool", text: "Write · completed — file-0.gd", createdAt: 10 },
+    ],
+  };
+  // Same writes, mid-run and deeper into the window: the key must not move.
+  const running: Session = { ...idle, status: "running", contextUsed: 99 };
+  assert.equal(projectWritesKey([idle], "p1"), projectWritesKey([running], "p1"));
 
   assert.equal(countLines(after), 1678);
   assert.deepEqual(countLineDelta("", after), { added: 1678, deleted: 0 });

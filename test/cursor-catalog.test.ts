@@ -98,8 +98,8 @@ test("collapse yields family bases with effort and fast as fields, not extra row
   const parsed = fixtureRows();
   const bases = collapseCursorCatalog(parsed);
   assert.ok(bases.length < parsed.length, `bases ${bases.length} should be under 204`);
-  assert.equal(bases.length, 33, `bases ${bases.length} should be the fixture's family count`);
   assert.ok(bases.length !== 204);
+  assert.equal(bases.length, 33, `bases ${bases.length} should be the fixture's family count`);
   const composer = bases.find((row) => row.id === "composer-2.5");
   assert.ok(composer);
   assert.ok(composer?.aliases?.includes("composer-2.5-fast"));

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { commandNeedsInput, commandsForSession, filterPalette, shortModeLabel } from "../lib/commands";
 import {
   collectDroppedFiles,
@@ -16,7 +16,8 @@ import {
 import { wrapMarkdown } from "../lib/markdown";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk } from "../lib/settings";
-import { useActiveSession, useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
+import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage } from "../lib/types";
 
 export function isEditableKeyTarget(el: EventTarget | null): boolean {
@@ -66,7 +67,7 @@ export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHei
   el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
 }
 
-export function Composer({
+export const Composer = memo(function Composer({
   setupOpen,
   onToggleSetup,
   dropRoot,
@@ -76,6 +77,7 @@ export function Composer({
   dropRoot?: RefObject<HTMLElement | null>;
 }) {
   const {
+    session,
     send,
     cancelRun,
     dropQueued,
@@ -85,8 +87,7 @@ export function Composer({
     settings,
     setComposerDraft,
     deskSkills,
-  } = useStore();
-  const session = useActiveSession();
+  } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
   const running = session?.status === "running";
   const queue = session?.queue ?? [];
@@ -531,4 +532,4 @@ export function Composer({
       </div>
     </div>
   );
-}
+});

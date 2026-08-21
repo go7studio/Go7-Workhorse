@@ -108,7 +108,6 @@ import { looksLikeDispatchCheckBack, looksLikeUnfinishedDeskTurn as looksLikeUnf
 import { askViaInbox, interpretPeerAskHttp, isRetryablePeerAskTransport, peerAskTimeoutMs, readBridgeRecord, watchPeerInbox, writeBridgeRecord } from "../electron/peer-inbox";
 import {
   COMMANDS,
-  CODEX_SHELL_COMMANDS,
   GROK_SHELL_COMMANDS,
   commandContinuesToVendor,
   commandNeedsInput,
@@ -155,7 +154,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionAnswerLabel, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
@@ -779,8 +778,10 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
     { id: "f1", name: "note.md", mimeType: "text/markdown", kind: "file", text: "# hello", data: "" },
   ]);
   assert.equal(files[0]?.kind, "file");
-  assert.match(buildAcpPrompt("read this", files)[1]?.text ?? "", /note\.md/);
-  assert.match(buildAcpPrompt("read this", files)[1]?.text ?? "", /# hello/);
+  const attached = buildAcpPrompt("read this", files)[1];
+  const attachedText = attached?.type === "text" ? attached.text : "";
+  assert.match(attachedText, /note\.md/);
+  assert.match(attachedText, /# hello/);
 
   const message = normalizeMessage({
     id: "u",
@@ -923,11 +924,11 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
   assert.equal(resolveModelHint("OpenAI Terra")?.model, "gpt-5.6-terra");
   assert.equal(resolveModelHint("codex")?.provider, "codex");
   assert.equal(shouldSpawnInsteadOfAsk("Terra", []), true);
-  assert.equal(shouldSpawnInsteadOfAsk("Test", [{ id: "t", title: "Test", projectId: null, projectName: null, provider: "codex", model: "gpt-5.6-sol", status: "idle", archived: false, preview: "", messageCount: 1 }]), false);
+  assert.equal(shouldSpawnInsteadOfAsk("Test", [{ id: "t", title: "Test", projectId: null, projectName: null, provider: "codex", model: "gpt-5.6-sol", status: "idle", archived: false, preview: "", sidebar: "Test", messageCount: 1 }]), false);
   const archivedSpawn = resolveSpawnSpec(
     { fromSessionId: "p", prompt: "ping", chat: "Old login notes" },
     [{ id: "sess_archived", title: "Old login notes", provider: "claude", model: "claude-opus-5", effort: "medium", archivedAt: 99 }],
-    { provider: "grok", effort: "high" },
+    { provider: "grok", model: "grok-4.6", effort: "high" },
   );
   assert.notEqual(archivedSpawn.provider, "claude");
   assert.notEqual(archivedSpawn.title, "Old login notes");
@@ -943,7 +944,7 @@ test("in-chat subagents resolve vendors and keep a nested transcript", () => {
   const spawned = resolveSpawnSpec(
     { fromSessionId: "p", prompt: "ping", chat: "OpenAI Terra", description: "Ask Terra" },
     [],
-    { provider: "grok", effort: "high" },
+    { provider: "grok", model: "grok-4.6", effort: "high" },
   );
   assert.equal(spawned.provider, "codex");
   assert.equal(spawned.model, "gpt-5.6-terra");
@@ -1802,7 +1803,13 @@ test("MiniMax usage row bills the turn total while the context ring keeps last o
   assert.equal(folded.inputTokens, firstHttp.inputTokens + secondHttp.inputTokens);
   assert.equal(folded.outputTokens, firstHttp.outputTokens + secondHttp.outputTokens);
   const lastOccupancy = occupancyFromUsage(secondHttp, 1_000_000);
-  const billed = eventTotal({ ...folded, id: "fold", at: 1, cacheWriteTokens: folded.cacheWriteTokens ?? 0 });
+  const billed = eventTotal({
+    ...folded,
+    id: "fold",
+    at: 1,
+    cacheReadTokens: folded.cacheReadTokens ?? 0,
+    cacheWriteTokens: folded.cacheWriteTokens ?? 0,
+  });
   assert.ok(lastOccupancy !== undefined);
   assert.ok(billed !== lastOccupancy);
 
@@ -2806,18 +2813,15 @@ test("create-project writes the exact name locally and fails fast without a rend
     process.env.WORKHORSE_BRIDGE_URL = "http://127.0.0.1:9";
     process.env.WORKHORSE_BRIDGE_TOKEN = "dead";
     const failStart = Date.now();
-    // Port 9 can black-hole a SYN on some Mac runners. The production default
-    // abort is ten minutes, which is how a release Test step sat for half an
-    // hour. This call must fail fast.
-    const failed = await handleWorkhorseRpc(
-      {
-        jsonrpc: "2.0",
-        id: 4,
-        method: "tools/call",
-        params: { name: "workhorse_create_project", arguments: { name: "Workhorse Dev" } },
-      },
-      { timeoutMs: 1_500 },
-    );
+    // Port 9 can black-hole a SYN on some Mac runners. A release Test step once
+    // sat for half an hour on a call like this, so the elapsed assertion below
+    // is the gate: no deadline is passed in, and none is honoured here.
+    const failed = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "workhorse_create_project", arguments: { name: "Workhorse Dev" } },
+    });
     const failElapsed = Date.now() - failStart;
     const message = (failed as { error?: { message?: string } })?.error?.message ?? "";
     assert.match(message, /failed|bridge is not running|Do not tell the user the project exists/i);
@@ -3448,6 +3452,7 @@ test("create-project binds the exact name and does not attach the folder to anot
     projectId: null as string | null,
     provider: "custom" as const,
     model: "MiniMax-M3",
+    effort: "medium" as const,
     title: "Can you create me a project…",
     mode: "ask" as const,
     sandbox: "off" as const,
@@ -3467,6 +3472,7 @@ test("delete-chat refuses the calling chat and fails closed on ambiguous titles"
     projectId: null,
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "hwat chats can you see?",
     mode: "ask",
     sandbox: "off",
@@ -3579,6 +3585,7 @@ test("rename chat and project in place without delete", () => {
     projectId: "proj_godot",
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "PLease look at the D drive",
     mode: "ask",
     sandbox: "off",
@@ -6144,9 +6151,13 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(closed[0]?.toolStatus, "failed");
   assert.match(closed[0]?.text ?? "", /failed/);
   assert.equal(closed[1]?.toolStatus, "completed");
-  assert.equal(interpretPeerAskHttp(400, { error: "Grok is over its day bank" }).retryable, false);
+  const overBank = interpretPeerAskHttp(400, { error: "Grok is over its day bank" });
+  assert.equal(overBank.ok, false);
+  assert.equal(overBank.retryable, false);
   assert.equal(interpretPeerAskHttp(200, { text: "hi" }).ok, true);
-  assert.equal(interpretPeerAskHttp(500, { error: "bridge down" }).retryable, true);
+  const bridgeDown = interpretPeerAskHttp(500, { error: "bridge down" });
+  assert.equal(bridgeDown.ok, false);
+  assert.equal(bridgeDown.retryable, true);
   assert.equal(isRetryablePeerAskTransport(new Error("Grok is over its day bank")), false);
   assert.equal(isRetryablePeerAskTransport(new Error("fetch failed")), true);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -6218,16 +6229,14 @@ test("subagent pane groups child thought tools and usage like the usual chat", (
     [bot],
   );
   assert.equal(who.color, "#3dff7a");
+  const noVendors = normalizeSettings({}).llms;
   const ink = deskInk(
     { provider: "custom", customBotId: "bot_minimax" },
-    { customBots: [bot], llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } } },
+    { customBots: [bot], llms: noVendors },
   );
   assert.equal(ink, "#3dff7a");
   assert.equal(
-    deskLabel(
-      { provider: "custom", customBotId: "bot_minimax" },
-      { customBots: [bot], llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } } },
-    ),
+    deskLabel({ provider: "custom", customBotId: "bot_minimax" }, { customBots: [bot], llms: noVendors }),
     "MiniMax",
   );
   assert.notEqual(who.color, undefined);
@@ -6951,6 +6960,7 @@ test("turns keep the bot that ran them after a switch", () => {
     grok: { connected: true },
     claude: { connected: true, name: "Clay", color: "#ff9f0a" },
     codex: { connected: false },
+    cursor: { connected: false },
     custom: { connected: false, baseUrl: "", model: "", apiKey: "", contextWindow: 1 },
   });
   assert.equal(renamed.name, "Clay");
@@ -6989,7 +6999,7 @@ function fakeAcp(script: {
     stdout,
     stderr,
     killed: false,
-    kill() {
+    kill(this: EventEmitter & { killed: boolean }) {
       this.killed = true;
       this.emit("exit", 0, null);
     },
@@ -7920,6 +7930,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(
     workerSidebarLabel({
       id: "worker_terra",
+      projectId: null,
       parentId: "orchestrator",
       provider: "codex",
       model: "gpt-5.6-terra",
@@ -7937,6 +7948,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(
     workerSidebarLabel({
       id: "worker_takeover",
+      projectId: null,
       parentId: "orchestrator",
       provider: "codex",
       model: "gpt-5.6-terra",
@@ -7960,6 +7972,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(
     workerSidebarLabel({
       id: "worker_pass_2",
+      projectId: null,
       parentId: "orchestrator",
       provider: "claude",
       model: "claude-sonnet-4-6",
@@ -8207,9 +8220,11 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(spawnWaitsForReply({ wait: "false" }), false);
   const kidRunning: Session = {
     id: "kid_run",
+    projectId: null,
     parentId: "orch",
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "src tree",
     mode: "ask",
     sandbox: "off",
@@ -8375,6 +8390,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     projectId: "proj",
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "Parent",
     mode: "ask",
     sandbox: "off",
@@ -8705,6 +8721,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
     projectId: "proj",
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "Parent",
     mode: "ask",
     sandbox: "off",

@@ -31,7 +31,6 @@ import {
   memoryCannotEscalate,
   memoryVisibleTo,
   mismatchCompilerPrompt,
-  normalizeLearning,
   outcomeIsVerified,
   parseBriefText,
   selectAdaptiveRoute,
@@ -650,7 +649,7 @@ test("compiler picker only lists attached custom bots", () => {
   assert.equal(options.length, 1);
   assert.equal(options[0]?.provider, "custom");
   assert.equal(options[0]?.customBotId, "bot_desk");
-  assert.equal(options.some((item) => item.provider === "grok" || item.provider === "cursor"), false);
+  assert.deepEqual([...new Set(options.map((item) => String(item.provider)))], ["custom"]);
   assert.equal(isEligibleLearningCompiler("grok"), false);
   assert.equal(isEligibleLearningCompiler("cursor"), false);
   assert.equal(isEligibleLearningCompiler("claude"), false);
@@ -1285,7 +1284,10 @@ test("compiler bot uses the vaulted desk key and never another bot or OpenClaw",
   assert.equal(config?.apiKey, "sk-desk-bot");
   assert.equal(config?.model, "MiniMax-M3");
   assert.equal(config?.baseUrl, "https://example.invalid/m3");
-  assert.equal(resolveCompilerBotConfig(bots, { customBotId: "bot_missing" }, (id) => vault.get(id) ?? ""), null);
+  assert.equal(
+    resolveCompilerBotConfig(bots, { customBotId: "bot_missing", model: "MiniMax-M3" }, (id) => vault.get(id) ?? ""),
+    null,
+  );
   assert.equal(resolveCompilerBotConfig(bots, { model: "MiniMax-M3" }, (id) => vault.get(id) ?? ""), null);
   const wrapped = parseBriefText(
     'Here is the brief:\n{"intent":[{"action":"add","memoryClass":"intent","scope":"project","statement":"Keep diffs small","sourceEventIds":["a"]}],"operations":[]}',

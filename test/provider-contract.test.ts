@@ -47,7 +47,8 @@ test("provider changes clear stale vendor context for portable replay", () => {
   const base: Session = {
     id: "s1", projectId: null, provider: "claude", model: "sonnet", effort: "medium",
     title: "Chat", mode: "ask", sandbox: "off", status: "idle", messages, contextUsed: 0,
-    vendorSessionId: "vendor-old", vendorProvider: "claude", permissionGrants: ["write"],
+    vendorSessionId: "vendor-old", vendorProvider: "claude",
+    permissionGrants: [{ id: "g1", key: "write:/proj/a.ts", tool: "write", detail: "a.ts", createdAt: 1, expiresAt: 2 }],
   };
   const changed = applySessionModelChange(base, { provider: "codex", model: "gpt-5.6-terra", effort: "high" });
   assert.equal(changed.vendorSessionId, undefined);

@@ -81,7 +81,8 @@ import {
   parseEffort,
   withEffort,
 } from "./models";
-import { joinChatText, mergeStreamedText } from "./markdown";
+import { mergeStreamedText } from "./markdown";
+import { applyStreamQueues, createStreamCommitScheduler } from "./stream-commit";
 import { APP_VERSION } from "./app-info";
 import type { AppUpdateCheckResult, AppUpdateOffer } from "./app-update";
 import {
@@ -466,6 +467,8 @@ export type Store = AppState & {
   refreshCursorPlan: () => void;
   customPlans: Record<string, import("./types").GrokPlanUsage | undefined>;
   customPlanKnown: Record<string, boolean>;
+  /** Built-in vendors whose meter has answered at least once, by provider id. */
+  vendorPlanKnown: Record<string, boolean>;
   refreshCustomPlans: () => void;
   quit: () => void;
   appUpdate: AppUpdateOffer | null;
@@ -765,6 +768,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [cursorPlan, setCursorPlan] = useState<GrokPlanUsage | undefined>();
   const [customPlans, setCustomPlans] = useState<Record<string, GrokPlanUsage | undefined>>({});
   const [customPlanKnown, setCustomPlanKnown] = useState<Record<string, boolean>>({});
+  const [vendorPlanKnown, setVendorPlanKnown] = useState<Record<string, boolean>>({});
   const [editMessageId, setEditMessageId] = useState<string | null>(null);
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
   const [watchRestore, setWatchRestore] = useState<{ text: string; images?: import("./types").ChatImage[] } | null>(null);
@@ -808,6 +812,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setState((current) => ({ ...current, deskPlans: plansRef.current }));
   }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
+
+  // A built-in meter that has answered once is known, whatever it answered. A
+  // 404, an auth failure, or a dead socket must read unknown, not "Loading…"
+  // forever. Declared beside the plan state so every later fetch can reach it.
+  const markVendorPlanKnown = useCallback((provider: ProviderId) => {
+    setVendorPlanKnown((current) => (current[provider] ? current : { ...current, [provider]: true }));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2414,8 +2425,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
           }));
           void window.workhorse?.cursorPlanUsage?.()
-            .then((plan) => setCursorPlan(plan ?? undefined))
-            .catch(() => undefined);
+            .then((plan) => {
+              setCursorPlan(plan ?? undefined);
+              markVendorPlanKnown("cursor");
+            })
+            .catch(() => markVendorPlanKnown("cursor"));
           return;
         }
         if (live === "codex") {
@@ -5399,6 +5413,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const flushStreams = () => {
+      if (
+        Object.keys(grokChunkQueue.current).length === 0 &&
+        Object.keys(grokThoughtQueue.current).length === 0
+      ) {
+        return;
+      }
+      setState((current) => {
+        const drained = applyStreamQueues({
+          sessions: current.sessions,
+          chunkQueue: grokChunkQueue.current,
+          thoughtQueue: grokThoughtQueue.current,
+          assistantIdFor: (sessionId, session) =>
+            grokAssistantId.current[sessionId] ??
+            [...session.messages].reverse().find((message) => message.role === "assistant")?.id,
+        });
+        grokChunkQueue.current = drained.chunkQueue;
+        grokThoughtQueue.current = drained.thoughtQueue;
+        return drained.changed ? { ...current, sessions: drained.sessions } : current;
+      });
+    };
+    const streamCommits = createStreamCommitScheduler(flushStreams, {
+      frame: (run) => requestAnimationFrame(run),
+      cancelFrame: (handle) => cancelAnimationFrame(handle),
+    });
     const apply = (event: GrokBridgeEvent) => {
       try {
       const goalHalted = goalHaltedSessions.current.has(event.sessionId);
@@ -5409,6 +5448,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (terminal === "ignore") return;
       if (terminal === "consume-halt-then-forward") {
+        streamCommits.flushNow();
         goalHaltedSessions.current.delete(event.sessionId);
         const haltedAssistantId = grokAssistantId.current[event.sessionId];
         const pending = goalForwardAfterHalt.current[event.sessionId];
@@ -5439,70 +5479,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
+      // Tokens buffer into the existing per-session queues and flush once a
+      // frame. Everything else forces a drain first so permission, tools, and
+      // turn-end never race a pending rAF.
       if (event.type === "chunk") {
-        setState((current) => {
-          const session = current.sessions.find((item) => item.id === event.sessionId);
-          const assistantId =
-            grokAssistantId.current[event.sessionId] ??
-            [...(session?.messages ?? [])].reverse().find((message) => message.role === "assistant")?.id;
-          const hasMessage = Boolean(assistantId && session?.messages.some((message) => message.id === assistantId));
-          if (!session || !assistantId || !hasMessage) {
-            grokChunkQueue.current[event.sessionId] = mergeStreamedText(
-              grokChunkQueue.current[event.sessionId] ?? "",
-              event.text,
-            );
-            return current;
-          }
-          const queued = grokChunkQueue.current[event.sessionId] ?? "";
-          delete grokChunkQueue.current[event.sessionId];
-          const add = joinChatText(queued, event.text);
-          if (!add) return current;
-          return {
-            ...current,
-            sessions: current.sessions.map((item) =>
-              item.id === event.sessionId
-                ? {
-                    ...item,
-                    messages: item.messages.map((message) =>
-                      message.id === assistantId ? { ...message, text: mergeStreamedText(message.text, add) } : message,
-                    ),
-                  }
-                : item,
-            ),
-          };
-        });
+        if (!event.text) return;
+        grokChunkQueue.current[event.sessionId] = mergeStreamedText(
+          grokChunkQueue.current[event.sessionId] ?? "",
+          event.text,
+        );
+        streamCommits.request();
         return;
       }
       if (event.type === "thought") {
-        setState((current) => {
-          const session = current.sessions.find((item) => item.id === event.sessionId);
-          const assistantId =
-            grokAssistantId.current[event.sessionId] ??
-            [...(session?.messages ?? [])].reverse().find((message) => message.role === "assistant")?.id;
-          const hasMessage = Boolean(assistantId && session?.messages.some((message) => message.id === assistantId));
-          if (!session || !assistantId || !hasMessage) {
-            grokThoughtQueue.current[event.sessionId] =
-              (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
-            return current;
-          }
-          const queued = grokThoughtQueue.current[event.sessionId] ?? "";
-          delete grokThoughtQueue.current[event.sessionId];
-          const add = queued + event.text;
-          if (!add) return current;
-          return {
-            ...current,
-            sessions: current.sessions.map((item) =>
-              item.id === event.sessionId
-                ? {
-                    ...item,
-                    messages: upsertThoughtMessage(item.messages, add),
-                  }
-                : item,
-            ),
-          };
-        });
+        if (!event.text) return;
+        grokThoughtQueue.current[event.sessionId] =
+          (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
+        streamCommits.request();
         return;
       }
+      streamCommits.flushNow();
       if (event.type === "commands") {
         setState((current) => ({
           ...current,
@@ -5954,8 +5950,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         if (session?.provider === "cursor") {
           void window.workhorse?.cursorPlanUsage?.()
-            .then((plan) => setCursorPlan(plan ?? undefined))
-            .catch(() => undefined);
+            .then((plan) => {
+              setCursorPlan(plan ?? undefined);
+              markVendorPlanKnown("cursor");
+            })
+            .catch(() => markVendorPlanKnown("cursor"));
         }
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
@@ -6132,6 +6131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCursor = window.workhorse?.onCursorEvent?.(apply);
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     return () => {
+      streamCommits.stop();
       offGrok?.();
       offCodex?.();
       offClaude?.();
@@ -6550,17 +6550,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.grokPlanUsage) return;
     void window.workhorse
       .grokPlanUsage()
-      .then((plan) => setGrokPlan(plan))
-      .catch(() => setGrokPlan(undefined));
-  }, []);
+      .then((plan) => {
+        setGrokPlan(plan);
+        markVendorPlanKnown("grok");
+      })
+      .catch(() => {
+        setGrokPlan(undefined);
+        markVendorPlanKnown("grok");
+      });
+  }, [markVendorPlanKnown]);
 
   const refreshCodexPlan = useCallback(() => {
     if (!window.workhorse?.codexPlanUsage) return;
     void window.workhorse
       .codexPlanUsage()
-      .then((plan) => setCodexPlan(plan))
-      .catch(() => setCodexPlan(undefined));
-  }, []);
+      .then((plan) => {
+        setCodexPlan(plan);
+        markVendorPlanKnown("codex");
+      })
+      .catch(() => {
+        setCodexPlan(undefined);
+        markVendorPlanKnown("codex");
+      });
+  }, [markVendorPlanKnown]);
 
   const refreshCursorPlan = useCallback(() => {
     if (!window.workhorse?.cursorPlanUsage) {
@@ -6569,9 +6581,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     void window.workhorse
       .cursorPlanUsage()
-      .then((plan) => setCursorPlan(plan ?? undefined))
-      .catch(() => setCursorPlan(undefined));
-  }, []);
+      .then((plan) => {
+        setCursorPlan(plan ?? undefined);
+        markVendorPlanKnown("cursor");
+      })
+      .catch(() => {
+        setCursorPlan(undefined);
+        markVendorPlanKnown("cursor");
+      });
+  }, [markVendorPlanKnown]);
 
   const refreshClaudePlan = useCallback(() => {
     if (!window.workhorse?.claudePlanUsage) return;
@@ -6579,6 +6597,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .claudePlanUsage()
       .then((plan) => {
         setClaudePlan(plan);
+        markVendorPlanKnown("claude");
         if (plan) {
           if (claudePlanRetry.current) window.clearTimeout(claudePlanRetry.current);
           claudePlanRetry.current = null;
@@ -6592,8 +6611,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
         }, 90_000);
       })
-      .catch(() => setClaudePlan(undefined));
-  }, []);
+      .catch(() => {
+        setClaudePlan(undefined);
+        markVendorPlanKnown("claude");
+      });
+  }, [markVendorPlanKnown]);
 
   const refreshCustomPlans = useCallback(() => {
     if (!window.workhorse?.customPlanUsage) return;
@@ -7020,6 +7042,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCursorPlan,
       customPlans,
       customPlanKnown,
+      vendorPlanKnown,
       refreshCustomPlans,
       quit,
       appUpdate,
@@ -7141,6 +7164,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshCursorPlan,
       customPlans,
       customPlanKnown,
+      vendorPlanKnown,
       refreshCustomPlans,
       quit,
       appUpdate,

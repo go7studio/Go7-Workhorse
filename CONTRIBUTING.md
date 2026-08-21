@@ -28,6 +28,10 @@ effect, so the shape check has to be updated in the same change.
 commit as the feature.** A feature nobody documented is a feature nobody finds.
 Operator product law does not live in this public repository.
 
+[`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) names the paths that run on every
+token, every keystroke, or every launch, and the test that holds each one.
+Read it before changing what a component subscribes to.
+
 ## Versioning
 
 [Semantic versioning](https://semver.org), held at major `0` until the product

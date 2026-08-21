@@ -148,7 +148,7 @@ function fakeAcp(script: { methods: string[]; loadFail?: boolean; nextId?: strin
     stdout,
     stderr,
     killed: false,
-    kill() {
+    kill(this: EventEmitter & { killed: boolean }) {
       this.killed = true;
       this.emit("exit", 0, null);
     },
@@ -707,7 +707,7 @@ test("CodexSessionHost new/load/fail/launch-key and missing binary", async () =>
 
   const loaded: string[] = [];
   const loadHost = new CodexSessionHost(() => fakeAcp({ methods: loaded }));
-  const loadResult = await loadHost.prompt(
+  await loadHost.prompt(
     {
       sessionId: "work-c2",
       text: "again",

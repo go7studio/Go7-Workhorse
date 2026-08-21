@@ -19,14 +19,21 @@ import {
   recordPlanEvidence,
   setPlanStepStatus,
   startPlanRun,
+  type PlanTransition,
 } from "../src/lib/plan";
 import { addLineupRow, applyChildIdleSync, emptyLineup, lineupJoinPrompt, maybeEnqueueLineupJoin } from "../src/lib/lineup";
 import { admitSpawn, deskRoleOf, formatAuditorPrompt, toolsForDeskRole, vendorTextForSpawn } from "../src/lib/subagents";
 import { AUDITOR_SESSION_RULES, sessionRulesFor } from "../src/lib/workhorse-rules";
-import type { Session } from "../src/lib/types";
+import type { PlanRun, Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
+
+/** Setup steps are meant to succeed; a refusal here is a broken fixture, not a finding. */
+function planOf(result: PlanTransition): PlanRun {
+  if (!result.ok) throw new Error(result.error);
+  return result.plan;
+}
 
 function parent(over: Partial<Session> = {}): Session {
   return {
@@ -63,9 +70,9 @@ test("a builder note cannot complete a step; auditor SHA+gate+last line can", ()
   });
   assert.equal(parsePlanGate(plan.source ? "Named test gate: `npm test`" : ""), "npm test");
   assert.equal(plan.gate, "npm test");
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
   const stepId = plan.steps[0]!.id;
-  const assigned = assignPlanStep(plan, stepId, {
+  plan = planOf(assignPlanStep(plan, stepId, {
     sessionId: "sess_wren",
     provider: "codex",
     model: "gpt-5.4",
@@ -73,19 +80,16 @@ test("a builder note cannot complete a step; auditor SHA+gate+last line can", ()
     skills: [],
     tools: [],
     constraints: [],
-  }, 4);
-  assert.equal(assigned.ok, true);
-  if (!assigned.ok) throw new Error(assigned.error);
-  plan = assigned.plan;
-  plan = setPlanStepStatus(plan, stepId, "running", { now: 5 }).plan;
-  plan = recordPlanEvidence(plan, stepId, {
+  }, 4));
+  plan = planOf(setPlanStepStatus(plan, stepId, "running", { now: 5 }));
+  plan = planOf(recordPlanEvidence(plan, stepId, {
     id: "note",
     kind: "note",
     label: "builder",
     value: "I ran the tests",
     recordedAt: 6,
     sessionId: "sess_wren",
-  }, 6).plan;
+  }, 6));
   assert.equal(setPlanStepStatus(plan, stepId, "completed", { now: 7 }).ok, false);
   const parsed = parseAuditorReport(`HEAD: ${HEAD}\nGATE: npm test\nLAST: tests 1\nSTATUS: pass\n`);
   assert.equal(parsed?.head, HEAD);
@@ -96,7 +100,7 @@ test("a builder note cannot complete a step; auditor SHA+gate+last line can", ()
     gate: "npm test",
   });
   assert.ok(evidence);
-  plan = recordPlanEvidence(plan, stepId, evidence!, 7).plan;
+  plan = planOf(recordPlanEvidence(plan, stepId, evidence, 7));
   assert.equal(setPlanStepStatus(plan, stepId, "completed", { now: 8 }).ok, true);
 });
 
@@ -115,8 +119,8 @@ test("pickAuditorVendor skips builder vendors and spent rows", () => {
 
 test("builder wave join spawns a sibling auditor on a different vendor; the parent still joins", () => {
   let plan = parseMarkdownPlan({ markdown: "### Task 1: Add\nNamed test gate: `npm test`\n", now: 1, id: "plan_1" });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
-  plan = setPlanStepStatus(plan, plan.steps[0]!.id, "running", { now: 4 }).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
+  plan = planOf(setPlanStepStatus(plan, plan.steps[0]!.id, "running", { now: 4 }));
   const wren = builder("sess_wren", "codex");
   let lineup = emptyLineup("/repo", 10, "assign bots", "desk");
   lineup = addLineupRow(lineup, {
@@ -151,9 +155,9 @@ test("builder wave join spawns a sibling auditor on a different vendor; the pare
 
 test("auditor report admits the running step; builder report does not", () => {
   let plan = parseMarkdownPlan({ markdown: "### Task 1: Add\nNamed test gate: `npm test`\n", now: 1 });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
   const stepId = plan.steps[0]!.id;
-  plan = setPlanStepStatus(plan, stepId, "running", { now: 4 }).plan;
+  plan = planOf(setPlanStepStatus(plan, stepId, "running", { now: 4 }));
   const wren = builder("sess_wren");
   const auditor: Session = parent({
     id: "sess_auditor",
@@ -192,8 +196,8 @@ test("auditor report admits the running step; builder report does not", () => {
 
 test("no second callable vendor means no auditor and the step stays incomplete", () => {
   let plan = parseMarkdownPlan({ markdown: "### Task 1: Add\n", now: 1 });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
-  plan = setPlanStepStatus(plan, plan.steps[0]!.id, "running", { now: 4 }).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
+  plan = planOf(setPlanStepStatus(plan, plan.steps[0]!.id, "running", { now: 4 }));
   const wren = builder("sess_wren", "codex");
   const lineup = addLineupRow(emptyLineup("/repo", 10), {
     childId: "sess_wren",
@@ -245,17 +249,17 @@ test("store joins then admits through joinAndAdmit", () => {
 
 test("an ordinary checklist plan completes without an auditor", () => {
   let plan = parseMarkdownPlan({ markdown: "### Task 1: Write copy\n", now: 1 });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
   const stepId = plan.steps[0]!.id;
-  plan = setPlanStepStatus(plan, stepId, "running", { now: 4 }).plan;
-  plan = recordPlanEvidence(plan, stepId, {
+  plan = planOf(setPlanStepStatus(plan, stepId, "running", { now: 4 }));
+  plan = planOf(recordPlanEvidence(plan, stepId, {
     id: "e1",
     kind: "note",
     label: "done",
     value: "shipped the copy",
     recordedAt: 5,
-  }, 5).plan;
-  plan = setPlanStepStatus(plan, stepId, "completed", { now: 6 }).plan;
+  }, 5));
+  plan = planOf(setPlanStepStatus(plan, stepId, "completed", { now: 6 }));
   assert.equal(completePlanRun(plan, 7).ok, true);
   const spawned = joinAndAdmit([parent({ planRun: plan })], "sess_parent", [{ provider: "grok", canCall: true }], {
     childId: "sess_auditor",
@@ -269,9 +273,9 @@ test("full objective: builder wave then auditor receipt completes the step", () 
     now: 1,
     id: "plan_obj",
   });
-  plan = startPlanRun(approvePlanRun(plan, 2).plan, 3).plan;
+  plan = planOf(startPlanRun(planOf(approvePlanRun(plan, 2)), 3));
   const stepId = plan.steps[0]!.id;
-  const assigned = assignPlanStep(plan, stepId, {
+  const assigned = planOf(assignPlanStep(plan, stepId, {
     sessionId: "sess_wren",
     provider: "codex",
     model: "gpt-5.4",
@@ -279,10 +283,8 @@ test("full objective: builder wave then auditor receipt completes the step", () 
     skills: [],
     tools: [],
     constraints: [],
-  }, 4);
-  assert.equal(assigned.ok, true);
-  if (!assigned.ok) throw new Error(assigned.error);
-  plan = setPlanStepStatus(assigned.plan, stepId, "running", { now: 5 }).plan;
+  }, 4));
+  plan = planOf(setPlanStepStatus(assigned, stepId, "running", { now: 5 }));
   const wren = builder("sess_wren", "codex");
   const lineup = addLineupRow(emptyLineup("/repo", 10, "assign bots", "desk"), {
     childId: "sess_wren",

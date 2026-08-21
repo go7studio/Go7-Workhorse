@@ -452,6 +452,22 @@ export function leftoverForCard(
   return undefined;
 }
 
+/**
+ * Has this meter been fetched at least once? A settled fetch is known even when
+ * it came back empty: a 404, an auth failure, or a dead socket is unknown, not
+ * still loading. Built-in vendors read `vendorPlanKnown`, custom bots keep
+ * their per-bot map.
+ */
+export function leftoverFetchKnown(input: {
+  provider: ProviderId;
+  botId?: string;
+  vendorPlanKnown: Record<string, boolean>;
+  customPlanKnown: Record<string, boolean>;
+}): boolean {
+  if (input.provider === "custom") return Boolean(input.botId && input.customPlanKnown[input.botId]);
+  return Boolean(input.vendorPlanKnown[input.provider]);
+}
+
 /** Copy under the leftover ring when the weekly plan is missing. */
 export function leftoverMissingCopy(input: {
   hasKey: boolean;
@@ -1572,45 +1588,128 @@ export function repairInflatedTurn<T extends { inputTokens: number; outputTokens
   };
 }
 
-function sameUsageBuckets(left: UsageEvent, right: UsageEvent): boolean {
-  return (
-    left.inputTokens === right.inputTokens &&
-    left.outputTokens === right.outputTokens &&
-    left.cacheReadTokens === right.cacheReadTokens &&
-    left.cacheWriteTokens === right.cacheWriteTokens
-  );
+/** Two reports of one turn land this close together. */
+const DUPLICATE_TURN_MS = 2000;
+/** A turn's cached last request lands this close to its uncached snapshot. */
+const CACHED_SIBLING_MS = 2500;
+
+/**
+ * The four token buckets as one key. Undefined when a bucket is NaN, which
+ * never equals another bucket and so can never be a duplicate. Numbers cannot
+ * contain the separator, so the session id is safe on the end.
+ */
+function usageBucketKey(event: UsageEvent): string | undefined {
+  const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = event;
+  if (
+    Number.isNaN(inputTokens) ||
+    Number.isNaN(outputTokens) ||
+    Number.isNaN(cacheReadTokens) ||
+    Number.isNaN(cacheWriteTokens)
+  ) {
+    return undefined;
+  }
+  return `${inputTokens}|${outputTokens}|${cacheReadTokens}|${cacheWriteTokens}|${event.sessionId}`;
+}
+
+/**
+ * One turn reported twice: a later entry in the same session with the same
+ * four buckets, within two seconds. "Later" is position in `events`, not clock
+ * time — the log is stored newest first, and the trailing copy is the keeper.
+ *
+ * Bucketing by session and buckets, then walking each bucket in time order,
+ * turns a cross product into one pass per bucket. `newestFirst` is a monotonic
+ * queue of the positions still able to be the newest entry of a window, so the
+ * window maximum is its front and each position enters and leaves once.
+ */
+function doubleReportedIds(events: UsageEvent[]): Set<string> {
+  const buckets = new Map<string, number[]>();
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (!event.sessionId || !Number.isFinite(event.at)) continue;
+    const key = usageBucketKey(event);
+    if (key === undefined) continue;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(index);
+    else buckets.set(key, [index]);
+  }
+  const drop = new Set<string>();
+  for (const bucket of buckets.values()) {
+    if (bucket.length < 2) continue;
+    bucket.sort((left, right) => events[left]!.at - events[right]!.at);
+    const newestFirst: number[] = [];
+    let front = 0;
+    let start = 0;
+    let end = 0;
+    for (let cursor = 0; cursor < bucket.length; cursor += 1) {
+      const at = events[bucket[cursor]!]!.at;
+      while (end < bucket.length && events[bucket[end]!]!.at <= at + DUPLICATE_TURN_MS) {
+        while (newestFirst.length > front && bucket[newestFirst[newestFirst.length - 1]!]! < bucket[end]!) {
+          newestFirst.pop();
+        }
+        newestFirst.push(end);
+        end += 1;
+      }
+      while (events[bucket[start]!]!.at < at - DUPLICATE_TURN_MS) {
+        if (newestFirst[front] === start) front += 1;
+        start += 1;
+      }
+      if (bucket[newestFirst[front]!]! > bucket[cursor]!) drop.add(events[bucket[cursor]!]!.id);
+    }
+  }
+  return drop;
+}
+
+/**
+ * A cached last request shadows the uncached snapshot of the same turn: same
+ * session, within 2.5 s, strictly fewer fresh input tokens and no more output.
+ * Snapshots and cached siblings are disjoint, so each session sorts both lists
+ * once and sweeps one window across them.
+ */
+function cacheShadowedIds(events: UsageEvent[]): Set<string> {
+  const sessions = new Map<string, { snapshots: UsageEvent[]; cached: UsageEvent[] }>();
+  for (const event of events) {
+    if (!event.sessionId || !Number.isFinite(event.at)) continue;
+    const cached = event.cacheReadTokens > 0;
+    if (!cached && (event.cacheWriteTokens > 0 || event.inputTokens <= 0)) continue;
+    let lane = sessions.get(event.sessionId);
+    if (!lane) {
+      lane = { snapshots: [], cached: [] };
+      sessions.set(event.sessionId, lane);
+    }
+    (cached ? lane.cached : lane.snapshots).push(event);
+  }
+  const drop = new Set<string>();
+  const byTime = (left: UsageEvent, right: UsageEvent) => left.at - right.at;
+  for (const lane of sessions.values()) {
+    if (!lane.snapshots.length || !lane.cached.length) continue;
+    lane.snapshots.sort(byTime);
+    lane.cached.sort(byTime);
+    let start = 0;
+    let end = 0;
+    for (const snapshot of lane.snapshots) {
+      while (end < lane.cached.length && lane.cached[end]!.at <= snapshot.at + CACHED_SIBLING_MS) end += 1;
+      while (start < end && lane.cached[start]!.at < snapshot.at - CACHED_SIBLING_MS) start += 1;
+      for (let cursor = start; cursor < end; cursor += 1) {
+        const sibling = lane.cached[cursor]!;
+        if (
+          sibling.id !== snapshot.id &&
+          sibling.inputTokens < snapshot.inputTokens &&
+          sibling.outputTokens <= snapshot.outputTokens
+        ) {
+          drop.add(snapshot.id);
+          break;
+        }
+      }
+    }
+  }
+  return drop;
 }
 
 export function collapseInflatedUsage(events: UsageEvent[]): UsageEvent[] {
   if (events.length < 2) return events.map(repairInflatedTurn);
-  const drop = new Set<string>();
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index];
-    if (!event.sessionId) continue;
-    const duplicate = events.find(
-      (other, otherIndex) =>
-        otherIndex > index &&
-        other.sessionId === event.sessionId &&
-        Math.abs(other.at - event.at) <= 2000 &&
-        sameUsageBuckets(event, other),
-    );
-    if (duplicate) drop.add(event.id);
-  }
+  const drop = doubleReportedIds(events);
   const remaining = events.filter((event) => !drop.has(event.id));
-  for (const event of remaining) {
-    if (event.cacheReadTokens > 0 || event.cacheWriteTokens > 0) continue;
-    if (!event.sessionId || event.inputTokens <= 0) continue;
-    const sibling = remaining.find(
-      (other) =>
-        other.id !== event.id &&
-        other.sessionId === event.sessionId &&
-        other.cacheReadTokens > 0 &&
-        other.inputTokens < event.inputTokens &&
-        other.outputTokens <= event.outputTokens &&
-        Math.abs(other.at - event.at) <= 2500,
-    );
-    if (sibling) drop.add(event.id);
-  }
+  for (const id of cacheShadowedIds(remaining)) drop.add(id);
   return events.filter((event) => !drop.has(event.id)).map(repairInflatedTurn);
 }
 

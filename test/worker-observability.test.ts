@@ -17,9 +17,11 @@ import type { Session } from "../src/lib/types";
 function worker(overrides: Partial<Session> = {}): Session {
   return {
     id: "kid_run",
+    projectId: null,
     parentId: "orch",
     provider: "custom",
     model: "MiniMax-M3",
+    effort: "medium",
     title: "src tree",
     mode: "ask",
     sandbox: "off",

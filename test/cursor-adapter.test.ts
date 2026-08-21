@@ -218,6 +218,7 @@ test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   assert.doesNotMatch(spec.command, /Cursor\.app/i);
   const legacyAuto = buildCursorLaunchSpec({
     ...spec,
+    mode: "ask",
     model: "auto-smart",
     detect: {
       env: { CURSOR_ACP_BIN: "/opt/cursor-agent" },

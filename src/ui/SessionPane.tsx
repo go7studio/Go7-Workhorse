@@ -1,4 +1,4 @@
-import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
@@ -21,7 +21,8 @@ import {
   type TranscriptBlock,
 } from "../lib/turns";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
-import { useActiveSession, useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
+import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { WatchBanners } from "./WatchNotices";
@@ -42,6 +43,7 @@ import { TerminalPane } from "./TerminalPane";
 import { pinNoticesDock } from "../lib/session-dock";
 import {
   countTurnsAboveViewport,
+  createPinScheduler,
   followLatestTurn,
   pinnedToLatest,
   pinToLatest,
@@ -134,8 +136,8 @@ const AssistantTurn = memo(function AssistantTurn({
 });
 
 export function SessionPane() {
-  const session = useActiveSession();
-  const store = useStore();
+  const desk = useStoreSelector(selectSessionPaneDesk, sameSessionPaneDesk);
+  const session = desk.session;
   const [setupOpen, setSetupOpen] = useState(false);
   const [open, setOpen] = useState<ProjectEdit | null>(null);
   const [fileOut, setFileOut] = useState(false);
@@ -160,8 +162,24 @@ export function SessionPane() {
   const editsBarOpenRef = useRef(false);
   const heldEditsRef = useRef<ProjectEdit[]>([]);
   const transcriptGrouper = useRef(createTranscriptGrouper());
+  const pinLatest = useMemo(
+    () =>
+      createPinScheduler(
+        () => {
+          const el = scroller.current;
+          if (el && followBottom.current) pinToLatest(el);
+        },
+        {
+          frame: (run) => requestAnimationFrame(run),
+          cancelFrame: (handle) => cancelAnimationFrame(handle),
+        },
+      ),
+    [],
+  );
+  const toggleSetup = useCallback(() => setSetupOpen((value) => !value), []);
+  const openSetup = useCallback(() => setSetupOpen(true), []);
   const working = session?.status === "running";
-  const project = store.projects.find((item) => item.id === session?.projectId);
+  const project = desk.projects.find((item) => item.id === session?.projectId);
   const localCwd = project ? primaryFolder(project)?.path ?? "" : "";
   const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;
   const roots = useMemo(() => (cwd ? [cwd] : []), [cwd]);
@@ -278,13 +296,25 @@ export function SessionPane() {
     userMoved.current = false;
   }, [session?.id]);
 
+  // Opening a chat and paging in an older window must land on this paint.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
     followLatestClass(el, followBottom.current);
     if (followBottom.current) pinToLatest(el);
     filling.current = false;
-  }, [session?.id, session?.messages, session?.status, paintFrom]);
+  }, [session?.id, paintFrom]);
+
+  // A stream is many commits a frame. One pin per frame is enough, and it
+  // keeps the forced layout off the token path.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    followLatestClass(el, followBottom.current);
+    if (followBottom.current) pinLatest.request();
+  }, [session?.messages, session?.status, pinLatest]);
+
+  useEffect(() => () => pinLatest.stop(), [pinLatest]);
 
   useEffect(() => {
     const thread = scroller.current;
@@ -496,11 +526,11 @@ export function SessionPane() {
               provider={session.provider}
               model={session.model}
               customBotId={session.customBotId}
-              settings={store.settings}
+              settings={desk.settings}
               cwd={cwd}
               vendorSessionId={session.vendorSessionId}
-              onFork={store.forkFrom}
-              onOpenThread={store.selectSession}
+              onFork={desk.forkFrom}
+              onOpenThread={desk.selectSession}
             />
           );
         })}
@@ -535,14 +565,14 @@ export function SessionPane() {
       ) : null}
       <div className="session-notices">
         <GoalBar />
-        <WatchBanners onSwitchModel={() => setSetupOpen(true)} setupOpen={setupOpen} />
+        <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />
       </div>
       {setupOpen && <SessionSetup onClose={() => setSetupOpen(false)} />}
       <Composer
         key={session.id}
         dropRoot={pane}
         setupOpen={setupOpen}
-        onToggleSetup={() => setSetupOpen((value) => !value)}
+        onToggleSetup={toggleSetup}
       />
       {project && terminalOpen && cwd ? <TerminalPane sessionId={session.id} cwd={cwd} onClose={() => setTerminalOpen(false)} /> : null}
       </div>

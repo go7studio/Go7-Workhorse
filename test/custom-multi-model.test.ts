@@ -97,7 +97,20 @@ test("Auto routes every approved model through one connection capacity", () => {
     customBots: [SYNTHETIC],
   };
   const candidates = routingCandidatesForDesk(settings, [
-    { key: "bot:bot_syn", label: "Synthetic", leftPercent: 75, usedPercent: 25, tone: "bot", holding: false },
+    {
+      key: "bot:bot_syn",
+      label: "Synthetic",
+      provider: "custom",
+      leftover: 75,
+      usedPercent: 25,
+      todayTokens: 0,
+      allowedPercent: 100,
+      overPercent: 0,
+      dailyLimit: 100,
+      dailyOver: false,
+      holding: false,
+      notices: [],
+    },
   ]);
   assert.deepEqual(candidates.map((item) => item.model), ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"]);
   assert.equal(candidates.every((item) => item.customBotId === "bot_syn"), true);

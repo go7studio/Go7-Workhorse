@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -222,6 +222,19 @@ function appIconPath() {
         ? "go7-workhorse-clean.png"
         : "go7-workhorse.ico";
   return path.join(root, "assets", "app-icons", name);
+}
+
+function setDockIcon() {
+  if (process.platform !== "darwin" || !app.dock) return;
+  const icon = appIconPath();
+  if (!fs.existsSync(icon)) return;
+  try {
+    const image = nativeImage.createFromPath(icon);
+    if (image.isEmpty()) return;
+    app.dock.setIcon(image);
+  } catch (error) {
+    console.warn("Workhorse could not set its Dock icon", error);
+  }
 }
 
 type Persistable = Record<string, unknown>;
@@ -1272,9 +1285,11 @@ app.whenReady().then(async () => {
 
   debugStartup("creating window");
   createWindow();
+  setDockIcon();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    setDockIcon();
   });
 });
 

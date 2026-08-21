@@ -8,6 +8,7 @@ import {
   isNewerVersion,
   macBundleFromExecPath,
   macInstallerArch,
+  macRefreshRegistrationScript,
   macReplaceScript,
   offerFromRelease,
   winInstallerArgs,
@@ -152,7 +153,49 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /hdiutil detach "\$device"/);
   assert.match(script, /open "\$dest"/);
   assert.match(script, /4242/);
+  assert.match(script, /WORKHORSE_MAC_DOCK_REFRESH/);
+  assert.match(script, /lsregister/);
+  assert.match(script, /persistent-apps/);
+  assert.match(script, /tile\.pop\("book"/);
 
+});
+
+test("replacing the Mac app re-registers the live bundle and drops a stale Dock bookmark", () => {
+  const refresh = macRefreshRegistrationScript();
+  assert.match(refresh, /WORKHORSE_MAC_DOCK_REFRESH/);
+  assert.match(refresh, /lsregister/);
+  assert.match(refresh, /persistent-apps/);
+  assert.match(refresh, /tile\.pop\("book"/);
+  assert.match(refresh, /go7-workhorse-install\.\*\/\*backup\.app/);
+  assert.doesNotMatch(refresh, /backup\.app"/);
+
+  const installer = readFileSync(path.join(ROOT, "scripts", "install-mac.sh"), "utf8");
+  assert.match(installer, /refresh_mac_app_icon "\/Applications\/\$\{APP\}"/);
+  assert.match(installer, /WORKHORSE_MAC_DOCK_REFRESH/);
+  assert.match(installer, /lsregister/);
+  assert.match(installer, /persistent-apps/);
+  assert.match(installer, /tile\.pop\("book"/);
+  assert.doesNotMatch(installer, /Go7 Workhorse .*backup\.app/);
+
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /function setDockIcon\(\)/);
+  assert.match(main, /nativeImage\.createFromPath\(icon\)/);
+  assert.match(main, /app\.dock\.setIcon\(image\)/);
+  assert.match(main, /createWindow\(\);\s*setDockIcon\(\)/);
+
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    build?: {
+      mac?: { icon?: string };
+      extraResources?: Array<{ from?: string; to?: string }>;
+    };
+  };
+  assert.equal(pkg.build?.mac?.icon, "assets/app-icons/go7-workhorse.icns");
+  assert.ok(
+    pkg.build?.extraResources?.some(
+      (resource) => resource.from === "assets/app-icons" && resource.to === "assets/app-icons",
+    ),
+    "the runtime icon directory must be copied into packaged app resources",
+  );
 });
 
 test("a packaged Windows desk service-spawns silent Setup and NSIS relaunches once", () => {

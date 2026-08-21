@@ -268,6 +268,64 @@ export function winWmiCreate(setup: string): { command: string; args: string[] }
   return winWmiCreateCommand(winInstallerCommandLine(setup));
 }
 
+/** Re-register the live bundle and drop a stale Dock bookmark after an in-place replace. */
+export function macRefreshRegistrationScript(destExpr = '"$dest"'): string {
+  return `# WORKHORSE_MAC_DOCK_REFRESH
+# Replacing the .app changes its inode. Dock keeps a bookmark to the old one
+# and shows a blank tile. Re-register the live bundle and drop that bookmark.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ] && [ -d ${destExpr} ]; then
+  "$LSREGISTER" -f ${destExpr} >/dev/null 2>&1 || true
+  for stale in /private/tmp/go7-workhorse-install.*/*backup.app /tmp/go7-workhorse-install.*/*backup.app; do
+    [ -e "$stale" ] || continue
+    "$LSREGISTER" -u "$stale" >/dev/null 2>&1 || true
+  done
+fi
+/usr/bin/touch ${destExpr} 2>/dev/null || true
+if [ -x /usr/bin/python3 ] && [ -d ${destExpr} ]; then
+  /usr/bin/python3 - ${destExpr} <<'PY'
+import plistlib, subprocess, sys, time
+from pathlib import Path
+dest = Path(sys.argv[1]).resolve()
+plist_path = Path.home() / "Library/Preferences/com.apple.dock.plist"
+if not dest.is_dir() or not plist_path.is_file():
+    raise SystemExit(0)
+try:
+    info = plistlib.loads((dest / "Contents/Info.plist").read_bytes())
+except Exception:
+    info = {}
+bundle_id = info.get("CFBundleIdentifier") or "com.go7studio.workhorse"
+label = info.get("CFBundleDisplayName") or info.get("CFBundleName") or dest.stem
+url = dest.as_uri()
+if not url.endswith("/"):
+    url += "/"
+data = plistlib.loads(plist_path.read_bytes())
+changed = False
+for item in data.get("persistent-apps") or []:
+    tile = item.get("tile-data")
+    if not isinstance(tile, dict):
+        continue
+    file_url = str((tile.get("file-data") or {}).get("_CFURLString") or "")
+    bid = str(tile.get("bundle-identifier") or "")
+    if bid != bundle_id and file_url.rstrip("/") != url.rstrip("/"):
+        continue
+    tile.pop("book", None)
+    tile["file-data"] = {"_CFURLString": url, "_CFURLStringType": 15}
+    tile["bundle-identifier"] = bundle_id
+    tile["file-label"] = label
+    item["tile-data"] = tile
+    changed = True
+if not changed:
+    raise SystemExit(0)
+subprocess.run(["killall", "-STOP", "Dock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(0.2)
+plist_path.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_BINARY))
+subprocess.run(["killall", "-9", "Dock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+PY
+fi
+`;
+}
+
 export function macReplaceScript(input: {
   pid: number;
   srcApp: string;
@@ -291,6 +349,7 @@ if [ -n "$device" ]; then
   hdiutil detach "$device" -quiet 2>/dev/null || hdiutil detach "$device" -force -quiet 2>/dev/null || true
 fi
 rm -rf "$tmp" 2>/dev/null || true
+${macRefreshRegistrationScript('"$dest"')}
 open "$dest"
 `;
 }

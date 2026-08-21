@@ -298,6 +298,8 @@ test("FEATURES names the shipped billing groups and new Custom HTTP presets", ()
   assert.match(features, /Kimi Code[\s\S]*unknown/);
   assert.match(features, /Gemini stay unknown|Gemini API[\s\S]*unknown/);
   assert.match(features, /fails closed if the\s+shim is down/);
+  assert.match(features, /instant-chat step/);
+  assert.match(features, /wake: true/);
 });
 
 test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {

@@ -4962,6 +4962,8 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /Add to desk/);
   assert.match(addBot, /Remove from desk/);
   assert.match(addBot, /Your own/);
+  assert.match(addBot, /Grok Bot/);
+  assert.match(addBot, /GrokBotWakeSetup/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Provider/);
   assert.match(addBot, /createCustomBot/);
@@ -4977,7 +4979,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["own"],
+    ["grok-bot", "own"],
   );
   assert.deepEqual(
     addBotChoices({
@@ -4986,7 +4988,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["codex", "own"],
+    ["codex", "grok-bot", "own"],
   );
   assert.doesNotMatch(addBot, /on desk/);
   assert.doesNotMatch(settings, /chip-list/);

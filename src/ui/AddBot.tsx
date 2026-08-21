@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { BOT_COLORS, draftReady } from "../lib/custom-bots";
 import { formatWindow } from "../lib/models";
+import { draftFromProvider, findProvider } from "../lib/provider-catalog";
 import { useStore } from "../lib/store";
 import type { LlmLink } from "../lib/types";
 import { BotForm } from "./BotForm";
+import { GrokBotWakeSetup } from "./GrokBotWakeSetup";
 
 const CATALOG: {
-  id: "grok" | "codex" | "claude" | "cursor" | "own";
+  id: "grok" | "codex" | "claude" | "cursor" | "grok-bot" | "own";
   name: string;
   hint: string;
 }[] = [
@@ -14,13 +16,14 @@ const CATALOG: {
   { id: "codex", name: "Codex", hint: "Local Codex." },
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
   { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },
+  { id: "grok-bot", name: "Grok Bot", hint: "Your Grok Bot, ready for instant chats." },
   { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
-type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor";
+type Stage = "catalog" | "own" | "grok" | "codex" | "claude" | "cursor" | "grok-bot";
 
 export function addBotChoices(llms: Record<"grok" | "codex" | "claude" | "cursor", Pick<LlmLink, "connected">>) {
-  return CATALOG.filter((item) => item.id === "own" || !llms[item.id]?.connected);
+  return CATALOG.filter((item) => item.id === "grok-bot" || item.id === "own" || !llms[item.id]?.connected);
 }
 
 export function AddBot() {
@@ -48,6 +51,19 @@ export function AddBot() {
 
   const pick = (id: (typeof CATALOG)[number]["id"]) => {
     setProbeNote("");
+    if (id === "grok-bot") {
+      const preset = findProvider(id);
+      if (preset) {
+        store.updateCustomLlm({
+          ...draftFromProvider(preset),
+          apiKey: "local",
+          tested: false,
+          source: "manual",
+        });
+      }
+      setStage(id);
+      return;
+    }
     if (id === "own") {
       if (!draft.apiKey.trim() && !draft.baseUrl.trim()) store.refreshCustomLogin();
       setStage("own");
@@ -86,17 +102,19 @@ export function AddBot() {
         </>
       )}
 
-      {stage === "own" && (
+      {(stage === "own" || stage === "grok-bot") && (
         <>
           <header className="project-hero">
             <div className="link-head">
-              <p className="eyebrow">Your own</p>
+              <p className="eyebrow">{stage === "grok-bot" ? "Instant chat" : "Your own"}</p>
               <button className="tiny" type="button" onClick={leaveChoice}>
                 Back
               </button>
             </div>
-            <h2>New bot</h2>
-            {draft.source === "openclaw" ? (
+            <h2>{stage === "grok-bot" ? "Connect Grok Bot" : "New bot"}</h2>
+            {stage === "grok-bot" ? (
+              <p className="lede">Add the local bot, then connect its webhook so Workhorse can wake it for every message.</p>
+            ) : draft.source === "openclaw" ? (
               <p className="row-meta">Imported MiniMax key from OpenClaw config. This is not harness integration.</p>
             ) : draft.source === "env" ? (
               <p className="row-meta">Imported MiniMax from the environment.</p>
@@ -124,8 +142,11 @@ export function AddBot() {
               models: draft.models,
               discovered: draft.discovered,
             }}
+            identityOnly={stage === "grok-bot"}
             onChange={(patch) => store.updateCustomLlm({ ...patch, source: "manual" })}
           />
+
+          {stage === "grok-bot" ? <GrokBotWakeSetup /> : null}
 
           <p className="row-meta">
             {probing

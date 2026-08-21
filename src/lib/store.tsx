@@ -85,6 +85,7 @@ import { mergeStreamedText } from "./markdown";
 import { applyStreamQueues, createStreamCommitScheduler } from "./stream-commit";
 import { APP_VERSION } from "./app-info";
 import type { AppUpdateCheckResult, AppUpdateOffer } from "./app-update";
+import type { GrokBotWakeInput, GrokBotWakeStatus } from "./grok-bot-wake";
 import {
   applyArchiveProject,
   applyCreateWorkhorseProject,
@@ -473,6 +474,9 @@ export type Store = AppState & {
   installExternalMcp: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
   linkConfig: () => Promise<string>;
   linkGrokBotOneshot: () => Promise<string>;
+  grokBotWakeStatus: GrokBotWakeStatus | null;
+  refreshGrokBotWake: () => Promise<GrokBotWakeStatus>;
+  saveGrokBotWake: (input: GrokBotWakeInput) => Promise<GrokBotWakeStatus>;
   installLinkCommand: () => Promise<{ ok: boolean; message?: string }>;
   updateLearning: (patch: Partial<import("./learning-types").LearningSettings>) => void;
   watchNotices: WatchNotice[];
@@ -6990,6 +6994,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return (await window.workhorse?.linkGrokBotOneshot?.()) ?? "";
   }, []);
 
+  const [grokBotWakeStatus, setGrokBotWakeStatus] = useState<GrokBotWakeStatus | null>(null);
+  const refreshGrokBotWake = useCallback(async () => {
+    const status = await window.workhorse?.grokBotWakeStatus?.() ?? {
+      configured: false,
+      shimReachable: false,
+      ready: false,
+      message: "Workhorse desktop only.",
+    };
+    setGrokBotWakeStatus(status);
+    return status;
+  }, []);
+  const saveGrokBotWake = useCallback(async (input: GrokBotWakeInput) => {
+    const status = await window.workhorse?.saveGrokBotWake?.(input) ?? {
+      configured: false,
+      shimReachable: false,
+      ready: false,
+      message: "Workhorse desktop only.",
+    };
+    setGrokBotWakeStatus(status);
+    return status;
+  }, []);
+
+  useEffect(() => {
+    if (ready) void refreshGrokBotWake();
+  }, [ready, refreshGrokBotWake]);
+
   const installLinkCommand = useCallback(async () => {
     const result = await window.workhorse?.installLinkCommand?.();
     return result ?? { ok: false, message: "Workhorse desktop only." };
@@ -7289,6 +7319,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       installExternalMcp,
       linkConfig,
       linkGrokBotOneshot,
+      grokBotWakeStatus,
+      refreshGrokBotWake,
+      saveGrokBotWake,
       installLinkCommand,
       updateLearning,
       watchNotices,
@@ -7414,6 +7447,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       installExternalMcp,
       linkConfig,
       linkGrokBotOneshot,
+      grokBotWakeStatus,
+      refreshGrokBotWake,
+      saveGrokBotWake,
       installLinkCommand,
       updateLearning,
       watchNotices,

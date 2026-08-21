@@ -383,6 +383,10 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /user's Mac/);
   assert.match(text, /workhorse capabilities/);
   assert.match(text, /Install workhorse command/);
+  assert.match(text, /active routine named Workhorse/);
+  assert.match(text, /When a webhook fires/);
+  assert.match(text, /Grok Bot → Instant chat/);
+  assert.match(text, /Never ask for the key or put it in chat/);
   assert.match(text, /WORKHORSE_MCP_PROFILE/);
   assert.match(text, /workhorse_delegate/);
   assert.match(text, /fromSessionId/);

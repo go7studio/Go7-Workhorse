@@ -50,12 +50,14 @@ export function asProviderId(value: string | undefined): ProviderId {
   return isProviderId(value) ? value : "grok";
 }
 
-/** Visible sidebar subtitle: model · effort · mode. Not the last-message preview. */
+/** Visible sidebar subtitle: model · effort, plus mode only when it is not Always approve. */
 /**
  * The sidebar line under a chat title. In auto mode the model and effort are
  * decided on every send, so naming the last pick here read as a promise:
  * a chat showed "Composer 2.5 · High" and the prompt went to Kimi K3. The
  * line says Auto instead; the reply header says what actually answered.
+ * Always approve is the usual permission, so the row omits it; Ask, Accept
+ * edits, and Plan still show because they change what the chat will do.
  */
 export function formatChatSidebar(input: {
   provider: string;
@@ -65,7 +67,8 @@ export function formatChatSidebar(input: {
   botName?: string;
   routingMode?: string;
 }): string {
-  const mode = modeLabel(parsePermissionMode(input.mode ?? "") ?? "ask");
+  const parsed = parsePermissionMode(input.mode ?? "") ?? "ask";
+  const mode = parsed === "always-approve" ? "" : modeLabel(parsed);
   if (input.routingMode === "auto") {
     return ["Auto", effortLabel((input.effort as EffortLevel | null) ?? null), mode].filter(Boolean).join(" · ");
   }

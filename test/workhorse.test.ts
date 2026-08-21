@@ -7931,6 +7931,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(boxed.sandbox, "read-only");
   assert.equal(boxed.vendorSessionId, undefined);
   assert.equal(formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "medium", mode: "ask" }), "Grok 4.6 · Medium · Ask");
+  assert.equal(formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "high", mode: "always-approve" }), "Grok 4.6 · High");
   assert.equal(
     workerSidebarLabel({
       id: "worker_terra",

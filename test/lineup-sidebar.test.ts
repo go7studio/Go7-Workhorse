@@ -61,16 +61,20 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
   // The row under the chat title.
   assert.equal(
     formatChatSidebar({ provider: "cursor", model: "composer-2.5", effort: "high", mode: "always-approve", routingMode: "auto" }),
-    "Auto · High · Always approve",
+    "Auto · High",
   );
   assert.equal(
     formatChatSidebar({ provider: "cursor", model: "composer-2.5", effort: "high", mode: "always-approve", routingMode: "manual" }),
-    "Composer 2.5 · High · Always approve",
+    "Composer 2.5 · High",
   );
   assert.equal(
     formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "medium", mode: "ask" }),
     "Grok 4.6 · Medium · Ask",
-    "no routingMode at all reads as before",
+    "Ask still shows because it is not the usual permission",
+  );
+  assert.equal(
+    formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "high", mode: "plan" }),
+    "Grok 4.6 · High · Plan",
   );
   // The row passes the mode through, and the composer chip — Composer's
   // setup-trigger, the one that actually renders — says Auto too. (An older

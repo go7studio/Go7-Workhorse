@@ -748,7 +748,7 @@ test("the daily-over banner is a short used-vs-expected line", () => {
       watch: DEFAULT_WATCH,
       customBots: [],
       usageBudgets: {},
-      llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+      llms: { ...DEFAULT_SETTINGS.llms, grok: { ...DEFAULT_SETTINGS.llms.grok, connected: true } },
     },
     usage: [],
     plans: { grok: plan(39, { resetsAt: grokReset }) },
@@ -771,12 +771,7 @@ test("the daily-over banner is a short used-vs-expected line", () => {
       watch: DEFAULT_WATCH,
       customBots: [],
       usageBudgets: {},
-      llms: {
-        grok: { connected: false },
-        claude: { connected: false },
-        codex: { connected: false },
-        cursor: { connected: true },
-      },
+      llms: { ...DEFAULT_SETTINGS.llms, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
     },
     usage: [],
     plans: {

@@ -385,6 +385,7 @@ test("Fable leftover is the extra pool, not the shared Claude week", () => {
       usedPercent: 13,
       leftPercent: 87,
       period: "weekly",
+      prepaidBalance: 0,
       products: [
         { product: "weekly_all", label: "All models", usagePercent: 13, resetsAt },
         { product: "extra_fable", label: "Fable extra", usagePercent: 40, resetsAt },

@@ -1282,7 +1282,11 @@ test("GrokSessionHost is the Electron spawn owner and does not call other vendor
   const grokBranch = store.slice(store.indexOf("window.workhorse.grokPrompt"));
   assert.doesNotMatch(grokBranch.slice(0, grokBranch.indexOf("Preview only")), /Preview only/);
   assert.ok(store.indexOf('status: "running"') < store.lastIndexOf("grokPrompt"));
-  assert.match(store, /Grok finished without a visible reply/);
+  assert.match(store, /settleEmptyAssistantText/);
+  assert.match(
+    readFileSync(path.join(ROOT, "src", "lib", "vendor-bridge.ts"), "utf8"),
+    /finished without a visible reply/,
+  );
   assert.match(agent, /spawnGrokProcess/);
   // The launch spec is built by the host that owns the spawn, not by the agent
   // that receives one. Asserting it on grok-agent locked an incidental import.

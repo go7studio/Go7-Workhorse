@@ -4888,7 +4888,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /function LooseChats/);
   assert.match(sidebar, /section-label">Projects[\s\S]*<LooseChats/);
   assert.match(css, /\.project-head \.twist::after/);
-  assert.match(css, /\.project-head \.twist:hover::before/);
+  assert.match(css, /\.project-head:hover \.twist::before/);
   assert.match(css, /--project-folder-closed/);
   assert.match(css, /--project-folder-open/);
   assert.match(sidebar, /className="row-title">\{project\.name\}/);

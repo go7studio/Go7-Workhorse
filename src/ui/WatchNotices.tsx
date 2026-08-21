@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useActiveSession, useStore } from "../lib/store";
+import { memo, useEffect, useMemo, useRef } from "react";
+import { useStoreSelector } from "../lib/store";
+import { sameWatchDesk, selectWatchDesk } from "../lib/store-select";
 import {
   evaluateWatchHold,
   isDesktopWatchNotice,
@@ -16,15 +17,15 @@ function vendorAskTitle(vendor: { name: string; status?: string }): string {
   return `Use ${vendor.name} in this chat?`;
 }
 
-export function WatchBanners({
+export const WatchBanners = memo(function WatchBanners({
   onSwitchModel,
   setupOpen = false,
 }: {
   onSwitchModel?: () => void;
   setupOpen?: boolean;
 } = {}) {
-  const store = useStore();
-  const session = useActiveSession();
+  const store = useStoreSelector(selectWatchDesk, sameWatchDesk);
+  const session = store.session;
   const ownKey = session ? watchKeyForSession(session) : null;
   const pending = store.watchHold && session && store.watchHold.sessionId === session.id ? store.watchHold : null;
   const live = useMemo(() => {
@@ -142,11 +143,11 @@ export function WatchBanners({
       ))}
     </div>
   );
-}
+});
 
 export function WatchNotices() {
-  const store = useStore();
-  const session = useActiveSession();
+  const store = useStoreSelector(selectWatchDesk, sameWatchDesk);
+  const session = store.session;
   const seenDesktop = useRef(new Set<string>());
 
   useEffect(() => {

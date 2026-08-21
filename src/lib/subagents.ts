@@ -1065,7 +1065,8 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
 }
 
 export type SpawnAdmissionInput = {
-  parent?: { parentId?: string | null; hidden?: boolean; projectId?: string | null } | null;
+  // `agentRun` is read here too: deskRoleOf uses it to spot an auditor parent.
+  parent?: { parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: unknown } | null;
   projectFolder?: string;
   folder?: string;
   prompt: string;

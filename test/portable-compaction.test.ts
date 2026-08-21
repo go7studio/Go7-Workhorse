@@ -66,8 +66,6 @@ test("portable compact shrinks occupancy and leaves leftover and Watch alone", (
     settings: {
       watch: { ...DEFAULT_WATCH, lockDaily: false },
       customBots: [],
-      usageBudgets: {},
-      llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
     },
     plans: {
       grok: { usedPercent: 33, leftPercent: leftoverPercent, period: "weekly", prepaidBalance: 0, products: [] },

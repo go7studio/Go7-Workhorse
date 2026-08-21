@@ -34,7 +34,7 @@ test("leftover helpers keep unknown unknown and unlimited off 100", () => {
   assert.equal(weeklyPlanLeftover(unlimited), undefined);
   assert.notEqual(weeklyPlanLeftover(unlimited), 0);
   assert.notEqual(weeklyPlanLeftover(unlimited), 100);
-  const card = { focus: "bot:bot_mini", provider: "custom" as const, key: "bot_mini" };
+  const card = { focus: "bot:bot_mini" as const, provider: "custom" as const, key: "bot_mini" };
   assert.equal(planRingView(card, { custom: { bot_mini: unlimited } }, "weekly")?.label, "∞");
   const capped = leftoverForCard(
     { focus: "claude", provider: "claude", key: "claude" },
@@ -115,7 +115,7 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
       { product: "weekly", label: "Weekly", usagePercent: 47.15034583333333 },
     ],
   };
-  const card = (key: string) => ({ focus: `bot:${key}`, provider: "custom" as const, key });
+  const card = (key: string) => ({ focus: `bot:${key}` as const, provider: "custom" as const, key });
 
   assert.deepEqual(planAllowance(minimax), { status: "unmetered", why: "dead-gauge" });
   assert.equal(planRingView(card("m"), { custom: { m: minimax } })?.label, "∞");

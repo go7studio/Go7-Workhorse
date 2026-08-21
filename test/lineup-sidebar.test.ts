@@ -61,7 +61,7 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
   // The row under the chat title.
   assert.equal(
     formatChatSidebar({ provider: "cursor", model: "composer-2.5", effort: "high", mode: "always-approve", routingMode: "auto" }),
-    "Auto · Always approve",
+    "Auto · High · Always approve",
   );
   assert.equal(
     formatChatSidebar({ provider: "cursor", model: "composer-2.5", effort: "high", mode: "always-approve", routingMode: "manual" }),
@@ -79,7 +79,10 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
   assert.match(read("src/ui/ChatRow.tsx"), /routingMode: session\.routingMode/);
   const composer = read("src/ui/Composer.tsx");
   const chip = composer.slice(composer.indexOf('className={`setup-trigger'), composer.indexOf('className={`setup-trigger') + 1400);
-  assert.match(chip, /session\.routingMode === "auto"\s*\?\s*`Auto · \$\{shortModeLabel\(session\.mode\)\}`/);
+  assert.match(
+    chip,
+    /session\.routingMode === "auto"\s*\?\s*`Auto\$\{session\.effort \? ` · \$\{effortLabel\(session\.effort\)\}` : ""\} · \$\{shortModeLabel\(session\.mode\)\}`/,
+  );
   assert.match(chip, /className="dot auto"/);
 });
 

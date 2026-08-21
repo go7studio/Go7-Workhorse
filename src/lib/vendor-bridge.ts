@@ -40,6 +40,34 @@ export function vendorEmptyReply(provider: ProviderId): string {
   return `${vendorAgentLabel(provider)} finished without a visible reply.`;
 }
 
+/** Markdown image embeds (e.g. GenerateImage) count as a visible reply on their own. */
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\([^)]+\)/;
+
+/**
+ * Whether assistant text already shows something — prose or an image embed.
+ * Promise-path finish writers must not overwrite either with vendorEmptyReply.
+ */
+export function assistantHasVisibleReply(text: string | undefined | null): boolean {
+  const value = (text ?? "").trim();
+  if (!value) return false;
+  return MARKDOWN_IMAGE_RE.test(value) || value.length > 0;
+}
+
+/**
+ * Did this turn leave thought or tool messages after the assistant bubble?
+ * Thinking and tool calls land as their own messages — ask the transcript.
+ */
+export function turnWorkedAfterAssistant(
+  messages: ReadonlyArray<{ id: string; kind?: string }>,
+  assistantId: string,
+): boolean {
+  const at = messages.findIndex((message) => message.id === assistantId);
+  return (
+    at >= 0 &&
+    messages.slice(at + 1).some((message) => message.kind === "thought" || message.kind === "tool")
+  );
+}
+
 /**
  * What to write in an assistant turn that ended with no prose.
  *
@@ -62,6 +90,26 @@ export function turnEndedWithoutProse(input: {
   if (input.stopReason === "cancelled") return "Stopped.";
   if (input.worked) return "";
   return vendorEmptyReply(input.provider);
+}
+
+/**
+ * Fill an empty assistant bubble after a vendor *Prompt promise returns.
+ * Prefer streamed text / markdown images; otherwise ask the transcript via `worked`.
+ */
+export function settleEmptyAssistantText(input: {
+  provider: ProviderId;
+  reply?: string | null;
+  existingText?: string | null;
+  stopReason?: string;
+  worked: boolean;
+}): string {
+  if (assistantHasVisibleReply(input.existingText)) return (input.existingText ?? "").trim();
+  if (assistantHasVisibleReply(input.reply)) return (input.reply ?? "").trim();
+  return turnEndedWithoutProse({
+    provider: input.provider,
+    stopReason: input.stopReason,
+    worked: input.worked,
+  });
 }
 
 export function previewOnlyReply(providerName: string, projectName: string, folders: string[], text: string): string {

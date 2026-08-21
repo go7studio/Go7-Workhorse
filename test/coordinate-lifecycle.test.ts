@@ -5,7 +5,6 @@ import {
   applyChildIdleSync,
   childReportText,
   emptyLineup,
-  LINEUP_FINISHED_NOTICE,
   lineupIsTerminal,
   maybeEnqueueLineupJoin,
   reconcilePersistedLineups,
@@ -14,8 +13,8 @@ import {
   chooseRoutingDecision,
   describeRoutingMiss,
   type RoutingCandidate,
-  type RoutingSettings,
 } from "../src/lib/routing";
+import type { RoutingSettings } from "../src/lib/types";
 import { normalizeSession } from "../src/lib/session";
 import {
   classifyMissionParticipants,

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -47,6 +46,7 @@ const TOP_LEVEL = new Set([
   "src",
   "test",
   "tsconfig.json",
+  "tsconfig.test.json",
   "vite.config.ts",
 ]);
 
@@ -137,6 +137,34 @@ test("the version is a single semantic version, and the changelog knows it", asy
     changelog.includes(`## [${version}]`),
     `CHANGELOG.md has no entry for ${version}. Write it in the commit that bumps the version.`,
   );
+});
+
+/**
+ * The `test` script is a hand-maintained list of files, so a new suite runs
+ * only if someone remembers to add it. `third-party-notices.test.ts` sat on
+ * disk passing five tests that CI never executed. This closes both directions:
+ * nothing on disk goes unrun, and nothing listed has been deleted underneath.
+ */
+test("every suite on disk is the suite `npm test` runs", () => {
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  const listed = pkg.scripts.test
+    .split(/\s+/)
+    .filter((token) => token.startsWith("test/") && token.endsWith(".test.ts"))
+    .sort();
+  const onDisk = readdirSync(path.join(ROOT, "test"))
+    .filter((name) => name.endsWith(".test.ts"))
+    .map((name) => `test/${name}`)
+    .sort();
+
+  const unrun = onDisk.filter((file) => !listed.includes(file));
+  assert.deepEqual(unrun, [], `on disk but never run: ${unrun.join(", ")}. Add each to the "test" script.`);
+
+  const gone = listed.filter((file) => !onDisk.includes(file));
+  assert.deepEqual(gone, [], `named by the "test" script but missing: ${gone.join(", ")}.`);
+
+  assert.deepEqual([...new Set(listed)], listed, "a suite is named twice in the \"test\" script");
 });
 
 test("the public tree does not ship operator product law", () => {

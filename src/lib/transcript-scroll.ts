@@ -22,6 +22,41 @@ export function pinToLatest(el: { scrollHeight: number; scrollTop: number }): vo
   el.scrollTop = el.scrollHeight;
 }
 
+export type FrameClock = {
+  frame: (run: () => void) => number;
+  cancelFrame: (handle: number) => void;
+};
+
+/**
+ * One pin per frame, however many tokens land in it. `pinToLatest` reads
+ * `scrollHeight` and writes `scrollTop`, which forces layout, so calling it
+ * once per streamed token is a forced layout per token. Requests inside the
+ * same frame collapse into the one that is already scheduled.
+ */
+export function createPinScheduler(
+  pin: () => void,
+  clock: FrameClock,
+): { request: () => void; stop: () => void } {
+  let handle = 0;
+  let waiting = false;
+  return {
+    request() {
+      if (waiting) return;
+      waiting = true;
+      handle = clock.frame(() => {
+        waiting = false;
+        handle = 0;
+        pin();
+      });
+    },
+    stop() {
+      if (waiting) clock.cancelFrame(handle);
+      waiting = false;
+      handle = 0;
+    },
+  };
+}
+
 export function pinnedToTop(el: { scrollTop: number }, slack: number): boolean {
   return el.scrollTop <= slack;
 }

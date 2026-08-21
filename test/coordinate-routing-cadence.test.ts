@@ -7,8 +7,8 @@ import {
   weeklyDrawState,
   rankRoutingCandidates,
   type RoutingCandidate,
-  type RoutingSettings,
 } from "../src/lib/routing";
+import type { RoutingSettings } from "../src/lib/types";
 
 /**
  * Regression for P0-4: capacity routing is miscalculated and outvotes fit.
@@ -114,7 +114,7 @@ function makeCandidate(
       intelligence,
       speed: 3,
       cost: 3,
-      inputs: { text: true },
+      inputs: { text: true, images: false, documents: false, audio: false, video: false },
       local: false,
     },
     capacity: extra.capacity,
@@ -123,6 +123,7 @@ function makeCandidate(
 }
 
 const baseSettings: RoutingSettings = {
+  enabled: true,
   capacityAware: true,
   preferExcess: false,
   reservePercent: 15,

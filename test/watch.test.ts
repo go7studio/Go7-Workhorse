@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { isSettingsSection, normalizeSettings } from "../src/lib/settings";
-import type { CustomBot, GrokPlanUsage } from "../src/lib/types";
+import { DEFAULT_SETTINGS, isSettingsSection, normalizeSettings } from "../src/lib/settings";
+import type { CustomBot, GrokPlanUsage, Settings } from "../src/lib/types";
 import {
   CAPACITY_SNAPSHOT_VERSION,
   CAPACITY_STALE_AFTER_MS,
@@ -60,6 +60,12 @@ const bot: CustomBot = {
   createdAt: 1,
 };
 
+/** Watch reads all five links. A fixture names the one or two it is about. */
+const links = (over: Partial<Settings["llms"]> = {}): Settings["llms"] => ({
+  ...structuredClone(DEFAULT_SETTINGS.llms),
+  ...over,
+});
+
 const plan = (left: number, extra?: Partial<GrokPlanUsage>): GrokPlanUsage => ({
   usedPercent: 100 - left,
   leftPercent: left,
@@ -110,12 +116,7 @@ test("monthly Cursor watch uses the billing month, not 7 days", () => {
     watch: DEFAULT_WATCH,
     customBots: [] as CustomBot[],
     usageBudgets: {},
-    llms: {
-      grok: { connected: false },
-      claude: { connected: false },
-      codex: { connected: false },
-      cursor: { connected: true },
-    },
+    llms: links({ cursor: { connected: true } }),
   };
   const statuses = watchVendorStatuses({
     settings,
@@ -159,7 +160,7 @@ test("unused days stack so day 4 can spend 60% and day 2 locks only past 30%", (
     watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 },
     customBots: [bot],
     usageBudgets: {},
-    llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+    llms: links({ grok: { connected: true } }),
   };
 
   const off = evaluateWatchHold({
@@ -243,11 +244,11 @@ test("Watch hides bots that are disabled on the desk", () => {
     settings: {
       watch: { ...DEFAULT_WATCH },
       usageBudgets: {},
-      llms: {
+      llms: links({
         grok: { connected: true },
         claude: { connected: true, enabled: false },
         codex: { connected: true },
-      },
+      }),
       customBots: [{ ...bot, enabled: false }],
     },
     usage: [],
@@ -267,7 +268,7 @@ test("leftover numbers stay visible on cards without a second hold setting", () 
     settings: {
       watch: { ...DEFAULT_WATCH, lockDaily: false },
       usageBudgets: {},
-      llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+      llms: links({ grok: { connected: true } }),
       customBots: [bot],
     },
     usage: [],
@@ -428,8 +429,6 @@ test("Watch settings and send hold are wired through the desk", () => {
       settings: {
         watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 },
         customBots: [bot],
-        usageBudgets: {},
-        llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
       },
       plans: { grok: plan(58) },
       permits: { grok: { sessions: { sess_g: today } } },
@@ -468,7 +467,7 @@ test("clicking a bot opts it into the day bank and leaves others free", () => {
     watch: { ...DEFAULT_WATCH, lockDaily: true, lockKeys: ["codex"] },
     customBots: [bot],
     usageBudgets: {},
-    llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: true } },
+    llms: links({ grok: { connected: true }, codex: { connected: true } }),
   };
   assert.equal(
     evaluateWatchHold({
@@ -528,7 +527,7 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 },
     customBots: [bot],
     usageBudgets: {},
-    llms: { grok: { connected: true }, claude: { connected: true, enabled: false }, codex: { connected: false } },
+    llms: links({ grok: { connected: true }, claude: { connected: true, enabled: false } }),
   };
   const rows = deskCallCatalog({
     settings,
@@ -673,7 +672,7 @@ test("desk roster assigns Cursor Auto to the API pool it actually uses", () => {
       watch: { ...DEFAULT_WATCH, lockDaily: false },
       customBots: [],
       usageBudgets: {},
-      llms: { cursor: { connected: true } },
+      llms: links({ cursor: { connected: true } }),
     },
     usage: [],
     plans: {},
@@ -694,11 +693,11 @@ test("available LLMs include a keyed custom bot when stock vendors are a no-go",
       watch: { ...DEFAULT_WATCH, lockDaily: true, dailyLimitPercent: 15 },
       customBots: [bot],
       usageBudgets: {},
-      llms: {
+      llms: links({
         grok: { connected: true },
         claude: { connected: true, enabled: false },
         codex: { connected: true },
-      },
+      }),
     },
     usage: [],
     plans: {
@@ -749,7 +748,7 @@ test("the daily-over banner is a short used-vs-expected line", () => {
       watch: DEFAULT_WATCH,
       customBots: [],
       usageBudgets: {},
-      llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+      llms: { ...DEFAULT_SETTINGS.llms, grok: { ...DEFAULT_SETTINGS.llms.grok, connected: true } },
     },
     usage: [],
     plans: { grok: plan(39, { resetsAt: grokReset }) },
@@ -772,12 +771,7 @@ test("the daily-over banner is a short used-vs-expected line", () => {
       watch: DEFAULT_WATCH,
       customBots: [],
       usageBudgets: {},
-      llms: {
-        grok: { connected: false },
-        claude: { connected: false },
-        codex: { connected: false },
-        cursor: { connected: true },
-      },
+      llms: { ...DEFAULT_SETTINGS.llms, cursor: { ...DEFAULT_SETTINGS.llms.cursor, connected: true } },
     },
     usage: [],
     plans: {
@@ -814,7 +808,7 @@ test("a full context window never holds a send the way a spent daily bank does",
     watch: { ...DEFAULT_WATCH, lockDaily: true },
     customBots: [bot],
     usageBudgets: {},
-    llms: { grok: { connected: true }, claude: { connected: false }, codex: { connected: false } },
+    llms: links({ grok: { connected: true } }),
   };
   assert.equal(occupancyCannotHoldSend(99_000, 100_000), null);
   const unlocked = evaluateWatchHold({
@@ -843,7 +837,7 @@ test("a vaulted custom bot is callable without a plaintext key", () => {
       watch: { ...DEFAULT_WATCH, lockDaily: false },
       customBots: [vaulted],
       usageBudgets: {},
-      llms: { grok: { connected: false }, claude: { connected: false }, codex: { connected: false } },
+      llms: links(),
     },
     usage: [],
     plans: { custom: { bot_minimax: plan(73) } },
@@ -936,12 +930,7 @@ test("projectCapacitySnapshot keeps Cursor pools and one custom-account row, dro
       },
     ],
     usageBudgets: {},
-    llms: {
-      grok: { connected: false },
-      claude: { connected: false },
-      codex: { connected: false },
-      cursor: { connected: true },
-    },
+    llms: links({ cursor: { connected: true } }),
   };
   const plans = {
     cursor: {

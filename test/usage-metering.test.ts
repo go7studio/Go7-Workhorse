@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { acpUpdateUsageSource, classifyAcpUpdate, parseGrokUsage } from "../electron/grok-agent";
+import { acpUpdateUsageSource, classifyAcpUpdate } from "../electron/grok-agent";
 import { parseCustomUsage } from "../electron/custom-http";
 import { largestKnownContextWindow } from "../src/lib/models";
 import {
@@ -64,7 +64,7 @@ test("Grok turn_completed is the turn total and replaces every earlier snapshot"
   });
   if (turn.kind !== "usage") throw new Error("expected usage");
   assert.equal(turn.usage.source, "turn");
-  const folded = finalizeTurnUsage([...snapshots, turn.usage as UsageDraft & { provider: "grok"; model: string }].map((d) => ({ ...KIMI, provider: "grok" as const, model: "grok-4.6", ...d })));
+  const folded = finalizeTurnUsage([...snapshots, turn.usage as UsageDraft & { provider: "grok"; model: string }].map((d) => ({ ...KIMI, ...d })));
   assert.equal(folded.inputTokens, 66_494, "fresh = inclusive prompt minus cache");
   assert.equal(folded.outputTokens, 5202);
   assert.equal(folded.cacheReadTokens, 461_440);

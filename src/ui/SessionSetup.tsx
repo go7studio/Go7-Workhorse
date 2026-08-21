@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
-import { defaultModel, effortStopAt, effortStopPos, effortsFor, findModel, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
+import { defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, findModel, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
@@ -337,7 +337,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
                 <div>
                   <strong>Reasoning level</strong>
                 </div>
-                <span className="setup-current">Auto</span>
+                <span className="setup-current">{session.effort ? effortLabel(session.effort) : "Auto"}</span>
               </div>
               <p className="row-meta">Picked with the model for each message. Choose a provider above to set it yourself.</p>
             </section>

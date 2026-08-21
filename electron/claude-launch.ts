@@ -50,9 +50,11 @@ export type ClaudeSessionMeta = GrokSessionMeta & {
   };
 };
 
-export type ClaudeLaunchSpec = GrokLaunchSpec & {
+export type ClaudeLaunchSpec = Omit<GrokLaunchSpec, "sessionParams"> & {
   env?: Record<string, string>;
   permissionMode: ClaudePermissionMode;
+  // The builder puts a ClaudeSessionMeta here; say so, or callers only see Grok's.
+  sessionParams: Omit<GrokLaunchSpec["sessionParams"], "_meta"> & { _meta?: ClaudeSessionMeta };
 };
 
 const DEFAULT_MODEL = "claude-sonnet-5";

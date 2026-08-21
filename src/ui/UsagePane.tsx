@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import { FuelRing } from "./FuelRing";
 import { modelsFor, shortModelName, usageModelLabel } from "../lib/models";
 import { isCursorWatchKey } from "../lib/cursor-lane";
-import { useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
+import { sameUsageDesk, selectUsageDesk } from "../lib/store-select";
 import type { ProviderId, UsageRange } from "../lib/types";
 import { ContextMeter } from "./ContextMeter";
 import {
@@ -11,6 +12,7 @@ import {
   customBotUsageEvents,
   cursorLaneEvents,
   deskUsageCards,
+  leftoverFetchKnown,
   leftoverForCard,
   leftoverMissingCopy,
   planRingView,
@@ -346,9 +348,10 @@ export function UsagePane({
     refreshCursorPlan,
     customPlans,
     customPlanKnown,
+    vendorPlanKnown,
     refreshCustomPlans,
     settings,
-  } = useStore();
+  } = useStoreSelector(selectUsageDesk, sameUsageDesk);
   const [focus, setFocus] = useState<Focus>("overview");
   const [claudeWindow, setClaudeWindowState] = useState(
     () => planWindowByFocus.get("overview") ?? "weekly_all",
@@ -638,7 +641,12 @@ export function UsagePane({
                   {planCopy ??
                     leftoverMissingCopy({
                       hasKey: focused.provider !== "custom" || Boolean(focusedBot?.apiKey?.trim()),
-                      fetchKnown: focused.provider === "custom" && Boolean(focusedBot && customPlanKnown[focusedBot.id]),
+                      fetchKnown: leftoverFetchKnown({
+                        provider: focused.provider,
+                        botId: focusedBot?.id,
+                        vendorPlanKnown,
+                        customPlanKnown,
+                      }),
                       canLoad: planLoaderFor(focused),
                       planName,
                     })}

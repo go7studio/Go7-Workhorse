@@ -212,9 +212,9 @@ test("Kimi and Gemini identity headers stay truthful Workhorse clients", async (
   assert.equal(miniHeaders["x-goog-api-client"], undefined);
 
   const seen: Array<{ url: string; headers: Record<string, string> }> = [];
-  const capture = async (url: string | URL, init?: RequestInit) => {
+  const capture = async (url: URL | RequestInfo, init?: RequestInit) => {
     const headers = Object.fromEntries(new Headers(init?.headers).entries());
-    seen.push({ url: String(url), headers });
+    seen.push({ url: url instanceof Request ? url.url : String(url), headers });
     return new Response(
       [
         'data: {"choices":[{"delta":{"content":"pong"}}]}\n\n',

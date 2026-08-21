@@ -1,4 +1,4 @@
-import { isDraftChat, lastTalkedAt } from "./chats";
+import { isDraftChat, isLiveChat, sidebarOrderAt } from "./chats";
 import { nestProjectChats } from "./lineup";
 import { chatLinksFromSessions, type ChatLink } from "./tool-labels";
 import type { Session } from "./types";
@@ -12,14 +12,14 @@ export type SidebarChatIndex = {
   parentsById: Map<string, Session>;
 };
 
-function recentFirst(activityById: Map<string, number>) {
+function recentFirst(orderById: Map<string, number>) {
   return (left: Session, right: Session) =>
-    (activityById.get(right.id) ?? 0) - (activityById.get(left.id) ?? 0);
+    (orderById.get(right.id) ?? 0) - (orderById.get(left.id) ?? 0);
 }
 
-function nestedActivityAt(session: NestedSidebarSession, activityById: Map<string, number>): number {
-  let latest = activityById.get(session.id) ?? 0;
-  for (const worker of session.workers) latest = Math.max(latest, activityById.get(worker.id) ?? 0);
+function nestedOrderAt(session: NestedSidebarSession, orderById: Map<string, number>): number {
+  let latest = orderById.get(session.id) ?? 0;
+  for (const worker of session.workers) latest = Math.max(latest, orderById.get(worker.id) ?? 0);
   return latest;
 }
 
@@ -28,7 +28,7 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   const live = new Map<string | null, Session[]>();
   const archived = new Map<string | null, Session[]>();
   const parentsById = new Map(sessions.map((session) => [session.id, session]));
-  const activityById = new Map(sessions.map((session) => [session.id, lastTalkedAt(session) ?? 0]));
+  const orderById = new Map(sessions.map((session) => [session.id, sidebarOrderAt(session)]));
   for (const session of sessions) {
     if (isDraftChat(session)) continue;
     if (session.hidden && !session.parentId) continue;
@@ -39,16 +39,15 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
     else target.set(projectId, [session]);
   }
   const liveByProject = new Map<string | null, NestedSidebarSession[]>();
-  const compareRecent = recentFirst(activityById);
+  const compareRecent = recentFirst(orderById);
   for (const [projectId, rows] of live) {
     rows.sort(compareRecent);
     const nested = nestProjectChats(rows);
-    const nestedActivityById = new Map(
-      nested.map((session) => [session.id, nestedActivityAt(session, activityById)]),
+    const nestedOrderById = new Map(
+      nested.map((session) => [session.id, nestedOrderAt(session, orderById)]),
     );
     nested.sort(
-      (left, right) =>
-        (nestedActivityById.get(right.id) ?? 0) - (nestedActivityById.get(left.id) ?? 0),
+      (left, right) => (nestedOrderById.get(right.id) ?? 0) - (nestedOrderById.get(left.id) ?? 0),
     );
     liveByProject.set(projectId, nested);
   }
@@ -65,8 +64,7 @@ function lastUser(messages: Session["messages"]) {
 }
 
 function sameLiveTools(left: Session, right: Session): boolean {
-  const live = (session: Session) => session.status === "running" || session.status === "needs-input";
-  if (!live(left) && !live(right)) return true;
+  if (!isLiveChat(left) && !isLiveChat(right)) return true;
   const leftUser = lastUser(left.messages);
   const rightUser = lastUser(right.messages);
   if (

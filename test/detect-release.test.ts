@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-// @ts-expect-error — plain .mjs release script, no types
 import { manifestVersionFrom, releaseDecision, versionFrom } from "../scripts/detect-release.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

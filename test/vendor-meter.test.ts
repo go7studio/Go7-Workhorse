@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { leftoverForCard, weeklyPlanLeftover } from "../src/lib/usage";
+import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, weeklyPlanLeftover } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
 import { CUSTOM_METERS } from "../src/lib/custom-meters";
@@ -114,6 +114,93 @@ test("prepaid custom meters fill balance and do not invent leftover percent", ()
     leftoverForCard({ focus: "bot:bot_ds", provider: "custom", key: "bot_ds" }, plans)?.prepaidBalance,
     leftoverForCard({ focus: "bot:bot_nv", provider: "custom", key: "bot_nv" }, plans)?.prepaidBalance,
   );
+});
+
+// A missing official meter stays unknown, and a 404 is not empty. Before the
+// built-in vendors had a `vendorPlanKnown` mark, a failed Grok/Claude/Codex/
+// Cursor fetch read "Loading weekly plan usage…" forever.
+test("a built-in meter that answered reads unknown, never a permanent Loading", () => {
+  const nothingFetched: Record<string, boolean> = {};
+  const answered: Record<string, boolean> = { grok: true, codex: true, claude: true, cursor: true };
+  const copyFor = (provider: "grok" | "codex" | "claude" | "cursor", vendorPlanKnown: Record<string, boolean>) =>
+    leftoverMissingCopy({
+      hasKey: true,
+      fetchKnown: leftoverFetchKnown({ provider, vendorPlanKnown, customPlanKnown: {} }),
+      canLoad: true,
+      planName: "SuperGrok",
+    });
+
+  for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
+    // Nothing has been asked yet, so "Loading" is still honest.
+    assert.equal(leftoverFetchKnown({ provider, vendorPlanKnown: nothingFetched, customPlanKnown: {} }), false);
+    assert.match(copyFor(provider, nothingFetched), /Loading weekly plan usage/);
+    // The fetch settled with no plan: a 404, an auth failure, or a dead socket.
+    assert.equal(leftoverFetchKnown({ provider, vendorPlanKnown: answered, customPlanKnown: {} }), true);
+    assert.match(copyFor(provider, answered), /Couldn't read weekly leftover/);
+    assert.doesNotMatch(copyFor(provider, answered), /Loading/);
+  }
+
+  // Custom bots keep their own per-bot map and are not swept in by a vendor mark.
+  assert.equal(
+    leftoverFetchKnown({ provider: "custom", botId: "bot_mini", vendorPlanKnown: answered, customPlanKnown: {} }),
+    false,
+  );
+  assert.equal(
+    leftoverFetchKnown({
+      provider: "custom",
+      botId: "bot_mini",
+      vendorPlanKnown: nothingFetched,
+      customPlanKnown: { bot_mini: true },
+    }),
+    true,
+  );
+  assert.equal(
+    leftoverFetchKnown({ provider: "custom", vendorPlanKnown: nothingFetched, customPlanKnown: { bot_mini: true } }),
+    false,
+  );
+
+  // Cursor's two pools share one fetch, so an answered meter marks both lanes
+  // known even when one lane's product is absent from the payload.
+  const cursorOneLane = {
+    usedPercent: 90,
+    leftPercent: 10,
+    period: "monthly" as const,
+    prepaidBalance: 0,
+    products: [{ product: "cursor-models", label: "Cursor Models", usagePercent: 90 }],
+  };
+  assert.equal(cursorLanePlan(cursorOneLane, "cursor:cursor-models")?.leftPercent, 10);
+  assert.equal(cursorLanePlan(cursorOneLane, "cursor:other-models"), undefined);
+  assert.equal(leftoverFetchKnown({ provider: "cursor", vendorPlanKnown: answered, customPlanKnown: {} }), true);
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /const \[vendorPlanKnown, setVendorPlanKnown\]/);
+  for (const provider of ["grok", "codex", "claude", "cursor"]) {
+    // Marked on both the resolve and the reject arm: settled either way is known.
+    const marks = store.match(new RegExp(`markVendorPlanKnown\\("${provider}"\\)`, "g")) ?? [];
+    assert.ok(marks.length >= 2, `${provider} marks its meter known on success and on failure`);
+  }
+
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(pane, /useStoreSelector\(selectUsageDesk, sameUsageDesk\)/);
+  assert.match(pane, /leftoverFetchKnown\(\{/);
+  assert.match(pane, /vendorPlanKnown,/);
+  assert.doesNotMatch(pane, /fetchKnown: focused\.provider === "custom"/);
+  // No invented ring: an unread meter draws nothing and reads "…", not 0%.
+  assert.match(pane, /value=\{plan \? plan\.leftPercent \/ 100 : undefined\}/);
+  assert.match(pane, /: "…"\}/);
+});
+
+test("an answered meter that carries a plan still fills its ring", () => {
+  const claudePlan = parseClaudePlanUsage({ seven_day: { utilization: 18 } });
+  const plans = {
+    claude: claudePlan,
+    grok: { usedPercent: 60, leftPercent: 40, period: "weekly" as const, prepaidBalance: 0, products: [] },
+  };
+  // Known and fetched are the same mark; the ring reads the plan, not the mark.
+  assert.equal(leftoverFetchKnown({ provider: "claude", vendorPlanKnown: { claude: true }, customPlanKnown: {} }), true);
+  assert.equal(leftoverForCard({ focus: "claude", provider: "claude", key: "claude" }, plans)?.leftPercent, 82);
+  assert.equal(leftoverForCard({ focus: "grok", provider: "grok", key: "grok" }, plans)?.leftPercent, 40);
+  assert.equal(weeklyPlanLeftover(claudePlan), 82);
 });
 
 test("custom leftover meters are a closed official list and catalog hosts stay custom bots", () => {

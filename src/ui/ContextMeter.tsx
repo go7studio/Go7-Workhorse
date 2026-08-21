@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { estimateChatContext, type ChatContextStats, type ContextCategory } from "../lib/context-stats";
 import { contextWindowFor, formatWindow } from "../lib/models";
 import { deskInk } from "../lib/settings";
-import { useActiveSession, useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
+import { sameContextDesk, selectContextDesk } from "../lib/store-select";
 import type { Session } from "../lib/types";
 import { formatTokens } from "../lib/usage";
 
@@ -103,7 +104,8 @@ export function ContextMeter({
   /** Catalog window size only — do not bind to a live chat. */
   referenceOnly?: boolean;
 } = {}) {
-  const liveSession = useActiveSession();
+  const desk = useStoreSelector(selectContextDesk, sameContextDesk);
+  const liveSession = desk.session;
   const matchedSession =
     referenceOnly
       ? undefined
@@ -114,11 +116,11 @@ export function ContextMeter({
         ? undefined
         : liveSession;
   const session = sessionProp ?? matchedSession;
-  const store = useStore();
+  const settings = desk.settings;
   const customWindow =
     (session?.customBotId
-      ? store.settings.customBots.find((bot) => bot.id === session.customBotId)?.contextWindow
-      : undefined) ?? store.settings?.llms.custom.contextWindow ?? fallbackWindow;
+      ? settings.customBots.find((bot) => bot.id === session.customBotId)?.contextWindow
+      : undefined) ?? settings?.llms.custom.contextWindow ?? fallbackWindow;
   const [open, setOpen] = useState(false);
   const [live, setLive] = useState<ChatContextStats | null>(null);
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -128,7 +130,7 @@ export function ContextMeter({
   const windowSize = session
     ? contextWindowFor(session.provider, session.model, customWindow)
     : 0;
-  const ink = session ? deskInk(session, store.settings) : undefined;
+  const ink = session ? deskInk(session, settings) : undefined;
   const estimate = useMemo(() => {
     if (!session) return null;
     return estimateChatContext({

@@ -66,7 +66,9 @@ export function formatChatSidebar(input: {
   routingMode?: string;
 }): string {
   const mode = modeLabel(parsePermissionMode(input.mode ?? "") ?? "ask");
-  if (input.routingMode === "auto") return ["Auto", mode].filter(Boolean).join(" · ");
+  if (input.routingMode === "auto") {
+    return ["Auto", effortLabel((input.effort as EffortLevel | null) ?? null), mode].filter(Boolean).join(" · ");
+  }
   const provider = asProviderId(input.provider);
   const name = input.botName?.trim() || modelName(provider, input.model);
   const effort = effortLabel((input.effort as EffortLevel | null) ?? null);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { commandNeedsInput, commandsForSession, filterPalette, shortModeLabel } from "../lib/commands";
 import {
   collectDroppedFiles,
@@ -16,7 +16,8 @@ import {
 import { wrapMarkdown } from "../lib/markdown";
 import { effortLabel, modelName } from "../lib/models";
 import { deskInk } from "../lib/settings";
-import { useActiveSession, useStore } from "../lib/store";
+import { useStoreSelector } from "../lib/store";
+import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage } from "../lib/types";
 
 export function isEditableKeyTarget(el: EventTarget | null): boolean {
@@ -66,7 +67,7 @@ export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHei
   el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
 }
 
-export function Composer({
+export const Composer = memo(function Composer({
   setupOpen,
   onToggleSetup,
   dropRoot,
@@ -76,6 +77,7 @@ export function Composer({
   dropRoot?: RefObject<HTMLElement | null>;
 }) {
   const {
+    session,
     send,
     cancelRun,
     dropQueued,
@@ -85,8 +87,7 @@ export function Composer({
     settings,
     setComposerDraft,
     deskSkills,
-  } = useStore();
-  const session = useActiveSession();
+  } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
   const running = session?.status === "running";
   const queue = session?.queue ?? [];
@@ -462,10 +463,8 @@ export function Composer({
             aria-expanded={setupOpen}
             onClick={onToggleSetup}
           >
-            {/* On Auto the model and effort are picked on every send, so
-                naming the last pick here read as the plan: this chip said
-                Composer 2.5 · High and the prompt went to Kimi K3. Say Auto;
-                the reply header names what actually answered. */}
+            {/* On Auto omit the model name (it would promise next-turn
+                vendor). Do show last/current thinking level when set. */}
             {session.routingMode === "auto" ? (
               <span className="dot auto" aria-hidden="true" />
             ) : (
@@ -473,7 +472,7 @@ export function Composer({
             )}
             <span>
               {session.routingMode === "auto"
-                ? `Auto · ${shortModeLabel(session.mode)}`
+                ? `Auto${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`
                 : `${modelName(session.provider, session.model)}${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`}
             </span>
             <span className="caret" aria-hidden="true" />
@@ -533,4 +532,4 @@ export function Composer({
       </div>
     </div>
   );
-}
+});

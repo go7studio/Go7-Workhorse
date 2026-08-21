@@ -115,47 +115,6 @@ function CrewList({
   );
 }
 
-function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatIndex }) {
-  const chats = index.liveByProject.get(null) ?? [];
-  const archived = index.archivedByProject.get(null) ?? [];
-  const [showArchived, setShowArchived] = useState(false);
-  const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    const active = store.activeSessionId ? index.parentsById.get(store.activeSessionId) : undefined;
-    if (!active?.parentId) return;
-    setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
-  }, [store.activeSessionId, index]);
-  if (chats.length === 0 && archived.length === 0) return null;
-  return (
-    <div className="loose-chats">
-      <div className="section-label">Chats</div>
-      {chats.map((session) => (
-        <div key={session.id} className="project-chat-block">
-          <ChatRow
-            session={session}
-            desk={rowDesk(store, index, session)}
-            workerCount={session.workers.length}
-            mission={missionRowLook(session, session.workers)}
-            workersOpen={Boolean(openCrew[session.id])}
-            onToggleWorkers={() =>
-              setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
-            }
-          />
-          <CrewList session={session} open={Boolean(openCrew[session.id])} store={store} index={index} />
-        </div>
-      ))}
-      {archived.length > 0 && (
-        <>
-          <button className="archive-toggle" type="button" onClick={() => setShowArchived((value) => !value)}>
-            Archived ({archived.length})
-          </button>
-          {showArchived && archived.map((session) => <ChatRow key={session.id} session={session} desk={rowDesk(store, index, session)} />)}
-        </>
-      )}
-    </div>
-  );
-}
-
 function ProjectFolder({
   project,
   open,
@@ -477,7 +436,6 @@ export function Sidebar() {
               ))}
           </>
         )}
-        <LooseChats store={store} index={index} />
       </div>
       <footer className="sidebar-dock">
         <button

@@ -266,7 +266,7 @@ ${mcp}
 
 5. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
 
-6. Workhorse on the user's ${desk} keeps http://127.0.0.1:8787 up across login (Mac and Windows). If they copied a Grok Bot webhook routine, they put Webhook URL and Webhook key in ${wake} themselves. Never store that key in this memory, this chat, or the remote box.
+6. Workhorse on the user's ${desk} keeps a private loopback shim (127.0.0.1 only). Each Workhorse install mints its own loopback token; only that desk may call completions. If they copied a Grok Bot webhook routine, they put Webhook URL and Webhook key in ${wake} themselves. Never store that key, the loopback token, or an open bind in this memory, this chat, or the remote box.
 `;
 }
 

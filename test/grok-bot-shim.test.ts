@@ -6,14 +6,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
-  grokBotHealthPayload,
+  authorizationBearer,
   grokBotInboxDir,
+  grokBotLoopbackApiKey,
+  grokBotPublicHealth,
   grokBotShimLaunch,
   grokBotWakeConfigured,
   grokBotWakePath,
   isGrokBotShimHealth,
+  isLoopbackAddress,
   lastUserText,
+  mintGrokBotShimToken,
+  parseGrokBotShimSecrets,
   parseGrokBotWake,
+  tokensMatch,
 } from "../src/lib/grok-bot-shim";
 import { GROK_BOT_SHIM_PORT } from "../src/lib/custom-http-identity";
 import {
@@ -56,12 +62,31 @@ test("last user text reads OpenAI content arrays", () => {
 });
 
 test("health payload is the loopback shim, not another leftover ring", () => {
-  const health = grokBotHealthPayload("/tmp/inbox", true);
+  const health = grokBotPublicHealth();
   assert.equal(health.ok, true);
   assert.equal(health.port, Number(GROK_BOT_SHIM_PORT));
-  assert.equal(health.wake, true);
+  assert.equal("inbox" in health, false);
+  assert.equal("wake" in health, false);
   assert.equal(isGrokBotShimHealth(health), true);
   assert.equal(isGrokBotShimHealth({ ok: true, port: 11434 }), false);
+});
+
+test("each install has its own loopback token, separate from the webhook key", () => {
+  const a = mintGrokBotShimToken();
+  const b = mintGrokBotShimToken();
+  assert.equal(a.length, 64);
+  assert.notEqual(a, b);
+  assert.equal(tokensMatch(a, a), true);
+  assert.equal(tokensMatch(a, b), false);
+  assert.equal(tokensMatch(a, ""), false);
+  assert.equal(authorizationBearer("Bearer secret-token"), "secret-token");
+  assert.equal(isLoopbackAddress("127.0.0.1"), true);
+  assert.equal(isLoopbackAddress("::ffff:127.0.0.1"), true);
+  assert.equal(isLoopbackAddress("10.0.0.4"), false);
+  const secrets = parseGrokBotShimSecrets({ token: a, port: 8787 });
+  assert.equal(grokBotLoopbackApiKey("http://127.0.0.1:8787/v1", "local", secrets), a);
+  assert.equal(grokBotLoopbackApiKey("https://api.minimax.io/v1", "keep-me", secrets), "keep-me");
+  assert.equal(parseGrokBotShimSecrets({ token: "short", port: 8787 }), undefined);
 });
 
 test("keepalive files are Mac LaunchAgent and Windows Startup, with no webhook key", () => {
@@ -109,7 +134,8 @@ test("install keepalive writes through injected io and never reads the machine h
 
 test("the loopback server writes inbox files and answers SSE once a reply lands", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "workhorse-grok-bot-shim-"));
-  const server = createGrokBotShimServer(root);
+  const token = mintGrokBotShimToken();
+  const server = createGrokBotShimServer(root, token);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address === "object");
@@ -123,7 +149,17 @@ test("the loopback server writes inbox files and answers SSE once a reply lands"
   });
   const pending = new Promise<string>((resolve, reject) => {
     const req = http.request(
-      { host: "127.0.0.1", port, path: "/v1/chat/completions", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } },
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          Authorization: `Bearer ${token}`,
+        },
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk) => chunks.push(chunk as Buffer));
@@ -154,6 +190,37 @@ test("the loopback server writes inbox files and answers SSE once a reply lands"
   rmSync(root, { recursive: true, force: true });
 });
 
+test("completions without this install's token are refused, and health does not leak inbox", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "workhorse-grok-bot-auth-"));
+  const token = mintGrokBotShimToken();
+  const server = createGrokBotShimServer(root, token);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const port = address.port;
+  const denied = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: "/v1/chat/completions", method: "POST" }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(chunk as Buffer));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.end("{}");
+  });
+  assert.equal(denied.status, 401);
+  assert.match(denied.body, /unauthorized/);
+  const health = await new Promise<string>((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path: "/health" }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(chunk as Buffer));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    }).on("error", reject);
+  });
+  assert.doesNotMatch(health, /inbox|wake|token|senderKey/);
+  server.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("Grok Bot one-shot names the wake file and forbids storing the key in Bot memory", () => {
   const text = linkGrokBotOneshot(
     { name: "workhorse", command: "/desk", args: ["/mcp.js"], env: { ELECTRON_RUN_AS_NODE: "1" } },
@@ -161,10 +228,12 @@ test("Grok Bot one-shot names the wake file and forbids storing the key in Bot m
   );
   assert.match(text, /grok-bot-wake\.json/);
   assert.match(text, /Never store that key/);
+  assert.match(text, /loopback token/);
   assert.doesNotMatch(text, /Authorization: Bearer/i);
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
   assert.match(features, /keeps the Grok Bot loopback shim/);
   assert.match(features, /Windows/);
+  assert.match(features, /loopback token/);
 });
 
 function readInboxReqs(inbox: string): string[] {

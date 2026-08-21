@@ -9,14 +9,22 @@ import { GROK_BOT_SHIM_PORT } from "../src/lib/custom-http-identity";
 import {
   GROK_BOT_SHIM_TIMEOUT_MS,
   GROK_BOT_WAKE_TIMEOUT_MS,
+  authorizationBearer,
   grokBotChatJson,
   grokBotChatSse,
-  grokBotHealthPayload,
   grokBotInboxDir,
+  grokBotPublicHealth,
+  grokBotShimSecretsFile,
+  grokBotShimSecretsPath,
   grokBotWakePath,
   isGrokBotShimHealth,
+  isLoopbackAddress,
   lastUserText,
+  mintGrokBotShimToken,
+  parseGrokBotShimSecrets,
   parseGrokBotWake,
+  tokensMatch,
+  type GrokBotShimSecrets,
 } from "../src/lib/grok-bot-shim";
 import { installGrokBotShimKeepalive } from "./grok-bot-shim-keepalive";
 import type { LinkDeskPlatform } from "../src/lib/workhorse-link";
@@ -101,20 +109,52 @@ function waitForReply(inbox: string, reqId: string): Promise<{ text?: string; er
   });
 }
 
+export function readOrMintShimSecrets(userData: string): GrokBotShimSecrets {
+  const file = grokBotShimSecretsPath(userData, sepFor(userData));
+  try {
+    const parsed = parseGrokBotShimSecrets(JSON.parse(fs.readFileSync(file, "utf8")));
+    if (parsed) return parsed;
+  } catch {
+    /* mint */
+  }
+  const minted: GrokBotShimSecrets = { token: mintGrokBotShimToken(), port: Number(GROK_BOT_SHIM_PORT) };
+  fs.mkdirSync(userData, { recursive: true });
+  fs.writeFileSync(file, grokBotShimSecretsFile(minted.token, minted.port), { mode: 0o600 });
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    /* windows */
+  }
+  return minted;
+}
+
 function sendJson(res: http.ServerResponse, code: number, payload: unknown): void {
   const raw = Buffer.from(JSON.stringify(payload));
   res.writeHead(code, { "Content-Type": "application/json", "Content-Length": raw.length, "Cache-Control": "no-store" });
   res.end(raw);
 }
 
-export function createGrokBotShimServer(userData: string): http.Server {
+function deny(res: http.ServerResponse, code: number, message: string): void {
+  sendJson(res, code, { error: { message, type: "access_denied" } });
+}
+
+export function createGrokBotShimServer(userData: string, token?: string): http.Server {
   const inbox = grokBotInboxDir(userData, sepFor(userData));
-  fs.mkdirSync(inbox, { recursive: true });
+  fs.mkdirSync(inbox, { recursive: true, mode: 0o700 });
+  const expected = token || readOrMintShimSecrets(userData).token;
   return http.createServer((req, res) => {
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      deny(res, 403, "loopback only");
+      return;
+    }
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const route = url.pathname.replace(/\/+$/, "") || "/";
     if (req.method === "GET" && (route === "/health" || route === "/")) {
-      sendJson(res, 200, grokBotHealthPayload(inbox, Boolean(readWake(userData))));
+      sendJson(res, 200, grokBotPublicHealth());
+      return;
+    }
+    if (!tokensMatch(expected, authorizationBearer(req.headers.authorization))) {
+      deny(res, 401, "unauthorized");
       return;
     }
     if (req.method === "GET" && (route === "/v1/models" || route === "/models")) {
@@ -142,9 +182,11 @@ export function createGrokBotShimServer(userData: string): http.Server {
           return;
         }
         const reqId = `gb_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+        const reqPath = path.join(inbox, `${reqId}.req.json`);
         fs.writeFileSync(
-          path.join(inbox, `${reqId}.req.json`),
+          reqPath,
           `${JSON.stringify({ id: reqId, createdAt: Date.now(), model: "grok-bot", text, origin: "workhorse" }, null, 2)}\n`,
+          { mode: 0o600 },
         );
         pokeWake(userData, reqId);
         const reply = await waitForReply(inbox, reqId);
@@ -198,6 +240,7 @@ export async function ensureGrokBotShim(input: {
   command: string;
   script: string;
 }): Promise<{ ok: boolean; mode: "running" | "spawned" | "failed"; dest: string }> {
+  readOrMintShimSecrets(input.userData);
   const platform: LinkDeskPlatform = input.platform === "win32" ? "win32" : input.platform === "linux" ? "linux" : "darwin";
   const keepalive = installGrokBotShimKeepalive({
     platform,

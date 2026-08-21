@@ -1,4 +1,5 @@
-import { GROK_BOT_SHIM_PORT } from "./custom-http-identity";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { GROK_BOT_SHIM_PORT, isGrokBotUrl } from "./custom-http-identity";
 
 export const GROK_BOT_SHIM_TIMEOUT_MS = 180_000;
 export const GROK_BOT_WAKE_TIMEOUT_MS = 8_000;
@@ -9,6 +10,46 @@ export function grokBotInboxDir(userData: string, sep = "/"): string {
 
 export function grokBotWakePath(userData: string, sep = "/"): string {
   return `${userData.replace(/[\\/]+$/, "")}${sep}grok-bot-wake.json`;
+}
+
+export function grokBotShimSecretsPath(userData: string, sep = "/"): string {
+  return `${userData.replace(/[\\/]+$/, "")}${sep}grok-bot-shim.json`;
+}
+
+/** Per-install loopback token. Never the webhook sender key. Never log it. */
+export type GrokBotShimSecrets = { token: string; port: number };
+
+export function mintGrokBotShimToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+export function parseGrokBotShimSecrets(raw: unknown): GrokBotShimSecrets | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  const token = String(row.token || "").trim();
+  if (token.length < 32) return undefined;
+  const port = Number(row.port || GROK_BOT_SHIM_PORT);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return undefined;
+  return { token, port };
+}
+
+export function authorizationBearer(header: string | string[] | undefined): string {
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (!raw) return "";
+  const match = /^Bearer\s+(\S+)/i.exec(raw.trim());
+  return match?.[1] ?? "";
+}
+
+export function tokensMatch(expected: string, received: string): boolean {
+  if (!expected || !received) return false;
+  const left = createHash("sha256").update(expected).digest();
+  const right = createHash("sha256").update(received).digest();
+  return timingSafeEqual(left, right);
+}
+
+export function isLoopbackAddress(address: string | undefined): boolean {
+  const host = (address || "").replace(/^::ffff:/i, "").toLowerCase();
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
 /** Grok Bot routine-panel copy. Never log url or senderKey. */
@@ -65,6 +106,10 @@ export function lastUserText(body: unknown): string {
   return "";
 }
 
+export function grokBotPublicHealth(port = Number(GROK_BOT_SHIM_PORT)): { ok: true; port: number } {
+  return { ok: true, port };
+}
+
 export function grokBotHealthPayload(inbox: string, wake: boolean, port = Number(GROK_BOT_SHIM_PORT)): {
   ok: true;
   inbox: string;
@@ -109,6 +154,15 @@ export function grokBotChatJson(reqId: string, answer: string, now = Math.floor(
     choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   };
+}
+
+export function grokBotShimSecretsFile(token: string, port = Number(GROK_BOT_SHIM_PORT)): string {
+  return `${JSON.stringify({ token, port }, null, 2)}\n`;
+}
+
+export function grokBotLoopbackApiKey(baseUrl: string, fallback: string, secrets: GrokBotShimSecrets | undefined): string {
+  if (!isGrokBotUrl(baseUrl) || !secrets?.token) return fallback;
+  return secrets.token;
 }
 
 export function grokBotShimLaunch(input: { command: string; script: string; userData: string }): {

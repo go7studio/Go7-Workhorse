@@ -3,7 +3,7 @@ import type { ChatImage, EffortLevel, ModelInputCapabilities } from "../src/lib/
 import { attachmentPromptBlock, isPicture } from "../src/lib/images";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
 import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
-import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
+import { customHttpIdentityHeaders, grokBotShimDownMessage } from "../src/lib/custom-http-identity";
 import {
   customHttpTools,
   customHttpToolsOpenAi,
@@ -776,11 +776,14 @@ export async function streamCustomHttp(
   try {
     return await run(body);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = grokBotShimDownMessage(config.baseUrl, error);
     if (api === "anthropic-messages" && body.thinking && /thinking|400|invalid/i.test(message)) {
       const retry = { ...body };
       delete retry.thinking;
       return run(retry);
+    }
+    if (message !== (error instanceof Error ? error.message : String(error))) {
+      throw new Error(message);
     }
     throw error;
   }
@@ -881,7 +884,6 @@ export async function probeCustomHttp(
       api,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, message, api, model };
+    return { ok: false, message: grokBotShimDownMessage(baseUrl, error), api, model };
   }
 }

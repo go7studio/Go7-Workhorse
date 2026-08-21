@@ -28,6 +28,21 @@ export function isGeminiApiUrl(baseUrl: string): boolean {
   return /(^|\.)generativelanguage\.googleapis\.com$/i.test(hostnameOf(baseUrl));
 }
 
+const LOOPBACK = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
+
+/** Grok Bot's custom HTTP preset lives on loopback. Other local shims use the same door. */
+export function isGrokBotUrl(baseUrl: string): boolean {
+  return LOOPBACK.test(hostnameOf(baseUrl));
+}
+
+/** Connection refused on the Grok Bot shim. Do not guess another host. */
+export function grokBotShimDownMessage(baseUrl: string, error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (!isGrokBotUrl(baseUrl)) return raw;
+  if (!/ECONNREFUSED|fetch failed|ENOTFOUND|EHOSTUNREACH|network/i.test(raw)) return raw;
+  return "Grok Bot shim is down. Do not guess another host.";
+}
+
 export function customHttpIdentityHeaders(baseUrl: string): Record<string, string> {
   const headers: Record<string, string> = {
     "User-Agent": workhorseUserAgent(),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   LINK_CAPABILITIES,
@@ -21,6 +22,7 @@ import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDe
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, type InstallIo } from "../electron/mcp-install";
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
 test("the Link contract: eight tools, four capabilities, one version — and the profile answers every name", () => {
@@ -54,6 +56,15 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   assert.equal(shake.followThrough.namedWorker, "workhorse_ask_chat");
   assert.equal(shake.followThrough.later, "workhorse_agent_status");
   assert.equal(linkHandshake({ deskOnline: false }).desk, "offline");
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  const link = readFileSync(path.join(ROOT, "docs", "LINK.md"), "utf8");
+  assert.match(features, /Grok Bot/);
+  assert.match(agents, /Workhorse Link/);
+  assert.match(agents, /Grok Bot preset on 127\.0\.0\.1/);
+  assert.doesNotMatch(features, /\bRemote\b/);
+  assert.doesNotMatch(agents, /\bRemote\b/);
+  assert.doesNotMatch(link, /\bRemote\b/);
 });
 
 test("`link` is the product spelling of the external profile, and an unknown word fails closed", () => {

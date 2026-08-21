@@ -1530,6 +1530,25 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(probe.contextWindow, 1_000_000);
 });
 
+test("Grok Bot probe fails closed when the local shim is down", async () => {
+  const probe = await probeCustomHttp(
+    { baseUrl: "http://127.0.0.1:8787/v1", apiKey: "local", model: "grok-bot", api: "openai-completions" },
+    async () => {
+      throw new Error("fetch failed");
+    },
+  );
+  assert.equal(probe.ok, false);
+  assert.equal(probe.message, "Grok Bot shim is down. Do not guess another host.");
+  const remote = await probeCustomHttp(
+    { baseUrl: "https://api.minimax.io/v1", apiKey: "sk-test", model: "MiniMax-M3", api: "openai-completions" },
+    async () => {
+      throw new Error("fetch failed");
+    },
+  );
+  assert.equal(remote.ok, false);
+  assert.equal(remote.message, "fetch failed");
+});
+
 test("custom usage streaming keeps one authoritative request snapshot", () => {
   const start = {
     inputTokens: 0,

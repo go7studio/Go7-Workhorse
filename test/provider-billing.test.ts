@@ -17,7 +17,9 @@ import {
 import {
   customHttpIdentityHeaders,
   geminiApiClient,
+  grokBotShimDownMessage,
   isGeminiApiUrl,
+  isGrokBotUrl,
   isKimiCodeUrl,
   workhorseUserAgent,
 } from "../src/lib/custom-http-identity";
@@ -54,7 +56,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   assert.equal(ids.includes("openclaw"), false);
   assert.equal(ids.includes("hermes"), false);
 
-  const expectedBilling: Record<string, "subscription" | "gateway" | "direct"> = {
+  const expectedBilling: Record<string, "subscription" | "gateway" | "direct" | "local"> = {
     minimax: "subscription",
     synthetic: "subscription",
     kimi: "subscription",
@@ -69,6 +71,7 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
     cerebras: "direct",
     aimlapi: "direct",
     gemini: "direct",
+    "grok-bot": "local",
   };
   for (const preset of PROVIDER_PRESETS) {
     assert.equal(preset.billing, expectedBilling[preset.id], preset.id);
@@ -79,11 +82,11 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   const groups = providerPresetsByBilling();
   assert.deepEqual(
     groups.map((item) => item.group.id),
-    ["subscription", "gateway", "direct"],
+    ["subscription", "gateway", "direct", "local"],
   );
   assert.deepEqual(
     PROVIDER_BILLING_GROUPS.map((item) => item.label),
-    ["Subscription plans", "Gateway credits / BYOK", "Direct API billing"],
+    ["Subscription plans", "Gateway credits / BYOK", "Direct API billing", "On this Mac"],
   );
   for (const group of PROVIDER_BILLING_GROUPS) {
     assert.ok(group.copy.trim().length > 0);
@@ -100,6 +103,10 @@ test("Add Bot presets keep every existing host and group billing copy", () => {
   assert.deepEqual(
     groups.find((item) => item.group.id === "direct")?.presets.map((item) => item.id),
     ["groq", "deepseek", "together", "fireworks", "novita", "cerebras", "aimlapi", "gemini"],
+  );
+  assert.deepEqual(
+    groups.find((item) => item.group.id === "local")?.presets.map((item) => item.id),
+    ["grok-bot"],
   );
 
   const form = readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8");
@@ -141,6 +148,8 @@ test("Vercel Kimi Code and Gemini ship as Custom HTTP presets with documented de
   assert.equal(detectProviderFromUrl("https://generativelanguage.googleapis.com/v1beta/openai/")?.id, "gemini");
   assert.equal(detectProviderFromUrl("https://api.moonshot.ai/v1")?.id, undefined);
   assert.equal(detectProviderFromUrl("https://api.minimax.io/v1")?.id, "minimax");
+  assert.equal(detectProviderFromUrl("http://127.0.0.1:8787/v1")?.id, "grok-bot");
+  assert.equal(detectProviderFromUrl("http://127.0.0.1:8787/v1/")?.id, "grok-bot");
 
   assert.equal(customMessagesUrl(vercel!.baseUrl, "openai-completions"), "https://ai-gateway.vercel.sh/v1/chat/completions");
   assert.equal(customMessagesUrl(kimi!.baseUrl, "openai-completions"), "https://api.kimi.com/coding/v1/chat/completions");
@@ -279,10 +288,44 @@ test("FEATURES names the shipped billing groups and new Custom HTTP presets", ()
   assert.match(features, /Vercel AI Gateway/);
   assert.match(features, /Kimi Code/);
   assert.match(features, /Gemini API/);
+  assert.match(features, /Grok Bot/);
   assert.match(features, /subscription plans/);
   assert.match(features, /gateway credits/);
   assert.match(features, /direct API billing/);
+  assert.match(features, /on this Mac/);
   assert.doesNotMatch(features, /Straitly|Z\.AI|Cloudflare/);
+  assert.doesNotMatch(features, /\bRemote\b/);
   assert.match(features, /Kimi Code[\s\S]*unknown/);
   assert.match(features, /Gemini stay unknown|Gemini API[\s\S]*unknown/);
+  assert.match(features, /fails closed if the\s+shim is down/);
+});
+
+test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
+  const grokBot = findProvider("grok-bot");
+  assert.equal(grokBot?.name, "Grok Bot");
+  assert.equal(grokBot?.baseUrl, "http://127.0.0.1:8787/v1");
+  assert.equal(grokBot?.api, "openai-completions");
+  assert.equal(grokBot?.billing, "local");
+  assert.match(grokBot?.hint ?? "", /fail closed/i);
+  assert.match(grokBot?.hint ?? "", /pairing token/i);
+  assert.equal(draftFromProvider(grokBot!).name, "Grok Bot");
+  assert.equal(draftFromProvider(grokBot!).model, "grok-bot");
+  assert.equal(
+    customMessagesUrl(grokBot!.baseUrl, "openai-completions"),
+    "http://127.0.0.1:8787/v1/chat/completions",
+  );
+  assert.equal(isGrokBotUrl(grokBot!.baseUrl), true);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), true);
+  assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);
+  assert.equal(
+    grokBotShimDownMessage(grokBot!.baseUrl, new Error("ECONNREFUSED")),
+    "Grok Bot shim is down. Do not guess another host.",
+  );
+  assert.equal(grokBotShimDownMessage("https://api.minimax.io/v1", new Error("ECONNREFUSED")), "ECONNREFUSED");
+  assert.equal(customMeterForUrl(grokBot!.baseUrl), undefined);
+  const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
+  assert.match(agents, /Workhorse Link/);
+  assert.match(agents, /Grok Bot preset on 127\.0\.0\.1/);
+  assert.doesNotMatch(agents, /\bRemote\b/);
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8"), /Grok Bot/);
 });

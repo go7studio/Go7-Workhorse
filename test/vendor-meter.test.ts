@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, weeklyPlanLeftover } from "../src/lib/usage";
+import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
 import { CUSTOM_METERS } from "../src/lib/custom-meters";
@@ -87,6 +87,11 @@ test("Claude MiniMax and Synthetic leftovers stay on their own rings", () => {
   assert.notEqual(mini?.leftPercent, leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, plans)?.leftPercent);
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /leftoverForCard/);
+  const cursorChip = planWindowChip(
+    leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, plans),
+    { provider: "cursor" },
+  );
+  assert.match(cursorChip ?? "", /90%/);
 });
 
 test("prepaid custom meters fill balance and do not invent leftover percent", () => {

@@ -204,6 +204,15 @@ transcript rather than as a path.
   restrict the worker or pick a different vendor from the builder; name the
   builder in `exclude` for that. Plan admission spawns its own auditor and
   picks a vendor the builders did not use.
+- **Composer + menu** — Orchestrate and Mission pin on the chat, together if
+  you want both; one Attach item at the bottom takes files or a folder. Each
+  pin stays as a chip next to + until you clear it. Two pins collapse to +2 on
+  the bar; click it to expand them. Orchestrate tells this chat
+  it is the orchestrator and must spawn desk workers (one assignment is one
+  worker, Auto ranks, fan-out only when asked). Mission is the adaptive loop:
+  spawn the first wave, then continue remaining work with
+  `workhorse_continue_mission`. With both on, the chat spawns as orchestrator
+  and then continues unmet work as a mission.
 - **Routing** — your own chat keeps the model you picked until you set it to
   **Auto**; Auto picks the bot and effort for each message. Auto does not pick
   Cursor Auto; that stays a named chat pick. When the prompt asks to generate

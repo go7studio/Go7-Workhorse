@@ -1996,6 +1996,7 @@ test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMa
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-tools.ts"), "utf8"), /Never invent a reply/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCustomPeerHint/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withSpawnHint/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCrewModeHint/);
 
   assert.equal(isBareVendorOrModel("Sol"), true);
   assert.equal(isBareVendorOrModel("Codex Sol"), true);

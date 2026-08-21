@@ -1,4 +1,4 @@
-import type { ChatImage, EffortLevel, McpServerConfig, PermissionGrant, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
+import type { ChatImage, CrewMode, EffortLevel, McpServerConfig, PermissionGrant, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 import { buildPolicyContext } from "../src/lib/context-preface";
 import {
   classifyElevationInput,
@@ -9,7 +9,7 @@ import {
 import { uid } from "../src/lib/id";
 import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
-import { withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
+import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
@@ -43,6 +43,7 @@ export type CustomPromptInput = {
   parentId?: string;
   hidden?: boolean;
   role?: import("../src/lib/workhorse-rules").DeskRole;
+  crewModes?: CrewMode[];
   customBotId?: string;
   config: CustomHttpConfig;
 };
@@ -332,11 +333,15 @@ export class CustomSessionHost {
       ...history,
       {
         role: "user",
-        text: withLooseDeleteHint(
-          withCustomPeerHint(
-            withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role),
+        text: withCrewModeHint(
+          withLooseDeleteHint(
+            withCustomPeerHint(
+              withSpawnHint(withPermissionHint(withWriteLimitHint(input.text, mode, sandbox), role), role),
+              role,
+            ),
             role,
           ),
+          input.crewModes,
           role,
         ),
         images: input.images,

@@ -98,6 +98,8 @@ test("the word at rest: failure is loud, unfinished is quiet, a clean wave says 
   assert.equal(at("timed-out")?.tone, "quiet");
   assert.equal(at("interrupted")?.word, "Interrupted");
   assert.equal(at("interrupted")?.tone, "quiet");
+  assert.equal(at("cancelled")?.word, "Cancelled");
+  assert.equal(at("cancelled")?.tone, "quiet", "a stopped worker is not a failure");
   // Several workers count; one names itself.
   const many = missionState(
     lineup({ rows: [row({ childId: "a", status: "failed" }), row({ childId: "b", status: "failed" }), row({ childId: "c" })] }),
@@ -109,6 +111,20 @@ test("the word at rest: failure is loud, unfinished is quiet, a clean wave says 
   const mixed = missionState(lineup({ rows: [row({ childId: "a", status: "failed" }), row({ childId: "b", status: "interrupted" })] }), []);
   assert.equal(mixed?.word, "1 failed");
   assert.equal(missionState(undefined, []), undefined);
+  // A cancelled sibling is labelled cancelled, not failed. The Cursor Agent
+  // Guide wave stored Dexter as failed after an orchestrator cancel and the
+  // parent row said "1 failed" next to a worker that was only stopped.
+  const cancelled = missionState(
+    lineup({ rows: [row({ childId: "a" }), row({ childId: "b", status: "failed" })] }),
+    [
+      { id: "a", status: "idle", agentRun: { status: "completed", startedAt: 1, isolation: "shared" } },
+      { id: "b", status: "idle", agentRun: { status: "cancelled", startedAt: 1, isolation: "shared" } },
+    ],
+  );
+  assert.equal(cancelled?.word, "1 cancelled");
+  assert.equal(cancelled?.tone, "quiet");
+  assert.equal(cancelled?.failed, 0);
+  assert.equal(cancelled?.cancelled, 1);
 });
 
 test("the transcript stops congratulating a wave that did not finish", () => {
@@ -118,6 +134,10 @@ test("the transcript stops congratulating a wave that did not finish", () => {
     "1 of 2 workers finished · 1 failed.",
   );
   assert.equal(lineupFinishedNotice(lineup({ rows: [row({ status: "interrupted" })] })), "No worker finished · 1 interrupted.");
+  assert.equal(
+    lineupFinishedNotice(lineup({ rows: [row({ childId: "a" }), row({ childId: "b", status: "cancelled" })] })),
+    "1 of 2 workers finished · 1 cancelled.",
+  );
   // And the notice that actually lands in the chat is that one.
   const parent = {
     id: "p1",
@@ -152,10 +172,10 @@ test("only failure is loud", () => {
   const failed = missionRowLook({ lineup: lineup({ rows: [row({ status: "failed" })] }) }, []);
   assert.equal(failed?.tone, "danger");
 
-  for (const status of ["interrupted", "timed-out"] as const) {
+  for (const status of ["interrupted", "timed-out", "cancelled"] as const) {
     const quiet = missionRowLook({ lineup: lineup({ rows: [row({ status })] }) }, []);
     assert.ok(quiet?.word, `${status} still says what happened`);
-    assert.notEqual(quiet?.tone, "danger", `${status} is unfinished, not wrong`);
+    assert.notEqual(quiet?.tone, "danger", `${status} is unfinished or stopped, not wrong`);
   }
 });
 
@@ -195,9 +215,11 @@ test("a live wave reaches the dot and the title reaches the row", () => {
   // every finished row holds flat at 1.00 — and pinned here in the same
   // source-shape way as test/dead-ui.test.ts, for the same reason.
   const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
-  assert.match(row, /session\.status === "running" \|\| mission\?\.running \? " pulse"/, "a live wave must pulse the dot");
+  assert.match(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must pulse the dot");
+  assert.match(row, /crewDotClass\(dotKind\)/);
   assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
-  assert.match(row, /mission\?\.caller \|\| mission\?\.word/, "the meta line must render the wave");
+  assert.match(row, /mission\.word !== "Working…"/, "a live wave keeps model · effort instead of Working…");
+  assert.match(row, /mission\?\.caller/, "the meta line must still name a harness caller");
 
   // And the Sidebar has to hand it down — it owns the workers the state needs.
   const sidebar = readFileSync(new URL("../src/ui/Sidebar.tsx", import.meta.url), "utf8");

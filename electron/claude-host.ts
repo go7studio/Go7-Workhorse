@@ -94,6 +94,7 @@ export class ClaudeSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
+      crewMode: input.crewModes,
     });
 
     try {

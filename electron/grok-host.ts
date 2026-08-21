@@ -7,7 +7,7 @@ import { readGrokGeneratedTitle, titleFromRecord } from "./grok-title";
 import { parseSessionContext, type ChatContextStats } from "../src/lib/context-stats";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import type { PermissionAnswer } from "../src/lib/permissions";
-import type { EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
+import type { CrewMode, EffortLevel, McpServerConfig, PermissionMode, SandboxProfile, SessionSecurityPolicy } from "../src/lib/types";
 
 export type GrokSessionOpenInput = {
   sessionId: string;
@@ -33,6 +33,7 @@ export type GrokSessionOpenInput = {
 export type GrokPromptInput = GrokSessionOpenInput & {
   text: string;
   images?: import("../src/lib/types").ChatImage[];
+  crewModes?: CrewMode[];
 };
 
 export type GrokCompactInput = GrokSessionOpenInput & {
@@ -167,6 +168,7 @@ export class GrokSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
+      crewMode: input.crewModes,
     });
 
     try {

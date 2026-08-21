@@ -1,3 +1,7 @@
+import type { CrewMode } from "./types";
+
+export type { CrewMode };
+
 export const WORKHORSE_SESSION_RULES =
   "You are inside Workhorse, a desktop multiplexer. This chat’s title, project, sidebar subtitle, preview, permission, and sandbox are in the desk context. Obey those live desk limits before you call any tool — do not try a write to see if it fails. Other live chats in this window show up in the sidebar. Archived and deleted chats are gone from the desk — do not list, read, ask, or mention them. Each row shows a title and a subtitle (model · effort · mode) — that subtitle is not the preview. The preview is the last user/assistant snippet (workhorse_list_chats.preview). If the user asks what the preview says, quote this chat’s preview first; list other live chats only if they ask. Use workhorse_list_chats to see them, workhorse_read_chat when you only need that chat’s transcript, and workhorse_ask_chat when that chat should answer or do work. Always pass the visible chat title (not a guessed id). To run a different vendor or model inside this conversation (Codex, Grok, Terra), use workhorse_spawn_agent. The user can also switch This chat → Vendor (Codex to Grok 4.6, etc.); that starts a new vendor instance for this same transcript. Do not invent session ids. " +
   "Custom HTTP bots are live desk slots the user added, not a built-in vendor and not source-code work. Do not call this product Workhorse/MiniMax or treat MiniMax as a first-party desk vendor. The shipped vendors are Grok, Claude, Codex, and Cursor, plus any custom bots already on the desk. " +
@@ -141,6 +145,57 @@ export function withSpawnHint(text: string, role?: DeskRole): string {
   if (role === "worker" || role === "auditor" || looksLikeWorkerBrief(text)) return text;
   if (!looksLikeSpawnRequest(text)) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
+}
+
+export const ORCHESTRATE_MODE_HINT =
+  "The user selected Orchestrate on this chat. You are the orchestrator this turn. Do not do the assigned work yourself. Spawn desk workers for it.";
+
+export const MISSION_MODE_HINT =
+  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass returns to independent Workhorse routing. Do not sit on workhorse_await_agents. The desk joins reports later.";
+
+export function crewModeLabel(mode: CrewMode): string {
+  return mode === "mission" ? "Mission" : "Orchestrate";
+}
+
+export function normalizeCrewModes(raw: unknown): CrewMode[] {
+  const list = Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw];
+  const modes: CrewMode[] = [];
+  for (const item of list) {
+    if ((item === "orchestrate" || item === "mission") && !modes.includes(item)) modes.push(item);
+  }
+  return modes;
+}
+
+export function hasCrewMode(current: CrewMode[] | undefined, mode: CrewMode): boolean {
+  return Boolean(current?.includes(mode));
+}
+
+export function orderedCrewModes(current: CrewMode[] | undefined): CrewMode[] {
+  return (["orchestrate", "mission"] as const).filter((mode) => current?.includes(mode));
+}
+
+export function toggleCrewMode(current: CrewMode[] | undefined, next: CrewMode): CrewMode[] | undefined {
+  const modes = normalizeCrewModes(current);
+  const nextModes = modes.includes(next) ? modes.filter((item) => item !== next) : [...modes, next];
+  return nextModes.length > 0 ? nextModes : undefined;
+}
+
+function withSpawnBible(text: string): string {
+  return text.startsWith(SPAWN_TURN_HINT) ? text : `${SPAWN_TURN_HINT}\n\n${text}`;
+}
+
+/** Pinned Orchestrate and/or Mission chips always inject the bible, even without spawn verbs. */
+export function withCrewModeHint(text: string, crewMode?: CrewMode | CrewMode[], role?: DeskRole): string {
+  const modes = normalizeCrewModes(crewMode);
+  if (role === "worker" || role === "auditor" || looksLikeWorkerBrief(text) || modes.length === 0) return text;
+  let next = withSpawnBible(text);
+  if (modes.includes("mission") && !next.startsWith(MISSION_MODE_HINT)) {
+    next = `${MISSION_MODE_HINT}\n\n${next}`;
+  }
+  if (modes.includes("orchestrate") && !next.startsWith(ORCHESTRATE_MODE_HINT)) {
+    next = `${ORCHESTRATE_MODE_HINT}\n\n${next}`;
+  }
+  return next;
 }
 
 export const LOOSE_DELETE_HINT =

@@ -13,6 +13,7 @@ type GrokPromptBridgeInput = {
   sandbox?: import("./lib/types").SandboxProfile;
   mcpServers?: import("./lib/types").McpServerConfig[];
   preface?: string;
+  crewModes?: import("./lib/types").CrewMode[];
 };
 
 type GrokBridgeEvent =
@@ -98,6 +99,7 @@ type WorkhorseBridge = {
     target: "grok" | "codex" | "claude" | "cursor";
   }) => Promise<import("./lib/types").DeskExportResult>;
   pickFile: () => Promise<string | null>;
+  pickAttach?: () => Promise<string[]>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;
   pathForFile: (file: File) => string;
   listDropFiles: (paths: string[]) => Promise<
@@ -213,6 +215,7 @@ type WorkhorseBridge = {
     parentId?: string;
     hidden?: boolean;
     role?: import("./lib/workhorse-rules").DeskRole;
+    crewModes?: import("./lib/types").CrewMode[];
     customBotId?: string;
     config: {
       baseUrl: string;

@@ -30,6 +30,9 @@ export type SessionEnvironment =
 
 export type EffortLevel = "off" | "adaptive" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
+/** Pinned on a chat from the composer + menu. Orchestrate spawns; Mission loops. */
+export type CrewMode = "orchestrate" | "mission";
+
 export type Theme = "system" | "light" | "dark" | "workhorse";
 
 export type ReferenceKind = "file" | "url" | "note";
@@ -161,6 +164,8 @@ export type DeskLineupRowStatus =
   | "completed"
   | "failed"
   | "timed-out"
+  /** The orchestrator or person stopped this worker. Not a failure. */
+  | "cancelled"
   /** The desk exited mid-run. The slice is unfinished but the worker can be resumed. */
   | "interrupted"
   /** External runtime task could not be reconciled after restart. */
@@ -532,6 +537,8 @@ export type Session = {
   /** Manual preserves the selected model. Auto may route before a new turn. */
   routingMode?: "auto" | "manual";
   routingDecision?: RoutingDecision;
+  /** Composer + pins. Orchestrate and Mission can be on together. */
+  crewModes?: CrewMode[];
 };
 
 export type PermissionRequest = {

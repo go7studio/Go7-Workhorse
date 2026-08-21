@@ -1,4 +1,4 @@
-import type { LinkedReference, PermissionMode, SandboxProfile } from "./types";
+import type { CrewMode, LinkedReference, PermissionMode, SandboxProfile } from "./types";
 import {
   AUDITOR_SESSION_RULES,
   CURSOR_SESSION_RULES,
@@ -7,6 +7,7 @@ import {
   WORKHORSE_SESSION_RULES,
   WORKER_SESSION_RULES,
   type DeskRole,
+  withCrewModeHint,
   withCrewStatusHint,
   withDeskBotHint,
   withLooseDeleteHint,
@@ -185,12 +186,16 @@ export function composeVendorPrompt(
   text: string,
   preface: string | undefined,
   opened: "session/new" | "session/load",
-  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole },
+  limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole; crewMode?: CrewMode | CrewMode[] },
 ): string {
   const hinted = withWriteLimitHint(
     withCrewStatusHint(
       withLooseDeleteHint(
-        withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
+        withCrewModeHint(
+          withSpawnHint(withPermissionHint(withPreviewHint(withDeskBotHint(text)), limits?.role), limits?.role),
+          limits?.crewMode,
+          limits?.role,
+        ),
         limits?.role,
       ),
       limits?.role,

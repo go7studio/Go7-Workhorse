@@ -82,6 +82,7 @@ export class CursorSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
+      crewMode: input.crewModes,
     });
     try {
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);

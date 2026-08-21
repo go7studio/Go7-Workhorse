@@ -63,10 +63,10 @@ import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
 import { buildSessionPreface, buildVendorPreface, composeVendorPrompt, withVendorPreface } from "../src/lib/context-preface";
-import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
+import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK_BOT_TURN_HINT, LOOSE_DELETE_HINT, MISSION_MODE_HINT, ORCHESTRATE_MODE_HINT, SPAWN_TURN_HINT, WORKER_SESSION_RULES, crewModeLabel, looksLikeCrewImpatience, looksLikeDeskBotRequest, looksLikeGoalCommand, looksLikeLooseDeleteRequest, looksLikePermissionQuestion, looksLikePreviewQuestion, looksLikeSpawnRequest, looksLikeWorkerBrief, orderedCrewModes, PERMISSION_TURN_HINT, PREVIEW_TURN_HINT, toggleCrewMode, withCrewModeHint, withCrewStatusHint, withDeskBotHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withCustomPeerHint, CUSTOM_HTTP_PEER_HINT, CUSTOM_HTTP_WORKER_RULES } from "../src/lib/workhorse-rules";
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
-import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
+import { buildAcpPrompt, droppedFromPickerFile, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
 import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, matchListedChat, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
@@ -156,7 +156,7 @@ import {
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
@@ -813,6 +813,10 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
     assert.equal(grouped[0].name, "SpaceProject");
     assert.equal(grouped[0].files.length, 2);
   }
+  const folderPick = droppedFromPickerFile({ name: "note.md", webkitRelativePath: "SpaceProject/src/note.md" } as File);
+  assert.equal(folderPick.folder, "SpaceProject");
+  const lonePick = droppedFromPickerFile({ name: "shot.png", webkitRelativePath: "" } as File);
+  assert.equal(lonePick.folder, undefined);
   const dropRoot = mkdtempSync(path.join(os.tmpdir(), "workhorse-drop-"));
   try {
     mkdirSync(path.join(dropRoot, "src"));
@@ -1463,6 +1467,8 @@ test("ACP text extractors walk nested content and update kinds", () => {
   assert.equal(titled.title, "Loaded.com Darkest Dungeon");
   assert.equal(extractSessionTitle({ sessionUpdate: "session_info_update", title: "  Fix login  " }), "Fix login");
   assert.equal(extractSessionTitle({ displayName: "Cursor agent name" }), "Cursor agent name");
+  assert.equal(extractSessionTitle({ displayName: "Cursor Agent Guide" }), undefined);
+  assert.equal(titleFromRecord({ title: "Cursor Agent" }), undefined);
   assert.equal(extractSessionTitle({ sessionTitle: "Claude session title" }), "Claude session title");
   assert.equal(extractSessionTitle({ threadTitle: "Codex thread title" }), "Codex thread title");
   assert.equal(extractSessionTitle({ name: "sess_abc123" }), undefined);
@@ -2983,6 +2989,10 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   assert.equal(titleNeedsUpgrade({ ...sliced, titleLocked: true }), false);
   const draft: Session = { ...session, title: "New chat", messages: [] };
   assert.equal(autoTitleForSend(draft, "What do you have access to?"), "Have access to");
+  assert.equal(
+    autoTitleForSend({ ...draft, title: "Cursor Agent Guide" }, "can you make middle mouse pan"),
+    "Make middle mouse pan",
+  );
   assert.equal(autoTitleForSend({ ...draft, titleLocked: true }, "What do you have access to?"), undefined);
   assert.equal(autoTitleForSend(sliced, "thanks"), undefined);
   const named: Session = {
@@ -3104,17 +3114,19 @@ test("composer field grows to half the session pane then collapses", () => {
   assert.match(pane, /ResizeObserver/);
   assert.match(pane, /composer-wrap/);
   assert.match(composer, /pinComposerInput/);
+  assert.match(composer, /querySelector\("\.composer-dock"\)/);
   assert.match(css, /--composer-input/);
   assert.match(css, /\.session-edits-slot\.open[\s\S]*bottom:\s*calc\(var\(--composer-input, 80px\) \+ var\(--notices-dock, 0px\) \+ 16px\)/);
   const col = {
     getBoundingClientRect: () => ({ bottom: 800 }),
     style: { value: "", setProperty(name: string, value: string) { this.value = `${name}:${value}`; } },
   };
-  const form = { getBoundingClientRect: () => ({ top: 720 }) };
-  assert.equal(pinComposerInput(col, form), 80);
+  const dock = { getBoundingClientRect: () => ({ top: 720 }) };
+  assert.equal(pinComposerInput(col, dock), 80);
   assert.equal(col.style.value, "--composer-input:80px");
-  const withThumbs = { getBoundingClientRect: () => ({ top: 720 }) };
-  assert.equal(pinComposerInput(col, withThumbs), 80);
+  const withQueue = { getBoundingClientRect: () => ({ top: 660 }) };
+  assert.equal(pinComposerInput(col, withQueue), 140);
+  assert.equal(col.style.value, "--composer-input:140px");
 });
 
 test("session setup is a compact right-side model and access inspector", () => {
@@ -4882,11 +4894,20 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /project-new/);
   assert.match(sidebar, /project-info/);
   assert.match(sidebar, /lastProjectChat/);
+  assert.match(sidebar, /if \(open\) \{\s*onToggle\(\);\s*return;/);
   assert.match(sidebar, /if \(last\) store\.selectSession\(last\.id\)/);
   assert.match(sidebar, /store\.selectProject\(project\.id\)/);
   assert.match(css, /\.tool-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(sidebar, /function LooseChats/);
   assert.match(sidebar, /section-label">Projects[\s\S]*<LooseChats/);
+  assert.match(sidebar, /twist-folder-open/);
+  assert.match(css, /\.project-head:hover \.twist::before/);
+  assert.doesNotMatch(css, /\.project-head:focus-within \.twist::before/);
+  assert.match(css, /\.project-folder\.open \.project-head \.twist-folder-open/);
+  assert.match(css, /\.project-folder\.selected \.project-head/);
+  assert.match(sidebar, /className="row-title">\{project\.name\}/);
+  assert.doesNotMatch(sidebar, /chat\$\{count/);
+  assert.doesNotMatch(sidebar, /folderSummary\(project\)/);
   assert.doesNotMatch(sidebar, /nest-new/);
   assert.match(pane, /canPlaceInProject/);
   assert.match(pane, /PlaceInProject/);
@@ -4904,6 +4925,29 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /settingsOpen/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8"), /!desk\.settingsOpen/);
   assert.equal(PROJECT_CHAT_LIMIT, 5);
+  assert.match(sidebar, /pinnedCollapsedChat/);
+  assert.match(sidebar, /activeProjectChat/);
+  assert.match(sidebar, /has-pin/);
+  assert.match(sidebar, /pinned-open/);
+  assert.match(sidebar, /project-chat-inner/);
+  assert.doesNotMatch(sidebar, /project-chats pinned/);
+  assert.match(css, /\.project-folder\.has-pin \.project-chats-slot/);
+  assert.match(css, /\.project-folder \.project-chat-block/);
+  assert.doesNotMatch(css, /^\.project-chat-block \{/m);
+  assert.match(css, /\.project-chat-block\.pinned-open/);
+  assert.match(css, /\.project-folder\.has-pin \.project-chat-block\.pinned-open/);
+  assert.match(sidebar, /function LooseChats/);
+  assert.match(sidebar, /className="loose-chats"/);
+  const pinRows = [
+    { id: "a", workers: [] as Array<{ id: string }> },
+    { id: "b", workers: [{ id: "w" }] },
+  ];
+  assert.equal(activeProjectChat(pinRows, "a")?.id, "a");
+  assert.equal(activeProjectChat(pinRows, "w")?.id, "b");
+  assert.equal(pinnedCollapsedChat(pinRows, true, "a")?.id, undefined);
+  assert.equal(pinnedCollapsedChat(pinRows, false, "a")?.id, "a");
+  assert.equal(pinnedCollapsedChat(pinRows, false, "w")?.id, "b");
+  assert.equal(pinnedCollapsedChat(pinRows, false, "z")?.id, undefined);
   const rows = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id: String(id) }));
   assert.deepEqual(visibleProjectChats(rows, false).map((item) => item.id), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(visibleProjectChats(rows, false, "7").map((item) => item.id), ["1", "2", "3", "4", "7"]);
@@ -6907,6 +6951,11 @@ test("unsent composer text and images survive normalizeSession", () => {
   const again = normalizeSession(JSON.parse(JSON.stringify(session)));
   assert.equal(again?.composerDraft, "still typing this");
   assert.equal(again?.composerImages?.[0]?.data, "abcd");
+  const crewed = normalizeSession({ ...saved, crewMode: "orchestrate" });
+  assert.deepEqual(crewed?.crewModes, ["orchestrate"]);
+  assert.deepEqual(normalizeSession({ ...saved, crewMode: "mission" })?.crewModes, ["mission"]);
+  assert.deepEqual(normalizeSession({ ...saved, crewModes: ["orchestrate", "mission"] })?.crewModes, ["orchestrate", "mission"]);
+  assert.equal(normalizeSession({ ...saved, crewMode: "nope" })?.crewModes, undefined);
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /setComposerDraft/);
   assert.match(composer, /composerDraft/);
@@ -6974,7 +7023,7 @@ test("turns keep the bot that ran them after a switch", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(pane, /turn-who/);
   assert.match(pane, /brainCaption/);
-  assert.match(row, /ink \? \{ background: ink/);
+  assert.match(row, /background: ink/);
   assert.match(store, /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "session.ts"), "utf8"), /stampUnstampedMessages\(session\.messages, brainStamp\(session\)\)/);
 });
@@ -7931,6 +7980,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
   assert.equal(boxed.sandbox, "read-only");
   assert.equal(boxed.vendorSessionId, undefined);
   assert.equal(formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "medium", mode: "ask" }), "Grok 4.6 · Medium · Ask");
+  assert.equal(formatChatSidebar({ provider: "grok", model: "grok-4.6", effort: "high", mode: "always-approve" }), "Grok 4.6 · High");
   assert.equal(
     workerSidebarLabel({
       id: "worker_terra",
@@ -7947,7 +7997,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium · Done",
+    "GPT-5.6-Terra · Medium",
   );
   assert.equal(
     workerSidebarLabel({
@@ -7971,7 +8021,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         takeoverReason: "Parent applied patch after handing the work to Workhorse.",
       },
     }),
-    "GPT-5.6-Terra · Medium · Parent took over",
+    "GPT-5.6-Terra · Medium",
   );
   assert.equal(
     workerSidebarLabel({
@@ -8002,7 +8052,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         },
       },
     }),
-    "Sonnet 4.6 · Medium · Pass 2 · Working…",
+    "Sonnet 4.6 · Medium",
   );
   const listed = catalogSessions({
     sessions: [
@@ -8055,6 +8105,111 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.equal(looksLikePreviewQuestion("hi"), false);
   const previewAsk = composeVendorPrompt("What does the preview message say?", WORKHORSE_SESSION_RULES, "session/load");
   assert.match(previewAsk, new RegExp(PREVIEW_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("composer + pins Orchestrate and Mission and those modes inject the bible", () => {
+  assert.equal(crewModeLabel("orchestrate"), "Orchestrate");
+  assert.equal(crewModeLabel("mission"), "Mission");
+  assert.deepEqual(toggleCrewMode(undefined, "orchestrate"), ["orchestrate"]);
+  assert.equal(toggleCrewMode(["orchestrate"], "orchestrate"), undefined);
+  assert.deepEqual(toggleCrewMode(["orchestrate"], "mission"), ["orchestrate", "mission"]);
+  assert.deepEqual(toggleCrewMode(["orchestrate", "mission"], "mission"), ["orchestrate"]);
+  assert.deepEqual(orderedCrewModes(["mission", "orchestrate"]), ["orchestrate", "mission"]);
+
+  const review = "Review this folder and ship the report";
+  assert.equal(withCrewModeHint(review), review);
+  const orchestrated = withCrewModeHint(review, "orchestrate");
+  assert.ok(orchestrated.startsWith(ORCHESTRATE_MODE_HINT));
+  assert.match(orchestrated, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(orchestrated, /Review this folder and ship the report/);
+  const missioned = withCrewModeHint(review, "mission");
+  assert.ok(missioned.startsWith(MISSION_MODE_HINT));
+  assert.match(missioned, /workhorse_continue_mission/);
+  assert.match(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const both = withCrewModeHint(review, ["orchestrate", "mission"]);
+  assert.ok(both.startsWith(ORCHESTRATE_MODE_HINT));
+  assert.match(both, new RegExp(MISSION_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(both, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const workerBrief = "ROLE: worker\nFOLDER: /repo\nDo not spawn.\nRead README.md";
+  assert.equal(withCrewModeHint(workerBrief, "orchestrate"), workerBrief);
+  assert.equal(withCrewModeHint(review, "orchestrate", "worker"), review);
+  assert.equal(withCrewModeHint(review, "mission", "auditor"), review);
+
+  const composed = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "orchestrate" });
+  assert.match(composed, /You are the orchestrator this turn/);
+  assert.match(composed, /workhorse_spawn_agent/);
+  assert.match(composed, /canCall/);
+  const composedMission = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
+  assert.match(composedMission, /workhorse_continue_mission/);
+  const composedBoth = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", {
+    crewMode: ["orchestrate", "mission"],
+  });
+  assert.match(composedBoth, /You are the orchestrator this turn/);
+  assert.match(composedBoth, /workhorse_continue_mission/);
+  const plain = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load");
+  assert.doesNotMatch(plain, new RegExp(ORCHESTRATE_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(plain, /workhorse_continue_mission/);
+
+  const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
+  assert.match(composer, /composer-plus-menu/);
+  assert.match(composer, /Orchestrate/);
+  assert.match(composer, /Mission/);
+  assert.match(composer, /Attach/);
+  assert.match(composer, /Files or folders/);
+  assert.match(composer, /plus-icon orchestrate/);
+  assert.match(composer, /plus-icon mission/);
+  assert.match(composer, /plus-icon attach/);
+  assert.match(composer, /plus-copy/);
+  assert.match(composer, /plus-row orchestrate/);
+  assert.doesNotMatch(composer, /plus-check/);
+  assert.match(composer, /composer-crew-chip more/);
+  assert.match(composer, /crew-more-count/);
+  assert.match(composer, /composer-crew-inner/);
+  assert.match(composer, /setCrewWidth/);
+  assert.match(composer, /crewLeaving/);
+  assert.match(composer, /onTransitionEnd/);
+  assert.match(composer, /setCrewOpen\(true\)/);
+  assert.match(composer, /CrewModeIcon/);
+  assert.match(composer, /attachFromMenu/);
+  assert.match(composer, /pickAttach/);
+  assert.doesNotMatch(composer, /Attach files/);
+  assert.doesNotMatch(composer, /Attach folder/);
+  assert.doesNotMatch(composer, /webkitdirectory/);
+  assert.match(
+    composer,
+    /pickCrewMode\("orchestrate"\)[\s\S]*pickCrewMode\("mission"\)[\s\S]*attachFromMenu\(\)/,
+  );
+  assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /attach:pick/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /pickAttach/);
+  assert.match(composer, /composer-crew-chip/);
+  assert.match(composer, /setCrewMode\(toggleCrewMode/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.composer-plus-menu/);
+  assert.match(css, /\.plus-icon\.orchestrate/);
+  assert.match(css, /\.plus-icon\.mission/);
+  assert.match(css, /\.plus-icon\.attach/);
+  assert.match(css, /\.plus-copy/);
+  assert.match(css, /\.plus-row\.orchestrate\[aria-checked="true"\]/);
+  assert.match(css, /\.plus-row\.mission\[aria-checked="true"\]/);
+  assert.match(css, /\.composer-crew-chip\.more/);
+  assert.match(css, /\.crew-more-count/);
+  assert.match(css, /\.composer-crew \{[\s\S]*transition:\s*width/);
+  assert.match(css, /@keyframes crew-chip-in/);
+  assert.match(css, /@keyframes crew-chip-out/);
+  assert.match(css, /\.composer-crew\.leaving/);
+  assert.match(css, /\.composer-attach \{[\s\S]*?height:\s*32px/);
+  assert.match(css, /\.setup-trigger \{[\s\S]*?height:\s*32px/);
+  assert.match(css, /\.composer-crew-chip/);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /crewModes: session\.crewModes/);
+  assert.match(store, /setCrewMode/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "grok-host.ts"), "utf8"), /crewMode: input\.crewModes/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "claude-host.ts"), "utf8"), /crewMode: input\.crewModes/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "codex-host.ts"), "utf8"), /crewMode: input\.crewModes/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "cursor-host.ts"), "utf8"), /crewMode: input\.crewModes/);
+  assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCrewModeHint/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /Composer \+ menu/);
 });
 
 test("desk-enforced orchestrator vs worker lineup", async () => {

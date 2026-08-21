@@ -11,23 +11,34 @@ import type { ChatLink } from "../lib/tool-labels";
 import type { Project, Session, Settings } from "../lib/types";
 import { TimeStamp } from "./TimeStamp";
 
+export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle";
+
+/** Working pulses. Failed rings red. Cancelled and the other stops are a hollow vendor ring. Needs-you pulses amber. Done is a still solid. */
+export function crewDotKind(
+  session: Pick<Session, "status" | "agentRun">,
+  waveRunning = false,
+): CrewDotKind {
+  const run = session.agentRun?.status;
+  if (session.status === "running" || run === "running" || waveRunning) return "working";
+  if (session.status === "needs-input") return "needs-you";
+  if (run === "failed") return "failed";
+  if (run === "cancelled" || run === "interrupted" || run === "timed-out" || run === "budget-exceeded") return "stopped";
+  return "idle";
+}
+
+export function crewDotClass(kind: CrewDotKind): string {
+  if (kind === "working") return " pulse";
+  if (kind === "failed") return " failed";
+  if (kind === "stopped") return " stopped";
+  if (kind === "needs-you") return " needs-you";
+  return "";
+}
+
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
-  const run = session.agentRun?.status;
-  let state = "Ready";
-  if (session.status === "running" || run === "running") state = "Working…";
-  else if (run === "completed") state = "Done";
-  else if (run === "failed") state = "Failed";
-  else if (run === "timed-out") state = "Timed out";
-  else if (run === "budget-exceeded") state = "Budget stop";
-  else if (run === "interrupted") state = "Interrupted";
-  else if (run === "cancelled") state = "Cancelled";
-  else if (session.status === "needs-input") state = "Needs you";
-  if (session.agentRun?.executionOwner === "parent") state = "Parent took over";
-  const iteration = session.agentRun?.mission?.iteration ?? 0;
-  const pass = iteration > 1 ? `Pass ${iteration}` : "";
-  return [name, effort, pass, state].filter(Boolean).join(" · ");
+  const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
+  return [name, effort, cancelled].filter(Boolean).join(" · ");
 }
 
 export type ChatRowDesk = {
@@ -97,6 +108,8 @@ export function ChatRow({
       })
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
+  const dotKind = crewDotKind(session, Boolean(mission?.running));
+  const waveWord = mission?.word && mission.word !== "Working…" ? mission.word : undefined;
   const link = desk.link;
 
   useEffect(() => {
@@ -209,8 +222,14 @@ export function ChatRow({
           }}
         >
           <span
-            className={`dot ${session.provider}${session.status === "running" || mission?.running ? " pulse" : ""}`}
-            style={ink ? { background: ink, color: ink } : undefined}
+            className={`dot ${session.provider}${crewDotClass(dotKind)}`}
+            style={
+              ink && dotKind !== "stopped"
+                ? { background: ink, color: ink }
+                : ink
+                  ? { color: ink }
+                  : undefined
+            }
           />
           <span>
             <span className="row-title" title="Double-click to rename">
@@ -225,21 +244,21 @@ export function ChatRow({
                 ? link.label
                 : nested && (session.hidden || session.agentRun)
                   ? workerLabel
-                  : mission?.caller || mission?.word
+                  : waveWord || mission?.caller
                     ? (
                         <>
-                          {mission.caller ? <span className="row-caller">{mission.caller}</span> : null}
-                          {mission.caller && mission.word ? " · " : null}
-                          {mission.word ? (
-                            <span className={mission.tone === "danger" ? "row-state bad" : "row-state"}>{mission.word}</span>
-                          ) : null}
+                          {mission?.caller ? <span className="row-caller">{mission.caller}</span> : null}
+                          {mission?.caller && (waveWord || rowLabel) ? " · " : null}
+                          {waveWord ? (
+                            <span className={mission?.tone === "danger" ? "row-state bad" : "row-state"}>{waveWord}</span>
+                          ) : (
+                            rowLabel
+                          )}
                         </>
                       )
-                    : session.status === "running"
-                      ? "Working…"
-                      : session.status === "needs-input"
-                        ? "Needs you"
-                        : rowLabel}
+                    : session.status === "needs-input"
+                      ? "Needs you"
+                      : rowLabel}
             </span>
           </span>
           <TimeStamp at={talkedAt} className="row-talked" />

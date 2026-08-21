@@ -23,6 +23,27 @@ export function hiddenProjectChatCount(total: number, expanded: boolean, limit =
   return total - limit;
 }
 
+/** The chat (or its worker) that is selected in this project, if any. */
+export function activeProjectChat<T extends { id: string; workers?: Array<{ id: string }> }>(
+  chats: T[],
+  activeId?: string | null,
+): T | undefined {
+  if (!activeId) return undefined;
+  return chats.find(
+    (item) => item.id === activeId || Boolean(item.workers?.some((worker) => worker.id === activeId)),
+  );
+}
+
+/** The open chat stays listed under a collapsed project until another chat is selected. */
+export function pinnedCollapsedChat<T extends { id: string; workers?: Array<{ id: string }> }>(
+  chats: T[],
+  open: boolean,
+  activeId?: string | null,
+): T | undefined {
+  if (open) return undefined;
+  return activeProjectChat(chats, activeId);
+}
+
 export function renameChat(sessions: Session[], id: string, title: string, locked = true): Session[] | null {
   const next = typeof title === "string" ? title.trim() : "";
   if (!next) return null;

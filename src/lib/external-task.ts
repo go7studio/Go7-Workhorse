@@ -83,7 +83,7 @@ export function externalTaskToRun(task: ExternalTask): ExternalAgentRun {
 
 export function externalTaskToLineupRow(task: ExternalTask, slice = ""): DeskLineupRow {
   const status: DeskLineupRow["status"] =
-    task.status === "cancelled" ? "failed" : task.status === "unknown" ? "unknown" : task.status;
+    task.status === "unknown" ? "unknown" : task.status;
   return {
     childId: task.id,
     title: formatExternalAgentRef(task.ref),

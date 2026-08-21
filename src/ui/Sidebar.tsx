@@ -1,9 +1,15 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
-import { hiddenProjectChatCount, lastProjectChat, PROJECT_CHAT_LIMIT, visibleProjectChats } from "../lib/chats";
+import {
+  activeProjectChat,
+  hiddenProjectChatCount,
+  lastProjectChat,
+  pinnedCollapsedChat,
+  PROJECT_CHAT_LIMIT,
+  visibleProjectChats,
+} from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
-import { folderSummary } from "../lib/project";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
 import { deskPulseLines } from "../lib/usage";
 import type { Project, Session } from "../lib/types";
@@ -187,10 +193,11 @@ function ProjectFolder({
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
-  const count = chats.length + archived.length;
+  const held = activeProjectChat(chats, store.activeSessionId);
+  const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
 
   return (
-    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
+    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${dropOver ? " drop-over" : ""}`}>
       <div className="project-head">
         <button
           className="twist"
@@ -198,15 +205,36 @@ function ProjectFolder({
           aria-expanded={open}
           aria-label={open ? `Hide chats in ${project.name}` : `Show chats in ${project.name}`}
           onClick={onToggle}
-        />
+        >
+          <svg className="twist-folder twist-folder-closed" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.88c.4 0 .78.16 1.06.44l1.12 1.12c.10.10.0.4.44.44H12.5A1.5 1.5 0 0 1 14 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5z"
+            />
+          </svg>
+          <svg className="twist-folder twist-folder-open" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.88c.4 0 .78.16 1.06.44l.8.8H12.5A1.5 1.5 0 0 1 14 4.75V6H4.15A2.1 2.1 0 0 0 2.1 7.85L2 8.2z"
+            />
+            <path
+              fill="currentColor"
+              d="M2.2 7.4h12.45L13.05 14.2H3.2A1.45 1.45 0 0 1 1.78 12.8L2.2 7.4z"
+            />
+          </svg>
+        </button>
         <button
           className={selected && !store.activeSessionId ? "row active" : "row"}
           type="button"
           onClick={() => {
+            if (open) {
+              onToggle();
+              return;
+            }
             const last = lastProjectChat(chats);
             if (last) store.selectSession(last.id);
             else store.selectProject(project.id);
-            if (!open) onToggle();
+            onToggle();
           }}
           onDragOver={(event) => {
             if (![...event.dataTransfer.types].includes("text/workhorse-chat")) return;
@@ -221,12 +249,7 @@ function ProjectFolder({
             if (id) store.moveSession(id, project.id);
           }}
         >
-          <span>
-            <span className="row-title">{project.name}</span>
-            <span className="row-meta">
-              {count === 0 ? folderSummary(project) : `${count} chat${count === 1 ? "" : "s"} · ${folderSummary(project)}`}
-            </span>
-          </span>
+          <span className="row-title">{project.name}</span>
         </button>
         <button
           className={`tiny project-info${selected && !store.activeSessionId ? " active" : ""}`}
@@ -254,26 +277,34 @@ function ProjectFolder({
           +
         </button>
       </div>
-      <div className="project-chats-slot" aria-hidden={!open}>
+      <div className="project-chats-slot" aria-hidden={!open && !pinned}>
         <div className="project-chats">
           {chats.length === 0 && archived.length === 0 && (
             <p className="row-meta nest-empty">No chats yet.</p>
           )}
-          {visible.map((session) => (
-            <div key={session.id} className="project-chat-block">
-              <ChatRow
-                session={session}
-                desk={rowDesk(store, index, session)}
-                workerCount={session.workers.length}
-            mission={missionRowLook(session, session.workers)}
-                workersOpen={Boolean(openCrew[session.id])}
-                onToggleWorkers={() =>
-                  setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
-                }
-              />
-              <CrewList session={session} open={Boolean(openCrew[session.id])} store={store} index={index} />
-            </div>
-          ))}
+          {visible.map((session) => {
+            const hold = held?.id === session.id;
+            const crewOpen = Boolean(
+              openCrew[session.id] || session.workers.some((worker) => worker.id === store.activeSessionId),
+            );
+            return (
+              <div key={session.id} className={`project-chat-block${hold ? " pinned-open" : ""}`}>
+                <div className="project-chat-inner">
+                  <ChatRow
+                    session={session}
+                    desk={rowDesk(store, index, session)}
+                    workerCount={session.workers.length}
+                    mission={missionRowLook(session, session.workers)}
+                    workersOpen={crewOpen}
+                    onToggleWorkers={() =>
+                      setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
+                    }
+                  />
+                  <CrewList session={session} open={crewOpen} store={store} index={index} />
+                </div>
+              </div>
+            );
+          })}
           {chats.length > PROJECT_CHAT_LIMIT && hidden > 0 && (
             <button className="archive-toggle" type="button" onClick={() => setShowMore((value) => !value)}>
               {showMore ? "Show less" : `Show more (${hidden})`}

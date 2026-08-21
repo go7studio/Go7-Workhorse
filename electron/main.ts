@@ -875,6 +875,19 @@ app.whenReady().then(async () => {
     return result.filePaths[0];
   });
 
+  ipcMain.handle("attach:pick", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Attach files or folders",
+      buttonLabel: "Attach",
+      properties:
+        process.platform === "win32"
+          ? ["openFile", "multiSelections"]
+          : ["openFile", "openDirectory", "multiSelections"],
+    });
+    if (result.canceled) return [];
+    return result.filePaths.filter((item) => typeof item === "string" && item.trim());
+  });
+
   ipcMain.handle("media:src", async (_event, href: string, cwd?: string, vendorSessionId?: string) =>
     readMediaSrc(href, cwd, vendorSessionId),
   );

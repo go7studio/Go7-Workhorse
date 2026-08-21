@@ -64,7 +64,7 @@ function session(raw: Record<string, unknown>): Session {
   return next;
 }
 
-function parentChat(lineupRows: Array<{ childId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "timed-out" | "interrupted"; report?: string }>, extra: Record<string, unknown> = {}): Session {
+function parentChat(lineupRows: Array<{ childId: string; title: string; status: "queued" | "running" | "completed" | "failed" | "timed-out" | "cancelled" | "interrupted"; report?: string }>, extra: Record<string, unknown> = {}): Session {
   let lineup = emptyLineup("/repo", 1, "Ship the verified feature", "desk");
   for (const row of lineupRows) {
     lineup = addLineupRow(lineup, {
@@ -263,11 +263,15 @@ test("cancellation: mid-mission cancel is terminal, keeps partial work, and is i
   assert.equal(second.worker?.agentRun?.finishedAt, 50);
   assert.equal(second.worker?.agentRun?.error, first.worker?.agentRun?.error);
 
-  const synced = applyChildIdleSync(first.sessions, coordinator.id, "failed", {
+  const synced = applyChildIdleSync(first.sessions, coordinator.id, "cancelled", {
     report: childReportText(first.worker),
     now: 60,
   });
   assert.equal(synced.find((row) => row.id === coordinator.id)?.agentRun?.status, "cancelled");
+  assert.equal(
+    synced.find((row) => row.id === parent.id)?.lineup?.rows.find((row) => row.childId === coordinator.id)?.status,
+    "cancelled",
+  );
 
   const bare = { ...worker("sess_bare", "Bare"), agentRun: undefined };
   const fromScratch = applyCancelWorker([bare], bare.id, 7);

@@ -11,6 +11,7 @@ import {
   type CursorUsageLane,
   type CursorWatchKey,
 } from "./cursor-lane";
+import { isGrokBotUrl } from "./custom-http-identity";
 import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange, UsageSource } from "./types";
 
 export type UsageTotals = {
@@ -512,11 +513,11 @@ function clampLeftover(value: number): number {
 
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1|[a-z0-9-]+\.local)$/i;
 
-/** A model served from this machine. It has no allowance to report, ever. */
+/** An ordinary local model has no allowance. Grok Bot's separate weekly meter is carved out. */
 export function isLocalEndpoint(baseUrl: string | undefined): boolean {
   if (!baseUrl?.trim()) return false;
   try {
-    return LOCAL_HOST.test(new URL(baseUrl).hostname);
+    return !isGrokBotUrl(baseUrl) && LOCAL_HOST.test(new URL(baseUrl).hostname);
   } catch {
     return false;
   }

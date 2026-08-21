@@ -28,8 +28,6 @@ export function isGeminiApiUrl(baseUrl: string): boolean {
   return /(^|\.)generativelanguage\.googleapis\.com$/i.test(hostnameOf(baseUrl));
 }
 
-const LOOPBACK = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)$/i;
-
 /** The Grok Bot Custom HTTP preset. Other loopback hosts (Ollama, the desk bridge) are not this door. */
 export const GROK_BOT_SHIM_PORT = "8787";
 
@@ -38,7 +36,7 @@ export function isGrokBotUrl(baseUrl: string): boolean {
   if (!trimmed) return false;
   try {
     const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`);
-    if (!LOOPBACK.test(url.hostname.toLowerCase())) return false;
+    if (url.hostname.toLowerCase() !== "127.0.0.1") return false;
     const port = url.port || (url.protocol === "https:" ? "443" : "80");
     return port === GROK_BOT_SHIM_PORT;
   } catch {

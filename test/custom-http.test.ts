@@ -133,7 +133,15 @@ import {
   openClawKeyForBaseUrl,
   parseOpenClawMinimax,
 } from "../electron/custom-login";
-import { customPlanRemainsUrl, fetchCustomPlanUsage, leftoverFromRemainingPercent, parseCustomPlanUsage, weeklyIsUnlimited } from "../electron/custom-plan";
+import {
+  customPlanRemainsUrl,
+  fetchCustomPlanUsage,
+  grokBotLeftoverPath,
+  leftoverFromRemainingPercent,
+  parseCustomPlanUsage,
+  parseGrokBotPlanUsage,
+  weeklyIsUnlimited,
+} from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
 import { applyUpdateCustomBot, botFromDraft, draftReady, EMPTY_CUSTOM_DRAFT, inferCustomApi } from "../src/lib/custom-bots";
 import {
@@ -1535,6 +1543,43 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   );
   assert.equal(probe.ok, true);
   assert.equal(probe.contextWindow, 1_000_000);
+});
+
+test("Grok Bot weekly leftover reads the local account-menu fixture and missing stays unknown", async () => {
+  const fixturePath = grokBotLeftoverPath(path.join("fixture", "Go7 Workhorse"));
+  assert.equal(fixturePath, path.join("fixture", "Go7 Workhorse", "grok-bot-leftover.json"));
+  const plan = await fetchCustomPlanUsage({
+    baseUrl: "http://127.0.0.1:8787/v1",
+    apiKey: "",
+    grokBotLeftoverPath: fixturePath,
+    readFileImpl: async (filePath, encoding) => {
+      assert.equal(filePath, fixturePath);
+      assert.equal(encoding, "utf8");
+      return JSON.stringify({ weekly: { usedPercent: 27, resetsAt: "2026-08-28T12:00:00-04:00" } });
+    },
+  });
+  assert.equal(plan?.usedPercent, 27);
+  assert.equal(plan?.leftPercent, 73);
+  assert.equal(plan?.period, "weekly");
+  assert.equal(plan?.resetsAt, "2026-08-28T16:00:00.000Z");
+  assert.equal(plan?.prepaidBalance, 0);
+  assert.equal(plan?.products[0]?.product, "weekly");
+  assert.equal(plan?.products[0]?.usagePercent, 27);
+
+  const onePercentUsed = parseGrokBotPlanUsage({ usedPercent: 1, resetsAt: "2026-08-28T16:00:00.000Z" });
+  assert.equal(onePercentUsed?.leftPercent, 99, "1 means 1% used, not a 0–1 fraction");
+  assert.equal(parseGrokBotPlanUsage({ leftPercent: 9, resetsAt: "2026-08-28T16:00:00.000Z" }), undefined);
+  assert.equal(parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "not-a-date" }), undefined);
+
+  const missing = await fetchCustomPlanUsage({
+    baseUrl: "http://127.0.0.1:8787/v1",
+    apiKey: "local",
+    grokBotLeftoverPath: fixturePath,
+    readFileImpl: async () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+  });
+  assert.equal(missing, undefined);
 });
 
 test("Grok Bot probe fails closed when the local shim is down", async () => {

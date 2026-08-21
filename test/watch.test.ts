@@ -996,6 +996,63 @@ test("projectCapacitySnapshot keeps Cursor pools and one custom-account row, dro
   assert.ok(summed > 0);
 });
 
+test("Grok Bot capacity uses its weekly reading while missing stays unknown and Grok stays separate", () => {
+  const now = Date.parse("2026-08-21T12:00:00.000Z");
+  const reset = "2026-08-28T12:00:00.000Z";
+  const grokBot: CustomBot = {
+    ...bot,
+    id: "bot_2yyu6ypvxald",
+    name: "Grok Bot",
+    baseUrl: "http://127.0.0.1:8787/v1",
+    model: "grok-bot",
+    apiKey: "pairing-token",
+    api: "openai-completions",
+  };
+  const settings = {
+    watch: { ...DEFAULT_WATCH, lockDaily: false },
+    customBots: [grokBot],
+    usageBudgets: {},
+    llms: links({ grok: { connected: true } }),
+  };
+  const grokPlan = plan(12, {
+    resetsAt: reset,
+    products: [{ product: "weekly", label: "Weekly", usagePercent: 88, resetsAt: reset }],
+  });
+  const botPlan = plan(73, {
+    resetsAt: reset,
+    products: [{ product: "weekly", label: "Weekly", usagePercent: 27, resetsAt: reset }],
+  });
+  const plans = { grok: grokPlan, custom: { bot_2yyu6ypvxald: botPlan } };
+  const knownRows = deskCallCatalog({ settings, usage: [], plans, permits: {}, now });
+  const routableBot = knownRows.find((row) => row.id === "bot:bot_2yyu6ypvxald");
+  assert.equal(routableBot?.leftoverPercent, 73);
+  assert.equal(routableBot?.canCall, true);
+  const known = projectCapacitySnapshot(
+    knownRows,
+    { now, fetchedAt: now, plans, settings },
+  );
+  const botKnown = known.rows.find((row) => row.id === "bot:bot_2yyu6ypvxald");
+  const grokKnown = known.rows.find((row) => row.id === "grok");
+  assert.equal(botKnown?.meter.status, "known");
+  assert.equal(botKnown?.meter.remainingPercent, 73);
+  assert.equal(botKnown?.meter.usedPercent, 27);
+  assert.equal(grokKnown?.meter.remainingPercent, 12);
+  assert.equal(grokKnown?.meter.usedPercent, 88);
+
+  const missingPlans = { grok: grokPlan, custom: { bot_2yyu6ypvxald: undefined } };
+  const missing = projectCapacitySnapshot(
+    deskCallCatalog({ settings, usage: [], plans: missingPlans, permits: {}, now }),
+    { now, fetchedAt: now, plans: missingPlans, settings },
+  );
+  const botMissing = missing.rows.find((row) => row.id === "bot:bot_2yyu6ypvxald");
+  const grokUnchanged = missing.rows.find((row) => row.id === "grok");
+  assert.equal(botMissing?.meter.status, "unknown");
+  assert.equal(botMissing?.meter.remainingPercent, undefined);
+  assert.equal(botMissing?.meter.usedPercent, undefined);
+  assert.equal(grokUnchanged?.meter.remainingPercent, 12);
+  assert.equal(grokUnchanged?.meter.usedPercent, 88);
+});
+
 test("projectCapacitySnapshot freshness uses the six-hour cache age", () => {
   const now = Date.parse("2026-08-19T18:00:00.000Z");
   const rows = [

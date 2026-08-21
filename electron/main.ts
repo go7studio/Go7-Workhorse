@@ -23,7 +23,7 @@ import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
 import { fetchCursorPlanUsage } from "./cursor-plan";
-import { fetchCustomPlanUsage } from "./custom-plan";
+import { fetchCustomPlanUsage, grokBotLeftoverPath } from "./custom-plan";
 import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
 import { safeExternalUrl } from "../src/lib/open-external";
@@ -1132,6 +1132,7 @@ app.whenReady().then(async () => {
           baseUrl,
           apiKey,
           model: typeof raw?.model === "string" ? raw.model : undefined,
+          grokBotLeftoverPath: grokBotLeftoverPath(app.getPath("userData")),
         })) ?? null
       );
     } catch {

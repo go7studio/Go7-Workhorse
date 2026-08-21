@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   pushSkill: (input: { dir: string; name?: string; target: "grok" | "codex" | "claude" | "cursor" }) =>
     ipcRenderer.invoke("desk:push-skill", input) as Promise<import("../src/lib/types").DeskExportResult>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
+  pickAttach: () => ipcRenderer.invoke("attach:pick") as Promise<string[]>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>
     ipcRenderer.invoke("media:src", href, cwd, vendorSessionId) as Promise<string | null>,
   pathForFile: (file: File) => {

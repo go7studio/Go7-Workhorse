@@ -3,6 +3,8 @@ import { commandNeedsInput, commandsForSession, filterPalette, shortModeLabel } 
 import {
   collectDroppedFiles,
   dataTransferLooksLikeFiles,
+  droppedFromDiskPaths,
+  droppedFromPickerFile,
   filesFromClipboard,
   folderNameFromPath,
   groupAttachments,
@@ -18,7 +20,8 @@ import { effortLabel, modelName } from "../lib/models";
 import { deskInk } from "../lib/settings";
 import { useStoreSelector } from "../lib/store";
 import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
-import type { ChatImage } from "../lib/types";
+import type { ChatImage, CrewMode } from "../lib/types";
+import { crewModeLabel, hasCrewMode, orderedCrewModes, toggleCrewMode } from "../lib/workhorse-rules";
 
 export function isEditableKeyTarget(el: EventTarget | null): boolean {
   if (!(el instanceof Element)) return false;
@@ -67,6 +70,30 @@ export function fitComposerField(el: HTMLTextAreaElement, value: string, paneHei
   el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
 }
 
+function CrewModeIcon({ mode, size = 12 }: { mode: CrewMode; size?: number }) {
+  if (mode === "mission") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <path d="M4.2 2.4v11.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M4.2 3.1h7.4L9.4 6.4l2.2 3.3H4.2z" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="3.4" r="1.7" fill="currentColor" />
+      <circle cx="3.4" cy="12.6" r="1.7" fill="currentColor" />
+      <circle cx="12.6" cy="12.6" r="1.7" fill="currentColor" />
+      <path
+        d="M8 5.2v2.1M8 7.3 4.4 11.1M8 7.3l3.6 3.8"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export const Composer = memo(function Composer({
   setupOpen,
   onToggleSetup,
@@ -86,6 +113,7 @@ export const Composer = memo(function Composer({
     clearWatchRestore,
     settings,
     setComposerDraft,
+    setCrewMode,
     deskSkills,
   } = useStoreSelector(selectComposerDesk, sameComposerDesk);
   const ink = session ? deskInk(session, settings) : undefined;
@@ -95,9 +123,14 @@ export const Composer = memo(function Composer({
   const [images, setImages] = useState<ChatImage[]>(() => session?.composerImages ?? []);
   const [over, setOver] = useState(false);
   const [active, setActive] = useState(0);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [crewOpen, setCrewOpen] = useState(false);
+  const [crewWidth, setCrewWidth] = useState(0);
+  const [shownCrew, setShownCrew] = useState<CrewMode[]>([]);
   const field = useRef<HTMLTextAreaElement>(null);
   const filePicker = useRef<HTMLInputElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
+  const crewInner = useRef<HTMLDivElement>(null);
   const sessionId = session?.id;
   const valueRef = useRef(value);
   const imagesRef = useRef(images);
@@ -105,6 +138,31 @@ export const Composer = memo(function Composer({
   imagesRef.current = images;
 
   const extras = useMemo(() => commandsForSession(session, deskSkills), [deskSkills, session]);
+  const crewModes = orderedCrewModes(session?.crewModes);
+
+  useEffect(() => {
+    setCrewOpen(false);
+    setCrewWidth(0);
+    setShownCrew([]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (crewModes.length < 2) setCrewOpen(false);
+  }, [crewModes.length]);
+
+  useEffect(() => {
+    if (crewModes.length > 0) setShownCrew(crewModes);
+  }, [crewModes]);
+
+  useEffect(() => {
+    const el = crewInner.current;
+    const next = crewModes.length === 0 ? 0 : el ? Math.ceil(el.scrollWidth) : 0;
+    const frame = window.requestAnimationFrame(() => setCrewWidth(next));
+    return () => window.cancelAnimationFrame(frame);
+  }, [crewModes, crewOpen, shownCrew]);
+  const displayCrew = crewModes.length > 0 ? crewModes : shownCrew;
+  const crewStacked = displayCrew.length >= 2 && !crewOpen;
+  const crewLeaving = crewModes.length === 0 && displayCrew.length > 0;
   const open = value.startsWith("/") && images.length === 0;
   const matches = useMemo(() => (open ? filterPalette(value, extras) : []), [extras, open, value]);
   const canSend = Boolean(value.trim() || images.length);
@@ -187,7 +245,7 @@ export const Composer = memo(function Composer({
     const next: ChatImage[] = [];
     for (const item of files) {
       const dropped = item instanceof File
-        ? { file: item, sourcePath: window.workhorse?.pathForFile(item) || undefined }
+        ? droppedFromPickerFile(item, window.workhorse?.pathForFile(item) || undefined)
         : item;
       const image = dropped.attachment ?? (dropped.file ? await readChatAttachment(dropped.file, dropped.sourcePath) : null);
       if (image) next.push(dropped.folder ? { ...image, folder: dropped.folder } : image);
@@ -195,6 +253,45 @@ export const Composer = memo(function Composer({
     if (next.length === 0) return;
     setImages((current) => [...current, ...next].slice(0, MAX_IMAGES));
   };
+
+  const pickCrewMode = (mode: CrewMode) => {
+    if (!sessionId) return;
+    setCrewMode(toggleCrewMode(session?.crewModes, mode));
+  };
+
+  const attachFromMenu = async () => {
+    setPlusOpen(false);
+    const pick = window.workhorse?.pickAttach;
+    if (pick) {
+      const paths = await pick();
+      if (paths.length === 0) return;
+      const dropped = await droppedFromDiskPaths(paths);
+      if (dropped.length > 0) void addFiles(dropped);
+      return;
+    }
+    filePicker.current?.click();
+  };
+
+  useEffect(() => {
+    setPlusOpen(false);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!plusOpen) return;
+    const onDown = (event: PointerEvent) => {
+      const dock = wrap.current;
+      if (!(event.target instanceof Node) || !dock) {
+        setPlusOpen(false);
+        return;
+      }
+      const attach = dock.querySelector(".composer-attach");
+      const menu = dock.querySelector(".composer-plus-menu");
+      if (attach?.contains(event.target) || menu?.contains(event.target)) return;
+      setPlusOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [plusOpen]);
 
   useEffect(() => {
     const root = dropRoot?.current ?? wrap.current;
@@ -428,6 +525,11 @@ export const Composer = memo(function Composer({
               submit(value, running && (event.altKey || event.metaKey) ? "steer" : "queue");
             }
             if (event.key === "Escape") {
+              if (plusOpen) {
+                event.preventDefault();
+                setPlusOpen(false);
+                return;
+              }
               setValue("");
               setImages([]);
               if (sessionId) setComposerDraft(sessionId, "", [], true);
@@ -445,16 +547,133 @@ export const Composer = memo(function Composer({
             event.target.value = "";
           }}
         />
+        {plusOpen && (
+          <div className="composer-plus-menu" role="menu">
+            <button
+              type="button"
+              className="plus-row orchestrate"
+              role="menuitemcheckbox"
+              aria-checked={hasCrewMode(session?.crewModes, "orchestrate")}
+              onClick={() => pickCrewMode("orchestrate")}
+            >
+              <span className="plus-icon orchestrate" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <circle cx="8" cy="3.4" r="1.7" fill="currentColor" />
+                  <circle cx="3.4" cy="12.6" r="1.7" fill="currentColor" />
+                  <circle cx="12.6" cy="12.6" r="1.7" fill="currentColor" />
+                  <path
+                    d="M8 5.2v2.1M8 7.3 4.4 11.1M8 7.3l3.6 3.8"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+              <span className="plus-copy">
+                <strong>Orchestrate</strong>
+                <em>This chat spawns workers</em>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="plus-row mission"
+              role="menuitemcheckbox"
+              aria-checked={hasCrewMode(session?.crewModes, "mission")}
+              onClick={() => pickCrewMode("mission")}
+            >
+              <span className="plus-icon mission" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4.2 2.4v11.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  <path d="M4.2 3.1h7.4L9.4 6.4l2.2 3.3H4.2z" fill="currentColor" />
+                </svg>
+              </span>
+              <span className="plus-copy">
+                <strong>Mission</strong>
+                <em>Adaptive waves until done</em>
+              </span>
+            </button>
+            <hr />
+            <button type="button" className="plus-row attach" role="menuitem" onClick={() => void attachFromMenu()}>
+              <span className="plus-icon attach" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path
+                    d="M5.6 7.4 9.1 3.9a2.4 2.4 0 1 1 3.4 3.4l-4.8 4.8a3.2 3.2 0 0 1-4.5-4.5l4.4-4.4"
+                    stroke="currentColor"
+                    strokeWidth="1.55"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+              <span className="plus-copy">
+                <strong>Attach</strong>
+                <em>Files or folders</em>
+              </span>
+            </button>
+          </div>
+        )}
         <div className="composer-tools">
         <button
-          className="composer-attach"
+          className={`composer-attach${plusOpen ? " on" : ""}`}
           type="button"
-          aria-label="Attach files"
-          title="Attach files"
-          onClick={() => filePicker.current?.click()}
+          aria-label="Attach or choose a mode"
+          aria-haspopup="menu"
+          aria-expanded={plusOpen}
+          title="Attach or choose a mode"
+          onClick={() => setPlusOpen((open) => !open)}
         >
           +
         </button>
+        {displayCrew.length > 0 || crewWidth > 0 ? (
+          <div
+            className={`composer-crew${crewLeaving ? " leaving" : ""}`}
+            style={{ width: crewWidth }}
+            onTransitionEnd={(event) => {
+              if (event.propertyName !== "width") return;
+              if (crewModes.length === 0) {
+                setShownCrew([]);
+                setCrewWidth(0);
+              }
+            }}
+          >
+            <div className="composer-crew-inner" ref={crewInner}>
+              {crewStacked ? (
+                <button
+                  type="button"
+                  className="composer-crew-chip more"
+                  aria-label={`Show ${displayCrew.length} modes`}
+                  title={displayCrew.map(crewModeLabel).join(", ")}
+                  onClick={() => setCrewOpen(true)}
+                >
+                  <span className="crew-more-stack" aria-hidden="true">
+                    {displayCrew.map((mode) => (
+                      <span key={mode} className={`plus-icon ${mode}`}>
+                        <CrewModeIcon mode={mode} />
+                      </span>
+                    ))}
+                  </span>
+                  <span className="crew-more-count">+{displayCrew.length}</span>
+                </button>
+              ) : (
+                displayCrew.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className="composer-crew-chip"
+                    title={`Clear ${crewModeLabel(mode)}`}
+                    onClick={() => setCrewMode(toggleCrewMode(session?.crewModes, mode))}
+                  >
+                    <span className={`plus-icon ${mode}`} aria-hidden="true">
+                      <CrewModeIcon mode={mode} />
+                    </span>
+                    {crewModeLabel(mode)}
+                    <span aria-hidden="true">×</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
         {onToggleSetup && session && (
           <button
             className={`setup-trigger${setupOpen ? " on" : ""}`}

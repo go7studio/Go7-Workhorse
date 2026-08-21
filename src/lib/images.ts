@@ -542,6 +542,23 @@ export function folderNameFromPath(name: string): string | undefined {
   return parts.length > 1 ? parts[0] : undefined;
 }
 
+/** File picker and folder picker both land here. Folder picks carry webkitRelativePath. */
+export function droppedFromPickerFile(file: File, sourcePath?: string): DroppedFile {
+  const relative = typeof file.webkitRelativePath === "string" ? file.webkitRelativePath : "";
+  return {
+    file,
+    sourcePath,
+    folder: folderNameFromPath(relative || file.name),
+  };
+}
+
+/** Disk paths from the Attach dialog. A folder root is walked and grouped. */
+export async function droppedFromDiskPaths(paths: string[]): Promise<DroppedFile[]> {
+  const clean = paths.map((item) => item.trim()).filter(Boolean);
+  if (clean.length === 0 || !window.workhorse?.listDropFiles) return [];
+  return filesFromListedDrop(await window.workhorse.listDropFiles(clean));
+}
+
 export function groupAttachments(items: ChatImage[]): AttachmentGroup[] {
   const folders = new Map<string, ChatImage[]>();
   const loose: ChatImage[] = [];

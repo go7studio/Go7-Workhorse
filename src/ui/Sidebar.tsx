@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import horseMark from "../../assets/app-icons/go7-workhorse-transparent.png";
 import { APP_VERSION } from "../lib/app-info";
 import {
+  activeProjectChat,
   hiddenProjectChatCount,
   lastProjectChat,
   pinnedCollapsedChat,
@@ -192,10 +193,11 @@ function ProjectFolder({
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
+  const held = activeProjectChat(chats, store.activeSessionId);
   const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
 
   return (
-    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${dropOver ? " drop-over" : ""}`}>
+    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${dropOver ? " drop-over" : ""}`}>
       <div className="project-head">
         <button
           className="twist"
@@ -275,52 +277,34 @@ function ProjectFolder({
           +
         </button>
       </div>
-      {pinned ? (
-        <div className="project-chats pinned">
-          <div className="project-chat-block">
-            <ChatRow
-              session={pinned}
-              desk={rowDesk(store, index, pinned)}
-              workerCount={pinned.workers.length}
-              mission={missionRowLook(pinned, pinned.workers)}
-              workersOpen={Boolean(
-                openCrew[pinned.id] || pinned.workers.some((worker) => worker.id === store.activeSessionId),
-              )}
-              onToggleWorkers={() =>
-                setOpenCrew((current) => ({ ...current, [pinned.id]: !current[pinned.id] }))
-              }
-            />
-            <CrewList
-              session={pinned}
-              open={Boolean(
-                openCrew[pinned.id] || pinned.workers.some((worker) => worker.id === store.activeSessionId),
-              )}
-              store={store}
-              index={index}
-            />
-          </div>
-        </div>
-      ) : null}
-      <div className="project-chats-slot" aria-hidden={!open}>
+      <div className="project-chats-slot" aria-hidden={!open && !pinned}>
         <div className="project-chats">
           {chats.length === 0 && archived.length === 0 && (
             <p className="row-meta nest-empty">No chats yet.</p>
           )}
-          {visible.map((session) => (
-            <div key={session.id} className="project-chat-block">
-              <ChatRow
-                session={session}
-                desk={rowDesk(store, index, session)}
-                workerCount={session.workers.length}
-            mission={missionRowLook(session, session.workers)}
-                workersOpen={Boolean(openCrew[session.id])}
-                onToggleWorkers={() =>
-                  setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
-                }
-              />
-              <CrewList session={session} open={Boolean(openCrew[session.id])} store={store} index={index} />
-            </div>
-          ))}
+          {visible.map((session) => {
+            const hold = held?.id === session.id;
+            const crewOpen = Boolean(
+              openCrew[session.id] || session.workers.some((worker) => worker.id === store.activeSessionId),
+            );
+            return (
+              <div key={session.id} className={`project-chat-block${hold ? " pinned-open" : ""}`}>
+                <div className="project-chat-inner">
+                  <ChatRow
+                    session={session}
+                    desk={rowDesk(store, index, session)}
+                    workerCount={session.workers.length}
+                    mission={missionRowLook(session, session.workers)}
+                    workersOpen={crewOpen}
+                    onToggleWorkers={() =>
+                      setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
+                    }
+                  />
+                  <CrewList session={session} open={crewOpen} store={store} index={index} />
+                </div>
+              </div>
+            );
+          })}
           {chats.length > PROJECT_CHAT_LIMIT && hidden > 0 && (
             <button className="archive-toggle" type="button" onClick={() => setShowMore((value) => !value)}>
               {showMore ? "Show less" : `Show more (${hidden})`}

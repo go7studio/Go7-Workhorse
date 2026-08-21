@@ -27,6 +27,7 @@ export type ComposerDesk = {
   steerQueued: Store["steerQueued"];
   clearWatchRestore: Store["clearWatchRestore"];
   setComposerDraft: Store["setComposerDraft"];
+  setCrewMode: Store["setCrewMode"];
 };
 
 export function selectComposerDesk(store: Store): ComposerDesk {
@@ -41,6 +42,7 @@ export function selectComposerDesk(store: Store): ComposerDesk {
     steerQueued: store.steerQueued,
     clearWatchRestore: store.clearWatchRestore,
     setComposerDraft: store.setComposerDraft,
+    setCrewMode: store.setCrewMode,
   };
 }
 
@@ -57,6 +59,7 @@ export function sameComposerSession(left: Session | null, right: Session | null)
     left.effort === right.effort &&
     left.mode === right.mode &&
     left.routingMode === right.routingMode &&
+    (left.crewModes ?? []).join() === (right.crewModes ?? []).join() &&
     left.queue === right.queue &&
     left.grokCommands === right.grokCommands &&
     left.composerDraft === right.composerDraft &&
@@ -76,7 +79,8 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
     left.dropQueued === right.dropQueued &&
     left.steerQueued === right.steerQueued &&
     left.clearWatchRestore === right.clearWatchRestore &&
-    left.setComposerDraft === right.setComposerDraft
+    left.setComposerDraft === right.setComposerDraft &&
+    left.setCrewMode === right.setCrewMode
   );
 }
 

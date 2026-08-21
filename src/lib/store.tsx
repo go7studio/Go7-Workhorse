@@ -161,6 +161,7 @@ import { chatPreview, formatPeerPrompt, sameSessionCrew } from "./session-bridge
 import {
   addLineupRow,
   applyChildIdleSync,
+  lineupStatusForTerminalRun,
   awaitAgentsWaits,
   childReportText,
   emptyLineup,
@@ -294,6 +295,7 @@ import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
 import type {
   AppState,
+  CrewMode,
   CustomBot,
   CustomLlm,
   EffortLevel,
@@ -361,6 +363,7 @@ export type Store = AppState & {
   startSession: (projectId?: string | null, provider?: ProviderId) => void;
   setSessionModel: (provider: ProviderId, model: string, customBotId?: string) => void;
   setSessionRoutingMode: (mode: "auto" | "manual") => void;
+  setCrewMode: (modes: CrewMode[] | undefined) => void;
   /** Pick an interrupted worker back up. Returns why not, when it cannot. */
   resumeAgentRun: (sessionId: string) => { ok: boolean; message: string };
   createCustomBot: () => string | null;
@@ -1128,6 +1131,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         item.id === current.activeSessionId
           ? { ...item, routingMode: mode, ...(mode === "manual" ? { routingDecision: undefined } : {}) }
           : item,
+      ),
+    }));
+  }, []);
+
+  const setCrewMode = useCallback((modes: CrewMode[] | undefined) => {
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((item) =>
+        item.id === current.activeSessionId ? { ...item, crewModes: modes } : item,
       ),
     }));
   }, []);
@@ -2257,6 +2269,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           parentId: session.parentId,
           hidden: session.hidden,
           role: deskRoleOf(session),
+          crewModes: session.crewModes,
           mcpServers: stateRef.current.settings.mcpServers,
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
@@ -2318,6 +2331,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             parentId: session.parentId,
             hidden: session.hidden,
             role: deskRoleOf(session),
+            crewModes: session.crewModes,
             customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
             config: {
               baseUrl: custom.baseUrl,
@@ -3041,6 +3055,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             parentId: session.parentId,
             hidden: session.hidden,
             role,
+            crewModes: session.crewModes,
             restartRuntime,
           };
           if (live === "preview") throw new Error(`${providerById(session.provider).name} is not connected yet`);
@@ -3075,6 +3090,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               parentId: session.parentId,
               hidden: session.hidden,
               role,
+              crewModes: session.crewModes,
               customBotId: session.customBotId ?? ("id" in custom ? custom.id : undefined),
               config: {
                 baseUrl: custom.baseUrl,
@@ -4086,11 +4102,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 const finishedAt = Date.now();
                 // The transition itself is pure and lives in subagents so it can
                 // be tested without a desk. Authorising the caller and stopping
-                // the vendor stay here, because both are side effects.
-                setState((currentState) => ({
-                  ...currentState,
-                  sessions: applyCancelWorker(currentState.sessions, worker.id, finishedAt).sessions,
-                }));
+                // the vendor stay here, because both are side effects. The
+                // lineup row has to move to cancelled in the same tick, or the
+                // parent keeps saying Working… / 1 failed until the vendor dies.
+                setState((currentState) => {
+                  const cancelled = applyCancelWorker(currentState.sessions, worker.id, finishedAt);
+                  const sessions = applyChildIdleSync(cancelled.sessions, worker.id, "cancelled", {
+                    now: finishedAt,
+                    report: childReportText(cancelled.worker),
+                    error: cancelled.worker?.agentRun?.error,
+                    correlationId: cancelled.worker?.agentRun?.correlationId,
+                  });
+                  return { ...currentState, sessions };
+                });
                 const settled = stateRef.current.sessions.find((session) => session.id === worker.id);
                 if (!settled) {
                   await replyAsk({ error: "unknown" });
@@ -4970,7 +4994,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
                 terminalFailure = terminalStatus;
                 setState((current) => {
-                  const rowStatus = terminalStatus === "timed-out" ? "timed-out" as const : "failed" as const;
+                  const rowStatus = lineupStatusForTerminalRun(terminalStatus);
                   let sessions = applyChildIdleSync(current.sessions, childId, rowStatus, {
                     report: childReportText(current.sessions.find((item) => item.id === childId)),
                     error: terminalStatus,
@@ -5398,7 +5422,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
       if (child?.status === "running") cancelVendorSession(child);
       setState((current) => {
-        const rowStatus = reason === "timed-out" ? "timed-out" as const : "failed" as const;
+        const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
         let sessions = applyChildIdleSync(current.sessions, childSessionId, rowStatus, {
           error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
         });
@@ -6845,25 +6869,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => {
       const id = current.activeSessionId;
       const targets = id ? new Set([id, ...descendantSessionIds(current.sessions, id)]) : new Set<string>();
+      const now = Date.now();
       for (const child of current.sessions) {
         if (targets.has(child.id) && child.status === "running") cancelVendorSession(child);
       }
-      return {
-        ...current,
-        sessions: current.sessions.map((session) => {
-          if (!targets.has(session.id) || session.status !== "running") return session;
-          return {
-            ...session,
-            status: "idle",
-            agentRun: session.agentRun ? {
-              ...session.agentRun,
-              status: "cancelled" as const,
-              finishedAt: Date.now(),
-              error: "Cancelled with its parent lifecycle.",
-            } : undefined,
-          };
-        }),
-      };
+      let sessions = current.sessions.map((session) => {
+        if (!targets.has(session.id) || session.status !== "running") return session;
+        return {
+          ...session,
+          status: "idle" as const,
+          agentRun: session.agentRun ? {
+            ...session.agentRun,
+            status: "cancelled" as const,
+            finishedAt: now,
+            error: "Cancelled with its parent lifecycle.",
+          } : undefined,
+        };
+      });
+      for (const session of current.sessions) {
+        if (!targets.has(session.id) || !session.parentId) continue;
+        if (session.status !== "running" && session.agentRun?.status !== "running") continue;
+        sessions = applyChildIdleSync(sessions, session.id, "cancelled", { now });
+      }
+      return { ...current, sessions };
     });
   }, []);
 
@@ -6952,6 +6980,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startSession,
       setSessionModel,
       setSessionRoutingMode,
+      setCrewMode,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,
@@ -7075,6 +7104,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       startSession,
       setSessionModel,
       setSessionRoutingMode,
+      setCrewMode,
       resumeAgentRun,
       createCustomBot,
       installCustomBot,

@@ -805,6 +805,26 @@ function AgentSystemsBlock() {
             className="tiny"
             type="button"
             onClick={() => {
+              void store.linkGrokBotOneshot().then(async (text) => {
+                if (!text) {
+                  setNote("Workhorse desktop only.");
+                  return;
+                }
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setNote("Copied the Grok Bot one-shot. Paste it into Grok Bot once and tell it to save in permanent memory.");
+                } catch {
+                  setNote(text);
+                }
+              });
+            }}
+          >
+            Copy Grok Bot one-shot
+          </button>
+          <button
+            className="tiny"
+            type="button"
+            onClick={() => {
               void store.installLinkCommand().then((result) => setNote(result.message || (result.ok ? "Installed the workhorse command." : "Could not install the command.")));
             }}
           >

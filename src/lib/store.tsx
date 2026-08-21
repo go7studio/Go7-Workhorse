@@ -448,6 +448,7 @@ export type Store = AppState & {
   refreshAgentRuntimes: () => Promise<void>;
   installExternalMcp: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
   linkConfig: () => Promise<string>;
+  linkGrokBotOneshot: () => Promise<string>;
   installLinkCommand: () => Promise<{ ok: boolean; message?: string }>;
   updateLearning: (patch: Partial<import("./learning-types").LearningSettings>) => void;
   watchNotices: WatchNotice[];
@@ -6732,6 +6733,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return (await window.workhorse?.linkConfig?.()) ?? "";
   }, []);
 
+  const linkGrokBotOneshot = useCallback(async () => {
+    return (await window.workhorse?.linkGrokBotOneshot?.()) ?? "";
+  }, []);
+
   const installLinkCommand = useCallback(async () => {
     const result = await window.workhorse?.installLinkCommand?.();
     return result ?? { ok: false, message: "Workhorse desktop only." };
@@ -7023,6 +7028,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshAgentRuntimes,
       installExternalMcp,
       linkConfig,
+      linkGrokBotOneshot,
       installLinkCommand,
       updateLearning,
       watchNotices,
@@ -7145,6 +7151,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshAgentRuntimes,
       installExternalMcp,
       linkConfig,
+      linkGrokBotOneshot,
       installLinkCommand,
       updateLearning,
       watchNotices,

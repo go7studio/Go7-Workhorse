@@ -55,7 +55,7 @@ import { CredentialStore, hydrateStateCredentials, protectStateCredentials } fro
 import { DurableJobEngine } from "./job-engine";
 import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
-import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig } from "./mcp-install";
+import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot } from "./mcp-install";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
@@ -671,6 +671,15 @@ app.whenReady().then(async () => {
 
   // The generic MCP configuration — for a client Link has no writer for.
   ipcMain.handle("agentRuntime:linkConfig", () => workhorseLinkGenericConfig(linkLaunch()));
+  ipcMain.handle("agentRuntime:linkGrokBotOneshot", () => {
+    const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
+    return workhorseLinkGrokBotOneshot({
+      ...linkLaunch(),
+      cliPath: platform === "win32" ? "workhorse.cmd" : "workhorse",
+      platform,
+      userData: app.getPath("userData"),
+    });
+  });
 
   // The `workhorse` command: a launcher with this install's exact paths, and
   // a symlink onto PATH where one can be made without a privilege prompt.

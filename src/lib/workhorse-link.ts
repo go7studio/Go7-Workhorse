@@ -161,6 +161,69 @@ export function linkGenericMcpConfig(server: McpServerConfig): string {
   )}\n`;
 }
 
+export type LinkDeskPlatform = "darwin" | "win32" | "linux";
+
+export type LinkGrokBotOneshotOptions = {
+  cli?: string;
+  platform?: LinkDeskPlatform;
+  userData?: string;
+};
+
+function grokBotDeskLabel(platform: LinkDeskPlatform): string {
+  if (platform === "win32") return "Windows PC";
+  if (platform === "linux") return "Linux machine";
+  return "Mac";
+}
+
+function grokBotUserData(platform: LinkDeskPlatform, userData?: string): string {
+  if (userData?.trim()) return userData.replace(/[\\/]+$/, "");
+  if (platform === "win32") return "%APPDATA%\\Go7 Workhorse";
+  if (platform === "linux") return "~/.config/Go7 Workhorse";
+  return "~/Library/Application Support/Go7 Workhorse";
+}
+
+function grokBotJoin(platform: LinkDeskPlatform, root: string, name: string): string {
+  const sep = platform === "win32" ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${sep}${name}`;
+}
+
+/**
+ * One-shot Grok Bot install. Paste into Grok Bot once. The charge is the same
+ * Link launch every other host gets. Grok Bot must save it in permanent agent
+ * memory (not the remote box scratch disk). Works on Mac and Windows. No bearer token.
+ */
+export function linkGrokBotOneshot(server: McpServerConfig, options: LinkGrokBotOneshotOptions | string = {}): string {
+  const opts: LinkGrokBotOneshotOptions = typeof options === "string" ? { cli: options } : options;
+  const platform = opts.platform ?? "darwin";
+  const cli = opts.cli ?? (platform === "win32" ? "workhorse.cmd" : "workhorse");
+  const desk = grokBotDeskLabel(platform);
+  const userData = grokBotUserData(platform, opts.userData);
+  const bridge = grokBotJoin(platform, userData, "workhorse-bridge.json");
+  const tools = LINK_TOOLS.join(", ");
+  const mcp = linkGenericMcpConfig(server).trim();
+  return `Workhorse Link — one-shot install for Grok Bot
+
+You are connecting to this user's Go7 Workhorse desk. Connecting is not adding a vendor, login, or Usage ring.
+
+Save this in permanent agent / session memory that survives a box reboot. The user's ${desk} holds the binaries. The remote box is scratch. Do not keep the only copy in this chat.
+
+1. On the user's ${desk} (local-exec / desktop helper), run:
+   ${cli} capabilities
+   If that fails: tell them to open Workhorse → Settings → LLMs → Install workhorse command, then retry.
+
+2. MCP clients on that same computer (Grok TUI, Cursor, Claude Code) use this launch. Do not exec these paths on the remote box.
+
+${mcp}
+
+3. After install, talk only through Workhorse Link. First call is workhorse_capabilities (or \`${cli} capabilities\`). Tools: ${tools}.
+   fromSessionId is the parent id from workhorse_list_chats, never the worker.
+   New slice: workhorse_delegate. Named worker: workhorse_ask_chat. Later: workhorse_agent_status (next is wait, done, or failed).
+   Fail closed if the desk is offline and you need to delegate. Do not guess a stale port. Do not store a bearer token. Reread ${bridge} at call time if you use HTTP; prefer the CLI/MCP launch above.
+
+4. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
+`;
+}
+
 export type LinkHost = "codex" | "claude" | "grok" | "openclaw" | "hermes";
 
 export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "openclaw", "hermes"];

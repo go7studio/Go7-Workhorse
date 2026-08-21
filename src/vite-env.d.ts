@@ -288,6 +288,7 @@ type WorkhorseBridge = {
   }>;
   installExternalMcp?: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
   linkConfig?: () => Promise<string>;
+  linkGrokBotOneshot?: () => Promise<string>;
   installLinkCommand?: () => Promise<{ ok: boolean; message?: string }>;
   startExternalRuntimeTask?: (
     request: import("./lib/external-task").RuntimeStartRequest,

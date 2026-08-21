@@ -13,6 +13,7 @@ import {
   LinkReplayCache,
   linkEnvelope,
   linkGenericMcpConfig,
+  linkGrokBotOneshot,
   linkHandshake,
   linkHostCliArgs,
   linkWorkerIdFromReply,
@@ -20,7 +21,7 @@ import {
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
-import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, type InstallIo } from "../electron/mcp-install";
+import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, type InstallIo } from "../electron/mcp-install";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
@@ -332,6 +333,38 @@ test("one launch, translated per host through that host's own mcp add — flags 
   assert.deepEqual(generic.mcpServers.workhorse.args, [LAUNCH.script]);
   assert.equal(generic.mcpServers.workhorse.env.WORKHORSE_MCP_PROFILE, "external-runtime");
   assert.equal(workhorseLinkGenericConfig(LAUNCH), linkGenericMcpConfig(server));
+});
+
+test("Grok Bot one-shot is the same charged launch plus durable install instructions", () => {
+  const server = { name: "workhorse", command: LAUNCH.command, args: [LAUNCH.script], env: { WORKHORSE_MCP_PROFILE: "external-runtime", WORKHORSE_STATE_PATH: LAUNCH.statePath, ELECTRON_RUN_AS_NODE: "1" } };
+  const text = linkGrokBotOneshot(server, "workhorse");
+  assert.match(text, /one-shot install for Grok Bot/);
+  assert.match(text, /permanent agent \/ session memory/);
+  assert.match(text, /remote box is scratch/);
+  assert.match(text, /user's Mac/);
+  assert.match(text, /workhorse capabilities/);
+  assert.match(text, /Install workhorse command/);
+  assert.match(text, /WORKHORSE_MCP_PROFILE/);
+  assert.match(text, /workhorse_delegate/);
+  assert.match(text, /fromSessionId/);
+  assert.doesNotMatch(text, /gho_|ghp_|WORKHORSE_BRIDGE_TOKEN|Authorization: Bearer/i);
+  assert.equal(workhorseLinkGrokBotOneshot(LAUNCH), text);
+  const win = linkGrokBotOneshot(server, {
+    platform: "win32",
+    cli: "workhorse.cmd",
+    userData: "C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse",
+  });
+  assert.match(win, /user's Windows PC/);
+  assert.match(win, /workhorse\.cmd capabilities/);
+  assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\workhorse-bridge\.json/);
+  assert.doesNotMatch(win, /Library\/Application Support/);
+  assert.equal(
+    workhorseLinkGrokBotOneshot({ ...LAUNCH, platform: "win32", cliPath: "workhorse.cmd", userData: "C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse" }),
+    win,
+  );
+  const settings = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/ui/Settings.tsx"), "utf8");
+  assert.match(settings, /Copy Grok Bot one-shot/);
+  assert.match(settings, /linkGrokBotOneshot/);
 });
 
 test("installWorkhorseLink connects the hosts asked for, reports a missing CLI as not installed, writes no token", () => {

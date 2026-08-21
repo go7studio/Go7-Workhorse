@@ -15,6 +15,64 @@ APP="Go7 Workhorse.app"
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
+# Keep in sync with macRefreshRegistrationScript in src/lib/app-update.ts.
+refresh_mac_app_icon() {
+  local dest="$1"
+  # WORKHORSE_MAC_DOCK_REFRESH
+  # Replacing the .app changes its inode. Dock keeps a bookmark to the old one
+  # and shows a blank tile. Re-register the live bundle and drop that bookmark.
+  local LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [ -x "$LSREGISTER" ] && [ -d "$dest" ]; then
+    "$LSREGISTER" -f "$dest" >/dev/null 2>&1 || true
+    for stale in /private/tmp/go7-workhorse-install.*/*backup.app /tmp/go7-workhorse-install.*/*backup.app; do
+      [ -e "$stale" ] || continue
+      "$LSREGISTER" -u "$stale" >/dev/null 2>&1 || true
+    done
+  fi
+  /usr/bin/touch "$dest" 2>/dev/null || true
+  if [ -x /usr/bin/python3 ] && [ -d "$dest" ]; then
+    /usr/bin/python3 - "$dest" <<'PY'
+import plistlib, subprocess, sys, time
+from pathlib import Path
+dest = Path(sys.argv[1]).resolve()
+plist_path = Path.home() / "Library/Preferences/com.apple.dock.plist"
+if not dest.is_dir() or not plist_path.is_file():
+    raise SystemExit(0)
+try:
+    info = plistlib.loads((dest / "Contents/Info.plist").read_bytes())
+except Exception:
+    info = {}
+bundle_id = info.get("CFBundleIdentifier") or "com.go7studio.workhorse"
+label = info.get("CFBundleDisplayName") or info.get("CFBundleName") or dest.stem
+url = dest.as_uri()
+if not url.endswith("/"):
+    url += "/"
+data = plistlib.loads(plist_path.read_bytes())
+changed = False
+for item in data.get("persistent-apps") or []:
+    tile = item.get("tile-data")
+    if not isinstance(tile, dict):
+        continue
+    file_url = str((tile.get("file-data") or {}).get("_CFURLString") or "")
+    bid = str(tile.get("bundle-identifier") or "")
+    if bid != bundle_id and file_url.rstrip("/") != url.rstrip("/"):
+        continue
+    tile.pop("book", None)
+    tile["file-data"] = {"_CFURLString": url, "_CFURLStringType": 15}
+    tile["bundle-identifier"] = bundle_id
+    tile["file-label"] = label
+    item["tile-data"] = tile
+    changed = True
+if not changed:
+    raise SystemExit(0)
+subprocess.run(["killall", "-STOP", "Dock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(0.2)
+plist_path.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_BINARY))
+subprocess.run(["killall", "-9", "Dock"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+PY
+  fi
+}
+
 [ "$(uname -s)" = "Darwin" ] || die "This installer is for macOS. On Windows, run the .exe from the releases page."
 
 # Apple silicon takes the arm64 dmg, Intel the x64 one. Running the arm64
@@ -95,6 +153,8 @@ if xattr -p com.apple.quarantine "/Applications/${APP}" >/dev/null 2>&1; then
     xattr -dr com.apple.quarantine "/Applications/${APP}"
   fi
 fi
+
+refresh_mac_app_icon "/Applications/${APP}"
 
 say ""
 say "Go7 Workhorse ${version} is in /Applications."

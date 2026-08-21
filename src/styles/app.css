@@ -120,8 +120,13 @@ button {
 }
 
 .titlebar span {
+  min-width: 0;
+  max-width: 100%;
   font-weight: 510;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .workspace {

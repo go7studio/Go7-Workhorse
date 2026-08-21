@@ -76,7 +76,7 @@ export function App() {
   return (
     <div className="app">
       <header className="titlebar">
-        <span>{title}</span>
+        <span title={title || undefined}>{title}</span>
       </header>
       <div className="workspace" style={{ ["--sidebar" as string]: `${view.sidebarWidth}px` }}>
         <Sidebar />

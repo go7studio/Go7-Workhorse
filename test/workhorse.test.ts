@@ -578,6 +578,31 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.ok(!titled.includes("Go7 Workhorse"));
 });
 
+test("long titles stay contained and live work does not repaint from unrelated desk changes", () => {
+  const app = readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const titlebar = css.slice(css.indexOf(".titlebar span"), css.indexOf(".workspace"));
+  assert.match(app, /<span title=\{title \|\| undefined\}>\{title\}<\/span>/);
+  assert.match(titlebar, /min-width:\s*0/);
+  assert.match(titlebar, /max-width:\s*100%/);
+  assert.match(titlebar, /white-space:\s*nowrap/);
+  assert.match(titlebar, /overflow:\s*hidden/);
+  assert.match(titlebar, /text-overflow:\s*ellipsis/);
+
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
+  assert.match(pane, /useStoreSelector\(selectSessionPaneStore, sameSessionPaneStore\)/);
+  assert.doesNotMatch(pane, /\buseStore\b/, "the whole conversation pane must not subscribe to every desk change");
+
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const activeHook = store.slice(store.indexOf("function activeSessionForStore"), store.indexOf("export function useProjectSessions"));
+  assert.match(activeHook, /useStoreSelection\(activeSessionForStore\)/);
+  assert.doesNotMatch(activeHook, /const store = useStore\(\)/);
+
+  const popout = readFileSync(path.join(ROOT, "src", "ui", "WorkPopout.tsx"), "utf8");
+  assert.match(popout, /setInterval\(\(\) => setNow\(Date\.now\(\)\), 1_000\)/);
+  assert.doesNotMatch(popout, /setInterval\(\(\) => setNow\(Date\.now\(\)\), 250\)/);
+});
+
 test("forkChat copies history through a turn into a new listed chat", () => {
   const messages: ChatMessage[] = [
     { id: "u1", role: "user", text: "first", createdAt: 1 },

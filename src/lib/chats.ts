@@ -529,6 +529,27 @@ export function lastTalkedAt(session: Pick<Session, "messages">): number | undef
   return undefined;
 }
 
+/** True while this row is still going — vendor turn or worker run. */
+function sessionIsActive(session: Pick<Session, "status" | "agentRun">): boolean {
+  return (
+    session.status === "running" ||
+    session.status === "needs-input" ||
+    session.agentRun?.status === "running"
+  );
+}
+
+/** Keep streamed tool activity from moving a live chat in the lineup. */
+export function lineupSortAt(session: Pick<Session, "messages" | "status" | "agentRun">): number {
+  const run = session.agentRun;
+  if (sessionIsActive(session)) {
+    if (typeof run?.startedAt === "number") return run.startedAt;
+    const user = lastUserMessage(session);
+    if (typeof user?.createdAt === "number") return user.createdAt;
+  }
+  if (typeof run?.finishedAt === "number") return run.finishedAt;
+  return lastTalkedAt(session) ?? 0;
+}
+
 /** Most recently active chat in a project list. Empty lists return undefined. */
 export function lastProjectChat<T extends { messages: Session["messages"] }>(chats: T[]): T | undefined {
   const first = chats[0];

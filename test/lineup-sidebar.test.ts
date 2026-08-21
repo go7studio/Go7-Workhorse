@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { sidebarKeepsChat } from "../src/lib/chats";
+import { lineupSortAt, sidebarKeepsChat } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
+import { buildSidebarChatIndex } from "../src/lib/sidebar-index";
 import { formatChatSidebar } from "../src/lib/session";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
+import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -165,4 +167,83 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
   assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
+});
+
+function lineupSession(
+  id: string,
+  messages: Session["messages"],
+  patch: Partial<Session> = {},
+): Session {
+  return {
+    id,
+    projectId: "proj",
+    provider: "cursor",
+    model: "composer-2.5",
+    effort: "high",
+    title: id,
+    mode: "ask",
+    sandbox: "off",
+    status: "idle",
+    messages,
+    contextUsed: 0,
+    ...patch,
+  };
+}
+
+test("tool ticks do not reshuffle live worker rows", () => {
+  const user = { id: "u1", role: "user" as const, text: "go", createdAt: 100 };
+  const tool = (id: string, createdAt: number) => ({
+    id,
+    role: "assistant" as const,
+    kind: "tool" as const,
+    text: "Read · running",
+    createdAt,
+  });
+  const parent = lineupSession("parent", [user]);
+  const slow = lineupSession("slow", [user, tool("slow-tool", 900)], {
+    parentId: parent.id,
+    hidden: true,
+    agentRun: { status: "running", startedAt: 200, isolation: "worktree" },
+  });
+  const fast = lineupSession("fast", [user, tool("fast-tool", 600)], {
+    parentId: parent.id,
+    hidden: true,
+    agentRun: { status: "running", startedAt: 500, isolation: "worktree" },
+  });
+
+  assert.equal(lineupSortAt(slow), 200);
+  assert.equal(lineupSortAt(fast), 500);
+  const before = buildSidebarChatIndex([parent, slow, fast]);
+  const beforeIds = before.liveByProject.get("proj")![0]!.workers.map((row) => row.id);
+  assert.deepEqual(beforeIds, ["fast", "slow"]);
+
+  const slowTicked = { ...slow, messages: [user, tool("slow-tool", 1_200)] };
+  const after = buildSidebarChatIndex([parent, slowTicked, fast]);
+  const afterIds = after.liveByProject.get("proj")![0]!.workers.map((row) => row.id);
+  assert.deepEqual(afterIds, beforeIds, "streamed tool timestamps do not move a running worker");
+});
+
+test("tool ticks do not lift a live worker's parent above a newer chat", () => {
+  const prompt = (id: string, createdAt: number) => ({
+    id,
+    role: "user" as const,
+    text: id,
+    createdAt,
+  });
+  const parent = lineupSession("parent", [prompt("parent-prompt", 100)]);
+  const worker = lineupSession("worker", [
+    prompt("worker-prompt", 100),
+    { id: "tool", role: "assistant", kind: "tool", text: "Read · running", createdAt: 900 },
+  ], {
+    parentId: parent.id,
+    hidden: true,
+    agentRun: { status: "running", startedAt: 200, isolation: "worktree" },
+  });
+  const newer = lineupSession("newer", [prompt("newer-prompt", 700)]);
+
+  const index = buildSidebarChatIndex([parent, worker, newer]);
+  assert.deepEqual(
+    index.liveByProject.get("proj")!.map((row) => row.id),
+    ["newer", "parent"],
+  );
 });

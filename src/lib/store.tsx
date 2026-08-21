@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
+import { StoreContext, StoreRuntimeContext, useStore, useStoreSelector as useStoreSelection } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
 import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
@@ -7093,9 +7093,12 @@ export function useActiveProject() {
   return store.projects.find((project) => project.id === store.activeProjectId) ?? null;
 }
 
-export function useActiveSession() {
-  const store = useStore();
+function activeSessionForStore(store: Pick<Store, "sessions" | "activeSessionId">) {
   return store.sessions.find((session) => session.id === store.activeSessionId) ?? null;
+}
+
+export function useActiveSession() {
+  return useStoreSelection(activeSessionForStore);
 }
 
 export function useProjectSessions(projectId: string | null, archived = false) {

@@ -21,7 +21,7 @@ import {
   type TranscriptBlock,
 } from "../lib/turns";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
-import { useActiveSession, useStore } from "../lib/store";
+import { useActiveSession, useStoreSelector, type Store } from "../lib/store";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
 import { WatchBanners } from "./WatchNotices";
@@ -50,6 +50,26 @@ import {
 import type { AppState, ProviderId } from "../lib/types";
 
 const SCROLL_SLACK = 96;
+
+type SessionPaneStore = Pick<Store, "projects" | "settings" | "forkFrom" | "selectSession">;
+
+function selectSessionPaneStore(store: Store): SessionPaneStore {
+  return {
+    projects: store.projects,
+    settings: store.settings,
+    forkFrom: store.forkFrom,
+    selectSession: store.selectSession,
+  };
+}
+
+function sameSessionPaneStore(left: SessionPaneStore, right: SessionPaneStore): boolean {
+  return (
+    left.projects === right.projects &&
+    left.settings === right.settings &&
+    left.forkFrom === right.forkFrom &&
+    left.selectSession === right.selectSession
+  );
+}
 
 function followLatestClass(el: HTMLElement, following: boolean) {
   el.classList.toggle("follow-latest", following);
@@ -135,7 +155,7 @@ const AssistantTurn = memo(function AssistantTurn({
 
 export function SessionPane() {
   const session = useActiveSession();
-  const store = useStore();
+  const store = useStoreSelector(selectSessionPaneStore, sameSessionPaneStore);
   const [setupOpen, setSetupOpen] = useState(false);
   const [open, setOpen] = useState<ProjectEdit | null>(null);
   const [fileOut, setFileOut] = useState(false);

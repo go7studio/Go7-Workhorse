@@ -290,7 +290,7 @@ export const WorkPopout = memo(function WorkPopout({
   const anyChildLive = threads.some((marker) => marker.toolStatus === "running");
   useEffect(() => {
     if (!live && !anyChildLive) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [live, anyChildLive]);
   const workTools = threads.length ? tools.filter((tool) => !isSpawnTool(tool)) : tools;

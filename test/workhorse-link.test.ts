@@ -17,6 +17,7 @@ import {
   linkGrokBotOneshot,
   linkHandshake,
   linkHostCliArgs,
+  formatLinkChatList,
   linkHostConnectsByOneshot,
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
@@ -254,10 +255,41 @@ test("the desk profile does not write inbound Learning events", async () => {
   }
 });
 
+test("Link chat list is compact by default so a 64 KB host cap does not clip it", () => {
+  const rows = Array.from({ length: 220 }, (_, index) => ({
+    id: `sess_${index.toString(36).padStart(8, "0")}`,
+    title: `Chat ${index} with a reasonably long operator title`,
+    worker: index % 4 === 0 ? "Marlow" : undefined,
+    parentId: index % 4 === 0 ? "sess_parent" : undefined,
+    status: index % 4 === 0 ? "completed" : "idle",
+    next: index % 4 === 0 ? "done" : "failed",
+    projectName: index % 3 === 0 ? "Workhorse Review" : null,
+    preview: "x".repeat(160),
+    sidebar: "Grok 4.6 · High · Always approve",
+    provider: "grok",
+    model: "grok-4.6",
+    messageCount: 400,
+  }));
+  const compact = formatLinkChatList(rows);
+  const parsed = JSON.parse(compact) as Array<Record<string, unknown>>;
+  assert.equal(parsed.length, 220);
+  assert.equal(parsed[0]?.preview, undefined);
+  assert.equal(parsed[0]?.sidebar, undefined);
+  assert.ok(Buffer.byteLength(compact) < 64 * 1024, `compact list is ${Buffer.byteLength(compact)} bytes`);
+  const parents = JSON.parse(formatLinkChatList(rows, { parents: true })) as Array<Record<string, unknown>>;
+  assert.equal(parents.length, rows.filter((row) => !row.parentId).length);
+  assert.equal(parents.every((row) => !row.parentId), true);
+  const full = JSON.parse(formatLinkChatList(rows, { full: true })) as Array<Record<string, unknown>>;
+  assert.equal(full[0]?.preview, "x".repeat(160));
+});
+
 test("the CLI is the same handler: each subcommand maps to one tool call", () => {
   assert.deepEqual(linkCliCall(["capabilities", "--json"]), { name: "workhorse_capabilities", args: {} });
   assert.deepEqual(linkCliCall(["capacity", "--provider", "claude", "--callable"]), { name: "workhorse_query_capacity", args: { provider: "claude", callableOnly: true } });
   assert.deepEqual(linkCliCall(["chats"]), { name: "workhorse_list_chats", args: {} });
+  assert.deepEqual(linkCliCall(["chats", "--parents"]), { name: "workhorse_list_chats", args: { parents: true } });
+  assert.deepEqual(linkCliCall(["chats", "--full"]), { name: "workhorse_list_chats", args: { full: true } });
+  assert.deepEqual(linkCliCall(["chats", "--parents", "--full"]), { name: "workhorse_list_chats", args: { parents: true, full: true } });
   assert.deepEqual(linkCliCall(["read", "sess_1", "--limit", "12"]), { name: "workhorse_read_chat", args: { chat: "sess_1", limit: 12 } });
   assert.deepEqual(linkCliCall(["ask", "--chat", "sess_marlow", "--message", "Review this", "--key", "k8"]), {
     name: "workhorse_ask_chat",

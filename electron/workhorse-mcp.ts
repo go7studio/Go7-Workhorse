@@ -59,7 +59,14 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { parseMarkdownPlan } from "../src/lib/plan";
 import { normalizeTaskStore } from "../src/lib/external-task";
 import { projectExternalAgentCatalog, type AgentRuntimeStatus, type ExternalAgent } from "../src/lib/external-catalog";
-import { LINK_MUTATING_TOOLS, LinkReplayCache, linkEnvelope, linkHandshake, type LinkEnvelope } from "../src/lib/workhorse-link";
+import {
+  LINK_MUTATING_TOOLS,
+  LinkReplayCache,
+  formatLinkChatList,
+  linkEnvelope,
+  linkHandshake,
+  type LinkEnvelope,
+} from "../src/lib/workhorse-link";
 import { assertMcpToolAllowed, inboundSessionIdFromState, isMcpToolAdvertised, mcpExposureProfile, profileForCaller, resolveMcpSpawnFrom } from "./mcp-exposure";
 import { effectiveLearningMode, learningCaptures } from "../src/lib/learning-policy";
 import {
@@ -249,8 +256,15 @@ const TOOLS = [
   {
     name: "workhorse_list_chats",
     description:
-      "List live chats and their workers (id, title, worker, parentId, status, next, project, sidebar, preview). Use this to pick a parent for delegate, or to find a named worker such as Marlow. If several rows share a worker name, pass id to ask or status. fromSessionId for delegate is the parent id, never the worker. Archived and deleted chats are omitted.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      "List live chats and their workers. Default is compact JSON (id, title, worker, parentId, status, next, project) so host output caps do not clip the list. Pass full for preview/sidebar. Pass parents to omit workers. Use this to pick a parent for delegate, or to find a named worker such as Marlow. If several rows share a worker name, pass id to ask or status. fromSessionId for delegate is the parent id, never the worker. Archived and deleted chats are omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        parents: { type: "boolean", description: "If true, omit workers (rows with a parentId)." },
+        full: { type: "boolean", description: "If true, include preview, sidebar, provider, and model." },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "workhorse_read_chat",
@@ -1690,7 +1704,8 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
       const follow = workerFollowThrough(row.status);
       return { ...row, next: follow.next };
     });
-    return JSON.stringify(rows, null, 2);
+    if (!isLinkProfile()) return JSON.stringify(rows, null, 2);
+    return formatLinkChatList(rows, { full: args.full === true, parents: args.parents === true });
   }
   if (name === "workhorse_read_chat") {
     const chat = typeof args.chat === "string" ? args.chat : "";
@@ -2286,7 +2301,7 @@ function isMcpEntry(): boolean {
  *
  *   <helper> link capabilities
  *   <helper> link capacity [--provider <id>] [--callable]
- *   <helper> link chats
+ *   <helper> link chats [--parents] [--full]
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
@@ -2319,12 +2334,17 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
   }
-  if (sub === "chats") return { name: "workhorse_list_chats", args: {} };
+  if (sub === "chats") {
+    return {
+      name: "workhorse_list_chats",
+      args: { ...(flag("parents") ? { parents: true } : {}), ...(flag("full") ? { full: true } : {}) },
+    };
+  }
   if (sub === "read") {
     if (!positional[0]) return { usage };
     const limit = Number(flag("limit") ?? "");

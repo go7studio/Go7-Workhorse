@@ -68,6 +68,47 @@ export function linkHandshake(input: { deskOnline: boolean }): LinkHandshake {
   };
 }
 
+/**
+ * Default Link chat list: one compact object per row, no pretty-print, no
+ * preview. Hosts clip tool output at 20–64 KB; 160-char previews blow that.
+ * `full` restores the catalog row. `parents` drops workers (rows with a parent).
+ */
+export type LinkChatListRow = {
+  id: string;
+  title: string;
+  worker?: string;
+  parentId?: string;
+  status: string;
+  next?: string;
+  project?: string | null;
+};
+
+export function formatLinkChatList(
+  rows: Array<{
+    id: string;
+    title: string;
+    worker?: string;
+    parentId?: string;
+    status: string;
+    next?: string;
+    projectName?: string | null;
+  }>,
+  opts?: { full?: boolean; parents?: boolean },
+): string {
+  const listed = opts?.parents ? rows.filter((row) => !row.parentId) : rows;
+  if (opts?.full) return JSON.stringify(listed);
+  const compact: LinkChatListRow[] = listed.map((row) => ({
+    id: row.id,
+    title: row.title,
+    ...(row.worker ? { worker: row.worker } : {}),
+    ...(row.parentId ? { parentId: row.parentId } : {}),
+    status: row.status,
+    ...(row.next ? { next: row.next } : {}),
+    ...(row.projectName ? { project: row.projectName } : {}),
+  }));
+  return JSON.stringify(compact);
+}
+
 /** Worker session id from a delegate/spawn reply. Names are not ids. */
 export function linkWorkerIdFromReply(text: string): string | undefined {
   try {

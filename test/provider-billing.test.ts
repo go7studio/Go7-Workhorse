@@ -316,6 +316,8 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
   );
   assert.equal(isGrokBotUrl(grokBot!.baseUrl), true);
   assert.equal(isGrokBotUrl("http://127.0.0.1:8787/v1/"), true);
+  assert.equal(isGrokBotUrl("http://localhost:8787/v1"), false);
+  assert.equal(isGrokBotUrl("http://0.0.0.0:8787/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), false);
   assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);

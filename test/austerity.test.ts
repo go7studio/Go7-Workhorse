@@ -140,10 +140,17 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
     "95%",
   );
 
-  // A model on this machine has no allowance to read. That is ∞, not "…".
+  // Ordinary local models have no allowance. Grok Bot is the one metered local door.
   assert.equal(planRingView(card("l"), {}, undefined, { local: true })?.label, "∞");
   assert.equal(isLocalEndpoint("http://localhost:1234/v1"), true);
   assert.equal(isLocalEndpoint("http://127.0.0.1:11434"), true);
+  assert.equal(isLocalEndpoint("http://127.0.0.1:8787/v1"), false);
+  assert.equal(
+    planRingView(card("grok-bot"), { custom: { "grok-bot": kimi } }, undefined, {
+      local: isLocalEndpoint("http://127.0.0.1:8787/v1"),
+    })?.label,
+    "53%",
+  );
   assert.equal(isLocalEndpoint("https://api.minimax.io/v1"), false);
   assert.equal(planAllowance(undefined, { local: true }).status, "unmetered");
   assert.equal(planAllowance(undefined).status, "unknown");

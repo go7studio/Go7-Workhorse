@@ -758,7 +758,7 @@ export type WorkerFollowNext = "wait" | "done" | "failed";
 
 /** What a harness does next. One word, so Claude/Codex/OpenClaw do not invent a loop. */
 export function workerFollowThrough(status: string): { next: WorkerFollowNext; how: string } {
-  if (status === "running") {
+  if (status === "running" || status === "queued") {
     return {
       next: "wait",
       how: "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.",
@@ -774,6 +774,13 @@ export function workerFollowThrough(status: string): { next: WorkerFollowNext; h
     next: "failed",
     how: "This worker did not finish. Do not treat a missing report as success. Delegate remaining work as a new slice if the user still wants it.",
   };
+}
+
+/** Attach `next`/`how` to any status payload, including an ExternalTask dump. */
+export function withFollowThrough<T extends Record<string, unknown>>(payload: T): T & { next: WorkerFollowNext; how: string } {
+  const status = typeof payload.status === "string" ? payload.status : "";
+  const follow = workerFollowThrough(status);
+  return { ...payload, next: follow.next, how: follow.how };
 }
 
 export function workerStatusSnapshot(

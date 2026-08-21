@@ -47,7 +47,12 @@ calling Claude's model through ACP is the other direction and stays separate.
     "workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat",
     "workhorse_query_capacity", "workhorse_delegate", "workhorse_continue_mission",
     "workhorse_agent_status", "workhorse_ask_chat"
-  ]
+  ],
+  "followThrough": {
+    "newSlice": "workhorse_delegate",
+    "namedWorker": "workhorse_ask_chat",
+    "later": "workhorse_agent_status"
+  }
 }
 ```
 
@@ -86,16 +91,18 @@ agent evidence. Keys and chat text stay out.
 The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
 
 1. `workhorse_list_chats` — pick the parent chat. Workers on that chat show
-   `worker`, `parentId`, and `status` (so Marlow is findable by name).
-2. `workhorse_delegate` — one task, `fromSessionId` is that parent. Stop this
-   turn. The desk joins the report into the parent chat.
+   `worker`, `parentId`, `status`, and `next` (so Marlow is findable by name).
+   If several rows share a worker name, pass that row's `id`.
+2. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
+   worker. Stop this turn. The desk joins the report into the parent chat.
+   Named worker: `workhorse_ask_chat` with that row's `id`.
 3. Later, `workhorse_agent_status` with the worker id. `next` is `wait`,
    `done`, or `failed`. When `done`, the report is in that payload.
-4. Remaining work: `workhorse_continue_mission`. Talk to a live chat:
-   `workhorse_ask_chat`. Read: `workhorse_read_chat`.
+4. Remaining work: `workhorse_continue_mission`. Read: `workhorse_read_chat`.
 
 Do not sit in a poll loop in the same turn. Do not spawn a second worker for
-the same slice.
+the same slice. Do not pass `wait=true`; Link ignores it so the client is not
+blocked.
 
 ## Execution contract
 
@@ -132,9 +139,12 @@ PATH for you.
 ```bash
 workhorse capabilities
 workhorse capacity --callable
+workhorse chats
+workhorse read <sessionId>
+workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
 workhorse status <workerId>
-workhorse follow-up <workerId> "Check the failing test" --chat <sessionId>
+workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
 ```
 
 Without the command, the same calls are

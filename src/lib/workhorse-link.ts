@@ -42,12 +42,19 @@ export type LinkCapability = (typeof LINK_CAPABILITIES)[number];
 /** Calls that change the desk. They carry the execution envelope. */
 export const LINK_MUTATING_TOOLS = ["workhorse_delegate", "workhorse_continue_mission", "workhorse_ask_chat"] as const;
 
+export const LINK_FOLLOW_THROUGH = {
+  newSlice: "workhorse_delegate",
+  namedWorker: "workhorse_ask_chat",
+  later: "workhorse_agent_status",
+} as const;
+
 export type LinkHandshake = {
   protocolVersion: number;
   desk: "online" | "offline";
   capabilities: LinkCapability[];
   /** The tools this helper will answer. Absent names are not there to try. */
   tools: LinkTool[];
+  followThrough: typeof LINK_FOLLOW_THROUGH;
 };
 
 /** The first thing a harness asks. The answer is the contract, not a guess. */
@@ -57,6 +64,7 @@ export function linkHandshake(input: { deskOnline: boolean }): LinkHandshake {
     desk: input.deskOnline ? "online" : "offline",
     capabilities: [...LINK_CAPABILITIES],
     tools: [...LINK_TOOLS],
+    followThrough: { ...LINK_FOLLOW_THROUGH },
   };
 }
 

@@ -121,7 +121,9 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
     const messages = Array.isArray(session.messages) ? session.messages : [];
-    if (!messages.some((item) => asRecord(item).role === "user")) continue;
+    const hiddenListedWorker =
+      opts?.includeWorkers === true && session.hidden === true && Boolean(parentId) && liveParentIds.has(parentId!);
+    if (!messages.some((item) => asRecord(item).role === "user") && !hiddenListedWorker) continue;
     const provider =
       session.provider === "codex" || session.provider === "claude" || session.provider === "custom"
         ? session.provider
@@ -177,6 +179,33 @@ export function findSession(sessions: SessionSnapshot[], query: string): Session
   return titled[0] ?? named[0] ?? prefix[0] ?? null;
 }
 
+/** Link ask/read: unique id, unique worker name, or unique title. Duplicate names must pass id. */
+export function matchListedChat(sessions: SessionSnapshot[], query: string): { session: SessionSnapshot } | { error: string } {
+  const q = query.trim();
+  if (!q) return { error: "chat is required" };
+  const listed = liveSessions(sessions);
+  const lower = q.toLowerCase();
+  const byId = listed.find((session) => session.id.toLowerCase() === lower);
+  if (byId) return { session: byId };
+  const named = listed.filter((session) => session.worker?.toLowerCase() === lower);
+  if (named.length === 1) return { session: named[0]! };
+  if (named.length > 1) {
+    const ids = named.slice(0, 8).map((session) => session.id).join(", ");
+    return { error: `Several workers named “${q}”. Pass id from list_chats (${ids}).` };
+  }
+  const titledExact = listed.filter((session) => session.title.trim().toLowerCase() === lower);
+  if (titledExact.length === 1) return { session: titledExact[0]! };
+  if (titledExact.length > 1) {
+    return { error: `Several chats match “${q}”. Pass id from list_chats.` };
+  }
+  const titled = listed.filter((session) => session.title.toLowerCase().includes(lower));
+  if (titled.length === 1) return { session: titled[0]! };
+  if (titled.length > 1) {
+    return { error: `Several chats match “${q}”. Pass id from list_chats.` };
+  }
+  return { error: `No Workhorse chat matches “${q}”` };
+}
+
 /** Sidebar peer labels must not attach because a vendor name appears inside a title. */
 export function findSessionForLink(sessions: SessionSnapshot[], query: string): SessionSnapshot | null {
   const q = query.trim().toLowerCase();
@@ -208,7 +237,10 @@ export function sessionTranscript(
             : null,
         model: typeof exact.model === "string" ? exact.model : "",
       }
-    : findSession(listed, query);
+    : (() => {
+        const resolved = matchListedChat(listed, query);
+        return "session" in resolved ? resolved.session : null;
+      })();
   if (!match) return null;
   const raw = rawSessions.find((item) => item.id === match.id);
   const messages = Array.isArray(raw?.messages) ? raw.messages : [];

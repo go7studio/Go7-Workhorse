@@ -28,7 +28,7 @@ import {
   type WatchPlans,
 } from "../src/lib/watch";
 import { isVendorDeclinedResult, vendorDeclinedForBot } from "../src/lib/vendor-decline";
-import { catalogSessions, findSession, sessionTranscript } from "../src/lib/session-bridge";
+import { catalogSessions, matchListedChat, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
   deskRoleOf,
@@ -38,6 +38,8 @@ import {
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
+  withFollowThrough,
+  workerFollowThrough,
   workerNameFromTitle,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
@@ -76,7 +78,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop on workhorse_await_agents. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. List chats also names live workers (worker, parentId, status) so you can find Marlow without guessing. Do not spawn a second worker for the same slice. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -173,7 +175,7 @@ const TOOLS = [
   {
     name: "workhorse_delegate",
     description:
-      "Execute one task through Workhorse. Leave initialBrain unset for full Auto; set it only for the first coordinator. Descendants route independently unless a slice is explicitly assigned. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
+      "New slice only. Workhorse picks the worker. Cannot target a named worker — use workhorse_ask_chat with that row's id. fromSessionId is the parent from list_chats, never the worker. Leave initialBrain unset for full Auto; set it only for the first coordinator. Descendants route independently unless a slice is explicitly assigned. Do not perform the task yourself. If this fails, report the exact Workhorse error before any direct fallback.",
     inputSchema: {
       type: "object",
       properties: {
@@ -204,7 +206,7 @@ const TOOLS = [
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         constraints: { type: "array", items: { type: "string" }, description: "Task boundaries and acceptance requirements" },
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
-        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names from workhorse_list_skills" },
+        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names. Leave unset unless the user named skills." },
         tools: { type: "array", items: { type: "string" }, description: "Tools the task requires" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
@@ -212,8 +214,8 @@ const TOOLS = [
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         folder: { type: "string", description: "Optional absolute working folder" },
-        wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
-        fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
+        wait: { type: "boolean", description: "Ignored on Link. Always returns the worker id promptly." },
+        fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats. Never the worker id." },
         traceId: { type: "string", description: "Optional trace id for this orchestration loop; Workhorse creates one when an adaptive loop omits it" },
         idempotencyKey: { type: "string", description: "Send one per intended task. A retry with the same key gets the first answer back, not a second worker. Workhorse creates one when omitted and echoes it." },
       },
@@ -236,8 +238,9 @@ const TOOLS = [
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
         isolation: { type: "string", description: "worktree or shared" },
         folder: { type: "string", description: "Optional absolute working folder" },
-        wait: { type: "boolean", description: "false (default) returns the next worker id promptly" },
-        fromSessionId: { type: "string", description: "Required parent Workhorse chat id" },
+        wait: { type: "boolean", description: "Ignored on Link. Always returns the next worker id promptly." },
+        fromSessionId: { type: "string", description: "Required parent Workhorse chat id. Never the worker id." },
+        idempotencyKey: { type: "string", description: "Send one per intended follow-up. A retry with the same key gets the first answer back." },
         traceId: { type: "string", description: "Trace id for this mission loop" },
       },
       required: ["previousWorkerIds", "previousPass", "remainingWork", "fromSessionId"],
@@ -246,17 +249,17 @@ const TOOLS = [
   {
     name: "workhorse_list_chats",
     description:
-      "List live chats and their workers (id, title, worker, parentId, status, project, sidebar, preview). Use this to pick a parent for delegate, or to find a named worker such as Marlow. Archived and deleted chats are omitted.",
+      "List live chats and their workers (id, title, worker, parentId, status, next, project, sidebar, preview). Use this to pick a parent for delegate, or to find a named worker such as Marlow. If several rows share a worker name, pass id to ask or status. fromSessionId for delegate is the parent id, never the worker. Archived and deleted chats are omitted.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "workhorse_read_chat",
     description:
-      "Read another sidebar chat’s transcript. The user will see that you are reading that chat. Pass the visible title.",
+      "Read another chat’s transcript. Pass id from list_chats when names repeat. The user will see that you are reading that chat.",
     inputSchema: {
       type: "object",
       properties: {
-        chat: { type: "string", description: "Session id or title" },
+        chat: { type: "string", description: "Session id. Title or worker name only when unique." },
         limit: { type: "number", description: "Max messages from the end (default 40)" },
       },
       required: ["chat"],
@@ -265,15 +268,16 @@ const TOOLS = [
   {
     name: "workhorse_ask_chat",
     description:
-      "Send a follow-up to an existing Workhorse chat. For harness work, use wait=false so long work cannot exceed the MCP client limit. The desk journals the reply and wakes the parent chat. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox.",
+      "Talk to an existing named worker (Marlow) or live chat. Pass that row's id from list_chats. This is not a new slice — use workhorse_delegate for that. Later read_chat or agent_status. The desk journals the reply and wakes the parent chat.",
     inputSchema: {
       type: "object",
       properties: {
-        chat: { type: "string", description: "Session id or title to ask" },
+        chat: { type: "string", description: "Session id from list_chats. Worker name only when unique." },
         message: { type: "string", description: "Question or request for that chat" },
-        fromSessionId: { type: "string", description: "Parent Workhorse chat id for this orchestration loop." },
+        fromSessionId: { type: "string", description: "Parent Workhorse chat id for this orchestration loop. Never the worker id." },
         traceId: { type: "string", description: "Trace id supplied in the Workhorse task context." },
-        wait: { type: "boolean", description: "false (default for harnesses) returns promptly; true waits for a short reply" },
+        wait: { type: "boolean", description: "Ignored on Link. Always returns promptly." },
+        idempotencyKey: { type: "string", description: "Send one per intended message. A retry with the same key gets the first answer back." },
       },
       required: ["chat", "message"],
     },
@@ -298,7 +302,7 @@ const TOOLS = [
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },
-        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names from workhorse_list_skills" },
+        skills: { type: "array", items: { type: "string" }, description: "Exact installed skill names. Leave unset unless the user named skills." },
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
@@ -319,7 +323,7 @@ const TOOLS = [
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
           type: "boolean",
-          description: "true (default) wait for this worker. false start it and return so you can spawn more, then workhorse_await_agents.",
+          description: "On Link this is ignored and the worker id returns promptly. On the desk, true waits for this worker.",
         },
         fromSessionId: {
           type: "string",
@@ -372,7 +376,7 @@ const TOOLS = [
   },
   {
     name: "workhorse_cancel_agent",
-    description: "Cancel an external OpenClaw/Hermes task.",
+    description: "Cancel a Workhorse worker or external task by id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1096,16 +1100,32 @@ function mergedDelegateExclusions(task: string, value: unknown): string[] | unde
   return unique.length > 0 ? unique : undefined;
 }
 
+function isLinkProfile(): boolean {
+  return mcpExposureProfile(process.env.WORKHORSE_MCP_PROFILE) === "external-runtime";
+}
+
+/** Link clients time out at 30–60s. Never block them on a long worker. */
+function linkWait(requested: unknown): boolean {
+  if (isLinkProfile()) return false;
+  return requested === true;
+}
+
+function askWaits(requested: unknown): boolean {
+  if (isLinkProfile()) return false;
+  return requested !== false;
+}
+
 async function askChat(chat: string, message: string, from?: string, traceId?: string, wait = true): Promise<string> {
   const state = readState();
   const listed = catalogSessions(state, { fromSessionId: fromSessionId(from), includeWorkers: true });
-  const match = findSession(listed, chat);
-  if (!match) {
+  const resolved = matchListedChat(listed, chat);
+  if (!("session" in resolved)) {
     if (shouldSpawnInsteadOfAsk(chat, listed)) {
       return spawnAgent({ prompt: message, chat, description: chat }, from);
     }
-    throw new Error(`No Workhorse chat matches “${chat}”`);
+    throw new Error(resolved.error);
   }
+  const match = resolved.session;
   const first = await postBridge("/ask", {
     toSessionId: match.id,
     fromSessionId: fromSessionId(from),
@@ -1544,7 +1564,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
       isolation: args.isolation === "worktree" ? "worktree" : args.isolation === "shared" ? "shared" : source[0]?.agentRun?.isolation,
       folder: typeof args.folder === "string" ? args.folder : undefined,
-      wait: args.wait === true,
+      wait: linkWait(args.wait),
       traceId: next.mission.id,
     },
     parentId,
@@ -1641,7 +1661,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
-        wait: args.wait === true,
+        wait: linkWait(args.wait),
         mission: true,
         missionIteration,
         traceId: effectiveTraceId,
@@ -1657,7 +1677,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
     const message = typeof args.message === "string" ? args.message : "";
     if (!message.trim()) throw new Error("message is required");
     const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
-    const wait = args.wait === true || (args.wait !== false && currentMcpProfile() !== "external-runtime");
+    const wait = askWaits(args.wait);
     return askChat(chat, message, parent, envelope.supplied.includes("traceId") ? envelope.traceId : undefined, wait);
   }
   throw new Error(`Unknown mutating tool ${name}`);
@@ -1666,12 +1686,19 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 /** Everything else: reads, and the desk-only tools an orchestrator or the desk itself may call. */
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
-    return JSON.stringify(catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }), null, 2);
+    const rows = catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }).map((row) => {
+      const follow = workerFollowThrough(row.status);
+      return { ...row, next: follow.next };
+    });
+    return JSON.stringify(rows, null, 2);
   }
   if (name === "workhorse_read_chat") {
     const chat = typeof args.chat === "string" ? args.chat : "";
+    const listed = catalogSessions(readState(), { fromSessionId: from, includeWorkers: true });
+    const resolved = matchListedChat(listed, chat);
+    if (!("session" in resolved)) throw new Error(resolved.error);
     const limit = typeof args.limit === "number" ? args.limit : 40;
-    const transcript = sessionTranscript(readState(), chat, limit, from);
+    const transcript = sessionTranscript(readState(), resolved.session.id, limit, from);
     if (!transcript) throw new Error(`No Workhorse chat matches “${chat}”`);
     return JSON.stringify(transcript, null, 2);
   }
@@ -1695,7 +1722,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
             ? (args.handoff as { status: string; summary: string; evidence?: string; nextSteps?: string; blocker?: string })
             : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
-        wait: args.wait === false ? false : args.wait === true ? true : undefined,
+        wait: isLinkProfile() ? false : args.wait === false ? false : args.wait === true ? true : undefined,
         route:
           args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
             ? args.route
@@ -1718,7 +1745,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     return awaitAgents(
       parent,
       typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
-      args.wait === true,
+      isLinkProfile() ? false : args.wait === true,
       typeof args.traceId === "string" ? args.traceId : undefined,
       Array.isArray(args.workerIds) ? args.workerIds.filter((item): item is string => typeof item === "string") : undefined,
     );
@@ -1752,9 +1779,20 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     const id = typeof args.id === "string" ? args.id : "";
     const store = normalizeTaskStore((readState() as { externalTasks?: unknown }).externalTasks);
     const task = store.byId[id];
-    if (task) return JSON.stringify(task, null, 2);
+    if (task) return JSON.stringify(withFollowThrough({ ...task } as Record<string, unknown>), null, 2);
     const parent = typeof args.fromSessionId === "string" ? args.fromSessionId : from;
-    return postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id, traceId: typeof args.traceId === "string" ? args.traceId : undefined }, parent), { timeoutMs: 8_000, inbox: false });
+    const text = await postBridge("/bots", botsAsk({ action: "agent-status", message: id, name: id, traceId: typeof args.traceId === "string" ? args.traceId : undefined }, parent), { timeoutMs: 8_000, inbox: false });
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.next === "string") return text;
+        if (typeof record.status === "string") return JSON.stringify(withFollowThrough(record), null, 2);
+      }
+    } catch {
+      /* plain text */
+    }
+    return text;
   }
   if (name === "workhorse_cancel_agent") {
     const id = typeof args.id === "string" ? args.id : "";
@@ -2248,9 +2286,12 @@ function isMcpEntry(): boolean {
  *
  *   <helper> link capabilities
  *   <helper> link capacity [--provider <id>] [--callable]
+ *   <helper> link chats
+ *   <helper> link read <sessionId> [--limit <n>]
+ *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
- *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>]
+ *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--key <idempotencyKey>]
  *
  * `--json` is accepted and ignored: the output is always JSON. Exit 0 on a
  * result, 1 on an error, with the error as JSON on stdout.
@@ -2258,7 +2299,7 @@ function isMcpEntry(): boolean {
 export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
-  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass"]);
+  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit"]);
   const flags = new Map<string, string>();
   const positional: string[] = [];
   for (let index = 0; index < rest.length; index += 1) {
@@ -2274,10 +2315,25 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | delegate --chat <id> --task <text> [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>]";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
+  }
+  if (sub === "chats") return { name: "workhorse_list_chats", args: {} };
+  if (sub === "read") {
+    if (!positional[0]) return { usage };
+    const limit = Number(flag("limit") ?? "");
+    return { name: "workhorse_read_chat", args: { chat: positional[0], ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}) } };
+  }
+  if (sub === "ask") {
+    const chat = flag("chat");
+    const message = flag("message");
+    if (!chat || !message) return { usage };
+    return {
+      name: "workhorse_ask_chat",
+      args: { chat, message, ...(flag("trace") ? { traceId: flag("trace") } : {}), ...(flag("key") ? { idempotencyKey: flag("key") } : {}) },
+    };
   }
   if (sub === "delegate") {
     const task = flag("task");
@@ -2297,7 +2353,14 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
     const pass = Number(flag("pass") ?? "1");
     return {
       name: "workhorse_continue_mission",
-      args: { previousWorkerIds: [worker], previousPass: Number.isFinite(pass) ? pass : 1, remainingWork: text.join(" "), fromSessionId: chat, ...(flag("trace") ? { traceId: flag("trace") } : {}) },
+      args: {
+        previousWorkerIds: [worker],
+        previousPass: Number.isFinite(pass) ? pass : 1,
+        remainingWork: text.join(" "),
+        fromSessionId: chat,
+        ...(flag("trace") ? { traceId: flag("trace") } : {}),
+        ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
+      },
     };
   }
   return { usage };

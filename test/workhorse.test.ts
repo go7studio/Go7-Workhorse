@@ -67,7 +67,7 @@ import { CREW_STATUS_HINT, CURSOR_SESSION_RULES, CUSTOM_HTTP_SESSION_RULES, DESK
 import { applySessionElevation, applySessionModelChange, applySessionPolicyChange, brainCaption, brainStamp, formatChatSidebar, isSessionIntro, messageBrain, normalizeMessage, normalizeSession, stampUnstampedMessages, vendorSessionForSend } from "../src/lib/session";
 import { workerSidebarLabel } from "../src/ui/ChatRow";
 import { buildAcpPrompt, groupAttachments, imageMime, normalizeImages, shouldSkipDropDir } from "../src/lib/images";
-import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
+import { catalogSessions, existingPeerReply, findSession, findSessionForLink, formatPeerPrompt, matchListedChat, peerPromptParts, sameSessionCrew, sessionTranscript } from "../src/lib/session-bridge";
 import {
   admitSpawn,
   collectChildAgentReports,
@@ -9310,6 +9310,19 @@ test("list chats names a live worker so a harness can find Marlow", () => {
         messages: [{ role: "user", text: "Review the taxonomy." }],
       },
       {
+        id: "sess_marlow_fresh",
+        title: "Marlow · Fresh",
+        projectId: "p1",
+        parentId: "sess_parent",
+        hidden: true,
+        workerName: "Marlow",
+        provider: "grok",
+        model: "grok-4.6",
+        status: "running",
+        agentRun: { status: "running", startedAt: 3 },
+        messages: [],
+      },
+      {
         id: "sess_orphan",
         title: "Child of deleted",
         parentId: "sess_gone",
@@ -9325,5 +9338,12 @@ test("list chats names a live worker so a harness can find Marlow", () => {
   assert.equal(marlow?.worker, "Marlow");
   assert.equal(marlow?.parentId, "sess_parent");
   assert.equal(marlow?.status, "completed");
+  assert.equal(listed.some((row) => row.id === "sess_marlow_fresh"), true, "a just-spawned worker with no user bubble still lists");
   assert.equal(findSession(listed, "Marlow")?.id, "sess_marlow");
+  const byId = matchListedChat(listed, "sess_marlow");
+  assert.ok("session" in byId);
+  if ("session" in byId) assert.equal(byId.session.id, "sess_marlow");
+  const named = matchListedChat(listed, "Marlow");
+  assert.equal("error" in named, true);
+  if ("error" in named) assert.match(named.error, /Several workers named/);
 });

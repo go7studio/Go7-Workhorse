@@ -225,6 +225,8 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.match(initialized.result?.instructions ?? "", /Do not sit in a poll loop/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_agent_status on that worker id/);
   assert.match(initialized.result?.instructions ?? "", /desk journals the terminal report/);
+  assert.doesNotMatch(initialized.result?.instructions ?? "", /workhorse_spawn_agent/);
+  assert.doesNotMatch(initialized.result?.instructions ?? "", /workhorse_await_agents/);
   assert.ok(initialized.result?.capabilities?.tools);
 });
 

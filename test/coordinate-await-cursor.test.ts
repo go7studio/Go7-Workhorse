@@ -46,6 +46,8 @@ test("MCP instructions tell the parent to stop; the desk joins without polling",
   assert.match(WORKHORSE_MCP_INSTRUCTIONS, /workhorse_agent_status on that worker id/);
   assert.match(WORKHORSE_MCP_INSTRUCTIONS, /desk journals the terminal report/);
   assert.match(WORKHORSE_MCP_INSTRUCTIONS, /joins it into the parent chat/);
+  assert.doesNotMatch(WORKHORSE_MCP_INSTRUCTIONS, /workhorse_spawn_agent/);
+  assert.doesNotMatch(WORKHORSE_MCP_INSTRUCTIONS, /workhorse_await_agents/);
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.doesNotMatch(mcp, /poll workhorse_agent_status until/);
   assert.doesNotMatch(mcp, /use wait=false and poll workhorse_agent_status/);

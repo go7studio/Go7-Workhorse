@@ -27,15 +27,17 @@ Code, Grok, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
 Link connects each with one button, through that app's own MCP tool; Copy
 generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
-delegate a task, continue a finished wave, worker status. Status says wait,
-done, or failed. List chats names live workers. The leftover check
-never includes keys or chat content. The first call,
-`workhorse_capabilities`, says what this desk offers. Older names still
+delegate a task, continue a finished wave, worker status. The first call,
+`workhorse_capabilities`, names follow-through: new slice, named worker,
+later status. Status says wait, done, or failed. List chats names live
+workers and their `id` when names repeat. Link never waits on a long worker.
+The leftover check never includes keys or chat content. Older names still
 answer so a harness that already calls them is not refused. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
-The same helper is a JSON CLI for a harness without MCP, and Install
-workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
+The same helper is a JSON CLI for a harness without MCP (`chats`, `read`,
+`ask`, `delegate`, `status`, `follow-up`), and Install workhorse command
+puts it on your PATH. See [docs/LINK.md](LINK.md).
 
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse

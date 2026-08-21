@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   LINK_CAPABILITIES,
+  LINK_FOLLOW_THROUGH,
   LINK_HOSTS,
   LINK_PROTOCOL_VERSION,
   LINK_TOOLS,
@@ -47,6 +48,10 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   assert.equal(shake.protocolVersion, 1);
   assert.equal(shake.desk, "online");
   assert.deepEqual(shake.tools, [...LINK_TOOLS]);
+  assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
+  assert.equal(shake.followThrough.newSlice, "workhorse_delegate");
+  assert.equal(shake.followThrough.namedWorker, "workhorse_ask_chat");
+  assert.equal(shake.followThrough.later, "workhorse_agent_status");
   assert.equal(linkHandshake({ deskOnline: false }).desk, "offline");
 });
 
@@ -76,10 +81,16 @@ test("workhorse_capabilities answers over the external profile, first, with the 
     const reply = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "workhorse_capabilities", arguments: {} } })) as {
       result?: { content?: Array<{ text?: string }> };
     };
-    const shake = JSON.parse(reply.result?.content?.[0]?.text ?? "{}") as { protocolVersion: number; desk: string; tools: string[] };
+    const shake = JSON.parse(reply.result?.content?.[0]?.text ?? "{}") as {
+      protocolVersion: number;
+      desk: string;
+      tools: string[];
+      followThrough: { newSlice: string; namedWorker: string; later: string };
+    };
     assert.equal(shake.protocolVersion, 1);
     assert.ok(shake.desk === "online" || shake.desk === "offline");
     assert.deepEqual(shake.tools, [...LINK_TOOLS]);
+    assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
   } finally {
     if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
     else process.env.WORKHORSE_MCP_PROFILE = previous;
@@ -231,17 +242,25 @@ test("the desk profile does not write inbound Learning events", async () => {
 test("the CLI is the same handler: each subcommand maps to one tool call", () => {
   assert.deepEqual(linkCliCall(["capabilities", "--json"]), { name: "workhorse_capabilities", args: {} });
   assert.deepEqual(linkCliCall(["capacity", "--provider", "claude", "--callable"]), { name: "workhorse_query_capacity", args: { provider: "claude", callableOnly: true } });
+  assert.deepEqual(linkCliCall(["chats"]), { name: "workhorse_list_chats", args: {} });
+  assert.deepEqual(linkCliCall(["read", "sess_1", "--limit", "12"]), { name: "workhorse_read_chat", args: { chat: "sess_1", limit: 12 } });
+  assert.deepEqual(linkCliCall(["ask", "--chat", "sess_marlow", "--message", "Review this", "--key", "k8"]), {
+    name: "workhorse_ask_chat",
+    args: { chat: "sess_marlow", message: "Review this", idempotencyKey: "k8" },
+  });
   assert.deepEqual(linkCliCall(["delegate", "--chat", "c1", "--task", "Review this change", "--key", "k9"]), {
     name: "workhorse_delegate",
     args: { task: "Review this change", fromSessionId: "c1", idempotencyKey: "k9" },
   });
   assert.deepEqual(linkCliCall(["status", "w7"]), { name: "workhorse_agent_status", args: { id: "w7" } });
-  assert.deepEqual(linkCliCall(["follow-up", "w7", "Check the failing test", "--chat", "c1", "--pass", "2"]), {
+  assert.deepEqual(linkCliCall(["follow-up", "w7", "Check the failing test", "--chat", "c1", "--pass", "2", "--key", "k2"]), {
     name: "workhorse_continue_mission",
-    args: { previousWorkerIds: ["w7"], previousPass: 2, remainingWork: "Check the failing test", fromSessionId: "c1" },
+    args: { previousWorkerIds: ["w7"], previousPass: 2, remainingWork: "Check the failing test", fromSessionId: "c1", idempotencyKey: "k2" },
   });
   assert.ok("usage" in linkCliCall(["follow-up", "w7", "no chat given"]));
   assert.ok("usage" in linkCliCall(["delegate", "--task", "no chat"]));
+  assert.ok("usage" in linkCliCall(["ask", "--chat", "c1"]));
+  assert.ok("usage" in linkCliCall(["read"]));
   assert.ok("usage" in linkCliCall(["nothing"]));
 });
 
@@ -416,4 +435,90 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
     assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
   }
   rmSync(root, { recursive: true, force: true });
+});
+
+test("Link ignores wait=true so MCP clients are not blocked", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-wait-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: [{ id: "parent_chat", title: "Desk", provider: "grok", projectId: null, messages: [{ role: "user", text: "hi" }] }] }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  const waits: Array<boolean | undefined> = [];
+  setWorkhorseDeskAsk(async (payload) => {
+    waits.push(payload.wait);
+    return { text: JSON.stringify({ ok: true, worker: "w1" }) };
+  });
+  try {
+    const delegated = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_delegate", arguments: { task: "review this", fromSessionId: "parent_chat", folder: dir, wait: true } },
+    })) as { error?: { message?: string } };
+    assert.equal(delegated.error, undefined, delegated.error?.message);
+    const spawned = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_spawn_agent", arguments: { prompt: "review this", fromSessionId: "parent_chat", folder: dir, wait: true } },
+    })) as { error?: { message?: string } };
+    assert.equal(spawned.error, undefined, spawned.error?.message);
+    assert.deepEqual(waits, [false, false]);
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent_status always returns next even for an external task", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-status-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(
+    statePath,
+    JSON.stringify({
+      settings: {},
+      sessions: [],
+      externalTasks: {
+        byId: {
+          ext_1: {
+            id: "ext_1",
+            ref: { runtimeId: "openclaw", agentId: "main" },
+            status: "running",
+            startedAt: 1,
+            envelope: { traceId: "t1", idempotencyKey: "k1", origin: "openclaw", visitedSystems: ["openclaw"], hopCount: 1 },
+            grantId: "g1",
+          },
+        },
+        byKey: {},
+      },
+    }),
+  );
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  try {
+    const reply = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "ext_1" } },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(reply.error, undefined, reply.error?.message);
+    const body = JSON.parse(reply.result?.content?.[0]?.text ?? "{}") as { next?: string; how?: string; status?: string; id?: string };
+    assert.equal(body.id, "ext_1");
+    assert.equal(body.status, "running");
+    assert.equal(body.next, "wait");
+    assert.match(body.how ?? "", /workhorse_agent_status/);
+  } finally {
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

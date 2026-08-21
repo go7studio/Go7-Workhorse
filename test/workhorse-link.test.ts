@@ -8,6 +8,7 @@ import {
   LINK_CAPABILITIES,
   LINK_FOLLOW_THROUGH,
   LINK_HOSTS,
+  LINK_HOST_LABEL,
   LINK_PROTOCOL_VERSION,
   LINK_TOOLS,
   LinkReplayCache,
@@ -16,6 +17,7 @@ import {
   linkGrokBotOneshot,
   linkHandshake,
   linkHostCliArgs,
+  linkHostConnectsByOneshot,
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
@@ -366,8 +368,12 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
     win,
   );
   const settings = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/ui/Settings.tsx"), "utf8");
-  assert.match(settings, /Copy Grok Bot one-shot/);
+  assert.match(settings, /Connect \{LINK_HOST_LABEL\[host\]\}/);
+  assert.match(settings, /linkHostConnectsByOneshot/);
   assert.match(settings, /linkGrokBotOneshot/);
+  assert.doesNotMatch(settings, /Copy Grok Bot one-shot/);
+  assert.ok(LINK_HOSTS.includes("grok-bot"));
+  assert.equal(LINK_HOST_LABEL["grok-bot"], "Grok Bot");
 });
 
 test("installWorkhorseLink connects the hosts asked for, reports a missing CLI as not installed, writes no token", () => {
@@ -398,6 +404,11 @@ test("installWorkhorseLink connects the hosts asked for, reports a missing CLI a
   for (const host of LINK_HOSTS) {
     assert.ok(all.written.some((item) => item.target === host) || all.skipped.some((item) => item.target === host), `${host} was attempted`);
   }
+  assert.ok(all.written.some((item) => item.target === "grok-bot" && item.how === "oneshot"));
+  assert.equal(linkHostConnectsByOneshot("grok-bot"), true);
+  assert.equal(linkHostConnectsByOneshot("grok"), false);
+  const botOnly = installWorkhorseLink({ home: "/home/u", platform: "darwin", ...LAUNCH, io, hosts: ["grok-bot"] });
+  assert.match(installReportMessage(botOnly), /Paste it into Grok Bot once/);
 });
 
 test("every mutating Link call shares the envelope: a retried ask_chat posts once", async () => {

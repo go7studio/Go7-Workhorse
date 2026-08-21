@@ -134,7 +134,7 @@ export type InstallIo = {
 
 export type InstallReport = {
   ok: boolean;
-  written: Array<{ target: LinkHost; path: string; how: "file" | "cli" }>;
+  written: Array<{ target: LinkHost; path: string; how: "file" | "cli" | "oneshot" }>;
   skipped: Array<{ target: LinkHost; reason: string }>;
 };
 
@@ -184,7 +184,7 @@ export function workhorseLinkGrokBotOneshot(input: {
  * linkHostCliArgs, verified against each CLI's help.
  */
 function connectViaHostCli(
-  host: Exclude<LinkHost, "openclaw" | "hermes">,
+  host: Exclude<LinkHost, "openclaw" | "hermes" | "grok-bot">,
   server: McpServerConfig,
   io: InstallIo,
   written: InstallReport["written"],
@@ -221,6 +221,9 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
 
   for (const host of ["codex", "claude", "grok"] as const) {
     if (hosts.has(host)) connectViaHostCli(host, server, input.io, written, skipped);
+  }
+  if (hosts.has("grok-bot")) {
+    written.push({ target: "grok-bot", path: "oneshot", how: "oneshot" });
   }
   if (!hosts.has("openclaw") && !hosts.has("hermes")) return { ok: written.length > 0, written, skipped };
 
@@ -285,6 +288,9 @@ export function installReportMessage(report: InstallReport): string {
   const name = (target: LinkHost) => LINK_HOST_LABEL[target];
   if (report.written.length === 0) {
     return report.skipped[0]?.reason || "Could not connect any host.";
+  }
+  if (report.written.length === 1 && report.written[0]?.how === "oneshot") {
+    return "Copied the Grok Bot one-shot. Paste it into Grok Bot once and tell it to save in permanent memory. No token stored.";
   }
   const names = report.written.map((item) => name(item.target));
   const list = names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;

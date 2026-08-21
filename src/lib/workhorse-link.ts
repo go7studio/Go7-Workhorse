@@ -226,17 +226,23 @@ ${mcp}
 `;
 }
 
-export type LinkHost = "codex" | "claude" | "grok" | "openclaw" | "hermes";
+export type LinkHost = "codex" | "claude" | "grok" | "grok-bot" | "openclaw" | "hermes";
 
-export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "openclaw", "hermes"];
+export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "grok-bot", "openclaw", "hermes"];
 
 export const LINK_HOST_LABEL: Record<LinkHost, string> = {
   codex: "Codex",
   claude: "Claude",
   grok: "Grok",
+  "grok-bot": "Grok Bot",
   openclaw: "OpenClaw",
   hermes: "Hermes",
 };
+
+/** Grok Bot has no `mcp add`. Connect copies the charged one-shot instead. */
+export function linkHostConnectsByOneshot(host: LinkHost): boolean {
+  return host === "grok-bot";
+}
 
 /**
  * The `mcp add` invocation for hosts that have one, each verified on a real
@@ -244,7 +250,7 @@ export const LINK_HOST_LABEL: Record<LinkHost, string> = {
  * format its business. `-s user` where the host scopes, so the link is
  * there in every project, not the one the desk happened to be in.
  */
-export function linkHostCliArgs(host: Exclude<LinkHost, "openclaw" | "hermes">, server: McpServerConfig): { command: string; args: string[] } {
+export function linkHostCliArgs(host: Exclude<LinkHost, "openclaw" | "hermes" | "grok-bot">, server: McpServerConfig): { command: string; args: string[] } {
   const env = Object.entries(server.env ?? {}).map(([key, value]) => `${key}=${value}`);
   if (host === "claude") {
     // claude mcp add [options] <name> <commandOrUrl> [args...]  ·  -e KEY=value  ·  -s user

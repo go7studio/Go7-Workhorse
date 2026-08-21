@@ -68,7 +68,7 @@ last saved state, delegation does not.
 | Tool | Does | Changes the desk |
 | --- | --- | --- |
 | `workhorse_capabilities` | the contract above | no |
-| `workhorse_list_chats` | chats, by project | no |
+| `workhorse_list_chats` | chats, compact by default (`id`, `title`, `worker`, `parentId`, `status`, `next`, `project`). `parents` omits workers. `full` adds preview and sidebar | no |
 | `workhorse_read_chat` | one chat's transcript | no |
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
@@ -93,9 +93,11 @@ agent evidence. Keys and chat text stay out.
 
 The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
 
-1. `workhorse_list_chats` — pick the parent chat. Workers on that chat show
-   `worker`, `parentId`, `status`, and `next` (so Marlow is findable by name).
-   If several rows share a worker name, pass that row's `id`.
+1. `workhorse_list_chats` — pick the parent chat. Default list is compact so a
+   host 20–64 KB output cap does not clip it. Workers show `worker`, `parentId`,
+   `status`, and `next` (so Marlow is findable by name). Pass `parents` for
+   parent chats only, `full` for preview. If several rows share a worker name,
+   pass that row's `id`.
 2. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
    worker. Stop this turn. The desk joins the report into the parent chat.
    Named worker: `workhorse_ask_chat` with that row's `id`.
@@ -148,6 +150,8 @@ PATH for you.
 workhorse capabilities
 workhorse capacity --callable
 workhorse chats
+workhorse chats --parents
+workhorse chats --full
 workhorse read <sessionId>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>

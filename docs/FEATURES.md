@@ -30,8 +30,11 @@ generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
 delegate a task, continue a finished wave, worker status. The first call,
 `workhorse_capabilities`, names follow-through: new slice, named worker,
-later status. Status says wait, done, or failed. List chats names live
-workers and their `id` when names repeat. Link never waits on a long worker.
+later status. Status says wait, done, or failed. List chats is compact by
+default (id, title, worker, parentId, status, next, project) so a host output
+cap does not clip the roster; `parents` omits workers and `full` adds
+preview. Duplicate worker names need that row’s `id`. Link never waits on a
+long worker.
 The leftover check never includes keys or chat content. Older names still
 answer so a harness that already calls them is not refused. Delete, rename,
 credentials, bot setup and project changes are not offered and are refused.

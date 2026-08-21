@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { sidebarKeepsChat } from "../src/lib/chats";
 import { nestProjectChats } from "../src/lib/lineup";
 import { formatChatSidebar } from "../src/lib/session";
+import { crewDotKind, workerSidebarLabel } from "../src/ui/ChatRow";
 import { DEFAULT_SETTINGS, normalizeRouting } from "../src/lib/settings";
 import { shouldAutoRouteSpawn } from "../src/lib/subagents";
 
@@ -55,6 +56,60 @@ test("both sidebar lists share the one rule", () => {
   // No second copy of the rule to drift again.
   assert.doesNotMatch(project, /isHiddenSession/);
   assert.doesNotMatch(loose.slice(0, 400), /isHiddenSession/);
+});
+
+test("a nested worker subtitle is model and effort only", () => {
+  assert.equal(
+    workerSidebarLabel({
+      id: "worker_terra",
+      projectId: null,
+      parentId: "orchestrator",
+      provider: "codex",
+      model: "gpt-5.6-terra",
+      effort: "medium",
+      title: "Certify Saga candidate",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "idle",
+      contextUsed: 0,
+      messages: [],
+      agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
+    }),
+    "GPT-5.6-Terra · Medium",
+  );
+  assert.equal(
+    workerSidebarLabel({
+      id: "worker_fail",
+      projectId: null,
+      parentId: "orchestrator",
+      provider: "claude",
+      model: "claude-sonnet-4-6",
+      effort: "high",
+      title: "Broke",
+      mode: "always-approve",
+      sandbox: "off",
+      status: "idle",
+      contextUsed: 0,
+      messages: [],
+      agentRun: { status: "failed", startedAt: 1, isolation: "shared" },
+    }),
+    "Sonnet 4.6 · High",
+  );
+});
+
+test("crew dots map run state onto the vendor circle", () => {
+  assert.equal(crewDotKind({ status: "running", agentRun: { status: "running", startedAt: 1, isolation: "shared" } }), "working");
+  assert.equal(crewDotKind({ status: "idle" }, true), "working");
+  assert.equal(crewDotKind({ status: "needs-input" }), "needs-you");
+  assert.equal(crewDotKind({ status: "idle", agentRun: { status: "failed", startedAt: 1, isolation: "shared" } }), "failed");
+  assert.equal(crewDotKind({ status: "idle", agentRun: { status: "cancelled", startedAt: 1, isolation: "shared" } }), "stopped");
+  assert.equal(crewDotKind({ status: "idle", agentRun: { status: "interrupted", startedAt: 1, isolation: "shared" } }), "stopped");
+  assert.equal(crewDotKind({ status: "idle", agentRun: { status: "timed-out", startedAt: 1, isolation: "shared" } }), "stopped");
+  assert.equal(crewDotKind({ status: "idle", agentRun: { status: "completed", startedAt: 1, isolation: "shared" } }), "idle");
+  assert.match(read("src/styles/crew-dots.css"), /\.dot\.failed/);
+  assert.match(read("src/styles/crew-dots.css"), /\.dot\.stopped/);
+  assert.match(read("src/styles/crew-dots.css"), /\.dot\.needs-you/);
+  assert.match(read("src/ui/Sidebar.tsx"), /CrewDotPreview/);
 });
 
 test("an auto-routed chat says Auto where a model name would read as the plan", () => {

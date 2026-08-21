@@ -195,7 +195,8 @@ test("a live wave reaches the dot and the title reaches the row", () => {
   // every finished row holds flat at 1.00 — and pinned here in the same
   // source-shape way as test/dead-ui.test.ts, for the same reason.
   const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
-  assert.match(row, /session\.status === "running" \|\| mission\?\.running \? " pulse"/, "a live wave must pulse the dot");
+  assert.match(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must pulse the dot");
+  assert.match(row, /crewDotClass\(dotKind\)/);
   assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
   assert.match(row, /mission\?\.caller \|\| mission\?\.word/, "the meta line must render the wave");
 

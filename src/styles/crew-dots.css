@@ -1,0 +1,53 @@
+/* Crew status lives on the vendor dot. Working already pulses. Done stays a
+   still solid. Only failure is loud — cancelled and the other stops are a
+   hollow ring, unfinished rather than wrong. */
+
+.dot.stopped {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.dot.failed {
+  outline: 1.5px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.dot.needs-you {
+  animation: needs-you-pulse 1.4s var(--ease) infinite;
+}
+
+@keyframes needs-you-pulse {
+  0%,
+  100% {
+    outline: 1.5px solid color-mix(in srgb, var(--warn) 28%, transparent);
+    outline-offset: 1px;
+  }
+  50% {
+    outline: 1.5px solid var(--warn);
+    outline-offset: 2px;
+  }
+}
+
+.crew-dot-preview {
+  margin: 8px 8px 12px;
+  padding: 8px 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-hover);
+}
+
+.crew-dot-preview .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.crew-dot-preview .chat-row {
+  pointer-events: none;
+}
+
+.crew-dot-preview .chat-open {
+  cursor: default;
+}

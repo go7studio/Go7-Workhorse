@@ -341,6 +341,7 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /one-shot install for Grok Bot/);
   assert.match(text, /permanent agent \/ session memory/);
   assert.match(text, /remote box is scratch/);
+  assert.match(text, /user's Mac/);
   assert.match(text, /workhorse capabilities/);
   assert.match(text, /Install workhorse command/);
   assert.match(text, /WORKHORSE_MCP_PROFILE/);
@@ -348,6 +349,19 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /fromSessionId/);
   assert.doesNotMatch(text, /gho_|ghp_|WORKHORSE_BRIDGE_TOKEN|Authorization: Bearer/i);
   assert.equal(workhorseLinkGrokBotOneshot(LAUNCH), text);
+  const win = linkGrokBotOneshot(server, {
+    platform: "win32",
+    cli: "workhorse.cmd",
+    userData: "C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse",
+  });
+  assert.match(win, /user's Windows PC/);
+  assert.match(win, /workhorse\.cmd capabilities/);
+  assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\workhorse-bridge\.json/);
+  assert.doesNotMatch(win, /Library\/Application Support/);
+  assert.equal(
+    workhorseLinkGrokBotOneshot({ ...LAUNCH, platform: "win32", cliPath: "workhorse.cmd", userData: "C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse" }),
+    win,
+  );
   const settings = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/ui/Settings.tsx"), "utf8");
   assert.match(settings, /Copy Grok Bot one-shot/);
   assert.match(settings, /linkGrokBotOneshot/);

@@ -671,9 +671,15 @@ app.whenReady().then(async () => {
 
   // The generic MCP configuration — for a client Link has no writer for.
   ipcMain.handle("agentRuntime:linkConfig", () => workhorseLinkGenericConfig(linkLaunch()));
-  ipcMain.handle("agentRuntime:linkGrokBotOneshot", () =>
-    workhorseLinkGrokBotOneshot({ ...linkLaunch(), cliPath: "workhorse" }),
-  );
+  ipcMain.handle("agentRuntime:linkGrokBotOneshot", () => {
+    const platform = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : "darwin";
+    return workhorseLinkGrokBotOneshot({
+      ...linkLaunch(),
+      cliPath: platform === "win32" ? "workhorse.cmd" : "workhorse",
+      platform,
+      userData: app.getPath("userData"),
+    });
+  });
 
   // The `workhorse` command: a launcher with this install's exact paths, and
   // a symlink onto PATH where one can be made without a privilege prompt.

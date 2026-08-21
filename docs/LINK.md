@@ -14,10 +14,11 @@ app's own MCP config through its own tool (`codex mcp add`, `claude mcp add`,
 written, and no token is stored.
 
 **Grok Bot:** Copy Grok Bot one-shot, and paste it into Grok Bot once. It is
-the same launch plus install steps. Grok Bot must save it in permanent agent
-memory (the remote box is scratch). Connecting is not adding a vendor. Grok
-Bot talks through the Link CLI on the user's Mac (`workhorse …`); the MCP
-JSON is for Mac-side clients. No token is stored.
+the same launch plus install steps for this computer (Mac or Windows). Grok
+Bot must save it in permanent agent memory (the remote box is scratch).
+Connecting is not adding a vendor. Grok Bot talks through the Link CLI on
+the user's computer (`workhorse` / `workhorse.cmd`); the MCP JSON is for
+clients on that same machine. No token is stored.
 
 **Any other MCP client:** Copy generic MCP configuration, and paste it into
 that client's servers list:

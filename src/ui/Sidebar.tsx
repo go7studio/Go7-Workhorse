@@ -196,15 +196,36 @@ function ProjectFolder({
           aria-expanded={open}
           aria-label={open ? `Hide chats in ${project.name}` : `Show chats in ${project.name}`}
           onClick={onToggle}
-        />
+        >
+          <svg className="twist-folder twist-folder-closed" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.88c.4 0 .78.16 1.06.44l1.12 1.12c.10.10.0.4.44.44H12.5A1.5 1.5 0 0 1 14 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5z"
+            />
+          </svg>
+          <svg className="twist-folder twist-folder-open" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M2 3.5A1.5 1.5 0 0 1 3.5 2h2.88c.4 0 .78.16 1.06.44l.8.8H12.5A1.5 1.5 0 0 1 14 4.75V6H4.15A2.1 2.1 0 0 0 2.1 7.85L2 8.2z"
+            />
+            <path
+              fill="currentColor"
+              d="M2.2 7.4h12.45L13.05 14.2H3.2A1.45 1.45 0 0 1 1.78 12.8L2.2 7.4z"
+            />
+          </svg>
+        </button>
         <button
           className={selected && !store.activeSessionId ? "row active" : "row"}
           type="button"
           onClick={() => {
+            if (open) {
+              onToggle();
+              return;
+            }
             const last = lastProjectChat(chats);
             if (last) store.selectSession(last.id);
             else store.selectProject(project.id);
-            if (!open) onToggle();
+            onToggle();
           }}
           onDragOver={(event) => {
             if (![...event.dataTransfer.types].includes("text/workhorse-chat")) return;

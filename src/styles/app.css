@@ -4321,7 +4321,9 @@ html.pane-dragging * {
 }
 
 .project-head:has(.row.active),
-.project-head:has(.row.active):hover {
+.project-head:has(.row.active):hover,
+.project-folder.selected .project-head,
+.project-folder.selected .project-head:hover {
   background: var(--bg-active);
 }
 
@@ -4465,37 +4467,42 @@ html.pane-dragging * {
   opacity: 0;
 }
 
-.project-head .twist::after {
-  content: "";
+.project-head .twist-folder {
   position: absolute;
-  inset: 50% auto auto 50%;
+  left: 50%;
+  top: 50%;
   width: 15px;
   height: 15px;
   transform: translate(-50%, -50%);
-  background: var(--text-tertiary);
-  opacity: 1;
+  color: var(--text-tertiary);
+  pointer-events: none;
   transition: opacity 140ms var(--ease);
-  --project-folder-closed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1.5 3.35h4.4l1.15 1.4H14.5v7.7c0 .9-.7 1.6-1.6 1.6H3.1c-.9 0-1.6-.7-1.6-1.6z'/%3E%3C/svg%3E");
-  --project-folder-open: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M1.4 3.2h4.55l1.2 1.45H14.6V6.3H1.4z'/%3E%3Cpath fill='black' d='M1.15 7.05h13.7l-1.85 7.2H1.85z'/%3E%3C/svg%3E");
-  -webkit-mask: var(--project-folder-closed) center / contain no-repeat;
-  mask: var(--project-folder-closed) center / contain no-repeat;
 }
 
-.project-folder.open .project-head .twist::after {
-  -webkit-mask: var(--project-folder-open) center / contain no-repeat;
-  mask: var(--project-folder-open) center / contain no-repeat;
+.project-head .twist-folder-open {
+  opacity: 0;
+}
+
+.project-folder.open .project-head .twist-folder-closed {
+  opacity: 0;
+}
+
+.project-folder.open .project-head .twist-folder-open {
+  opacity: 1;
+}
+
+.project-head:hover .twist-folder,
+.project-head:focus-within .twist-folder,
+.project-head .twist:focus-visible .twist-folder,
+.project-folder.open .project-head:hover .twist-folder,
+.project-folder.open .project-head:focus-within .twist-folder {
+  opacity: 0;
 }
 
 .project-head:hover .twist::before,
 .project-head:focus-within .twist::before,
 .project-head .twist:focus-visible::before {
   opacity: 1;
-}
-
-.project-head:hover .twist::after,
-.project-head:focus-within .twist::after,
-.project-head .twist:focus-visible::after {
-  opacity: 0;
 }
 
 .project-chats-slot {

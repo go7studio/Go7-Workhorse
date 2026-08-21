@@ -127,7 +127,12 @@ function WorkRow({
     const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
     const childLive =
       child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
-    const title = marker.fromTitle || marker.text || child?.title || "Subagent";
+    const titled = child?.title?.trim() || marker.text?.trim() || "";
+    const from = marker.fromTitle?.trim() || "";
+    const title =
+      titled ||
+      (from && from.length <= 80 && !from.includes("\n") ? from : "") ||
+      "Worker";
     const ink = child ? deskInk(child, store.settings) : undefined;
     const brain = child
       ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
@@ -154,7 +159,9 @@ function WorkRow({
             style={ink ? { background: ink, color: ink } : undefined}
             aria-hidden="true"
           />
-          <span className="tool-name">{title}</span>
+          <span className="tool-name" title={title}>
+            {title}
+          </span>
           {brain ? <span className="subagent-model">{[brain.name, child?.effort].filter(Boolean).join(" · ")}</span> : null}
           {child?.agentRun?.constraints?.length ? (
             <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>

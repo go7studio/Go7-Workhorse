@@ -107,7 +107,9 @@ transcript rather than as a path.
   a row of "1 tool". A single call shows its name. A later thought starts a new
   hop. When a turn runs long, earlier thoughts and tools roll into an Earlier
   fold you can open again. The current hop stays open. The visible reply stays
-  below that.
+  below that. A parent turn that is only a worker marker still shows that
+  worker's last reply underneath, so the report is readable on this chat.
+  Open the worker for the tools and the rest of its transcript.
 - Grok tables keep their real columns. Empty `| |` / `|---|` chrome is
   dropped, and a path with a size suffix such as `foo.md (34441 chars)`
   still opens.

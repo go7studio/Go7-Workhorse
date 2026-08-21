@@ -7,9 +7,10 @@ import {
   type CompactRowInput,
   type ToolRowInput,
 } from "./grok-events";
+import { childReportText } from "./lineup";
 import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, Session } from "./types";
 
 export type WorkStepType = "thought" | "tool" | "compact" | "subagent";
 
@@ -467,4 +468,48 @@ export function lastReplyIndex(blocks: TranscriptBlock[]): number {
     if (blocks[i].type === "reply") return i;
   }
   return -1;
+}
+
+function subagentReportHeading(
+  child: Pick<Session, "title"> | undefined,
+  marker: Pick<ChatMessage, "fromTitle" | "text">,
+): string {
+  const named = child?.title?.trim() || marker.text?.trim();
+  if (named) return named;
+  const from = marker.fromTitle?.trim() || "";
+  if (from && from.length <= 80 && !from.includes("\n")) return from;
+  return "Worker";
+}
+
+/**
+ * A wave that finishes after "All workers finished." lands as a new reply
+ * with no parent text — only a subagent marker. The worker's last reply is
+ * the visible body so the report is not trapped behind the worker row.
+ */
+export function visibleCrewReply(
+  assistantText: string,
+  live: boolean,
+  subagents: Array<Pick<ChatMessage, "subagentSessionId" | "fromTitle" | "text">>,
+  sessions: Array<Pick<Session, "id" | "title" | "messages">>,
+): { thought: string; body: string } {
+  const peeled = peelPlanningPreamble(assistantText ?? "", live);
+  if (peeled.body.trim() || (assistantText ?? "").trim()) return peeled;
+  const seen = new Set<string>();
+  const reports: Array<{ who: string; report: string }> = [];
+  for (const marker of subagents) {
+    const id = marker.subagentSessionId?.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const child = sessions.find((session) => session.id === id);
+    const raw = childReportText(child);
+    if (!raw) continue;
+    const report = peelPlanningPreamble(raw, false).body.trim() || raw;
+    reports.push({ who: subagentReportHeading(child, marker), report });
+  }
+  if (reports.length === 0) return peeled;
+  const body =
+    reports.length === 1
+      ? reports[0]!.report
+      : reports.map((item) => `### ${item.who}\n\n${item.report}`).join("\n\n");
+  return { thought: peeled.thought, body };
 }

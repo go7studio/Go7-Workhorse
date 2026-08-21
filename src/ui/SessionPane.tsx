@@ -3,7 +3,7 @@ import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
-import { peelPlanningPreamble, unsquashSentences } from "../lib/markdown";
+import { unsquashSentences } from "../lib/markdown";
 import { brainCaption, messageBrain } from "../lib/session";
 import { talkingToSummary } from "../lib/tool-labels";
 import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
@@ -18,6 +18,7 @@ import {
   TRANSCRIPT_LOOKAHEAD,
   TRANSCRIPT_PAINT_CHUNK,
   transcriptPaintStart,
+  visibleCrewReply,
   type TranscriptBlock,
 } from "../lib/turns";
 import { clampPaneWidth, FILE_PANE } from "../lib/pane";
@@ -47,7 +48,7 @@ import {
   pinToLatest,
   shouldLoadEarlierWindow,
 } from "../lib/transcript-scroll";
-import type { AppState, ProviderId } from "../lib/types";
+import type { AppState, ProviderId, Session } from "../lib/types";
 
 const SCROLL_SLACK = 96;
 
@@ -82,6 +83,7 @@ const AssistantTurn = memo(function AssistantTurn({
   settings,
   cwd,
   vendorSessionId,
+  crew,
   onFork,
   onOpenThread,
 }: {
@@ -93,11 +95,12 @@ const AssistantTurn = memo(function AssistantTurn({
   settings: AppState["settings"];
   cwd: string;
   vendorSessionId?: string;
+  crew: Array<Pick<Session, "id" | "title" | "messages">>;
   onFork: (id: string) => void;
   onOpenThread: (id: string) => void;
 }) {
   const assistantText = block.assistant.text ?? "";
-  const peeled = peelPlanningPreamble(assistantText, live);
+  const peeled = visibleCrewReply(assistantText, live, block.subagents, crew);
   const body = unsquashSentences(peeled.body);
   const who = brainCaption(
     messageBrain(block.assistant, { provider, model, ...(customBotId ? { customBotId } : {}) }),
@@ -499,6 +502,7 @@ export function SessionPane() {
               settings={store.settings}
               cwd={cwd}
               vendorSessionId={session.vendorSessionId}
+              crew={store.sessions}
               onFork={store.forkFrom}
               onOpenThread={store.selectSession}
             />

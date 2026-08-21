@@ -213,6 +213,7 @@ import {
   transcriptPaintStart,
   resolveWorkedMs,
   thoughtForReply,
+  visibleCrewReply,
   workStepKinds,
   type WorkStreamEvent,
 } from "../src/lib/turns";
@@ -5949,8 +5950,12 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /LINEUP_FINISHED_NOTICE/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /crew-done/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.crew-done-card/);
-  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /peelPlanningPreamble\(assistantText, live\)/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /visibleCrewReply\(assistantText, live, block\.subagents, crew\)/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /unsquashSentences\(peeled\.body\)/);
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /worker's last reply underneath/,
+  );
   assert.doesNotMatch(
     readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"),
     /peeled\.body \|\| \(!live \? assistantText/,
@@ -6014,6 +6019,44 @@ test("transcript groups tools and thoughts above the final reply", () => {
   const replies = synthesis.filter((block) => block.type === "reply");
   if (replies[0]?.type === "reply") assert.equal(replies[0].assistant.text, "Started three slices.");
   if (replies[1]?.type === "reply") assert.equal(replies[1].assistant.text, "HUD is in main_hud.gd.");
+  const emptyCrew = groupTranscript([
+    { id: "u", role: "user", text: "run the slice", createdAt: 1 },
+    { id: "a1", role: "assistant", text: "Dexter is out.", createdAt: 2 },
+    { id: "note", role: "system", text: "All workers finished.", createdAt: 3 },
+    {
+      id: "sub",
+      role: "system",
+      kind: "subagent",
+      text: "MC analytics repair",
+      fromTitle: "RUN THE FULL MISSION AGAIN as a fresh Workhorse-controlled orchestration pass.\n\nParent intent from Steve.",
+      subagentSessionId: "kid",
+      toolStatus: "completed",
+      createdAt: 4,
+    },
+  ]);
+  const crewCard = emptyCrew.find((block) => block.type === "reply" && block.subagents.length > 0);
+  assert.ok(crewCard && crewCard.type === "reply");
+  if (crewCard?.type === "reply") {
+    assert.equal(crewCard.assistant.text, "");
+    const shown = visibleCrewReply(crewCard.assistant.text, false, crewCard.subagents, [
+      {
+        id: "kid",
+        title: "Rufus · MC analytics repair",
+        messages: [{ id: "a", role: "assistant", text: "Port 3940 is a production next start.\n\nSTATUS: complete", createdAt: 5 }],
+      },
+    ]);
+    assert.match(shown.body, /Port 3940 is a production next start/);
+    assert.match(shown.body, /STATUS: complete/);
+    const parentJoin = visibleCrewReply("Dexter’s merge is back. Both missions that could finish in code are done.", false, crewCard.subagents, [
+      {
+        id: "kid",
+        title: "Rufus · MC analytics repair",
+        messages: [{ id: "a", role: "assistant", text: "Do not replace a parent join with this.", createdAt: 5 }],
+      },
+    ]);
+    assert.match(parentJoin.body, /Dexter/);
+    assert.doesNotMatch(parentJoin.body, /Do not replace/);
+  }
   const twoAssistants = groupTranscript([
     { id: "u", role: "user", text: "go", createdAt: 1 },
     { id: "a1", role: "assistant", text: "Workers are running.", createdAt: 2 },
@@ -6041,6 +6084,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   }
   assert.match(popout, /subagent-preview/);
   assert.match(popout, /subagent-open/);
+  assert.match(popout, /child\?\.title\?\.trim\(\) \|\| marker\.text\?\.trim/);
+  assert.doesNotMatch(popout, /marker\.fromTitle \|\| marker\.text \|\| child\?\.title/);
   assert.match(popout, /subagents/);
   assert.match(popout, /onOpenThread/);
   assert.match(popout, /working · \$\{formatWorked/);
@@ -6048,6 +6093,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /deskInk/);
   assert.doesNotMatch(popout, /subagentTurns/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.subagent-open/);
+  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.subagent-open \.tool-name/);
   const workCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const foldAt = workCss.indexOf(".work-fold > summary::before");
   const foldBlock = foldAt >= 0 ? workCss.slice(foldAt, foldAt + 280) : "";

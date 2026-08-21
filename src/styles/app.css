@@ -2182,6 +2182,10 @@ html.pane-dragging * {
   cursor: pointer;
 }
 
+.subagent-open .tool-name {
+  max-width: min(48ch, 100%);
+}
+
 .subagent-model {
   color: var(--text-secondary);
   font-weight: 560;

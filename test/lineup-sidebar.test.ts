@@ -97,6 +97,12 @@ test("a nested worker subtitle is model and effort only", () => {
   );
 });
 
+test("a running chat keeps model and effort on the row, not Working…", () => {
+  const row = read("src/ui/ChatRow.tsx");
+  assert.doesNotMatch(row, /session\.status === "running"\s*\?\s*"Working…"/);
+  assert.match(row, /mission\.word !== "Working…"/);
+});
+
 test("crew dots map run state onto the vendor circle", () => {
   assert.equal(crewDotKind({ status: "running", agentRun: { status: "running", startedAt: 1, isolation: "shared" } }), "working");
   assert.equal(crewDotKind({ status: "idle" }, true), "working");

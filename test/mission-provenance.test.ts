@@ -198,7 +198,8 @@ test("a live wave reaches the dot and the title reaches the row", () => {
   assert.match(row, /crewDotKind\(session, Boolean\(mission\?\.running\)\)/, "a live wave must pulse the dot");
   assert.match(row, /crewDotClass\(dotKind\)/);
   assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
-  assert.match(row, /mission\?\.caller \|\| mission\?\.word/, "the meta line must render the wave");
+  assert.match(row, /mission\.word !== "Working…"/, "a live wave keeps model · effort instead of Working…");
+  assert.match(row, /mission\?\.caller/, "the meta line must still name a harness caller");
 
   // And the Sidebar has to hand it down — it owns the workers the state needs.
   const sidebar = readFileSync(new URL("../src/ui/Sidebar.tsx", import.meta.url), "utf8");

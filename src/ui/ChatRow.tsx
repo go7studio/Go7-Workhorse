@@ -108,6 +108,7 @@ export function ChatRow({
     : "Attach LLM";
   const workerLabel = workerSidebarLabel(session, bot?.name ?? stockLink?.name);
   const dotKind = crewDotKind(session, Boolean(mission?.running));
+  const waveWord = mission?.word && mission.word !== "Working…" ? mission.word : undefined;
   const link = desk.link;
 
   useEffect(() => {
@@ -242,21 +243,21 @@ export function ChatRow({
                 ? link.label
                 : nested && (session.hidden || session.agentRun)
                   ? workerLabel
-                  : mission?.caller || mission?.word
+                  : waveWord || mission?.caller
                     ? (
                         <>
                           {mission.caller ? <span className="row-caller">{mission.caller}</span> : null}
-                          {mission.caller && mission.word ? " · " : null}
-                          {mission.word ? (
-                            <span className={mission.tone === "danger" ? "row-state bad" : "row-state"}>{mission.word}</span>
-                          ) : null}
+                          {mission.caller && (waveWord || rowLabel) ? " · " : null}
+                          {waveWord ? (
+                            <span className={mission.tone === "danger" ? "row-state bad" : "row-state"}>{waveWord}</span>
+                          ) : (
+                            rowLabel
+                          )}
                         </>
                       )
-                    : session.status === "running"
-                      ? "Working…"
-                      : session.status === "needs-input"
-                        ? "Needs you"
-                        : rowLabel}
+                    : session.status === "needs-input"
+                      ? "Needs you"
+                      : rowLabel}
             </span>
           </span>
           <TimeStamp at={talkedAt} className="row-talked" />

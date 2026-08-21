@@ -10,11 +10,14 @@ import type {
   ChatMessage,
   EffortLevel,
   ExecutionOwner,
+  MissionContinuationKind,
   MissionIteration,
+  MissionPhaseAction,
   ProviderId,
   Session,
   WorkerHandoff,
   WorkerSeed,
+  WorkerTerminalStatus,
 } from "./types";
 import { beginAssignmentBudget } from "./worker-budget";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
@@ -619,6 +622,7 @@ export function collectChildAgentReports(
   provider: Session["provider"];
   model: string;
   effort: Session["effort"];
+  reportState?: "empty";
   exclusions?: string[];
   mission?: MissionIteration;
 }> {
@@ -628,14 +632,16 @@ export function collectChildAgentReports(
       const reply = [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant" && message.text.trim());
+      const text = reply?.text.trim() ?? "";
       return {
         title: session.title,
         status: session.agentRun?.status ?? session.status,
-        text: reply?.text.trim() ?? "",
+        text,
         childSessionId: session.id,
         provider: session.provider,
         model: session.model,
         effort: session.effort,
+        ...(text ? {} : { reportState: "empty" as const }),
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
         ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
       };
@@ -718,11 +724,20 @@ function extractBlockers(text: string | undefined): string[] {
   return blockers;
 }
 
+/** Last declared terminal STATUS line, or undefined when the report never said. */
+export function workerReportedStatus(text: string | undefined): WorkerTerminalStatus | undefined {
+  if (!text) return undefined;
+  const declarations = [...text.matchAll(/^\s*(?:mission\s+)?status:\s*(blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim)];
+  const raw = declarations.at(-1)?.[1]?.toLowerCase();
+  if (!raw) return undefined;
+  if (raw === "blocked") return "blocked";
+  if (raw === "continue") return "continue";
+  return "complete";
+}
+
 /** A model may finish its turn while explicitly saying the assigned work did not finish. */
 export function workerReportedBlocked(text: string | undefined): boolean {
-  if (!text) return false;
-  const declarations = [...text.matchAll(/^\s*(?:mission\s+)?status:\s*(blocked|continue|complete(?:d)?)\s*[.!]?\s*$/gim)];
-  return declarations.at(-1)?.[1]?.toLowerCase() === "blocked";
+  return workerReportedStatus(text) === "blocked";
 }
 
 export function workerProgressCheckpoint(
@@ -762,12 +777,16 @@ export function workerStatusSnapshot(
   const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
+  const reportedStatus = workerReportedStatus(raw);
+  const reportState = raw ? undefined : "empty";
   return {
     id: worker.id,
     title: worker.title,
     ...(worker.workerName ? { worker: worker.workerName } : {}),
     parentId: worker.parentId,
     status,
+    ...(reportedStatus ? { reportedStatus } : {}),
+    ...(reportState ? { reportState } : {}),
     provider: worker.provider,
     model: worker.model,
     effort: worker.effort,
@@ -995,8 +1014,12 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   const slice = input.slice?.trim();
   const vendor = input.vendor?.trim();
   const task = stripSpawnPreamble(input.text) || input.text.trim();
+  const coordinatorRole =
+    Boolean(input.mission) &&
+    input.missionIteration?.expectedAction !== "implementation" &&
+    input.missionIteration?.expectedAction !== "verification";
   const lines = [
-    input.mission ? "ROLE: mission coordinator" : "ROLE: worker",
+    coordinatorRole ? "ROLE: mission coordinator" : "ROLE: worker",
     `ORCHESTRATOR: ${input.fromTitle.trim() || "another agent"}`,
     `PROJECT: ${project || "Unfiled chat"}`,
     `FOLDER: ${folder || "(none — stop and say so)"}`,
@@ -1007,18 +1030,29 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
   if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
-  if (input.mission) {
+  if (coordinatorRole) {
     lines.push("Choose a focused or split execution strategy from task coupling, risk, skills, and useful concurrency.");
     lines.push("Focused is valid when one worker can safely own the coupled change; split is valid when an independent slice adds value.");
     lines.push("If split, dispatch one bounded helper before the main work. Do not fan out for appearance.");
     lines.push("Explain the strategy and report every worker used. Workhorse attaches the actual model and effort to the result.");
   }
   if (input.missionIteration) {
-    lines.push(`ADAPTIVE LOOP: Pass ${input.missionIteration.iteration} of ${input.missionIteration.maxIterations}`);
+    const pass = `ADAPTIVE LOOP: Pass ${input.missionIteration.iteration} of ${input.missionIteration.maxIterations}`;
+    lines.push(input.missionIteration.expectedAction ? `${pass} — ${input.missionIteration.expectedAction}` : pass);
+    if (input.missionIteration.previousStatus) lines.push(`PRIOR STATUS: ${input.missionIteration.previousStatus}`);
+    if (input.missionIteration.continuationKind) lines.push(`CONTINUATION: ${input.missionIteration.continuationKind}`);
+    if (input.missionIteration.roleShift) lines.push(`ROLE SHIFT: ${input.missionIteration.roleShift}`);
+    if (input.missionIteration.priorLimitations?.length) {
+      lines.push("PRIOR LIMITATIONS:");
+      input.missionIteration.priorLimitations.forEach((item) => lines.push(`- ${item}`));
+    }
     lines.push("Acceptance:");
     input.missionIteration.acceptanceCriteria.forEach((criterion) => lines.push(`- ${criterion}`));
     lines.push("Required follow-up belongs to the parent mission loop. A leaf helper is only an optional bounded check.");
     lines.push("If that helper stops or leaves work incomplete, report continue with the remaining work; do not claim completion.");
+    if (input.missionIteration.continuationKind === "next-pass" && input.missionIteration.expectedAction === "implementation") {
+      lines.push("Do not repeat an assessment-only pass. Implement the remaining work.");
+    }
     lines.push("Verify the acceptance criteria after the work. End with Mission status: complete, continue, or blocked, plus evidence or remaining work.");
   }
   lines.push("Do this slice only. Use list_dir / read_file on FOLDER. Quote real files.");
@@ -1275,6 +1309,13 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
     ? row.acceptanceCriteria.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
   if (acceptanceCriteria.length === 0) return undefined;
+  const previousStatus = normalizeWorkerTerminalStatus(row.previousStatus);
+  const expectedAction = normalizeMissionPhaseAction(row.expectedAction);
+  const continuationKind = normalizeMissionContinuationKind(row.continuationKind);
+  const roleShift = typeof row.roleShift === "string" && row.roleShift.trim() ? row.roleShift.trim() : undefined;
+  const priorLimitations = Array.isArray(row.priorLimitations)
+    ? row.priorLimitations.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, 8)
+    : [];
   return {
     id: row.id.trim(),
     mode: "adaptive",
@@ -1286,7 +1327,24 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
       ? [...new Set(row.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
       : [],
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+    ...(previousStatus ? { previousStatus } : {}),
+    ...(expectedAction ? { expectedAction } : {}),
+    ...(continuationKind ? { continuationKind } : {}),
+    ...(roleShift ? { roleShift } : {}),
+    ...(priorLimitations.length ? { priorLimitations } : {}),
   };
+}
+
+function normalizeWorkerTerminalStatus(value: unknown): WorkerTerminalStatus | undefined {
+  return value === "complete" || value === "continue" || value === "blocked" ? value : undefined;
+}
+
+function normalizeMissionPhaseAction(value: unknown): MissionPhaseAction | undefined {
+  return value === "assessment" || value === "implementation" || value === "verification" ? value : undefined;
+}
+
+function normalizeMissionContinuationKind(value: unknown): MissionContinuationKind | undefined {
+  return value === "resume" || value === "next-pass" ? value : undefined;
 }
 
 const BUDGET_PHASES: BudgetPhase[] = ["produce", "verify", "handoff", "exhausted"];
@@ -1521,6 +1579,112 @@ export function nextMissionIteration(
       iteration: first.iteration + 1,
       previousWorkerIds: ids,
     },
+  };
+}
+
+const IMPLEMENT_NOW = /\b(implement now|do not return another assessment|finish and (?:verify|implement)|implemented)\b/i;
+const ASSESSMENT_ONLY = /\b(assessment-only|assessment only|did not implement|do not implement|read-only|next phase needs implementation|gather(?:ed)? evidence)\b/i;
+const IMPLEMENT_ACTION = /\b(implement(?:ation|ing)?|write the (?:code|fix)|patch(?:es|ing)?|apply(?:ing)? (?:the )?(?:fix|change)|code change|ship the)\b/i;
+const ASSESS_ACTION = /\b(assess(?:ment|ing)?|diagnos(?:e|is|ed)|inspect(?:ion)?)\b/i;
+const VERIFY_ACTION = /\b(verif(?:y|ication|ied)|re-run the|acceptance (?:criteria|check))\b/i;
+
+export function inferMissionPhaseAction(text: string | undefined): MissionPhaseAction | undefined {
+  const value = text?.trim();
+  if (!value) return undefined;
+  if (IMPLEMENT_NOW.test(value)) return "implementation";
+  if (ASSESSMENT_ONLY.test(value)) return "assessment";
+  if (IMPLEMENT_ACTION.test(value)) return "implementation";
+  if (ASSESS_ACTION.test(value)) return "assessment";
+  if (VERIFY_ACTION.test(value)) return "verification";
+  return undefined;
+}
+
+export type MissionContinuationPath = {
+  kind: MissionContinuationKind;
+  expectedAction: MissionPhaseAction;
+  previousStatus?: WorkerTerminalStatus;
+  priorAction?: MissionPhaseAction;
+  roleShift?: string;
+  priorLimitations: string[];
+  workerName?: string;
+  reason: string;
+};
+
+export type MissionContinuationEvidence = {
+  remainingWork: string;
+  reports: Array<{ text?: string; status?: string; childSessionId?: string; reportState?: string }>;
+  workers: Array<Pick<Session, "id" | "workerName" | "title" | "agentRun" | "messages">>;
+  coordinatorName?: string;
+};
+
+/**
+ * Resume the same child when it already started the remaining work.
+ * Start a fresh next-pass worker when the last pass was assessment-only
+ * and the remaining work is implementation or verification — naming that
+ * child would replay its read-only transcript.
+ */
+export function missionContinuationPath(input: MissionContinuationEvidence): MissionContinuationPath {
+  const remainingWork = input.remainingWork.trim();
+  const reports = input.reports;
+  const primary = reports[0];
+  const primaryWorker = input.workers.find((worker) => worker.id === primary?.childSessionId) ?? input.workers[0];
+  const reportText = (primary?.text ?? "").trim() || lastAssistantReport(primaryWorker?.messages)?.text.trim() || "";
+  const previousStatus = workerReportedStatus(reportText);
+  const changedFiles = primaryWorker?.agentRun?.changedFiles ?? [];
+  const priorLimitations: string[] = [];
+  if (!reportText) priorLimitations.push("no assistant report");
+  if (primary?.reportState === "empty" || (!reportText && (primaryWorker?.messages ?? []).length > 0)) {
+    if (!priorLimitations.includes("no assistant report")) priorLimitations.push("no assistant report");
+  }
+  if (changedFiles.length === 0) priorLimitations.push("no files changed");
+
+  const priorAction =
+    changedFiles.length > 0
+      ? "implementation"
+      : inferMissionPhaseAction(reportText) ?? (previousStatus === "continue" && changedFiles.length === 0 ? "assessment" : undefined);
+  if (priorAction === "assessment" && !priorLimitations.some((item) => /assessment/i.test(item))) {
+    priorLimitations.push("assessment-only");
+  }
+
+  const expectedAction =
+    inferMissionPhaseAction(remainingWork) ??
+    (VERIFY_ACTION.test(remainingWork) ? "verification" : "implementation");
+  const assessedThenAdvance = (priorAction === "assessment" || (!priorAction && changedFiles.length === 0)) && expectedAction !== "assessment";
+  const kind: MissionContinuationKind = assessedThenAdvance ? "next-pass" : "resume";
+  const roleShift = priorAction && priorAction !== expectedAction ? `${priorAction} → ${expectedAction}` : undefined;
+  const coordinatorName = input.coordinatorName?.trim() || primaryWorker?.workerName || workerNameFromTitle(primaryWorker?.title ?? "");
+  const workerName = kind === "resume" ? coordinatorName : undefined;
+  const reason =
+    kind === "next-pass"
+      ? "Prior pass was assessment-only; remaining work needs a fresh worker on this mission."
+      : "Prior pass already advanced the remaining work; resume that child.";
+  return {
+    kind,
+    expectedAction,
+    ...(previousStatus ? { previousStatus } : {}),
+    ...(priorAction ? { priorAction } : {}),
+    ...(roleShift ? { roleShift } : {}),
+    priorLimitations,
+    ...(workerName ? { workerName } : {}),
+    reason,
+  };
+}
+
+export function applyMissionContinuationPath(mission: MissionIteration, path: MissionContinuationPath): MissionIteration {
+  return {
+    id: mission.id,
+    mode: mission.mode,
+    objective: mission.objective,
+    acceptanceCriteria: mission.acceptanceCriteria,
+    iteration: mission.iteration,
+    maxIterations: mission.maxIterations,
+    previousWorkerIds: mission.previousWorkerIds,
+    ...(mission.tokenBudget ? { tokenBudget: mission.tokenBudget } : {}),
+    ...(path.previousStatus ? { previousStatus: path.previousStatus } : {}),
+    expectedAction: path.expectedAction,
+    continuationKind: path.kind,
+    ...(path.roleShift ? { roleShift: path.roleShift } : {}),
+    ...(path.priorLimitations.length ? { priorLimitations: path.priorLimitations } : {}),
   };
 }
 

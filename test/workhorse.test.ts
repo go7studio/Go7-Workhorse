@@ -99,6 +99,7 @@ import {
   UNBOUND_SPAWN_ERROR,
   withSubagentStatus,
   workerReportedBlocked,
+  workerReportedStatus,
   workerStatusSnapshot,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
@@ -8088,6 +8089,9 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(workerReportedBlocked("Mission status: blocked."), true);
   assert.equal(workerReportedBlocked("Status: completed."), false);
   assert.equal(workerReportedBlocked("The task mentioned STATUS: blocked inline, but the work completed."), false);
+  assert.equal(workerReportedStatus("STATUS: continue"), "continue");
+  assert.equal(workerReportedStatus("STATUS: complete"), "complete");
+  assert.equal(workerReportedStatus("The task mentioned STATUS: blocked inline, but the work completed."), undefined);
 
   assert.equal(isSpawnOnlyPrompt("please spawn MiniMax"), true);
   assert.equal(isSpawnOnlyPrompt("call subagents"), true);

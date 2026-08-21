@@ -158,7 +158,7 @@ transcript rather than as a path.
   desk goal continues in rounds after a turn ends, until pause, clear, or the
   round cap. Each round is one turn on that chat’s vendor. Grok’s own `/goal`
   is still that vendor’s one-shot driver.
-- **Loops** — an opt-in goal that reassesses unfinished work for bounded rounds.
+- **Loops** — an opt-in goal that reassesses unfinished work for bounded rounds. Continuing a wave that still needs implementation after an assessment-only pass starts a fresh worker on that mission.
 - **Fresh workers** — a separate spawn option with only a bounded handoff
   (`seed: fresh`) and no parent conversation.
 - **Turn log** — a chat can reconstruct model history from its own turn and

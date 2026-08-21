@@ -225,12 +225,16 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
   const again = cancelWorker(sessions, REVIEWER_B_ID, 99);
   assert.equal(again.find((session) => session.id === REVIEWER_B_ID)?.agentRun?.finishedAt, 10);
   assert.equal(again.find((session) => session.id === REVIEWER_B_ID)?.agentRun?.error, cancelled?.agentRun?.error);
-  sessions = applyChildIdleSync(again, REVIEWER_B_ID, "failed", {
+  sessions = applyChildIdleSync(again, REVIEWER_B_ID, "cancelled", {
     report: childReportText(cancelled),
     now: 11,
     correlationId: "corr_marlow",
   });
   assert.equal(sessions.find((session) => session.id === REVIEWER_B_ID)?.agentRun?.status, "cancelled");
+  assert.equal(
+    sessions.find((session) => session.id === PARENT_ID)?.lineup?.rows.find((row) => row.childId === REVIEWER_B_ID)?.status,
+    "cancelled",
+  );
 
   sessions = applyChildIdleSync(sessions, COORDINATOR_ID, "completed", {
     report: "Coordinator: feature landed.",
@@ -245,10 +249,10 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
 
   const joined = maybeEnqueueLineupJoin(sessions, PARENT_ID, 14);
   const liveParent = joined.find((session) => session.id === PARENT_ID);
-  // One of the three reviewers failed. The transcript says so now instead of
-  // reporting a clean sweep, which is what let the chat row and the chat
-  // disagree about the same wave.
-  assert.ok(liveParent?.messages.some((message) => message.text === "2 of 3 workers finished · 1 failed."));
+  // One of the three reviewers was cancelled. The transcript names that stop
+  // instead of calling it a failure, which is what let the chat row say
+  // "1 failed" next to a worker the orchestrator only stopped.
+  assert.ok(liveParent?.messages.some((message) => message.text === "2 of 3 workers finished · 1 cancelled."));
   const join = deskJoin(liveParent);
   assert.ok(join, "parent is woken with a desk join, not asked to poll");
   assert.match(join?.text ?? "", /Coordinator: feature landed/);

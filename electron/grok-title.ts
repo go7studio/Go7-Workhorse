@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isGenericVendorTitle } from "../src/lib/titles";
 
 export function grokHome(): string {
   const override = process.env.GROK_HOME?.trim();
@@ -28,6 +29,7 @@ function usableTitle(value: unknown): string | undefined {
   const next = value.replace(/\s+/g, " ").trim();
   if (!next || next.length > 80) return undefined;
   if (/^(new chat|untitled|untitled chat)$/i.test(next)) return undefined;
+  if (isGenericVendorTitle(next)) return undefined;
   if (looksLikeId(next)) return undefined;
   return next;
 }

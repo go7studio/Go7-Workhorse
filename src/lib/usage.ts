@@ -633,10 +633,14 @@ export function planWindowChip(
   options: { local?: boolean; provider?: ProviderId } = {},
 ): string | undefined {
   const windows = planTimeWindows(plan);
-  if (windows.length === 0) return undefined;
+  // Cursor leftover is a monthly product pool, not a weekly/5h window. Without
+  // this fallback the ring showed leftover while the line under it said
+  // "No token data" — true of the ledger, a lie about the meter.
+  const rows = windows.length > 0 ? windows : (plan?.products ?? []);
+  if (rows.length === 0) return undefined;
   const allowance = planAllowance(plan, options);
   const deadGauge = allowance.status === "unmetered" && allowance.why === "dead-gauge";
-  return windows
+  return rows
     .map((item) => {
       // Once the allowance is judged unmetered, its gauge stops being a
       // number worth printing: "Weekly: 0%" is the fiction we just saw through.

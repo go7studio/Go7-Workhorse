@@ -1,6 +1,8 @@
 import type { Session } from "./types";
 
 const DEFAULT_TITLES = new Set(["new chat", "untitled", "untitled chat"]);
+/** Cursor ACP session/new often names every chat this. Not a generated title. */
+const GENERIC_VENDOR_TITLES = new Set(["cursor agent guide", "cursor agent", "agent guide", "cursor"]);
 const TITLE_MAX_CHARS = 48;
 const TITLE_MAX_WORDS = 8;
 const PING_TITLE = "Availability check";
@@ -8,8 +10,17 @@ const PING_TITLE = "Availability check";
 const TASK_HINT =
   /\b(fix|implement|build|refactor|debug|write|code|login|error|file|project|function|component|bug|game|access|redirect|settings|webhook|sidebar|title)\b/;
 
+export function foldedTitle(title: string | undefined): string {
+  return (title ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function isGenericVendorTitle(title: string | undefined): boolean {
+  return GENERIC_VENDOR_TITLES.has(foldedTitle(title));
+}
+
 export function isDefaultTitle(title: string | undefined): boolean {
-  return !title || DEFAULT_TITLES.has(title.trim().toLowerCase());
+  const folded = foldedTitle(title);
+  return !folded || DEFAULT_TITLES.has(folded) || GENERIC_VENDOR_TITLES.has(folded);
 }
 
 export function cleanTitle(raw: string): string {

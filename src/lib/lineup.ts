@@ -20,17 +20,33 @@ export function lineupFinishedNotice(lineup: DeskLineup | undefined): string {
   const count = (status: DeskLineupRowStatus) => rows.filter((row) => row.status === status).length;
   const failed = count("failed");
   const timedOut = count("timed-out");
+  const cancelled = count("cancelled");
   const interrupted = count("interrupted");
   const unknown = count("unknown");
-  if (failed + timedOut + interrupted + unknown === 0) return LINEUP_FINISHED_NOTICE;
+  if (failed + timedOut + cancelled + interrupted + unknown === 0) return LINEUP_FINISHED_NOTICE;
   const say = (n: number, word: string) => (n > 0 ? `${n} ${word}` : "");
-  const parts = [say(failed, "failed"), say(timedOut, "timed out"), say(interrupted, "interrupted"), say(unknown, "unknown")].filter(Boolean);
-  const done = rows.length - failed - timedOut - interrupted - unknown;
+  const parts = [
+    say(failed, "failed"),
+    say(timedOut, "timed out"),
+    say(cancelled, "cancelled"),
+    say(interrupted, "interrupted"),
+    say(unknown, "unknown"),
+  ].filter(Boolean);
+  const done = rows.length - failed - timedOut - cancelled - interrupted - unknown;
   const head = done > 0 ? `${done} of ${rows.length} workers finished` : `No worker finished`;
   return `${head} · ${parts.join(", ")}.`;
 }
 
-const ROW_STATUSES: DeskLineupRowStatus[] = ["queued", "running", "completed", "failed", "timed-out", "interrupted", "unknown"];
+const ROW_STATUSES: DeskLineupRowStatus[] = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "timed-out",
+  "cancelled",
+  "interrupted",
+  "unknown",
+];
 
 export function emptyLineup(
   folder: string,
@@ -296,6 +312,23 @@ function agentStatusForRow(
 ): AgentRun["status"] {
   if (status === "completed") return "completed";
   if (status === "timed-out") return "timed-out";
+  if (status === "cancelled") return "cancelled";
+  if (status === "interrupted") return "interrupted";
+  return "failed";
+}
+
+function subagentChipStatus(status: DeskLineupRowStatus): string {
+  if (status === "completed") return "completed";
+  if (status === "cancelled") return "cancelled";
+  return "failed";
+}
+
+/** Map a terminal agent-run stop onto the lineup row, so cancel is not stored as failed. */
+export function lineupStatusForTerminalRun(
+  status: Extract<AgentRun["status"], "timed-out" | "cancelled" | "budget-exceeded">,
+): Exclude<DeskLineupRowStatus, "queued" | "running"> {
+  if (status === "timed-out") return "timed-out";
+  if (status === "cancelled") return "cancelled";
   return "failed";
 }
 
@@ -328,7 +361,7 @@ export function applyChildIdleSync(
     };
   });
   return applyLineupChildFinish(
-    withSubagentStatus(next, childId, status === "completed" ? "completed" : "failed"),
+    withSubagentStatus(next, childId, subagentChipStatus(status)),
     childId,
     report,
     status,
@@ -379,20 +412,23 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
       };
       changed = true;
     }
-    // A row written by an older build says "failed" for the same interruption
-    // its worker now reports as interrupted. Heal that too, or the wave and
-    // the worker disagree about what happened.
-    const legacyFailedRow = row.status === "failed" && child.agentRun.status === "interrupted";
+    // A row written by an older build says "failed" for an interruption or an
+    // orchestrator cancel. Heal that too, or the wave and the worker disagree.
+    const legacyFailedRow =
+      row.status === "failed" &&
+      (child.agentRun.status === "interrupted" || child.agentRun.status === "cancelled");
     if (row.status !== "queued" && row.status !== "running" && !legacyFailedRow) continue;
     const rowStatus = child.agentRun.status === "completed"
       ? "completed" as const
       : child.agentRun.status === "timed-out"
         ? "timed-out" as const
-        : child.agentRun.status === "interrupted"
-          // Not a failure and not still going: the wave stops waiting, and the
-          // row says the slice is unfinished so a join cannot claim it is done.
-          ? "interrupted" as const
-          : "failed" as const;
+        : child.agentRun.status === "cancelled"
+          ? "cancelled" as const
+          : child.agentRun.status === "interrupted"
+            // Not a failure and not still going: the wave stops waiting, and the
+            // row says the slice is unfinished so a join cannot claim it is done.
+            ? "interrupted" as const
+            : "failed" as const;
     const report = childReportText(child);
     const lineup = setLineupRowStatus(parent!.lineup, child.id, rowStatus, {
       report,
@@ -402,7 +438,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
     if (lineup !== parent!.lineup) {
       const messages = parent!.messages.map((message) =>
         message.kind === "subagent" && message.subagentSessionId === child.id
-          ? { ...message, toolStatus: rowStatus === "completed" ? "completed" : "failed" }
+          ? { ...message, toolStatus: subagentChipStatus(rowStatus) }
           : message,
       );
       next[parentIndex] = { ...parent!, lineup, messages };
@@ -664,15 +700,30 @@ export type MissionState = {
   done: number;
   failed: number;
   timedOut: number;
+  cancelled: number;
   interrupted: number;
   unknown: number;
   /** True while any worker is still going, whatever the rows say. */
   running: boolean;
-  /** Working… | Interrupted | 2 failed | undefined when every worker completed. */
+  /** Working… | Interrupted | 2 failed | 1 cancelled | undefined when every worker completed. */
   word?: string;
-  /** Failure earns the danger tone; an unfinished slice does not. */
+  /** Failure earns the danger tone; an unfinished or cancelled slice does not. */
   tone?: "danger" | "quiet";
 };
+
+function missionRowStatus(
+  row: DeskLineupRow,
+  child: Pick<Session, "id" | "status" | "agentRun"> | undefined,
+): DeskLineupRowStatus {
+  const childRuns = child?.status === "running" || child?.agentRun?.status === "running";
+  if (childRuns) return "running";
+  const run = child?.agentRun?.status;
+  // A cancelled or interrupted worker wins over a stale running/failed row so
+  // the parent does not keep saying Working… or 1 failed after a stop.
+  if (run === "cancelled") return "cancelled";
+  if (run === "interrupted") return "interrupted";
+  return row.status;
+}
 
 export function missionState(
   lineup: DeskLineup | undefined,
@@ -681,14 +732,13 @@ export function missionState(
   const rows = lineup?.rows ?? [];
   if (rows.length === 0) return undefined;
   const byId = new Map(children.map((child) => [child.id, child]));
-  const counts = { live: 0, done: 0, failed: 0, timedOut: 0, interrupted: 0, unknown: 0 };
+  const counts = { live: 0, done: 0, failed: 0, timedOut: 0, cancelled: 0, interrupted: 0, unknown: 0 };
   for (const row of rows) {
-    const child = byId.get(row.childId);
-    const childRuns = child?.status === "running" || child?.agentRun?.status === "running";
-    const status: DeskLineupRowStatus = childRuns ? "running" : row.status;
+    const status = missionRowStatus(row, byId.get(row.childId));
     if (status === "queued" || status === "running") counts.live += 1;
     else if (status === "failed") counts.failed += 1;
     else if (status === "timed-out") counts.timedOut += 1;
+    else if (status === "cancelled") counts.cancelled += 1;
     else if (status === "interrupted") counts.interrupted += 1;
     else if (status === "unknown") counts.unknown += 1;
     else counts.done += 1;
@@ -705,6 +755,9 @@ export function missionState(
     // A ceiling firing is designed behaviour: the run is warned first and the
     // stop report says what was left. Unfinished, and resumable — not wrong.
     word = many ? `${counts.timedOut} timed out` : "Timed out";
+    tone = "quiet";
+  } else if (counts.cancelled > 0) {
+    word = many ? `${counts.cancelled} cancelled` : "Cancelled";
     tone = "quiet";
   } else if (counts.interrupted > 0) {
     // Unfinished, not broken: it can be picked up again.
@@ -754,9 +807,9 @@ export type MissionRowLook = {
   title?: string;
   /** The harness that called, when one did. */
   caller?: string;
-  /** Working… | Failed | 2 interrupted — absent when every worker completed. */
+  /** Working… | Failed | 1 cancelled | 2 interrupted — absent when every worker completed. */
   word?: string;
-  /** Failure is loud; unfinished work is quiet. */
+  /** Failure is loud; unfinished or cancelled work is quiet. */
   tone?: "danger" | "quiet";
   /** A live wave pulses the row even when the parent chat itself sits idle. */
   running: boolean;

@@ -148,7 +148,9 @@ test("resume puts the worker back to running and re-sends its brief", () => {
 });
 
 test("the desk says interrupted where it used to say failed, and offers a way back", () => {
-  assert.match(read("src/ui/ChatRow.tsx"), /run === "interrupted"\) state = "Interrupted"/);
+  const row = read("src/ui/ChatRow.tsx");
+  assert.match(row, /run === "interrupted"/);
+  assert.match(row, /agentRun\?\.status === "cancelled" \? "Cancelled"/);
   const popout = read("src/ui/WorkPopout.tsx");
   assert.match(popout, /agentRun\?\.status === "interrupted"\s*\?\s*"interrupted"/);
   assert.match(popout, /store\.resumeAgentRun\(child\.id\)/);
@@ -188,6 +190,46 @@ test("a lineup row written as failed by the old build is healed with its worker"
   assert.equal(healed.find((s) => s.id === "sess_a")!.agentRun?.status, "interrupted");
   assert.equal(healed.find((s) => s.id === "sess_parent")!.lineup!.rows[0]!.status, "interrupted",
     "or the wave and the worker disagree about what happened");
+});
+
+test("a lineup row written as failed for an orchestrator cancel is healed to cancelled", () => {
+  const child = {
+    ...worker("sess_dexter", "Dexter · Menu open close blur"),
+    agentRun: {
+      status: "cancelled" as const,
+      startedAt: 1,
+      isolation: "shared" as const,
+      finishedAt: 2,
+      error: "Cancelled by the orchestrator before the worker finished.",
+    },
+  } as Session;
+  const parent = {
+    ...worker("sess_parent", "Cursor Agent Guide"),
+    parentId: undefined,
+    hidden: undefined,
+    agentRun: undefined,
+    lineup: {
+      id: "l",
+      folder: "/repo",
+      startedAt: 1,
+      rows: [{
+        childId: "sess_dexter",
+        title: "Menu open close blur",
+        slice: "Menu open close blur",
+        folder: "/repo",
+        vendor: "Cursor",
+        status: "failed" as const,
+        startedAt: 1,
+      }],
+    },
+  } as Session;
+  const healed = reconcilePersistedLineups([parent, child]);
+  assert.equal(healed.find((session) => session.id === "sess_dexter")?.agentRun?.status, "cancelled");
+  assert.equal(
+    healed.find((session) => session.id === "sess_parent")?.lineup?.rows[0]?.status,
+    "cancelled",
+    "an orchestrator cancel must not stay painted as failed",
+  );
 });
 
 test("worker-heavy restart reconciliation stays linear at ten thousand chats", () => {

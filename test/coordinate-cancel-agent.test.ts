@@ -46,6 +46,20 @@ test("cancel-agent dispatcher actually stops the vendor run", () => {
   );
 });
 
+test("cancel-agent dispatcher writes cancelled onto the lineup, not failed", () => {
+  const block = extractCancelAgentBlock(STORE);
+  assert.match(
+    block,
+    /applyChildIdleSync\([\s\S]*?"cancelled"/,
+    "cancel-agent must settle the wave row as cancelled so the parent does not say 1 failed",
+  );
+  assert.match(
+    STORE,
+    /lineupStatusForTerminalRun\(terminalStatus\)/,
+    "a cancelled vendor return must keep cancelled instead of collapsing to failed",
+  );
+});
+
 test("cancel-agent dispatcher marks the worker terminal and preserves partial work", () => {
   // The state transition lives in applyCancelWorker so it can be exercised
   // directly. The store still owns authorising the caller and stopping the

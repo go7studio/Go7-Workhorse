@@ -37,7 +37,8 @@ export function crewDotClass(kind: CrewDotKind): string {
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
-  return [name, effort].filter(Boolean).join(" · ");
+  const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
+  return [name, effort, cancelled].filter(Boolean).join(" · ");
 }
 
 export type ChatRowDesk = {
@@ -246,10 +247,10 @@ export function ChatRow({
                   : waveWord || mission?.caller
                     ? (
                         <>
-                          {mission.caller ? <span className="row-caller">{mission.caller}</span> : null}
-                          {mission.caller && (waveWord || rowLabel) ? " · " : null}
+                          {mission?.caller ? <span className="row-caller">{mission.caller}</span> : null}
+                          {mission?.caller && (waveWord || rowLabel) ? " · " : null}
                           {waveWord ? (
-                            <span className={mission.tone === "danger" ? "row-state bad" : "row-state"}>{waveWord}</span>
+                            <span className={mission?.tone === "danger" ? "row-state bad" : "row-state"}>{waveWord}</span>
                           ) : (
                             rowLabel
                           )}

@@ -60,6 +60,7 @@ import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { sweepStaleUserData } from "./user-data-hygiene";
+import { ensureGrokBotShimSupervise } from "./grok-bot-shim-host";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
@@ -493,6 +494,30 @@ app.whenReady().then(async () => {
     /* rg copy is best-effort */
   }
   debugStartup("ripgrep ready");
+  if (process.platform === "darwin") {
+    try {
+      const report = ensureGrokBotShimSupervise({
+        platform: "darwin",
+        userData: app.getPath("userData"),
+        home: app.getPath("home"),
+        uid: os.userInfo().uid,
+        execPath: process.execPath,
+        script: path.join(__dirname, "grok-bot-shim.js"),
+        io: {
+          mkdirp: (dir) => fs.mkdirSync(dir, { recursive: true }),
+          writeFile: (file, text) => fs.writeFileSync(file, text),
+          existsSync: (file) => fs.existsSync(file),
+          exec: (file, args) => {
+            const result = spawnSync(file, args, { encoding: "utf8", timeout: 8_000, windowsHide: true });
+            return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+          },
+        },
+      });
+      if (!report.ok) console.warn("Grok Bot shim supervise:", report.message);
+    } catch (error) {
+      console.warn("Grok Bot shim supervise failed", error);
+    }
+  }
 
   process.env.WORKHORSE_STATE_PATH = statePath();
   jobEngine = new DurableJobEngine(path.join(app.getPath("userData"), "workhorse-jobs.json"), (events) => {

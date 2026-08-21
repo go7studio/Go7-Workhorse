@@ -42,5 +42,9 @@ export default defineConfig({
       entry: "electron/workhorse-mcp.ts",
       onstart() {},
     }),
+    electronMcp({
+      entry: "electron/grok-bot-shim.ts",
+      onstart() {},
+    }),
   ],
 });

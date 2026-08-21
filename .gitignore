@@ -22,3 +22,4 @@ eval/config.json
 *.mobileprovision
 workhorse-state.json
 credentials.json
+grok-bot-wake.json

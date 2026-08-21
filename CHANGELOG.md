@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.23](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.22...v0.6.23) (2026-08-21)
+
+
+### Bug Fixes
+
+* map Grok Bot weekly leftover into capacity ([7d09b24](https://github.com/go7studio/Go7-Workhorse/commit/7d09b24838240a86c1b4fc5c750f3d78da23438c))
+* map Grok Bot weekly leftover into capacity ([ec40970](https://github.com/go7studio/Go7-Workhorse/commit/ec40970c1795648535ab7c09abbde0fe3f3a5fff))
+
 ## [0.6.22](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.21...v0.6.22) (2026-08-21)
 
 

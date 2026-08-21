@@ -8,6 +8,29 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.21](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.20...v0.6.21) (2026-08-21)
+
+
+### Features
+
+* add a Grok Bot custom HTTP preset on loopback ([4898859](https://github.com/go7studio/Go7-Workhorse/commit/4898859d31e34cc2a997155229faec18e7ab3729))
+* copy a Grok Bot one-shot for Workhorse Link ([c7b3be3](https://github.com/go7studio/Go7-Workhorse/commit/c7b3be3ae9b5a8c7cafe3392b21b7989cbfed95b))
+* copy a Grok Bot one-shot for Workhorse Link ([6061d0d](https://github.com/go7studio/Go7-Workhorse/commit/6061d0de07d2516f1c9a39bf79c6721c9dadd9f0))
+* Grok Bot custom HTTP preset on loopback 8787 ([ac20693](https://github.com/go7studio/Go7-Workhorse/commit/ac2069326453d77efaf866179d25afba0947343f))
+* Grok Bot is a Workhorse Link host with auto-approved tools ([254c7bf](https://github.com/go7studio/Go7-Workhorse/commit/254c7bf0766f4bca14ec11a768e37233be394ea4))
+* Grok Bot one-shot auto-approves Workhorse Link tools ([5cc0e24](https://github.com/go7studio/Go7-Workhorse/commit/5cc0e2487eb7a5d21ea53386b191ab71d3949791))
+* map Grok Bot as a Workhorse Link host ([5b1810b](https://github.com/go7studio/Go7-Workhorse/commit/5b1810b557e0a55302ba62eba5a925182d4b94b5))
+
+
+### Bug Fixes
+
+* compact Link chat list so host output caps do not clip it ([f07c345](https://github.com/go7studio/Go7-Workhorse/commit/f07c3451fb04cd1e798b79e07eee2b717aa78c0c))
+* compact Link chat list so host output caps do not clip it ([5de7684](https://github.com/go7studio/Go7-Workhorse/commit/5de76846ac35893a9b487aa1bc4b2d179347ed09))
+* Grok Bot fail-closed is port 8787 only ([86f019f](https://github.com/go7studio/Go7-Workhorse/commit/86f019f2f8b533cc70a97a467c57cc58f73472b6))
+* Grok Bot one-shot names this computer, Mac or Windows ([641293d](https://github.com/go7studio/Go7-Workhorse/commit/641293df95ba4388e8dbbb1f58b004e920e02de6))
+* keep the Mac Dock icon after replacing the app ([f9f52ef](https://github.com/go7studio/Go7-Workhorse/commit/f9f52ef695291b4dba5c782c81fc9cf3240ec7b0))
+* keep the Mac Dock icon after replacing the app ([93be7e5](https://github.com/go7studio/Go7-Workhorse/commit/93be7e560f8c92d4f0e2404bac7b289512cee13c))
+
 ## [0.6.20](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.19...v0.6.20) (2026-08-21)
 
 

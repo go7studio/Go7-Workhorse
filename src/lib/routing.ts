@@ -220,9 +220,10 @@ function profile(
  * overrides and Settings stay on the 1–5 the user authored (5 = frontier);
  * they are doubled at this one seam.
  *
- * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
- * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
- * gpt-5.4, sol/terra/luna before any bare gpt-5.6.
+ * Order is load-bearing: fable before opus, prior opus (4.x) before
+ * generic opus, sonnet-4-6 before sonnet, minimax-m3 before minimax,
+ * grok-4.6 before grok-4.5, mini/nano before gpt-5.4, sol/terra/luna
+ * before any bare gpt-5.6.
  */
 export function routingProfileForModel(
   _provider: ProviderId,
@@ -252,6 +253,10 @@ export function routingProfileForModel(
     // separate extra pool. Keep it for visual, creative, or complex work
     // that named that specialist. Cost and leftover assign the rest.
     base = profile(10, 2, 5, { strengths: FABLE });
+  } else if (slug.includes("opus") && isPriorOpusLine(slug)) {
+    // Same list price as Opus 5, previous generation. Auto must not treat
+    // them as equals: a score tie plus label sort picks "Opus 4.8".
+    base = profile(9, 3, 4, { strengths: CODE });
   } else if (slug.includes("opus")) {
     // Near-Fable intelligence at half the price. Default for agentic coding.
     base = profile(10, 3, 4, { strengths: CODE });
@@ -528,6 +533,41 @@ function supports(profile: ModelRoutingProfile, required: Partial<ModelInputCapa
   return Object.entries(required).every(([key, needed]) => !needed || profile.inputs[key as keyof ModelInputCapabilities]);
 }
 
+/** Opus 4.5–4.8, including Cursor's `claude-4.6-opus` spelling. */
+function isPriorOpusLine(slug: string): boolean {
+  if (slug.includes("opus-5") || slug.includes("opus 5")) return false;
+  return /4[.\-]?[5-8]/.test(slug);
+}
+
+function modelFamilyStem(model: string): string {
+  const slug = model.trim().toLowerCase();
+  if (slug.includes("opus")) return "opus";
+  if (slug.includes("fable") || slug.includes("mythos")) return "fable";
+  if (slug.includes("sonnet")) return "sonnet";
+  if (slug.includes("haiku")) return "haiku";
+  if (slug.includes("grok")) return "grok";
+  if (slug.includes("5.6-sol")) return "sol";
+  if (slug.includes("5.6-terra")) return "terra";
+  if (slug.includes("5.6-luna")) return "luna";
+  return slug;
+}
+
+/**
+ * Same vendor, same family, same or higher price: a weaker revision is not
+ * a pick. Opus 4.8 must not beat Opus 5 because overfit or label sort said so.
+ */
+function isWeakerFamilyRevision(candidate: RoutingCandidate, pool: RoutingCandidate[]): boolean {
+  return pool.some(
+    (other) =>
+      other !== candidate &&
+      other.provider === candidate.provider &&
+      other.customBotId === candidate.customBotId &&
+      modelFamilyStem(other.model) === modelFamilyStem(candidate.model) &&
+      other.profile.intelligence > candidate.profile.intelligence &&
+      other.profile.cost <= candidate.profile.cost,
+  );
+}
+
 function extraPoolAssignment(
   profile: ModelRoutingProfile,
   domain: TaskDomain,
@@ -612,14 +652,17 @@ export function rankRoutingCandidates(
   const required = mergeInputRequirements(request.attachments, request.requirements);
   const minimum = requiredIntelligence(tier);
   const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
-  const ranked: RankedRoutingCandidate[] = [];
-  for (const candidate of candidates) {
-    if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
-    if (routingIdentityExcluded(candidate, request.exclude)) continue;
+  const eligible = candidates.filter((candidate) => {
+    if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) return false;
+    if (routingIdentityExcluded(candidate, request.exclude)) return false;
     // A model that cannot hold the conversation is not a worse pick, it is a
     // failed send. Routing never knew the window before, so a 300k thread
     // could rank onto a 128k bot and die on arrival.
-    if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) continue;
+    if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) return false;
+    return true;
+  });
+  const ranked: RankedRoutingCandidate[] = [];
+  for (const candidate of eligible) {
     const gap = candidate.profile.intelligence - minimum;
     // On deep work we want fit to dominate. The over-fit penalty gets softer
     // for higher tiers and the gap penalty gets harder if the model falls
@@ -647,6 +690,9 @@ export function rankRoutingCandidates(
     // Extra-pool specialists (high cost + visual/creative): spend them on
     // that work. Equal-intelligence cheaper slots take ordinary coding.
     score += extraPoolAssignment(candidate.profile, domain, tier);
+    // Keep the prior revision in the field, but never let it win at the
+    // same list price. Overfit and "Opus 4.8" label-sort would otherwise.
+    if (isWeakerFamilyRevision(candidate, eligible)) score -= 50;
     const tilt = outcomeTilt(outcomeFor(candidate, request.outcomes));
     // Stickiness is for continuity, not loyalty: an incumbent whose verified
     // record has gone negative does not keep its +4, or one dead bot gets

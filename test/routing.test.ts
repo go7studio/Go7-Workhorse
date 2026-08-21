@@ -299,6 +299,7 @@ test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, 
   assert.notDeepEqual(triple("grok", "grok-build"), [4, 3, 3]);
   assert.deepEqual(triple("claude", "claude-fable-5"), [10, 2, 5]);
   assert.deepEqual(triple("claude", "claude-opus-5"), [10, 3, 4]);
+  assert.deepEqual(triple("claude", "claude-opus-4-8"), [9, 3, 4]);
   assert.notDeepEqual(triple("codex", "gpt-5.5"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.4"), [4, 3, 3]);
   assert.notDeepEqual(triple("codex", "gpt-5.3-codex"), [4, 3, 3]);

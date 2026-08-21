@@ -58,6 +58,7 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   // Frontier intelligence. Opus 5 is as capable as Fable 5; cost assigns.
   assert.equal(intelligence("claude", "claude-fable-5"), 10);
   assert.equal(intelligence("claude", "claude-opus-5"), 10);
+  assert.equal(intelligence("claude", "claude-opus-4-8"), 9, "prior Opus is not Opus 5");
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
   assert.equal(intelligence("grok", "grok-4.6"), 10);
   assert.equal(intelligence("cursor", "cursor-grok-4.6-high"), 10);
@@ -83,6 +84,9 @@ test("slug order: the specific name wins before the generic one", () => {
   const intelligence = (model: string) => routingProfileForModel("custom", model).intelligence;
   assert.equal(intelligence("claude-sonnet-4-6"), 8, "sonnet-4-6 before sonnet");
   assert.equal(intelligence("claude-sonnet-5"), 9);
+  assert.equal(intelligence("claude-opus-5"), 10, "opus-5 before generic opus");
+  assert.equal(intelligence("claude-opus-4-8"), 9, "opus-4-8 is the previous line");
+  assert.equal(intelligence("claude-4.6-opus"), 9);
   assert.equal(intelligence("MiniMax-M3"), 7, "minimax-m3 before minimax");
   assert.equal(intelligence("MiniMax-M2.7"), 6, "generic minimax is last gen");
   assert.equal(intelligence("grok-4.6"), 10, "grok-4.6 before grok-4.5");
@@ -375,6 +379,47 @@ test("Opus 5 matches Fable intelligence; cost and task keep Fable for visual and
   assert.deepEqual(namedClaude.map((row) => row.provider), ["claude", "claude", "claude"]);
   const unnamed = constrainRouteCandidatesForSpawn(namedClaude, {});
   assert.equal(unnamed.length, namedClaude.length);
+});
+
+test("same list price: Auto calls Opus 5, never Opus 4.8", () => {
+  const claude = (id: string, name: string): RoutingCandidate => ({
+    provider: "claude",
+    model: id,
+    label: name,
+    connected: true,
+    profile: routingProfileForModel("claude", id),
+    capacity: midWeek(14),
+  });
+  const opus5 = routingProfileForModel("claude", "claude-opus-5");
+  const opus48 = routingProfileForModel("claude", "claude-opus-4-8");
+  assert.ok(opus5.intelligence > opus48.intelligence);
+  assert.equal(opus5.cost, opus48.cost);
+
+  const rows = [
+    claude("claude-opus-4-8", "Opus 4.8"),
+    claude("claude-opus-5", "Opus 5"),
+    claude("claude-sonnet-5", "Sonnet 5"),
+  ];
+  for (const tier of ["quick", "balanced", "deep"] as const) {
+    const ranked = rankRoutingCandidates(rows, { prompt: "Implement the bounded settings panel", tier, now: NOW }, settings);
+    const five = ranked.findIndex((row) => row.model === "claude-opus-5");
+    const prior = ranked.findIndex((row) => row.model === "claude-opus-4-8");
+    assert.ok(five >= 0 && prior >= 0, `${tier}: both stay in the field`);
+    assert.ok(five < prior, `${tier}: Opus 5 outranks 4.8 at the same price`);
+    assert.notEqual(ranked[0]?.model, "claude-opus-4-8", `${tier}: Auto does not call 4.8`);
+  }
+  const deep = rankRoutingCandidates(rows, { prompt: "Architect a production migration", tier: "deep", now: NOW }, settings);
+  assert.equal(deep[0]?.model, "claude-opus-5", "deep work takes the current Opus, not 4.8");
+
+  const withoutFive = rankRoutingCandidates(
+    rows.filter((row) => row.model !== "claude-opus-5"),
+    { prompt: "Implement the bounded settings panel", tier: "balanced", now: NOW },
+    settings,
+  );
+  assert.ok(
+    withoutFive.some((row) => row.model === "claude-opus-4-8"),
+    "Opus 4.8 stays available when Opus 5 is not",
+  );
 });
 
 test("Fable leftover is the extra pool, not the shared Claude week", () => {

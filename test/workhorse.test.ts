@@ -7948,7 +7948,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium · Done",
+    "GPT-5.6-Terra · Medium",
   );
   assert.equal(
     workerSidebarLabel({
@@ -7972,7 +7972,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         takeoverReason: "Parent applied patch after handing the work to Workhorse.",
       },
     }),
-    "GPT-5.6-Terra · Medium · Parent took over",
+    "GPT-5.6-Terra · Medium",
   );
   assert.equal(
     workerSidebarLabel({
@@ -8003,7 +8003,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
         },
       },
     }),
-    "Sonnet 4.6 · Medium · Pass 2 · Working…",
+    "Sonnet 4.6 · Medium",
   );
   const listed = catalogSessions({
     sessions: [

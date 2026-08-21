@@ -14,20 +14,7 @@ import { TimeStamp } from "./TimeStamp";
 export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
-  const run = session.agentRun?.status;
-  let state = "Ready";
-  if (session.status === "running" || run === "running") state = "Working…";
-  else if (run === "completed") state = "Done";
-  else if (run === "failed") state = "Failed";
-  else if (run === "timed-out") state = "Timed out";
-  else if (run === "budget-exceeded") state = "Budget stop";
-  else if (run === "interrupted") state = "Interrupted";
-  else if (run === "cancelled") state = "Cancelled";
-  else if (session.status === "needs-input") state = "Needs you";
-  if (session.agentRun?.executionOwner === "parent") state = "Parent took over";
-  const iteration = session.agentRun?.mission?.iteration ?? 0;
-  const pass = iteration > 1 ? `Pass ${iteration}` : "";
-  return [name, effort, pass, state].filter(Boolean).join(" · ");
+  return [name, effort].filter(Boolean).join(" · ");
 }
 
 export type ChatRowDesk = {

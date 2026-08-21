@@ -4369,6 +4369,10 @@ html.pane-dragging * {
   color: var(--text);
 }
 
+.loose-chats {
+  margin-bottom: 10px;
+}
+
 .place-project {
   position: relative;
   display: flex;

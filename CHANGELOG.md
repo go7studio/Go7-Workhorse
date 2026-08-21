@@ -8,6 +8,26 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.20](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.19...v0.6.20) (2026-08-21)
+
+
+### Features
+
+* assign a Link mission loop and later read the report ([83b20d3](https://github.com/go7studio/Go7-Workhorse/commit/83b20d36a9fafb1639f07fdc7796a0c5ca021c88))
+
+
+### Bug Fixes
+
+* Link follow-through is the same from every host ([1d60cbb](https://github.com/go7studio/Go7-Workhorse/commit/1d60cbbebe1a95484d0a2a71cef95d479bb91f07))
+* Link follow-through is wait, done, or failed ([100e44e](https://github.com/go7studio/Go7-Workhorse/commit/100e44ea7c9e73d9b6b7a562f8b4d40f34100db3))
+* show Auto effort, settle empty replies, route image gen to Grok ([ec98923](https://github.com/go7studio/Go7-Workhorse/commit/ec9892306aa871e9e2197ed7e22d1d81c52aa9d3))
+* show Auto effort, settle empty replies, route image gen to Grok ([67d8537](https://github.com/go7studio/Go7-Workhorse/commit/67d8537498f1e410d39e66d4985e92080e0db10e))
+
+
+### Performance Improvements
+
+* keep large desks and live streams responsive ([cb1bbec](https://github.com/go7studio/Go7-Workhorse/commit/cb1bbec46126469f92b85c0ef78b3b5e51714243))
+
 ## [0.6.19](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.18...v0.6.19) (2026-08-20)
 
 

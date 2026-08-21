@@ -115,7 +115,8 @@ import {
 import { acceptInboundEnvelope, allowedExternalCandidates, formatExternalAgentRef, parseExternalAgentRef } from "./agent-runtime";
 import { decideDispatch } from "./dispatch";
 import { projectExternalAgentCatalog } from "./external-catalog";
-import { inboundDeskAction, inboundSpawnParent, mcpExposureProfile } from "../../electron/mcp-exposure";
+import { inboundDeskAction, mcpExposureProfile } from "../../electron/mcp-exposure";
+import { linkMissionLanding } from "./workhorse-link";
 import {
   emptyTaskStore,
   envelopeForTrace,
@@ -4151,53 +4152,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             runningVisible;
           const inboundSessionId = latest.settings.agentSystems?.inboundSessionId;
           const inboundProjectId = latest.settings.agentSystems?.inboundProjectId;
-          if (payload.mode === "spawn" && (payload.fromSessionId || inboundSessionId)) {
-            const parentHit = inboundSpawnParent({
-              profile: exposure,
-              fromSessionId: payload.fromSessionId,
-              defaultSessionId: inboundSessionId,
-              runningVisibleSessionId: exposure === "external-runtime" ? undefined : openChat?.id,
-            });
-            if ("code" in parentHit) {
-              await replyAsk({ error: "context_required" });
-              return;
-            }
-          }
           let caller =
             latest.sessions.find((item) => item.id === payload.fromSessionId) ??
             latest.sessions.find((item) => item.id === inboundSessionId) ??
             (exposure === "external-runtime" ? undefined : openChat);
           let inboundHost: Session | undefined;
-          if (payload.mode === "spawn" && !caller && exposure === "external-runtime") {
-            const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
-            if (!remembered) {
-              await replyAsk({ error: "context_required" });
+          if (payload.mode === "spawn" && exposure === "external-runtime") {
+            // A harness sends an objective, so it gets a chat of its own —
+            // never the chat the caller happened to be holding.
+            const askedProject = payload.project?.trim() || "";
+            const namedProject = askedProject ? findProjectByQuery(latest.projects, askedProject) : undefined;
+            if (askedProject && !namedProject) {
+              await replyAsk({ error: `No Workhorse project matches “${askedProject}”` });
               return;
             }
-            const project = inboundProjectId
-              ? latest.projects.find((item) => item.id === inboundProjectId) ?? null
-              : null;
-            const title = titleFromIntent(payload.description?.trim() || payload.message.trim());
-            const opened = openDraft(latest.sessions, {
-              id: uid("sess"),
-              projectId: project?.id ?? null,
-              provider: remembered.provider,
-              model: remembered.model,
-              customBotId: remembered.customBotId,
-              effort: withEffort(remembered.provider, remembered.model, remembered.effort),
-              title,
-              titleLocked: false,
-              mode: remembered.mode ?? "ask",
-              sandbox: remembered.sandbox ?? "off",
-              environment: { kind: "local" },
-              securityPolicy: { network: "allowed", root: "allowed" },
-              status: "idle",
-              contextUsed: 0,
-              messages: [],
-              routingMode: "manual",
+            const landing = linkMissionLanding({
+              from: caller
+                ? {
+                    id: caller.id,
+                    parentId: caller.parentId,
+                    projectId: caller.projectId,
+                    joinOwner: caller.lineup?.joinOwner,
+                  }
+                : undefined,
+              namedProjectId: namedProject?.id,
+              inboundProjectId,
             });
-            inboundHost = { ...opened.session, title, titleLocked: false };
-            caller = inboundHost;
+            if (landing.kind === "new") {
+              const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
+              if (!remembered) {
+                await replyAsk({ error: "context_required" });
+                return;
+              }
+              const objective = payload.message.trim();
+              const openedAt = Date.now();
+              inboundHost = {
+                id: uid("sess"),
+                projectId: landing.projectId,
+                provider: remembered.provider,
+                model: remembered.model,
+                customBotId: remembered.customBotId,
+                effort: withEffort(remembered.provider, remembered.model, remembered.effort),
+                title: titleFromIntent(payload.description?.trim() || objective),
+                // The desk named this chat from the work. Nothing re-derives it
+                // from the first prompt, and no wave row renames it later.
+                titleLocked: true,
+                mode: remembered.mode ?? "ask",
+                sandbox: remembered.sandbox ?? "off",
+                environment: { kind: "local" },
+                securityPolicy: { network: "allowed", root: "allowed" },
+                status: "idle",
+                contextUsed: 0,
+                // The objective is the chat's first turn. Without it the chat is
+                // a draft, and a draft is not persisted or listed — a whole
+                // mission would vanish on restart.
+                messages: [{ id: uid("msg"), role: "user", text: objective, createdAt: openedAt }],
+                routingMode: "manual",
+              };
+              caller = inboundHost;
+            }
           }
           const parent = caller;
           if (payload.mode === "spawn") {

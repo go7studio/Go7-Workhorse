@@ -141,6 +141,57 @@ export function linkGenericMcpConfig(server: McpServerConfig): string {
   )}\n`;
 }
 
+/**
+ * The chat a harness pointed at, as the land rule reads it. Only these four
+ * facts decide where an objective goes.
+ */
+export type LinkMissionChat = {
+  id: string;
+  /** Set on a worker, and on any chat nested under another. */
+  parentId?: string;
+  projectId?: string | null;
+  /** `external-runtime` marks a chat this rule already landed a mission on. */
+  joinOwner?: "desk" | "external-runtime";
+};
+
+export type LinkMissionLanding =
+  | { kind: "reuse"; sessionId: string; projectId: string | null }
+  | { kind: "new"; projectId: string | null; liftedFrom?: string };
+
+/**
+ * Where an inbound objective lands.
+ *
+ * A harness sends a whole objective, not a line into a chat someone is sitting
+ * in. So it gets its own top-level chat, named from the work, and its workers
+ * nest under that one: project → mission chat → workers, and no deeper.
+ *
+ * Attaching to whatever chat the caller last held is what produced a chat
+ * called "Workhorse Desk Bots…" hosting an unrelated analytics repair, and the
+ * sidebar then took a worker's name off the person who chose that title.
+ *
+ * Only a chat this rule already landed on — top-level, harness-owned lineup —
+ * is reused, and only for the same target project, so follow-up slices of one
+ * objective stay together. Everything else lifts: an ordinary desk chat, a
+ * worker, or a nested chat keeps its own name and gives up its project, which
+ * is also the depth cap — a worker never ends up parented under a worker.
+ */
+export function linkMissionLanding(input: {
+  from?: LinkMissionChat;
+  /** Project the call named, already resolved to a live id. */
+  namedProjectId?: string | null;
+  /** Settings → LLMs inbound parent, when it is a project. */
+  inboundProjectId?: string | null;
+}): LinkMissionLanding {
+  const named = input.namedProjectId?.trim() || "";
+  const from = input.from;
+  const fromProject = from?.projectId?.trim() || "";
+  if (from && !from.parentId && from.joinOwner === "external-runtime" && (!named || named === fromProject)) {
+    return { kind: "reuse", sessionId: from.id, projectId: fromProject || null };
+  }
+  const projectId = named || fromProject || input.inboundProjectId?.trim() || "";
+  return { kind: "new", projectId: projectId || null, ...(from ? { liftedFrom: from.id } : {}) };
+}
+
 export type LinkHost = "codex" | "claude" | "grok" | "openclaw" | "hermes";
 
 export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "openclaw", "hermes"];

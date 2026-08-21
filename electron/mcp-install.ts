@@ -13,12 +13,19 @@ export function workhorseExternalMcpLaunch(input: {
   command: string;
   script: string;
   statePath: string;
+  /**
+   * Which harness this config is for, when the desk can name it. It lets a
+   * wave row say OpenClaw instead of the generic word. Hosts with no name of
+   * their own carry none rather than a guess.
+   */
+  origin?: "openclaw" | "hermes";
 }): ExternalMcpLaunch {
   return {
     command: input.command,
     args: [input.script],
     env: {
       WORKHORSE_MCP_PROFILE: "external-runtime",
+      ...(input.origin ? { WORKHORSE_MCP_ORIGIN: input.origin } : {}),
       WORKHORSE_STATE_PATH: input.statePath,
       ELECTRON_RUN_AS_NODE: "1",
     },
@@ -29,6 +36,7 @@ export function workhorseExternalMcpServer(input: {
   command: string;
   script: string;
   statePath: string;
+  origin?: "openclaw" | "hermes";
 }): McpServerConfig {
   const launch = workhorseExternalMcpLaunch(input);
   return { name: WORKHORSE_MCP_NAME, command: launch.command, args: launch.args, env: launch.env };
@@ -198,7 +206,8 @@ export function installWorkhorseExternalMcp(input: Omit<InstallLinkInput, "hosts
 }
 
 export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
-  const launch = workhorseExternalMcpLaunch(input);
+  const launch = workhorseExternalMcpLaunch({ ...input, origin: "openclaw" });
+  const hermesLaunch = workhorseExternalMcpLaunch({ ...input, origin: "hermes" });
   const server = workhorseExternalMcpServer(input);
   const hosts = new Set<LinkHost>(input.hosts?.length ? input.hosts : LINK_HOSTS);
   const written: InstallReport["written"] = [];
@@ -248,7 +257,7 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
     skipped.push({ target: "hermes", reason: "Hermes is not installed (no ~/.hermes)" });
   } else try {
     const current = input.io.existsSync(hermesPath) ? input.io.readFile(hermesPath) : "";
-    const next = upsertHermesMcpServers(current, launch);
+    const next = upsertHermesMcpServers(current, hermesLaunch);
     if (/bearer|WORKHORSE_BRIDGE_TOKEN|authorization/i.test(next)) {
       skipped.push({ target: "hermes", reason: "refused to write a bearer token" });
     } else {

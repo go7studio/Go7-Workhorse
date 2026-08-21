@@ -214,7 +214,10 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
     result?: { instructions?: string; capabilities?: { tools?: unknown } };
   };
   assert.equal(initialized.result?.instructions, WORKHORSE_MCP_INSTRUCTIONS);
-  assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
+  // A harness picks the project, not a parent chat: an objective opens its own
+  // mission chat there rather than moving into somebody's transcript.
+  assert.match(initialized.result?.instructions ?? "", /list_projects to choose the project the work belongs on/);
+  assert.match(initialized.result?.instructions ?? "", /opens its own mission chat on that project/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
   assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
   assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);

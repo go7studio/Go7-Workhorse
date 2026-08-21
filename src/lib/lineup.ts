@@ -728,30 +728,15 @@ export function missionCaller(lineup: DeskLineup | undefined): string | undefine
 }
 
 /**
- * The name a parent chat row should show. A chat's own title is the person's
- * word for it and is kept. A Link wave was never named by the person — it
- * lands on whatever chat the caller passed — so it takes the work's own name.
- * Every row sharing one name means one job; several mean a split wave, and a
- * count is honest where one slice's name would not be.
+ * What a parent chat row shows for the wave it ran. Undefined = an ordinary row.
+ *
+ * No title: a chat's name belongs to whoever named it. A harness objective now
+ * lands on a mission chat the desk opens and names from the work
+ * (`linkMissionLanding`), so there is nothing left for a row to rename — and
+ * renaming from a worker's slice is what put an analytics repair on a chat
+ * called "Workhorse Desk Bots…".
  */
-export function missionTitle(lineup: DeskLineup | undefined): string | undefined {
-  if (lineup?.joinOwner !== "external-runtime") return undefined;
-  const named = lineup.rows.map((row) => row.title.trim()).filter(Boolean);
-  if (named.length === 0) return undefined;
-  const unique = [...new Set(named)];
-  if (unique.length === 1) return unique[0];
-  // Rows that disagree have no single name, and a count is not a name. The
-  // desk's own state holds a three-worker Link wave on a chat titled "Walt site
-  // launch GA4 SEO review"; replacing that with "3 workers" loses the only
-  // words on the row that say what the work was, and repeats the number the
-  // fold button is already showing. Keep whatever the chat is called.
-  return undefined;
-}
-
-/** What a parent chat row shows for the wave it ran. Undefined = an ordinary row. */
 export type MissionRowLook = {
-  /** Replaces the chat title. Only a Link wave renames; a desk chat keeps the person's title. */
-  title?: string;
   /** The harness that called, when one did. */
   caller?: string;
   /** Working… | Failed | 2 interrupted — absent when every worker completed. */
@@ -774,11 +759,9 @@ export function missionRowLook(
 ): MissionRowLook | undefined {
   const state = missionState(session.lineup, workers);
   if (!state) return undefined;
-  const title = missionTitle(session.lineup);
   const caller = missionCaller(session.lineup);
-  if (!title && !caller && !state.word && !state.running) return undefined;
+  if (!caller && !state.word && !state.running) return undefined;
   return {
-    ...(title ? { title } : {}),
     ...(caller ? { caller } : {}),
     ...(state.word ? { word: state.word } : {}),
     ...(state.tone ? { tone: state.tone } : {}),

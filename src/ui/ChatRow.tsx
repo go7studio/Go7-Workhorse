@@ -215,11 +215,10 @@ export function ChatRow({
           />
           <span>
             <span className="row-title" title="Double-click to rename">
-              {/* A chat's title is the person's word for it and is kept. A wave
-                  that arrived over Link was never named by anyone here — it
-                  lands on whatever chat the caller passed — so it shows the
-                  work's own name instead of "Opus 5 ping". */}
-              {mission?.title ?? session.title}
+              {/* Whoever named the chat owns the name. A harness objective gets
+                  its own mission chat, named from the work when the desk opens
+                  it, so no wave renames a row out from under a person. */}
+              {session.title}
             </span>
             <span className={`row-meta${link ? " peer" : ""}`}>
               {link

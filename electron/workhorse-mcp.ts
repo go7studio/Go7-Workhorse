@@ -8,9 +8,9 @@ import {
   type BotSetupInput,
   type PublicBotCard,
 } from "../src/lib/bot-setup";
-import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
+import { applyCreateWorkhorseProject, findProjectByQuery, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CorrelationOrigin, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -76,7 +76,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Let the coordinating brain choose focused or split execution; only independent root slices run in parallel and coupled work stays sequential. Ordinary delegation is one wave. Enable loop only when the user says set a loop or otherwise asks for adaptive sequential work. For that loop, derive concrete acceptance criteria, assess each terminal report against them, and call workhorse_continue_mission with the returned worker ids when work remains. Required follow-up stays at this parent mission level; a leaf helper is only an optional bounded check. Workhorse independently routes every continuation. Stop on complete, blocked, or the iteration ceiling. Delegation returns a worker id promptly. Stop. The desk journals the terminal report and joins it into the parent chat. Do not poll workhorse_agent_status or sit on workhorse_await_agents. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_projects to choose the project the work belongs on, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, project, and working folder. Each objective opens its own mission chat on that project; pass fromSessionId only to continue an objective the desk already opened, and never to attach new work to somebody's chat. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Let the coordinating brain choose focused or split execution; only independent root slices run in parallel and coupled work stays sequential. Ordinary delegation is one wave. Enable loop only when the user says set a loop or otherwise asks for adaptive sequential work. For that loop, derive concrete acceptance criteria, assess each terminal report against them, and call workhorse_continue_mission with the returned worker ids when work remains. Required follow-up stays at this parent mission level; a leaf helper is only an optional bounded check. Workhorse independently routes every continuation. Stop on complete, blocked, or the iteration ceiling. Delegation returns a worker id promptly. Stop. The desk journals the terminal report and joins it into the parent chat. Do not poll workhorse_agent_status or sit on workhorse_await_agents. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -211,13 +211,14 @@ const TOOLS = [
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
+        project: { type: "string", description: "Live Workhorse project this objective belongs on, by name or id from workhorse_list_projects. The desk opens a new mission chat there. It never creates a project." },
         folder: { type: "string", description: "Optional absolute working folder" },
         wait: { type: "boolean", description: "false (default) returns the worker id promptly; true is only for work known to finish within the MCP client limit" },
-        fromSessionId: { type: "string", description: "Required parent Workhorse chat id from workhorse_list_chats" },
+        fromSessionId: { type: "string", description: "Optional Workhorse chat id from workhorse_list_chats. Pass the mission chat a previous slice returned to keep this objective together; anything else, or nothing, opens a new mission chat." },
         traceId: { type: "string", description: "Optional trace id for this orchestration loop; Workhorse creates one when an adaptive loop omits it" },
         idempotencyKey: { type: "string", description: "Send one per intended task. A retry with the same key gets the first answer back, not a second worker. Workhorse creates one when omitted and echoes it." },
       },
-      required: ["task", "fromSessionId"],
+      required: ["task"],
     },
   },
   {
@@ -316,6 +317,7 @@ const TOOLS = [
           type: "object",
           description: "Bounded report for seed=fresh: status, summary, evidence, nextSteps, blocker.",
         },
+        project: { type: "string", description: "Live Workhorse project this objective belongs on, by name or id from workhorse_list_projects. The desk opens a new mission chat there. It never creates a project." },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
           type: "boolean",
@@ -1151,6 +1153,30 @@ function callerProjectFolder(session?: { projectId?: string | null }): string {
   return typeof pathValue === "string" ? pathValue.trim() : "";
 }
 
+/** Folder of the project a harness named. Empty when it named none, or none matches. */
+function namedProjectFolder(query?: string): string {
+  const want = query?.trim();
+  if (!want) return "";
+  const projects = readState().projects;
+  if (!Array.isArray(projects)) return "";
+  const rows = projects.filter(
+    (item): item is { id: string; name: string; archivedAt?: number | null; folders?: Array<{ path?: string }> } =>
+      Boolean(item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string" && typeof (item as { name?: unknown }).name === "string"),
+  );
+  const pathValue = findProjectByQuery(rows, want)?.folders?.[0]?.path;
+  return typeof pathValue === "string" ? pathValue.trim() : "";
+}
+
+/**
+ * Which harness is calling, so a wave row can say OpenClaw rather than the
+ * generic word. Written per host by Install; a host that carries none stays
+ * unattributed instead of being guessed at.
+ */
+function linkOrigin(): CorrelationOrigin | undefined {
+  const raw = process.env.WORKHORSE_MCP_ORIGIN?.trim().toLowerCase();
+  return raw === "openclaw" || raw === "hermes" ? raw : undefined;
+}
+
 /**
  * The desk takes 84 file types when you drag one onto the window. This used to
  * know 14, from a private table that drifted out of step with the real one, so
@@ -1222,6 +1248,8 @@ async function spawnAgent(
     isolation?: "worktree" | "shared";
     seed?: "inherit" | "fresh";
     handoff?: { status: string; summary: string; evidence?: string; nextSteps?: string; blocker?: string };
+    /** Live project this objective belongs on. Names one; never creates one. */
+    project?: string;
     folder?: string;
     wait?: boolean;
     mission?: boolean;
@@ -1243,7 +1271,14 @@ async function spawnAgent(
   if (!input.prompt.trim()) throw new Error("prompt is required");
   const fromId = resolveExternalSpawnFrom(from);
   const caller = callerSession(fromId);
-  const isNested = deskRoleOf(caller) === "worker";
+  /*
+   * An inbound objective lands on its own top-level mission chat
+   * (linkMissionLanding), so the chat a harness named is context for the
+   * folder, never this worker's parent. That is also the depth cap: naming a
+   * worker lifts the objective instead of hanging a grandchild off it.
+   */
+  const parentChat = currentMcpProfile() === "external-runtime" ? undefined : caller;
+  const isNested = deskRoleOf(parentChat) === "worker";
   if (isNested && caller?.id) {
     const state = readState();
     const sessions = (Array.isArray(state?.sessions) ? state.sessions : [])
@@ -1278,10 +1313,13 @@ async function spawnAgent(
   }
   const resolvedSkills = requestedSkills.resolved.map((skill) => `${skill.origin}:${skill.name}`);
   const skillFiles = requestedSkills.resolved.map((skill) => skill.skillFile);
-  const projectFolder = callerProjectFolder(caller);
-  const admitted = caller
+  // A named project is an inbound objective's own ground; only fall back to
+  // the folder of the chat the harness pointed at. The desk's own spawns keep
+  // taking the folder from the parent chat, as they always did.
+  const projectFolder = (parentChat ? "" : namedProjectFolder(input.project)) || callerProjectFolder(caller);
+  const admitted = parentChat
     ? admitSpawn({
-        parent: caller,
+        parent: parentChat,
         projectFolder,
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
@@ -1303,6 +1341,8 @@ async function spawnAgent(
     toSessionId: "",
     fromSessionId: fromId,
     exposureProfile: currentMcpProfile(),
+    ...(linkOrigin() ? { origin: linkOrigin() } : {}),
+    project: spawnInput.project,
     message: spawnInput.prompt,
     mode: "spawn",
     provider: spawnInput.provider,
@@ -1341,6 +1381,8 @@ async function spawnAgent(
       toSessionId: "",
       fromSessionId: fromId,
       exposureProfile: currentMcpProfile(),
+      ...(linkOrigin() ? { origin: linkOrigin() } : {}),
+      project: spawnInput.project,
       message: spawnInput.prompt,
       mode: "spawn",
       provider: spawnInput.provider,
@@ -1639,6 +1681,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
         planStepId: typeof args.planStepId === "string" ? args.planStepId : undefined,
+        project: typeof args.project === "string" ? args.project : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: args.wait === true,
         mission: true,
@@ -1693,6 +1736,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
           args.handoff && typeof args.handoff === "object"
             ? (args.handoff as { status: string; summary: string; evidence?: string; nextSteps?: string; blocker?: string })
             : undefined,
+        project: typeof args.project === "string" ? args.project : undefined,
         folder: typeof args.folder === "string" ? args.folder : undefined,
         wait: args.wait === false ? false : args.wait === true ? true : undefined,
         route:

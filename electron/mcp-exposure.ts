@@ -113,7 +113,6 @@ export type InboundParentInput = {
   profile: McpExposureProfile;
   fromSessionId?: string;
   defaultSessionId?: string;
-  defaultProjectId?: string;
   runningVisibleSessionId?: string;
 };
 

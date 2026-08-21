@@ -14,7 +14,6 @@ import {
   missionCaller,
   missionRowLook,
   missionState,
-  missionTitle,
 } from "../src/lib/lineup";
 import type { DeskLineup, DeskLineupRow, Session } from "../src/lib/types";
 
@@ -52,24 +51,17 @@ test("the caller reaches the row, so a Link wave can say who drove it", () => {
   assert.equal(missionCaller(undefined), undefined);
 });
 
-test("a Link wave takes the work's name; the desk's own chat keeps the person's title", () => {
-  const walt = lineup({ joinOwner: "external-runtime" });
-  assert.equal(missionTitle(walt), "Mission Control orchestration");
-  // The desk's chats are named by the person. Never overridden.
-  assert.equal(missionTitle(lineup({ joinOwner: "desk" })), undefined);
-  assert.equal(missionTitle(lineup()), undefined);
-  // A split wave has no single name; a count is honest where one slice is not.
-  const split = lineup({
-    joinOwner: "external-runtime",
-    rows: [row({ childId: "a", title: "Read the catalog" }), row({ childId: "b", title: "Audit the router" })],
-  });
-  // A count is not a name: rows that disagree leave the chat's own title alone.
-  assert.equal(missionTitle(split), undefined);
-  // Every row sharing one name is one job.
-  const same = lineup({ joinOwner: "external-runtime", rows: [row({ childId: "a" }), row({ childId: "b" })] });
-  assert.equal(missionTitle(same), "Mission Control orchestration");
-  // No usable name is no override, not an empty string.
-  assert.equal(missionTitle(lineup({ joinOwner: "external-runtime", rows: [row({ title: "  " })] })), undefined);
+test("no wave renames a chat row, whoever owns the title", () => {
+  // A Link wave used to substitute its workers' slice name for the chat's
+  // title. An objective now arrives on a mission chat the desk opens and names
+  // from the work (test/inbound-mission-landing.test.ts), so there is nothing
+  // left to replace — and a chat somebody named is safe from a wave landing on
+  // it. Both readings are the same one line of code, so both are asserted here.
+  const titled = (over: Partial<DeskLineup>) =>
+    (missionRowLook({ lineup: lineup(over) }, []) as { title?: string } | undefined)?.title;
+  assert.equal(titled({ joinOwner: "external-runtime" }), undefined);
+  assert.equal(titled({ joinOwner: "desk" }), undefined);
+  assert.equal(titled({}), undefined);
 });
 
 test("one status source: a running child beats its own stale row, so no surface contradicts another", () => {
@@ -140,7 +132,6 @@ test("the row's whole reading of a wave comes from one place", () => {
   const link = lineup({ joinOwner: "external-runtime", rows: [row({ caller: "openclaw" })] });
   const look = missionRowLook({ lineup: link }, [{ id: "child_1", status: "idle" }]);
   assert.equal(look?.caller, "OpenClaw");
-  assert.equal(look?.title, "Mission Control orchestration");
   assert.equal(look?.running, false);
   assert.equal(look?.word, undefined, "work that finished says nothing — the row is quiet at rest");
   assert.equal(look?.tone, undefined);
@@ -186,7 +177,7 @@ test("an ordinary chat is left alone", () => {
   assert.equal(missionRowLook({ lineup: undefined }, []), undefined);
 });
 
-test("a live wave reaches the dot and the title reaches the row", () => {
+test("a live wave reaches the dot, and the chat's own title stays on the row", () => {
   // missionRowLook is tested above, but nothing else covers the hop from that
   // object into the DOM, and that hop is the whole feature: a parent chat's own
   // status is idle for the entire time a wave runs, so without mission.running
@@ -196,7 +187,8 @@ test("a live wave reaches the dot and the title reaches the row", () => {
   // source-shape way as test/dead-ui.test.ts, for the same reason.
   const row = readFileSync(new URL("../src/ui/ChatRow.tsx", import.meta.url), "utf8").replace(/\s+/g, " ");
   assert.match(row, /session\.status === "running" \|\| mission\?\.running \? " pulse"/, "a live wave must pulse the dot");
-  assert.match(row, /mission\?\.title \?\? session\.title/, "a named wave must reach the title");
+  assert.match(row, /\{session\.title\} <\/span>/, "the row shows the chat's own title");
+  assert.doesNotMatch(row, /mission\?\.title/, "no wave renames a row out from under a person");
   assert.match(row, /mission\?\.caller \|\| mission\?\.word/, "the meta line must render the wave");
 
   // And the Sidebar has to hand it down — it owns the workers the state needs.

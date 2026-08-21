@@ -48,6 +48,8 @@ export type PeerAsk = {
   isolation?: "worktree" | "shared";
   action?: PeerAction;
   name?: string;
+  /** Project a harness named for an inbound objective. Names a live project; never creates one. */
+  project?: string;
   folder?: string;
   color?: string;
   baseUrl?: string;

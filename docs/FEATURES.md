@@ -36,10 +36,15 @@ No token is stored. Connecting an app adds no vendor, login or Usage ring.
 The same helper is a JSON CLI for a harness without MCP, and Install
 workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
 
-Unnamed inbound spawns create a new chat in Chats by default, or in a project
-you pick, titled from the prompt. An explicit request to work with Workhorse
-delegates before direct execution; blocked delegation returns the Workhorse
-error before any fallback.
+An objective from a connected app opens its own chat, named from the work, and
+its workers sit under that chat: project, mission chat, workers, and no deeper.
+It lands on the project the call names, or the one you picked in Settings, or in
+Chats. Pointing a follow-up slice at a mission chat keeps that objective
+together; pointing at anything else — one of your own chats, or a worker —
+starts a new mission chat in that chat's project and leaves the chat alone. No
+chat is renamed, and a connected app cannot create, rename or move a project.
+An explicit request to work with Workhorse delegates before direct execution;
+blocked delegation returns the Workhorse error before any fallback.
 
 One custom API connection can approve several models. Chats and Auto routing use only that list while Usage keeps one connection ring and separate model rows.
 Add a bot lists MiniMax, Synthetic, OpenRouter, Groq, DeepSeek, Together,
@@ -97,9 +102,7 @@ transcript rather than as a path.
 - A chat that ran a wave says so on its own row: who called it, and how it
   went — `OpenClaw · Working…`, or nothing at all once every worker finished
   clean. Failure is the only word in red; interrupted and timed-out work is
-  unfinished, not wrong. A wave that came in over Link and was never named
-  here takes the work's own name instead of the prompt's first few words, so
-  long as its workers agree on one.
+  unfinished, not wrong. The title on a row is always the chat's own.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share

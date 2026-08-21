@@ -5217,7 +5217,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   routingMode: target.routingMode ?? "manual",
                   ...(target.routingDecision ? { routingDecision: target.routingDecision } : {}),
                   status: "running",
-                  howToUse: "Accepted. Stop. The desk journals the reply and wakes the parent chat. Do not poll workhorse_agent_status.",
+                  howToUse: "Accepted. Stop this turn. The desk journals the reply and wakes the parent chat. Later, workhorse_agent_status on this chat.",
                 },
                 null,
                 2,

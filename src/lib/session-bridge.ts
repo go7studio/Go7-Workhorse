@@ -17,6 +17,8 @@ export type SessionSnapshot = {
   preview: string;
   sidebar: string;
   messageCount: number;
+  parentId?: string;
+  worker?: string;
 };
 
 export type SessionTranscript = {
@@ -84,7 +86,7 @@ function projectNames(state: LooseState): Map<string, string> {
   return projects;
 }
 
-export function catalogSessions(state: LooseState, opts?: { fromSessionId?: string }): SessionSnapshot[] {
+export function catalogSessions(state: LooseState, opts?: { fromSessionId?: string; includeWorkers?: boolean }): SessionSnapshot[] {
   const projects = projectNames(state);
   if (!Array.isArray(state.sessions)) return [];
   const crewSessions = state.sessions
@@ -94,13 +96,28 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
       id: session.id as string,
       parentId: typeof session.parentId === "string" ? session.parentId : undefined,
     }));
+  const liveParentIds = new Set<string>();
+  for (const raw of state.sessions) {
+    const session = asRecord(raw);
+    if (typeof session.id !== "string") continue;
+    if (session.hidden === true) continue;
+    if (typeof session.archivedAt === "number") continue;
+    liveParentIds.add(session.id);
+  }
   const sessions: SessionSnapshot[] = [];
   for (const raw of state.sessions) {
     const session = asRecord(raw);
     if (typeof session.id !== "string") continue;
     const from = opts?.fromSessionId?.trim() ?? "";
     const crewChild = Boolean(from && sameSessionCrew(crewSessions, from, session.id));
-    if (!crewChild && session.hidden === true) continue;
+    const parentId = typeof session.parentId === "string" && session.parentId ? session.parentId : undefined;
+    if (
+      session.hidden === true &&
+      !crewChild &&
+      !(opts?.includeWorkers && parentId && liveParentIds.has(parentId))
+    ) {
+      continue;
+    }
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
     const messages = Array.isArray(session.messages) ? session.messages : [];
@@ -110,6 +127,8 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
         ? session.provider
         : "grok";
     const model = typeof session.model === "string" ? session.model : "";
+    const run = asRecord(session.agentRun);
+    const workerName = typeof session.workerName === "string" ? session.workerName.trim() : "";
     sessions.push({
       id: session.id,
       title: typeof session.title === "string" ? session.title : "New chat",
@@ -117,7 +136,12 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
       projectName: projectId ? projects.get(projectId) ?? null : null,
       provider,
       model,
-      status: typeof session.status === "string" ? session.status : "idle",
+      status:
+        typeof run.status === "string"
+          ? run.status
+          : typeof session.status === "string"
+            ? session.status
+            : "idle",
       archived: typeof session.archivedAt === "number",
       preview: previewFrom(messages),
       sidebar: formatChatSidebar({
@@ -127,6 +151,8 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
         mode: typeof session.mode === "string" ? session.mode : "ask",
       }),
       messageCount: messages.length,
+      ...(parentId ? { parentId } : {}),
+      ...(workerName ? { worker: workerName } : {}),
     });
   }
   return sessions;
@@ -144,9 +170,11 @@ export function findSession(sessions: SessionSnapshot[], query: string): Session
   if (exact) return exact;
   const prefix = listed.filter((session) => session.id.toLowerCase().startsWith(q));
   if (prefix.length === 1) return prefix[0];
+  const named = listed.filter((session) => session.worker?.toLowerCase() === q);
+  if (named.length === 1) return named[0];
   const titled = listed.filter((session) => session.title.toLowerCase().includes(q));
   if (titled.length === 1) return titled[0];
-  return titled[0] ?? prefix[0] ?? null;
+  return titled[0] ?? named[0] ?? prefix[0] ?? null;
 }
 
 /** Sidebar peer labels must not attach because a vendor name appears inside a title. */
@@ -166,7 +194,7 @@ export function sessionTranscript(
   limit = 40,
   fromSessionId?: string,
 ): SessionTranscript | null {
-  const listed = catalogSessions(state, { fromSessionId });
+  const listed = catalogSessions(state, { fromSessionId, includeWorkers: true });
   const rawSessions = Array.isArray(state.sessions) ? state.sessions.map(asRecord) : [];
   const names = projectNames(state);
   const exact = rawSessions.find((item) => typeof item.id === "string" && item.id === query.trim());

@@ -100,6 +100,7 @@ import {
   withSubagentStatus,
   workerReportedBlocked,
   workerStatusSnapshot,
+  workerFollowThrough,
   WORKER_SPAWN_ERROR,
 } from "../src/lib/subagents";
 import { addLineupRow, applyChildIdleSync, applyJoinRateLimitRetry, applyLineupChildFinish, applyLineupTurnBreak, awaitAgentsWaits, emptyLineup, formatAwaitAgentsSnapshot, handOverLineup, JOIN_MAX_ATTEMPTS, joinDelayMs, LINEUP_FINISHED_NOTICE, lineupIsTerminal, lineupJoinFallback, lineupJoinPrompt, lineupSnapshot, lineupSynthesizePrompt, maybeEnqueueLineupJoin, nestProjectChats, queueWakeDelayMs, normalizeLineup, reconcileIdleChildren, reconcilePersistedLineups, setLineupRowStatus, stampLineupUserText } from "../src/lib/lineup";
@@ -8282,6 +8283,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
     title: kidDone.title,
     parentId: kidDone.parentId,
     status: "completed",
+    ...workerFollowThrough("completed"),
     provider: kidDone.provider,
     model: kidDone.model,
     effort: kidDone.effort,
@@ -8310,6 +8312,7 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
       worker: "Dexter",
       parentId: kidDone.parentId,
       status: "completed",
+      ...workerFollowThrough("completed"),
       provider: kidDone.provider,
       model: kidDone.model,
       effort: kidDone.effort,
@@ -9278,4 +9281,49 @@ test("reading a hidden worker by id still names its project", () => {
   );
   assert.equal(transcript?.id, "sess_mt1sgskp2vop6m");
   assert.equal(transcript?.projectName, "OpenClaw SEO ASO");
+});
+
+test("list chats names a live worker so a harness can find Marlow", () => {
+  const listed = catalogSessions(
+    {
+    projects: [{ id: "p1", name: "Desk" }],
+    sessions: [
+      {
+        id: "sess_parent",
+        title: "Pipeline",
+        projectId: "p1",
+        provider: "claude",
+        model: "claude-opus-5",
+        messages: [{ role: "user", text: "Review" }],
+      },
+      {
+        id: "sess_marlow",
+        title: "Marlow · Category taxonomy adversarial review",
+        projectId: "p1",
+        parentId: "sess_parent",
+        hidden: true,
+        workerName: "Marlow",
+        provider: "grok",
+        model: "grok-4.6",
+        status: "idle",
+        agentRun: { status: "completed", startedAt: 1, finishedAt: 2 },
+        messages: [{ role: "user", text: "Review the taxonomy." }],
+      },
+      {
+        id: "sess_orphan",
+        title: "Child of deleted",
+        parentId: "sess_gone",
+        hidden: true,
+        messages: [{ role: "user", text: "orphan" }],
+      },
+    ],
+    },
+    { includeWorkers: true },
+  );
+  assert.equal(listed.some((row) => row.id === "sess_orphan"), false);
+  const marlow = listed.find((row) => row.id === "sess_marlow");
+  assert.equal(marlow?.worker, "Marlow");
+  assert.equal(marlow?.parentId, "sess_parent");
+  assert.equal(marlow?.status, "completed");
+  assert.equal(findSession(listed, "Marlow")?.id, "sess_marlow");
 });

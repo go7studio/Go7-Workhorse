@@ -754,6 +754,28 @@ export function workerProgressCheckpoint(
   };
 }
 
+export type WorkerFollowNext = "wait" | "done" | "failed";
+
+/** What a harness does next. One word, so Claude/Codex/OpenClaw do not invent a loop. */
+export function workerFollowThrough(status: string): { next: WorkerFollowNext; how: string } {
+  if (status === "running") {
+    return {
+      next: "wait",
+      how: "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.",
+    };
+  }
+  if (status === "completed") {
+    return {
+      next: "done",
+      how: "The report is in this payload. workhorse_continue_mission if work remains (previousWorkerIds: this id). workhorse_ask_chat to talk to this worker.",
+    };
+  }
+  return {
+    next: "failed",
+    how: "This worker did not finish. Do not treat a missing report as success. Delegate remaining work as a new slice if the user still wants it.",
+  };
+}
+
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
 ): Record<string, unknown> {
@@ -762,12 +784,15 @@ export function workerStatusSnapshot(
   const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
+  const follow = workerFollowThrough(status);
   return {
     id: worker.id,
     title: worker.title,
     ...(worker.workerName ? { worker: worker.workerName } : {}),
     parentId: worker.parentId,
     status,
+    next: follow.next,
+    how: follow.how,
     provider: worker.provider,
     model: worker.model,
     effort: worker.effort,

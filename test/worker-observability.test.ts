@@ -48,6 +48,8 @@ test("a running worker snapshot carries progress, not a blank report hole", () =
   assert.equal(snap.lastActivityAt, 30);
   assert.deepEqual(snap.changedFiles, ["src/lib/subagents.ts"]);
   assert.equal(snap.partialReport, "Reading the isolate default next.");
+  assert.equal(snap.next, "wait");
+  assert.match(String(snap.how), /workhorse_agent_status/);
   const checkpoint = workerProgressCheckpoint(running);
   assert.equal(checkpoint.phase, "running");
   assert.equal(checkpoint.currentStep, "read_file src/lib/subagents.ts");
@@ -126,6 +128,26 @@ test("a spawn brief that names build checks is not checksRun, and silence is not
   assert.equal(snap.currentStep, "no vendor output");
   assert.equal(snap.lastActivityAt, 1787250125161);
   assert.notEqual(snap.currentStep, "started");
+  assert.equal(snap.next, "wait");
+});
+
+test("status tells a harness wait, done, or failed", () => {
+  const done = workerStatusSnapshot(
+    worker({
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "worktree" },
+      messages: [{ id: "a", role: "assistant", text: "STATUS: complete\nReviewed.", createdAt: 2 }],
+    }),
+  );
+  assert.equal(done.next, "done");
+  assert.match(String(done.report), /STATUS: complete/);
+  const failed = workerStatusSnapshot(
+    worker({
+      status: "idle",
+      agentRun: { status: "interrupted", startedAt: 1, finishedAt: 2, isolation: "worktree" },
+    }),
+  );
+  assert.equal(failed.next, "failed");
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

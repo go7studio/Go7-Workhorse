@@ -27,7 +27,8 @@ Code, Grok, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
 Link connects each with one button, through that app's own MCP tool; Copy
 generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
-delegate a task, continue a finished wave, worker status. The leftover check
+delegate a task, continue a finished wave, worker status. Status says wait,
+done, or failed. List chats names live workers. The leftover check
 never includes keys or chat content. The first call,
 `workhorse_capabilities`, says what this desk offers. Older names still
 answer so a harness that already calls them is not refused. Delete, rename,

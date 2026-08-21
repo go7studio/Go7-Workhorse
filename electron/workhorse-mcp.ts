@@ -76,7 +76,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Let the coordinating brain choose focused or split execution; only independent root slices run in parallel and coupled work stays sequential. Ordinary delegation is one wave. Enable loop only when the user says set a loop or otherwise asks for adaptive sequential work. For that loop, derive concrete acceptance criteria, assess each terminal report against them, and call workhorse_continue_mission with the returned worker ids when work remains. Required follow-up stays at this parent mission level; a leaf helper is only an optional bounded check. Workhorse independently routes every continuation. Stop on complete, blocked, or the iteration ceiling. Delegation returns a worker id promptly. Stop. The desk journals the terminal report and joins it into the parent chat. Do not poll workhorse_agent_status or sit on workhorse_await_agents. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split, and leave routing fields unset for every unassigned slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop on workhorse_await_agents. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. List chats also names live workers (worker, parentId, status) so you can find Marlow without guessing. Do not spawn a second worker for the same slice. Use workhorse_spawn_agent only for an explicit assignment or multi-worker split. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -246,7 +246,7 @@ const TOOLS = [
   {
     name: "workhorse_list_chats",
     description:
-      "List live sidebar chats in this window (id, title, project, sidebar, preview). Archived and deleted chats are omitted. sidebar is the visible subtitle (model · effort · mode). preview is the last user/assistant snippet — that is what “the preview” means. Use this before reading or asking another chat.",
+      "List live chats and their workers (id, title, worker, parentId, status, project, sidebar, preview). Use this to pick a parent for delegate, or to find a named worker such as Marlow. Archived and deleted chats are omitted.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -265,7 +265,7 @@ const TOOLS = [
   {
     name: "workhorse_ask_chat",
     description:
-      "Send a follow-up to an existing Workhorse chat. For harness work, use wait=false so long work cannot exceed the MCP client limit. The desk journals the reply and wakes the parent chat. Do not poll workhorse_agent_status. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox.",
+      "Send a follow-up to an existing Workhorse chat. For harness work, use wait=false so long work cannot exceed the MCP client limit. The desk journals the reply and wakes the parent chat. Talking to another live chat is always allowed and is not limited by this chat’s Permission or Sandbox.",
     inputSchema: {
       type: "object",
       properties: {
@@ -358,7 +358,8 @@ const TOOLS = [
   },
   {
     name: "workhorse_agent_status",
-    description: "Status of an external OpenClaw/Hermes task or a Workhorse worker.",
+    description:
+      "Follow through on a worker. Pass the id from delegate. next is wait, done, or failed. When done, report is in the payload. Do not spawn another worker for the same slice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1097,7 +1098,7 @@ function mergedDelegateExclusions(task: string, value: unknown): string[] | unde
 
 async function askChat(chat: string, message: string, from?: string, traceId?: string, wait = true): Promise<string> {
   const state = readState();
-  const listed = catalogSessions(state, { fromSessionId: fromSessionId(from) });
+  const listed = catalogSessions(state, { fromSessionId: fromSessionId(from), includeWorkers: true });
   const match = findSession(listed, chat);
   if (!match) {
     if (shouldSpawnInsteadOfAsk(chat, listed)) {
@@ -1665,7 +1666,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 /** Everything else: reads, and the desk-only tools an orchestrator or the desk itself may call. */
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
-    return JSON.stringify(catalogSessions(readState(), { fromSessionId: from }), null, 2);
+    return JSON.stringify(catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }), null, 2);
   }
   if (name === "workhorse_read_chat") {
     const chat = typeof args.chat === "string" ? args.chat : "";

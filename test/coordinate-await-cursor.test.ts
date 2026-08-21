@@ -42,7 +42,8 @@ test("MCP instructions tell the parent to stop; the desk joins without polling",
   // owns joining — this string must fail against the pre-repair copy even if
   // awaitAgentsCursorSeconds already exists.
   assert.doesNotMatch(WORKHORSE_MCP_INSTRUCTIONS, /poll workhorse_agent_status until/);
-  assert.match(WORKHORSE_MCP_INSTRUCTIONS, /Do not poll workhorse_agent_status/);
+  assert.match(WORKHORSE_MCP_INSTRUCTIONS, /Do not sit in a poll loop/);
+  assert.match(WORKHORSE_MCP_INSTRUCTIONS, /workhorse_agent_status on that worker id/);
   assert.match(WORKHORSE_MCP_INSTRUCTIONS, /desk journals the terminal report/);
   assert.match(WORKHORSE_MCP_INSTRUCTIONS, /joins it into the parent chat/);
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");

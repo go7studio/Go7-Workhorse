@@ -65,7 +65,7 @@ last saved state, delegation does not.
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
 | `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse routes the next pass | yes |
-| `workhorse_agent_status` | one worker's state | no |
+| `workhorse_agent_status` | follow through: `next` is wait, done, or failed; report when done | no |
 | `workhorse_ask_chat` | a message to a live chat | yes |
 
 Not available through Link: credentials, permissions, deletes, renames,
@@ -80,6 +80,22 @@ that already calls them is not refused. New harnesses should use the eight.
 
 When Settings → Learning is on, each Link call is stored on this machine as
 agent evidence. Keys and chat text stay out.
+
+## Follow through
+
+The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
+
+1. `workhorse_list_chats` — pick the parent chat. Workers on that chat show
+   `worker`, `parentId`, and `status` (so Marlow is findable by name).
+2. `workhorse_delegate` — one task, `fromSessionId` is that parent. Stop this
+   turn. The desk joins the report into the parent chat.
+3. Later, `workhorse_agent_status` with the worker id. `next` is `wait`,
+   `done`, or `failed`. When `done`, the report is in that payload.
+4. Remaining work: `workhorse_continue_mission`. Talk to a live chat:
+   `workhorse_ask_chat`. Read: `workhorse_read_chat`.
+
+Do not sit in a poll loop in the same turn. Do not spawn a second worker for
+the same slice.
 
 ## Execution contract
 

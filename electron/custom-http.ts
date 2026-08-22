@@ -3,7 +3,10 @@ import type { ChatImage, EffortLevel, ModelInputCapabilities } from "../src/lib/
 import { attachmentPromptBlock, isPicture } from "../src/lib/images";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
 import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
+import fs from "node:fs";
+import path from "node:path";
 import { customHttpIdentityHeaders, grokBotShimDownMessage } from "../src/lib/custom-http-identity";
+import { grokBotLoopbackApiKey, grokBotShimSecretsPath, parseGrokBotShimSecrets } from "../src/lib/grok-bot-shim";
 import {
   customHttpTools,
   customHttpToolsOpenAi,
@@ -15,6 +18,18 @@ import {
 } from "./custom-tools";
 
 export type { CustomToolResult, CustomToolUse };
+
+function grokBotDeskApiKey(baseUrl: string, apiKey: string): string {
+  const userData = process.env.WORKHORSE_USER_DATA || (process.env.WORKHORSE_STATE_PATH ? path.dirname(process.env.WORKHORSE_STATE_PATH) : "");
+  if (!userData) return apiKey;
+  try {
+    const sep = userData.includes("\\") && !userData.includes("/") ? "\\" : "/";
+    const parsed = parseGrokBotShimSecrets(JSON.parse(fs.readFileSync(grokBotShimSecretsPath(userData, sep), "utf8")));
+    return grokBotLoopbackApiKey(baseUrl, apiKey, parsed);
+  } catch {
+    return apiKey;
+  }
+}
 
 export type CustomHttpConfig = {
   baseUrl: string;
@@ -608,9 +623,9 @@ export async function streamCustomHttp(
   handlers: CustomHttpHandlers = {},
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
-  const apiKey = config.apiKey.trim();
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
+  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim());
   if (!apiKey || !model || !baseUrl) throw new Error(CUSTOM_NOT_CONFIGURED);
   const api = resolveCustomApi(config);
   const url = customMessagesUrl(baseUrl, api);
@@ -824,9 +839,9 @@ export async function probeCustomHttp(
   config: CustomHttpConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CustomProbeResult> {
-  const apiKey = config.apiKey.trim();
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
+  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim());
   if (!apiKey || !model || !baseUrl) {
     return { ok: false, message: CUSTOM_NOT_CONFIGURED };
   }

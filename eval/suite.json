@@ -1697,6 +1697,7 @@
           "steps": [
             "Run a packaged macOS build from an isolated install and offer a mocked newer release with Intel and Apple-silicon disk images.",
             "Verify Workhorse selects the running architecture's disk image, validates the mounted app, replaces the same app path, and relaunches.",
+            "Leave the installed Grok Bot shim alive before replacement; verify the updater stops only that exact shim and the relaunched app serves the new bridge on port 8787.",
             "Verify the signed application identity and credential-store service remain stable so approved credentials do not prompt again.",
             "Run unavailable, malformed, wrong-architecture, mount, copy, and relaunch failures and verify the existing app and user state remain usable.",
             "Verify source checkouts use the documented development update path and never impersonate the packaged updater."
@@ -1805,8 +1806,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["REL-S4"],
-          "passCriteria": "A packaged build selects the correct release asset, validates and replaces the installed app at its original path, relaunches, preserves signed identity and credential access, and leaves the old app usable on every failure path.",
-          "evidence": "Release metadata, architecture and asset decision, mounted bundle identity, install path, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
+          "passCriteria": "A packaged build selects the correct release asset, stops only the prior installed Grok Bot shim, validates and replaces the installed app at its original path, relaunches with the new bridge on port 8787, preserves signed identity and credential access, and leaves the old app usable on every failure path.",
+          "evidence": "Release metadata, architecture and asset decision, mounted bundle identity, install path, prior/new shim PIDs, port owner, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
         },
         {
           "id": "REL-08",

@@ -73,6 +73,21 @@ PY
   fi
 }
 
+stop_grok_bot_shim() {
+  local dest="$1"
+  # WORKHORSE_MAC_GROK_BOT_SHIM_STOP
+  # The shim can outlive the desktop app. Stop only the exact installed shim.
+  launchctl bootout "gui/$(id -u)/com.go7studio.workhorse-grok-bot-shim" >/dev/null 2>&1 || true
+  local expected="$dest/Contents/MacOS/Go7 Workhorse $dest/Contents/Resources/app.asar/dist-electron/grok-bot-shim-host.js"
+  local shim_pid shim_command
+  while IFS= read -r shim_pid; do
+    [ -n "$shim_pid" ] || continue
+    shim_command=$(ps -p "$shim_pid" -o command= 2>/dev/null || true)
+    [ "$shim_command" = "$expected" ] || continue
+    kill -TERM "$shim_pid" 2>/dev/null || true
+  done < <(pgrep -f 'grok-bot-shim-host\.js$' 2>/dev/null || true)
+}
+
 [ "$(uname -s)" = "Darwin" ] || die "This installer is for macOS. On Windows, run the .exe from the releases page."
 
 # Apple silicon takes the arm64 dmg, Intel the x64 one. Running the arm64
@@ -132,6 +147,7 @@ if pgrep -f "/Applications/${APP}/Contents/MacOS/|/Applications/Workhorse.app/Co
   osascript -e 'tell application "Workhorse" to quit' 2>/dev/null || true
   sleep 2
 fi
+stop_grok_bot_shim "/Applications/${APP}"
 
 say "Installing to /Applications..."
 rm -rf "/Applications/${APP}"

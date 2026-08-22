@@ -157,6 +157,10 @@ test("a packaged Mac desk installs the arch-matched dmg, not a git checkout", ()
   assert.match(script, /lsregister/);
   assert.match(script, /persistent-apps/);
   assert.match(script, /tile\.pop\("book"/);
+  assert.match(script, /WORKHORSE_MAC_GROK_BOT_SHIM_STOP/);
+  assert.match(script, /launchctl bootout/);
+  assert.ok(script.includes("grok-bot-shim-host.js$"));
+  assert.ok(script.indexOf("WORKHORSE_MAC_GROK_BOT_SHIM_STOP") < script.indexOf('rm -rf "$dest"'));
 
 });
 
@@ -176,6 +180,10 @@ test("replacing the Mac app re-registers the live bundle and drops a stale Dock 
   assert.match(installer, /persistent-apps/);
   assert.match(installer, /tile\.pop\("book"/);
   assert.doesNotMatch(installer, /Go7 Workhorse .*backup\.app/);
+  assert.match(installer, /stop_grok_bot_shim "\/Applications\/\$\{APP\}"/);
+  assert.match(installer, /WORKHORSE_MAC_GROK_BOT_SHIM_STOP/);
+  assert.match(installer, /launchctl bootout/);
+  assert.ok(installer.includes("grok-bot-shim-host\\.js$"));
 
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /function setDockIcon\(\)/);

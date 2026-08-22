@@ -258,11 +258,11 @@
     },
     {
       "id": "REG-029",
-      "behavior": "Packaged macOS updates select the running architecture's disk image, preserve app identity and state, and fail recoverably.",
+      "behavior": "Packaged macOS updates select the running architecture's disk image, stop only the prior installed Grok Bot shim before replacement, preserve app identity and state, and fail recoverably.",
       "profiles": ["grok-acp"],
       "scenarios": ["REL-S3", "REL-S4"],
       "rubric": ["REL-02", "REL-05", "REL-07"],
-      "sourceFiles": ["src/lib/app-update.ts", "electron/app-update.ts", "test/app-update.test.ts"],
+      "sourceFiles": ["src/lib/app-update.ts", "electron/app-update.ts", "scripts/install-mac.sh", "test/app-update.test.ts"],
       "verification": ["eval:validate"]
     },
     {

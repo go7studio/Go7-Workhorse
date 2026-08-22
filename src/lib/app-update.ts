@@ -343,6 +343,17 @@ device=${quote(input.device)}
 tmp=${quote(input.tmp)}
 while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
 sleep 0.4
+# WORKHORSE_MAC_GROK_BOT_SHIM_STOP
+# The shim is a keepalive child, not the app process above. Stop both its
+# LaunchAgent and an exact orphan from the replaced bundle before copying.
+launchctl bootout "gui/$(id -u)/com.go7studio.workhorse-grok-bot-shim" >/dev/null 2>&1 || true
+expected_shim="$dest/Contents/MacOS/Go7 Workhorse $dest/Contents/Resources/app.asar/dist-electron/grok-bot-shim-host.js"
+while IFS= read -r shim_pid; do
+  [ -n "$shim_pid" ] || continue
+  shim_command=$(ps -p "$shim_pid" -o command= 2>/dev/null || true)
+  [ "$shim_command" = "$expected_shim" ] || continue
+  kill -TERM "$shim_pid" 2>/dev/null || true
+done < <(pgrep -f 'grok-bot-shim-host\.js$' 2>/dev/null || true)
 rm -rf "$dest"
 cp -R "$src" "$dest"
 if [ -n "$device" ]; then

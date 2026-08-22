@@ -169,6 +169,32 @@ export function protectStateCredentials<T extends LooseRecord>(state: T, vault: 
   return next;
 }
 
+function redactStateCredentials<T extends LooseRecord>(state: T): T {
+  const next = cloneState(state);
+  const settings = record(next.settings);
+  const llms = record(settings?.llms);
+  const custom = record(llms?.custom);
+  if (custom) delete custom.apiKey;
+  const bots = settings?.customBots;
+  if (Array.isArray(bots)) {
+    for (const item of bots) {
+      const bot = record(item);
+      if (bot) delete bot.apiKey;
+    }
+  }
+  return next;
+}
+
+/** Keep non-secret desk state durable while a locked OS vault stays read-only. */
+export function protectStateCredentialsForSave<T extends LooseRecord>(state: T, vault: CredentialStore): T {
+  try {
+    return protectStateCredentials(state, vault);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "OS credential encryption is unavailable.") throw error;
+    return redactStateCredentials(state);
+  }
+}
+
 /** Return a clone hydrated for the renderer; legacy plaintext remains migratable. */
 export function hydrateStateCredentials<T extends LooseRecord>(state: T, vault: CredentialStore): T {
   const next = cloneState(state);

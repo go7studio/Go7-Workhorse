@@ -51,7 +51,12 @@ import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
 import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
-import { CredentialStore, hydrateStateCredentials, protectStateCredentials } from "./credential-store";
+import {
+  CredentialStore,
+  hydrateStateCredentials,
+  protectStateCredentials,
+  protectStateCredentialsForSave,
+} from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
 import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
@@ -388,7 +393,7 @@ function writeState(state: Persistable) {
     writeVersionedState(
       file,
       state,
-      (snapshot) => protectStateCredentials(snapshot, credentialStore()),
+      (snapshot) => protectStateCredentialsForSave(snapshot, credentialStore()),
       { rotateBackups },
     );
     if (rotateBackups) lastStateBackupAt = now;

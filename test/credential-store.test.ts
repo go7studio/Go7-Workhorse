@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CredentialStore, hydrateStateCredentials, protectStateCredentials, type SecretCipher } from "../electron/credential-store";
+import {
+  CredentialStore,
+  hydrateStateCredentials,
+  protectStateCredentials,
+  protectStateCredentialsForSave,
+  type SecretCipher,
+} from "../electron/credential-store";
 
 const cipher: SecretCipher = {
   isEncryptionAvailable: () => true,
@@ -42,6 +48,28 @@ test("credential protection refuses plaintext persistence when OS encryption is 
     () => protectStateCredentials({ settings: { llms: { custom: { apiKey: "secret" } }, customBots: [] } }, vault),
     /unavailable/,
   );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a locked credential vault does not freeze non-secret desk saves", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-credentials-locked-save-"));
+  const unavailable: SecretCipher = { ...cipher, isEncryptionAvailable: () => false };
+  const vault = new CredentialStore(path.join(root, "credentials.json"), unavailable);
+  const saved = protectStateCredentialsForSave(
+    {
+      sessions: [{ id: "chat-1", title: "Saved while locked" }],
+      settings: {
+        llms: { custom: { apiKey: "default-secret", credentialId: "custom-default" } },
+        customBots: [{ id: "bot-1", apiKey: "bot-secret", credentialId: "custom-bot-bot-1" }],
+      },
+    },
+    vault,
+  );
+  assert.equal(saved.sessions[0]?.title, "Saved while locked");
+  assert.equal(saved.settings.llms.custom.apiKey, undefined);
+  assert.equal(saved.settings.customBots[0]?.apiKey, undefined);
+  assert.equal(saved.settings.customBots[0]?.credentialId, "custom-bot-bot-1");
+  assert.equal(fs.existsSync(path.join(root, "credentials.json")), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

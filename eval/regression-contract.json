@@ -24,7 +24,7 @@
     },
     {
       "id": "REG-003",
-      "behavior": "Session approvals and OS credential access do not create duplicate or indefinite prompts across one installed app identity.",
+      "behavior": "Session approvals and OS credential access do not create duplicate prompts, and a locked vault cannot freeze redacted non-secret desk saves.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["SEC-S1", "SEC-S4"],
       "rubric": ["SEC-01", "SEC-07"],

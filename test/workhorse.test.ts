@@ -5975,10 +5975,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(pane, /useLayoutEffect/);
   assert.match(pane, /MediaPaintProvider/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /observer\.observe\(content\)/);
-  assert.match(pane, /startTransition/);
-  assert.match(pane, /scheduleAfterPaint/);
-  assert.match(pane, /startTransition\(\(\) => setOpenFor\(sessionId\)\)/);
-  assert.match(pane, /transcriptOpen && session/);
+  // A deferred openFor flag stayed false on Orchestrate chats: worker streams
+  // kept cancelling the after-paint open, so the composer worked on an empty
+  // thread. Group the live messages up front; first-paint windowing is enough.
+  assert.match(pane, /transcriptGrouper\.current\.group\(session\.messages\)/);
+  assert.doesNotMatch(pane, /transcriptOpen/);
+  assert.doesNotMatch(pane, /setOpenFor/);
+  assert.doesNotMatch(pane, /scheduleAfterPaint/);
+  assert.doesNotMatch(pane, /startTransition/);
   assert.match(pane, /followLatestClass/);
   assert.doesNotMatch(pane, /CHAT_LOOKS/);
   assert.doesNotMatch(pane, /chat-look-/);

@@ -4973,13 +4973,15 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(wakeSetup, />POST to</);
   assert.match(wakeSetup, />key</);
   assert.match(wakeSetup, /type="password"[\s\S]*type="password"/);
-  assert.match(wakeSetup, /grok-bot-webhook\.mp4/);
-  assert.match(wakeSetup, /<video/);
-  assert.match(wakeSetup, /preload="metadata"/);
+  assert.match(
+    wakeSetup,
+    /github\.com\/go7studio\/Go7-Workhorse\/blob\/main\/docs\/GROK-BOT\.md#instant-chat-walkthrough/,
+  );
+  assert.doesNotMatch(wakeSetup, /\.mp4|<video/);
   assert.match(wakeSetup, /If a saved pair stops working/);
   assert.match(settings, /Finish instant chat/);
   assert.doesNotMatch(wakeSetup, /type="url"/);
-  assert.equal(existsSync(path.join(ROOT, "src", "assets", "grok-bot-webhook.mp4")), true);
+  assert.equal(existsSync(path.join(ROOT, "src", "assets", "grok-bot-webhook.mp4")), false);
   const grokBotGuide = readFileSync(path.join(ROOT, "docs", "GROK-BOT.md"), "utf8");
   assert.match(grokBotGuide, /media\/grok-bot-webhook\.gif/);
   assert.match(grokBotGuide, /If the pair ever stops working/);

@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 
-const grokBotWebhookVideo = new URL("../assets/grok-bot-webhook.mp4", import.meta.url).href;
-
 export function GrokBotWakeSetup() {
   const store = useStore();
   const status = store.grokBotWakeStatus;
@@ -11,7 +9,6 @@ export function GrokBotWakeSetup() {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
-  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
 
   useEffect(() => {
     if (status?.configured) setEditing(false);
@@ -82,24 +79,14 @@ export function GrokBotWakeSetup() {
               <strong> When a webhook fires</strong>. Open that trigger, then copy <strong>POST to</strong> and
               <strong> key</strong> here. Never send either value in chat.
             </p>
-            <div className="grok-bot-wake-guide-actions">
-              <button className="grok-bot-wake-guide" type="button" onClick={() => setWalkthroughOpen((open) => !open)}>
-                {walkthroughOpen ? "Hide walkthrough" : "Watch walkthrough"}
-              </button>
-              <a
-                className="grok-bot-wake-guide"
-                href="https://github.com/go7studio/Go7-Workhorse/blob/main/docs/GROK-BOT.md#instant-chat-walkthrough"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Read the steps
-              </a>
-            </div>
-            {walkthroughOpen ? (
-              <video className="grok-bot-wake-video" controls muted playsInline preload="metadata">
-                <source src={grokBotWebhookVideo} type="video/mp4" />
-              </video>
-            ) : null}
+            <a
+              className="grok-bot-wake-guide"
+              href="https://github.com/go7studio/Go7-Workhorse/blob/main/docs/GROK-BOT.md#instant-chat-walkthrough"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open walkthrough
+            </a>
             <p className="grok-bot-wake-stale">If a saved pair stops working, reopen the routine and replace both values.</p>
           </details>
           <div className="grok-bot-wake-fields">

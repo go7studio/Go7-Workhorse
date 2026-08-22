@@ -4928,34 +4928,16 @@ html.pane-dragging * {
   font-weight: 560;
 }
 
-.grok-bot-wake-guide-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
-}
-
 .grok-bot-wake-guide {
-  padding: 0;
-  border: 0;
-  background: transparent;
+  display: inline-block;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--accent);
-  cursor: pointer;
   text-decoration: none;
 }
 
 .grok-bot-wake-guide:hover {
   text-decoration: underline;
-}
-
-.grok-bot-wake-video {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #000;
 }
 
 .grok-bot-wake-help .grok-bot-wake-stale {

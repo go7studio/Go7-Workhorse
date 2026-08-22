@@ -1532,8 +1532,8 @@
           "steps": [
             "Load Cursor Composer and API plan sources and record each source timestamp and meter.",
             "Apply distinct fixture usage to each pool and verify one cannot change the other.",
-            "Run a bounded Cursor ACP turn with no usage event and verify Workhorse records unknown rather than invented tokens.",
-            "Restart and verify both pool histories and unknown turn usage remain truthful."
+            "Run a bounded Cursor ACP turn with no usage event and verify Workhorse books a Cursor estimate on the matching Composer or API pool, not leftover.",
+            "Restart and verify both pool histories and Cursor estimates remain truthful."
           ]
         },
         {
@@ -1620,13 +1620,13 @@
         },
         {
           "id": "USG-07",
-          "criterion": "Cursor Composer and API plan pools stay separate and missing ACP turn usage is represented as unknown.",
+          "criterion": "Cursor Composer and API plan pools stay separate; missing ACP turn usage is estimated for Cursor only.",
           "weight": 3,
           "type": "scoping",
           "testability": "auto-partial",
           "profiles": ["cursor-acp"],
           "scenarios": ["USG-S4"],
-          "passCriteria": "Composer and API rings use independent source records, totals, thresholds, Watch decisions, and official weekly/monthly period labels; an ACP turn without a usage event creates no synthetic token count.",
+          "passCriteria": "Composer and API rings use independent source records, totals, thresholds, Watch decisions, and official weekly/monthly period labels; an ACP turn without a usage event books a Cursor estimate on that pool, never leftover; leftover stays unknown when official JSON is missing.",
           "evidence": "Cursor plan payloads, lane keys, Usage and Watch screenshots, raw ACP events, finalized usage row, and restart state."
         },
         {

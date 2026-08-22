@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { estimateChatContext, type ChatContextStats, type ContextCategory } from "../lib/context-stats";
+import { estimateChatContext, formatRetainedPct, retainedContextStats, type ChatContextStats, type ContextCategory } from "../lib/context-stats";
 import { contextWindowFor, formatWindow } from "../lib/models";
 import { deskInk } from "../lib/settings";
 import { useStoreSelector } from "../lib/store";
@@ -192,7 +192,7 @@ export function ContextMeter({
     };
   }, [referenceOnly, session?.id, session?.provider, session?.status]);
 
-  const stats = live ?? estimate;
+  const stats = estimate ? retainedContextStats(estimate, live) : null;
   const shownUsed = stats?.used ?? 0;
   const shownTotal = stats?.total ?? fallbackWindow ?? 0;
   const animatedUsed = useAnimatedNumber(shownUsed, session?.id);
@@ -266,7 +266,7 @@ export function ContextMeter({
           <header>
             <strong>Retained context</strong>
             <span>
-              {formatTokens(stats.used)} of {formatTokens(stats.total)} · {stats.usagePct}%
+              {formatTokens(stats.used)} of {formatTokens(stats.total)} · {formatRetainedPct(stats.used, stats.usagePct)}
             </span>
           </header>
           <div className="context-stack" aria-hidden="true">

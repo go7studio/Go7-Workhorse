@@ -156,7 +156,10 @@ export function estimateChatContext(input: {
   const { tokens: messageTokens, count } = estimateMessageTokens(input.messages);
   const total = Math.max(1, Math.round(input.windowSize));
   const raw = Math.max(0, Math.round(input.contextUsed));
-  const used = raw > total ? messageTokens : raw;
+  // 0 and overshoot are missing occupancy, not an empty or overflowed window.
+  let used = raw > 0 && raw <= total ? raw : 0;
+  if (used < messageTokens) used = messageTokens;
+  if (used > total) used = Math.min(messageTokens, total);
   const free = Math.max(0, total - used);
   const leftover = Math.max(0, used - messageTokens);
   const occupying: ContextCategory[] = [];
@@ -185,4 +188,19 @@ export function estimateChatContext(input: {
     occupying,
     extra: [],
   };
+}
+
+/** Live Grok session-info wins only when it reports occupancy. used=0 is missing. */
+export function retainedContextStats(
+  estimate: ChatContextStats,
+  live?: ChatContextStats | null,
+): ChatContextStats {
+  if (live && live.used > 0) return live;
+  return estimate;
+}
+
+/** Occupancy share for the meter. 123 of 200k is not "0%" empty — it is under one percent. */
+export function formatRetainedPct(used: number, pct: number): string {
+  if (used > 0 && pct < 1) return "<1%";
+  return `${Math.max(0, Math.round(pct))}%`;
 }

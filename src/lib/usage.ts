@@ -12,6 +12,7 @@ import {
   type CursorWatchKey,
 } from "./cursor-lane";
 import { isGrokBotUrl } from "./custom-http-identity";
+import { estimateMessageTokens } from "./context-stats";
 import type { CustomBot, GrokPlanProduct, GrokPlanUsage, LlmLink, ProviderId, Session, Settings, UsageDraft, UsageEvent, UsageRange, UsageSource } from "./types";
 
 export type UsageTotals = {
@@ -45,6 +46,182 @@ const EMPTY: UsageTotals = {
 
 export function eventTotal(event: UsageEvent): number {
   return event.inputTokens + event.outputTokens + event.cacheWriteTokens;
+}
+
+/** Fallback when a vendor turn reports no billed tokens. ~4 characters per token. */
+export function estimateTurnTokens(userText: string, assistantText: string): { inputTokens: number; outputTokens: number } {
+  const tokens = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return 0;
+    return Math.max(1, Math.round(trimmed.length / 4));
+  };
+  return { inputTokens: tokens(userText), outputTokens: tokens(assistantText) };
+}
+
+type CursorTurnMessage = {
+  id?: string;
+  role?: string;
+  kind?: string;
+  text?: string;
+  createdAt?: number;
+};
+
+function messageAt(message: CursorTurnMessage): number {
+  return typeof message.createdAt === "number" && message.createdAt > 0 ? message.createdAt : 0;
+}
+
+export function completedCursorTurns(
+  messages: CursorTurnMessage[],
+): Array<{ userText: string; assistantText: string; at: number }> {
+  const turns: Array<{ userText: string; assistantText: string; at: number }> = [];
+  let pending: { text: string; at: number } | undefined;
+  let assistantParts: string[] = [];
+  let assistantAt = 0;
+  const flush = () => {
+    if (!pending) return;
+    const assistantText = assistantParts.join("\n").trim();
+    if (assistantText) {
+      turns.push({
+        userText: pending.text,
+        assistantText,
+        at: assistantAt || pending.at,
+      });
+    }
+    pending = undefined;
+    assistantParts = [];
+    assistantAt = 0;
+  };
+  for (const message of messages) {
+    const text = (message.text ?? "").trim();
+    if (message.role === "user" && text) {
+      flush();
+      pending = { text, at: messageAt(message) };
+      continue;
+    }
+    if (!pending) continue;
+    if (message.role === "assistant" || message.kind === "thought") {
+      if (text) assistantParts.push(text);
+      assistantAt = messageAt(message) || assistantAt;
+    }
+  }
+  flush();
+  return turns;
+}
+
+/** Character estimate for the current turn: this user, this assistant, then thoughts if Composer wrote no prose. */
+export function estimateFromSessionTurn(input: {
+  messages: CursorTurnMessage[];
+  assistantId?: string;
+  queuedText?: string;
+}): { inputTokens: number; outputTokens: number } {
+  const messages = input.messages;
+  let assistantIndex = input.assistantId ? messages.findIndex((message) => message.id === input.assistantId) : -1;
+  if (assistantIndex < 0) {
+    assistantIndex = messages.reduce(
+      (found, message, index) => (message.role === "assistant" && !message.kind ? index : found),
+      -1,
+    );
+  }
+  const before = assistantIndex >= 0 ? messages.slice(0, assistantIndex) : messages;
+  const user = [...before].reverse().find((message) => message.role === "user");
+  const assistant = assistantIndex >= 0 ? messages[assistantIndex] : undefined;
+  const thoughts = (assistantIndex >= 0 ? messages.slice(assistantIndex + 1) : [])
+    .filter((message) => message.kind === "thought")
+    .map((message) => (message.text ?? "").trim())
+    .filter(Boolean);
+  const output = [(assistant?.text ?? "").trim(), (input.queuedText ?? "").trim(), ...thoughts]
+    .filter(Boolean)
+    .join("\n");
+  return estimateTurnTokens(user?.text ?? "", output);
+}
+
+/**
+ * One stored event for a finished turn. A vendor total wins. Cursor estimates
+ * when ACP only sent a context gauge — otherwise Composer/API cards stay at
+ * 0 in / 0 out. Grok, Claude, and Codex never invent a bill.
+ */
+export function settleTurnUsage(input: {
+  pending: UsageDraft[];
+  provider: ProviderId;
+  model: string;
+  projectId?: string;
+  sessionId?: string;
+  customBotId?: string;
+  estimate?: { inputTokens: number; outputTokens: number };
+}): UsageDraft | undefined {
+  const folded = input.pending.length ? finalizeTurnUsage(input.pending) : undefined;
+  if (folded && usageHasBilledTokens(folded)) {
+    return {
+      ...folded,
+      lane: folded.provider === "cursor" ? folded.lane ?? cursorUsageLane(folded.model) : folded.lane,
+    };
+  }
+  if (
+    input.provider === "cursor" &&
+    input.estimate &&
+    usageHasBilledTokens({ ...input.estimate, cacheReadTokens: 0, cacheWriteTokens: 0 })
+  ) {
+    return {
+      provider: input.provider,
+      model: input.model,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      customBotId: input.customBotId,
+      lane: cursorUsageLane(input.model),
+      inputTokens: input.estimate.inputTokens,
+      outputTokens: input.estimate.outputTokens,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "estimate",
+      contextUsed: folded?.contextUsed,
+      costUsd: folded?.costUsd,
+    };
+  }
+  return undefined;
+}
+
+/** Fill in Cursor turns that ACP never billed. Gauge/zero events do not satisfy turn count. */
+export function backfillCursorUsage(
+  sessions: Array<Pick<Session, "id" | "provider" | "model" | "projectId"> & { messages: CursorTurnMessage[] }>,
+  usage: UsageEvent[],
+): UsageEvent[] {
+  const extras: UsageEvent[] = [];
+  for (const session of sessions) {
+    if (session.provider !== "cursor") continue;
+    const turns = completedCursorTurns(session.messages);
+    const billed = usage.filter(
+      (event) => event.sessionId === session.id && event.provider === "cursor" && usageHasBilledTokens(event),
+    );
+    if (billed.length >= turns.length) continue;
+    // Billed events cover the earliest completed turns. Skip those so a live
+    // `use_*` row is not duplicated as `use_cursor_*_0` while a later turn
+    // stays missing.
+    for (const [index, turn] of turns.entries()) {
+      if (index < billed.length) continue;
+      const estimated = estimateTurnTokens(turn.userText, turn.assistantText);
+      if (!usageHasBilledTokens(estimated)) continue;
+      const id = `use_cursor_${session.id}_${index}`;
+      if (usage.some((event) => event.id === id) || extras.some((event) => event.id === id)) continue;
+      const occupying = estimateMessageTokens(session.messages).tokens;
+      const occupancy = occupancyFromUsage({}, contextWindowFor(session.provider, session.model), occupying);
+      extras.push({
+        id,
+        at: turn.at || Date.now(),
+        provider: "cursor",
+        model: session.model,
+        projectId: session.projectId ?? undefined,
+        sessionId: session.id,
+        lane: cursorUsageLane(session.model),
+        inputTokens: estimated.inputTokens,
+        outputTokens: estimated.outputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        source: "estimate",
+        ...(occupancy ? { contextUsed: occupancy } : {}),
+      });
+    }
+  }
+  return extras;
 }
 
 function cursorLaneFromRecord(record: Record<string, unknown>, model: string): CursorUsageLane {
@@ -123,13 +300,17 @@ export function applyCompactOutcome(input: {
 export function occupancyFromUsage(
   draft: { contextUsed?: number; inputTokens?: number; cacheReadTokens?: number },
   windowSize: number,
+  occupyingTokens = 0,
 ): number | undefined {
   const window = Math.max(0, Math.round(windowSize));
   const reported = draft.contextUsed;
-  if (typeof reported === "number" && Number.isFinite(reported) && reported >= 0) {
+  // used=0 is missing occupancy, not an empty window.
+  if (typeof reported === "number" && Number.isFinite(reported) && reported > 0) {
     const value = Math.round(reported);
     if (window === 0 || value <= window) return value;
   }
+  const occupied = Math.max(0, Math.round(occupyingTokens));
+  if (occupied > 0 && (window === 0 || occupied <= window)) return occupied;
   const billed = (draft.inputTokens ?? 0) + (draft.cacheReadTokens ?? 0);
   if (billed > 0 && (window === 0 || billed <= window)) return Math.round(billed);
   return undefined;
@@ -859,7 +1040,13 @@ export function heatCellBots(
   const rows = new Map<string, HeatBot>();
   for (const event of events) {
     const bot = customBotForEvent(event, customBots);
-    const provider = bot ? "custom" : usageToneForModel(event.model, event.provider);
+    // Composer-pool Cursor models keep Cursor grey. Do not paint Cursor Grok
+    // as Grok white on the leftover ring's own card.
+    const provider = bot
+      ? "custom"
+      : event.provider === "cursor" && cursorWatchLane(event.model) === "cursor:cursor-models"
+        ? "cursor"
+        : usageToneForModel(event.model, event.provider);
     const look = provider === "custom" ? undefined : looks[provider];
     const key = bot ? `bot:${bot.id}` : provider;
     const current = rows.get(key);
@@ -1367,6 +1554,24 @@ export function formatTokens(value: number): string {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+/** Settings → Usage drill-in facts. Empty billed events stay "-" / 0, not leftover %. */
+export function usageFocusFacts(
+  card: Pick<UsageTotals, "events" | "inputTokens" | "outputTokens">,
+  focusedEvents: Array<{ sessionId?: string; contextUsed?: number; at: number }>,
+): { apiTraffic: string; requests: number; chats: number; latestContext: string } {
+  const latest = focusedEvents.reduce<{ at: number; used: number } | null>((kept, event) => {
+    if (event.contextUsed === undefined) return kept;
+    if (!kept || event.at > kept.at) return { at: event.at, used: event.contextUsed };
+    return kept;
+  }, null);
+  return {
+    apiTraffic: card.events > 0 ? formatTokens(card.inputTokens + card.outputTokens) : "-",
+    requests: card.events,
+    chats: new Set(focusedEvents.map((event) => event.sessionId).filter(Boolean)).size,
+    latestContext: latest ? formatTokens(latest.used) : "-",
+  };
+}
+
 /** The whole prompt the model held: fresh input plus what it read back from cache. */
 export function promptTokens(row: { inputTokens: number; cacheReadTokens?: number }): number {
   return row.inputTokens + (row.cacheReadTokens ?? 0);
@@ -1800,13 +2005,9 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
-    // Older builds guessed Cursor/custom tokens from transcript characters and
-    // backfilled Cursor rows on restart. Those are not provider measurements.
-    // Drop the rows during hydration so a missing count remains unknown.
-    if (
-      record.source === "estimate" ||
-      (record.provider === "cursor" && typeof record.id === "string" && record.id.startsWith("use_cursor_"))
-    ) {
+    // Cursor estimates are the product fallback when ACP omits a bill. Drop
+    // guessed rows for every other vendor so a missing count stays unknown.
+    if (record.source === "estimate" && record.provider !== "cursor") {
       continue;
     }
     if (

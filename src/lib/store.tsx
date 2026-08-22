@@ -231,14 +231,17 @@ import { withPortableHistory } from "./portable-history";
 import { createPortableCheckpoint, messagesForPortableReplay } from "./portable-compaction";
 import { appendLiveTool, appendOpenTurnUser, recordLiveCompact } from "./session-ledger";
 import { fitModelImages, hasSendableAttachment } from "./images";
+import { estimateMessageTokens } from "./context-stats";
 import { buildSessionPreface } from "./context-preface";
 import {
   applyCompactOutcome,
   applyUsageContext,
-  finalizeTurnUsage,
+  backfillCursorUsage,
+  estimateFromSessionTurn,
   normalizeUsage,
   occupancyFromUsage,
   rehomeCustomUsage,
+  settleTurnUsage,
   usageHasBilledTokens,
   usageHomeForReport,
 } from "./usage";
@@ -564,7 +567,7 @@ function hydrate(value: unknown): AppState {
     : [];
   const rawSessions = reconcilePersistedLineups(normalizedSessions);
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
-  const usage = restored;
+  const usage = [...backfillCursorUsage(rawSessions, restored), ...restored];
   const sessions = listedChats(
     applyUsageContext(rawSessions, usage).map((session) => {
       // Local intent titles only for defaults / old prompt slices. Do not rewrite
@@ -665,12 +668,21 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
 }
 
 function occupancyForSession(
-  session: { provider: ProviderId; model: string } | undefined,
+  session: { provider: ProviderId; model: string; messages?: Parameters<typeof estimateMessageTokens>[0] } | undefined,
   draft: UsageDraft,
   seen?: number,
 ): number | undefined {
-  if (seen !== undefined) return seen;
-  return occupancyFromUsage(draft, session ? contextWindowFor(session.provider, session.model) : 0);
+  if (typeof seen === "number" && seen > 0) return seen;
+  const window = session ? contextWindowFor(session.provider, session.model) : 0;
+  if (draft.source === "estimate") {
+    const occupying = session?.messages ? estimateMessageTokens(session.messages).tokens : 0;
+    return occupancyFromUsage(
+      { contextUsed: typeof draft.contextUsed === "number" && draft.contextUsed > 0 ? draft.contextUsed : undefined },
+      window,
+      occupying,
+    );
+  }
+  return occupancyFromUsage(draft, window);
 }
 
 function settlePlanAssignment(
@@ -2158,15 +2170,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     const live = vendorSendTarget(session.provider);
     if (live !== "preview") {
+      const previousAssistantId = grokAssistantId.current[session.id];
       const assistantId = uid("msg");
       grokAssistantId.current[session.id] = assistantId;
       const leftover = grokUsagePending.current[session.id];
       if (leftover?.length) {
-        const folded = finalizeTurnUsage(leftover);
-        if (usageHasBilledTokens(folded)) {
+        const leftoverSettled = settleTurnUsage({
+          pending: leftover,
+          provider: session.provider,
+          model: session.model,
+          projectId: session.projectId ?? undefined,
+          sessionId: session.id,
+          customBotId: session.provider === "custom" ? session.customBotId : undefined,
+          estimate: estimateFromSessionTurn({
+            messages: session.messages,
+            assistantId: previousAssistantId,
+            queuedText: grokChunkQueue.current[session.id] ?? "",
+          }),
+        });
+        if (leftoverSettled && usageHasBilledTokens(leftoverSettled)) {
           recordUsage({
-            ...folded,
-            contextUsed: occupancyForSession(session, folded, grokContextSeen.current[session.id]),
+            ...leftoverSettled,
+            contextUsed: occupancyForSession(session, leftoverSettled, grokContextSeen.current[session.id]),
           });
         }
       }
@@ -2929,8 +2954,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const recordUsage = useCallback((draft: UsageDraft) => {
-    // Provider silence is unknown, not permission to estimate a bill.
-    if (draft.source === "estimate") return;
+    // Cursor estimates when ACP omits a bill. Grok/Claude/Codex stay unknown.
+    if (draft.source === "estimate" && draft.provider !== "cursor") return;
     const model = normalizeModelId(draft.provider, draft.model);
     const tokenCount = (value: unknown) => {
       const number = Number(value);
@@ -5946,14 +5971,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         const session = stateRef.current.sessions.find((item) => item.id === event.sessionId);
-        if (pending?.length) {
-          const folded = finalizeTurnUsage(pending);
-          if (usageHasBilledTokens(folded)) {
-            recordUsage({
-              ...folded,
-              contextUsed: occupancyForSession(session, folded, grokContextSeen.current[event.sessionId]),
-            });
-          }
+        const settled = settleTurnUsage({
+          pending: pending ?? [],
+          provider: session?.provider ?? "grok",
+          model: session?.model ?? "",
+          projectId: session?.projectId ?? undefined,
+          sessionId: event.sessionId,
+          customBotId: session?.provider === "custom" ? session.customBotId : undefined,
+          estimate: session
+            ? estimateFromSessionTurn({
+                messages: session.messages,
+                assistantId: grokAssistantId.current[event.sessionId],
+                queuedText: grokChunkQueue.current[event.sessionId] ?? "",
+              })
+            : undefined,
+        });
+        if (settled && usageHasBilledTokens(settled)) {
+          recordUsage({
+            ...settled,
+            contextUsed: occupancyForSession(session, settled, grokContextSeen.current[event.sessionId]),
+          });
         }
         const turn = learningTurns.current[event.sessionId];
         const assistantId = grokAssistantId.current[event.sessionId];
@@ -6073,18 +6110,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (event.type === "error") {
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
-        if (pending?.length) {
-          const folded = finalizeTurnUsage(pending);
-          if (usageHasBilledTokens(folded)) {
-            const session = stateRef.current.sessions.find((item) => item.id === event.sessionId);
-            recordUsage({
-              ...folded,
-              contextUsed: occupancyForSession(session, folded, grokContextSeen.current[event.sessionId]),
-            });
-          }
+        const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+        const settled = settleTurnUsage({
+          pending: pending ?? [],
+          provider: failedSession?.provider ?? "grok",
+          model: failedSession?.model ?? "",
+          projectId: failedSession?.projectId ?? undefined,
+          sessionId: event.sessionId,
+          customBotId: failedSession?.provider === "custom" ? failedSession.customBotId : undefined,
+          estimate: failedSession
+            ? estimateFromSessionTurn({
+                messages: failedSession.messages,
+                assistantId: grokAssistantId.current[event.sessionId],
+                queuedText: grokChunkQueue.current[event.sessionId] ?? "",
+              })
+            : undefined,
+        });
+        if (settled && usageHasBilledTokens(settled)) {
+          recordUsage({
+            ...settled,
+            contextUsed: occupancyForSession(failedSession, settled, grokContextSeen.current[event.sessionId]),
+          });
         }
         const assistantId = grokAssistantId.current[event.sessionId];
-        const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const turn = learningTurns.current[event.sessionId];
         if (turn && failedSession && assistantId) {
           const evidence = agentTurnEvidence({

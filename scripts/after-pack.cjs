@@ -54,8 +54,21 @@ function writeBuildMarker(appPath, env = process.env) {
   return marker;
 }
 
+function writeWinBuildMarker(appOutDir, env = process.env) {
+  const marker = {
+    channel: requiresStableIdentity(env) ? "release" : "development",
+  };
+  const markerPath = path.join(appOutDir, "resources", BUILD_MARKER_FILE);
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, `${JSON.stringify(marker)}\n`, { mode: 0o644 });
+  return marker;
+}
+
 async function afterPack(context) {
-  if (context.electronPlatformName !== "darwin") return;
+  if (context.electronPlatformName !== "darwin") {
+    if (context.electronPlatformName === "win32") writeWinBuildMarker(context.appOutDir);
+    return;
+  }
   assertStableReleaseIdentity();
 
   const appName = `${context.packager.appInfo.productFilename}.app`;
@@ -77,4 +90,5 @@ module.exports.requiresStableIdentity = requiresStableIdentity;
 module.exports.assertStableReleaseIdentity = assertStableReleaseIdentity;
 module.exports.BUILD_MARKER_FILE = BUILD_MARKER_FILE;
 module.exports.writeBuildMarker = writeBuildMarker;
+module.exports.writeWinBuildMarker = writeWinBuildMarker;
 module.exports.afterPack = afterPack;

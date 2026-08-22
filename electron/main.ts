@@ -89,6 +89,7 @@ import type { Settings } from "../src/lib/types";
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
+  WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_USER_DATA_DIR,
   WORKHORSE_USER_DATA_DIR,
   parseWorkhorseBuildChannel,
@@ -151,16 +152,21 @@ function requireSessionCwd(value?: string | null): string {
 }
 
 function packagedBuildChannel() {
-  if (!app.isPackaged || process.platform !== "darwin") return app.isPackaged ? "release" : "development";
-  try {
-    return parseWorkhorseBuildChannel(
-      fs.readFileSync(path.join(process.resourcesPath, WORKHORSE_BUILD_MARKER), "utf8"),
-    );
-  } catch {
-    // Releases before the marker shipped are production builds. Defaulting to
-    // release preserves their existing user data and Safe Storage item.
-    return "release";
+  if (!app.isPackaged) return "development";
+  const files = [
+    path.join(process.resourcesPath, WORKHORSE_BUILD_MARKER),
+    path.join(path.dirname(process.execPath), "resources", WORKHORSE_BUILD_MARKER),
+  ];
+  for (const file of files) {
+    try {
+      return parseWorkhorseBuildChannel(fs.readFileSync(file, "utf8"));
+    } catch {
+      /* try the next packaged marker location */
+    }
   }
+  // Releases before the marker shipped are production builds. Defaulting to
+  // release preserves their existing user data and Safe Storage item.
+  return "release";
 }
 
 // Development shells and ad-hoc packages must never request Keychain access.
@@ -168,6 +174,9 @@ function packagedBuildChannel() {
 // make agent-driven tests independent of each local build's code requirement.
 const runtimeIdentity = workhorseRuntimeIdentity(app.isPackaged, packagedBuildChannel());
 app.setName(runtimeIdentity.name);
+const windowsAppUserModelId =
+  runtimeIdentity.userDataDirectory === WORKHORSE_DEV_USER_DATA_DIR ? WORKHORSE_DEV_APP_ID : WORKHORSE_APP_ID;
+if (process.platform === "win32") app.setAppUserModelId(windowsAppUserModelId);
 
 function useVolatileCredentials() {
   return runtimeIdentity.volatileCredentials || workhorseVolatileCredentials();
@@ -489,7 +498,7 @@ app.whenReady().then(async () => {
     })
     .catch((error) => console.warn("Workhorse Codex worker cleanup failed", error));
   if (process.platform === "win32") {
-    app.setAppUserModelId(WORKHORSE_APP_ID);
+    app.setAppUserModelId(windowsAppUserModelId);
   }
   applyStoredClaudeToken();
   debugStartup("credentials ready");

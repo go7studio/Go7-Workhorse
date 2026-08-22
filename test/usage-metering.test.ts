@@ -755,6 +755,7 @@ test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok wh
   const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(pane, /tone=\{focused\.provider\}[\s\S]*color=\{focused\.color\}/);
   const event = {
+    id: "u_cursor_grey",
     at: 1,
     provider: "cursor" as const,
     model: "cursor-grok-4.6",

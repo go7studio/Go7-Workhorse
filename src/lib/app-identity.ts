@@ -45,26 +45,36 @@ export type WorkhorseInstallTarget = {
   productionApp: string;
 };
 
+export function appBundleName(name: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "darwin" ? `${name}.app` : name;
+}
+
 /** Install dest for a packaged desk. Callers inject the Applications folder. */
-export function productionAppPath(applicationsDir: string): string {
-  return path.join(applicationsDir, `${WORKHORSE_APP_NAME}.app`);
+export function productionAppPath(applicationsDir: string, platform: NodeJS.Platform = process.platform): string {
+  return path.join(applicationsDir, appBundleName(WORKHORSE_APP_NAME, platform));
 }
 
 export function workhorseInstallTarget(input: {
   channel: WorkhorseBuildChannel;
   applicationsDir: string;
+  platform?: NodeJS.Platform;
 }): WorkhorseInstallTarget {
+  const platform = input.platform ?? process.platform;
   const identity = workhorseRuntimeIdentity(true, input.channel);
-  const appName = `${identity.name}.app`;
+  const appName = appBundleName(identity.name, platform);
   return {
     channel: input.channel,
     appName,
     dest: path.join(input.applicationsDir, appName),
     userDataDirectory: identity.userDataDirectory,
-    productionApp: productionAppPath(input.applicationsDir),
+    productionApp: productionAppPath(input.applicationsDir, platform),
   };
 }
 
-export function tryInstallWouldReplaceProduction(dest: string, applicationsDir: string): boolean {
-  return path.normalize(dest) === path.normalize(productionAppPath(applicationsDir));
+export function tryInstallWouldReplaceProduction(
+  dest: string,
+  applicationsDir: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return path.normalize(dest) === path.normalize(productionAppPath(applicationsDir, platform));
 }

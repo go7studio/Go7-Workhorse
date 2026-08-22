@@ -9,7 +9,7 @@ export type CustomPlanUsage = GrokPlanUsage;
 export { customPlanRemainsUrl };
 
 export const GROK_BOT_LEFTOVER_FILE = "grok-bot-leftover.json";
-const GROK_BOT_LEFTOVER_MAX_AGE_MS = 30 * 60 * 1000;
+const GROK_BOT_LEFTOVER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The shim and Workhorse share one reading beside grok-bot-inbox. */
 export function grokBotLeftoverPath(userData: string): string {

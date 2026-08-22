@@ -1553,6 +1553,9 @@ test("Grok Bot weekly leftover reads the local account-menu fixture and missing 
     baseUrl: "http://127.0.0.1:8787/v1",
     apiKey: "",
     grokBotLeftoverPath: fixturePath,
+    fetchImpl: async () => {
+      throw new Error("Grok Bot leftover must not poll a network meter");
+    },
     readFileImpl: async (filePath, encoding) => {
       assert.equal(filePath, fixturePath);
       assert.equal(encoding, "utf8");
@@ -1601,11 +1604,11 @@ test("Grok Bot weekly leftover reads the local account-menu fixture and missing 
   );
   assert.equal(
     parseGrokBotPlanUsage(
-      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T02:39:59.999Z" },
+      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-21T03:09:59.999Z" },
       now,
     ),
     undefined,
-    "a reading older than 30 minutes stays unknown",
+    "a reading older than 24 hours stays unknown",
   );
   assert.equal(
     parseGrokBotPlanUsage(

@@ -60,7 +60,7 @@ Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, and Gemini stay
 unknown until those hosts publish leftover JSON. Grok Bot is a local
 OpenAI-compatible shim on 127.0.0.1. Its separate weekly ring reads
 `grok-bot-leftover.json` beside `grok-bot-inbox`, using numeric `usedPercent`
-plus ISO `resetsAt` and `asOf` fields; missing, invalid, expired, or 30-minute-old readings stay unknown. The
+plus ISO `resetsAt` and `asOf` fields; missing, invalid, expired, or over-30-minute-old readings stay unknown. The
 connection fails closed if the shim is down. On Mac, the desk keeps that
 shim listening on 127.0.0.1:8787 across restarts. `grok-bot-wake.json` stays
 in userData and is never committed. It is not a fifth stock vendor.

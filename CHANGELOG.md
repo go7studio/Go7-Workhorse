@@ -8,6 +8,15 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.29](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.28...v0.6.29) (2026-08-22)
+
+
+### Bug Fixes
+
+* keep Orchestrate transcripts visible while workers stream ([#145](https://github.com/go7studio/Go7-Workhorse/issues/145)) ([ec6632a](https://github.com/go7studio/Go7-Workhorse/commit/ec6632af4c38c14b3914a2c17a501cb714235201))
+* remove stale Grok Bot usage snapshots ([0eb6b73](https://github.com/go7studio/Go7-Workhorse/commit/0eb6b737560b5ef4154d1b18cd215126b90266b9))
+* restore Grok Bot leftover reader ([#144](https://github.com/go7studio/Go7-Workhorse/issues/144)) ([37ece8a](https://github.com/go7studio/Go7-Workhorse/commit/37ece8a73ba6688df64751d3fcad6526418cd9e5))
+
 ## [0.6.28](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.27...v0.6.28) (2026-08-22)
 
 

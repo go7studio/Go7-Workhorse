@@ -1097,6 +1097,22 @@ test("Workhorse chat tools read as talking to another chat", () => {
   assert.equal(prettyToolTitle("Edit File"), "Edit File");
   assert.equal(describePeerTool("Mcp.Workhorse.Workhorse Ask Chat", "Test")?.title, "Asking Test");
   assert.equal(permissionActionLabel("workhorse_workhorse_list_chats"), "list chats");
+  // Grok sometimes sends the whole command as toolCall.title. That used to
+  // become "Grok wants to $steamLibs = …" and grow the ask card taller than
+  // the window, so Allow/Deny sat off-screen.
+  const pastedShell = [
+    "$steamLibs = @(\"$env:ProgramFiles(x86)\\Steam\\steamapps\\libraryfolders.vdf\")",
+    "Write-Host \"=== registry ===\"",
+    "Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | Where-Object { $_.DisplayName -match \"Aseprite\" }",
+  ].join("\n");
+  assert.equal(prettyToolTitle(pastedShell), "Run a command");
+  assert.equal(permissionActionLabel(pastedShell), "run a command");
+  assert.equal(permissionActionLabel("`Get-ChildItem D:\\SteamLibrary`"), "run a command");
+  const grokAgent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
+  assert.match(grokAgent, /prettyToolTitle\(title\)/);
+  const permissionCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(permissionCss, /permission-card strong[\s\S]*-webkit-line-clamp:\s*3/);
+  assert.match(permissionCss, /\.permission-card \{[\s\S]*max-height:\s*min\(/);
   assert.equal(
     formatPermissionDetail(
       '{"variant":"UseTool","tool_name":"workhorse_workhorse_list_chats","tool_input":{}}',

@@ -1546,6 +1546,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
 });
 
 test("Grok Bot weekly leftover reads the local account-menu fixture and missing stays unknown", async () => {
+  const now = Date.parse("2026-08-22T03:10:00.000Z");
   const fixturePath = grokBotLeftoverPath(path.join("fixture", "Go7 Workhorse"));
   assert.equal(fixturePath, path.join("fixture", "Go7 Workhorse", "grok-bot-leftover.json"));
   const plan = await fetchCustomPlanUsage({
@@ -1555,8 +1556,11 @@ test("Grok Bot weekly leftover reads the local account-menu fixture and missing 
     readFileImpl: async (filePath, encoding) => {
       assert.equal(filePath, fixturePath);
       assert.equal(encoding, "utf8");
-      return JSON.stringify({ weekly: { usedPercent: 27, resetsAt: "2026-08-28T12:00:00-04:00" } });
+      return JSON.stringify({
+        weekly: { usedPercent: 27, resetsAt: "2026-08-28T12:00:00-04:00", asOf: "2026-08-22T03:00:00.000Z" },
+      });
     },
+    now,
   });
   assert.equal(plan?.usedPercent, 27);
   assert.equal(plan?.leftPercent, 73);
@@ -1566,10 +1570,51 @@ test("Grok Bot weekly leftover reads the local account-menu fixture and missing 
   assert.equal(plan?.products[0]?.product, "weekly");
   assert.equal(plan?.products[0]?.usagePercent, 27);
 
-  const onePercentUsed = parseGrokBotPlanUsage({ usedPercent: 1, resetsAt: "2026-08-28T16:00:00.000Z" });
+  const onePercentUsed = parseGrokBotPlanUsage(
+    { usedPercent: 1, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+    now,
+  );
   assert.equal(onePercentUsed?.leftPercent, 99, "1 means 1% used, not a 0–1 fraction");
-  assert.equal(parseGrokBotPlanUsage({ leftPercent: 9, resetsAt: "2026-08-28T16:00:00.000Z" }), undefined);
-  assert.equal(parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "not-a-date" }), undefined);
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { leftPercent: 9, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+      now,
+    ),
+    undefined,
+  );
+  assert.equal(
+    parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "not-a-date", asOf: "2026-08-22T03:00:00.000Z" }, now),
+    undefined,
+  );
+  assert.equal(
+    parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z" }, now),
+    undefined,
+    "missing asOf stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "not-a-date" },
+      now,
+    ),
+    undefined,
+    "malformed asOf stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T02:39:59.999Z" },
+      now,
+    ),
+    undefined,
+    "a reading older than 30 minutes stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-22T03:10:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+      now,
+    ),
+    undefined,
+    "an expired reset stays unknown immediately",
+  );
 
   const missing = await fetchCustomPlanUsage({
     baseUrl: "http://127.0.0.1:8787/v1",

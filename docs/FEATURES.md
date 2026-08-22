@@ -65,9 +65,9 @@ The port binds loopback only. A webhook wake file, when present, stays in
 userData as `grok-bot-wake.json` and is a different secret from the loopback
 token. Workhorse does not put those keys in git or in Grok Bot memory. The separate
 weekly ring reads `grok-bot-leftover.json` beside `grok-bot-inbox`, using
-numeric `usedPercent` and ISO `resetsAt` fields; a missing or invalid reading
-stays unknown. The connection fails closed if the shim is down. It is not a
-fifth stock vendor.
+numeric `usedPercent` plus ISO `resetsAt` and `asOf` fields; missing, invalid,
+expired, or over-30-minute-old readings stay unknown. The connection fails
+closed if the shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 

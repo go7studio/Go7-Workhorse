@@ -1502,8 +1502,8 @@
           "executor": "electron",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "steps": [
-            "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic; capture lane, timestamp, and source.",
-            "Return a missing, unauthorized, rate-limited, and stale source and verify every affected ring remains unknown rather than inferred.",
+            "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic, plus the local Grok Bot snapshot; capture lane, timestamp, and source.",
+            "Return a missing, unauthorized, rate-limited, malformed, stale, and expired source and verify every affected ring remains unknown rather than inferred.",
             "Set a small fixture budget or deterministic Watch threshold.",
             "Trigger a hold without spending live money and verify the reason plus override scope.",
             "Restart and verify durable marks/permits behave as documented."

@@ -463,6 +463,32 @@ export function effortForRoutingTier(
   return withEffort(provider, model, override ?? preferred);
 }
 
+/**
+ * Thinking level for a spawned worker.
+ *
+ * Explicit effort wins. A reused worker keeps the level it already has unless
+ * the caller asked to change it — otherwise a second orchestrate of the same
+ * bot would re-infer "review" as deep and bump medium to high. Auto-route
+ * still picks from task depth for a new worker. A named bot with no effort
+ * inherits the parent instead of re-deriving from the slice prose.
+ */
+export function spawnEffortFor(input: {
+  provider: ProviderId;
+  model: string;
+  tier: RoutingTaskTier;
+  requested?: EffortLevel | null;
+  routed?: EffortLevel | null;
+  reused?: EffortLevel | null;
+  inherited?: EffortLevel | null;
+}): EffortLevel | null {
+  return effortForRoutingTier(
+    input.provider,
+    input.model,
+    input.tier,
+    input.requested ?? input.reused ?? input.routed ?? input.inherited,
+  );
+}
+
 /** Time horizon the vendor's allowance actually resets over, in ms. */
 export function routingPeriodMs(capacity: RoutingCapacity | undefined, now = Date.now()): number {
   const MS_DAY = 24 * 60 * 60 * 1000;

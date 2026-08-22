@@ -122,6 +122,20 @@ test("a different bot, model or effort is a different worker", () => {
   );
 });
 
+test("omitting effort reuses that bot at its current thinking level", () => {
+  const wave = { ...scope, waveChildIds: ["w1"] };
+  const medium = worker({ effort: "medium" });
+  assert.equal(
+    findReusableWorker({ provider: "grok", model: "grok-4.6", seed: "inherit" }, [medium], wave)?.id,
+    "w1",
+  );
+  assert.equal(
+    findReusableWorker({ provider: "grok", model: "grok-4.6", seed: "inherit", effort: "high" }, [medium], wave),
+    null,
+    "an explicit high still will not sit on a medium worker",
+  );
+});
+
 test("a worker is never borrowed from another chat or project", () => {
   // Reaching across would hand a worker context from a business it was
   // never shown.

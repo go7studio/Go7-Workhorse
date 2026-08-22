@@ -125,7 +125,7 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, describeRoutingMiss, effortForRoutingTier, inferRoutingTier, outcomesFromLearningEvents, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn } from "./routing";
+import { chooseRoutingDecision, describeRoutingMiss, inferRoutingTier, outcomesFromLearningEvents, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn, spawnEffortFor } from "./routing";
 import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
@@ -4509,24 +4509,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               parent,
               latest.settings.customBots,
             );
-            const spec = {
-              ...resolvedSpec,
-              effort: effortForRoutingTier(
-                resolvedSpec.provider,
-                resolvedSpec.model,
-                selectedTier,
-                requestedEffort ?? routeDecision?.effort,
-              ),
-            };
-            if (routingIdentityExcluded({
-              provider: spec.provider,
-              model: spec.model,
-              label: spec.title,
-              customBotId: spec.customBotId,
-            }, effectiveExclusions)) {
-              await replyAsk({ error: `${spec.title} is excluded by this orchestration policy` });
-              return;
-            }
             /*
              * Hand the slice back to the worker that already did the last one.
              *
@@ -4536,6 +4518,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
              * the tree and the task. Only an IDLE worker of this chat, in this
              * project, is reused; a busy one still gets a colleague, because
              * running several at once is the point of the desk.
+             *
+             * Resolve reuse before thinking level. A named or inherited worker
+             * keeps its effort unless the user asked to change it. Deriving
+             * effort first from the slice ("review" → high) then writing it
+             * onto Wren was how medium became high on the next orchestrate.
              */
             const spawnSeed =
               payload.seed === "fresh" ? ("fresh" as const)
@@ -4567,10 +4554,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ?? (wantsIdleReuse
                 ? findReusableWorker(
                     {
-                      provider: spec.provider,
-                      model: spec.model,
-                      effort: spec.effort,
-                      customBotId: spec.customBotId,
+                      provider: resolvedSpec.provider,
+                      model: resolvedSpec.model,
+                      // No explicit effort: match that bot at whatever thinking
+                      // level it already has, then keep it.
+                      ...(requestedEffort ? { effort: requestedEffort } : {}),
+                      customBotId: resolvedSpec.customBotId,
                       seed: spawnSeed,
                     },
                     latest.sessions as unknown as WorkerRecord[],
@@ -4583,6 +4572,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     },
                   )
                 : null);
+            const spec = {
+              ...resolvedSpec,
+              effort: spawnEffortFor({
+                provider: resolvedSpec.provider,
+                model: resolvedSpec.model,
+                tier: selectedTier,
+                requested: requestedEffort,
+                routed: routeDecision?.effort,
+                reused: reusedWorker?.effort,
+                inherited: resolvedSpec.effort,
+              }),
+            };
+            if (routingIdentityExcluded({
+              provider: spec.provider,
+              model: spec.model,
+              label: spec.title,
+              customBotId: spec.customBotId,
+            }, effectiveExclusions)) {
+              await replyAsk({ error: `${spec.title} is excluded by this orchestration policy` });
+              return;
+            }
             if (vendorSendTarget(spec.provider) === "preview") {
               await replyAsk({ error: `${providerById(spec.provider).name} is not connected yet` });
               return;

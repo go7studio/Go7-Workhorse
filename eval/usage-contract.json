@@ -6,6 +6,7 @@
     "Provider-supplied weekly and monthly periods stay accurate in Usage, Watch, and bot-roster copy.",
     "Cursor Auto belongs to the Other Models API pool while Composer and Cursor Grok stay in the Composer pool.",
     "Grok Bot leftover is unknown when its local snapshot is missing, malformed, expired, or older than 24 hours.",
+    "A Grok Bot writer without real runtime weeklyUsage is not a producer and must not refresh the snapshot.",
     "Retired model aliases merge into one canonical model row without changing token totals."
   ],
   "requiredRubric": ["USG-01", "USG-02", "USG-03", "USG-04", "USG-05", "USG-06", "USG-07", "USG-08"],

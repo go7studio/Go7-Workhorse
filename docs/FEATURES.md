@@ -25,7 +25,8 @@ ring.
 **Workhorse Link** is how any outside app calls this desk — Codex, Claude
 Code, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
 Link connects each with one button. Connect Grok Bot copies the same launch
-plus install instructions to paste into Grok Bot once (Mac or Windows). Copy
+plus install instructions to paste into Grok Bot once (Mac or Windows), including
+its runtime-owned weekly-usage exporter contract. Copy
 generic MCP configuration covers the rest. Every app gets the same eight
 tools: capabilities, list/read/ask chats, query leftover and availability,
 delegate a task, continue a finished wave, worker status. The first call,
@@ -63,9 +64,15 @@ on that port on Mac and Windows (login keepalive, restart if it dies). Each
 install mints its own loopback token; completions refuse any other caller.
 The port binds loopback only. A webhook wake file, when present, stays in
 userData as `grok-bot-wake.json` and is a different secret from the loopback
-token. Workhorse does not put those keys in git or in Grok Bot memory. The
-weekly ring stays unknown until Cursor publishes a documented meter.
-It fails closed if the shim is down. It is not a fifth stock vendor.
+token. Workhorse does not put those keys in git or in Grok Bot memory. The separate
+weekly ring reads `grok-bot-leftover.json` beside `grok-bot-inbox`, using
+numeric `usedPercent` plus ISO `resetsAt` and `asOf` fields; missing, invalid,
+expired, or over-30-minute-old readings stay unknown. Workhorse never writes that
+file and never folds Cursor Composer / Other Models monthly leftover onto this ring.
+The Grok Bot handoff replaces older setup and requires fresh runtime values on
+launch, after work, and every 15 minutes while active; it never asks a model to
+invent them.
+The connection fails closed if the shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 

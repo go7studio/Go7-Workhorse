@@ -136,8 +136,10 @@ import {
 import {
   customPlanRemainsUrl,
   fetchCustomPlanUsage,
+  grokBotLeftoverPath,
   leftoverFromRemainingPercent,
   parseCustomPlanUsage,
+  parseGrokBotPlanUsage,
   weeklyIsUnlimited,
 } from "../electron/custom-plan";
 import { knownContextWindow, probeCustomHttp } from "../electron/custom-http";
@@ -1543,15 +1545,118 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
   assert.equal(probe.contextWindow, 1_000_000);
 });
 
-test("Grok Bot weekly leftover stays unknown without a documented meter", async () => {
+test("Grok Bot weekly leftover reads the local leftover fixture and missing/stale stays unknown", async () => {
+  const now = Date.parse("2026-08-22T03:10:00.000Z");
+  const fixturePath = grokBotLeftoverPath(path.join("fixture", "Go7 Workhorse"));
+  assert.equal(fixturePath, path.join("fixture", "Go7 Workhorse", "grok-bot-leftover.json"));
+  assert.equal(
+    grokBotLeftoverPath("ignored", { GROK_BOT_LEFTOVER_FILE: path.join("override", "grok-bot-leftover.json") }),
+    path.join("override", "grok-bot-leftover.json"),
+  );
   const plan = await fetchCustomPlanUsage({
     baseUrl: "http://127.0.0.1:8787/v1",
+    apiKey: "",
+    grokBotLeftoverPath: fixturePath,
+    readFileImpl: async (filePath, encoding) => {
+      assert.equal(filePath, fixturePath);
+      assert.equal(encoding, "utf8");
+      return JSON.stringify({
+        usedPercent: 27,
+        resetsAt: "2026-08-28T12:00:00-04:00",
+        asOf: "2026-08-22T03:00:00.000Z",
+      });
+    },
+    now,
+  });
+  assert.equal(plan?.usedPercent, 27);
+  assert.equal(plan?.leftPercent, 73);
+  assert.equal(plan?.period, "weekly");
+  assert.equal(plan?.resetsAt, "2026-08-28T16:00:00.000Z");
+  assert.equal(plan?.observedAt, "2026-08-22T03:00:00.000Z");
+  assert.equal(plan?.prepaidBalance, 0);
+  assert.equal(plan?.products[0]?.product, "weekly");
+  assert.equal(plan?.products[0]?.usagePercent, 27);
+
+  const liveShape = parseGrokBotPlanUsage(
+    {
+      usedPercent: 23.062179,
+      resetsAt: "2026-08-26T19:24:20.000Z",
+      asOf: "2026-08-22T13:31:56.000Z",
+    },
+    Date.parse("2026-08-22T13:45:00.000Z"),
+  );
+  assert.ok(liveShape);
+  assert.ok(Math.abs((liveShape?.usedPercent ?? 0) - 23.062179) < 1e-6);
+  assert.ok(Math.abs((liveShape?.leftPercent ?? 0) - 76.937821) < 1e-6);
+
+  const onePercentUsed = parseGrokBotPlanUsage(
+    { usedPercent: 1, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+    now,
+  );
+  assert.equal(onePercentUsed?.leftPercent, 99, "1 means 1% used, not a 0–1 fraction");
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { leftPercent: 9, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+      now,
+    ),
+    undefined,
+  );
+  assert.equal(
+    parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "not-a-date", asOf: "2026-08-22T03:00:00.000Z" }, now),
+    undefined,
+  );
+  assert.equal(
+    parseGrokBotPlanUsage({ usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z" }, now),
+    undefined,
+    "missing asOf stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "not-a-date" },
+      now,
+    ),
+    undefined,
+    "malformed asOf stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-28T16:00:00.000Z", asOf: "2026-08-22T02:39:59.999Z" },
+      now,
+    ),
+    undefined,
+    "a reading older than 30 minutes stays unknown",
+  );
+  assert.equal(
+    parseGrokBotPlanUsage(
+      { usedPercent: 27, resetsAt: "2026-08-22T03:10:00.000Z", asOf: "2026-08-22T03:00:00.000Z" },
+      now,
+    ),
+    undefined,
+    "an expired reset stays unknown immediately",
+  );
+
+  const blockedHttp = await fetchCustomPlanUsage({
+    baseUrl: "http://127.0.0.1:8787/v1",
     apiKey: "local",
+    grokBotLeftoverPath: fixturePath,
     fetchImpl: async () => {
-      throw new Error("Grok Bot must not poll an undocumented meter");
+      throw new Error("Grok Bot must not poll an HTTP meter");
+    },
+    readFileImpl: async () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
     },
   });
-  assert.equal(plan, undefined);
+  assert.equal(blockedHttp, undefined);
+
+  const missing = await fetchCustomPlanUsage({
+    baseUrl: "http://127.0.0.1:8787/v1",
+    apiKey: "local",
+    grokBotLeftoverPath: fixturePath,
+    readFileImpl: async () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+  });
+  assert.equal(missing, undefined);
 });
 
 test("Grok Bot probe fails closed when the local shim is down", async () => {

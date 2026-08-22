@@ -1503,10 +1503,10 @@
           "executor": "electron",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
           "steps": [
-            "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic; capture lane, timestamp, and source.",
-            "Run the Grok Bot connection handoff and verify it leaves weekly usage unknown without asking an agent or script to write a snapshot.",
-            "Seed an obsolete Grok Bot plan in saved state and verify Usage plus read-only capacity both discard it.",
-            "Return a missing, unauthorized, rate-limited, malformed, stale, and expired source and verify every affected ring remains unknown rather than inferred.",
+            "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic, plus the local Grok Bot leftover file; capture lane, timestamp, and source.",
+            "Inspect Connect Grok Bot and verify its handoff replaces older setup, requires an LLM-free producer with real weeklyUsage percentUsed and nextResetMs on launch, after work, and every 15 minutes, and forbids hand edits, model guesses, private Cursor hosts, and copied vendor pools.",
+            "Return a missing, unauthorized, rate-limited, malformed, stale (asOf older than 30 minutes), and expired resetsAt source and verify every affected ring remains unknown rather than inferred.",
+            "Confirm the Grok Bot custom ring never receives Cursor Composer or Other Models monthly leftover.",
             "Set a small fixture budget or deterministic Watch threshold.",
             "Trigger a hold without spending live money and verify the reason plus override scope.",
             "Restart and verify durable marks/permits behave as documented."

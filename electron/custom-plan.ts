@@ -1,10 +1,33 @@
 import https from "node:https";
+import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { customMeterForUrl, customPlanRemainsUrl } from "../src/lib/custom-meters";
-import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
+import { customHttpIdentityHeaders, isGrokBotUrl } from "../src/lib/custom-http-identity";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
 export { customPlanRemainsUrl };
+
+export const GROK_BOT_LEFTOVER_FILE = "grok-bot-leftover.json";
+/** Match leftover-status.py: asOf older than 30 minutes is unknown. */
+export const GROK_BOT_LEFTOVER_MAX_AGE_MS = 30 * 60 * 1000;
+
+/**
+ * Resolve the Grok Bot weekly leftover snapshot path.
+ * Env overrides: GROK_BOT_LEFTOVER_FILE / WORKHORSE_LEFTOVER_PATH (full file),
+ * else WORKHORSE_USERDATA / filename, else Electron userData / filename.
+ * Workhorse only reads this file; it never writes it.
+ */
+export function grokBotLeftoverPath(
+  userData: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const override = env.GROK_BOT_LEFTOVER_FILE?.trim() || env.WORKHORSE_LEFTOVER_PATH?.trim();
+  if (override) return override;
+  const fromEnvUserData = env.WORKHORSE_USERDATA?.trim();
+  if (fromEnvUserData) return path.join(fromEnvUserData, GROK_BOT_LEFTOVER_FILE);
+  return path.join(userData, GROK_BOT_LEFTOVER_FILE);
+}
 
 function numberVal(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -34,6 +57,53 @@ function remainingMsToIso(value: unknown, now = Date.now()): string | undefined 
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
+}
+
+function isoDate(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const stamp = Date.parse(value);
+  return Number.isNaN(stamp) ? undefined : new Date(stamp).toISOString();
+}
+
+/**
+ * Grok Bot weekly leftover handoff. Source field is percent *used*; leftover is 100 − used.
+ * Missing, malformed, expired resetsAt, or asOf older than 30 minutes → unknown (never invent 0/100).
+ * Never maps Cursor Composer / Other Models monthly pools onto this ring.
+ */
+export function parseGrokBotPlanUsage(raw: unknown, now = Date.now()): CustomPlanUsage | undefined {
+  const root = asRecord(raw);
+  const nested = asRecord(root.weekly);
+  const row = Object.keys(nested).length ? nested : root;
+  const used = numberVal(
+    firstDefined(
+      row.usedPercent,
+      row.used_percent,
+      row.weeklyUsagePercent,
+      row.weekly_usage_percent,
+      row.usagePercent,
+      row.usage_percent,
+    ),
+  );
+  const resetsAt = isoDate(
+    firstDefined(row.resetsAt, row.resets_at, row.resetAt, row.reset_at, row.weeklyResetAt, row.weekly_reset_at),
+  );
+  const asOf = isoDate(firstDefined(row.asOf, row.as_of, root.asOf, root.as_of, root.updatedAt));
+  if (!Number.isFinite(used) || used < 0 || used > 100 || !resetsAt || !asOf) return undefined;
+  const resetMs = Date.parse(resetsAt);
+  const asOfMs = Date.parse(asOf);
+  if (!Number.isFinite(resetMs) || !Number.isFinite(asOfMs)) return undefined;
+  if (resetMs <= now) return undefined;
+  if (now - asOfMs > GROK_BOT_LEFTOVER_MAX_AGE_MS) return undefined;
+  const usedPercent = clampPercent(used);
+  return {
+    usedPercent,
+    leftPercent: clampPercent(100 - usedPercent),
+    period: "weekly",
+    resetsAt,
+    observedAt: asOf,
+    prepaidBalance: 0,
+    products: [{ product: "weekly", label: "Weekly", usagePercent: usedPercent, resetsAt }],
+  };
 }
 
 /** MiniMax usage_percent / remaining_percent is leftover, not consumed. */
@@ -345,8 +415,17 @@ export async function fetchCustomPlanUsage(input: {
   apiKey: string;
   model?: string;
   fetchImpl?: typeof fetch;
+  grokBotLeftoverPath?: string;
+  readFileImpl?: (filePath: string, encoding: "utf8") => Promise<string>;
+  now?: number;
 }): Promise<CustomPlanUsage | undefined> {
   try {
+    if (isGrokBotUrl(input.baseUrl)) {
+      const filePath = input.grokBotLeftoverPath?.trim();
+      if (!filePath) return undefined;
+      const read = input.readFileImpl ?? ((target: string, encoding: "utf8") => readFile(target, encoding));
+      return parseGrokBotPlanUsage(JSON.parse(await read(filePath, "utf8")), input.now ?? Date.now());
+    }
     const meter = customMeterForUrl(input.baseUrl);
     const url = customPlanRemainsUrl(input.baseUrl);
     const apiKey = input.apiKey.trim();

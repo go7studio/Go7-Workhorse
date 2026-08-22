@@ -241,6 +241,7 @@ export function linkGrokBotOneshot(server: McpServerConfig, options: LinkGrokBot
   const userData = grokBotUserData(platform, opts.userData);
   const bridge = grokBotJoin(platform, userData, "workhorse-bridge.json");
   const wake = grokBotJoin(platform, userData, "grok-bot-wake.json");
+  const leftover = grokBotJoin(platform, userData, "grok-bot-leftover.json");
   const tools = LINK_TOOLS.join(", ");
   const mcp = linkGenericMcpConfig(server).trim();
   return `Workhorse Link — one-shot install for Grok Bot
@@ -268,7 +269,7 @@ ${mcp}
 
 6. Workhorse on the user's ${desk} keeps a private loopback shim (127.0.0.1 only). Each Workhorse install mints its own loopback token; only that desk may call completions. If they copied a Grok Bot webhook routine, they put Webhook URL and Webhook key in ${wake} themselves. Never store that key, the loopback token, or an open bind in this memory, this chat, or the remote box.
 
-7. Usage stays unknown until Cursor exposes a documented meter; do not write or infer it.
+7. Weekly leftover: replace any older setup with this contract. Grok Bot is the sole producer; Workhorse only reads ${leftover}. On the user's ${desk}, install and enable an LLM-free runtime hook that receives Grok Bot's real weeklyUsage percentUsed and nextResetMs. Run it now, on launch, after completed work, and every 15 minutes while active. It atomically writes {"usedPercent": percentUsed, "resetsAt": nextResetMs as ISO-8601, "asOf": current ISO-8601 time}. Failed refreshes keep the last valid file; the routine stays quiet when healthy and reports one producer error when blocked. Never hand-edit it, ask a model for the number, read a login token, scrape private Cursor hosts, or copy SuperGrok, Cursor Composer, or Other Models. Missing, expired, or older-than-30-minute readings stay unknown. Finish by running ${cli} capacity and confirm Grok Bot is known with the same used and remaining percentages. Do not claim setup complete before that check passes.
 `;
 }
 

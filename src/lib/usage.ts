@@ -63,6 +63,8 @@ type CursorTurnMessage = {
   role?: string;
   kind?: string;
   text?: string;
+  thought?: string;
+  images?: import("./types").ChatMessage["images"];
   createdAt?: number;
 };
 
@@ -202,7 +204,14 @@ export function backfillCursorUsage(
       if (!usageHasBilledTokens(estimated)) continue;
       const id = `use_cursor_${session.id}_${index}`;
       if (usage.some((event) => event.id === id) || extras.some((event) => event.id === id)) continue;
-      const occupying = estimateMessageTokens(session.messages).tokens;
+      const occupying = estimateMessageTokens(
+        session.messages.map((message) => ({
+          text: message.text ?? "",
+          kind: message.kind as import("./types").ChatMessage["kind"],
+          thought: message.thought,
+          images: message.images,
+        })),
+      ).tokens;
       const occupancy = occupancyFromUsage({}, contextWindowFor(session.provider, session.model), occupying);
       extras.push({
         id,

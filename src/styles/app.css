@@ -5501,6 +5501,10 @@ html.pane-dragging * {
   background: var(--codex);
 }
 
+.usage-split-track i.cursor {
+  background: var(--cursor);
+}
+
 .usage-split-track i.custom {
   background: var(--custom);
 }

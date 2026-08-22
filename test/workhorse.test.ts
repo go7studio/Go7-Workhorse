@@ -311,16 +311,22 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(WORKHORSE_BUILD_MARKER, "workhorse-build.json");
   assert.equal(WORKHORSE_APP_ID, "com.go7studio.workhorse");
   const apps = path.join("C:", "Apps");
-  const development = workhorseInstallTarget({ channel: "development", applicationsDir: apps });
-  const release = workhorseInstallTarget({ channel: "release", applicationsDir: apps });
+  const development = workhorseInstallTarget({ channel: "development", applicationsDir: apps, platform: "darwin" });
+  const release = workhorseInstallTarget({ channel: "release", applicationsDir: apps, platform: "darwin" });
   assert.equal(development.dest, path.join(apps, "Go7 Workhorse Dev.app"));
   assert.equal(release.dest, path.join(apps, "Go7 Workhorse.app"));
   assert.notEqual(development.dest, release.dest);
   assert.equal(development.userDataDirectory, WORKHORSE_DEV_USER_DATA_DIR);
   assert.equal(release.userDataDirectory, WORKHORSE_USER_DATA_DIR);
   assert.notEqual(development.userDataDirectory, release.userDataDirectory);
-  assert.equal(tryInstallWouldReplaceProduction(development.dest, apps), false);
-  assert.equal(tryInstallWouldReplaceProduction(release.dest, apps), true);
+  assert.equal(tryInstallWouldReplaceProduction(development.dest, apps, "darwin"), false);
+  assert.equal(tryInstallWouldReplaceProduction(release.dest, apps, "darwin"), true);
+  const winDev = workhorseInstallTarget({ channel: "development", applicationsDir: apps, platform: "win32" });
+  const winRel = workhorseInstallTarget({ channel: "release", applicationsDir: apps, platform: "win32" });
+  assert.equal(winDev.dest, path.join(apps, "Go7 Workhorse Dev"));
+  assert.equal(winRel.dest, path.join(apps, "Go7 Workhorse"));
+  assert.equal(tryInstallWouldReplaceProduction(winDev.dest, apps, "win32"), false);
+  assert.equal(tryInstallWouldReplaceProduction(winRel.dest, apps, "win32"), true);
 });
 
 test("filterCommands returns the shipped command list and filters it", () => {
@@ -558,6 +564,10 @@ test("selectSurface and titlebarLabel follow the draft chrome rules", () => {
   assert.match(main, /titleBarOverlay/);
   assert.match(main, /setMenu\(null\)/);
   assert.match(main, /workhorseRuntimeIdentity\(app\.isPackaged, packagedBuildChannel\(\)\)/);
+  assert.match(main, /WORKHORSE_DEV_APP_ID/);
+  assert.match(main, /setAppUserModelId\(windowsAppUserModelId\)/);
+  assert.match(main, /if \(!app\.isPackaged\) return "development"/);
+  assert.doesNotMatch(main, /process\.platform !== "darwin"\) return app\.isPackaged \? "release"/);
   assert.match(main, /app\.setName\(runtimeIdentity\.name\)/);
   assert.match(main, /runtimeIdentity\.userDataDirectory/);
   assert.match(main, /runtimeIdentity\.volatileCredentials \|\| workhorseVolatileCredentials\(\)/);
@@ -1594,7 +1604,7 @@ test("normalizeUsage keeps Cursor composer events and their lane", () => {
   assert.equal(hydrated[0].lane, "cursor-models");
 });
 
-test("normalizeUsage removes guessed rows and repairs invalid persisted counts", () => {
+test("normalizeUsage keeps Cursor estimates, drops other guessed rows, and repairs invalid counts", () => {
   const hydrated = normalizeUsage([
     {
       id: "use_estimate",
@@ -1614,6 +1624,15 @@ test("normalizeUsage removes guessed rows and repairs invalid persisted counts",
       outputTokens: 4,
     },
     {
+      id: "use_grok_guess",
+      at: 2.5,
+      provider: "grok",
+      model: "grok-4.6",
+      inputTokens: 12,
+      outputTokens: 4,
+      source: "estimate",
+    },
+    {
       id: "use_measured",
       at: 3,
       provider: "codex",
@@ -1626,17 +1645,19 @@ test("normalizeUsage removes guessed rows and repairs invalid persisted counts",
       source: "turn",
     },
   ]);
-  assert.equal(hydrated.length, 1);
+  assert.equal(hydrated.filter((event) => event.provider === "cursor").length, 2);
+  assert.equal(hydrated.find((event) => event.id === "use_grok_guess"), undefined);
+  const measured = hydrated.find((event) => event.id === "use_measured");
   assert.deepEqual(
     {
-      input: hydrated[0]?.inputTokens,
-      output: hydrated[0]?.outputTokens,
-      cacheRead: hydrated[0]?.cacheReadTokens,
-      cacheWrite: hydrated[0]?.cacheWriteTokens,
+      input: measured?.inputTokens,
+      output: measured?.outputTokens,
+      cacheRead: measured?.cacheReadTokens,
+      cacheWrite: measured?.cacheWriteTokens,
     },
     { input: 0, output: 5, cacheRead: 0, cacheWrite: 9 },
   );
-  assert.equal(hydrated[0]?.costUsd, undefined);
+  assert.equal(measured?.costUsd, undefined);
 });
 
 test("collapseInflatedUsage drops used-as-input snapshots and duplicate finals", () => {
@@ -1733,6 +1754,8 @@ test("collapseInflatedUsage drops used-as-input snapshots and duplicate finals",
   assert.equal(occupancyFromUsage({ contextUsed: 70_000, inputTokens: 17_050, cacheReadTokens: 510_000 }, 500_000), 70_000);
   assert.equal(occupancyFromUsage({ contextUsed: 527_934, inputTokens: 17_050, cacheReadTokens: 510_000 }, 500_000), undefined);
   assert.equal(occupancyFromUsage({ inputTokens: 17_050, cacheReadTokens: 96_768 }, 500_000), 113_818);
+  assert.equal(occupancyFromUsage({ contextUsed: 0 }, 200_000), undefined);
+  assert.equal(occupancyFromUsage({ contextUsed: 0 }, 200_000, 9_700), 9_700);
 
   const over = applyUsageContext(
     [
@@ -3283,6 +3306,28 @@ test("estimateChatContext attributes visible messages and leftover occupancy", (
   assert.equal(overflow.used, 100);
   assert.equal(overflow.total, 500_000);
   assert.ok(overflow.used <= overflow.total);
+
+  const missing = estimateChatContext({
+    contextUsed: 0,
+    windowSize: 200_000,
+    messages: [
+      { text: "a".repeat(2000), kind: undefined },
+      { text: "b".repeat(2000), kind: undefined },
+    ],
+  });
+  const occupyingMessages = missing.occupying.find((row) => row.id === "messages");
+  assert.equal(missing.used, occupyingMessages?.tokens);
+  assert.ok(missing.used > 0);
+  assert.ok(missing.usagePct > 0);
+  assert.equal(missing.used, 1000);
+
+  const empty = estimateChatContext({
+    contextUsed: 0,
+    windowSize: 200_000,
+    messages: [],
+  });
+  assert.equal(empty.used, 0);
+  assert.equal(empty.usagePct, 0);
 });
 
 test("context ring opens this-chat stats instead of the Usage page", () => {
@@ -3291,6 +3336,7 @@ test("context ring opens this-chat stats instead of the Usage page", () => {
   assert.match(meter, /This chat/);
   assert.match(meter, /grokSessionInfo/);
   assert.match(meter, /estimateChatContext/);
+  assert.match(meter, /retainedContextStats/);
   assert.match(meter, /shownUsed/);
   assert.match(meter, /useAnimatedNumber/);
   assert.match(meter, /strokeDashoffset/);
@@ -9438,7 +9484,12 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /codesign/);
   assert.match(tryDesk, /CSC_IDENTITY_AUTO_DISCOVERY = "false"/);
   assert.match(tryDesk, /delete env\.CSC_LINK/);
+  assert.match(tryDesk, /packWindowsDir/);
+  assert.match(tryDesk, /installWinDevApp/);
+  assert.match(tryDesk, /--workhorse-user-data=/);
+  assert.match(tryDesk, /Start-Process/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
+  assert.doesNotMatch(tryDesk, /taskkill[\s\S]*Go7 Workhorse\.exe/);
   assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);
   const scripts = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")).scripts as { try?: string; "try:dry"?: string };
   assert.match(scripts.try ?? "", /try-desk\.ts/);
@@ -9451,12 +9502,21 @@ test("the repo tracks no symlinks and states its working rules", () => {
       [path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), path.join(ROOT, "scripts", "try-desk.ts"), "--dry", "--applications-dir", apps],
       { cwd: ROOT, encoding: "utf8" },
     );
-    assert.match(stdout, /Go7 Workhorse Dev\.app/);
+    assert.match(stdout, /Go7 Workhorse Dev/);
     assert.match(stdout, /userData Go7 Workhorse Dev/);
     assert.match(stdout, /channel development/);
     assert.match(stdout, /does not replace/);
-    assert.ok(stdout.includes(path.join(apps, "Go7 Workhorse Dev.app")));
-    assert.ok(!stdout.includes(`try desk → ${path.join(apps, "Go7 Workhorse.app")}`));
+    const devDest =
+      process.platform === "darwin"
+        ? path.join(apps, "Go7 Workhorse Dev.app")
+        : path.join(apps, "Go7 Workhorse Dev");
+    const prodDest =
+      process.platform === "darwin" ? path.join(apps, "Go7 Workhorse.app") : path.join(apps, "Go7 Workhorse");
+    assert.ok(stdout.includes(`try desk → ${devDest}`));
+    assert.ok(
+      !stdout.split(/\r?\n/).some((line) => line.trim() === `try desk → ${prodDest}`),
+      "try dest must not be the production app",
+    );
   } finally {
     rmSync(apps, { recursive: true, force: true });
   }

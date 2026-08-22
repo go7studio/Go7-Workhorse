@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "unknownUsagePolicy": "A completed, failed, canceled, or restarted turn without an authoritative provider usage event creates no token row. Workhorse never estimates or invents token counts.",
+  "unknownUsagePolicy": "A completed, failed, canceled, or restarted turn without an authoritative provider usage event creates no token row for Grok, Claude, or Codex. Workhorse never estimates or invents token counts for those vendors. Cursor is estimated at four characters a token only when ACP omits a bill; Composer and API pools stay separate. Leftover rings stay official and unknown when official JSON is missing.",
   "presentationInvariants": [
     "A connected model with no authoritative usage event says No token data instead of displaying measured zeroes.",
     "Provider-supplied weekly and monthly periods stay accurate in Usage, Watch, and bot-roster copy.",

@@ -250,5 +250,7 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false, "a named custom bot wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");
   const store = read("src/lib/store.tsx");
-  assert.match(store, /effort: effortForRoutingTier\(\s*resolvedSpec\.provider,\s*resolvedSpec\.model,\s*selectedTier,\s*requestedEffort \?\? routeDecision\?\.effort,?\s*\)/);
+  assert.match(store, /effort: spawnEffortFor\(\{/);
+  assert.match(store, /requested: requestedEffort/);
+  assert.match(store, /reused: reusedWorker\?\.effort/);
 });

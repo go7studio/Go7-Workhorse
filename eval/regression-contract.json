@@ -15,7 +15,7 @@
     },
     {
       "id": "REG-002",
-      "behavior": "Cursor Composer and API plan pools remain separate while absent ACP token usage stays unknown.",
+      "behavior": "Cursor Composer and API plan pools remain separate. Absent ACP token usage is estimated for Cursor only; leftover stays unknown when official JSON is missing.",
       "profiles": ["cursor-acp"],
       "scenarios": ["USG-S1", "USG-S4"],
       "rubric": ["USG-01", "USG-07"],

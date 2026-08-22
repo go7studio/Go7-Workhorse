@@ -1,21 +1,34 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { acpUpdateUsageSource, classifyAcpUpdate } from "../electron/grok-agent";
 import { parseCustomUsage } from "../electron/custom-http";
 import { largestKnownContextWindow } from "../src/lib/models";
 import {
   applyCompactOutcome,
+  backfillCursorUsage,
   billedCompactUsage,
   byModel,
+  cellDotBackground,
+  deskUsageCards,
+  heatCellBots,
   eventTotal,
+  estimateFromSessionTurn,
   finalizeTurnUsage,
   formatIoLine,
   leftoverForCard,
   normalizeUsage,
+  occupancyFromUsage,
   repairSummedPromptTurn,
+  settleTurnUsage,
   sumRequestBills,
+  usageFocusFacts,
 } from "../src/lib/usage";
 import type { UsageDraft } from "../src/lib/types";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Every fixture below is a shape a vendor really sends, taken from the
 // adapters in node_modules or from the ledger on disk on 2026-08-17. The point
@@ -145,12 +158,13 @@ test("a tool loop bills each request once, and only adds prompts the vendor spli
   assert.equal(folded.contextUsed, 520_000);
 });
 
-test("persisted estimates are removed so missing usage stays unknown", () => {
+test("persisted Cursor estimates are kept; other guessed rows stay unknown", () => {
   const normalized = normalizeUsage([
-    { id: "guessed", at: 1, provider: "cursor", model: "composer-2.5", inputTokens: 349, outputTokens: 7168, source: "estimate" },
-    { id: "measured", at: 2, provider: "cursor", model: "composer-2.5", inputTokens: 1200, outputTokens: 640, cacheReadTokens: 9000, source: "request" },
+    { id: "guessed", at: 1, provider: "cursor", model: "composer-2.5", inputTokens: 349, outputTokens: 7168, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimate" },
+    { id: "measured", at: 2, provider: "cursor", model: "composer-2.5", inputTokens: 1200, outputTokens: 640, cacheReadTokens: 9000, cacheWriteTokens: 0, source: "request" },
+    { id: "grok-guess", at: 3, provider: "grok", model: "grok-4.6", inputTokens: 12, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0, source: "estimate" },
   ]);
-  assert.deepEqual(normalized.map((event) => event.id), ["measured"]);
+  assert.deepEqual(normalized.map((event) => event.id), ["guessed", "measured"]);
 });
 
 test("untagged drafts keep the old size-based fold, so events already on disk do not move", () => {
@@ -379,4 +393,392 @@ test("a billed compact lands on the same bot ring, not another vendor", () => {
     { grok: { usedPercent: 10, leftPercent: 90, period: "weekly", prepaidBalance: 0, products: [] } },
   );
   assert.equal(grokPlan?.leftPercent, 90);
+});
+
+test("occupancyFromUsage treats used=0 as missing when occupying tokens exist", () => {
+  assert.equal(occupancyFromUsage({ contextUsed: 0 }, 200_000), undefined);
+  assert.equal(occupancyFromUsage({ contextUsed: 0 }, 200_000, 9_700), 9_700);
+  assert.notEqual(occupancyFromUsage({ contextUsed: 0 }, 200_000, 9_700), 0);
+  assert.equal(occupancyFromUsage({ contextUsed: 80_000 }, 200_000, 9_700), 80_000);
+});
+
+test("Cursor still books an estimate when ACP only sent a context gauge", () => {
+  const settled = settleTurnUsage({
+    pending: [
+      {
+        provider: "cursor",
+        model: "composer-2.5",
+        inputTokens: 0,
+        outputTokens: 0,
+        contextUsed: 80_000,
+        source: "gauge",
+      },
+    ],
+    provider: "cursor",
+    model: "composer-2.5",
+    sessionId: "sess_composer",
+    estimate: { inputTokens: 12, outputTokens: 40 },
+  });
+  assert.equal(settled?.provider, "cursor");
+  assert.equal(settled?.inputTokens, 12);
+  assert.equal(settled?.outputTokens, 40);
+  assert.equal(settled?.source, "estimate");
+  assert.equal(settled?.lane, "cursor-models");
+  assert.equal(settled?.contextUsed, 80_000);
+});
+
+test("a billed Cursor API request is kept and the estimate is ignored", () => {
+  const settled = settleTurnUsage({
+    pending: [
+      {
+        provider: "cursor",
+        model: "gpt-5.4",
+        inputTokens: 1200,
+        outputTokens: 640,
+        cacheReadTokens: 9000,
+        source: "request",
+      },
+    ],
+    provider: "cursor",
+    model: "gpt-5.4",
+    estimate: { inputTokens: 12, outputTokens: 40 },
+  });
+  assert.equal(settled?.inputTokens, 1200);
+  assert.equal(settled?.outputTokens, 640);
+  assert.equal(settled?.source, "request");
+  assert.equal(settled?.lane, "other-models");
+});
+
+test("Grok does not invent an estimate when the vendor sent only a gauge", () => {
+  const settled = settleTurnUsage({
+    pending: [
+      { provider: "grok", model: "grok-4.6", inputTokens: 0, outputTokens: 0, contextUsed: 100, source: "gauge" },
+    ],
+    provider: "grok",
+    model: "grok-4.6",
+    estimate: { inputTokens: 12, outputTokens: 40 },
+  });
+  assert.equal(settled, undefined);
+});
+
+test("estimateFromSessionTurn uses this turn and falls back to Composer thoughts", () => {
+  const estimated = estimateFromSessionTurn({
+    messages: [
+      { id: "u1", role: "user", text: "hello there friend" },
+      { id: "a1", role: "assistant", text: "" },
+      { id: "t1", role: "system", kind: "thought", text: "I will look at the file and then answer in detail" },
+    ],
+    assistantId: "a1",
+  });
+  assert.ok(estimated.inputTokens > 0);
+  assert.ok(estimated.outputTokens > 0);
+});
+
+test("Composer and API usage cards go up after a gauge-only Cursor turn", () => {
+  const settings = {
+    llms: {
+      grok: { connected: false },
+      claude: { connected: false },
+      codex: { connected: false },
+      cursor: { connected: true },
+    },
+    customBots: [],
+  };
+  const composerTurn = settleTurnUsage({
+    pending: [
+      { provider: "cursor", model: "composer-2.5", inputTokens: 0, outputTokens: 0, contextUsed: 12_000, source: "gauge" },
+    ],
+    provider: "cursor",
+    model: "composer-2.5",
+    sessionId: "sess_composer_live",
+    estimate: estimateFromSessionTurn({
+      messages: [
+        { id: "u1", role: "user", text: "Please list the files in this folder and say hello." },
+        { id: "a1", role: "assistant", text: "" },
+        { id: "t1", role: "system", kind: "thought", text: "I will list the directory then greet the user in a short reply." },
+      ],
+      assistantId: "a1",
+    }),
+  });
+  const apiTurn = settleTurnUsage({
+    pending: [],
+    provider: "cursor",
+    model: "gpt-5.4",
+    sessionId: "sess_api_live",
+    estimate: estimateFromSessionTurn({
+      messages: [
+        { id: "u2", role: "user", text: "Summarize this TypeScript module in two sentences." },
+        { id: "a2", role: "assistant", text: "It exports settleTurnUsage so Cursor tokens still book when ACP omits a bill." },
+      ],
+      assistantId: "a2",
+    }),
+  });
+  assert.ok(composerTurn && composerTurn.inputTokens > 0 && composerTurn.outputTokens > 0);
+  assert.ok(apiTurn && apiTurn.inputTokens > 0 && apiTurn.outputTokens > 0);
+  assert.equal(composerTurn?.lane, "cursor-models");
+  assert.equal(apiTurn?.lane, "other-models");
+
+  const after = deskUsageCards(
+    [
+      { id: "use_1", at: 1, cacheReadTokens: 0, cacheWriteTokens: 0, ...composerTurn },
+      { id: "use_2", at: 2, cacheReadTokens: 0, cacheWriteTokens: 0, ...apiTurn },
+    ],
+    settings,
+  );
+  const composerAfter = after.find((card) => card.focus === "cursor:cursor-models")!;
+  const apiAfter = after.find((card) => card.focus === "cursor:other-models")!;
+  assert.ok(composerAfter.inputTokens > 0);
+  assert.ok(composerAfter.outputTokens > 0);
+  assert.ok(apiAfter.inputTokens > 0);
+  assert.ok(apiAfter.outputTokens > 0);
+});
+
+test("backfillCursorUsage fills missing turns and ignores gauge/zero events as turn count", () => {
+  const session = {
+    id: "sess_cursor_gap",
+    provider: "cursor" as const,
+    model: "composer-2.5",
+    projectId: "proj_1",
+    messages: [
+      { role: "user" as const, text: "hello there", createdAt: 1 },
+      { role: "assistant" as const, text: "pong from composer", createdAt: 2 },
+      { role: "user" as const, text: "again please", createdAt: 3 },
+      { role: "assistant" as const, text: "pong two", createdAt: 4 },
+    ],
+  };
+  const gauges = [
+    {
+      id: "use_gauge",
+      at: 1,
+      provider: "cursor" as const,
+      model: "composer-2.5",
+      sessionId: session.id,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      contextUsed: 0,
+      source: "gauge" as const,
+    },
+  ];
+  const first = backfillCursorUsage([session], gauges);
+  assert.equal(first.length, 2);
+  assert.ok(first.every((event) => event.provider === "cursor" && event.lane === "cursor-models"));
+  assert.ok(first.every((event) => event.source === "estimate"));
+  assert.ok(first[0]!.inputTokens > 0 && first[0]!.outputTokens > 0);
+  assert.ok((first[0]!.contextUsed ?? 0) > 0);
+
+  const billed = [
+    {
+      id: "use_billed_1",
+      at: 2,
+      provider: "cursor" as const,
+      model: "composer-2.5",
+      sessionId: session.id,
+      lane: "cursor-models" as const,
+      inputTokens: 12,
+      outputTokens: 8,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "request" as const,
+    },
+    {
+      id: "use_billed_2",
+      at: 3,
+      provider: "cursor" as const,
+      model: "composer-2.5",
+      sessionId: session.id,
+      lane: "cursor-models" as const,
+      inputTokens: 20,
+      outputTokens: 9,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "request" as const,
+    },
+  ];
+  assert.equal(backfillCursorUsage([session], billed).length, 0);
+  assert.equal(backfillCursorUsage([session], first).length, 0);
+
+  const oneBilled = [
+    {
+      id: "use_live_first",
+      at: 2,
+      provider: "cursor" as const,
+      model: "composer-2.5",
+      sessionId: session.id,
+      lane: "cursor-models" as const,
+      inputTokens: 12,
+      outputTokens: 8,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "request" as const,
+    },
+  ];
+  const partial = backfillCursorUsage([session], oneBilled);
+  assert.equal(partial.length, 1);
+  assert.equal(partial[0]!.id, `use_cursor_${session.id}_1`);
+  assert.equal(partial[0]!.at, 4);
+  assert.notEqual(partial[0]!.id, `use_cursor_${session.id}_0`);
+  assert.ok(partial[0]!.inputTokens > 0 && partial[0]!.outputTokens > 0);
+  assert.equal(partial[0]!.source, "estimate");
+});
+
+test("normalizeUsage keeps Cursor estimates and drops other guessed rows", () => {
+  const hydrated = normalizeUsage([
+    {
+      id: "use_estimate",
+      at: 1,
+      provider: "cursor",
+      model: "composer-2.5",
+      inputTokens: 12,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "estimate",
+    },
+    {
+      id: "use_cursor_old_backfill_0",
+      at: 2,
+      provider: "cursor",
+      model: "composer-2.5",
+      inputTokens: 12,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "use_grok_guess",
+      at: 3,
+      provider: "grok",
+      model: "grok-4.6",
+      inputTokens: 12,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      source: "estimate",
+    },
+    {
+      id: "use_measured",
+      at: 4,
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      inputTokens: -12,
+      outputTokens: 4.6,
+      cacheReadTokens: Number.POSITIVE_INFINITY,
+      cacheWriteTokens: "9",
+      costUsd: Number.NaN,
+      source: "turn",
+    },
+  ]);
+  assert.equal(hydrated.filter((event) => event.provider === "cursor").length, 2);
+  assert.equal(hydrated.find((event) => event.provider === "grok"), undefined);
+  const measured = hydrated.find((event) => event.id === "use_measured");
+  assert.deepEqual(
+    {
+      input: measured?.inputTokens,
+      output: measured?.outputTokens,
+      cacheRead: measured?.cacheReadTokens,
+      cacheWrite: measured?.cacheWriteTokens,
+    },
+    { input: 0, output: 5, cacheRead: 0, cacheWrite: 9 },
+  );
+});
+
+test("a Cursor Grok 4.6 PONG turn books Composer in/out so Usage facts are not zero", () => {
+  const settings = {
+    llms: {
+      grok: { connected: false },
+      claude: { connected: false },
+      codex: { connected: false },
+      cursor: { connected: true },
+    },
+    customBots: [],
+  };
+  const settled = settleTurnUsage({
+    pending: [],
+    provider: "cursor",
+    model: "cursor-grok-4.6-high",
+    sessionId: "sess_pong",
+    estimate: estimateFromSessionTurn({
+      messages: [
+        { id: "u1", role: "user", text: "What are you and where are you?" },
+        { id: "a1", role: "assistant", text: "PONG" },
+      ],
+      assistantId: "a1",
+    }),
+  });
+  assert.ok(settled);
+  assert.equal(settled?.lane, "cursor-models");
+  assert.equal(settled?.source, "estimate");
+  assert.ok((settled?.inputTokens ?? 0) > 0);
+  assert.ok((settled?.outputTokens ?? 0) > 0);
+
+  const occupying = occupancyFromUsage(
+    { contextUsed: settled?.contextUsed },
+    200_000,
+    123,
+  );
+  assert.equal(occupying, 123);
+
+  const booked = [
+    {
+      id: "use_pong",
+      at: Date.now(),
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      ...settled!,
+      contextUsed: occupying,
+    },
+  ];
+  const cards = deskUsageCards(booked, settings);
+  const composer = cards.find((card) => card.focus === "cursor:cursor-models");
+  const api = cards.find((card) => card.focus === "cursor:other-models");
+  assert.ok((composer?.events ?? 0) > 0);
+  assert.ok((composer?.inputTokens ?? 0) > 0);
+  assert.ok((composer?.outputTokens ?? 0) > 0);
+  assert.equal(api?.events, 0);
+  const facts = usageFocusFacts(composer!, booked);
+  assert.notEqual(facts.apiTraffic, "-");
+  assert.ok(facts.requests >= 1);
+  assert.ok(facts.chats >= 1);
+  assert.notEqual(facts.latestContext, "-");
+  const emptyFacts = usageFocusFacts(api!, []);
+  assert.equal(emptyFacts.apiTraffic, "-");
+  assert.equal(emptyFacts.requests, 0);
+  assert.equal(emptyFacts.chats, 0);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /usageFocusFacts\(focused, focusedEvents\)/);
+});
+
+test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok white", () => {
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.usage-split-track i\.cursor\s*\{[^}]*background:\s*var\(--cursor\)/);
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
+  assert.match(pane, /tone=\{focused\.provider\}[\s\S]*color=\{focused\.color\}/);
+  const event = {
+    id: "u_cursor_grey",
+    at: 1,
+    provider: "cursor" as const,
+    model: "cursor-grok-4.6",
+    inputTokens: 100,
+    outputTokens: 40,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const composer = heatCellBots([event]);
+  assert.equal(composer[0]?.provider, "cursor");
+  assert.equal(
+    cellDotBackground({ tokens: 140, bots: composer, pad: false }, 140),
+    "var(--cursor)",
+  );
+  const api = heatCellBots([{ ...event, model: "gpt-5.4" }]);
+  assert.equal(api[0]?.provider, "codex");
+});
+
+test("Spend docs keep leftover, billed tokens, and retained context distinct", () => {
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(features, /four characters a token only when ACP sent no count/);
+  assert.match(features, /Composer and API stay[\s\S]*two separate pools/);
+  assert.match(features, /Grok, Claude, and Codex stay unknown/);
+  assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);
+  assert.match(features, /Retained context is this chat's window occupancy, never the[\s\S]*leftover ring/);
 });

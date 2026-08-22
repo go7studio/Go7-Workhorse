@@ -324,7 +324,7 @@ const TOOLS = [
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
-        effort: { type: "string", description: "Explicit user override only; otherwise the desk derives it from task depth" },
+        effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { estimateChatContext, formatRetainedPct, retainedContextStats } from "../src/lib/context-stats";
 import { placeContextPop } from "../src/ui/ContextMeter";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,4 +51,64 @@ test("Usage and Settings context meters are catalog size, not a live chat", () =
   );
   assert.match(meter, /left: anchor.left/);
   assert.doesNotMatch(meter, /right: anchor.right/);
+});
+
+test("ContextMeter populates Cursor retained context without a Grok-only live session-info call", () => {
+  const estimate = estimateChatContext({
+    contextUsed: 0,
+    windowSize: 200_000,
+    messages: [
+      { text: "hello there from a composer chat with real occupying tokens ".repeat(80), kind: undefined },
+      { text: "pong from composer with enough characters to count occupancy ".repeat(80), kind: undefined },
+    ],
+  });
+  assert.ok(estimate.used > 0);
+  assert.equal(estimate.used, estimate.occupying.find((row) => row.id === "messages")?.tokens);
+  const liveZero = {
+    ...estimate,
+    used: 0,
+    usagePct: 0,
+    source: "live" as const,
+  };
+  const stats = retainedContextStats(estimate, liveZero);
+  assert.equal(stats.used, estimate.used);
+  assert.ok(stats.usagePct > 0);
+  const liveFull = { ...estimate, used: 80_000, usagePct: 40, source: "live" as const };
+  assert.equal(retainedContextStats(estimate, liveFull).used, 80_000);
+
+  const meter = readFileSync(path.join(ROOT, "src", "ui", "ContextMeter.tsx"), "utf8");
+  assert.match(meter, /retainedContextStats/);
+  assert.match(meter, /estimateChatContext/);
+  assert.doesNotMatch(
+    meter,
+    /if \(!session \|\| session\.provider !== "grok"\) return;[\s\S]*estimateChatContext/,
+  );
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /settleTurnUsage/);
+  assert.match(store, /backfillCursorUsage/);
+  assert.match(store, /draft\.source === "estimate" && draft\.provider !== "cursor"/);
+  assert.match(store, /estimateMessageTokens/);
+  assert.match(meter, /formatRetainedPct/);
+});
+
+test("a six-message Cursor chat does not keep retained context at 0 of 200k", () => {
+  const stats = estimateChatContext({
+    contextUsed: 0,
+    windowSize: 200_000,
+    messages: [
+      { text: "What are you and where are you?", kind: undefined },
+      { text: "PONG", kind: undefined },
+      { text: "owned by SpaceXAI and Cursor.", kind: undefined },
+      { text: "Workhorse is the desktop multiplexer running this conversation.", kind: undefined },
+      { text: "No project folder is linked to this chat right now.", kind: undefined },
+      { text: "follow up", kind: undefined },
+    ],
+  });
+  const messages = stats.occupying.find((row) => row.id === "messages");
+  assert.ok((messages?.tokens ?? 0) > 0);
+  assert.equal(stats.used, messages?.tokens);
+  assert.notEqual(stats.used, 0);
+  assert.equal(formatRetainedPct(stats.used, stats.usagePct), stats.usagePct < 1 ? "<1%" : `${stats.usagePct}%`);
+  assert.equal(formatRetainedPct(0, 0), "0%");
+  assert.equal(formatRetainedPct(123, 0), "<1%");
 });

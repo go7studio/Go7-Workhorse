@@ -161,14 +161,17 @@ transcript rather than as a path.
 ## Spend
 
 - Usage recorded per vendor and per chat, from each vendor's own count: the
-  ACP turn total, or the HTTP response's usage block. If a vendor sends no
-  count, the turn stays unknown; Workhorse does not invent tokens.
+  ACP turn total, or the HTTP response's usage block. Cursor is estimated at
+  four characters a token only when ACP sent no count — Composer and API stay
+  two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
+  Leftover rings, billed tokens, and retained context stay distinct meters.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
 - Compact shrinks the context meter. Leftover does not move unless that same
   bot ran a billed summary. A full window never holds a send the way a spent
-  daily bank does.
+  daily bank does. Retained context is this chat's window occupancy, never the
+  leftover ring.
 - Budgets per vendor.
 - A weekly pace that tells you when you are ahead of it, before the bill does.
 - A usage view by day, week, month, or all time.

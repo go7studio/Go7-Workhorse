@@ -17,6 +17,7 @@ import {
   routingIdentityExcluded,
   routingProfileForModel,
   shouldRouteSessionTurn,
+  spawnEffortFor,
   weeklyDrawState,
   type RoutingCandidate,
 } from "../src/lib/routing";
@@ -60,6 +61,53 @@ test("routing tiers keep quick work light and deep work strong", () => {
   assert.equal(deep?.effort, "high");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-terra", "balanced"), "medium");
   assert.equal(effortForRoutingTier("codex", "gpt-5.6-luna", "quick", "high"), "high");
+});
+
+test("a second orchestrate of the same bot keeps thinking unless effort was asked for", () => {
+  const deep = inferRoutingTier("Give each spawn the review task");
+  assert.equal(deep, "deep", "slice prose with 'review' still reads as deep work");
+  assert.equal(
+    spawnEffortFor({ provider: "grok", model: "grok-4.6", tier: deep, requested: "medium", routed: "high" }),
+    "medium",
+    "the user's medium wins over a deep slice",
+  );
+  assert.equal(
+    spawnEffortFor({
+      provider: "grok",
+      model: "grok-4.6",
+      tier: deep,
+      routed: "high",
+      reused: "medium",
+    }),
+    "medium",
+    "calling Wren again without effort does not bump medium to high",
+  );
+  assert.equal(
+    spawnEffortFor({ provider: "grok", model: "grok-4.6", tier: deep, routed: "high" }),
+    "high",
+    "a new auto-routed worker still takes the slice's thinking level",
+  );
+  assert.equal(
+    spawnEffortFor({
+      provider: "grok",
+      model: "grok-4.6",
+      tier: deep,
+      inherited: "medium",
+    }),
+    "medium",
+    "a named bot with no effort inherits the parent instead of re-deriving from 'review'",
+  );
+  assert.equal(
+    spawnEffortFor({
+      provider: "grok",
+      model: "grok-4.6",
+      tier: deep,
+      requested: "high",
+      reused: "medium",
+    }),
+    "high",
+    "an explicit change of thinking level still takes",
+  );
 });
 
 test("automatic routing applies only to a person's visible turn", () => {

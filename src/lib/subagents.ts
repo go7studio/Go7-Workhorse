@@ -308,7 +308,8 @@ export function findReusableWorker(
     name?: string;
     provider: ProviderId;
     model: string;
-    effort: EffortLevel | null;
+    /** Omit to match any thinking level on that bot; pass a level to require it. */
+    effort?: EffortLevel | null;
     customBotId?: string;
     seed?: WorkerSeed;
   },
@@ -355,7 +356,7 @@ export function findReusableWorker(
     (worker) =>
       worker.provider === want.provider &&
       worker.model === want.model &&
-      (worker.effort ?? null) === (want.effort ?? null) &&
+      (want.effort === undefined || (worker.effort ?? null) === (want.effort ?? null)) &&
       (worker.customBotId ?? "") === (want.customBotId ?? ""),
   );
   // The most recently used one knows the most about where this work got to.

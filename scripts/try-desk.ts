@@ -5,7 +5,7 @@
 //   npm run try
 //
 // Never writes /Applications/Go7 Workhorse.app. That path is ship only.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,6 +14,7 @@ import {
   WORKHORSE_APP_NAME,
   WORKHORSE_DEV_APP_ID,
   WORKHORSE_DEV_APP_NAME,
+  WORKHORSE_DEV_USER_DATA_DIR,
   tryInstallWouldReplaceProduction,
   workhorseInstallTarget,
   type WorkhorseBuildChannel,
@@ -31,8 +32,18 @@ function die(line: string): never {
   process.exit(1);
 }
 
+function defaultApplicationsDir(): string {
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA?.trim();
+    return local
+      ? path.join(local, "Programs")
+      : path.join(os.homedir(), "AppData", "Local", "Programs");
+  }
+  return "/Applications";
+}
+
 function parseArgs(argv: string[]) {
-  const args = { dry: false, help: false, skipPack: false, applicationsDir: "/Applications" };
+  const args = { dry: false, help: false, skipPack: false, applicationsDir: defaultApplicationsDir() };
   for (let i = 0; i < argv.length; i += 1) {
     const item = argv[i] ?? "";
     if (item === "--dry") args.dry = true;
@@ -70,6 +81,12 @@ function builtAppPath(): string | null {
   return null;
 }
 
+function builtWinDir(): string | null {
+  const unpacked = path.join(ROOT, "release", "win-unpacked");
+  const exe = path.join(unpacked, `${WORKHORSE_APP_NAME}.exe`);
+  return fs.existsSync(exe) ? unpacked : null;
+}
+
 function macArch(): "arm64" | "x64" {
   const machine = os.machine();
   if (machine === "arm64") return "arm64";
@@ -77,15 +94,20 @@ function macArch(): "arm64" | "x64" {
   die(`Unknown Mac architecture ${machine}.`);
 }
 
-function packCurrentArch() {
-  const arch = macArch();
-  say(`Packing a development ${arch} dir (unsigned, this tree)...`);
+function developmentPackEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.WORKHORSE_RELEASE_BUILD;
   delete env.CSC_LINK;
   delete env.CSC_KEY_PASSWORD;
   delete env.CSC_NAME;
   env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+  return env;
+}
+
+function packCurrentArch() {
+  const arch = macArch();
+  say(`Packing a development ${arch} dir (unsigned, this tree)...`);
+  const env = developmentPackEnv();
   const build = spawnSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "inherit" });
   if (build.status !== 0) die("npm run build failed.");
   const pack = spawnSync(
@@ -93,6 +115,20 @@ function packCurrentArch() {
     ["electron-builder", "--mac", "--dir", `--${arch}`, "--publish", "never"],
     { cwd: ROOT, env, stdio: "inherit" },
   );
+  if (pack.status !== 0) die("electron-builder failed.");
+}
+
+function packWindowsDir() {
+  say("Packing a development Windows dir (this tree)...");
+  const env = developmentPackEnv();
+  const build = spawnSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "inherit", shell: true });
+  if (build.status !== 0) die("npm run build failed.");
+  const pack = spawnSync("npx", ["electron-builder", "--win", "--dir", "--publish", "never"], {
+    cwd: ROOT,
+    env,
+    stdio: "inherit",
+    shell: true,
+  });
   if (pack.status !== 0) die("electron-builder failed.");
 }
 
@@ -114,6 +150,52 @@ function stampDevBundle(dest: string) {
   }
   const signed = spawnSync("/usr/bin/codesign", ["--force", "--sign", "-", dest], { stdio: "inherit" });
   if (signed.status !== 0) die("Could not sign the development app.");
+}
+
+function quitWinDevApp(dest: string) {
+  const exe = path.join(dest, `${WORKHORSE_APP_NAME}.exe`);
+  const escaped = exe.replace(/'/g, "''");
+  spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq '${escaped}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+    ],
+    { windowsHide: true, stdio: "ignore" },
+  );
+}
+
+function installWinDevApp(src: string, dest: string) {
+  if (tryInstallWouldReplaceProduction(dest, path.dirname(dest))) {
+    die(`Refusing to install over ${dest}. That path is ship only.`);
+  }
+  say("Quitting Go7 Workhorse Dev if it is open...");
+  quitWinDevApp(dest);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.cpSync(src, dest, { recursive: true });
+  const marker = path.join(dest, "resources", "workhorse-build.json");
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
+  fs.writeFileSync(marker, `${JSON.stringify({ channel: "development" })}\n`);
+}
+
+function openWinDevApp(dest: string) {
+  const exe = path.join(dest, `${WORKHORSE_APP_NAME}.exe`);
+  if (!fs.existsSync(exe)) die(`No ${WORKHORSE_APP_NAME}.exe in ${dest}.`);
+  const roaming = process.env.APPDATA?.trim() || path.join(os.homedir(), "AppData", "Roaming");
+  const userData = path.join(roaming, WORKHORSE_DEV_USER_DATA_DIR);
+  fs.mkdirSync(userData, { recursive: true });
+  const launched = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-Command",
+      `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -WorkingDirectory '${dest.replace(/'/g, "''")}' -ArgumentList @('--workhorse-user-data=${userData.replace(/'/g, "''")}','--workhorse-volatile-credentials')`,
+    ],
+    { windowsHide: true, encoding: "utf8" },
+  );
+  if (launched.status !== 0) die(`Could not open Dev desk: ${launched.stderr || launched.stdout || "Start-Process failed"}`);
 }
 
 function installDevApp(src: string, dest: string) {
@@ -151,8 +233,17 @@ function main() {
     for (const line of planLines(args.applicationsDir)) say(line);
     return;
   }
+  if (process.platform === "win32") {
+    if (!args.skipPack) packWindowsDir();
+    const built = builtWinDir();
+    if (!built) die("No packed win-unpacked desk under release/. Run without --skip-pack.");
+    installWinDevApp(built, target.dest);
+    say(`Opening ${target.dest}`);
+    openWinDevApp(target.dest);
+    return;
+  }
   if (process.platform !== "darwin") {
-    die("try-desk installs a Mac app. Use --dry to print the dest on this machine.");
+    die("try-desk packs a Mac or Windows desk. Use --dry to print the dest on this machine.");
   }
   if (!args.skipPack) packCurrentArch();
   const built = builtAppPath();

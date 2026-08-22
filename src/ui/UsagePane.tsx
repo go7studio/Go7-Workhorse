@@ -27,6 +27,7 @@ import {
   formatCost,
   formatIoLine,
   formatTokens,
+  usageFocusFacts,
   inRange,
   modelsForProvider,
   heatLevel,
@@ -54,12 +55,14 @@ function SplitBar({
   value,
   peak,
   tone,
+  color,
   display,
 }: {
   label: string;
   value: number;
   peak: number;
   tone: ProviderId;
+  color?: string;
   display?: string;
 }) {
   const width = value <= 0 ? 4 : Math.max(4, Math.round((value / Math.max(peak, 1)) * 220));
@@ -67,7 +70,13 @@ function SplitBar({
     <div className="usage-split">
       <span>{label}</span>
       <div className="usage-split-track">
-        <i className={tone} style={{ width }} />
+        <i
+          className={tone}
+          style={{
+            width,
+            ...(color ? { background: color } : {}),
+          }}
+        />
       </div>
       <em>{display ?? formatTokens(value)}</em>
     </div>
@@ -418,11 +427,7 @@ export function UsagePane({
               label: shortModelName(focused.provider, row.label),
             }));
   const focusedTotal = focusedModels.reduce((sum, row) => sum + row.totalTokens, 0);
-  const latestFocusedContext = focusedEvents.reduce<{ at: number; used: number } | null>((latest, event) => {
-    if (event.contextUsed === undefined) return latest;
-    if (!latest || event.at > latest.at) return { at: event.at, used: event.contextUsed };
-    return latest;
-  }, null);
+  const focusFacts = focused ? usageFocusFacts(focused, focusedEvents) : null;
   useEffect(() => {
     const pull = () => {
       refreshGrokPlan();
@@ -668,7 +673,7 @@ export function UsagePane({
           <div className="usage-facts">
             <div className="usage-fact">
               <span>API traffic</span>
-              <strong>{focused.events > 0 ? formatTokens(focused.inputTokens + focused.outputTokens) : "-"}</strong>
+              <strong>{focusFacts?.apiTraffic ?? "-"}</strong>
             </div>
             <div className="usage-fact">
               <span>{plan ? "Used" : "Cost"}</span>
@@ -678,17 +683,15 @@ export function UsagePane({
             </div>
             <div className="usage-fact">
               <span>Latest context</span>
-              <strong>{latestFocusedContext ? formatTokens(latestFocusedContext.used) : "-"}</strong>
+              <strong>{focusFacts?.latestContext ?? "-"}</strong>
             </div>
             <div className="usage-fact">
               <span>Requests</span>
-              <strong>{focused.events}</strong>
+              <strong>{focusFacts?.requests ?? 0}</strong>
             </div>
             <div className="usage-fact">
               <span>Chats</span>
-              <strong>
-                {new Set(focusedEvents.filter((event) => event.sessionId).map((event) => event.sessionId)).size}
-              </strong>
+              <strong>{focusFacts?.chats ?? 0}</strong>
             </div>
           </div>
           <div className="usage-detail">
@@ -698,12 +701,14 @@ export function UsagePane({
                 value={focused.inputTokens}
                 peak={Math.max(focused.inputTokens, focused.outputTokens)}
                 tone={focused.provider}
+                color={focused.color}
               />
               <SplitBar
                 label="Out"
                 value={focused.outputTokens}
                 peak={Math.max(focused.inputTokens, focused.outputTokens)}
                 tone={focused.provider}
+                color={focused.color}
               />
             </div>
           </div>
@@ -715,7 +720,11 @@ export function UsagePane({
           {focusedModels.length > 0 && (
             <ul className="usage-models">
               {focusedModels.map((row) => (
-                <ModelRow key={row.key} row={row} total={focusedTotal} />
+                <ModelRow
+                  key={row.key}
+                  row={{ ...row, color: row.color ?? focused.color }}
+                  total={focusedTotal}
+                />
               ))}
             </ul>
           )}

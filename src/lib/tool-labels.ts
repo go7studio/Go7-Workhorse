@@ -80,6 +80,15 @@ export function toolNameKey(raw: string): string {
   return stripDeskPrefixes(toolTokens(raw)).join("_");
 }
 
+export function looksLikeInlineCommand(raw: string): boolean {
+  const text = raw.trim();
+  if (!text) return false;
+  if (/[\r\n]/.test(text)) return true;
+  if (/^[`$]/.test(text)) return true;
+  if (text.length > 96) return true;
+  return /\b(Write-Host|Get-ItemProperty|Get-ChildItem|Get-Content|Invoke-Expression|foreach\s*\()\b/i.test(text);
+}
+
 export function permissionActionLabel(raw: string): string {
   const pretty = prettyToolTitle(raw);
   if (!pretty) return "use a tool";
@@ -125,6 +134,7 @@ function mappedToolTitle(key: string): string | undefined {
 export function prettyToolTitle(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
+  if (looksLikeInlineCommand(trimmed)) return "Run a command";
   const original = toolTokens(trimmed);
   const tokens = stripDeskPrefixes(original);
   const key = tokens.join("_");

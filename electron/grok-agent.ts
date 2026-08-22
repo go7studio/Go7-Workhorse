@@ -549,11 +549,17 @@ export function consumeAcpBuffers(input: Buffer): { messages: JsonRpcMessage[]; 
   return { messages, rest };
 }
 
-function toolTitle(params: Record<string, unknown>): string {
+function rawToolTitle(params: Record<string, unknown>): string {
   const toolCall = asRecord(params.toolCall);
-  if (typeof toolCall.title === "string" && toolCall.title.trim()) return toolCall.title;
-  if (typeof params.title === "string" && params.title.trim()) return params.title;
-  return "use a tool";
+  if (typeof toolCall.title === "string" && toolCall.title.trim()) return toolCall.title.trim();
+  if (typeof params.title === "string" && params.title.trim()) return params.title.trim();
+  return "";
+}
+
+function toolTitle(params: Record<string, unknown>): string {
+  const title = rawToolTitle(params);
+  if (!title) return "use a tool";
+  return prettyToolTitle(title);
 }
 
 function toolDetail(params: Record<string, unknown>): string {
@@ -567,6 +573,8 @@ function toolDetail(params: Record<string, unknown>): string {
       return String(raw);
     }
   }
+  const title = rawToolTitle(params);
+  if (title && prettyToolTitle(title) === "Run a command") return title;
   if (typeof toolCall.kind === "string") return toolCall.kind;
   return "needs approval";
 }

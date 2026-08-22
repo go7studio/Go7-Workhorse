@@ -2923,6 +2923,7 @@ html.pane-dragging * {
 .permission-card {
   width: min(400px, calc(100vw - 48px));
   max-width: 100%;
+  max-height: min(72vh, 560px);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -2932,7 +2933,7 @@ html.pane-dragging * {
   border-radius: 18px;
   box-shadow: var(--shadow);
   animation: rise 220ms var(--ease);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .permission-card .session-who {
@@ -2948,7 +2949,10 @@ html.pane-dragging * {
 }
 
 .permission-card strong {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
   font-family: var(--display);
   font-size: 22px;
   font-weight: 620;
@@ -2974,6 +2978,10 @@ html.pane-dragging * {
 .permission-card .actions {
   justify-content: flex-end;
   margin-top: 4px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: var(--bg-solid);
 }
 
 .send {

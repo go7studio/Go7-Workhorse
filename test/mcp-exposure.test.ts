@@ -860,6 +860,18 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
           contextWindow: 524_288,
           createdAt: 1,
         },
+        {
+          id: "bot_grokky",
+          name: "Grok Bot",
+          color: "#ffcc00",
+          baseUrl: "http://127.0.0.1:8787/v1",
+          model: "grok-bot",
+          apiKey: "",
+          credentialId: "cred_grok_bot",
+          api: "openai-completions",
+          contextWindow: 131_072,
+          createdAt: 1,
+        },
       ],
       routing: { enabled: true, includeExternalAgents: false },
       watch: { lockDaily: false },
@@ -890,10 +902,20 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
       custom: {
         bot_minimax: { usedPercent: 45, leftPercent: 55, period: "weekly", prepaidBalance: 0, products: [] },
         bot_kimi: { usedPercent: 27, leftPercent: 73, period: "weekly", prepaidBalance: 0, products: [] },
+        bot_grokky: { usedPercent: 11, leftPercent: 89, period: "weekly", prepaidBalance: 0, products: [] },
       },
     },
   };
   writeFileSync(statePath, JSON.stringify(state));
+  const observedAt = new Date(Date.now() - 60_000).toISOString();
+  writeFileSync(
+    path.join(dir, "grok-bot-leftover.json"),
+    JSON.stringify({
+      usedPercent: 20,
+      resetsAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1_000).toISOString(),
+      asOf: observedAt,
+    }),
+  );
   const previous = {
     profile: process.env.WORKHORSE_MCP_PROFILE,
     state: process.env.WORKHORSE_STATE_PATH,
@@ -927,13 +949,20 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     assert.equal(first.version, 1);
     assert.ok(first.rows.some((row) => row.id === "grok"));
     assert.equal(first.rows.filter((row) => row.provider === "cursor").length, 2);
-    assert.equal(first.rows.filter((row) => row.kind === "custom").length, 2);
+    assert.equal(first.rows.filter((row) => row.kind === "custom").length, 3);
     const kimi = first.rows.find((row) => row.id === "bot:bot_kimi") as
       | { availability?: { canCall?: boolean; status?: string }; meter?: { remainingPercent?: number } }
       | undefined;
     assert.equal(kimi?.availability?.canCall, true);
     assert.notEqual(kimi?.availability?.status, "not_connected");
     assert.equal(kimi?.meter?.remainingPercent, 73);
+    const grokBot = first.rows.find((row) => row.id === "bot:bot_grokky") as
+      | { meter?: { status?: string; remainingPercent?: number; usedPercent?: number; observedAt?: string } }
+      | undefined;
+    assert.equal(grokBot?.meter?.status, "known");
+    assert.equal(grokBot?.meter?.remainingPercent, 80);
+    assert.equal(grokBot?.meter?.usedPercent, 20);
+    assert.equal(grokBot?.meter?.observedAt, observedAt);
     assert.equal(
       first.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes")),
       false,
@@ -975,6 +1004,18 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
       }),
     );
     assert.equal(JSON.parse(second).version, 1);
+    writeFileSync(path.join(dir, "grok-bot-leftover.json"), "{bad");
+    const unknown = JSON.parse(
+      mcpToolText(
+        await handleWorkhorseRpc({
+          jsonrpc: "2.0",
+          id: 40,
+          method: "tools/call",
+          params: { name: "workhorse_query_capacity", arguments: { provider: "custom" } },
+        }),
+      ),
+    ) as { rows: Array<{ id: string; meter?: { status?: string } }> };
+    assert.equal(unknown.rows.find((row) => row.id === "bot:bot_grokky")?.meter?.status, "unknown");
     const after = JSON.parse(readFileSync(statePath, "utf8")) as typeof state;
     assert.equal(after.usage.length, 1);
     assert.deepEqual(after.watchPermits, permits);

@@ -47,6 +47,11 @@ import { uid } from "../src/lib/id";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import {
+  GROK_BOT_LEFTOVER_FILE as GROK_BOT_SNAPSHOT_FILE,
+  parseGrokBotPlanUsage,
+} from "./custom-plan";
+import { isGrokBotUrl } from "../src/lib/custom-http-identity";
+import {
   askViaInbox,
   interpretPeerAskHttp,
   isRetryablePeerAskTransport,
@@ -975,10 +980,34 @@ function stateFetchedAt(): number | undefined {
   }
 }
 
+function capacityPlans(raw: ReturnType<typeof readState>, settings: ReturnType<typeof normalizeSettings>): WatchPlans {
+  const plans = raw.deskPlans ?? {};
+  const grokBotIds = settings.customBots.filter((bot) => isGrokBotUrl(bot.baseUrl)).map((bot) => bot.id);
+  if (grokBotIds.length === 0) return plans;
+  const stateFile = process.env.WORKHORSE_STATE_PATH?.trim();
+  const snapshotFile =
+    process.env.GROK_BOT_LEFTOVER_FILE?.trim() ||
+    process.env.WORKHORSE_LEFTOVER_PATH?.trim() ||
+    (stateFile ? path.join(path.dirname(stateFile), GROK_BOT_SNAPSHOT_FILE) : "");
+  if (!snapshotFile) return plans;
+  let current: ReturnType<typeof parseGrokBotPlanUsage>;
+  try {
+    current = parseGrokBotPlanUsage(JSON.parse(fs.readFileSync(snapshotFile, "utf8")));
+  } catch {
+    current = undefined;
+  }
+  const custom = { ...(plans.custom ?? {}) };
+  for (const id of grokBotIds) {
+    if (current) custom[id] = current;
+    else delete custom[id];
+  }
+  return { ...plans, custom };
+}
+
 function queryCapacity(args: Record<string, unknown>): string {
   const raw = readState();
   const settings = normalizeSettings(raw.settings);
-  const plans = raw.deskPlans ?? {};
+  const plans = capacityPlans(raw, settings);
   const rows = deskCallCatalog({
     settings,
     usage: Array.isArray(raw.usage) ? raw.usage : [],

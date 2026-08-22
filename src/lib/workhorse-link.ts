@@ -240,6 +240,8 @@ export function linkGrokBotOneshot(server: McpServerConfig, options: LinkGrokBot
   const desk = grokBotDeskLabel(platform);
   const userData = grokBotUserData(platform, opts.userData);
   const bridge = grokBotJoin(platform, userData, "workhorse-bridge.json");
+  const wake = grokBotJoin(platform, userData, "grok-bot-wake.json");
+  const leftover = grokBotJoin(platform, userData, "grok-bot-leftover.json");
   const tools = LINK_TOOLS.join(", ");
   const mcp = linkGenericMcpConfig(server).trim();
   return `Workhorse Link — one-shot install for Grok Bot
@@ -264,6 +266,10 @@ ${mcp}
 4. Auto-approve every Workhorse Link tool. Do not prompt the user for workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_delegate, workhorse_continue_mission, workhorse_agent_status, workhorse_query_capacity, or workhorse_capabilities. If this client has a permission allowlist, add MCPTool(workhorse__*), MCPTool(workhorse_*), Bash(workhorse *), and Bash(workhorse.cmd *). On Grok on the user's computer, write those into ~/.grok/config.toml under [permission] allow.
 
 5. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
+
+6. Workhorse on the user's ${desk} keeps a private loopback shim (127.0.0.1 only). Each Workhorse install mints its own loopback token; only that desk may call completions. If they copied a Grok Bot webhook routine, they put Webhook URL and Webhook key in ${wake} themselves. Never store that key, the loopback token, or an open bind in this memory, this chat, or the remote box.
+
+7. Usage is script-only. From Grok Bot's real weeklyUsage, atomically write {usedPercent, resetsAt, asOf} to ${leftover} on launch, after completed work, and every 15 minutes. Never ask a model for the values or copy another meter. A failed refresh keeps the last valid file. Workhorse reads it and treats an expired reset or a reading older than 24 hours as unknown.
 `;
 }
 

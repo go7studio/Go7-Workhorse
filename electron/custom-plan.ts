@@ -9,6 +9,7 @@ export type CustomPlanUsage = GrokPlanUsage;
 export { customPlanRemainsUrl };
 
 export const GROK_BOT_LEFTOVER_FILE = "grok-bot-leftover.json";
+const GROK_BOT_LEFTOVER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The shim and Workhorse share one reading beside grok-bot-inbox. */
 export function grokBotLeftoverPath(userData: string): string {
@@ -52,7 +53,7 @@ function isoDate(value: unknown): string | undefined {
 }
 
 /** Local Grok Bot account-menu reading. Percent is consumed, never leftover. */
-export function parseGrokBotPlanUsage(raw: unknown): CustomPlanUsage | undefined {
+export function parseGrokBotPlanUsage(raw: unknown, now = Date.now()): CustomPlanUsage | undefined {
   const root = asRecord(raw);
   const nested = asRecord(root.weekly);
   const row = Object.keys(nested).length ? nested : root;
@@ -69,7 +70,9 @@ export function parseGrokBotPlanUsage(raw: unknown): CustomPlanUsage | undefined
   const resetsAt = isoDate(
     firstDefined(row.resetsAt, row.resets_at, row.resetAt, row.reset_at, row.weeklyResetAt, row.weekly_reset_at),
   );
-  if (!Number.isFinite(used) || used < 0 || used > 100 || !resetsAt) return undefined;
+  const asOf = isoDate(firstDefined(row.asOf, row.as_of));
+  if (!Number.isFinite(used) || used < 0 || used > 100 || !resetsAt || !asOf) return undefined;
+  if (Date.parse(resetsAt) <= now || now - Date.parse(asOf) > GROK_BOT_LEFTOVER_MAX_AGE_MS) return undefined;
   const usedPercent = clampPercent(used);
   return {
     usedPercent,
@@ -392,13 +395,14 @@ export async function fetchCustomPlanUsage(input: {
   fetchImpl?: typeof fetch;
   grokBotLeftoverPath?: string;
   readFileImpl?: (filePath: string, encoding: "utf8") => Promise<string>;
+  now?: number;
 }): Promise<CustomPlanUsage | undefined> {
   try {
     if (isGrokBotUrl(input.baseUrl)) {
       const filePath = input.grokBotLeftoverPath?.trim();
       if (!filePath) return undefined;
       const read = input.readFileImpl ?? ((target: string, encoding: "utf8") => readFile(target, encoding));
-      return parseGrokBotPlanUsage(JSON.parse(await read(filePath, "utf8")));
+      return parseGrokBotPlanUsage(JSON.parse(await read(filePath, "utf8")), input.now);
     }
     const meter = customMeterForUrl(input.baseUrl);
     const url = customPlanRemainsUrl(input.baseUrl);

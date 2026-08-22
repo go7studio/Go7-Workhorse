@@ -58,10 +58,16 @@ official key-only JSON meters (MiniMax, Synthetic, OpenRouter). DeepSeek,
 Novita, AI/ML API, and Vercel AI Gateway fill prepaid balance. Together,
 Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, and Gemini stay
 unknown until those hosts publish leftover JSON. Grok Bot is a local
-OpenAI-compatible shim on 127.0.0.1. Its separate weekly ring reads
-`grok-bot-leftover.json` beside `grok-bot-inbox`, using numeric `usedPercent`
-and ISO `resetsAt` fields; a missing or invalid reading stays unknown. The
-connection fails closed if the shim is down. It is not a fifth stock vendor.
+OpenAI-compatible shim on 127.0.0.1. Workhorse keeps the Grok Bot loopback shim
+on that port on Mac and Windows (login keepalive, restart if it dies). Each
+install mints its own loopback token; completions refuse any other caller.
+The port binds loopback only. A webhook wake file, when present, stays in
+userData as `grok-bot-wake.json` and is a different secret from the loopback
+token. Workhorse does not put those keys in git or in Grok Bot memory. The separate
+weekly ring reads `grok-bot-leftover.json` beside `grok-bot-inbox`, using
+numeric `usedPercent` plus ISO `resetsAt` and `asOf` fields; missing, invalid,
+expired, or over-24-hour-old readings stay unknown. It fails closed if the
+shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 

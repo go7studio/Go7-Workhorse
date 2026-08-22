@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.28](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.27...v0.6.28) (2026-08-22)
+
+
+### Bug Fixes
+
+* stop stale Grok Bot shim during Mac updates ([7e28d4a](https://github.com/go7studio/Go7-Workhorse/commit/7e28d4ab7d34bcf59b01f302a791630d2461cd63))
+
 ## [0.6.27](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.26...v0.6.27) (2026-08-22)
 
 

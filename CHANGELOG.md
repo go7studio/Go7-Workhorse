@@ -8,6 +8,21 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.24](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.23...v0.6.24) (2026-08-22)
+
+
+### Features
+
+* ship authenticated Grok Bot Link and truthful usage ([23c83ac](https://github.com/go7studio/Go7-Workhorse/commit/23c83ac123a08fd75de13574c38e73c17217f2be))
+* Workhorse owns the Grok Bot loopback shim on Mac and Windows ([65055d2](https://github.com/go7studio/Go7-Workhorse/commit/65055d2a23eeb13b76700be6c553bb8ed1aaae08))
+
+
+### Bug Fixes
+
+* age stale Grok Bot leftover to unknown ([c11cf56](https://github.com/go7studio/Go7-Workhorse/commit/c11cf567d0452ddf38c1f8fe36d155045e98f501))
+* keep Grok Bot usage fresh without polling ([963ffc2](https://github.com/go7studio/Go7-Workhorse/commit/963ffc2613b61f5ff83900cb38968547ea1fe06f))
+* require a per-install loopback token on the Grok Bot shim ([1dcdc4e](https://github.com/go7studio/Go7-Workhorse/commit/1dcdc4e29a5143c534bb90ed9f23a306da1cc9aa))
+
 ## [0.6.23](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.22...v0.6.23) (2026-08-21)
 
 

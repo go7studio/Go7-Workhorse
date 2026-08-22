@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.30](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.29...v0.6.30) (2026-08-22)
+
+
+### Bug Fixes
+
+* keep permission asks short when Grok titles a command ([#146](https://github.com/go7studio/Go7-Workhorse/issues/146)) ([45a1b19](https://github.com/go7studio/Go7-Workhorse/commit/45a1b19822b2a658175fb23a6c2b4acb9a12208e))
+
 ## [0.6.29](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.28...v0.6.29) (2026-08-22)
 
 

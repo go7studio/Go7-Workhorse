@@ -1,4 +1,4 @@
-import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { canPlaceInProject } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
@@ -13,7 +13,6 @@ import {
   lastReplyIndex,
   recentTranscriptText,
   nextTranscriptPaintStart,
-  scheduleAfterPaint,
   TRANSCRIPT_LEAD_PX,
   TRANSCRIPT_LOOKAHEAD,
   TRANSCRIPT_PAINT_CHUNK,
@@ -151,7 +150,6 @@ export function SessionPane() {
   const [editsBarOpen, setEditsBarOpen] = useState(false);
   const [editsIdle, setEditsIdle] = useState(false);
   const [paint, setPaint] = useState({ id: "", from: 0 });
-  const [openFor, setOpenFor] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const stack = useRef<HTMLDivElement>(null);
   const followBottom = useRef(true);
@@ -191,18 +189,16 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
-  const transcriptOpen = openFor === sessionId;
-  const blocks = transcriptOpen && session ? transcriptGrouper.current.group(session.messages) : [];
+  const blocks = session ? transcriptGrouper.current.group(session.messages) : [];
   const nearby = useMemo(
-    () => (transcriptOpen ? recentTranscriptText(session?.messages ?? []) : ""),
-    [session?.messages, transcriptOpen],
+    () => recentTranscriptText(session?.messages ?? []),
+    [session?.messages],
   );
-  const paintFrom = !transcriptOpen
-    ? 0
-    : paint.id === sessionId && paint.from < blocks.length
+  const paintFrom =
+    paint.id === sessionId && paint.from < blocks.length
       ? paint.from
       : transcriptPaintStart(blocks.length);
-  const shownBlocks = transcriptOpen ? blocks.slice(paintFrom) : [];
+  const shownBlocks = blocks.slice(paintFrom);
   const hiddenPaths = session ? hiddenByChat[session.id] : undefined;
   const visible = useMemo(
     () => edits.filter((item) => !(hiddenPaths ?? []).some((path) => sameEditPath(path, item.path))),
@@ -231,23 +227,9 @@ export function SessionPane() {
   }, [session?.id]);
 
   useEffect(() => {
-    if (!sessionId) return;
     filling.current = false;
-    return scheduleAfterPaint(
-      () => startTransition(() => setOpenFor(sessionId)),
-      {
-        frame: (cb) => requestAnimationFrame(cb),
-        cancelFrame: (id) => cancelAnimationFrame(id),
-        later: (cb) => window.setTimeout(cb, 0),
-        cancelLater: (id) => window.clearTimeout(id),
-      },
-    );
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!transcriptOpen) return;
     setPaint({ id: sessionId, from: transcriptPaintStart(blocks.length) });
-  }, [sessionId, transcriptOpen]);
+  }, [sessionId]);
 
   useEffect(() => {
     fetchedStats.current = {};

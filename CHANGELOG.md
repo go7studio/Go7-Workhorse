@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.32](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.31...v0.6.32) (2026-08-22)
+
+
+### Bug Fixes
+
+* stop the Grok Bot shim before Windows NSIS replace and stamp Windows releases ([#150](https://github.com/go7studio/Go7-Workhorse/issues/150)) ([3f9a082](https://github.com/go7studio/Go7-Workhorse/commit/3f9a08244c932cbc4a5eaa1142fe8c5509ab6c9a))
+
 ## [0.6.31](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.30...v0.6.31) (2026-08-22)
 
 

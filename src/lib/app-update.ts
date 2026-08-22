@@ -150,6 +150,26 @@ export function packagedUpdateMissingMessage(platform: string): string {
 
 export const WIN_UPDATE_TASK_NAME = "Go7WorkhorseUpdate";
 
+/** The Grok Bot shim is a second Go7 Workhorse.exe that keeps app.asar locked. */
+export function isWindowsGrokBotShimProcess(input: {
+  pid: number;
+  selfPid: number;
+  name: string;
+  commandLine?: string;
+}): boolean {
+  if (input.pid === input.selfPid) return false;
+  if (!/Go7 Workhorse\.exe$/i.test(input.name.trim())) return false;
+  return /grok-bot-shim-host/i.test(input.commandLine ?? "");
+}
+
+export function windowsGrokBotShimPids(
+  selfPid: number,
+  processes: Array<{ pid: number; name: string; commandLine?: string }>,
+): number[] {
+  return processes.filter((process) => isWindowsGrokBotShimProcess({ ...process, selfPid })).map((process) => process.pid);
+}
+
+
 export function winInstallerArgs(): string[] {
   // /S is NSIS silent. --force-run is electron-builder's assisted-installer
   // switch that starts the new exe after a silent install (the finish page

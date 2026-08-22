@@ -111,17 +111,11 @@ jobs:
       - name: Build installer
         shell: bash
         env:
-          # Only a release has to be signed and notarized. Demanding a
-          # certificate for a test build would mean never getting one.
-          #
-          # This must match the job's own `if:` exactly. It used to test only
-          # `cut == 'true'` while the job also runs on workflow_dispatch, so a
-          # manually re-fired release built with WORKHORSE_RELEASE_BUILD=0 and
-          # after-pack stamped it {"channel":"development"}. That build reads the
-          # Dev user-data directory and uses volatile credentials, so the desk
-          # opens with none of the user's chats and no vendor logged in. v0.6.9
-          # shipped that way after its first run failed and was re-fired by hand.
-          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true')) && '1' || '0' }}
+          # Stamp every published installer as release. Signing/notarizing is
+          # still macOS-only below. v0.6.9 (Mac) and v0.6.31 (Windows) shipped
+          # {"channel":"development"} when this flag stayed 0, so the installed
+          # desk opened the Dev profile with volatile credentials.
+          WORKHORSE_RELEASE_BUILD: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
           MAC_CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
           MAC_CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           MAC_CSC_NAME: ${{ runner.os == 'macOS' && secrets.MAC_CSC_NAME || '' }}
@@ -170,7 +164,7 @@ jobs:
       # here rather than trusting the flag that produced it.
       - name: Refuse a development-stamped release
         env:
-          WORKHORSE_RELEASE_BUILD: ${{ (runner.os == 'macOS' && (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true')) && '1' || '0' }}
+          WORKHORSE_RELEASE_BUILD: ${{ (github.event_name == 'workflow_dispatch' || needs.detect-release.outputs.cut == 'true') && '1' || '0' }}
         run: node scripts/assert-release-channel.mjs
 
       # Held here rather than sent straight to the release, so a machine that

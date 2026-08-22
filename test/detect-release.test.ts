@@ -85,7 +85,7 @@ test("a version that moved without the manifest was typed by hand, and does not 
  * Whatever the installers job is willing to build, it must be willing to stamp
  * as a release. These two conditions have to stay in step.
  */
-test("every build the installers job makes on macOS is stamped a release", () => {
+test("every installer a release job builds is stamped a release", () => {
   const workflow = readFileSync(path.join(ROOT, ".github", "workflows", "release.yml"), "utf8");
 
   const marker = workflow.match(/WORKHORSE_RELEASE_BUILD:\s*\$\{\{(.+?)\}\}/s);
@@ -97,8 +97,15 @@ test("every build the installers job makes on macOS is stamped a release", () =>
     /workflow_dispatch/,
     "a hand-fired release still ships to users, so it must stamp channel=release",
   );
-  assert.match(condition, /runner\.os == 'macOS'/, "only macOS needs the signed-release identity");
+  assert.doesNotMatch(
+    condition,
+    /runner\.os == 'macOS'/,
+    "Windows 0.6.31 shipped stamped development because the flag was macOS-only",
+  );
   assert.match(condition, /cut == 'true'/, "an automatic cut must still stamp channel=release");
+  const gate = readFileSync(path.join(ROOT, "scripts", "assert-release-channel.mjs"), "utf8");
+  assert.match(gate, /win-unpacked/);
+  assert.match(gate, /process\.platform === "win32"/);
 });
 
 test("after-pack only writes the development marker off the release path", () => {

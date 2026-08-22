@@ -26,6 +26,7 @@ import {
   winUpdateTaskXml,
   winUpdateTaskXmlBytes,
   winWmiCreate,
+  windowsGrokBotShimPids,
   type AppUpdateApplyResult,
   type AppUpdateCheckResult,
 } from "../src/lib/app-update";
@@ -152,6 +153,55 @@ async function installMacDmg(version: string): Promise<AppUpdateApplyResult> {
   return { ok: true };
 }
 
+async function stopWindowsGrokBotShim(): Promise<void> {
+  if (process.platform !== "win32") return;
+  let stdout = "";
+  try {
+    stdout = await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name = 'Go7 Workhorse.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
+      ],
+      os.tmpdir(),
+      15_000,
+    );
+  } catch {
+    return;
+  }
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === "null") return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  const processes = rows.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as { ProcessId?: unknown; Name?: unknown; CommandLine?: unknown };
+    const pid = Number(record.ProcessId);
+    if (!Number.isInteger(pid) || pid <= 0) return [];
+    return [
+      {
+        pid,
+        name: typeof record.Name === "string" ? record.Name : "",
+        commandLine: typeof record.CommandLine === "string" ? record.CommandLine : "",
+      },
+    ];
+  });
+  for (const pid of windowsGrokBotShimPids(process.pid, processes)) {
+    try {
+      await run("taskkill.exe", ["/F", "/PID", String(pid)], os.tmpdir(), 8_000);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
 async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
   let release: unknown;
   try {
@@ -172,6 +222,7 @@ async function installWinNsis(version: string): Promise<AppUpdateApplyResult> {
     });
     if (!response.ok) throw new Error(`Download failed (${response.status}).`);
     fs.writeFileSync(setup, Buffer.from(await response.arrayBuffer()));
+    await stopWindowsGrokBotShim();
 
     const xmlPath = path.join(tmp, "update-task.xml");
     fs.writeFileSync(xmlPath, winUpdateTaskXmlBytes(winUpdateTaskXml({ command: setup })));

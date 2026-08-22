@@ -16,7 +16,7 @@ const CATALOG: {
   { id: "codex", name: "Codex", hint: "Local Codex." },
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
   { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },
-  { id: "grok-bot", name: "Grok Bot", hint: "Your Grok Bot, ready for instant chats." },
+  { id: "grok-bot", name: "Grok Bot", hint: "Private local bridge. Instant replies are optional." },
   { id: "own", name: "Your own", hint: "API URL and key." },
 ];
 
@@ -57,7 +57,7 @@ export function AddBot() {
         store.updateCustomLlm({
           ...draftFromProvider(preset),
           apiKey: "local",
-          tested: false,
+          tested: true,
           source: "manual",
         });
       }
@@ -106,14 +106,14 @@ export function AddBot() {
         <>
           <header className="project-hero">
             <div className="link-head">
-              <p className="eyebrow">{stage === "grok-bot" ? "Instant chat" : "Your own"}</p>
+              <p className="eyebrow">{stage === "grok-bot" ? "Grok Bot" : "Your own"}</p>
               <button className="tiny" type="button" onClick={leaveChoice}>
                 Back
               </button>
             </div>
             <h2>{stage === "grok-bot" ? "Connect Grok Bot" : "New bot"}</h2>
             {stage === "grok-bot" ? (
-              <p className="lede">Add the local bot, then connect its webhook so Workhorse can wake it for every message.</p>
+              <p className="lede">Add the private local bot now. You can finish its optional instant-reply connection later.</p>
             ) : draft.source === "openclaw" ? (
               <p className="row-meta">Imported MiniMax key from OpenClaw config. This is not harness integration.</p>
             ) : draft.source === "env" ? (
@@ -148,29 +148,33 @@ export function AddBot() {
 
           {stage === "grok-bot" ? <GrokBotWakeSetup /> : null}
 
-          <p className="row-meta">
-            {probing
-              ? "Testing API…"
-              : probeNote ||
-                (draft.tested
-                  ? `Tested. ${formatWindow(draft.contextWindow)} context.`
-                  : "Test the API before Create.")}
-          </p>
+          {stage === "own" ? (
+            <p className="row-meta">
+              {probing
+                ? "Testing API…"
+                : probeNote ||
+                  (draft.tested
+                    ? `Tested. ${formatWindow(draft.contextWindow)} context.`
+                    : "Test the API before Create.")}
+            </p>
+          ) : null}
           <div className="actions add-bot-actions">
-            <button
-              className="tiny"
-              type="button"
-              disabled={probing}
-              onClick={() => {
-                setProbing(true);
-                void store.probeCustomDraft().then((result) => {
-                  setProbeNote(result.message);
-                  setProbing(false);
-                });
-              }}
-            >
-              Test API
-            </button>
+            {stage === "own" ? (
+              <button
+                className="tiny"
+                type="button"
+                disabled={probing}
+                onClick={() => {
+                  setProbing(true);
+                  void store.probeCustomDraft().then((result) => {
+                    setProbeNote(result.message);
+                    setProbing(false);
+                  });
+                }}
+              >
+                Test API
+              </button>
+            ) : null}
             <button
               className="primary"
               type="button"

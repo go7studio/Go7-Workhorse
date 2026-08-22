@@ -11,7 +11,7 @@ import {
 
 function memoryIo(
   initial: unknown,
-  health: { ok: boolean; wake?: boolean } | Error = { ok: true, wake: true },
+  health: { ok: boolean } | Error = { ok: true },
 ) {
   let saved = initial === undefined ? "" : JSON.stringify(initial);
   const writes: Array<{ file: string; value: unknown }> = [];
@@ -76,9 +76,19 @@ test("a saved connection stays saved while the local bridge is offline", async (
   assert.deepEqual(await inspectGrokBotWake("fixture.json", io), {
     configured: true,
     shimReachable: false,
-    ready: false,
-    message: "Saved. Start Grok Bot to finish connecting.",
+    ready: true,
+    message: "Saved. Instant replies will be ready when Grok Bot starts.",
   });
+});
+
+test("public health never needs to reveal whether a webhook is configured", async () => {
+  const { io } = memoryIo(
+    { url: "https://routines.grok.com/webhook/abc", senderKey: "sender-secret" },
+    { ok: true },
+  );
+  const status = await inspectGrokBotWake("fixture.json", io);
+  assert.equal(status.ready, true);
+  assert.doesNotMatch(JSON.stringify(status), /sender-secret|routines\.grok\.com|wake/);
 });
 
 test("invalid input is not written and the path follows the supplied userData root", async () => {

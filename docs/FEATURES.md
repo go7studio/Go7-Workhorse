@@ -83,7 +83,8 @@ invent them. It names no fixed Grok Bot model: the selected model only needs
 local MCP/CLI tool calling, and Workhorse routes delegated workers.
 The connection fails closed if the shim is down. Instant chat is an optional
 finishing step: the user can add a Grok Bot without its webhook, hide the guide,
-and return later from LLMs. It is not a fifth stock vendor.
+and return later from LLMs. See the [Grok Bot guide](GROK-BOT.md). It is not a
+fifth stock vendor.
 
 ## Files you can hand a chat
 

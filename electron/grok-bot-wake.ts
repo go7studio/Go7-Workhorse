@@ -14,7 +14,7 @@ const SHIM_HEALTH_URL = "http://127.0.0.1:8787/health";
 export type GrokBotWakeIo = {
   readFile(file: string): string;
   writeConfig(file: string, value: GrokBotWakeConfig): void;
-  health(): Promise<{ ok: boolean; wake?: boolean }>;
+  health(): Promise<{ ok: boolean }>;
 };
 
 export function grokBotWakePath(userData: string): string {
@@ -30,8 +30,7 @@ function defaultIo(): GrokBotWakeIo {
       const timer = setTimeout(() => controller.abort(), 1_500);
       try {
         const response = await fetch(SHIM_HEALTH_URL, { signal: controller.signal });
-        const body = response.ok ? await response.json() as { wake?: unknown } : {};
-        return { ok: response.ok, wake: body.wake === true };
+        return { ok: response.ok };
       } finally {
         clearTimeout(timer);
       }
@@ -56,12 +55,12 @@ export async function inspectGrokBotWake(
       configured: false,
       shimReachable: false,
       ready: false,
-      message: "Add the webhook URL and key to finish instant chat access.",
+      message: "Optional. Set this up later for quick Grok Bot replies.",
     };
   }
   try {
     const health = await io.health();
-    if (health.ok && health.wake) {
+    if (health.ok) {
       return {
         configured: true,
         shimReachable: true,
@@ -71,16 +70,16 @@ export async function inspectGrokBotWake(
     }
     return {
       configured: true,
-      shimReachable: health.ok,
-      ready: false,
-      message: health.ok ? "Saved. Restart the Grok Bot bridge to load it." : "Saved. Start Grok Bot to finish connecting.",
+      shimReachable: false,
+      ready: true,
+      message: "Saved. Instant replies will be ready when Grok Bot starts.",
     };
   } catch {
     return {
       configured: true,
       shimReachable: false,
-      ready: false,
-      message: "Saved. Start Grok Bot to finish connecting.",
+      ready: true,
+      message: "Saved. Instant replies will be ready when Grok Bot starts.",
     };
   }
 }

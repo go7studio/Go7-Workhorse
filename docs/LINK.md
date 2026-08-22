@@ -23,7 +23,9 @@ webhook key, if used, lives only in `grok-bot-wake.json` on that computer.
 Grok Bot writes `grok-bot-leftover.json` from its real runtime reading now, on
 launch, after work, and every 15 minutes while active. Workhorse only reads it;
 missing, expired, or older-than-30-minute readings stay unknown. Connecting is
-not adding a vendor. No token is stored.
+not adding a vendor. No Workhorse Link bearer token is stored by Grok Bot. See
+the [Grok Bot connection guide](GROK-BOT.md) for the two paths and the optional
+instant-reply walkthrough.
 
 **Any other MCP client:** Copy generic MCP configuration, and paste it into
 that client's servers list:

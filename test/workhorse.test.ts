@@ -4964,6 +4964,17 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /Your own/);
   assert.match(addBot, /Grok Bot/);
   assert.match(addBot, /GrokBotWakeSetup/);
+  assert.match(addBot, /optional instant-reply connection later/);
+  assert.match(addBot, /tested: true/);
+  const wakeSetup = readFileSync(path.join(ROOT, "src", "ui", "GrokBotWakeSetup.tsx"), "utf8");
+  assert.match(wakeSetup, /Instant replies \(optional\)/);
+  assert.match(wakeSetup, /Set up/);
+  assert.match(wakeSetup, /Hide/);
+  assert.match(wakeSetup, />POST to</);
+  assert.match(wakeSetup, />key</);
+  assert.match(wakeSetup, /type="password"[\s\S]*type="password"/);
+  assert.match(settings, /Finish instant chat/);
+  assert.doesNotMatch(wakeSetup, /type="url"/);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Provider/);
   assert.match(addBot, /createCustomBot/);

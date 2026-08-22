@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.25](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.24...v0.6.25) (2026-08-22)
+
+
+### Bug Fixes
+
+* show Grok Bot usage snapshot age ([ca4cd76](https://github.com/go7studio/Go7-Workhorse/commit/ca4cd7688dd7f9938c9c52c8f82e2678f556df59))
+
 ## [0.6.24](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.23...v0.6.24) (2026-08-22)
 
 

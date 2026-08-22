@@ -10,6 +10,7 @@ import {
   macInstallerArch,
   macRefreshRegistrationScript,
   macReplaceScript,
+  windowsGrokBotShimPids,
   offerFromRelease,
   winInstallerArgs,
   winInstallerCommandLine,
@@ -318,6 +319,19 @@ test("update check is wired through main, preload, and the sidebar action", () =
   const nsis = readFileSync(path.join(ROOT, "build", "installer.nsh"), "utf8");
   assert.doesNotMatch(nsis, /!macro customInstall/);
   assert.doesNotMatch(nsis, /\bExec\b/);
+  assert.match(nsis, /!macro customInit/);
+  assert.match(nsis, /nsProcess::KillProcess/);
+  assert.match(nsis, /Go7 Workhorse\.exe/);
+  assert.match(winApply, /stopWindowsGrokBotShim/);
+  assert.match(updater, /windowsGrokBotShimPids/);
+  assert.deepEqual(
+    windowsGrokBotShimPids(100, [
+      { pid: 100, name: "Go7 Workhorse.exe", commandLine: "Go7 Workhorse.exe" },
+      { pid: 200, name: "Go7 Workhorse.exe", commandLine: `"C:\\\\Programs\\\\Go7 Workhorse\\\\Go7 Workhorse.exe" grok-bot-shim-host.js` },
+      { pid: 300, name: "chrome.exe", commandLine: "grok-bot-shim-host.js" },
+    ]),
+    [200],
+  );
   assert.doesNotMatch(updater, /hdiutil attach[^\n]*-quiet/);
   assert.match(updater, /error: message\.slice/);
   assert.doesNotMatch(updater, /catch \{\s*return null;\s*\}/);

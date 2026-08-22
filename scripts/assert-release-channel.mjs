@@ -48,23 +48,39 @@ function findApps(root) {
   return out;
 }
 
+function windowsMarkers(root) {
+  const unpacked = path.join(root, "win-unpacked", "resources", MARKER);
+  return existsSync(unpacked) ? [unpacked] : [];
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const publishing = String(process.env.WORKHORSE_RELEASE_BUILD ?? "").trim() === "1";
-  if (process.platform !== "darwin") {
-    console.log("assert-release-channel: not macOS, nothing to check");
+  const root = path.resolve("release");
+  const checks =
+    process.platform === "win32"
+      ? windowsMarkers(root).map((markerPath) => ({
+          label: path.relative(root, markerPath),
+          markerPath,
+        }))
+      : process.platform === "darwin"
+        ? findApps(root).map((app) => ({
+            label: path.basename(app),
+            markerPath: path.join(app, "Contents", "Resources", MARKER),
+          }))
+        : [];
+  if (process.platform !== "darwin" && process.platform !== "win32") {
+    console.log("assert-release-channel: nothing to check on this platform");
     process.exit(0);
   }
-  const apps = findApps(path.resolve("release"));
-  if (apps.length === 0) {
-    console.error("assert-release-channel: no packaged .app found under release/");
+  if (checks.length === 0) {
+    console.error(`assert-release-channel: no packaged marker found under ${root}`);
     process.exit(publishing ? 1 : 0);
   }
   let failed = false;
-  for (const app of apps) {
-    const markerPath = path.join(app, "Contents", "Resources", MARKER);
-    const channel = existsSync(markerPath) ? channelOf(readFileSync(markerPath, "utf8")) : null;
+  for (const item of checks) {
+    const channel = existsSync(item.markerPath) ? channelOf(readFileSync(item.markerPath, "utf8")) : null;
     const verdict = verdictFor(channel, publishing);
-    console.log(`${verdict.ok ? "ok" : "FAIL"}  ${path.basename(app)}  channel=${channel ?? "(unreadable)"}  ${verdict.why}`);
+    console.log(`${verdict.ok ? "ok" : "FAIL"}  ${item.label}  channel=${channel ?? "(unreadable)"}  ${verdict.why}`);
     if (!verdict.ok) failed = true;
   }
   process.exit(failed ? 1 : 0);

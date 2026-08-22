@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.31](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.30...v0.6.31) (2026-08-22)
+
+
+### Bug Fixes
+
+* book Cursor Composer/API tokens and keep reused worker thinking level ([#148](https://github.com/go7studio/Go7-Workhorse/issues/148)) ([7bbc92d](https://github.com/go7studio/Go7-Workhorse/commit/7bbc92d3469a9b6be44c0c85add88d57db1433a2))
+
 ## [0.6.30](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.29...v0.6.30) (2026-08-22)
 
 

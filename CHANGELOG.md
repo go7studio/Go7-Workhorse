@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.27](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.26...v0.6.27) (2026-08-22)
+
+
+### Bug Fixes
+
+* keep desk saves durable when vault is locked ([06898e7](https://github.com/go7studio/Go7-Workhorse/commit/06898e794a589814d0912eb2bdd384cffffd0a2e))
+
 ## [0.6.26](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.25...v0.6.26) (2026-08-22)
 
 

@@ -1504,6 +1504,7 @@
           "steps": [
             "Load official leftover sources for Grok, Codex, Claude, Cursor Composer, Cursor Other Models, MiniMax, and Synthetic, plus the local Grok Bot snapshot; capture lane, timestamp, and source.",
             "Run the Grok Bot connection handoff and require the exact per-install path, real runtime weeklyUsage fields, and 15-minute producer cadence; a writer with no live feed must fail this check without touching the snapshot.",
+            "Load a valid Grok Bot snapshot and verify Usage detail plus capacity output preserve its exact observation time instead of presenting the accepted reading as newly fetched.",
             "Return a missing, unauthorized, rate-limited, malformed, stale, and expired source and verify every affected ring remains unknown rather than inferred.",
             "Set a small fixture budget or deterministic Watch threshold.",
             "Trigger a hold without spending live money and verify the reason plus override scope.",

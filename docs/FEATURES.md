@@ -67,7 +67,8 @@ token. Workhorse does not put those keys in git or in Grok Bot memory. The separ
 weekly ring reads `grok-bot-leftover.json` beside `grok-bot-inbox`, using
 numeric `usedPercent` plus ISO `resetsAt` and `asOf` fields; missing, invalid,
 expired, or over-24-hour-old readings stay unknown. It fails closed if the
-shim is down. It is not a fifth stock vendor.
+shim is down. Accepted readings show their age in Usage. It is not a fifth
+stock vendor.
 
 ## Files you can hand a chat
 

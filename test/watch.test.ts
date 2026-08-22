@@ -1020,6 +1020,7 @@ test("Grok Bot capacity uses its weekly reading while missing stays unknown and 
   });
   const botPlan = plan(73, {
     resetsAt: reset,
+    observedAt: "2026-08-21T11:45:00.000Z",
     products: [{ product: "weekly", label: "Weekly", usagePercent: 27, resetsAt: reset }],
   });
   const plans = { grok: grokPlan, custom: { bot_2yyu6ypvxald: botPlan } };
@@ -1036,6 +1037,7 @@ test("Grok Bot capacity uses its weekly reading while missing stays unknown and 
   assert.equal(botKnown?.meter.status, "known");
   assert.equal(botKnown?.meter.remainingPercent, 73);
   assert.equal(botKnown?.meter.usedPercent, 27);
+  assert.equal(botKnown?.meter.observedAt, "2026-08-21T11:45:00.000Z");
   assert.equal(grokKnown?.meter.remainingPercent, 12);
   assert.equal(grokKnown?.meter.usedPercent, 88);
 

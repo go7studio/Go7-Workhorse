@@ -251,6 +251,7 @@ import {
   claudeWindowTabs,
   planWindowChip,
   weeklyPlanLeftover,
+  formatPlanObservation,
   formatPlanReset,
   formatIoLine,
   normalizeUsage,
@@ -5789,6 +5790,8 @@ test("Usage rings include every desk LLM even with no spend", () => {
     "∞",
   );
   assert.match(formatPlanReset("2026-08-20T05:59:59Z", Date.parse("2026-08-13T16:00:00Z")), /Resets/);
+  assert.equal(formatPlanObservation("2026-08-13T15:52:00Z", Date.parse("2026-08-13T16:00:00Z")), "Updated 8m ago");
+  assert.equal(formatPlanObservation("2026-08-13T08:00:00Z", Date.parse("2026-08-13T16:00:00Z")), "Updated 8h ago");
   assert.deepEqual(
     deskUsageCards([], {
       llms: {

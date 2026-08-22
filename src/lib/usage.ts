@@ -694,6 +694,18 @@ export function formatPlanReset(iso?: string, now = Date.now()): string {
   return `Resets ${date.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
 }
 
+export function formatPlanObservation(iso?: string, now = Date.now()): string {
+  if (!iso) return "";
+  const stamp = Date.parse(iso);
+  if (!Number.isFinite(stamp)) return "";
+  const minutes = Math.floor(Math.max(0, now - stamp) / 60_000);
+  if (minutes < 1) return "Updated now";
+  if (minutes < 60) return `Updated ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Updated ${hours}h ago`;
+  return `Updated ${Math.floor(hours / 24)}d ago`;
+}
+
 function customBotForEvent(event: UsageEvent, bots: HeatBotHint[]): HeatBotHint | undefined {
   if (event.customBotId) {
     const hit = bots.find((bot) => bot.id === event.customBotId);

@@ -1569,6 +1569,7 @@ test("Grok Bot weekly leftover reads the local account-menu fixture and missing 
   assert.equal(plan?.leftPercent, 73);
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.resetsAt, "2026-08-28T16:00:00.000Z");
+  assert.equal(plan?.observedAt, "2026-08-22T03:00:00.000Z");
   assert.equal(plan?.prepaidBalance, 0);
   assert.equal(plan?.products[0]?.product, "weekly");
   assert.equal(plan?.products[0]?.usagePercent, 27);

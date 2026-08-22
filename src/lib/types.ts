@@ -790,6 +790,7 @@ export type GrokPlanUsage = {
   leftPercent: number;
   period: "weekly" | "monthly" | "unknown";
   resetsAt?: string;
+  observedAt?: string;
   prepaidBalance: number;
   products: GrokPlanProduct[];
 };

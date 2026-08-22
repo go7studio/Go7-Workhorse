@@ -1071,6 +1071,7 @@ export type CapacityMeter = {
   remainingPercent?: number;
   usedPercent?: number;
   resetsAt?: string;
+  observedAt?: string;
 };
 
 export type CapacityRow = {
@@ -1115,6 +1116,7 @@ function officialCapacityMeter(input: {
   leftover?: number;
   used?: number;
   resetsAt?: string;
+  observedAt?: string;
   unmetered?: boolean;
 }): CapacityMeter {
   if (input.unmetered) return { status: "unmetered" };
@@ -1126,6 +1128,7 @@ function officialCapacityMeter(input: {
     ...(remaining != null ? { remainingPercent: remaining } : {}),
     ...(used != null ? { usedPercent: used } : {}),
     ...(input.resetsAt ? { resetsAt: input.resetsAt } : {}),
+    ...(input.observedAt ? { observedAt: input.observedAt } : {}),
   };
 }
 
@@ -1166,6 +1169,7 @@ export function capacityMeterForRow(
       leftover,
       used: plan?.usedPercent,
       resetsAt: row.resetsAt ?? plan?.resetsAt,
+      observedAt: plan?.observedAt,
       unmetered,
     });
   }

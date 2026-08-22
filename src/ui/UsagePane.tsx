@@ -22,6 +22,7 @@ import {
   claudeWindowTabs,
   planTimeWindows,
   planWindowChip,
+  formatPlanObservation,
   formatPlanReset,
   formatCost,
   formatIoLine,
@@ -456,7 +457,7 @@ export function UsagePane({
   const usedFact = windowPick?.unlimited
     ? "∞"
     : `${Math.round(windowPick?.usagePercent ?? (focused?.provider === "claude" ? (claudePick?.usagePercent ?? plan?.usedPercent ?? 0) : plan?.usedPercent ?? 0))}%`;
-  const planCopy = plan
+  const planCopyBase = plan
     ? weeklyUnlimited
       ? windowPick && !windowPick.unlimited && windowPick.resetsAt
         ? `${windowPick.label} limit · ${formatPlanReset(windowPick.resetsAt)}.`
@@ -469,6 +470,10 @@ export function UsagePane({
         ? `${planName} · ${formatReset(plan.resetsAt)}.`
         : `${planName} allowance.`
     : undefined;
+  const observation = formatPlanObservation(plan?.observedAt);
+  const planCopy = planCopyBase && observation
+    ? `${planCopyBase.replace(/\.$/, "")} · ${observation}.`
+    : planCopyBase;
   const back = () => {
     if (focus !== "overview") {
       setFocus("overview");

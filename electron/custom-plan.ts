@@ -79,6 +79,7 @@ export function parseGrokBotPlanUsage(raw: unknown, now = Date.now()): CustomPla
     leftPercent: clampPercent(100 - usedPercent),
     period: "weekly",
     resetsAt,
+    observedAt: asOf,
     prepaidBalance: 0,
     products: [{ product: "weekly", label: "Weekly", usagePercent: usedPercent, resetsAt }],
   };

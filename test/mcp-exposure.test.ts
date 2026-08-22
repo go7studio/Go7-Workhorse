@@ -902,6 +902,7 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
       custom: {
         bot_minimax: { usedPercent: 45, leftPercent: 55, period: "weekly", prepaidBalance: 0, products: [] },
         bot_kimi: { usedPercent: 27, leftPercent: 73, period: "weekly", prepaidBalance: 0, products: [] },
+        // Obsolete Aug 21 hand write (11/89). Without a fresh leftover.json beside state, capacity must drop it to unknown.
         bot_grokky: { usedPercent: 11, leftPercent: 89, period: "weekly", prepaidBalance: 0, products: [] },
       },
     },

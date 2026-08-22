@@ -14,11 +14,14 @@ through its own tool (`codex mcp add`, `claude mcp add`, `grok mcp add`,
 `openclaw mcp set`, Hermes `config.yaml`). **Connect Grok Bot** copies the
 same launch plus install steps for this computer (Mac or Windows); paste it
 into Grok Bot once and tell it to save in permanent agent memory (the remote
-box is scratch). Workhorse keeps a private loopback shim on Mac and Windows.
+box is scratch). The handoff replaces older leftover setup and tells Grok Bot
+to keep a local, non-LLM weekly-usage exporter current. Workhorse keeps a private loopback shim on Mac and Windows.
 Each install has its own loopback token; 8787 is not a shared open API. A
 webhook key, if used, lives only in `grok-bot-wake.json` on that computer.
-Grok Bot weekly usage stays unknown until Cursor publishes a documented meter.
-Connecting is not adding a vendor. No token is stored.
+Grok Bot writes `grok-bot-leftover.json` from its real runtime reading now, on
+launch, after work, and every 15 minutes while active. Workhorse only reads it;
+missing, expired, or older-than-30-minute readings stay unknown. Connecting is
+not adding a vendor. No token is stored.
 
 **Any other MCP client:** Copy generic MCP configuration, and paste it into
 that client's servers list:

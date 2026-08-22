@@ -177,11 +177,11 @@
     },
     {
       "id": "REG-020",
-      "behavior": "Official leftover meters stay provider- and lane-specific, and unavailable sources remain unknown.",
+      "behavior": "Official leftover meters stay provider- and lane-specific, unavailable sources remain unknown, and Grok Bot onboarding installs its runtime-produced snapshot contract.",
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai"],
       "scenarios": ["USG-S2", "USG-S4"],
       "rubric": ["USG-03", "USG-07"],
-      "sourceFiles": ["src/lib/usage.ts", "src/lib/cursor-lane.ts", "electron/claude-plan.ts", "electron/custom-plan.ts", "test/vendor-meter.test.ts"],
+      "sourceFiles": ["src/lib/usage.ts", "src/lib/cursor-lane.ts", "src/lib/workhorse-link.ts", "electron/claude-plan.ts", "electron/custom-plan.ts", "test/vendor-meter.test.ts", "test/workhorse-link.test.ts"],
       "verification": ["eval:validate"]
     },
     {

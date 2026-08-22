@@ -46,6 +46,7 @@ import { normalizeSession } from "../src/lib/session";
 import { uid } from "../src/lib/id";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
+import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
 import { isGrokBotUrl } from "../src/lib/custom-http-identity";
 import {
   askViaInbox,
@@ -980,9 +981,26 @@ function capacityPlans(raw: ReturnType<typeof readState>, settings: ReturnType<t
   const plans = raw.deskPlans ?? {};
   const grokBotIds = settings.customBots.filter((bot) => isGrokBotUrl(bot.baseUrl)).map((bot) => bot.id);
   if (grokBotIds.length === 0) return plans;
+  const stateFile = process.env.WORKHORSE_STATE_PATH?.trim();
+  const snapshotFile =
+    process.env.GROK_BOT_LEFTOVER_FILE?.trim() ||
+    process.env.WORKHORSE_LEFTOVER_PATH?.trim() ||
+    (stateFile ? path.join(path.dirname(stateFile), GROK_BOT_LEFTOVER_FILE) : "");
+  let current: ReturnType<typeof parseGrokBotPlanUsage>;
+  if (snapshotFile) {
+    try {
+      current = parseGrokBotPlanUsage(JSON.parse(fs.readFileSync(snapshotFile, "utf8")));
+    } catch {
+      current = undefined;
+    }
+  } else {
+    current = undefined;
+  }
   const custom = { ...(plans.custom ?? {}) };
   for (const id of grokBotIds) {
-    delete custom[id];
+    // Live leftover file wins; missing/stale/expired clears any saved desk plan so a hand ring cannot stick.
+    if (current) custom[id] = current;
+    else delete custom[id];
   }
   return { ...plans, custom };
 }

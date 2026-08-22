@@ -387,8 +387,23 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /grok-bot-wake\.json/);
   assert.match(text, /Never store that key/);
   assert.match(text, /loopback token/);
-  assert.match(text, /Usage stays unknown until Cursor exposes a documented meter/);
-  assert.doesNotMatch(text, /grok-bot-leftover\.json|weeklyUsage|every 15 minutes/);
+  assert.match(text, /grok-bot-leftover\.json/);
+  assert.match(text, /replace any older setup with this contract/);
+  assert.match(text, /Grok Bot is the sole producer; Workhorse only reads/);
+  assert.match(text, /weeklyUsage percentUsed and nextResetMs/);
+  assert.match(text, /Run it now, on launch, after completed work, and every 15 minutes/);
+  assert.match(text, /install and enable an LLM-free runtime hook/);
+  assert.match(text, /atomically write/);
+  assert.match(text, /"usedPercent"/);
+  assert.match(text, /"resetsAt"/);
+  assert.match(text, /"asOf"/);
+  assert.match(text, /Failed refreshes keep the last valid file/);
+  assert.match(text, /stays quiet when healthy and reports one producer error/);
+  assert.match(text, /workhorse capacity/);
+  assert.match(text, /older-than-30-minute/);
+  assert.match(text, /Never hand-edit it, ask a model for the number, read a login token, scrape private Cursor hosts/);
+  assert.match(text, /Do not claim setup complete before that check passes/);
+  assert.doesNotMatch(text, /api2\.|GetSandUsageStatus|GetCurrentPeriodUsage|documented meter/);
   assert.doesNotMatch(text, /gho_|ghp_|WORKHORSE_BRIDGE_TOKEN|Authorization: Bearer/i);
   assert.equal(workhorseLinkGrokBotOneshot(LAUNCH), text);
   const win = linkGrokBotOneshot(server, {
@@ -398,8 +413,9 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   });
   assert.match(win, /user's Windows PC/);
   assert.match(win, /workhorse\.cmd capabilities/);
+  assert.match(win, /workhorse\.cmd capacity/);
   assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\workhorse-bridge\.json/);
-  assert.doesNotMatch(win, /grok-bot-leftover\.json/);
+  assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\grok-bot-leftover\.json/);
   assert.doesNotMatch(win, /Library\/Application Support/);
   assert.equal(
     workhorseLinkGrokBotOneshot({ ...LAUNCH, platform: "win32", cliPath: "workhorse.cmd", userData: "C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse" }),

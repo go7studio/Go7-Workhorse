@@ -1,20 +1,10 @@
 import https from "node:https";
-import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { customMeterForUrl, customPlanRemainsUrl } from "../src/lib/custom-meters";
-import { customHttpIdentityHeaders, isGrokBotUrl } from "../src/lib/custom-http-identity";
+import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
 import type { GrokPlanUsage } from "../src/lib/types";
 
 export type CustomPlanUsage = GrokPlanUsage;
 export { customPlanRemainsUrl };
-
-export const GROK_BOT_LEFTOVER_FILE = "grok-bot-leftover.json";
-const GROK_BOT_LEFTOVER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-/** The shim and Workhorse share one reading beside grok-bot-inbox. */
-export function grokBotLeftoverPath(userData: string): string {
-  return path.join(userData, GROK_BOT_LEFTOVER_FILE);
-}
 
 function numberVal(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -44,45 +34,6 @@ function remainingMsToIso(value: unknown, now = Date.now()): string | undefined 
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
-}
-
-function isoDate(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  const stamp = Date.parse(value);
-  return Number.isNaN(stamp) ? undefined : new Date(stamp).toISOString();
-}
-
-/** Local Grok Bot account-menu reading. Percent is consumed, never leftover. */
-export function parseGrokBotPlanUsage(raw: unknown, now = Date.now()): CustomPlanUsage | undefined {
-  const root = asRecord(raw);
-  const nested = asRecord(root.weekly);
-  const row = Object.keys(nested).length ? nested : root;
-  const used = numberVal(
-    firstDefined(
-      row.usedPercent,
-      row.used_percent,
-      row.weeklyUsagePercent,
-      row.weekly_usage_percent,
-      row.usagePercent,
-      row.usage_percent,
-    ),
-  );
-  const resetsAt = isoDate(
-    firstDefined(row.resetsAt, row.resets_at, row.resetAt, row.reset_at, row.weeklyResetAt, row.weekly_reset_at),
-  );
-  const asOf = isoDate(firstDefined(row.asOf, row.as_of));
-  if (!Number.isFinite(used) || used < 0 || used > 100 || !resetsAt || !asOf) return undefined;
-  if (Date.parse(resetsAt) <= now || now - Date.parse(asOf) > GROK_BOT_LEFTOVER_MAX_AGE_MS) return undefined;
-  const usedPercent = clampPercent(used);
-  return {
-    usedPercent,
-    leftPercent: clampPercent(100 - usedPercent),
-    period: "weekly",
-    resetsAt,
-    observedAt: asOf,
-    prepaidBalance: 0,
-    products: [{ product: "weekly", label: "Weekly", usagePercent: usedPercent, resetsAt }],
-  };
 }
 
 /** MiniMax usage_percent / remaining_percent is leftover, not consumed. */
@@ -394,17 +345,8 @@ export async function fetchCustomPlanUsage(input: {
   apiKey: string;
   model?: string;
   fetchImpl?: typeof fetch;
-  grokBotLeftoverPath?: string;
-  readFileImpl?: (filePath: string, encoding: "utf8") => Promise<string>;
-  now?: number;
 }): Promise<CustomPlanUsage | undefined> {
   try {
-    if (isGrokBotUrl(input.baseUrl)) {
-      const filePath = input.grokBotLeftoverPath?.trim();
-      if (!filePath) return undefined;
-      const read = input.readFileImpl ?? ((target: string, encoding: "utf8") => readFile(target, encoding));
-      return parseGrokBotPlanUsage(JSON.parse(await read(filePath, "utf8")), input.now);
-    }
     const meter = customMeterForUrl(input.baseUrl);
     const url = customPlanRemainsUrl(input.baseUrl);
     const apiKey = input.apiKey.trim();

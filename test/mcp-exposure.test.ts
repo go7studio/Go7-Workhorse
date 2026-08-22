@@ -907,15 +907,6 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     },
   };
   writeFileSync(statePath, JSON.stringify(state));
-  const observedAt = new Date(Date.now() - 60_000).toISOString();
-  writeFileSync(
-    path.join(dir, "grok-bot-leftover.json"),
-    JSON.stringify({
-      usedPercent: 20,
-      resetsAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1_000).toISOString(),
-      asOf: observedAt,
-    }),
-  );
   const previous = {
     profile: process.env.WORKHORSE_MCP_PROFILE,
     state: process.env.WORKHORSE_STATE_PATH,
@@ -959,10 +950,10 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
     const grokBot = first.rows.find((row) => row.id === "bot:bot_grokky") as
       | { meter?: { status?: string; remainingPercent?: number; usedPercent?: number; observedAt?: string } }
       | undefined;
-    assert.equal(grokBot?.meter?.status, "known");
-    assert.equal(grokBot?.meter?.remainingPercent, 80);
-    assert.equal(grokBot?.meter?.usedPercent, 20);
-    assert.equal(grokBot?.meter?.observedAt, observedAt);
+    assert.equal(grokBot?.meter?.status, "unknown");
+    assert.equal(grokBot?.meter?.remainingPercent, undefined);
+    assert.equal(grokBot?.meter?.usedPercent, undefined);
+    assert.equal(grokBot?.meter?.observedAt, undefined);
     assert.equal(
       first.rows.some((row) => row.id.includes("openclaw") || row.id.includes("hermes")),
       false,
@@ -1004,7 +995,6 @@ test("workhorse_query_capacity is read-only on external-runtime and omits trap f
       }),
     );
     assert.equal(JSON.parse(second).version, 1);
-    writeFileSync(path.join(dir, "grok-bot-leftover.json"), "{bad");
     const unknown = JSON.parse(
       mcpToolText(
         await handleWorkhorseRpc({

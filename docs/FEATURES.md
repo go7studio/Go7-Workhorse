@@ -63,12 +63,9 @@ on that port on Mac and Windows (login keepalive, restart if it dies). Each
 install mints its own loopback token; completions refuse any other caller.
 The port binds loopback only. A webhook wake file, when present, stays in
 userData as `grok-bot-wake.json` and is a different secret from the loopback
-token. Workhorse does not put those keys in git or in Grok Bot memory. The separate
-weekly ring reads `grok-bot-leftover.json` beside `grok-bot-inbox`, using
-numeric `usedPercent` plus ISO `resetsAt` and `asOf` fields; missing, invalid,
-expired, or over-24-hour-old readings stay unknown. It fails closed if the
-shim is down. Accepted readings show their age in Usage. It is not a fifth
-stock vendor.
+token. Workhorse does not put those keys in git or in Grok Bot memory. The
+weekly ring stays unknown until Cursor publishes a documented meter.
+It fails closed if the shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 

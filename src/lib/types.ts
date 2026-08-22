@@ -752,6 +752,10 @@ export type WatchDismissed = Record<string, string>;
 export type WatchDayMark = {
   day: string;
   leftover: number;
+  /** Latest official leftover seen, used only to detect a vendor counter refill. */
+  observedLeftover?: number;
+  /** When Workhorse observed the official leftover counter roll upward into a new cycle. */
+  resetObservedAt?: string;
 };
 
 export type WatchDayMarks = Record<string, WatchDayMark>;

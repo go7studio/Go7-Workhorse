@@ -31,9 +31,11 @@ import {
   spawnIsNoGo,
   isDesktopWatchNotice,
   leftoverPercentForKey,
+  normalizeWatchDayMarks,
   normalizeWatch,
   pruneWatchPermits,
   rollingAllowed,
+  syncWatchDayMarks,
   toggleWatchLockKey,
   watchDayFill,
   watchBarDetail,
@@ -102,6 +104,44 @@ test("weekDayIndex treats the next local date as the next Watch day", () => {
   assert.deepEqual(weekDayIndex(weekEnd, first), { day: 1, days: 7 });
   assert.deepEqual(weekDayIndex(weekEnd, Date.parse("2026-08-14T00:10:00")), { day: 2, days: 7 });
   assert.deepEqual(weekDayIndex("2026-08-20T12:00:00", Date.parse("2026-08-14T00:52:00")), { day: 2, days: 7 });
+});
+
+test("Watch starts a new cycle when the official leftover counter refills before its timestamp moves", () => {
+  const now = Date.parse("2026-08-22T12:30:00");
+  const staleReset = "2026-08-25T13:53:32.726325+00:00";
+  const marks = normalizeWatchDayMarks({
+    grok: { day: "2026-08-22", leftover: 1 },
+  });
+  assert.deepEqual(weekDayIndex(staleReset, now, "weekly"), { day: 5, days: 7 });
+
+  const status = watchVendorStatuses({
+    settings: {
+      watch: DEFAULT_WATCH,
+      customBots: [],
+      usageBudgets: {},
+      llms: { ...DEFAULT_SETTINGS.llms, grok: { ...DEFAULT_SETTINGS.llms.grok, connected: true } },
+    },
+    usage: [],
+    plans: { grok: plan(99, { resetsAt: staleReset }) },
+    permits: {},
+    dayMarks: marks,
+    now,
+  }).find((row) => row.key === "grok");
+  assert.deepEqual(status?.weekDay, { day: 1, days: 7 });
+
+  const synced = syncWatchDayMarks(marks, { grok: 99 }, now);
+  assert.equal(synced.grok?.leftover, 99);
+  assert.equal(synced.grok?.observedLeftover, 99);
+  assert.equal(synced.grok?.resetObservedAt, new Date(now).toISOString());
+  const restored = normalizeWatchDayMarks(synced);
+  assert.deepEqual(
+    weekDayIndex(staleReset, Date.parse("2026-08-23T09:00:00"), "weekly", restored.grok?.resetObservedAt),
+    { day: 2, days: 7 },
+  );
+  assert.deepEqual(
+    weekDayIndex("2026-08-30T13:53:32.726325+00:00", Date.parse("2026-08-24T09:00:00"), "weekly", restored.grok?.resetObservedAt),
+    { day: 2, days: 7 },
+  );
 });
 
 test("monthly Cursor watch uses the billing month, not 7 days", () => {

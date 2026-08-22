@@ -168,7 +168,17 @@ export function normalizeWatchDayMarks(raw: unknown): WatchDayMarks {
     const record = value as Partial<WatchDayMark>;
     if (typeof record.day !== "string" || !record.day) continue;
     if (typeof record.leftover !== "number" || !Number.isFinite(record.leftover)) continue;
-    next[key] = { day: record.day, leftover: Math.max(0, Math.min(100, record.leftover)) };
+    const mark: WatchDayMark = {
+      day: record.day,
+      leftover: Math.max(0, Math.min(100, record.leftover)),
+    };
+    if (typeof record.observedLeftover === "number" && Number.isFinite(record.observedLeftover)) {
+      mark.observedLeftover = Math.max(0, Math.min(100, record.observedLeftover));
+    }
+    if (typeof record.resetObservedAt === "string" && !Number.isNaN(Date.parse(record.resetObservedAt))) {
+      mark.resetObservedAt = record.resetObservedAt;
+    }
+    next[key] = mark;
   }
   return next;
 }
@@ -188,6 +198,54 @@ export function startOfLocalDay(now = Date.now()): number {
 }
 
 const MS_DAY = 24 * 60 * 60 * 1000;
+/** Official percentages may round by a point; a five-point rise is strong refill evidence. */
+const WATCH_RESET_RISE_PERCENT = 5;
+
+function providerCycleStartDay(
+  resetsAt: string | undefined,
+  period: "weekly" | "monthly" | "unknown" | undefined,
+): number | undefined {
+  if (!resetsAt) return undefined;
+  const reset = Date.parse(resetsAt);
+  if (Number.isNaN(reset)) return undefined;
+  const resetDay = startOfLocalDay(reset);
+  if (period === "monthly") {
+    const start = new Date(resetDay);
+    start.setMonth(start.getMonth() - 1);
+    return startOfLocalDay(start.getTime());
+  }
+  return resetDay - 7 * MS_DAY;
+}
+
+function observedCycleDayIndex(
+  resetObservedAt: string | undefined,
+  resetsAt: string | undefined,
+  now: number,
+  period: "weekly" | "monthly" | "unknown" | undefined,
+): { day: number; days: number } | undefined {
+  if (!resetObservedAt) return undefined;
+  const observed = Date.parse(resetObservedAt);
+  if (Number.isNaN(observed)) return undefined;
+  const observedDay = startOfLocalDay(observed);
+  const today = startOfLocalDay(now);
+  const providerStart = providerCycleStartDay(resetsAt, period);
+  if (observedDay > today || (providerStart != null && providerStart >= observedDay)) return undefined;
+  const days = period === "monthly" ? monthDayIndex(resetsAt, now).days : 7;
+  const elapsed = Math.round((today - observedDay) / MS_DAY);
+  if (elapsed < 0 || elapsed >= days) return undefined;
+  return { day: elapsed + 1, days };
+}
+
+function resetObservedAtForMark(
+  mark: WatchDayMark | undefined,
+  leftover: number | undefined,
+  now: number,
+): string | undefined {
+  if (!mark || leftover == null) return mark?.resetObservedAt;
+  const previous = mark.observedLeftover ?? mark.leftover;
+  if (leftover >= previous + WATCH_RESET_RISE_PERCENT) return new Date(now).toISOString();
+  return mark.resetObservedAt;
+}
 
 /** Which day of a monthly billing cycle this is (1–28…31), from the previous reset to `resetsAt`. */
 export function monthDayIndex(resetsAt?: string, now = Date.now()): { day: number; days: number } {
@@ -215,7 +273,10 @@ export function weekDayIndex(
   resetsAt?: string,
   now = Date.now(),
   period?: "weekly" | "monthly" | "unknown",
+  resetObservedAt?: string,
 ): { day: number; days: number } {
+  const observed = observedCycleDayIndex(resetObservedAt, resetsAt, now, period);
+  if (observed) return observed;
   if (period === "monthly") return monthDayIndex(resetsAt, now);
   const days = 7;
   if (resetsAt) {
@@ -385,8 +446,22 @@ export function syncWatchDayMarks(
   for (const [key, leftover] of Object.entries(leftovers)) {
     if (leftover == null) continue;
     const mark = next[key];
-    if (!mark || mark.day !== day) {
-      next[key] = { day, leftover };
+    const previous = mark?.observedLeftover ?? mark?.leftover;
+    const resetObserved = previous != null && leftover >= previous + WATCH_RESET_RISE_PERCENT;
+    const resetObservedAt = resetObserved ? new Date(now).toISOString() : mark?.resetObservedAt;
+    const startsDay = !mark || mark.day !== day || resetObserved;
+    if (
+      !mark ||
+      startsDay ||
+      mark.observedLeftover !== leftover ||
+      mark.resetObservedAt !== resetObservedAt
+    ) {
+      next[key] = {
+        day,
+        leftover: startsDay ? leftover : mark.leftover,
+        observedLeftover: leftover,
+        ...(resetObservedAt ? { resetObservedAt } : {}),
+      };
       changed = true;
     }
   }
@@ -454,7 +529,8 @@ export function evaluateWatchHold(input: {
   const plan = leftoverForCard(row, input.plans);
   const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent, plan);
   const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
-  const cycle = weekDayIndex(resetsAt, now, plan?.period);
+  const resetObservedAt = resetObservedAtForMark(input.dayMarks?.[key], leftover, now);
+  const cycle = weekDayIndex(resetsAt, now, plan?.period, resetObservedAt);
   const allowedPercent = rollingAllowed(watch.dailyLimitPercent, cycle.day, cycle.days);
   const permit = input.permits[key];
   if (!watchLocksKey(watch, key)) return null;
@@ -631,7 +707,8 @@ export function watchVendorStatuses(input: {
     const usedPercent = weekUsedFromLeftover(leftover, plan?.usedPercent, plan);
     const today = todayTokens(slice, now);
     const resetsAt = plan?.resetsAt ?? plan?.products.find((item) => item.resetsAt)?.resetsAt;
-    const weekDay = weekDayIndex(resetsAt, now, plan?.period);
+    const resetObservedAt = resetObservedAtForMark(input.dayMarks?.[key], leftover, now);
+    const weekDay = weekDayIndex(resetsAt, now, plan?.period, resetObservedAt);
     const allowedPercent = rollingAllowed(watch.dailyLimitPercent, weekDay.day, weekDay.days);
     const todayUsed = todayUsedOfWeek({
       leftover,

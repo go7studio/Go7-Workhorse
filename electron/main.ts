@@ -676,6 +676,10 @@ app.whenReady().then(async () => {
     platform: process.platform,
     command: process.execPath,
     script: path.join(__dirname, "grok-bot-shim-host.js"),
+    // A desk pinned to an isolated profile is a test or a dev build. It can use
+    // whatever shim is already up, but it must not rewrite the launch agent the
+    // installed desk depends on.
+    manageKeepalive: !workhorseUserDataOverride(),
   }).then((result) => {
     if (!result.ok) console.warn("Grok Bot shim failed to start. Desk POSTs to 127.0.0.1:8787 still fail closed.");
     else debugStartup(`Grok Bot shim ${result.mode}`);

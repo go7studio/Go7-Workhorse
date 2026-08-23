@@ -64,6 +64,7 @@ export type LinkedReference = {
 export type Project = {
   id: string;
   name: string;
+  description?: string;
   createdAt: number;
   openedAt: number;
   archivedAt?: number | null;

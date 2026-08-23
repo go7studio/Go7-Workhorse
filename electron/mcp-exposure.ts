@@ -14,6 +14,10 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_read_chat",
   "workhorse_ask_chat",
   "workhorse_list_projects",
+  "workhorse_read_project",
+  "workhorse_create_project",
+  "workhorse_link_project_folder",
+  "workhorse_create_chat",
   "workhorse_list_agents",
   "workhorse_list_external_agents",
   "workhorse_spawn_agent",
@@ -25,7 +29,6 @@ export const EXTERNAL_RUNTIME_ALLOW = [
 /** Names a harness may still call. They are not the Link contract. */
 export const LINK_COMPAT_TOOLS = [
   "workhorse_list_bots",
-  "workhorse_list_projects",
   "workhorse_list_agents",
   "workhorse_list_external_agents",
   "workhorse_spawn_agent",
@@ -38,7 +41,6 @@ export const EXTERNAL_RUNTIME_FORBIDDEN = [
   "workhorse_delete_project",
   "workhorse_rename_chat",
   "workhorse_rename_project",
-  "workhorse_create_project",
   "workhorse_move_chat",
   "workhorse_add_reference",
   "workhorse_delete_reference",
@@ -78,7 +80,7 @@ export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boo
 }
 
 /**
- * The list a caller is shown. Link advertises the eight contract names.
+ * The list a caller is shown. Link advertises the contract names.
  * Older names still pass isMcpToolAllowed so a harness that already calls
  * them is not refused.
  */

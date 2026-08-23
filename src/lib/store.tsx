@@ -30,6 +30,7 @@ import {
   isLooseDeleteScope,
   applyRenameDeskChat,
   listedChats,
+  applyCreateWorkhorseChat,
   applyComposerDrafts,
   sameComposerDraft,
   snapComposerDraft,
@@ -88,6 +89,7 @@ import type { AppUpdateCheckResult, AppUpdateOffer } from "./app-update";
 import {
   applyArchiveProject,
   applyCreateWorkhorseProject,
+  applyLinkProjectFolder,
   applyDeleteProject,
   applyProjectChatFate,
   applyRenameDeskProject,
@@ -3310,13 +3312,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
               return;
             }
+            if (action === "read-project") {
+              const query = (payload.projectId || payload.name || payload.message || "").trim();
+              const project = findProjectByQuery(latest.projects, query);
+              if (!project) {
+                await replyAsk({ error: query ? `No project matches “${query}”` : "project is required" });
+                return;
+              }
+              const chats = latest.sessions.filter((session) => session.projectId === project.id && !session.archivedAt);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    source: "live",
+                    project: {
+                      id: project.id,
+                      name: project.name,
+                      description: project.description ?? null,
+                      folders: projectFolderPaths(project, folderExists),
+                      references: project.references.map((item) => ({ kind: item.kind, value: item.value, label: item.label })),
+                      chats: chats.length,
+                      chatIds: chats.map((item) => item.id),
+                    },
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
             if (action === "create-project") {
               const name = (payload.name || payload.message || "").trim() || "Untitled";
               const folder = (payload.folder || payload.chat || "").trim();
+              const folders = [
+                ...((payload.folders ?? []).map((item) => item.trim()).filter(Boolean)),
+                ...(folder ? [folder] : []),
+              ];
               const fromId = payload.fromSessionId?.trim() || "";
               const applied = applyCreateWorkhorseProject(latest.projects, latest.sessions, {
                 name,
-                folder: folder || undefined,
+                description: payload.description,
+                folder: folders[0],
+                folders,
+                references: (payload.references ?? []).flatMap((item) => {
+                  const kind = item.kind === "file" || item.kind === "url" || item.kind === "note" ? item.kind : null;
+                  const value = item.value?.trim() ?? "";
+                  if (!kind || !value) return [];
+                  return [{ kind, value, label: item.label }];
+                }),
                 fromSessionId: fromId,
               });
               const result = applied.result;
@@ -3353,13 +3396,148 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     alreadyExists: result?.alreadyExists,
                     projectId: result?.projectId,
                     name: result?.name ?? name,
+                    description: result?.description ?? null,
                     folder: result?.folder ?? (folder || null),
                     folders: result?.folders ?? [],
+                    references: result?.references ?? [],
                     movedThisChat: Boolean(result?.movedThisChat),
                     projects,
                     howToUse: `Project “${result?.name ?? name}” is under Projects.${
                       result?.folder ? ` Linked folder: ${result.folder}.` : ""
                     }${result?.movedThisChat ? " This chat is in that project." : ""} Live desk now has: ${projects.map((row) => row.name).join(", ") || "(none)"}.`,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "link-project-folder") {
+              const projectQuery = (payload.projectId || payload.name || payload.message || "").trim();
+              const folder = (payload.folder || "").trim();
+              if (!folder) {
+                await replyAsk({ error: "folder is required" });
+                return;
+              }
+              if (!folderExists(folder)) {
+                await replyAsk({ error: `folder is not an existing directory: ${folder}` });
+                return;
+              }
+              const linked = applyLinkProjectFolder(latest.projects, projectQuery, folder);
+              if (!linked.ok) {
+                await replyAsk({ error: linked.error });
+                return;
+              }
+              setState((current) => ({
+                ...current,
+                projects: linked.projects,
+                activeProjectId: linked.project.id,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  projects: linked.projects,
+                  sessions: listedChats(latest.sessions),
+                  activeProjectId: linked.project.id,
+                  activeSessionId: latest.activeSessionId,
+                })
+                .catch(() => undefined);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    source: "live",
+                    projectId: linked.project.id,
+                    name: linked.project.name,
+                    path: linked.path,
+                    folders: projectFolderPaths(linked.project, folderExists),
+                    alreadyLinked: linked.alreadyLinked,
+                  },
+                  null,
+                  2,
+                ),
+              });
+              return;
+            }
+            if (action === "create-chat") {
+              const projectQuery = (payload.projectId || payload.message || "").trim();
+              const project = findProjectByQuery(latest.projects, projectQuery);
+              if (!project) {
+                await replyAsk({ error: projectQuery ? `No project matches “${projectQuery}”` : "projectId is required" });
+                return;
+              }
+              const folder = (payload.folder || "").trim();
+              let projects = latest.projects;
+              let liveProject = project;
+              if (folder) {
+                if (!folderExists(folder)) {
+                  await replyAsk({ error: `folder is not an existing directory: ${folder}` });
+                  return;
+                }
+                const linked = applyLinkProjectFolder(projects, project.id, folder);
+                if (!linked.ok) {
+                  await replyAsk({ error: linked.error });
+                  return;
+                }
+                projects = linked.projects;
+                liveProject = linked.project;
+              }
+              const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
+              const provider = isProviderId(payload.provider) ? payload.provider : remembered?.provider ?? "grok";
+              const model = payload.model?.trim() || (remembered?.provider === provider ? remembered.model : defaultModel(provider).id);
+              const effort = withEffort(provider, model, parseEffort(payload.effort ?? "") ?? remembered?.effort ?? null);
+              const customBotId = provider === "custom" ? remembered?.customBotId : undefined;
+              const rememberedAccess = remembered?.provider === provider ? remembered : undefined;
+              const nativeAccess = provider === "custom" ? undefined : latest.settings.llms[provider].accessDefaults;
+              const opened = applyCreateWorkhorseChat(latest.sessions, {
+                projectId: liveProject.id,
+                title: payload.title || payload.name,
+                provider,
+                model,
+                effort,
+                customBotId,
+                mode: rememberedAccess?.mode ?? nativeAccess?.mode ?? "ask",
+                sandbox: rememberedAccess?.sandbox ?? nativeAccess?.sandbox ?? "off",
+              });
+              setState((current) => ({
+                ...current,
+                projects,
+                sessions: opened.sessions,
+                activeProjectId: liveProject.id,
+                activeSessionId: opened.session.id,
+                lastModel: {
+                  provider,
+                  model,
+                  effort,
+                  sandbox: opened.session.sandbox,
+                  mode: opened.session.mode,
+                  customBotId,
+                },
+                panel: null,
+                sheet: null,
+              }));
+              void window.workhorse
+                ?.saveState({
+                  ...latest,
+                  projects,
+                  sessions: listedChats(opened.sessions),
+                  activeProjectId: liveProject.id,
+                  activeSessionId: opened.session.id,
+                })
+                .catch(() => undefined);
+              await replyAsk({
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    source: "live",
+                    sessionId: opened.session.id,
+                    title: opened.session.title,
+                    projectId: liveProject.id,
+                    project: liveProject.name,
+                    provider,
+                    model,
+                    effort,
+                    messages: 0,
                   },
                   null,
                   2,

@@ -37,6 +37,9 @@ export async function startWorkhorseBridge(handler: (ask: PeerAsk) => Promise<Pe
             raw.action === "list" ||
             raw.action === "create-project" ||
             raw.action === "list-projects" ||
+            raw.action === "read-project" ||
+            raw.action === "link-project-folder" ||
+            raw.action === "create-chat" ||
             raw.action === "move-chat" ||
             raw.action === "rename-chat" ||
             raw.action === "rename-project" ||

@@ -3,7 +3,10 @@ import type { LinkedFolder, LinkedReference, Project, ReferenceKind } from "./ty
 
 export type CreateWorkhorseProjectInput = {
   name: string;
+  description?: string;
   folder?: string;
+  folders?: string[];
+  references?: Array<{ kind: ReferenceKind; value: string; label?: string }>;
   fromSessionId?: string;
 };
 
@@ -11,13 +14,88 @@ export type CreateWorkhorseProjectResult = {
   ok: true;
   name: string;
   projectId: string;
+  description: string | null;
   folder: string | null;
   folders: string[];
+  references: Array<{ kind: ReferenceKind; value: string; label: string }>;
   alreadyExists?: boolean;
   movedThisChat: boolean;
 };
 
-/** Bind sidebar name to this project only. Never attach the folder to a different existing name. */
+export type FolderIo = {
+  resolve: (folder: string) => string;
+  existsSync: (folder: string) => boolean;
+  isDirectory: (folder: string) => boolean;
+  realpathSync: (folder: string) => string;
+};
+
+/** Confirm the path is an existing directory. Never create one. */
+export function resolveExistingFolder(folder: string, io: FolderIo): string {
+  const trimmed = folder.trim();
+  if (!trimmed) throw new Error("folder is required");
+  const resolved = io.resolve(trimmed);
+  if (!io.existsSync(resolved) || !io.isDirectory(resolved)) {
+    throw new Error(`folder is not an existing directory: ${trimmed}`);
+  }
+  return io.realpathSync(resolved);
+}
+
+function collectFolderPaths(input: CreateWorkhorseProjectInput): string[] {
+  const rows = [...(input.folders ?? []), input.folder ?? ""];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of rows) {
+    const path = raw.trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+function asLinkedReferences(raw: CreateWorkhorseProjectInput["references"] = []): LinkedReference[] {
+  const out: LinkedReference[] = [];
+  for (const item of raw) {
+    if (item.kind !== "file" && item.kind !== "url" && item.kind !== "note") continue;
+    const value = item.value.trim();
+    if (!value) continue;
+    out.push({
+      id: uid("ref"),
+      kind: item.kind,
+      value,
+      label: item.label?.trim() || value,
+    });
+  }
+  return out;
+}
+
+function appendProjectReferences(references: LinkedReference[], extra: LinkedReference[]): LinkedReference[] {
+  const seen = new Set(references.map((item) => `${item.kind}:${item.value}`));
+  const next = [...references];
+  for (const item of extra) {
+    const key = `${item.kind}:${item.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(item);
+  }
+  return next;
+}
+
+function projectResult(project: Project, folder: string, alreadyExists: boolean, movedThisChat: boolean): CreateWorkhorseProjectResult {
+  return {
+    ok: true,
+    name: project.name,
+    projectId: project.id,
+    description: project.description ?? null,
+    folder: folder || project.folders[0]?.path || null,
+    folders: project.folders.map((item) => item.path),
+    references: project.references.map((item) => ({ kind: item.kind, value: item.value, label: item.label })),
+    alreadyExists: alreadyExists || undefined,
+    movedThisChat,
+  };
+}
+
+/** Bind sidebar name to this project only. Never attach the folder to a different existing name. Never create a directory. */
 export function applyCreateWorkhorseProject<S extends { id: string; projectId?: string | null }>(
   projects: Project[],
   sessions: S[],
@@ -31,21 +109,32 @@ export function applyCreateWorkhorseProject<S extends { id: string; projectId?: 
   result: CreateWorkhorseProjectResult;
 } {
   const name = input.name.trim() || "Untitled";
-  const folder = input.folder?.trim() || "";
+  const folders = collectFolderPaths(input);
+  const description = input.description?.trim() || "";
+  const references = asLinkedReferences(input.references);
   const existing = projects.find((project) => !project.archivedAt && project.name.toLowerCase() === name.toLowerCase());
   let project: Project;
   let nextProjects: Project[];
   const alreadyExists = Boolean(existing);
   if (existing) {
+    let nextFolders = existing.folders;
+    for (const folder of folders) nextFolders = appendProjectFolder(nextFolders, folder);
     project = {
       ...existing,
-      folders: folder ? appendProjectFolder(existing.folders, folder) : existing.folders,
+      folders: nextFolders,
+      references: appendProjectReferences(existing.references, references),
+      description: existing.description || description || undefined,
       openedAt: now,
     };
     nextProjects = projects.map((item) => (item.id === existing.id ? project : item));
   } else {
-    project = emptyProject(name, folder ? [folder] : []);
-    project = { ...project, createdAt: now, openedAt: now };
+    project = emptyProject(name, folders, description || undefined);
+    project = {
+      ...project,
+      createdAt: now,
+      openedAt: now,
+      references: appendProjectReferences(project.references, references),
+    };
     nextProjects = [project, ...projects];
   }
   const fromId = input.fromSessionId?.trim() || "";
@@ -57,25 +146,43 @@ export function applyCreateWorkhorseProject<S extends { id: string; projectId?: 
     sessions: nextSessions,
     activeProjectId: project.id,
     activeSessionId: fromId && nextSessions.some((session) => session.id === fromId) ? fromId : null,
-    result: {
-      ok: true,
-      name: project.name,
-      projectId: project.id,
-      folder: folder || null,
-      folders: project.folders.map((item) => item.path),
-      alreadyExists: alreadyExists || undefined,
-      movedThisChat: Boolean(fromId),
-    },
+    result: projectResult(project, folders[0] ?? "", alreadyExists, Boolean(fromId)),
   };
 }
 
-export function emptyProject(name: string, folderPaths: string[] = []): Project {
+export function applyLinkProjectFolder(
+  projects: Project[],
+  projectId: string,
+  folderPath: string,
+  now = Date.now(),
+):
+  | { ok: true; projects: Project[]; project: Project; path: string; alreadyLinked: boolean }
+  | { ok: false; error: string } {
+  const path = folderPath.trim();
+  if (!path) return { ok: false, error: "folder is required" };
+  const project = findProjectByQuery(projects, projectId);
+  if (!project) return { ok: false, error: `No project matches “${projectId}”` };
+  const alreadyLinked = project.folders.some((item) => folderKey(item.path) === folderKey(path));
+  const nextFolders = alreadyLinked ? project.folders : appendProjectFolder(project.folders, path);
+  const next: Project = { ...project, folders: nextFolders, openedAt: now };
+  return {
+    ok: true,
+    projects: projects.map((item) => (item.id === project.id ? next : item)),
+    project: next,
+    path,
+    alreadyLinked,
+  };
+}
+
+export function emptyProject(name: string, folderPaths: string[] = [], description?: string): Project {
   const now = Date.now();
   const folders = uniqueFolders(folderPaths);
   const trimmed = name.trim() || folders[0]?.label || "Untitled";
+  const note = description?.trim() || "";
   return {
     id: uid("proj"),
     name: trimmed,
+    ...(note ? { description: note } : {}),
     createdAt: now,
     openedAt: now,
     folders,
@@ -217,9 +324,13 @@ export function normalizeProject(raw: unknown): Project | null {
       ? record.name.trim()
       : folders[0]?.label ?? "Untitled";
 
+  const description =
+    typeof record.description === "string" && record.description.trim() ? record.description.trim() : undefined;
+
   return {
     id,
     name,
+    ...(description ? { description } : {}),
     createdAt,
     openedAt,
     folders,

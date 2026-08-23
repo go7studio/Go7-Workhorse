@@ -36,7 +36,7 @@ import {
 } from "../electron/mcp-install";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 
-test("Link lists the eight contract tools; older names still dispatch", () => {
+test("Link lists the contract tools; older names still dispatch", () => {
   for (const tool of LINK_TOOLS) {
     assert.equal(isMcpToolAdvertised("external-runtime", tool), true, tool);
   }
@@ -57,6 +57,10 @@ test("external-runtime allows execution discovery, delegation, chat, and worker 
     "workhorse_read_chat",
     "workhorse_ask_chat",
     "workhorse_list_projects",
+    "workhorse_read_project",
+    "workhorse_create_project",
+    "workhorse_link_project_folder",
+    "workhorse_create_chat",
     "workhorse_list_agents",
     "workhorse_list_external_agents",
     "workhorse_spawn_agent",
@@ -216,6 +220,7 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.equal(initialized.result?.instructions, WORKHORSE_MCP_INSTRUCTIONS);
   assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
+  assert.match(initialized.result?.instructions ?? "", /workhorse_create_chat to mint a parent sessionId/);
   assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
   assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);

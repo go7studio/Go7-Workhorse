@@ -14,6 +14,7 @@ import {
   buildAcpPrompt,
   fitModelImages,
   imageSrc,
+  imageSrcForModel,
   modelImagePayloadBytes,
   normalizeImages,
 } from "../src/lib/images";
@@ -28,6 +29,20 @@ test("attachment classifier recognizes documents, audio, and video", () => {
   assert.equal(attachmentKind({ name: "interview.mp3" }), "audio");
   assert.equal(attachmentKind({ name: "demo.mov" }), "video");
   assert.equal(attachmentKind({ name: "main.ts" }), "file");
+});
+
+test("model image resize uses attachment bytes, not a media-protocol URL", () => {
+  const data = Buffer.from("png-bytes").toString("base64");
+  const image: ChatImage = {
+    id: "img_1",
+    name: "compare.png",
+    mimeType: "image/png",
+    data,
+    kind: "image",
+    sourcePath: "/abs/compare.png",
+  };
+  assert.equal(imageSrc(image).startsWith("workhorse-media:") || imageSrc(image).includes("compare.png"), true);
+  assert.equal(imageSrcForModel(image), `data:image/png;base64,${data}`);
 });
 
 test("spawned visual agents receive bounded workspace attachments", () => {

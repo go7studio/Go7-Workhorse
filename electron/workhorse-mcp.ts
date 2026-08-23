@@ -8,7 +8,16 @@ import {
   type BotSetupInput,
   type PublicBotCard,
 } from "../src/lib/bot-setup";
-import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
+import { applyCreateWorkhorseChat, listedChats } from "../src/lib/chats";
+import { defaultModel, parseEffort, withEffort } from "../src/lib/models";
+import { isProviderId } from "../src/lib/providers";
+import {
+  applyCreateWorkhorseProject,
+  applyLinkProjectFolder,
+  findProjectByQuery,
+  normalizeProject,
+  resolveExistingFolder,
+} from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
@@ -87,7 +96,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. If no parent exists: workhorse_list_projects, workhorse_create_project if that name is absent (desk project only — do not create a directory), workhorse_link_project_folder with an existing absolute path, workhorse_create_chat to mint a parent sessionId without a vendor prompt, then workhorse_delegate. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -480,8 +489,55 @@ const TOOLS = [
   {
     name: "workhorse_list_projects",
     description:
-      "List Workhorse projects (name, linked folders, chat count). Use this before and after creating a project. Do not tell the user a project exists unless it appears here.",
+      "List Workhorse projects (id, name, linked folders, chat count). Use this before creating a project so you do not duplicate a name. Do not tell the user a project exists unless it appears here.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "workhorse_read_project",
+    description:
+      "Read one Workhorse project by id or name. Returns the normalized name, description, linked folders, references, and live chats. Use this to verify a folder is linked before creating a duplicate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: { type: "string", description: "Project id or exact name" },
+      },
+      required: ["project"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_link_project_folder",
+    description:
+      "Link an existing absolute folder onto a Workhorse project. The path must already exist. This does not create a directory. Returns the canonical resolved path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Project id or exact name" },
+        folder: { type: "string", description: "Absolute folder path that already exists" },
+        idempotencyKey: { type: "string", description: "Send one per intended link. A retry with the same key gets the first answer back." },
+      },
+      required: ["projectId", "folder"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "workhorse_create_chat",
+    description:
+      "Create a parent Workhorse chat in a project and return its sessionId. Does not send a vendor prompt. Use this sessionId as fromSessionId for workhorse_delegate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Project id or exact name" },
+        folder: { type: "string", description: "Optional existing absolute folder to link onto the project" },
+        provider: { type: "string", description: "Optional vendor: grok, claude, codex, cursor, or custom" },
+        model: { type: "string", description: "Optional model id" },
+        effort: { type: "string", description: "Optional effort: low, medium, high, extra" },
+        title: { type: "string", description: "Optional chat title. Locked so the chat persists without a prompt." },
+        idempotencyKey: { type: "string", description: "Send one per intended chat. A retry with the same key gets the first sessionId back." },
+      },
+      required: ["projectId"],
+      additionalProperties: false,
+    },
   },
   {
     name: "workhorse_request_vendor",
@@ -514,12 +570,27 @@ const TOOLS = [
   {
     name: "workhorse_create_project",
     description:
-      "Create a Workhorse project (a named desk entry under Projects, not a file on disk). Pass the exact name. Folder is optional at create time. If you found a folder, pass that absolute path — if the project already exists, this links the folder onto it and moves this chat there. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
+      "Create a Workhorse project (a named desk entry under Projects, not a directory on disk). Pass the exact name. Optional description, folders, and references are links only — existing paths are validated, never created. If that name already exists, folders are linked onto it. Then call workhorse_list_projects and only report success if that name appears.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Project name" },
-        folder: { type: "string", description: "Optional absolute folder to link" },
+        description: { type: "string", description: "Optional project description" },
+        folder: { type: "string", description: "Optional existing absolute folder to link" },
+        folders: { type: "array", items: { type: "string" }, description: "Optional existing absolute folders to link" },
+        references: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", description: "file, url, or note" },
+              value: { type: "string" },
+              label: { type: "string" },
+            },
+          },
+          description: "Optional file, url, or note links. Not created on disk.",
+        },
+        idempotencyKey: { type: "string", description: "Send one per intended project. A retry with the same key gets the first answer back." },
       },
       required: ["name"],
       additionalProperties: false,
@@ -834,9 +905,54 @@ export function parseCreateProjectLive(raw: string): Record<string, unknown> | n
   return null;
 }
 
+function folderIo() {
+  return {
+    resolve: (folder: string) => path.resolve(folder),
+    existsSync: (folder: string) => fs.existsSync(folder),
+    isDirectory: (folder: string) => {
+      try {
+        return fs.statSync(folder).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+    realpathSync: (folder: string) => fs.realpathSync(folder),
+  };
+}
+
+function existingFoldersFromArgs(args: Record<string, unknown>): string[] {
+  const raw: string[] = [];
+  if (typeof args.folder === "string") raw.push(args.folder);
+  if (Array.isArray(args.folders)) {
+    for (const item of args.folders) if (typeof item === "string") raw.push(item);
+  }
+  return raw.map((item) => resolveExistingFolder(item, folderIo()));
+}
+
+function referencesFromArgs(args: Record<string, unknown>): Array<{ kind: "file" | "url" | "note"; value: string; label?: string }> {
+  if (!Array.isArray(args.references)) return [];
+  const out: Array<{ kind: "file" | "url" | "note"; value: string; label?: string }> = [];
+  for (const item of args.references) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as { kind?: unknown; value?: unknown; label?: unknown };
+    const kind = record.kind === "file" || record.kind === "url" || record.kind === "note" ? record.kind : null;
+    const value = typeof record.value === "string" ? record.value.trim() : "";
+    if (!kind || !value) continue;
+    out.push({
+      kind,
+      value,
+      ...(typeof record.label === "string" && record.label.trim() ? { label: record.label.trim() } : {}),
+    });
+  }
+  return out;
+}
+
 function createWorkhorseProjectLocal(input: {
   name: string;
+  description?: string;
   folder?: string;
+  folders?: string[];
+  references?: Array<{ kind: "file" | "url" | "note"; value: string; label?: string }>;
   fromSessionId?: string;
 }): string {
   const dest = process.env.WORKHORSE_STATE_PATH?.trim();
@@ -870,6 +986,132 @@ function createWorkhorseProjectLocal(input: {
       howToUse: `Project “${applied.result.name}” is under Projects.${
         applied.result.folder ? ` Linked folder: ${applied.result.folder}.` : ""
       } Call workhorse_list_projects to confirm. Do not say it exists unless that list shows this name.`,
+    },
+    null,
+    2,
+  );
+}
+
+function writeDeskState(patch: Record<string, unknown>): Record<string, unknown> {
+  const dest = process.env.WORKHORSE_STATE_PATH?.trim();
+  if (!dest) throw new Error("Workhorse state is not available");
+  let full: Record<string, unknown> = {};
+  try {
+    full = JSON.parse(fs.readFileSync(dest, "utf8")) as Record<string, unknown>;
+  } catch {
+    full = {};
+  }
+  const next = { ...full, ...patch };
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+function deskProjectsAndSessions(): {
+  full: Record<string, unknown>;
+  projects: NonNullable<ReturnType<typeof normalizeProject>>[];
+  sessions: NonNullable<ReturnType<typeof normalizeSession>>[];
+} {
+  const dest = process.env.WORKHORSE_STATE_PATH?.trim();
+  if (!dest) throw new Error("Workhorse state is not available");
+  let full: Record<string, unknown> = {};
+  try {
+    full = JSON.parse(fs.readFileSync(dest, "utf8")) as Record<string, unknown>;
+  } catch {
+    full = {};
+  }
+  const projects = (Array.isArray(full.projects) ? full.projects : [])
+    .map((item) => normalizeProject(item))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const sessions = (Array.isArray(full.sessions) ? full.sessions : [])
+    .map((item) => normalizeSession(item))
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+  return { full, projects, sessions };
+}
+
+function publicProjectRow(
+  project: NonNullable<ReturnType<typeof normalizeProject>>,
+  sessions: Array<{ projectId?: string | null; archivedAt?: number | null; id?: string; title?: string }>,
+): Record<string, unknown> {
+  const chats = sessions.filter((session) => session.projectId === project.id && typeof session.archivedAt !== "number");
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description ?? null,
+    folders: project.folders.map((folder) => folder.path),
+    references: project.references.map((item) => ({ kind: item.kind, value: item.value, label: item.label })),
+    chats: chats.length,
+    chatIds: chats.map((item) => item.id).filter((id): id is string => Boolean(id)),
+  };
+}
+
+function createWorkhorseChatLocal(input: {
+  projectId: string;
+  title?: string;
+  folder?: string;
+  provider?: string;
+  model?: string;
+  effort?: string;
+  customBotId?: string;
+}): string {
+  const { full, projects, sessions } = deskProjectsAndSessions();
+  let nextProjects = projects;
+  const project = findProjectByQuery(projects, input.projectId);
+  if (!project) throw new Error(`No project matches “${input.projectId}”`);
+  if (input.folder) {
+    const linked = applyLinkProjectFolder(nextProjects, project.id, input.folder);
+    if (!linked.ok) throw new Error(linked.error);
+    nextProjects = linked.projects;
+  }
+  const live = findProjectByQuery(nextProjects, project.id) ?? project;
+  const provider = isProviderId(input.provider) ? input.provider : "grok";
+  const model = input.model?.trim() || defaultModel(provider).id;
+  const effort = withEffort(provider, model, parseEffort(input.effort ?? ""));
+  const opened = applyCreateWorkhorseChat(sessions, {
+    projectId: live.id,
+    title: input.title,
+    provider,
+    model,
+    effort,
+    customBotId: input.customBotId,
+  });
+  writeDeskState({
+    ...full,
+    projects: nextProjects,
+    sessions: listedChats(opened.sessions),
+    activeProjectId: live.id,
+    activeSessionId: opened.session.id,
+  });
+  return JSON.stringify(
+    {
+      ok: true,
+      sessionId: opened.session.id,
+      title: opened.session.title,
+      projectId: live.id,
+      project: live.name,
+      provider,
+      model,
+      effort,
+      messages: 0,
+    },
+    null,
+    2,
+  );
+}
+
+function linkProjectFolderLocal(projectId: string, folder: string): string {
+  const { full, projects } = deskProjectsAndSessions();
+  const linked = applyLinkProjectFolder(projects, projectId, folder);
+  if (!linked.ok) throw new Error(linked.error);
+  writeDeskState({ ...full, projects: linked.projects, activeProjectId: linked.project.id });
+  return JSON.stringify(
+    {
+      ok: true,
+      projectId: linked.project.id,
+      name: linked.project.name,
+      path: linked.path,
+      folders: linked.project.folders.map((item) => item.path),
+      alreadyLinked: linked.alreadyLinked,
     },
     null,
     2,
@@ -1724,6 +1966,13 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
     const wait = askWaits(args.wait);
     return askChat(chat, message, parent, envelope.supplied.includes("traceId") ? envelope.traceId : undefined, wait);
   }
+  if (
+    name === "workhorse_create_project" ||
+    name === "workhorse_link_project_folder" ||
+    name === "workhorse_create_chat"
+  ) {
+    return callDeskTool(name, args, from);
+  }
   throw new Error(`Unknown mutating tool ${name}`);
 }
 
@@ -1918,21 +2167,36 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
       .filter((item): item is { id: string; name: string; folders: string[]; chats: number } => item !== null);
     return JSON.stringify({ source: "disk", summary: formatProjectRows(rows), projects: rows }, null, 2);
   }
+  if (name === "workhorse_read_project") {
+    const query = typeof args.project === "string" ? args.project.trim() : typeof args.projectId === "string" ? args.projectId.trim() : "";
+    if (!query) throw new Error("project is required");
+    try {
+      const live = await postBridge(
+        "/bots",
+        botsAsk({ action: "read-project", message: query, name: query, projectId: query }, from),
+        { timeoutMs: 8_000, inbox: false },
+      );
+      const parsed = JSON.parse(live) as { ok?: boolean; project?: unknown };
+      if (parsed.project && typeof parsed.project === "object") return JSON.stringify(parsed, null, 2);
+    } catch {
+      /* fall back to the last saved file */
+    }
+    const { projects, sessions } = deskProjectsAndSessions();
+    const project = findProjectByQuery(projects, query);
+    if (!project) throw new Error(`No project matches “${query}”`);
+    return JSON.stringify({ ok: true, source: "disk", project: publicProjectRow(project, sessions) }, null, 2);
+  }
   if (name === "workhorse_create_project") {
     const projectName = typeof args.name === "string" ? args.name.trim() : "";
     if (!projectName) throw new Error("name is required");
-    const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    if (folder) {
-      try {
-        if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
-          throw new Error(`folder is not an existing directory: ${folder}`);
-        }
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        throw new Error(detail);
-      }
-    }
-    const sessionId = fromSessionId(from);
+    const folders = existingFoldersFromArgs(args);
+    const description = typeof args.description === "string" ? args.description.trim() : "";
+    const references = referencesFromArgs(args);
+    const sessionId = isLinkProfile()
+      ? typeof args.fromSessionId === "string"
+        ? args.fromSessionId.trim()
+        : ""
+      : fromSessionId(from);
     const notify = () =>
       postBridge(
         "/bots",
@@ -1941,8 +2205,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
             action: "create-project",
             message: projectName,
             name: projectName,
-            folder: folder || undefined,
-            chat: folder || undefined,
+            description: description || undefined,
+            folder: folders[0],
+            folders,
+            references,
+            chat: folders[0],
           },
           from,
         ),
@@ -1960,7 +2227,10 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         try {
           return createWorkhorseProjectLocal({
             name: projectName,
-            folder: folder || undefined,
+            description: description || undefined,
+            folder: folders[0],
+            folders,
+            references,
             fromSessionId: sessionId || undefined,
           });
         } catch {
@@ -1968,6 +2238,95 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         }
       }
       throw new Error(`create-project failed: ${detail}. Do not tell the user the project exists.`);
+    }
+  }
+  if (name === "workhorse_link_project_folder") {
+    const projectId =
+      typeof args.projectId === "string"
+        ? args.projectId.trim()
+        : typeof args.project === "string"
+          ? args.project.trim()
+          : "";
+    if (!projectId) throw new Error("projectId is required");
+    const folder = existingFoldersFromArgs({ folder: args.folder })[0];
+    if (!folder) throw new Error("folder is required");
+    try {
+      const live = await postBridge(
+        "/bots",
+        botsAsk({ action: "link-project-folder", message: projectId, name: projectId, projectId, folder }, from),
+        { timeoutMs: 12_000, inbox: false },
+      );
+      const parsed = JSON.parse(live) as { ok?: boolean; path?: unknown; projectId?: unknown };
+      if (parsed.ok === true && typeof parsed.path === "string") return JSON.stringify(parsed, null, 2);
+      throw new Error("live desk did not confirm the folder");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const rendererDown = /bridge is not running|fetch failed|ECONNREFUSED|not available/i.test(detail);
+      if (rendererDown || !process.env.WORKHORSE_BRIDGE_URL?.trim()) {
+        try {
+          return linkProjectFolderLocal(projectId, folder);
+        } catch {
+          /* use the live error */
+        }
+      }
+      throw new Error(`link-folder failed: ${detail}`);
+    }
+  }
+  if (name === "workhorse_create_chat") {
+    const projectId =
+      typeof args.projectId === "string"
+        ? args.projectId.trim()
+        : typeof args.project === "string"
+          ? args.project.trim()
+          : "";
+    if (!projectId) throw new Error("projectId is required");
+    const folder = typeof args.folder === "string" && args.folder.trim() ? resolveExistingFolder(args.folder, folderIo()) : undefined;
+    const title = typeof args.title === "string" ? args.title.trim() : "";
+    const provider = typeof args.provider === "string" ? args.provider.trim() : "";
+    const model = typeof args.model === "string" ? args.model.trim() : "";
+    const effort = typeof args.effort === "string" ? args.effort.trim() : "";
+    try {
+      const live = await postBridge(
+        "/bots",
+        botsAsk(
+          {
+            action: "create-chat",
+            message: projectId,
+            name: title || undefined,
+            projectId,
+            folder,
+            title: title || undefined,
+            provider: provider || undefined,
+            model: model || undefined,
+            effort: effort || undefined,
+          },
+          from,
+        ),
+        { timeoutMs: 12_000, inbox: false },
+      );
+      const parsed = JSON.parse(live) as { ok?: boolean; sessionId?: unknown };
+      if (parsed.ok === true && typeof parsed.sessionId === "string" && parsed.sessionId.trim()) {
+        return JSON.stringify(parsed, null, 2);
+      }
+      throw new Error("live desk did not confirm the chat");
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const rendererDown = /bridge is not running|fetch failed|ECONNREFUSED|not available/i.test(detail);
+      if (rendererDown || !process.env.WORKHORSE_BRIDGE_URL?.trim()) {
+        try {
+          return createWorkhorseChatLocal({
+            projectId,
+            title: title || undefined,
+            folder,
+            provider: provider || undefined,
+            model: model || undefined,
+            effort: effort || undefined,
+          });
+        } catch {
+          /* use the live error */
+        }
+      }
+      throw new Error(`create-chat failed: ${detail}`);
     }
   }
   if (name === "workhorse_move_chat") {
@@ -2233,7 +2592,7 @@ export async function handleWorkhorseRpc(
   if (message.method === "tools/list") {
     if (message.id === undefined) return undefined;
     // The list a caller sees is the list it should learn. Forbidden names stay
-    // off it. Link shows the eight contract tools; older names still answer
+    // off it. Link shows the contract tools; older names still answer
     // at dispatch so a harness that already calls them is not refused.
     const profile = profileForCaller(currentMcpProfile(), deskRoleOf(callerSession(ctx?.fromSessionId)));
     return { jsonrpc: "2.0", id: message.id, result: { tools: TOOLS.filter((tool) => isMcpToolAdvertised(profile, tool.name)) } };
@@ -2333,6 +2692,11 @@ function isMcpEntry(): boolean {
  *   <helper> link capacity [--provider <id>] [--callable]
  *   <helper> link chats [--parents] [--full]
  *   <helper> link read <sessionId> [--limit <n>]
+ *   <helper> link projects
+ *   <helper> link project <projectId>
+ *   <helper> link create-project --name "<name>" [--folder <path>] [--key <idempotencyKey>]
+ *   <helper> link link-folder --project <id> --folder <path> [--key <idempotencyKey>]
+ *   <helper> link create-chat --project <id> [--title "<text>"] [--key <idempotencyKey>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
@@ -2344,7 +2708,24 @@ function isMcpEntry(): boolean {
 export function linkCliCall(argv: string[]): { name: string; args: Record<string, unknown> } | { usage: string } {
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
-  const VALUE_FLAGS = new Set(["--provider", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--folder", "--passes"]);
+  const VALUE_FLAGS = new Set([
+    "--provider",
+    "--chat",
+    "--task",
+    "--trace",
+    "--key",
+    "--pass",
+    "--message",
+    "--limit",
+    "--folder",
+    "--passes",
+    "--name",
+    "--title",
+    "--description",
+    "--project",
+    "--model",
+    "--effort",
+  ]);
   const flags = new Map<string, string>();
   const accepts: string[] = [];
   const positional: string[] = [];
@@ -2364,7 +2745,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | projects | project <id> | create-project --name <name> [--description <text>] [--folder <path>] [--key <id>] | link-folder --project <id> --folder <path> [--key <id>] | create-chat --project <id> [--title <text>] [--folder <path>] [--provider <id>] [--model <id>] [--effort <level>] [--key <id>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>]";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -2405,6 +2786,49 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
           ? { loop: { acceptanceCriteria: criteria, ...(Number.isFinite(passes) && passes >= 2 ? { maxIterations: Math.min(8, Math.floor(passes)) } : {}) } }
           : {}),
         ...(flag("trace") ? { traceId: flag("trace") } : {}),
+        ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
+      },
+    };
+  }
+  if (sub === "projects") return { name: "workhorse_list_projects", args: {} };
+  if (sub === "project") {
+    if (!positional[0] && !flag("project")) return { usage };
+    return { name: "workhorse_read_project", args: { project: positional[0] || flag("project") } };
+  }
+  if (sub === "create-project") {
+    const name = flag("name") || positional[0];
+    if (!name) return { usage };
+    return {
+      name: "workhorse_create_project",
+      args: {
+        name,
+        ...(flag("description") ? { description: flag("description") } : {}),
+        ...(flag("folder") ? { folder: flag("folder") } : {}),
+        ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
+      },
+    };
+  }
+  if (sub === "link-folder") {
+    const project = flag("project") || positional[0];
+    const folder = flag("folder") || positional[1];
+    if (!project || !folder) return { usage };
+    return {
+      name: "workhorse_link_project_folder",
+      args: { projectId: project, folder, ...(flag("key") ? { idempotencyKey: flag("key") } : {}) },
+    };
+  }
+  if (sub === "create-chat") {
+    const project = flag("project") || positional[0];
+    if (!project) return { usage };
+    return {
+      name: "workhorse_create_chat",
+      args: {
+        projectId: project,
+        ...(flag("title") || flag("name") ? { title: flag("title") || flag("name") } : {}),
+        ...(flag("folder") ? { folder: flag("folder") } : {}),
+        ...(flag("provider") ? { provider: flag("provider") } : {}),
+        ...(flag("model") ? { model: flag("model") } : {}),
+        ...(flag("effort") ? { effort: flag("effort") } : {}),
         ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
       },
     };

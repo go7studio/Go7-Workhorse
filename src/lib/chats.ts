@@ -1,5 +1,15 @@
 import { uid } from "./id";
-import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment } from "./types";
+import type {
+  ChatImage,
+  ChatMessage,
+  EffortLevel,
+  PermissionMode,
+  ProviderId,
+  QueuedPrompt,
+  SandboxProfile,
+  Session,
+  SessionEnvironment,
+} from "./types";
 
 export const PROJECT_CHAT_LIMIT = 5;
 
@@ -312,8 +322,11 @@ export function applyComposerDrafts<T extends { id: string; composerDraft?: stri
   return changed ? next : sessions;
 }
 
-export function isDraftChat(session: Pick<Session, "messages" | "archivedAt" | "composerDraft" | "composerImages">): boolean {
+export function isDraftChat(
+  session: Pick<Session, "messages" | "archivedAt" | "composerDraft" | "composerImages" | "titleLocked">,
+): boolean {
   if (typeof session.archivedAt === "number") return false;
+  if (session.titleLocked === true) return false;
   if (hasComposerDraft(session)) return false;
   return !hasUserPrompt(session);
 }
@@ -393,6 +406,45 @@ export function openDraft(sessions: Session[], draft: Session): { sessions: Sess
     sessions: dropDrafts(sessions, existing.id).map((item) => (item.id === existing.id ? session : item)),
     session,
   };
+}
+
+export type CreateWorkhorseChatInput = {
+  id?: string;
+  projectId: string;
+  title?: string;
+  provider: ProviderId;
+  model: string;
+  effort?: EffortLevel | null;
+  customBotId?: string;
+  mode?: PermissionMode;
+  sandbox?: SandboxProfile;
+};
+
+/** A parent chat that persists without a vendor prompt. titleLocked keeps it off the draft discard path. */
+export function applyCreateWorkhorseChat(
+  sessions: Session[],
+  input: CreateWorkhorseChatInput,
+): { sessions: Session[]; session: Session } {
+  const title = input.title?.trim() || "New chat";
+  const session: Session = {
+    id: input.id?.trim() || uid("sess"),
+    projectId: input.projectId,
+    provider: input.provider,
+    model: input.model,
+    effort: input.effort ?? null,
+    ...(input.customBotId ? { customBotId: input.customBotId } : {}),
+    title,
+    titleLocked: true,
+    mode: input.mode ?? "ask",
+    sandbox: input.sandbox ?? "off",
+    environment: { kind: "local" },
+    securityPolicy: { network: "allowed", root: "allowed" },
+    status: "idle",
+    contextUsed: 0,
+    messages: [],
+    routingMode: "manual",
+  };
+  return { sessions: [session, ...sessions], session };
 }
 
 export function normalizeQueuedPrompt(raw: unknown): QueuedPrompt | null {

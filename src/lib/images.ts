@@ -219,6 +219,12 @@ export function imageSrc(image: Pick<ChatImage, "mimeType" | "data" | "sourcePat
   return `data:${image.mimeType};base64,${image.data}`;
 }
 
+/** Bytes already on the attachment, never a media-protocol URL that taints a canvas. */
+export function imageSrcForModel(image: Pick<ChatImage, "mimeType" | "data" | "sourcePath">): string {
+  if (image.data) return `data:${image.mimeType};base64,${image.data}`;
+  return imageSrc(image);
+}
+
 export function base64DecodedBytes(data: string): number {
   const value = data.replace(/^data:[^;]+;base64,/, "");
   if (!value) return 0;
@@ -238,7 +244,7 @@ function loadImage(image: ChatImage): Promise<HTMLImageElement> {
     const element = new Image();
     element.onload = () => resolve(element);
     element.onerror = () => reject(new Error(`Could not resize ${image.name}`));
-    element.src = imageSrc(image);
+    element.src = imageSrcForModel(image);
   });
 }
 

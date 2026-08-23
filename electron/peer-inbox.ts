@@ -12,6 +12,9 @@ export type PeerAction =
   | "delete-reference"
   | "select-project"
   | "list-projects"
+  | "read-project"
+  | "link-project-folder"
+  | "create-chat"
   | "move-chat"
   | "rename-chat"
   | "rename-project"
@@ -49,6 +52,10 @@ export type PeerAsk = {
   action?: PeerAction;
   name?: string;
   folder?: string;
+  folders?: string[];
+  references?: Array<{ kind: string; value: string; label?: string }>;
+  projectId?: string;
+  title?: string;
   color?: string;
   baseUrl?: string;
   apiKey?: string;

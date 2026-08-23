@@ -1330,6 +1330,9 @@ test("inbound Link drafts drop keys and paths, and only the harness profile capt
   assert.equal(shouldCaptureInboundProfile("desk"), false);
   assert.equal(shouldCaptureInboundProfile("worker"), false);
   assert.equal(isInboundMutatingTool("workhorse_delegate"), true);
+  assert.equal(isInboundMutatingTool("workhorse_create_project"), true);
+  assert.equal(isInboundMutatingTool("workhorse_create_chat"), true);
+  assert.equal(isInboundMutatingTool("workhorse_list_projects"), false);
   assert.equal(isInboundMutatingTool("workhorse_list_chats"), false);
   const args = sanitizeInboundArgs({
     task: "review the diff",

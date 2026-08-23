@@ -27,20 +27,26 @@ Code, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs →
 Link connects each with one button. Connect Grok Bot copies the same launch
 plus install instructions to paste into Grok Bot once (Mac or Windows), including
 its runtime-owned weekly-usage exporter contract. Copy
-generic MCP configuration covers the rest. Every app gets the same eight
-tools: capabilities, list/read/ask chats, query leftover and availability,
-delegate a task, continue a finished wave, worker status. The first call,
-`workhorse_capabilities`, names follow-through: new slice, named worker,
-later status. Status says wait, done, or failed. List chats is compact by
-default (id, title, worker, parentId, status, next, project) so a host output
-cap does not clip the roster; `parents` omits workers and `full` adds
-preview. Duplicate worker names need that row’s `id`. Link never waits on a
-long worker.
+generic MCP configuration covers the rest. Every app gets the same Link
+tools: capabilities, list/read chats, list/read/create projects, link an
+existing folder, create a parent chat, query leftover and availability,
+delegate a task, continue a finished wave, worker status, ask a live chat.
+The first call, `workhorse_capabilities`, names follow-through: new slice,
+named worker, later status. Status says wait, done, or failed. A harness
+with no parent can `list_projects` → `create_project` if absent →
+`link_project_folder` → `create_chat` → `delegate`. Create project names a
+desk entry only; it does not create a directory. Create chat returns a
+`sessionId` without a vendor prompt. List chats is compact by default (id,
+title, worker, parentId, status, next, project) so a host output cap does
+not clip the roster; `parents` omits workers and `full` adds preview.
+Duplicate worker names need that row’s `id`. Link never waits on a long
+worker.
 The leftover check never includes keys or chat content. Older names still
 answer so a harness that already calls them is not refused. Delete, rename,
-credentials, bot setup and project changes are not offered and are refused.
+credentials, and bot setup are not offered and are refused.
 No token is stored. Connecting an app adds no vendor, login or Usage ring.
 The same helper is a JSON CLI for a harness without MCP (`chats`, `read`,
+`projects`, `project`, `create-project`, `link-folder`, `create-chat`,
 `ask`, `delegate`, `status`, `follow-up`). `delegate --accept` starts an
 adaptive mission loop; `status` then `follow-up` continue it. Install
 workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
@@ -76,7 +82,9 @@ The connection fails closed if the shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat
 
-Drag them onto the window, or paste them in.
+Drag them onto the window, or paste them in. Link `files` on delegate read
+native file bytes from the bound folder. They do not go through a canvas
+export.
 
 - **Images** — png, jpg, jpeg, webp, gif, bmp
 - **Audio** — mp3, wav, m4a, aac, flac, ogg, opus, webm

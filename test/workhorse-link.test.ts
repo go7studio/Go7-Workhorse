@@ -29,7 +29,7 @@ import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig,
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
-test("the Link contract: eight tools, four capabilities, one version — and the profile answers every name", () => {
+test("the Link contract: listed tools, capabilities, one version — and the profile answers every name", () => {
   assert.equal(LINK_PROTOCOL_VERSION, 1);
   // Follow-up is continue_mission: delegate publishes no worker field, because
   // which worker runs a task is Workhorse's routing, not the harness's.
@@ -37,16 +37,29 @@ test("the Link contract: eight tools, four capabilities, one version — and the
     "workhorse_capabilities",
     "workhorse_list_chats",
     "workhorse_read_chat",
+    "workhorse_list_projects",
+    "workhorse_read_project",
+    "workhorse_create_project",
+    "workhorse_link_project_folder",
+    "workhorse_create_chat",
     "workhorse_query_capacity",
     "workhorse_delegate",
     "workhorse_continue_mission",
     "workhorse_agent_status",
     "workhorse_ask_chat",
   ]);
-  assert.deepEqual([...LINK_CAPABILITIES], ["capacity.read", "chats.read", "workers.delegate", "workers.follow_up"]);
+  assert.deepEqual([...LINK_CAPABILITIES], [
+    "capacity.read",
+    "chats.read",
+    "chats.create",
+    "projects.read",
+    "projects.write",
+    "workers.delegate",
+    "workers.follow_up",
+  ]);
   // Every contract tool is allowed on the external profile; admin is not.
   for (const tool of LINK_TOOLS) assert.equal(isMcpToolAllowed("external-runtime", tool), true, tool);
-  for (const tool of ["workhorse_delete_chat", "workhorse_rename_project", "workhorse_setup_custom_bot", "workhorse_request_permission", "workhorse_delete_bot", "workhorse_create_project"]) {
+  for (const tool of ["workhorse_delete_chat", "workhorse_rename_project", "workhorse_setup_custom_bot", "workhorse_request_permission", "workhorse_delete_bot"]) {
     assert.equal(isMcpToolAllowed("external-runtime", tool), false, tool);
     assert.equal((EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool), false, tool);
   }
@@ -340,6 +353,20 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
   assert.ok("usage" in linkCliCall(["ask", "--chat", "c1"]));
   assert.ok("usage" in linkCliCall(["read"]));
   assert.ok("usage" in linkCliCall(["nothing"]));
+  assert.deepEqual(linkCliCall(["projects"]), { name: "workhorse_list_projects", args: {} });
+  assert.deepEqual(linkCliCall(["project", "proj_1"]), { name: "workhorse_read_project", args: { project: "proj_1" } });
+  assert.deepEqual(linkCliCall(["create-project", "--name", "Cargo Pop", "--folder", "/abs/repo", "--key", "k-p"]), {
+    name: "workhorse_create_project",
+    args: { name: "Cargo Pop", folder: "/abs/repo", idempotencyKey: "k-p" },
+  });
+  assert.deepEqual(linkCliCall(["link-folder", "--project", "proj_1", "--folder", "/abs/repo", "--key", "k-l"]), {
+    name: "workhorse_link_project_folder",
+    args: { projectId: "proj_1", folder: "/abs/repo", idempotencyKey: "k-l" },
+  });
+  assert.deepEqual(linkCliCall(["create-chat", "--project", "proj_1", "--title", "Parity parent", "--key", "k-c"]), {
+    name: "workhorse_create_chat",
+    args: { projectId: "proj_1", title: "Parity parent", idempotencyKey: "k-c" },
+  });
 });
 
 test("one launch, translated per host through that host's own mcp add — flags as each CLI documents them", () => {

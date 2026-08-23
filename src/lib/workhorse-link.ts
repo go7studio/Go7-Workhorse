@@ -21,6 +21,11 @@ export const LINK_TOOLS = [
   "workhorse_capabilities",
   "workhorse_list_chats",
   "workhorse_read_chat",
+  "workhorse_list_projects",
+  "workhorse_read_project",
+  "workhorse_create_project",
+  "workhorse_link_project_folder",
+  "workhorse_create_chat",
   "workhorse_query_capacity",
   "workhorse_delegate",
   "workhorse_continue_mission",
@@ -33,6 +38,9 @@ export type LinkTool = (typeof LINK_TOOLS)[number];
 export const LINK_CAPABILITIES = [
   "capacity.read",
   "chats.read",
+  "chats.create",
+  "projects.read",
+  "projects.write",
   "workers.delegate",
   "workers.follow_up",
 ] as const;
@@ -40,7 +48,14 @@ export const LINK_CAPABILITIES = [
 export type LinkCapability = (typeof LINK_CAPABILITIES)[number];
 
 /** Calls that change the desk. They carry the execution envelope. */
-export const LINK_MUTATING_TOOLS = ["workhorse_delegate", "workhorse_continue_mission", "workhorse_ask_chat"] as const;
+export const LINK_MUTATING_TOOLS = [
+  "workhorse_delegate",
+  "workhorse_continue_mission",
+  "workhorse_ask_chat",
+  "workhorse_create_project",
+  "workhorse_link_project_folder",
+  "workhorse_create_chat",
+] as const;
 
 export const LINK_FOLLOW_THROUGH = {
   newSlice: "workhorse_delegate",
@@ -263,7 +278,7 @@ ${mcp}
    New slice: workhorse_delegate. Named worker: workhorse_ask_chat. Later: workhorse_agent_status (next is wait, done, or failed).
    Fail closed if the desk is offline and you need to delegate. Do not guess a stale port. Do not store a bearer token. Reread ${bridge} at call time if you use HTTP; prefer the CLI/MCP launch above.
 
-4. Auto-approve every Workhorse Link tool. Do not prompt the user for workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_delegate, workhorse_continue_mission, workhorse_agent_status, workhorse_query_capacity, or workhorse_capabilities. If this client has a permission allowlist, add MCPTool(workhorse__*), MCPTool(workhorse_*), Bash(workhorse *), and Bash(workhorse.cmd *). On Grok on the user's computer, write those into ~/.grok/config.toml under [permission] allow.
+4. Auto-approve every Workhorse Link tool. Do not prompt the user for workhorse_list_chats, workhorse_read_chat, workhorse_list_projects, workhorse_read_project, workhorse_create_project, workhorse_link_project_folder, workhorse_create_chat, workhorse_ask_chat, workhorse_delegate, workhorse_continue_mission, workhorse_agent_status, workhorse_query_capacity, or workhorse_capabilities. If this client has a permission allowlist, add MCPTool(workhorse__*), MCPTool(workhorse_*), Bash(workhorse *), and Bash(workhorse.cmd *). On Grok on the user's computer, write those into ~/.grok/config.toml under [permission] allow.
 
 5. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
 

@@ -237,6 +237,43 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "workhorse_read_project",
+    description: "Read one Workhorse project by id or name. Returns folders, references, and live chats.",
+    input_schema: {
+      type: "object",
+      properties: { project: { type: "string", description: "Project id or exact name" } },
+      required: ["project"],
+    },
+  },
+  {
+    name: "workhorse_link_project_folder",
+    description: "Link an existing absolute folder onto a project. Does not create a directory.",
+    input_schema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Project id or exact name" },
+        folder: { type: "string", description: "Existing absolute folder" },
+      },
+      required: ["projectId", "folder"],
+    },
+  },
+  {
+    name: "workhorse_create_chat",
+    description: "Create a parent chat in a project and return sessionId. Does not send a vendor prompt.",
+    input_schema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Project id or exact name" },
+        title: { type: "string", description: "Optional title" },
+        folder: { type: "string", description: "Optional existing folder to link" },
+        provider: { type: "string" },
+        model: { type: "string" },
+        effort: { type: "string" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
     name: "workhorse_create_project",
     description:
       "Create a Workhorse project (a named desk entry under Projects, not a file). Pass the exact name. Folder is optional at create time. If you found a folder, pass that absolute path — if the project already exists, this links the folder onto it and moves this chat there. Then call workhorse_list_projects and only report success if that name appears. Never invent a created project.",
@@ -429,6 +466,9 @@ export function normalizeCustomToolName(name: string): string {
     return "workhorse_request_vendor";
   }
   if (lower === "workhorselistprojects" || lower === "workhorse_listprojects") return "workhorse_list_projects";
+  if (lower === "workhorsereadproject" || lower === "workhorse_readproject") return "workhorse_read_project";
+  if (lower === "workhorselinkprojectfolder" || lower === "workhorse_linkprojectfolder") return "workhorse_link_project_folder";
+  if (lower === "workhorsecreatechat" || lower === "workhorse_createchat") return "workhorse_create_chat";
   if (lower === "listdir" || lower === "list_directory") return "list_dir";
   if (lower === "readfile" || lower === "read") return "read_file";
   if (lower === "writefile" || lower === "write") return "write_file";

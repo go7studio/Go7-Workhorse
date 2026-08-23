@@ -52,9 +52,11 @@ calling Claude's model through ACP is the other direction and stays separate.
 {
   "protocolVersion": 1,
   "desk": "online",
-  "capabilities": ["capacity.read", "chats.read", "workers.delegate", "workers.follow_up"],
+  "capabilities": ["capacity.read", "chats.read", "chats.create", "projects.read", "projects.write", "workers.delegate", "workers.follow_up"],
   "tools": [
     "workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat",
+    "workhorse_list_projects", "workhorse_read_project", "workhorse_create_project",
+    "workhorse_link_project_folder", "workhorse_create_chat",
     "workhorse_query_capacity", "workhorse_delegate", "workhorse_continue_mission",
     "workhorse_agent_status", "workhorse_ask_chat"
   ],
@@ -77,6 +79,11 @@ last saved state, delegation does not.
 | `workhorse_capabilities` | the contract above | no |
 | `workhorse_list_chats` | chats, compact by default (`id`, `title`, `worker`, `parentId`, `status`, `next`, `project`). `parents` omits workers. `full` adds preview and sidebar | no |
 | `workhorse_read_chat` | one chat's transcript | no |
+| `workhorse_list_projects` | projects, linked folders, chat counts | no |
+| `workhorse_read_project` | one project: name, description, folders, references, chats | no |
+| `workhorse_create_project` | a named desk project. Does not create a directory | yes |
+| `workhorse_link_project_folder` | link an existing absolute folder; returns the canonical path | yes |
+| `workhorse_create_chat` | a parent `sessionId` in a project, with no vendor prompt | yes |
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
 | `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse routes the next pass | yes |
@@ -84,14 +91,14 @@ last saved state, delegation does not.
 | `workhorse_ask_chat` | a message to a live chat | yes |
 
 Not available through Link: credentials, permissions, deletes, renames,
-custom-bot setup, Watch permits, project mutation. They are not listed and
-a call is refused.
+custom-bot setup, Watch permits. They are not listed and a call is refused.
 
-`workhorse_capabilities` and `tools/list` name those eight. Older names
-(`workhorse_spawn_agent`, `workhorse_list_bots`, `workhorse_list_projects`,
+`workhorse_capabilities` and `tools/list` name the contract tools. Older names
+(`workhorse_spawn_agent`, `workhorse_list_bots`,
 `workhorse_list_agents`, `workhorse_list_external_agents`,
 `workhorse_await_agents`, `workhorse_cancel_agent`) still answer so a harness
-that already calls them is not refused. New harnesses should use the eight.
+that already calls them is not refused. New harnesses should use the listed
+contract.
 
 When Settings → Learning is on, each Link call is stored on this machine as
 agent evidence. Keys and chat text stay out.
@@ -105,12 +112,16 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    `status`, and `next` (so Marlow is findable by name). Pass `parents` for
    parent chats only, `full` for preview. If several rows share a worker name,
    pass that row's `id`.
-2. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
+2. No parent yet: `workhorse_list_projects`. If the name is absent,
+   `workhorse_create_project` (desk entry only; no directory). Then
+   `workhorse_link_project_folder` with an existing absolute path, then
+   `workhorse_create_chat`. That `sessionId` is the parent.
+3. New slice: `workhorse_delegate`. `fromSessionId` is that parent, never the
    worker. Stop this turn. The desk joins the report into the parent chat.
    Named worker: `workhorse_ask_chat` with that row's `id`.
-3. Later, `workhorse_agent_status` with the worker id. `next` is `wait`,
+4. Later, `workhorse_agent_status` with the worker id. `next` is `wait`,
    `done`, or `failed`. When `done`, the report is in that payload.
-4. Remaining work: `workhorse_continue_mission`. Read: `workhorse_read_chat`.
+5. Remaining work: `workhorse_continue_mission`. Read: `workhorse_read_chat`.
 
 Do not sit in a poll loop in the same turn. Do not spawn a second worker for
 the same slice. Do not pass `wait=true`; Link ignores it so the client is not
@@ -135,7 +146,7 @@ Send `traceId` and `idempotencyKey`; Workhorse creates any you leave out and
 echoes the three it ran under in the reply's `envelope`. A retry with the same
 `idempotencyKey` returns the first answer: not a second worker from
 `delegate`, not a second pass from `continue_mission`, not the same message
-posted twice by `ask_chat`.
+posted twice by `ask_chat`, not a second project or parent chat.
 
 Workhorse owns hop counting and cycle detection. Capacity is advisory:
 delegation rechecks Watch, permissions, connection and callability every
@@ -160,6 +171,11 @@ workhorse chats
 workhorse chats --parents
 workhorse chats --full
 workhorse read <sessionId>
+workhorse projects
+workhorse project <projectId>
+workhorse create-project --name "Cargo Pop" --folder /abs/path --key <idempotencyKey>
+workhorse link-folder --project <projectId> --folder /abs/path --key <idempotencyKey>
+workhorse create-chat --project <projectId> --title "Parity parent" --key <idempotencyKey>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Ship and certify" --accept "Tests pass" --accept "Marker file exists" --passes 2 --folder <dir>

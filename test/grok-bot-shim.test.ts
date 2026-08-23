@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { ensureGrokBotShim } from "../electron/grok-bot-shim-host";
 import {
   authorizationBearer,
   grokBotInboxDir,

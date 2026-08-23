@@ -50,6 +50,49 @@ test("a bot named on this desk beats a catalog model that shares a word", () => 
   assert.equal(ask("Grok 4.6", on).customBotId, undefined);
 });
 
+test("a brief that forbids a bot does not select it", () => {
+  /*
+   * The one that actually bit. A worker brief read:
+   *
+   *   "Provider/model must be grok/grok-4.6; stop without edits on any
+   *    grok-bot routing. Do not use Grok Bot or unrelated project folders."
+   *
+   * and the desk ran it on Grok Bot. The description feeds the hint query, and
+   * matchCustomBot matched the word "grok" inside the prohibition. The worker
+   * ran on the one vendor the brief forbade, then died when that vendor's shim
+   * was down — which reads as "Workhorse translated my model selection".
+   */
+  const brief =
+    "Folder must be exactly /tmp/work. Provider/model must be grok/grok-4.6; stop without edits on " +
+    "any grok-bot routing. Do not use Grok Bot or unrelated project folders.";
+  const on = parent("cursor", "composer-2.5");
+  const spec = resolveSpawnSpec(
+    { fromSessionId: "sess_parent", prompt: "do the work", description: brief } as never,
+    [],
+    on,
+    BOTS as never,
+  );
+  assert.notEqual(spec.customBotId, "bot_grok", "a prohibition is not a selection");
+  assert.equal(spec.provider, "grok");
+  assert.equal(spec.model, "grok-4.6", "the brief named the model it wanted");
+});
+
+test("naming a bot in prose still picks it", () => {
+  // The gate must not cost the ordinary case: a short brief that names a bot
+  // is still how you ask for one.
+  const on = parent("grok", "grok-4.6");
+  const say = (description: string) =>
+    resolveSpawnSpec({ fromSessionId: "sess_parent", prompt: "x", description } as never, [], on, BOTS as never);
+  assert.equal(say("Kimi K3").customBotId, "bot_kimi");
+  assert.equal(say("use the Kimi K3 bot").customBotId, "bot_kimi", "filler words do not disqualify it");
+  // ...and a paragraph that merely mentions it does not.
+  assert.equal(
+    say("Audit the K3 export path and report every mismatch you find in the manifest").customBotId,
+    undefined,
+    "a passing mention in a task description is not a selection",
+  );
+});
+
 test("the model that matches the most of the name wins", () => {
   // The scan took the first model matching ANY token, so "5" found
   // claude-fable-5 before claude-opus-5 and stopped there.

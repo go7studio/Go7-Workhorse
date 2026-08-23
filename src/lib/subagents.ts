@@ -1164,6 +1164,32 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   });
 }
 
+/**
+ * A bot is chosen by being named, not by being mentioned.
+ *
+ * matchCustomBot matches any three-letter token against a bot's name, and the
+ * hint query includes the task description. So a brief reading "Provider/model
+ * must be grok/grok-4.6. Do not use Grok Bot or unrelated project folders"
+ * selected the Grok Bot: the word "grok" inside a prohibition read as a
+ * request, and the worker ran on the one vendor the brief forbade.
+ *
+ * Stock models were already held to this standard by isBareVendorOrModel — a
+ * paragraph cannot pick claude-opus-5. Custom bots were held to nothing, which
+ * is the whole asymmetry.
+ */
+function isBareBotReference(query: string, bots: CustomBotHint[] | undefined): boolean {
+  const bot = matchCustomBot(bots, query);
+  if (!bot) return false;
+  const tokens = tokensOf(query);
+  // Count the words that carry meaning. "use the Kimi K3 bot" is five tokens
+  // and three of them are filler; capping the raw count would refuse the most
+  // ordinary way anyone asks for a bot.
+  const meaningful = tokens.filter((token) => !VENDOR_FILLER.has(token));
+  if (meaningful.length === 0 || meaningful.length > 4) return false;
+  const hay = `${bot.name} ${bot.model} ${bot.id}`.toLowerCase();
+  return meaningful.every((token) => hay.includes(token));
+}
+
 export function resolveSpawnSpec(
   input: SpawnRequest,
   sessions: Array<Pick<Session, "id" | "title" | "provider" | "model" | "effort" | "customBotId" | "archivedAt">>,
@@ -1243,7 +1269,8 @@ export function resolveSpawnSpec(
     };
   }
 
-  const custom = !namedStock ? matchCustomBot(customBots, hintedQuery) : undefined;
+  const custom =
+    !namedStock && isBareBotReference(hintedQuery, customBots) ? matchCustomBot(customBots, hintedQuery) : undefined;
   if (custom) {
     return {
       provider: "custom",

@@ -702,12 +702,21 @@ function clampLeftover(value: number): number {
 }
 
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1|[a-z0-9-]+\.local)$/i;
+const TAILSCALE_DNS = /\.ts\.net$/i;
+
+function isTailscaleIpv4(hostname: string): boolean {
+  const parts = hostname.split(".").map(Number);
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+    && parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
+}
 
 /** An ordinary local model has no allowance. Grok Bot's separate weekly meter is carved out. */
 export function isLocalEndpoint(baseUrl: string | undefined): boolean {
   if (!baseUrl?.trim()) return false;
   try {
-    return !isGrokBotUrl(baseUrl) && LOCAL_HOST.test(new URL(baseUrl).hostname);
+    const hostname = new URL(baseUrl).hostname;
+    return !isGrokBotUrl(baseUrl)
+      && (LOCAL_HOST.test(hostname) || TAILSCALE_DNS.test(hostname) || isTailscaleIpv4(hostname));
   } catch {
     return false;
   }

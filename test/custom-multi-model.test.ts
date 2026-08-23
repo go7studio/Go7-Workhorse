@@ -11,6 +11,7 @@ import {
   findCustomBotByModel,
   normalizeCustomBot,
   normalizeCustomModelList,
+  reconcileCustomBotSelections,
 } from "../src/lib/custom-bots";
 import { customModelsUrl, parseCustomModels } from "../electron/custom-models";
 import { byModel, customBotUsageEvents } from "../src/lib/usage";
@@ -89,6 +90,21 @@ test("a chat on a secondary model still finds its connection", () => {
   assert.equal(findCustomBotByModel(bots, "hf:zai-org/GLM-5.2")?.id, "bot_syn");
   assert.equal(findCustomBotByModel(bots, "nothing-we-serve"), undefined);
   assert.equal(customBotForSession(bots, { customBotId: "bot_syn", model: "nothing-we-serve" }), undefined);
+});
+
+test("retiring a model never silently rewrites existing chats", () => {
+  const sessions = [
+    { id: "chat_old", provider: "custom", customBotId: "bot_syn", model: "hf:zai-org/GLM-5.2" },
+  ];
+  const result = reconcileCustomBotSelections(
+    "bot_syn",
+    { model: "hf:moonshotai/Kimi-K3", models: ["hf:moonshotai/Kimi-K3"] },
+    { provider: "custom", customBotId: "bot_syn", model: "hf:zai-org/GLM-5.2" },
+    sessions,
+  );
+  assert.equal(result.lastModel.model, "hf:moonshotai/Kimi-K3", "new chats use the current default");
+  assert.equal(result.sessions, sessions, "saved chats keep their exact binding");
+  assert.equal(result.sessions[0]?.model, "hf:zai-org/GLM-5.2");
 });
 
 test("Auto routes every approved model through one connection capacity", () => {

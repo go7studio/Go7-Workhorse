@@ -70,6 +70,7 @@ import {
   draftReady,
   EMPTY_CUSTOM_DRAFT,
   normalizeCustomModelList,
+  reconcileCustomBotSelections,
 } from "./custom-bots";
 import {
   DEFAULT_CHOICE,
@@ -6561,17 +6562,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => {
       const customBots = applyUpdateCustomBot(current.settings.customBots, id, patch);
       const bot = customBots.find((item) => item.id === id);
-      const repairModel = (model: string) => bot && customBotServes(bot, model) ? model : bot?.model ?? model;
+      const selections = reconcileCustomBotSelections(id, bot, current.lastModel, current.sessions);
       return {
         ...current,
         settings: { ...current.settings, customBots },
-        lastModel:
-          current.lastModel.customBotId === id
-            ? { ...current.lastModel, model: repairModel(current.lastModel.model) }
-            : current.lastModel,
-        sessions: current.sessions.map((session) =>
-          session.customBotId === id ? { ...session, model: repairModel(session.model) } : session,
-        ),
+        lastModel: selections.lastModel,
+        sessions: selections.sessions,
       };
     });
   }, []);

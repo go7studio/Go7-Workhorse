@@ -145,6 +145,10 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
   assert.equal(isLocalEndpoint("http://localhost:1234/v1"), true);
   assert.equal(isLocalEndpoint("http://127.0.0.1:11434"), true);
   assert.equal(isLocalEndpoint("http://127.0.0.1:8787/v1"), false);
+  assert.equal(isLocalEndpoint("https://go7-dgx-spark.example-tailnet.ts.net/v1"), true);
+  assert.equal(isLocalEndpoint("http://100.100.100.42:8788/v1"), true);
+  assert.equal(isLocalEndpoint("http://100.63.255.255:8788/v1"), false);
+  assert.equal(isLocalEndpoint("http://100.128.0.1:8788/v1"), false);
   assert.equal(
     planRingView(card("grok-bot"), { custom: { "grok-bot": kimi } }, undefined, {
       local: isLocalEndpoint("http://127.0.0.1:8787/v1"),

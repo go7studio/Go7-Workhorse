@@ -177,6 +177,27 @@ export function customBotServes(bot: Pick<CustomBot, "model" | "models">, model:
   return customBotModels(bot).includes(model.trim());
 }
 
+/**
+ * Updating a connection may change what new chats should default to. Existing
+ * chats keep their explicit model so a runtime change cannot silently rewrite
+ * their provenance; the send guard will show that a retired model is unavailable.
+ */
+export function reconcileCustomBotSelections<
+  TChoice extends { customBotId?: string; model: string },
+  TSession extends { customBotId?: string; model: string },
+>(
+  id: string,
+  bot: Pick<CustomBot, "model" | "models"> | undefined,
+  lastModel: TChoice,
+  sessions: TSession[],
+): { lastModel: TChoice; sessions: TSession[] } {
+  const nextLastModel =
+    lastModel.customBotId === id && bot && !customBotServes(bot, lastModel.model)
+      ? { ...lastModel, model: bot.model }
+      : lastModel;
+  return { lastModel: nextLastModel, sessions };
+}
+
 export function normalizeCustomModelList(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const ids = [

@@ -1,5 +1,6 @@
 import https from "node:https";
 import { customHttpIdentityHeaders } from "../src/lib/custom-http-identity";
+import { CUSTOM_DISCOVERY_TIMEOUT_MS, withCustomResponse } from "./custom-fetch";
 
 /**
  * Ask a custom provider which models it serves.
@@ -59,9 +60,16 @@ export async function fetchCustomModels(input: {
   };
   try {
     if (input.fetchImpl) {
-      const response = await input.fetchImpl(url, { headers });
-      if (!response.ok) return [];
-      return parseCustomModels(await response.json());
+      return await withCustomResponse(
+        input.fetchImpl,
+        url,
+        { headers },
+        CUSTOM_DISCOVERY_TIMEOUT_MS,
+        async (response) => {
+          if (!response.ok) return [];
+          return parseCustomModels(await response.json());
+        },
+      );
     }
     // Electron's Chromium fetch can strip User-Agent, and these hosts 429 or
     // empty the body when it does. Same workaround as the quota reader.
@@ -71,7 +79,7 @@ export async function fetchCustomModels(input: {
         response.on("data", (chunk) => chunks.push(chunk as Buffer));
         response.on("end", () => {
           const body = Buffer.concat(chunks).toString("utf8");
-          if ((response.statusCode ?? 500) >= 400) {
+          if ((response.statusCode ?? 500) >= 300) {
             resolve(null);
             return;
           }

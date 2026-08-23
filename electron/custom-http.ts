@@ -8,6 +8,16 @@ import path from "node:path";
 import { customHttpIdentityHeaders, grokBotShimDownMessage } from "../src/lib/custom-http-identity";
 import { grokBotLoopbackApiKey, grokBotShimSecretsPath, parseGrokBotShimSecrets } from "../src/lib/grok-bot-shim";
 import {
+  CUSTOM_CONNECT_TIMEOUT_MS,
+  CUSTOM_DISCOVERY_TIMEOUT_MS,
+  CUSTOM_PROBE_TIMEOUT_MS,
+  CUSTOM_STREAM_IDLE_TIMEOUT_MS,
+  fetchCustomResponse,
+  readCustomErrorDetail,
+  readCustomStreamChunk,
+  withCustomResponse,
+} from "./custom-fetch";
+import {
   customHttpTools,
   customHttpToolsOpenAi,
   parseAnthropicToolUseBlock,
@@ -644,18 +654,27 @@ export async function streamCustomHttp(
   };
 
   const run = async (payload: Record<string, unknown>) => {
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: input.signal,
-    });
+    const response = await fetchCustomResponse(
+      fetchImpl,
+      url,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: input.signal,
+      },
+      CUSTOM_CONNECT_TIMEOUT_MS,
+    );
     if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 400);
+      const rawDetail = await readCustomErrorDetail(response, input.signal).catch(() => "");
+      const detail = rawDetail
+        .replaceAll(apiKey, "[redacted]")
+        .replace(/\b(Bearer|x-api-key)\s*[:=]?\s*[A-Za-z0-9._~+\/-]{8,}/gi, "$1 [redacted]");
       throw new Error(`Custom model HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
     }
     if (!response.body) throw new Error("Custom model returned no body");
     const reader = response.body.getReader();
+    try {
     const decoder = new TextDecoder();
     let rest = "";
     let raw = "";
@@ -723,7 +742,7 @@ export async function streamCustomHttp(
     };
     let streamComplete = false;
     readStream: while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readCustomStreamChunk(reader, CUSTOM_STREAM_IDLE_TIMEOUT_MS, input.signal);
       if (done) break;
       rest += decoder.decode(value, { stream: true });
       const decoded = decodeSse(rest);
@@ -786,6 +805,9 @@ export async function streamCustomHttp(
     }
     if (usage) handlers.onUsage?.(usage);
     return { text, ...(reasoning ? { thought: reasoning } : {}), usage, toolUses, stopReason };
+    } finally {
+      await reader.cancel("Custom model response finished.").catch(() => undefined);
+    }
   };
 
   try {
@@ -818,18 +840,25 @@ async function fetchListedContext(
   fetchImpl: typeof fetch,
 ): Promise<number | undefined> {
   try {
-    const response = await fetchImpl(modelsUrl(baseUrl), {
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${apiKey}`,
-        "x-api-key": apiKey,
-        ...customHttpIdentityHeaders(baseUrl),
+    return await withCustomResponse(
+      fetchImpl,
+      modelsUrl(baseUrl),
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${apiKey}`,
+          "x-api-key": apiKey,
+          ...customHttpIdentityHeaders(baseUrl),
+        },
       },
-    });
-    if (!response.ok) return undefined;
-    const parsed: unknown = await response.json();
-    return contextFromModelList(parsed, model);
+      CUSTOM_DISCOVERY_TIMEOUT_MS,
+      async (response) => {
+        if (!response.ok) return undefined;
+        const parsed: unknown = await response.json();
+        return contextFromModelList(parsed, model);
+      },
+    );
   } catch {
     return undefined;
   }
@@ -870,8 +899,14 @@ export async function probeCustomHttp(
             stream: false,
             messages: [{ role: "user", content: "Reply with the single word pong." }],
           };
-    const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
-    const text = await response.text();
+    const result = await withCustomResponse(
+      fetchImpl,
+      url,
+      { method: "POST", headers, body: JSON.stringify(body) },
+      CUSTOM_PROBE_TIMEOUT_MS,
+      async (response) => ({ response, text: await response.text() }),
+    );
+    const { response, text } = result;
     if (!response.ok) {
       return { ok: false, message: `HTTP ${response.status}${text ? `: ${text.slice(0, 180)}` : ""}`, api, model };
     }

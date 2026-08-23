@@ -29,6 +29,15 @@ export type SpawnRequest = {
   model?: string;
   customBotId?: string;
   chat?: string;
+  /**
+   * A bot named the way a person says it — "Grok Build", "Kimi K3". Every other
+   * desk tool takes this field, so a caller reaches for it here too; it used to
+   * be dropped without a word and the worker silently took the parent chat's
+   * vendor. The same spawn then landed on grok-4.6 under one parent and
+   * cursor/composer-2.5 under another, which reads as the desk translating an
+   * explicit selection.
+   */
+  bot?: string;
   effort?: string;
   timeoutSeconds?: number;
   tokenBudget?: number;
@@ -118,14 +127,21 @@ export function resolveModelHint(query: string): { provider: ProviderId; model: 
   const tokens = tokensOf(trimmed);
   if (tokens.length === 0) return null;
 
+  /*
+   * Take the model that matches the most of what was asked for, not the first
+   * one that matches any of it. Scanning for a single token answered "Claude
+   * Opus 5" with claude-fable-5, because "5" hits that name first and the loop
+   * stopped there. A person naming two words means both of them.
+   */
+  let best: { provider: ProviderId; model: string; score: number } | null = null;
   for (const provider of ["codex", "grok", "claude", "cursor", "custom"] as ProviderId[]) {
     for (const model of modelsFor(provider)) {
       const hay = `${model.id} ${model.name}`.toLowerCase();
-      if (tokens.some((token) => token.length >= 3 && hay.includes(token))) {
-        return { provider, model: model.id };
-      }
+      const score = tokens.filter((token) => token.length >= 3 && hay.includes(token)).length;
+      if (score > 0 && (!best || score > best.score)) best = { provider, model: model.id, score };
     }
   }
+  if (best) return { provider: best.provider, model: best.model };
 
   for (const token of tokens) {
     const alias = VENDOR_ALIASES[token];
@@ -1186,7 +1202,31 @@ export function resolveSpawnSpec(
     };
   }
   const hintedQuery = [input.provider, input.model, input.chat, input.description].filter(Boolean).join(" ");
+  const askedBot = input.bot?.trim() ?? "";
+  /*
+   * A bot the person named on this desk beats a fuzzy catalog match. "Grok Bot"
+   * shares a word with every Grok model, so the catalog claimed it first and
+   * answered grok-4.6 — a different vendor entirely from the one that was
+   * asked for. The match has to be that bot's actual name or model though —
+   * matchCustomBot is fuzzy, and letting it decide sent every grok-ish request
+   * to the Grok Bot, which is the same fault pointing the other way. A hint
+   * drawn from the chat title or description stays a guess and is unaffected.
+   */
+  const sameName = (a: string, b: string) => a.toLowerCase().replace(/[\s_-]+/g, "") === b.toLowerCase().replace(/[\s_-]+/g, "");
+  const askedCustom = askedBot
+    ? customBots?.find((bot) => sameName(bot.name, askedBot) || sameName(bot.model, askedBot))
+    : undefined;
+  if (askedCustom) {
+    return {
+      provider: "custom",
+      model: askedCustom.model,
+      customBotId: askedCustom.id,
+      effort: withEffort("custom", askedCustom.model, parseEffort(input.effort ?? "") ?? parent?.effort ?? "medium"),
+      title: subagentLabel("custom", askedCustom.model, input.description || askedCustom.name),
+    };
+  }
   const named =
+    (askedBot && isBareVendorOrModel(askedBot) ? resolveModelHint(askedBot) : null) ??
     (chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null) ??
     (isBareVendorOrModel(hintedQuery) ? resolveModelHint(hintedQuery) : null);
   const namedStock = named && named.provider !== "custom" ? named : null;

@@ -4688,6 +4688,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
             }
+            // Did routing actually decide this worker, or did something more
+            // explicit take over after it ran?
+            const routedWorkerIsRouted = Boolean(
+              routeDecision &&
+                routeDecision.provider === spec.provider &&
+                routeDecision.model === spec.model &&
+                (routeDecision.customBotId ?? undefined) === (spec.customBotId ?? undefined),
+            );
             const childId = reusedWorker?.id || payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
@@ -4863,8 +4871,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 correlationId: childCorrelationId,
                 ...(childMission ? { mission: childMission } : {}),
               },
-              routingMode: routeDecision ? "auto" : "manual",
-              routingDecision: routeDecision ?? undefined,
+              /*
+               * Record the decision only when the worker is the decision. An
+               * explicit assignment, a named worker, or a custom bot can win
+               * over routing, and the row used to keep the decision anyway —
+               * so a session that ran on grok-bot carried a routingDecision
+               * saying grok/grok-4.6. Anyone reading that record concludes the
+               * desk translated their selection, which is a real afternoon
+               * spent chasing a mapping bug that is not there.
+               */
+              ...(routedWorkerIsRouted
+                ? { routingMode: "auto" as const, routingDecision: routeDecision ?? undefined }
+                : { routingMode: "manual" as const }),
               ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
               messages: workerStartMessages({
                 seed: spawnSeed,

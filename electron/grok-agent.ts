@@ -1,3 +1,4 @@
+import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -112,7 +113,7 @@ function resolveGrokBinary(): string {
 export function spawnGrokProcess(spec: GrokLaunchSpec): ChildProcessWithoutNullStreams {
   const { args, cwd } = grokSpawnArgs(spec);
   return spawn(resolveGrokBinary(), args, {
-    cwd,
+    cwd: spawnCwd(cwd),
     env: withDeskToolEnv(process.env),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,

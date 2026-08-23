@@ -923,6 +923,15 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Which linked folders are gone. The renderer picks the folder a chat runs in
+  // and cannot stat, so without this it keeps choosing a path that has moved.
+  ipcMain.handle("project:missing-folders", async (_event, folders: unknown) => {
+    if (!Array.isArray(folders)) return [];
+    return folders.filter(
+      (folder): folder is string => typeof folder === "string" && folder.trim().length > 0 && !fs.existsSync(folder),
+    );
+  });
+
   ipcMain.handle("shell:open", async (_event, href: unknown) => {
     const url = typeof href === "string" ? safeExternalUrl(href) : null;
     if (!url) return false;

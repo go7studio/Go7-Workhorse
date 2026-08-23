@@ -143,7 +143,10 @@ transcript rather than as a path.
 - **Execution directory** — a chat starts in a linked folder or managed git
   worktree; the terminal can navigate elsewhere and Review opens cited external
   files. A loose top-level chat can search from the desk base, while workers
-  need an absolute folder.
+  need an absolute folder. A project with several folders linked runs in the
+  first one still on disk, so moving one repo does not stop the project. When
+  none of them is there, the chat names the missing folder instead of failing as
+  though the vendor's CLI were gone.
 - **Terminal** — chat-scoped, in that same directory.
 - **Git review** — a compact Changes control beside the composer opens the
   changed files and diffs for the work a chat did. Click a row to open the

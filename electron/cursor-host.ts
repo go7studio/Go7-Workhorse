@@ -1,3 +1,4 @@
+import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { deskRoleOf } from "../src/lib/subagents";
 import fs from "node:fs";
@@ -45,7 +46,7 @@ export function spawnCursorProcess(spec: ReturnType<typeof buildCursorLaunchSpec
   if (isBareWindowsCmd(command)) throw new Error(CURSOR_ACP_NOT_INSTALLED);
   if (!fs.existsSync(command)) throw new Error(CURSOR_ACP_NOT_INSTALLED);
   return spawn(command, args, {
-    cwd,
+    cwd: spawnCwd(cwd),
     env,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,

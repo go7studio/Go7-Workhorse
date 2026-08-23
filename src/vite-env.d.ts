@@ -114,6 +114,7 @@ type WorkhorseBridge = {
     }[]
   >;
   revealProject: (folder: string) => Promise<void>;
+  missingFolders: (folders: string[]) => Promise<string[]>;
   openExternal?: (href: string) => Promise<boolean>;
   fileDiff: (
     filePath: string,

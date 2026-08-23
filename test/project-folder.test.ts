@@ -1,7 +1,6 @@
 /**
- * BoomFrontTD linked two folders. The repo moved from repos/boomfront-td to
- * games/boomfront-td and the dead link stayed first, so every agent in that
- * project died with `spawn ~/.grok/bin/grok ENOENT` — a message naming a
+ * A project linked two folders. The repo behind the first one moved, the dead
+ * link stayed first, and every agent in that project died with `spawn ~/.grok/bin/grok ENOENT` — a message naming a
  * binary that was present, resolvable and executable the whole time. Node
  * reports a working directory that does not exist by naming the command.
  */
@@ -17,13 +16,13 @@ import type { Project } from "../src/lib/types";
 
 const project = (...paths: string[]): Project =>
   ({
-    id: "proj_boomfront",
-    name: "BoomFrontTD",
+    id: "proj_example",
+    name: "Example",
     folders: paths.map((folder, index) => ({ id: `fold_${index}`, path: folder, label: path.basename(folder) })),
   }) as Project;
 
-const DEAD = "/nowhere/workspace/repos/boomfront-td";
-const LIVE = "/nowhere/workspace/games/boomfront-td";
+const DEAD = "/nowhere/workspace/repos/moved-away";
+const LIVE = "/nowhere/workspace/current/moved-away";
 const exists = (folder: string) => folder !== DEAD;
 
 test("a folder that moved is skipped when a live one is linked beside it", () => {
@@ -55,7 +54,7 @@ test("a missing folder says so, instead of blaming the vendor's binary", () => {
       () => spawnCwd(DEAD),
       (error: Error) => {
         assert.match(error.message, /project folder is missing/);
-        assert.match(error.message, /boomfront-td/, "it must name the folder that is gone");
+        assert.match(error.message, /moved-away/, "it must name the folder that is gone");
         assert.doesNotMatch(error.message, /ENOENT/, "the old message sent people hunting for a CLI");
         return true;
       },

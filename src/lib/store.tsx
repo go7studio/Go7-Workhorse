@@ -98,6 +98,7 @@ import {
   folderFromPath,
   normalizeProject,
   primaryFolder,
+  projectFolderPaths,
   projectForSpawn,
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
@@ -768,7 +769,7 @@ function snapshotWriteInstance(
   const project =
     state.projects.find((item) => item.id === session?.projectId) ??
     state.projects.find((item) => item.id === state.activeProjectId);
-  const roots = project?.folders.map((folder) => folder.path) ?? [];
+  const roots = projectFolderPaths(project);
   void window.workhorse.recordFileWrite(filePath, roots);
 }
 
@@ -2311,7 +2312,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
             cwd,
-            folders: project?.folders.map((folder) => folder.path) ?? [],
+            folders: projectFolderPaths(project, folderExists),
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
@@ -2364,7 +2365,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             mcpServers: stateRef.current.settings.mcpServers,
             securityPolicy: session.securityPolicy,
             permissionGrants: session.permissionGrants,
-            folders: project?.folders.map((folder) => folder.path) ?? [],
+            folders: projectFolderPaths(project, folderExists),
             parentId: session.parentId,
             hidden: session.hidden,
             role: deskRoleOf(session),
@@ -3069,7 +3070,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const preface = buildSessionPreface({
             sessionId: session.id,
             cwd,
-            folders: project?.folders.map((folder) => folder.path) ?? [],
+            folders: projectFolderPaths(project, folderExists),
             references: project?.references ?? [],
             mode: session.mode,
             sandbox: session.sandbox,
@@ -3123,7 +3124,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               mcpServers,
               securityPolicy: session.securityPolicy,
               permissionGrants: session.permissionGrants,
-              folders: project?.folders.map((folder) => folder.path) ?? [],
+              folders: projectFolderPaths(project, folderExists),
               parentId: session.parentId,
               hidden: session.hidden,
               role,
@@ -3290,7 +3291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const projects = latest.projects.map((item) => ({
                 id: item.id,
                 name: item.name,
-                folders: item.folders.map((folder) => folder.path),
+                folders: projectFolderPaths(item, folderExists),
                 chats: latest.sessions.filter((session) => session.projectId === item.id && !session.archivedAt).length,
               }));
               await replyAsk({
@@ -3332,7 +3333,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const projects = applied.projects.map((item) => ({
                 id: item.id,
                 name: item.name,
-                folders: item.folders.map((folder) => folder.path),
+                folders: projectFolderPaths(item, folderExists),
                 chats: applied.sessions.filter((session) => session.projectId === item.id && !("archivedAt" in session && session.archivedAt)).length,
               }));
               void window.workhorse
@@ -3518,7 +3519,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     projects: applied.projects.map((item) => ({
                       id: item.id,
                       name: item.name,
-                      folders: item.folders.map((folder) => folder.path),
+                      folders: projectFolderPaths(item, folderExists),
                     })),
                     howToUse: visibleOnDesk
                       ? `Visible sidebar names: ${names.join(", ")}. The project is named “${applied.renamed.name}”. Call workhorse_list_projects and only repeat that if the list still shows it.`
@@ -6280,7 +6281,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * focused — coming back from Finder after moving a repo is exactly when it
    * has gone stale.
    */
-  const projectFolderPaths = state.projects.flatMap((project) => project.folders.map((folder) => folder.path)).join("\n");
+  const linkedFolderKey = state.projects.flatMap((project) => project.folders.map((folder) => folder.path)).join("\n");
   useEffect(() => {
     if (!window.workhorse?.missingFolders) return;
     let live = true;
@@ -6304,7 +6305,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       live = false;
       window.removeEventListener("focus", refresh);
     };
-  }, [projectFolderPaths, projectFolders]);
+  }, [linkedFolderKey, projectFolders]);
 
   const listDeskSkills = useCallback(async () => {
     if (!window.workhorse?.listDeskSkills) return deskSkillsRef.current;

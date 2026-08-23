@@ -123,10 +123,10 @@ export function folderFromPath(path: string, bookmark?: string): LinkedFolder {
  * The folder a chat runs in.
  *
  * A folder that has been moved or deleted is skipped when a live one is linked
- * beside it. BoomFrontTD kept a link to repos/boomfront-td after the repo moved
- * to games/boomfront-td, and because the dead link was first, every agent in
- * that project died with `spawn /Users/…/.grok/bin/grok ENOENT` — Node reports
- * a missing cwd by naming the command, so the error blamed a CLI that was fine.
+ * beside it. A project that kept a link to a repo after it moved went on
+ * choosing the dead path, and every agent in it died with
+ * `spawn ~/.grok/bin/grok ENOENT` — Node reports a missing working directory
+ * by naming the command, so the error blamed a CLI that was present and fine.
  *
  * When nothing exists this still answers the first folder, so the caller fails
  * naming a path the person actually linked rather than an empty string.
@@ -141,6 +141,27 @@ export function primaryFolder(
     if (live) return live;
   }
   return folders[0] ?? null;
+}
+
+/**
+ * The project's folders as the desk actually sees them: the ones still on disk,
+ * in their linked order. A folder that has been moved is dropped rather than
+ * reported, because every consumer treats the first entry as *the* project
+ * folder — the session preface hands it to the model, and workhorse_list_projects
+ * hands it to a harness that will pass it straight back as a working folder.
+ *
+ * If none of them is there, the full list stands. The person linked those paths
+ * and needs to see which ones, and an error that names a real link beats one
+ * that names nothing.
+ */
+export function projectFolderPaths(
+  project: Pick<Project, "folders"> | undefined,
+  folderExists?: (path: string) => boolean,
+): string[] {
+  const paths = project?.folders.map((folder) => folder.path) ?? [];
+  if (!folderExists) return paths;
+  const live = paths.filter((path) => folderExists(path));
+  return live.length > 0 ? live : paths;
 }
 
 export function folderSummary(project: Project): string {

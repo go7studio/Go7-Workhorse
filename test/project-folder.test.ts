@@ -73,6 +73,18 @@ test("every vendor host runs its agent through the guard", () => {
   }
 });
 
+test("nothing that decides a directory picks a folder without asking", () => {
+  // Not just the store. The terminal, the worktree button and the Codex probe
+  // all resolve a project root too, and a UI that names the dead folder while
+  // the agent runs in the live one is its own bug.
+  const surfaces = ["src/lib/store.tsx", "src/ui/SessionPane.tsx", "src/ui/SessionSetup.tsx", "src/ui/Settings.tsx"];
+  for (const file of surfaces) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    const bare = [...source.matchAll(/\??\.folders\[0\]\?\.path/g)];
+    assert.equal(bare.length, 0, `${file} chose a folder that may be gone`);
+  }
+});
+
 test("the store never picks a folder without asking whether it is there", () => {
   // Each of these decides where an agent runs. A bare folders[0] here is the
   // bug returning.

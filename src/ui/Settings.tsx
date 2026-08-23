@@ -1,3 +1,4 @@
+import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
@@ -491,7 +492,7 @@ function CodexNativeStatus() {
   const store = useStore();
   const active = store.sessions.find((session) => session.id === store.activeSessionId);
   const project = store.projects.find((item) => item.id === active?.projectId);
-  const projectRoot = project?.folders[0]?.path;
+  const projectRoot = primaryFolder(project, store.folderExists)?.path;
   const [runtime, setRuntime] = useState<import("../../electron/codex-app-server").CodexRuntimeInfo | null>(null);
   const [threads, setThreads] = useState<import("../../electron/codex-app-server").CodexNativeThread[]>([]);
   const [capabilities, setCapabilities] = useState<ReturnType<typeof import("../../electron/codex-capabilities").codexCapabilitySummary> | null>(null);

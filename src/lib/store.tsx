@@ -417,6 +417,8 @@ export type Store = AppState & {
   openAddBot: () => void;
   closeAddBot: () => void;
   setSettingsSection: (section: SettingsSection) => void;
+  /** False for a linked folder that has been moved or deleted. */
+  folderExists: (path: string) => boolean;
   deskSkills: DeskSkill[];
   listDeskSkills: () => Promise<DeskSkill[]>;
   refreshDeskSkills: () => Promise<DeskSkill[]>;
@@ -7132,6 +7134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openAddBot,
       closeAddBot,
       setSettingsSection,
+      folderExists,
       listDeskSkills,
       refreshDeskSkills,
       massSendVendor,

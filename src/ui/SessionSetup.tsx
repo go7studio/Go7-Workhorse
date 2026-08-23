@@ -1,3 +1,4 @@
+import { primaryFolder } from "../lib/project";
 import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
@@ -61,6 +62,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     refreshCodexPlan,
     refreshClaudePlan,
     refreshCustomPlans,
+    folderExists,
   } = useStore();
   const root = useRef<HTMLDivElement>(null);
   const [slide, setSlide] = useState<number | null>(null);
@@ -98,7 +100,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     ? settings.customBots.find((item) => item.id === session.customBotId)
     : undefined;
   const project = projects.find((item) => item.id === session.projectId);
-  const localRoot = project?.folders[0]?.path ?? "";
+  const localRoot = primaryFolder(project, folderExists)?.path ?? "";
   const environmentKind = sessionEnvironmentKind(session.environment);
   const chooseEnvironment = async (kind: "local" | "worktree") => {
     setEnvironmentBusy(kind);

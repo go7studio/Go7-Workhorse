@@ -178,7 +178,7 @@ export function SessionPane() {
   const openSetup = useCallback(() => setSetupOpen(true), []);
   const working = session?.status === "running";
   const project = desk.projects.find((item) => item.id === session?.projectId);
-  const localCwd = project ? primaryFolder(project)?.path ?? "" : "";
+  const localCwd = primaryFolder(project, desk.folderExists)?.path ?? "";
   const cwd = session ? sessionExecutionCwd(session.environment, localCwd) : localCwd;
   const roots = useMemo(() => (cwd ? [cwd] : []), [cwd]);
   const fileRoots = roots;

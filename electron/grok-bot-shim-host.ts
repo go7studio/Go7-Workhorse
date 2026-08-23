@@ -26,7 +26,7 @@ import {
   tokensMatch,
   type GrokBotShimSecrets,
 } from "../src/lib/grok-bot-shim";
-import { installGrokBotShimKeepalive } from "./grok-bot-shim-keepalive";
+import { grokBotShimKeepalivePaths, installGrokBotShimKeepalive } from "./grok-bot-shim-keepalive";
 import type { LinkDeskPlatform } from "../src/lib/workhorse-link";
 
 function sepFor(userData: string): "\\" | "/" {
@@ -239,10 +239,22 @@ export async function ensureGrokBotShim(input: {
   platform: NodeJS.Platform;
   command: string;
   script: string;
+  /**
+   * A desk on an isolated profile must not manage the machine-wide keepalive.
+   * The launch agent is keyed by home and one fixed label, so any second
+   * instance — a dev build, a packaged build someone is testing — used to
+   * rewrite the installed desk's agent to point at its own binary and its own
+   * profile, boot it, and leave it there. Delete that throwaway profile and the
+   * real desk has no shim: every model call fails closed with "Grok Bot shim is
+   * down", and nothing on the installed side ever touched the file.
+   */
+  manageKeepalive?: boolean;
 }): Promise<{ ok: boolean; mode: "running" | "spawned" | "failed"; dest: string }> {
   readOrMintShimSecrets(input.userData);
   const platform: LinkDeskPlatform = input.platform === "win32" ? "win32" : input.platform === "linux" ? "linux" : "darwin";
-  const keepalive = installGrokBotShimKeepalive({
+  const manage = input.manageKeepalive !== false;
+  const keepalive = manage
+    ? installGrokBotShimKeepalive({
     platform,
     home: input.home,
     userData: input.userData,
@@ -257,7 +269,8 @@ export async function ensureGrokBotShim(input: {
         return { status: result.status ?? 1 };
       },
     },
-  });
+      })
+    : { ok: true, dest: grokBotShimKeepalivePaths(platform, input.home, input.userData).dest };
   if (await probeGrokBotShim()) return { ok: true, mode: "running", dest: keepalive.dest };
   if (platform === "darwin") {
     for (let i = 0; i < 12; i += 1) {

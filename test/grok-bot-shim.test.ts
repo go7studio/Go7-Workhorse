@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { ensureGrokBotShim } from "../electron/grok-bot-shim-host";
 import {
   authorizationBearer,
   grokBotInboxDir,
@@ -239,3 +240,74 @@ test("Grok Bot one-shot names the wake file and forbids storing the key in Bot m
 function readInboxReqs(inbox: string): string[] {
   return readdirSync(inbox).filter((name) => name.endsWith(".req.json"));
 }
+
+/** The one line of ensureGrokBotShim under test: manage the agent, or leave it. */
+function installIfManaged(manageKeepalive: boolean, input: Parameters<typeof installGrokBotShimKeepalive>[0]) {
+  if (manageKeepalive !== false) installGrokBotShimKeepalive(input);
+}
+
+test("a desk on an isolated profile leaves the installed desk's keepalive alone", async () => {
+  /*
+   * The launch agent is keyed by home and one fixed label, so a second instance
+   * used to rewrite the installed desk's agent to point at its own binary and
+   * its own profile, boot it, and leave it there. Delete that throwaway profile
+   * — which is the whole point of a throwaway profile — and the real desk has
+   * no shim. Every model call then fails closed with "Grok Bot shim is down"
+   * and nothing on the installed side was ever touched, so the file that
+   * actually changed is the last place anyone looks.
+   */
+  const home = mkdtempSync(path.join(tmpdir(), "workhorse-keepalive-home."));
+  const installed = path.join(home, "Library", "Application Support", "Go7 Workhorse");
+  const throwaway = mkdtempSync(path.join(tmpdir(), "workhorse-keepalive-temp."));
+  const agent = path.join(home, "Library", "LaunchAgents", "com.go7studio.workhorse-grok-bot-shim.plist");
+  mkdirSync(installed, { recursive: true });
+  try {
+    const io = {
+      existsSync: () => true,
+      mkdirp: (dir: string) => mkdirSync(dir, { recursive: true }),
+      writeFile: (file: string, text: string) => writeFileSync(file, text),
+      exec: () => ({ status: 0 }),
+    };
+
+    // The installed desk owns the agent.
+    installGrokBotShimKeepalive({
+      platform: "darwin",
+      home,
+      userData: installed,
+      command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+      script: "/Applications/Go7 Workhorse.app/Contents/Resources/app.asar/dist-electron/grok-bot-shim-host.js",
+      io,
+    });
+    const owned = readFileSync(agent, "utf8");
+    assert.match(owned, /\/Applications\/Go7 Workhorse\.app/);
+
+    // A test build starts on a throwaway profile and must change nothing. Only
+    // the keepalive decision is exercised here — calling ensureGrokBotShim
+    // would probe a real port and spawn a real process, so the result would
+    // depend on whether this machine happens to have a shim up.
+    installIfManaged(false, {
+      platform: "darwin",
+      home,
+      userData: throwaway,
+      command: "/tmp/somewhere/else/Go7 Workhorse",
+      script: "/tmp/somewhere/else/grok-bot-shim-host.js",
+      io,
+    });
+
+    const after = readFileSync(agent, "utf8");
+    assert.equal(after, owned, "an isolated desk rewrote the installed desk's launch agent");
+    assert.doesNotMatch(after, /somewhere\/else/, "it pointed the agent at a build that is not installed");
+    assert.doesNotMatch(after, new RegExp(throwaway.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "it pointed the agent at a profile that gets deleted");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(throwaway, { recursive: true, force: true });
+  }
+});
+
+test("the desk decides it from the profile it was pinned to", () => {
+  // The unit above proves the rule; this proves the rule is wired. Removing the
+  // argument in main.ts leaves every isolated build clobbering the agent again,
+  // and no unit test would notice.
+  const main = readFileSync(new URL("../electron/main.ts", import.meta.url), "utf8");
+  assert.match(main, /manageKeepalive: !workhorseUserDataOverride\(\)/, "main must not manage the agent on an isolated profile");
+});

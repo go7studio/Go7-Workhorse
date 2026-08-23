@@ -10,6 +10,12 @@ const userData = process.env.WORKHORSE_USER_DATA_PATH?.trim();
 const workspace = process.env.WORKHORSE_REAL_PLAN_WORKSPACE?.trim();
 const planPath = process.env.WORKHORSE_REAL_PLAN_PATH?.trim();
 const executablePath = process.env.WORKHORSE_APP_PATH?.trim();
+// Which product this plan belongs to, and which screenshots its visual audit
+// needs, are that product's business — not this repository's. The device lanes
+// below stay named, because probing Godot, Android and iOS is a Workhorse
+// feature (see workhorse_probe_runtime), not somebody's project leaking in.
+const projectName = process.env.WORKHORSE_REAL_PLAN_PROJECT?.trim() || "Production Orchestration";
+const auditFiles = process.env.WORKHORSE_REAL_PLAN_AUDIT_FILES?.trim();
 if (!userData || !workspace || !planPath) throw new Error("User data, workspace, and plan path are required.");
 
 const runDir = path.join(process.cwd(), "eval", "runs", `real-plan-${Date.now()}`);
@@ -36,12 +42,14 @@ const prompt = (rootSession?.planRun ? [
   "Continue until the plan is completed or truthfully blocked. Never purchase, change account access, push, or release.",
 ] : [
   "You are the production Workhorse orchestrator. Execute and track this plan through Workhorse; do not pretend to complete delegated work.",
-  `Create project “BoomFront Production Orchestration” bound to ${workspace} and move this chat into it.`,
+  `Create project “${projectName}” bound to ${workspace} and move this chat into it.`,
   `Import ${planPath} with workhorse_plan.`,
   "Inspect canonical docs, then revise task details and dependencies before approving and starting the plan.",
   "Call workhorse_list_bots and workhorse_probe_runtime. Choose callable agents yourself from the live roster and current capacity.",
   "For every plan spawn, pass planStepId, a one-line rationale, required skills, and required tools. Explicit user assignments always win.",
-  "Kimi K3 must own the visual/UI/icon audit. Attach tools/ui_walk_out/title.png, campaign_page1.png, hud_level01.png, and settings.png to that Kimi spawn.",
+  auditFiles
+    ? `Kimi K3 must own the visual/UI/icon audit. Attach ${auditFiles} to that Kimi spawn.`
+    : "Kimi K3 must own the visual/UI/icon audit. Attach the interface screenshots the plan names to that Kimi spawn.",
   "Kimi is audit-only for this plan. Pass read-only, audit-only, no-code, and no-commit constraints; route its findings to a separate coding worker.",
   "Do not call MiniMax M3 in this production run. Choose among callable Codex, Grok, Claude, and Kimi agents using capability, capacity, and task risk.",
   "Use at most two root workers at once. Use stronger models for implementation and bounded cheaper models only for low-risk verification.",

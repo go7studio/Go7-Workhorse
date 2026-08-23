@@ -8,6 +8,21 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.33](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.32...v0.6.33) (2026-08-23)
+
+
+### Bug Fixes
+
+* a desk on an isolated profile must not take over the shim keepalive ([1adecc5](https://github.com/go7studio/Go7-Workhorse/commit/1adecc515e20246fe8f2db91531e102bb549a72d))
+* a desk on an isolated profile must not take over the shim keepalive ([428ac2d](https://github.com/go7studio/Go7-Workhorse/commit/428ac2d7a304c8217b5825f12864b88e79d9639b))
+* drop the import the deterministic rewrite left behind ([6f2b913](https://github.com/go7studio/Go7-Workhorse/commit/6f2b913b380f015bebcaf4d13f335220190e44bd))
+* report only the project folders that are there ([dfd2b32](https://github.com/go7studio/Go7-Workhorse/commit/dfd2b321e132c5da9a38d5553a51b849bce0fc40))
+* report only the project folders that are there, and stop naming a private project ([4d36249](https://github.com/go7studio/Go7-Workhorse/commit/4d36249b4d423bdf60757dcd384041da6f1b1f51))
+* run a chat in a project folder that exists, and name the one that does not ([15041f9](https://github.com/go7studio/Go7-Workhorse/commit/15041f9b22b1c3d117695616c814e45d3949dc3d))
+* run a chat in a project folder that exists, and name the one that does not ([1a0bd21](https://github.com/go7studio/Go7-Workhorse/commit/1a0bd21f8c7ba240fd514d937952880e2ca8dcb0))
+* the terminal, worktree button and Codex probe pick a live folder too ([d17ee07](https://github.com/go7studio/Go7-Workhorse/commit/d17ee0792215b5b71b9ad09a7eabeaf6727365b4))
+* the terminal, worktree button and Codex probe pick a live folder too ([1fe51ee](https://github.com/go7studio/Go7-Workhorse/commit/1fe51ee8ea4811813d1aa623c5fbceb0faa58e68))
+
 ## [0.6.32](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.31...v0.6.32) (2026-08-22)
 
 

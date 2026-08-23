@@ -805,6 +805,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
   const agentRuntimesRef = useRef<import("./external-catalog").AgentRuntimeStatus[]>([]);
+  /**
+   * Linked folders that are no longer on disk. The renderer decides which folder
+   * a chat runs in but cannot stat, so a project that kept a link to a moved
+   * repo went on choosing it and every agent died on a cwd that was not there.
+   * Refreshed from the main process; empty until the first answer, which only
+   * costs the old behaviour for a moment.
+   */
+  const missingFolders = useRef(new Set<string>());
+  const folderExists = useCallback((path: string) => !missingFolders.current.has(path), []);
+
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
   const claudePlanRetry = useRef<number | null>(null);
@@ -1190,7 +1200,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const project = snapshot.projects.find((item) => item.id === session.projectId);
-    const root = project?.folders[0]?.path ?? "";
+    const root = primaryFolder(project, folderExists)?.path ?? "";
     if (!root) return { ok: false, message: "Link a project folder before creating a worktree." };
     if (!window.workhorse?.ensureWorktree) {
       return { ok: false, message: "Restart Workhorse before creating a managed worktree." };
@@ -1615,7 +1625,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         provider: session.provider,
         tool: "run command",
         detail: "git status",
-        path: project ? primaryFolder(project)?.path : undefined,
+        path: project ? primaryFolder(project, folderExists)?.path : undefined,
       };
       return {
         ...current,
@@ -1906,7 +1916,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         const project = snapshot.projects.find((item) => item.id === session.projectId);
-        const cwd = sessionExecutionCwd(session.environment, project?.folders[0]?.path ?? "");
+        const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
         setState((latest) => ({
           ...latest,
           sessions: latest.sessions.map((item) =>
@@ -2221,7 +2231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hiddenWorker: Boolean(session.hidden),
         },
       });
-      const cwd = sessionExecutionCwd(session.environment, project?.folders[0]?.path ?? "");
+      const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
       setState((latest) => {
         const queued = grokChunkQueue.current[session.id] ?? "";
         delete grokChunkQueue.current[session.id];
@@ -2880,7 +2890,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       panel: null,
     });
     const project = current.projects.find((item) => item.id === source.projectId);
-    const root = project?.folders[0]?.path ?? "";
+    const root = primaryFolder(project, folderExists)?.path ?? "";
     const attachGrokFork = (cwd: string) => {
       if (source.provider !== "grok" || !window.workhorse?.grokFork) return;
       void window.workhorse
@@ -3051,7 +3061,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           if (hold) throw new Error(watchHoldMessage(hold));
           const project = snapshot.projects.find((item) => item.id === session.projectId);
-          const cwd = sessionExecutionCwd(session.environment, project?.folders[0]?.path ?? "");
+          const cwd = sessionExecutionCwd(session.environment, primaryFolder(project, folderExists)?.path ?? "");
           const live = vendorSendTarget(session.provider);
           const role = deskRoleOf(session);
           const preface = buildSessionPreface({
@@ -4368,7 +4378,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 fromSessionId: caller.id,
                 workspace: sessionExecutionCwd(
                   caller.environment,
-                  latest.projects.find((item) => item.id === caller.projectId)?.folders[0]?.path ?? "",
+                  (() => {
+                    const project = latest.projects.find((item) => item.id === caller.projectId);
+                    return project ? primaryFolder(project, folderExists)?.path ?? "" : "";
+                  })(),
                 ),
                 store: taskStore,
                 envelope: storedEnvelope ?? {
@@ -4506,7 +4519,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnIsolation = isNested ? "shared" : payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
-              projectFolder: boundProject?.folders[0]?.path ?? "",
+              projectFolder: primaryFolder(boundProject, folderExists)?.path ?? "",
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
@@ -6257,6 +6270,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const projectFolders = useCallback(() => {
     return stateRef.current.projects.flatMap((project) => project.folders.map((folder) => folder.path).filter(Boolean));
   }, []);
+
+  /*
+   * Keep the missing-folder set current. A folder can be moved or deleted while
+   * the desk is open, and the answer decides where every agent runs, so this
+   * re-checks whenever the linked folders change and again when the window is
+   * focused — coming back from Finder after moving a repo is exactly when it
+   * has gone stale.
+   */
+  const projectFolderPaths = state.projects.flatMap((project) => project.folders.map((folder) => folder.path)).join("\n");
+  useEffect(() => {
+    if (!window.workhorse?.missingFolders) return;
+    let live = true;
+    const refresh = async () => {
+      const paths = projectFolders();
+      if (paths.length === 0) {
+        missingFolders.current = new Set();
+        return;
+      }
+      try {
+        const gone = await window.workhorse!.missingFolders!(paths);
+        if (live) missingFolders.current = new Set(gone);
+      } catch {
+        // A probe that cannot answer must not strand every chat: leaving the
+        // set as it was keeps the previous, working choice.
+      }
+    };
+    void refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [projectFolderPaths, projectFolders]);
 
   const listDeskSkills = useCallback(async () => {
     if (!window.workhorse?.listDeskSkills) return deskSkillsRef.current;

@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   },
   listDropFiles: (paths: string[]) => ipcRenderer.invoke("drop:list", paths) as Promise<import("./drop-files").ListedDropFile[]>,
   revealProject: (folder: string) => ipcRenderer.invoke("project:reveal", folder),
+  missingFolders: (folders: string[]) => ipcRenderer.invoke("project:missing-folders", folders),
   openExternal: (href: string) => ipcRenderer.invoke("shell:open", href) as Promise<boolean>,
   fileDiff: (filePath: string, roots: string[] = [], created = false) =>
     ipcRenderer.invoke("project:file-diff", filePath, roots, created),

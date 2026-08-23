@@ -119,8 +119,28 @@ export function folderFromPath(path: string, bookmark?: string): LinkedFolder {
   return { id: uid("fold"), path, label: folderName(path), ...(token ? { bookmark: token } : {}) };
 }
 
-export function primaryFolder(project: Project): LinkedFolder | null {
-  return project.folders[0] ?? null;
+/**
+ * The folder a chat runs in.
+ *
+ * A folder that has been moved or deleted is skipped when a live one is linked
+ * beside it. BoomFrontTD kept a link to repos/boomfront-td after the repo moved
+ * to games/boomfront-td, and because the dead link was first, every agent in
+ * that project died with `spawn /Users/…/.grok/bin/grok ENOENT` — Node reports
+ * a missing cwd by naming the command, so the error blamed a CLI that was fine.
+ *
+ * When nothing exists this still answers the first folder, so the caller fails
+ * naming a path the person actually linked rather than an empty string.
+ */
+export function primaryFolder(
+  project: Project | undefined,
+  folderExists?: (path: string) => boolean,
+): LinkedFolder | null {
+  const folders = project?.folders ?? [];
+  if (folderExists) {
+    const live = folders.find((folder) => folderExists(folder.path));
+    if (live) return live;
+  }
+  return folders[0] ?? null;
 }
 
 export function folderSummary(project: Project): string {

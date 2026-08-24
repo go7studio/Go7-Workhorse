@@ -8,6 +8,24 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.34](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.33...v0.6.34) (2026-08-24)
+
+
+### Features
+
+* record trustworthy routing evidence ([13b5a10](https://github.com/go7studio/Go7-Workhorse/commit/13b5a10ccb87be00695c04f5c69381cce01b1311))
+
+
+### Bug Fixes
+
+* Grok 4.6 is ACP Grok, not Grok Bot ([9ef2f08](https://github.com/go7studio/Go7-Workhorse/commit/9ef2f08738489dd29c45873e12e3286e51678adb))
+* Grok Bot is a calling harness, not an inherited worker ([a62c81c](https://github.com/go7studio/Go7-Workhorse/commit/a62c81c67e3413fb35c9ac170a2d5c3ae9add564))
+* honor explicit worker model identity ([650c082](https://github.com/go7studio/Go7-Workhorse/commit/650c08277570318938d2d9eb3d2c42950ab73318))
+* keep Grok 4.6 off Grok Bot and idle parents off Failed ([8d05d0d](https://github.com/go7studio/Go7-Workhorse/commit/8d05d0d103dd797611a8d7b91d1cc4cd46eb8720))
+* keep worker routing identity truthful ([ed66d2f](https://github.com/go7studio/Go7-Workhorse/commit/ed66d2f7f37a65a05b6bc19f958948d8ddd414e1))
+* nested Auto spawn cannot allocate grok-bot ([9f6e23b](https://github.com/go7studio/Go7-Workhorse/commit/9f6e23b8a57cc98cd1784802570680879ba784a3))
+* separate Grok client from model identity ([dd620c0](https://github.com/go7studio/Go7-Workhorse/commit/dd620c01fa49a1679244ac6ff665e65940920936))
+
 ## [0.6.33](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.32...v0.6.33) (2026-08-23)
 
 

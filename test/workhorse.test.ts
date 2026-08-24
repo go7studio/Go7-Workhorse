@@ -6060,7 +6060,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   // A deferred openFor flag stayed false on Orchestrate chats: worker streams
   // kept cancelling the after-paint open, so the composer worked on an empty
   // thread. Group the live messages up front; first-paint windowing is enough.
-  assert.match(pane, /transcriptGrouper\.current\.group\(session\.messages\)/);
+  // Queued prompts stay off the transcript so they cannot split the live turn.
+  assert.match(pane, /omitQueuedUserMessages\(session\.messages, session\.queue\)/);
+  assert.match(pane, /transcriptGrouper\.current\.group\(transcriptMessages\)/);
   assert.doesNotMatch(pane, /transcriptOpen/);
   assert.doesNotMatch(pane, /setOpenFor/);
   assert.doesNotMatch(pane, /scheduleAfterPaint/);

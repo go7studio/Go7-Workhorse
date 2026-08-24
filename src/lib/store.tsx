@@ -126,7 +126,19 @@ import {
   reconcileLineupOnRestart,
   reconcileTaskStoreOnRestart,
 } from "./external-task";
-import { chooseRoutingDecision, describeRoutingMiss, inferRoutingTier, outcomesFromLearningEvents, routingCandidatesForDesk, routingIdentityExcluded, routingProfileForModel, shouldRouteSessionTurn, spawnEffortFor } from "./routing";
+import {
+  chooseRoutingDecision,
+  describeRoutingMiss,
+  inferRoutingTier,
+  outcomesFromLearningEvents,
+  routingCandidatesForDesk,
+  routingDecisionEvidence,
+  routingIdentityExcluded,
+  routingProfileForModel,
+  shouldRouteSessionTurn,
+  shouldShadowRouteSessionTurn,
+  spawnEffortFor,
+} from "./routing";
 import type { AgentRun, AgentSystemsSettings, ExternalTask } from "./types";
 import {
   approvePlanRun,
@@ -293,7 +305,7 @@ import {
   type WatchNotice,
 } from "./watch";
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
-import { normalizeLearning } from "./learning-policy";
+import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -2065,24 +2077,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         permits: current.watchPermits,
         dayMarks: current.watchDayMarks,
       });
-      const decision = chooseRoutingDecision(
-        routingCandidatesForDesk(current.settings, statuses, plansRef.current),
-        {
-          prompt: originalText,
-          attachments: images,
-          parentTier: hideUser ? session.routingDecision?.taskTier : undefined,
-          outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
-          current: {
-            provider: session.provider,
-            model: session.model,
-            customBotId: session.customBotId,
-          },
-          // The conversation must fit the picked model. Spawn routing skips
-          // this on purpose: a worker starts a fresh session.
-          contextNeed: session.contextUsed || undefined,
+      const routeCandidates = routingCandidatesForDesk(current.settings, statuses, plansRef.current);
+      const routeRequest = {
+        prompt: originalText,
+        attachments: images,
+        parentTier: hideUser ? session.routingDecision?.taskTier : undefined,
+        outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
+        current: {
+          provider: session.provider,
+          model: session.model,
+          customBotId: session.customBotId,
         },
-        current.settings.routing,
-      );
+        // The conversation must fit the picked model. Spawn routing skips
+        // this on purpose: a worker starts a fresh session.
+        contextNeed: session.contextUsed || undefined,
+      };
+      const decision = chooseRoutingDecision(routeCandidates, routeRequest, current.settings.routing);
       if (decision) {
         // Auto picks the effort with the model: a quick task at low, a deep
         // one at high. Keeping the person's old effort here left Auto choosing
@@ -2095,6 +2105,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         session = { ...routed, routingMode: "auto", routingDecision: decision };
         const routedSession = session;
+        const evidence = routingDecisionEvidence({
+          candidates: routeCandidates,
+          request: routeRequest,
+          settings: current.settings.routing,
+          selected: decision,
+          mode: "live-auto",
+          source: "chat",
+        });
         emitLearningEvent({
           kind: "routing",
           correlationId: turnCorrelationId,
@@ -2105,9 +2123,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           effort: decision.effort,
           payload: {
             summary: decision.reason,
-            score: decision.score,
-            taskTier: decision.taskTier,
-            rationale: decision.reason,
+            ...(evidence ?? {}),
           },
         });
         // lastModel is what the user last chose, and seeds the next new chat.
@@ -2117,6 +2133,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...latest,
           sessions: latest.sessions.map((item) => (item.id === routedSession.id ? routedSession : item)),
         }));
+      }
+    }
+    if (shouldShadowRouteSessionTurn({
+      learningEnabled: learningCaptures(effectiveLearningMode(current.settings.learning, session.projectId)),
+      routingMode: session.routingMode,
+      text: originalText,
+      hideUser,
+    })) {
+      const statuses = watchVendorStatuses({
+        settings: current.settings,
+        usage: current.usage,
+        plans: plansRef.current,
+        permits: current.watchPermits,
+        dayMarks: current.watchDayMarks,
+      });
+      const routeCandidates = routingCandidatesForDesk(current.settings, statuses, plansRef.current);
+      const routeRequest = {
+        prompt: originalText,
+        attachments: images,
+        outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
+        current: {
+          provider: session.provider,
+          model: session.model,
+          customBotId: session.customBotId,
+        },
+        contextNeed: session.contextUsed || undefined,
+      };
+      const evidence = routingDecisionEvidence({
+        candidates: routeCandidates,
+        request: routeRequest,
+        settings: current.settings.routing,
+        selected: session,
+        mode: "shadow",
+        source: "chat",
+      });
+      if (evidence) {
+        emitLearningEvent({
+          kind: "routing",
+          correlationId: turnCorrelationId,
+          projectId: session.projectId,
+          sessionId: session.id,
+          provider: session.provider,
+          model: session.model,
+          effort: session.effort,
+          payload: {
+            summary: "Shadow routing recommendation recorded",
+            ...evidence,
+          },
+        });
       }
     }
     if (!vendorAttachedForSession(session, current.settings)) {
@@ -4779,6 +4844,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             grokAssistantId.current[childId] = assistantId;
             const childCorrelationId = payload.traceId || learningTurns.current[parent.id]?.correlationId || payload.id || uid("corr");
             learningTurns.current[childId] = { correlationId: childCorrelationId, agentRunId: assistantId, toolIds: [] };
+            if (routeDecision) {
+              const evidence = routingDecisionEvidence({
+                candidates: routeCandidates,
+                request: routeRequest,
+                settings: latest.settings.routing,
+                selected: spec,
+                mode: "live-auto",
+                source: "spawn",
+              });
+              emitLearningEvent({
+                kind: "routing",
+                actorClass: "agent",
+                projectId: spawnProjectId,
+                sessionId: childId,
+                provider: spec.provider,
+                model: spec.model,
+                effort: spec.effort,
+                correlationId: childCorrelationId,
+                agentRunId: assistantId,
+                payload: {
+                  summary: routeDecision.reason,
+                  ...(evidence ?? {}),
+                },
+              });
+            }
             emitLearningEvent({
               id: learningEvidenceId("execution", assistantId),
               kind: "execution",

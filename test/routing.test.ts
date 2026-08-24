@@ -14,9 +14,11 @@ import {
   outcomesFromLearningEvents,
   rankRoutingCandidates,
   routingCandidatesForDesk,
+  routingDecisionEvidence,
   routingIdentityExcluded,
   routingProfileForModel,
   shouldRouteSessionTurn,
+  shouldShadowRouteSessionTurn,
   spawnEffortFor,
   weeklyDrawState,
   type RoutingCandidate,
@@ -124,6 +126,18 @@ test("automatic routing applies only to a person's visible turn", () => {
   );
   assert.equal(shouldRouteSessionTurn({ routingMode: "auto", text: "/goal status", hideUser: false }), false);
   assert.equal(shouldRouteSessionTurn({ routingMode: "manual", text: "Review this", hideUser: false }), false);
+  assert.equal(
+    shouldShadowRouteSessionTurn({ learningEnabled: true, routingMode: "manual", text: "Review this" }),
+    true,
+  );
+  assert.equal(
+    shouldShadowRouteSessionTurn({ learningEnabled: false, routingMode: "manual", text: "Review this" }),
+    false,
+  );
+  assert.equal(
+    shouldShadowRouteSessionTurn({ learningEnabled: true, routingMode: "manual", text: "/goal status" }),
+    false,
+  );
 });
 
 test("routing exclusions match provider, model, label, and bot identity", () => {
@@ -504,13 +518,13 @@ test("verified worker outcomes tilt a close fit but leftover still splits two fa
       kind: "outcome",
       provider: "codex",
       model: "gpt-5.6-terra",
-      payload: { status: "failed", signals: { testsPassed: true } },
+      payload: { status: "failed", evidenceClass: "infrastructure-failure", signals: { adapterTerminal: true } },
     },
     {
       kind: "outcome",
       provider: "codex",
       model: "gpt-5.6-terra",
-      payload: { status: "failed", signals: { artifactChecked: true } },
+      payload: { status: "failed", evidenceClass: "verified-failure", signals: { testsFailed: true } },
     },
     {
       kind: "outcome",
@@ -524,10 +538,43 @@ test("verified worker outcomes tilt a close fit but leftover still splits two fa
       model: "gpt-5.5",
       payload: { status: "completed", signals: { agentClaimed: true } },
     },
+    {
+      kind: "outcome",
+      provider: "codex",
+      model: "gpt-5.5",
+      payload: { status: "completed", evidenceClass: "verified-success", signals: { adapterTerminal: true } },
+    },
     { kind: "outcome", provider: "codex", model: "gpt-5.5", payload: { status: "completed" } },
   ]);
-  assert.equal(tallies.find((row) => row.model === "gpt-5.6-terra")?.verifiedFailures, 2);
+  assert.equal(tallies.find((row) => row.model === "gpt-5.6-terra")?.verifiedFailures, 1);
   assert.equal(tallies.find((row) => row.model === "gpt-5.5")?.verifiedSuccesses, 1);
+});
+
+test("routing evidence is versioned, bounded, and never stores the prompt", () => {
+  const rows = [candidate("gpt-5.6-sol"), candidate("gpt-5.6-terra"), candidate("gpt-5.6-luna")];
+  const secretPrompt = "Review API_SECRET_7f91 and implement the production migration";
+  const evidence = routingDecisionEvidence({
+    candidates: rows,
+    request: {
+      prompt: secretPrompt,
+      attachments: [{ id: "img", name: "screen.png", mimeType: "image/png", data: "ignored", kind: "image" }],
+      contextNeed: 64_000,
+    },
+    settings,
+    selected: { provider: "codex", model: "gpt-5.6-terra" },
+    mode: "shadow",
+    source: "chat",
+  });
+  assert.ok(evidence);
+  assert.equal(evidence.routingEvidenceVersion, 1);
+  assert.equal(evidence.policyVersion, "fit-capacity-outcomes-v1");
+  assert.equal(evidence.mode, "shadow");
+  assert.equal(evidence.task.domain, "coding");
+  assert.equal(evidence.task.attachmentKinds.image, 1);
+  assert.equal(evidence.task.contextNeed, "medium");
+  assert.equal(evidence.eligibleCandidateCount, 3);
+  assert.equal(typeof evidence.margin, "number");
+  assert.doesNotMatch(JSON.stringify(evidence), /API_SECRET_7f91/);
 });
 
 test("Workhorse Auto omits Cursor Auto from the pool; a named Cursor Auto id stays on the catalog", () => {

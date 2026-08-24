@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.5",
+  "contractVersion": "0.6.6",
   "title": "Observed production regression coverage",
-  "observedThrough": "2026-08-19",
+  "observedThrough": "2026-08-23",
   "regressions": [
     {
       "id": "REG-001",
@@ -659,6 +659,51 @@
       "scenarios": ["PRJ-S3", "ORC-S7"],
       "rubric": ["PRJ-06", "ORC-09"],
       "sourceFiles": ["src/lib/project.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/workhorse.test.ts", "test/coordinate-lifecycle.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-074",
+      "behavior": "An Orchestrate parent keeps its transcript mounted, visible, and scrollable while worker status and tool events stream; the live lineup never replaces the conversation.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["ORC-S7", "PRJ-S5"],
+      "rubric": ["ORC-15", "PRJ-08"],
+      "sourceFiles": ["src/ui/SessionPane.tsx", "src/lib/turns.ts", "test/workhorse.test.ts", "eval/performance-contract.json"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-075",
+      "behavior": "Provider-generated Grok command titles render as one compact permission action with bounded detail while the exact tool, command, and path scope remains auditable.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["SEC-S1"],
+      "rubric": ["SEC-01"],
+      "sourceFiles": ["electron/grok-agent.ts", "src/lib/tool-labels.ts", "src/styles/app.css", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-076",
+      "behavior": "A packaged Windows update stops only the installed Grok Bot shim before NSIS replacement, stamps executable metadata with the release version, and relaunches the new bridge without changing desk identity or state.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S6"],
+      "rubric": ["REL-09"],
+      "sourceFiles": ["build/installer.nsh", "electron/app-update.ts", "src/lib/app-update.ts", "scripts/assert-release-channel.mjs", "test/app-update.test.ts", "test/detect-release.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-077",
+      "behavior": "A project with several linked folders consistently selects the first folder still on disk for provider launch, Terminal, worktree actions, and Codex readiness; reporting omits missing links and an all-missing project names the missing folder instead of blaming the provider.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["PRJ-S3"],
+      "rubric": ["PRJ-06"],
+      "sourceFiles": ["electron/spawn-cwd.ts", "src/lib/project.ts", "src/lib/store-select.ts", "src/lib/store.tsx", "src/ui/SessionPane.tsx", "src/ui/SessionSetup.tsx", "src/ui/Settings.tsx", "test/project-folder.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-078",
+      "behavior": "An isolated development or eval profile cannot install or rewrite the production Grok Bot shim keepalive and cannot take over the production loopback owner on port 8787.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["REL-S1", "SEC-S4"],
+      "rubric": ["REL-01", "SEC-07"],
+      "sourceFiles": ["electron/grok-bot-shim-host.ts", "electron/main.ts", "test/grok-bot-shim.test.ts"],
       "verification": ["eval:validate", "verify"]
     }
   ]

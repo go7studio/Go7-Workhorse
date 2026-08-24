@@ -8,6 +8,7 @@ import {
   pinnedCollapsedChat,
   PROJECT_CHAT_LIMIT,
   visibleProjectChats,
+  workersFoldOpen,
 } from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
@@ -109,9 +110,9 @@ function CrewList({
   store: SidebarStore;
   index: SidebarChatIndex;
 }) {
-  if (session.workers.length === 0) return null;
+  if (!open || session.workers.length === 0) return null;
   return (
-    <div className={`crew-slot${open ? " open" : ""}`} aria-hidden={!open}>
+    <div className="crew-slot open">
       <div className="crew-slot-inner">
         {session.workers.map((worker) => (
           <ChatRow key={worker.id} session={worker} desk={rowDesk(store, index, worker)} nested />
@@ -127,10 +128,12 @@ function LooseChats({ store, index }: { store: SidebarStore; index: SidebarChatI
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    const active = store.activeSessionId ? index.parentsById.get(store.activeSessionId) : undefined;
+    const id = store.activeSessionId;
+    if (!id) return;
+    const active = store.sessions.find((session) => session.id === id);
     if (!active?.parentId) return;
     setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
-  }, [store.activeSessionId, index]);
+  }, [store.activeSessionId]);
   if (chats.length === 0 && archived.length === 0) return null;
   return (
     <div className="loose-chats">
@@ -185,16 +188,22 @@ function ProjectFolder({
   const [showArchived, setShowArchived] = useState(false);
   const [openCrew, setOpenCrew] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    const active = store.activeSessionId ? index.parentsById.get(store.activeSessionId) : undefined;
+    const id = store.activeSessionId;
+    if (!id) return;
+    const active = store.sessions.find((session) => session.id === id);
     if (!active?.parentId) return;
     setOpenCrew((current) => (current[active.parentId!] ? current : { ...current, [active.parentId!]: true }));
-  }, [store.activeSessionId, index]);
+  }, [store.activeSessionId]);
   const settingsOpen = store.panel === "settings" || store.panel === "add-bot";
   const selected = !settingsOpen && project.id === store.activeProjectId;
   const visible = visibleProjectChats(chats, showMore, store.activeSessionId);
   const hidden = hiddenProjectChatCount(chats.length, showMore);
   const held = activeProjectChat(chats, store.activeSessionId);
   const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
+  const toggleFolder = () => {
+    if (open) setOpenCrew({});
+    onToggle();
+  };
 
   return (
     <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${dropOver ? " drop-over" : ""}`}>
@@ -204,7 +213,7 @@ function ProjectFolder({
           type="button"
           aria-expanded={open}
           aria-label={open ? `Hide chats in ${project.name}` : `Show chats in ${project.name}`}
-          onClick={onToggle}
+          onClick={toggleFolder}
         >
           <svg className="twist-folder twist-folder-closed" viewBox="0 0 16 16" aria-hidden="true">
             <path
@@ -228,13 +237,13 @@ function ProjectFolder({
           type="button"
           onClick={() => {
             if (open) {
-              onToggle();
+              toggleFolder();
               return;
             }
             const last = lastProjectChat(chats);
             if (last) store.selectSession(last.id);
             else store.selectProject(project.id);
-            onToggle();
+            toggleFolder();
           }}
           onDragOver={(event) => {
             if (![...event.dataTransfer.types].includes("text/workhorse-chat")) return;
@@ -284,9 +293,7 @@ function ProjectFolder({
           )}
           {visible.map((session) => {
             const hold = held?.id === session.id;
-            const crewOpen = Boolean(
-              openCrew[session.id] || session.workers.some((worker) => worker.id === store.activeSessionId),
-            );
+            const crewOpen = workersFoldOpen(open, Boolean(openCrew[session.id]));
             return (
               <div key={session.id} className={`project-chat-block${hold ? " pinned-open" : ""}`}>
                 <div className="project-chat-inner">
@@ -296,9 +303,14 @@ function ProjectFolder({
                     workerCount={session.workers.length}
                     mission={missionRowLook(session, session.workers)}
                     workersOpen={crewOpen}
-                    onToggleWorkers={() =>
-                      setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }))
-                    }
+                    onToggleWorkers={() => {
+                      if (!open) {
+                        setOpenCrew((current) => ({ ...current, [session.id]: true }));
+                        onToggle();
+                        return;
+                      }
+                      setOpenCrew((current) => ({ ...current, [session.id]: !current[session.id] }));
+                    }}
                   />
                   <CrewList session={session} open={crewOpen} store={store} index={index} />
                 </div>

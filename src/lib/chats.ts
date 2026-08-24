@@ -44,6 +44,11 @@ export function pinnedCollapsedChat<T extends { id: string; workers?: Array<{ id
   return activeProjectChat(chats, activeId);
 }
 
+/** Count-button fold. A collapsed project hides workers even if the parent stays pinned. */
+export function workersFoldOpen(projectOpen: boolean, opened: boolean): boolean {
+  return projectOpen && opened;
+}
+
 export function renameChat(sessions: Session[], id: string, title: string, locked = true): Session[] | null {
   const next = typeof title === "string" ? title.trim() : "";
   if (!next) return null;

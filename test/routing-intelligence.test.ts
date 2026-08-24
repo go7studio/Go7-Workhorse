@@ -9,6 +9,7 @@ import {
   routingProfileForModel,
   type RoutingCandidate,
 } from "../src/lib/routing";
+import { normalizeModelId } from "../src/lib/models";
 import { constrainRouteCandidatesForSpawn } from "../src/lib/subagents";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
@@ -67,7 +68,6 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("codex", "gpt-5.6-terra"), 8);
   assert.equal(intelligence("claude", "claude-sonnet-4-6"), 8);
   assert.equal(intelligence("cursor", "composer-2.5"), 8);
-  assert.equal(intelligence("grok", "grok-build"), 8);
   assert.equal(intelligence("codex", "gpt-5.5"), 8);
   // Strong open models sit below the balanced band, not beside it
   assert.equal(intelligence("custom", "MiniMax-M3"), 7);
@@ -77,6 +77,14 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-haiku-4-5"), 5);
   assert.equal(intelligence("codex", "gpt-5.6-luna"), 5);
   assert.equal(intelligence("codex", "gpt-5.4-mini"), 5);
+});
+
+test("legacy Grok Build model saves normalize to the Grok 4.6 model", () => {
+  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.6");
+  assert.deepEqual(
+    routingProfileForModel("grok", "grok-build"),
+    routingProfileForModel("grok", "grok-4.6"),
+  );
 });
 
 test("slug order: the specific name wins before the generic one", () => {
@@ -259,7 +267,7 @@ test("domain tie-breaks inside a band and never overturns fit", () => {
 
 test("excluding a family uses whole tokens, not substrings", () => {
   const rows = [
-    bot("grok-build", 8, 4, 2),
+    bot("grok-4.6", 10, 3, 5),
     bot("cursor-grok-4.6-high", 10, 2, 5),
     bot("gpt-5.6-sol", 10, 2, 5, midWeek(50), { label: "Solaris Notes Bot" }),
   ];

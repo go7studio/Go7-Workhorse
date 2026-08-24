@@ -878,7 +878,7 @@ test("projectCapacitySnapshot is version 1, omits unknown percents, and never in
         leftoverPercent: 68,
         models: [
           { id: "grok-4.6", name: "Grok 4.6" },
-          { id: "grok-build", name: "Grok Build" },
+          { id: "grok-4.5", name: "Grok 4.5" },
         ],
       }),
       capacityRow({

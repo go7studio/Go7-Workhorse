@@ -294,7 +294,7 @@ export function normalizeSession(raw: unknown): Session | null {
 
 export function isSessionIntro(message: Pick<ChatMessage, "role" | "kind" | "text">): boolean {
   if (message.role !== "system" || message.kind) return false;
-  return /\bis live via Grok Build\b/.test(message.text) || /\bis not connected yet\./.test(message.text);
+  return /\bis live via (?:the )?Grok Build(?: CLI)?\b/.test(message.text) || /\bis not connected yet\./.test(message.text);
 }
 
 export function normalizeMessage(raw: unknown): ChatMessage | null {

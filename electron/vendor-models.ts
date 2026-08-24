@@ -8,6 +8,7 @@ import {
   CODEX_EFFORTS,
   EFFORTS,
   MODEL_CATALOG,
+  normalizeModelId,
   parseEffort,
   type ModelInfo,
   type ReasoningLevel,
@@ -27,8 +28,6 @@ export type VendorModelListInput = {
 };
 
 export type VendorModelLists = Record<ProviderId, ModelInfo[]>;
-
-const GROK_LOCAL_ALIASES = new Set(["grok-build"]);
 
 /** Live Cursor ids overlay the catalog as family bases. Empty live still falls back to stock. */
 export function reconcileCursorModels(live: ModelInfo[]): ModelInfo[] {
@@ -164,10 +163,13 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
         : infoSource && typeof infoSource === "object"
           ? (infoSource as Record<string, unknown>)
           : {};
-    const id = String(info.id ?? info.model ?? wrapped.slug ?? wrapped.id ?? "").trim();
+    const rawId = String(info.id ?? info.model ?? wrapped.slug ?? wrapped.id ?? "").trim();
+    const id = normalizeModelId("grok", rawId);
     if (!id || seen.has(id)) continue;
     if (info.hidden === true) continue;
-    const name = String(info.name ?? info.display_name ?? info.system_prompt_label ?? id).trim() || id;
+    const name = rawId.toLowerCase() === "grok-build"
+      ? "Grok 4.6"
+      : String(info.name ?? info.display_name ?? info.system_prompt_label ?? id).trim() || id;
     const effort = info.supports_reasoning_effort !== false;
     seen.add(id);
     models.push({
@@ -178,12 +180,6 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
     });
   }
   return models;
-}
-
-function withLocalGrokAliases(live: ModelInfo[]): ModelInfo[] {
-  const ids = new Set(live.map((model) => model.id));
-  const extras = MODEL_CATALOG.grok.filter((model) => GROK_LOCAL_ALIASES.has(model.id) && !ids.has(model.id));
-  return extras.length ? [...live, ...extras] : live;
 }
 
 export function listVendorModels(input: VendorModelListInput = {}): VendorModelLists {
@@ -205,7 +201,7 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
   const cursorLive = parseCursorModelsOutput(cursorRaw ?? "");
 
   return {
-    grok: grokLive.length ? withLocalGrokAliases(grokLive) : MODEL_CATALOG.grok,
+    grok: grokLive.length ? grokLive : MODEL_CATALOG.grok,
     claude: claudeFromGrokShape.length
       ? claudeFromGrokShape.map((model) => ({
           ...model,

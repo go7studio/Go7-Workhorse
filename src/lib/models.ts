@@ -69,7 +69,6 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   grok: [
     { id: "grok-4.6", name: "Grok 4.6", effort: true, contextWindow: 500_000 },
     { id: "grok-4.5", name: "Grok 4.5", effort: true, contextWindow: 500_000 },
-    { id: "grok-build", name: "Grok Build", effort: true, contextWindow: 500_000 },
   ],
   claude: [
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
@@ -118,9 +117,16 @@ const CURSOR_RETIRED_MODEL_ALIASES: Record<string, string> = {
   "grok-4.5": "cursor-grok-4.5-high",
 };
 
-/** Canonicalize retired vendor aliases without changing user-selected models. */
+const GROK_RETIRED_MODEL_ALIASES: Record<string, string> = {
+  // Grok Build is the local CLI/client, never a model. Older Workhorse
+  // versions exposed it as a model-shaped default alias.
+  "grok-build": "grok-4.6",
+};
+
+/** Canonicalize retired or invalid model-shaped aliases at the persistence boundary. */
 export function normalizeModelId(provider: ProviderId, modelId: string): string {
   const id = modelId.trim();
+  if (provider === "grok") return GROK_RETIRED_MODEL_ALIASES[id.toLowerCase()] ?? id;
   if (provider === "cursor") return CURSOR_RETIRED_MODEL_ALIASES[id.toLowerCase()] ?? id;
   return id;
 }

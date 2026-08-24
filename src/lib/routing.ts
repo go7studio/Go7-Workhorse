@@ -14,7 +14,7 @@ import { customBotEnabled, customBotModels, customModelRoutingOverride } from ".
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
-import { modelsFor, withEffort, contextWindowFor } from "./models";
+import { modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export type RoutingCapacity = {
@@ -130,7 +130,7 @@ export function routingIdentityExcluded(
 ): boolean {
   const terms = exclude.map((item) => item.trim().toLowerCase()).filter(Boolean);
   if (terms.length === 0) return false;
-  // Whole tokens, not substrings: "grok" still excludes grok-build and
+  // Whole tokens, not substrings: "grok" still excludes Grok models and
   // cursor-grok rows (the family), but "rok" or "sol" no longer knock out
   // labels that merely contain those letters.
   const tokens = [identity.provider, identity.model, identity.label, identity.customBotId]
@@ -266,11 +266,11 @@ function profile(
  * gpt-5.4, sol/terra/luna before any bare gpt-5.6.
  */
 export function routingProfileForModel(
-  _provider: ProviderId,
+  provider: ProviderId,
   model: string,
   override?: Partial<ModelRoutingProfile>,
 ): ModelRoutingProfile {
-  const slug = model.trim().toLowerCase();
+  const slug = normalizeModelId(provider, model).toLowerCase();
   const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
   let base: ModelRoutingProfile;
   const CODE = ["coding"] as const;
@@ -309,7 +309,7 @@ export function routingProfileForModel(
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
     base = profile(6, 4, 2);
-  } else if (slug.includes("composer") || slug.includes("grok-build")) {
+  } else if (slug.includes("composer")) {
     base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug === "auto" || slug === "auto-smart" || slug.startsWith("auto-")) {
     base = profile(7, 5, 2);

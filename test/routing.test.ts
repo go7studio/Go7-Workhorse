@@ -354,12 +354,12 @@ afterEach(() => {
   resetVendorCatalog();
 });
 
-test("one family table covers Grok Build, Fable, Codex 5.x, Kimi, GLM, MiniMax, Composer, Gemini", () => {
+test("one family table covers Grok 4.6, Fable, Codex 5.x, Kimi, GLM, MiniMax, Composer, Gemini", () => {
   const triple = (provider: "grok" | "claude" | "codex" | "cursor" | "custom", model: string) => {
     const profile = routingProfileForModel(provider, model);
     return [profile.intelligence, profile.speed, profile.cost] as const;
   };
-  assert.notDeepEqual(triple("grok", "grok-build"), [4, 3, 3]);
+  assert.deepEqual(triple("grok", "grok-4.6"), [10, 2, 5]);
   assert.deepEqual(triple("claude", "claude-fable-5"), [10, 2, 5]);
   assert.deepEqual(triple("claude", "claude-opus-5"), [10, 3, 4]);
   assert.notDeepEqual(triple("codex", "gpt-5.5"), [4, 3, 3]);

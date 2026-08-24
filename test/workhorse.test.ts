@@ -121,7 +121,7 @@ import {
 } from "../src/lib/commands";
 import { applyGoalCommand, goalCommandForAction, goalDisplay, goalDisplayForSession, goalHaltsVendor, goalVendorPrompt, grokGoalAfterTurnIdle, parseGoalInput, parseGrokGoalLine } from "../src/lib/goal";
 import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "../src/lib/vendor-send";
-import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, modelName, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
+import { advertisedClaudeWindow, advertisedCodexWindow, applyVendorCatalog, contextWindowFor, defaultModel, effortStopAt, effortStopPos, effortsFor, MODEL_CATALOG, modelName, normalizeModelId, parseEffort, resetVendorCatalog, shortModelName, usageToneForModel } from "../src/lib/models";
 import { safeExternalUrl } from "../src/lib/open-external";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
@@ -2119,14 +2119,14 @@ test("compact and auto-compact notifications update reported contextUsed", () =>
 test("chat markdown turns status dumps into facts and renders inline marks", () => {
   const inline = parseInline("I’m **Grok 4.6** on `C:\\\\Workhorse`");
   assert.deepEqual(inline.map((part) => part.type), ["text", "strong", "text", "code"]);
-  assert.equal(parseFactLine("- **Model:** Grok 4.6 (Grok Build TUI)")?.label, "Model");
+  assert.equal(parseFactLine("- **Model:** Grok 4.6 (Grok Build CLI)")?.label, "Model");
   assert.equal(parseFactLine("- **Workspace:** `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse`")?.value, "C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse");
 
   const blocks = parseChatMarkdown(
     [
       "Nothing is running in the background from this session.",
       "",
-      "- **Model:** Grok 4.6 (Grok Build TUI)",
+      "- **Model:** Grok 4.6 (Grok Build CLI)",
       "- **Workspace:** `C:\\\\Users\\\\someone\\\\Projects\\\\Go7-Workhorse`",
       "- **Background commands / monitors / subagents:** none",
       "",
@@ -5383,7 +5383,6 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.doesNotMatch(pane, /Almost all of this window/);
   assert.doesNotMatch(pane, /tokens overall/);
   assert.equal(shortModelName("grok", "grok-4.6"), "4.6");
-  assert.equal(shortModelName("grok", "Grok Build"), "Build");
   assert.equal(usageToneForModel("claude-opus", "custom"), "claude");
   assert.equal(usageToneForModel("claude-opus-4-8", "grok"), "claude");
   assert.equal(usageToneForModel("Fable 5", "claude"), "claude");
@@ -6104,7 +6103,7 @@ test("transcript groups tools and thoughts above the final reply", () => {
   const intro = {
     id: "intro",
     role: "system" as const,
-    text: "Grok · Grok 4.6 is live via Grok Build. This chat belongs to “Go7-Workhorse” and can see:\nC:\\\\proj",
+    text: "Grok · Grok 4.6 is live via the Grok Build CLI. This chat belongs to “Go7-Workhorse” and can see:\nC:\\\\proj",
     createdAt: 0,
   };
   assert.equal(isSessionIntro(intro), true);
@@ -6428,7 +6427,7 @@ test("shipped launch spec maps sandbox and plan without yolo", () => {
   ]);
 });
 
-test("Grok Build slash commands merge into the palette and lose to Workhorse names", () => {
+test("Grok Build CLI slash commands merge into the palette and lose to Workhorse names", () => {
   assert.ok(GROK_SHELL_COMMANDS.some((command) => command.name === "/imagine" && command.inputHint));
   assert.ok(GROK_SHELL_COMMANDS.some((command) => command.name === "/context"));
   assert.ok(GROK_SHELL_COMMANDS.some((command) => command.name === "/skills"));
@@ -6912,7 +6911,7 @@ test("Grok /goal is not a desk spawn and keeps the typed slash", () => {
   assert.match(store, /prepareVendorSend\(/);
   assert.doesNotMatch(store, /if \(looksLikeSpawnRequest\(originalText\)\)/);
   assert.match(store, /applyVendorTurnIdle/);
-  assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal runs Grok Build/);
+  assert.match(WORKHORSE_SESSION_RULES, /starts with \/goal runs the Grok Build CLI/);
   // The rule must still hold both halves: no fan-out for a bare goal, and
   // desk workers when the objective asks for them.
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn workers for a \/goal that only names work/);
@@ -7873,7 +7872,8 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
     },
   });
   assert.equal(missing.codex[0]?.id, "gpt-5.6-sol");
-  assert.ok(missing.grok.some((model) => model.id === "grok-build"));
+  assert.deepEqual(missing.grok.map((model) => model.id), ["grok-4.6", "grok-4.5"]);
+  assert.equal(MODEL_CATALOG.grok.some((model) => model.id === "grok-build"), false);
 
   const cursorRenamed = listVendorModels({
     env: {},
@@ -7913,8 +7913,19 @@ test("vendor model caches drive the picker so Sol is first and new slugs need no
   );
   assert.deepEqual(
     live.grok.map((model) => model.id),
-    ["grok-4.6", "grok-build"],
+    ["grok-4.6"],
   );
+
+  const legacyGrokCache = listVendorModels({
+    env: {},
+    homedir: home,
+    existsSync: (file) => file === path.join(home, ".grok", "models_cache.json"),
+    readFile: () => JSON.stringify({
+      models: { "grok-build": { info: { id: "grok-build", name: "Grok Build" } } },
+    }),
+  });
+  assert.deepEqual(legacyGrokCache.grok.map((model) => [model.id, model.name]), [["grok-4.6", "Grok 4.6"]]);
+  assert.equal(normalizeModelId("grok", "grok-build"), "grok-4.6");
 
   try {
     applyVendorCatalog(live);

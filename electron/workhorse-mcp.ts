@@ -39,7 +39,7 @@ import {
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
   withFollowThrough,
-  workerFollowThrough,
+  listedChatFollowThrough,
   workerNameFromTitle,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
@@ -87,7 +87,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.6 is ACP Grok, not Grok Bot. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -192,7 +192,7 @@ const TOOLS = [
         description: { type: "string", description: "Short 3–5 word label" },
         initialBrain: {
           type: "object",
-          description: "Optional first coordinating brain; descendants stay independently routed",
+          description: "Optional first coordinating brain; descendants stay independently routed. grok / grok-4.6 is ACP Grok. grok-bot only when the user chose Grok Bot to call, analyze, or dispatch — never for orchestration or builder work.",
           properties: {
             provider: { type: "string", description: "First coordinator vendor" },
             model: { type: "string", description: "First coordinator model" },
@@ -1731,8 +1731,8 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
     const rows = catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }).map((row) => {
-      const follow = workerFollowThrough(row.status);
-      return { ...row, next: follow.next };
+      const follow = listedChatFollowThrough(row);
+      return { ...row, ...(follow.next ? { next: follow.next } : {}) };
     });
     if (!isLinkProfile()) return JSON.stringify(rows, null, 2);
     return formatLinkChatList(rows, { full: args.full === true, parents: args.parents === true });

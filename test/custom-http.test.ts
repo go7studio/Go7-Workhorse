@@ -2287,6 +2287,40 @@ test("explicit stock model identity cannot be hijacked by an overlapping custom 
   assert.equal(assignedCustom.customBotId, "bot_grok");
 });
 
+test("a Grok Bot parent does not inherit grok-bot onto an unnamed worker", () => {
+  const grokBot = [{ id: "bot_grok", name: "Grok Bot", model: "grok-bot" }];
+  const parent = {
+    provider: "custom" as const,
+    model: "grok-bot",
+    effort: "high" as const,
+    customBotId: "bot_grok",
+  };
+  const unnamed = resolveSpawnSpec(
+    { fromSessionId: "parent", prompt: "audit the tree" },
+    [],
+    parent,
+    grokBot,
+  );
+  assert.equal(unnamed.provider, "grok");
+  assert.equal(unnamed.model, "grok-4.6");
+  assert.equal(unnamed.customBotId, undefined);
+  const named = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "summarize this log",
+      provider: "custom",
+      model: "grok-bot",
+      customBotId: "bot_grok",
+    },
+    [],
+    parent,
+    grokBot,
+  );
+  assert.equal(named.provider, "custom");
+  assert.equal(named.model, "grok-bot");
+  assert.equal(named.customBotId, "bot_grok");
+});
+
 test("custom bot inference requires a short affirmative name", () => {
   const bots = [
     { id: "bot_kimi", name: "Kimi K3", model: "hf:moonshotai/Kimi-K3" },

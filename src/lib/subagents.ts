@@ -1,4 +1,5 @@
 import { isExternalAgentAddress } from "./agent-runtime";
+import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
@@ -570,7 +571,9 @@ export function spawnExclusions(
   const inherited = nested ? parent?.agentRun?.exclusions ?? [] : [];
   const added = Array.isArray(requested)
     ? requested.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-    : [];
+    : typeof requested === "string" && requested.trim()
+      ? [requested.trim()]
+      : [];
   return [...new Set([...inherited, ...added].map((item) => item.trim()))];
 }
 
@@ -760,7 +763,10 @@ export function workerProgressCheckpoint(
 export type WorkerFollowNext = "wait" | "done" | "failed";
 
 /** What a harness does next. One word, so Claude/Codex/OpenClaw do not invent a loop. */
-export function workerFollowThrough(status: string): { next: WorkerFollowNext; how: string } {
+export function workerFollowThrough(
+  status: string,
+  opts?: { hasReport?: boolean },
+): { next: WorkerFollowNext; how: string } {
   if (status === "running" || status === "queued") {
     return {
       next: "wait",
@@ -768,6 +774,12 @@ export function workerFollowThrough(status: string): { next: WorkerFollowNext; h
     };
   }
   if (status === "completed") {
+    if (opts?.hasReport === false) {
+      return {
+        next: "failed",
+        how: "This worker finished without a durable report. Do not treat a missing report as success.",
+      };
+    }
     return {
       next: "done",
       how: "The report is in this payload. workhorse_continue_mission if work remains (previousWorkerIds: this id). workhorse_ask_chat to talk to this worker.",
@@ -777,6 +789,16 @@ export function workerFollowThrough(status: string): { next: WorkerFollowNext; h
     next: "failed",
     how: "This worker did not finish. Do not treat a missing report as success. Delegate remaining work as a new slice if the user still wants it.",
   };
+}
+
+/** Parent chats are not workers. Idle must not become next=failed. */
+export function listedChatFollowThrough(row: {
+  parentId?: string;
+  worker?: string;
+  status: string;
+}): { next?: WorkerFollowNext } {
+  if (!row.parentId && !row.worker) return {};
+  return { next: workerFollowThrough(row.status).next };
 }
 
 /** Attach `next`/`how` to any status payload, including an ExternalTask dump. */
@@ -794,7 +816,7 @@ export function workerStatusSnapshot(
   const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
-  const follow = workerFollowThrough(status);
+  const follow = workerFollowThrough(status, { hasReport: Boolean(raw) });
   return {
     id: worker.id,
     title: worker.title,
@@ -1132,12 +1154,22 @@ export function continueWorkerRun(
   };
 }
 
+function isGrokBotHint(bot: CustomBotHint): boolean {
+  return isGrokBotModel(bot.model) || isGrokBotName(bot.name);
+}
+
+function queryNamesGrokBot(query: string): boolean {
+  return /\bgrok-bot\b|\bgrok bot\b/i.test(query);
+}
+
 function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {
   if (!bots?.length) return undefined;
   const lower = query.trim().toLowerCase();
   if (!lower) return undefined;
   const tokens = tokensOf(lower);
+  const namesGrokBot = queryNamesGrokBot(lower);
   return bots.find((bot) => {
+    if (isGrokBotHint(bot) && !namesGrokBot) return false;
     const name = bot.name.toLowerCase();
     const model = bot.model.toLowerCase();
     const id = bot.id.toLowerCase();
@@ -1210,10 +1242,11 @@ export function resolveSpawnSpec(
       provider: session.provider,
     }));
   const chat = input.chat?.trim() ?? "";
+  const explicit = parseProviderId(input.provider);
   const assignedCustom = input.customBotId
     ? customBots?.find((bot) => bot.id === input.customBotId)
     : undefined;
-  if (assignedCustom) {
+  if (assignedCustom && explicit !== "grok") {
     return {
       provider: "custom",
       model: input.model?.trim() || assignedCustom.model,
@@ -1226,7 +1259,6 @@ export function resolveSpawnSpec(
       title: subagentLabel("custom", input.model?.trim() || assignedCustom.model, input.description || assignedCustom.name),
     };
   }
-  const explicit = parseProviderId(input.provider);
   const rawModel = input.model?.trim() ?? "";
   const modelHint = explicitModelHint(rawModel, explicit);
   if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {
@@ -1268,8 +1300,21 @@ export function resolveSpawnSpec(
     };
   }
 
+  const namedGrokBot =
+    isGrokBotModel(rawModel) ||
+    isGrokBotName(rawModel) ||
+    isGrokBotModel(chat) ||
+    isGrokBotName(chat) ||
+    queryNamesGrokBot(`${chat} ${input.description ?? ""}`);
+  const parentIsGrokBot =
+    parent?.provider === "custom" &&
+    (isGrokBotModel(parent.model ?? "") ||
+      Boolean(customBots?.some((bot) => bot.id === parent.customBotId && isGrokBotHint(bot))));
+  // Grok Bot may call, analyze, and dispatch from its own chat. An unnamed
+  // child is a worker slice, so it must not inherit the grok-bot slot.
+  const inheritParent = !(parentIsGrokBot && !namedGrokBot);
   const parentCustom =
-    !stockPick && parent?.provider === "custom" && (!explicit || explicit === "custom")
+    inheritParent && !stockPick && parent?.provider === "custom" && (!explicit || explicit === "custom")
       ? customBots?.find((bot) => bot.id === parent.customBotId) ??
         customBots?.find((bot) => bot.model === parent.model) ??
         customBots?.[0]
@@ -1285,7 +1330,7 @@ export function resolveSpawnSpec(
   }
 
   const hinted = namedStock ?? named;
-  const provider = explicit ?? hinted?.provider ?? parent?.provider ?? "grok";
+  const provider = explicit ?? hinted?.provider ?? (inheritParent ? parent?.provider : undefined) ?? "grok";
   const model =
     (modelHint?.provider === provider ? modelHint.model : "") ||
     (explicit && !rawModel ? defaultModel(provider).id : hinted?.model) ||

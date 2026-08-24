@@ -1,3 +1,4 @@
+import { isGrokBotModel, isGrokBotUrl } from "./custom-http-identity";
 import { uid } from "./id";
 import type { CustomBot, CustomLlm, ModelRoutingProfile } from "./types";
 
@@ -165,9 +166,10 @@ export function customBotEnabled(bot: { enabled?: boolean } | undefined): boolea
  * leads, so a connection saved before models were listed still offers exactly
  * what it always did, and nothing on disk has to move.
  */
-export function customBotModels(bot: Pick<CustomBot, "model" | "models"> | undefined): string[] {
+export function customBotModels(bot: (Pick<CustomBot, "model" | "models"> & { baseUrl?: string }) | undefined): string[] {
   if (!bot) return [];
   const first = bot.model.trim();
+  if ((bot.baseUrl && isGrokBotUrl(bot.baseUrl)) || isGrokBotModel(first)) return first ? [first] : ["grok-bot"];
   const rest = (bot.models ?? []).map((item) => item.trim()).filter(Boolean);
   return [...new Set([first, ...rest].filter(Boolean))];
 }

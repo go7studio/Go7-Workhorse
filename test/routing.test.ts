@@ -26,7 +26,8 @@ import {
 import { applyVendorCatalog, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
-import { resolveSpawnSpec } from "../src/lib/subagents";
+import { listedChatFollowThrough, resolveSpawnSpec } from "../src/lib/subagents";
+import { customBotModels } from "../src/lib/custom-bots";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -603,11 +604,110 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   assert.match(store, /outcomesFromLearningEvents/);
   assert.match(store, /shouldAutoRouteSpawn/);
   assert.match(store, /constrainRouteCandidatesForSpawn/);
+  const spawnRoleAt = store.indexOf("const spawnRole =");
+  assert.ok(spawnRoleAt >= 0);
+  const spawnRole = store.slice(spawnRoleAt, spawnRoleAt + 220);
+  assert.match(spawnRole, /routeSpawn \? "worker"/);
+  assert.doesNotMatch(spawnRole, /!isNested/);
   assert.match(settingsUi, /id: "routing"/);
   assert.doesNotMatch(settingsUi, /id: "models"/);
   assert.doesNotMatch(welcome, /brain picker|pick a model before/i);
 });
 
+
+test("Grok 4.6 is ACP Grok; Auto workers never allocate grok-bot", () => {
+  const grokAcp: RoutingCandidate = {
+    provider: "grok",
+    model: "grok-4.6",
+    label: "Grok 4.6",
+    connected: true,
+    profile: routingProfileForModel("grok", "grok-4.6"),
+    capacity: { usedPercent: 50, resetsAt: "2026-08-25T00:00:00.000Z" },
+  };
+  const grokBot: RoutingCandidate = {
+    provider: "custom",
+    model: "grok-bot",
+    label: "Grok Bot",
+    customBotId: "bot_grokbot",
+    connected: true,
+    profile: routingProfileForModel("custom", "grok-bot"),
+    capacity: { usedPercent: 5, resetsAt: "2026-08-25T00:00:00.000Z" },
+  };
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const deep = chooseRoutingDecision(
+    [grokAcp, grokBot],
+    { prompt: "Architect a production migration", tier: "deep", role: "worker", now },
+    settings,
+  );
+  assert.equal(deep?.provider, "grok");
+  assert.equal(deep?.model, "grok-4.6");
+  assert.equal(deep?.customBotId, undefined);
+  const rankedWorker = rankRoutingCandidates(
+    [grokAcp, grokBot],
+    { prompt: "Architect a production migration", tier: "deep", role: "worker", now },
+    settings,
+  );
+  assert.equal(rankedWorker.some((row) => row.model === "grok-bot"), false);
+  const dispatch = chooseRoutingDecision(
+    [grokBot],
+    { prompt: "Summarize this log", current: { provider: "custom", model: "grok-bot", customBotId: "bot_grokbot" }, now },
+    settings,
+  );
+  assert.equal(dispatch?.model, "grok-bot");
+  const nestedQuick = chooseRoutingDecision(
+    [grokAcp, grokBot],
+    { prompt: "Quick: list these names", tier: "quick", now },
+    settings,
+  );
+  assert.equal(nestedQuick?.provider, "grok");
+  assert.equal(nestedQuick?.model, "grok-4.6");
+  assert.notEqual(nestedQuick?.model, "grok-bot");
+  const stolen = chooseRoutingDecision(
+    [grokAcp, grokBot],
+    { prompt: "Keep going", current: { provider: "grok", model: "grok-4.6" }, now },
+    settings,
+  );
+  assert.equal(stolen?.provider, "grok");
+  assert.equal(stolen?.model, "grok-4.6");
+  const excluded = rankRoutingCandidates(
+    [grokAcp, grokBot],
+    { prompt: "Quick: list names", exclude: ["grok-bot"], now },
+    settings,
+  );
+  assert.equal(excluded.some((row) => row.model === "grok-bot"), false);
+  assert.ok(excluded.some((row) => row.model === "grok-4.6"));
+  const spec = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "fix", provider: "grok", model: "grok-4.6", customBotId: "bot_grokbot", description: "Idle chat labels" },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "high" },
+    [{ id: "bot_grokbot", name: "Grok Bot", model: "grok-bot" }],
+  );
+  assert.equal(spec.provider, "grok");
+  assert.equal(spec.model, "grok-4.6");
+  assert.equal(spec.customBotId, undefined);
+  assert.deepEqual(
+    customBotModels({
+      model: "grok-bot",
+      models: ["grok-bot", "MiniMax-M3", "hf:moonshotai/Kimi-K3"],
+      baseUrl: "http://127.0.0.1:8787/v1",
+    }),
+    ["grok-bot"],
+  );
+  assert.equal(listedChatFollowThrough({ status: "idle" }).next, undefined);
+  assert.equal(listedChatFollowThrough({ status: "completed", parentId: "p", worker: "Wren" }).next, "done");
+  assert.equal(listedChatFollowThrough({ status: "idle", parentId: "p" }).next, "failed");
+  const grokBotProfile = routingProfileForModel("custom", "grok-bot");
+  assert.ok(grokBotProfile.intelligence < routingProfileForModel("grok", "grok-4.6").intelligence);
+  const unnamedFromBot = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "fix the leak" },
+    [],
+    { provider: "custom", model: "grok-bot", effort: "high", customBotId: "bot_grokbot" },
+    [{ id: "bot_grokbot", name: "Grok Bot", model: "grok-bot" }],
+  );
+  assert.equal(unnamedFromBot.provider, "grok");
+  assert.equal(unnamedFromBot.model, "grok-4.6");
+  assert.equal(unnamedFromBot.customBotId, undefined);
+});
 
 test("auto-route spawn fails closed when no candidate qualifies", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");

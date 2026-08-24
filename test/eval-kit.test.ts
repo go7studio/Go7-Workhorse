@@ -218,6 +218,11 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_query_capacity"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
+  assert.deepEqual(orchestration.workhorseSurfaces.grokBotSetup.hosts, ["darwin", "win32"]);
+  assert.match(orchestration.workhorseSurfaces.grokBotSetup.modelRequirement, /no fixed Grok Bot model.*local MCP\/CLI/i);
+  assert.match(orchestration.workhorseSurfaces.grokBotSetup.workerRouting, /Workhorse independently selects.*model.*effort/i);
+  assert.match(orchestration.workhorseSurfaces.grokBotSetup.usageExporter, /LLM-free.*no model/i);
+  assert.ok(orchestration.workhorseSurfaces.grokBotSetup.requiredInstructions.includes("capacity verification"));
   const commands = json("eval/command-contract.json");
   assert.match(commands.providerNativePolicy, /non-normative.*runtime-discovered/i);
   assert.match(orchestration.semantics.externalAgentSystem, /never providers/i);
@@ -245,6 +250,8 @@ test("eval baseline and contracts track the current product generation", () => {
     assert.match(profile.discovery.join(" "), /user-approved/i);
     assert.match(profile.capabilities.usage, /one connection ring/i);
   }
+  const regressions = json("eval/regression-contract.json");
+  assert.ok(regressions.regressions.some((item: any) => item.id === "REG-079"));
 });
 
 test("release automation keeps the eval target on the packaged version", () => {

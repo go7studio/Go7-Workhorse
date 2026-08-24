@@ -81,6 +81,9 @@ The validator checks:
 - every orchestration desk tool and source boundary in
   eval/orchestration-contract.json still exists and every ORC rubric item is
   mapped;
+- Connect Grok Bot output covers Mac and Windows, names its MCP/CLI capability
+  requirement without fixing a model, leaves worker routing to Workhorse, and
+  keeps weekly usage production LLM-free;
 - plan admission runs the shipped checklist, sibling-auditor, receipt, and
   ask-default helpers without a provider call;
 - every routing/media source boundary in eval/capability-contract.json exists

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.6",
+  "contractVersion": "0.6.7",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-23",
   "regressions": [
@@ -704,6 +704,15 @@
       "scenarios": ["REL-S1", "SEC-S4"],
       "rubric": ["REL-01", "SEC-07"],
       "sourceFiles": ["electron/grok-bot-shim-host.ts", "electron/main.ts", "test/grok-bot-shim.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-079",
+      "behavior": "Connect Grok Bot emits complete Mac and Windows setup instructions: permanent local memory, capabilities-first Link discovery, exact tools and follow-through, permission and loopback boundaries, no fixed model beyond local MCP/CLI capability, independent Workhorse worker routing, an LLM-free weekly usage producer, and final capacity proof.",
+      "profiles": ["grok-acp", "custom-openai"],
+      "scenarios": ["SET-S2", "USG-S2", "ORC-S9"],
+      "rubric": ["SET-02", "USG-03", "ORC-17"],
+      "sourceFiles": ["src/lib/workhorse-link.ts", "test/workhorse-link.test.ts", "docs/LINK.md", "docs/FEATURES.md"],
       "verification": ["eval:validate", "verify"]
     }
   ]

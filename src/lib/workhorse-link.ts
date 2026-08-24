@@ -250,6 +250,8 @@ You are connecting to this user's Go7 Workhorse desk. Connecting is not adding a
 
 Save this in permanent agent / session memory that survives a box reboot. The user's ${desk} holds the binaries. The remote box is scratch. Do not keep the only copy in this chat.
 
+Model: no fixed Grok Bot model. It only needs local MCP/CLI tool calling; Workhorse routes delegated workers, and the weekly exporter is LLM-free.
+
 1. On the user's ${desk} (local-exec / desktop helper), run:
    ${cli} capabilities
    If that fails: tell them to open Workhorse → Settings → LLMs → Install workhorse command, then retry.

@@ -13,7 +13,7 @@
  *   WORKHORSE_MCP_PROFILE=link \
  *   npm run eval:link-iteration
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LINK_FOLLOW_THROUGH, LINK_TOOLS, linkWorkerIdFromReply } from "../src/lib/workhorse-link";
@@ -132,7 +132,7 @@ if (!workerId) throw new Error(`delegate did not return a worker id: ${JSON.stri
 if (delegated.wait === true) throw new Error("Link blocked on wait=true");
 
 const passOne = await monitor(workerId);
-if (passOne.next !== "done" && passOne.next !== "failed") throw new Error("pass one did not finish");
+if (passOne.next !== "done") throw new Error(`pass one did not complete: ${JSON.stringify(passOne)}`);
 
 let passTwo: Record<string, unknown> | undefined;
 let continuedId: string | undefined;
@@ -158,6 +158,9 @@ if (passOne.next === "done") {
   }
 }
 
+const markerExists = existsSync(markerPath);
+const markerText = markerExists ? readFileSync(markerPath, "utf8").trim() : "";
+
 writeFileSync(
   path.join(folder, "iteration-evidence.json"),
   JSON.stringify(
@@ -169,6 +172,8 @@ writeFileSync(
       continuedId,
       goalAsk,
       continueError: continueError ?? null,
+      markerExists,
+      markerTextMatches: markerText === nonce,
       passOne: { next: passOne.next, how: passOne.how, status: passOne.status, report: passOne.report ?? passOne.text },
       passTwo: passTwo ? { next: passTwo.next, how: passTwo.how, status: passTwo.status, report: passTwo.report ?? passTwo.text } : null,
     },
@@ -177,10 +182,15 @@ writeFileSync(
   ),
 );
 
+if (!String(goalAsk).trim()) throw new Error("set a loop returned no acknowledgement");
+if (continueError) throw new Error(`mission continuation failed: ${continueError}`);
+if (!continuedId || passTwo?.next !== "done") throw new Error("mission continuation did not return and complete pass two");
+if (!markerExists || markerText !== nonce) throw new Error("the Link worker did not produce the exact requested marker");
+
 console.log(
   JSON.stringify(
     {
-      status: passOne.next === "failed" && !passTwo ? "failed" : "ok",
+      status: "ok",
       nonce,
       parentId,
       workerId,
@@ -193,4 +203,3 @@ console.log(
     2,
   ),
 );
-if (passOne.next === "failed" && !passTwo) process.exit(1);

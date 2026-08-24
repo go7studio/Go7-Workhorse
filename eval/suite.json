@@ -2,9 +2,16 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "2b09cefdba8123147c98d83c9dc4bb6f76237a8c",
+  "baselineRef": "91a39a5cb13fe845e3ba7facad665e466adda988",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
+  "releaseBlockers": [
+    "MOD-02", "MOD-04", "MOD-06",
+    "SEC-01", "SEC-03", "SEC-04", "SEC-07",
+    "ORC-07", "ORC-09", "ORC-13", "ORC-15", "ORC-17",
+    "USG-01", "USG-02", "USG-03", "USG-07", "USG-08",
+    "REL-01", "REL-02", "REL-05", "REL-06", "REL-07", "REL-09"
+  ],
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
   "areaOrder": ["setup", "projects", "model-integrity", "commands", "security", "continuity", "orchestration", "capabilities", "usage", "reliability", "learning-memory"],
   "areas": [
@@ -52,7 +59,7 @@
           "id": "SET-S3",
           "name": "Every settings section is reachable and persistent",
           "executor": "electron",
-          "profiles": ["grok-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp"],
           "steps": [
             "Walk Profile, LLMs, Skills, Routing, Learning, Usage, and Watch from the Settings header.",
             "Change profile, appearance, and one safe preference; leave and return.",
@@ -82,7 +89,7 @@
           "weight": 3,
           "type": "exists",
           "testability": "auto-partial",
-          "profiles": ["grok-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S1"],
           "passCriteria": "Fresh launch exposes the five named concepts with labels or single-line copy, avoids repeated or multi-sentence helper prose, and can be reopened later.",
           "evidence": "First-launch screenshots, action transcript, and post-restart screenshot.",
@@ -167,7 +174,7 @@
           "id": "PRJ-S1",
           "name": "Create a named project, then attach folders and references",
           "executor": "electron",
-          "profiles": ["grok-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create a project by name only and verify no folder is required.",
             "Attach two fixture folders plus file, URL, and note references.",
@@ -179,7 +186,7 @@
           "id": "PRJ-S2",
           "name": "Exercise chat rename, title lock, archive, move, fork, and delete",
           "executor": "electron",
-          "profiles": ["grok-acp", "codex-acp"],
+          "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Create two projects and multiple chats with distinctive message text.",
             "Manually rename a chat, continue using it, and verify the title stays locked.",

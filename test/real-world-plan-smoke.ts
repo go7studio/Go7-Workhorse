@@ -23,24 +23,15 @@ fs.mkdirSync(runDir, { recursive: true });
 const startedAt = Date.now();
 const seedState = JSON.parse(fs.readFileSync(path.join(userData, "workhorse-state.json"), "utf8"));
 const requestedRootId = process.env.WORKHORSE_REAL_PLAN_SESSION_ID?.trim();
+if (!requestedRootId) throw new Error("WORKHORSE_REAL_PLAN_SESSION_ID must name a fresh isolated root chat.");
 const requestedProvider = process.env.WORKHORSE_REAL_PLAN_ORCHESTRATOR?.trim() || "codex";
-const rootSessions = (seedState.sessions ?? [])
-  .filter((session: any) => session.provider === requestedProvider && !session.archived && !session.parentId && !session.goal)
-  .sort((left: any, right: any) => Number(right.updatedAt ?? right.createdAt ?? 0) - Number(left.updatedAt ?? left.createdAt ?? 0));
 const requestedRoot = (seedState.sessions ?? []).find((session: any) => session.id === requestedRootId && !session.parentId);
-const rootSession = requestedRoot ?? rootSessions[0];
+const rootSession = requestedRoot;
 const rootSessionId = rootSession?.id;
 const rootTitle = rootSession?.title;
-if (!rootSessionId || !rootTitle) throw new Error(`A ${requestedProvider} root chat without an active goal is required.`);
-const prompt = (rootSession?.planRun ? [
-  "Resume the persisted production plan. Do not import a duplicate plan or repeat completed work.",
-  "Preserve the completed Kimi visual audit; do not call Kimi again or repeat its work. Requeue Task 7 and give implementation to a separate coding worker using that audit.",
-  "The Kimi assignment is audit-only with read-only, audit-only, no-code, and no-commit constraints.",
-  "Keep MiniMax M3 out of this production run. Keep at most two root workers active and preserve routing rationale, skills, tools, and evidence.",
-  "Integrate isolated worker commits into the bound branch before dependent steps. Run artifact checks, Saga, and iOS lanes when their dependencies are ready.",
-  "Treat an idle worker whose agentRun still says running after restart as interrupted: fail and requeue its step instead of waiting forever.",
-  "Continue until the plan is completed or truthfully blocked. Never purchase, change account access, push, or release.",
-] : [
+if (!rootSessionId || !rootTitle || rootSession?.provider !== requestedProvider) throw new Error(`A ${requestedProvider} root chat without an active goal is required.`);
+if (rootSession?.planRun) throw new Error("The real-plan smoke requires a fresh root chat without an existing plan.");
+const prompt = ([
   "You are the production Workhorse orchestrator. Execute and track this plan through Workhorse; do not pretend to complete delegated work.",
   `Create project “${projectName}” bound to ${workspace} and move this chat into it.`,
   `Import ${planPath} with workhorse_plan.`,
@@ -90,8 +81,7 @@ try {
   while (Date.now() < deadline) {
     const elevate = page.getByRole("button", { name: /^Elevate(?: to )?/ }).first();
     if (await elevate.isVisible().catch(() => false)) {
-      await elevate.click();
-      elevated = true;
+      throw new Error("The real-plan smoke requested elevation instead of staying inside its pre-authorized boundary.");
     }
     let saved: any = {};
     try {
@@ -162,18 +152,16 @@ try {
   fs.writeFileSync(path.join(runDir, "evidence.json"), JSON.stringify(evidence, null, 2));
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
   if (!evidence.plan) throw new Error("The orchestrator did not import a plan.");
-  if (!["completed", "blocked"].includes(evidence.plan.status)) {
-    throw new Error(`The plan did not reach a truthful terminal state: ${evidence.plan.status}.`);
-  }
+  if (evidence.plan.status !== "completed") throw new Error(`The plan did not complete: ${evidence.plan.status}.`);
   if (evidence.peakRootWorkers > 2) throw new Error(`Root concurrency exceeded two: ${evidence.peakRootWorkers}.`);
-  if (!evidence.children.some((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length)) {
+  const productionChildren = evidence.children.filter((child: any) => child.startedAt >= startedAt);
+  if (!productionChildren.some((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length)) {
     throw new Error("No Kimi visual child received attachments.");
   }
-  const productionChildren = evidence.children.filter((child: any) => child.startedAt >= startedAt);
   if (productionChildren.some((child: any) => !child.planStepId || !String(child.rationale ?? "").trim())) {
     throw new Error("A production worker is missing its plan step or routing rationale.");
   }
-  const kimi = evidence.children.find((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length);
+  const kimi = productionChildren.find((child: any) => /kimi/i.test(`${child.title} ${child.model}`) && child.attachments?.length);
   const kimiLimits = (kimi?.exclusions ?? []).join(" ");
   if (!/no[- ]code/i.test(kimiLimits) || !/no[- ]commit/i.test(kimiLimits) || !/audit[- ]only/i.test(kimiLimits)) {
     throw new Error("The Kimi visual worker was not constrained to audit-only, no-code, and no-commit work.");

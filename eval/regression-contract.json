@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.6.7",
+  "contractVersion": "0.6.9",
   "title": "Observed production regression coverage",
   "observedThrough": "2026-08-23",
   "regressions": [
@@ -19,7 +19,7 @@
       "profiles": ["cursor-acp"],
       "scenarios": ["USG-S1", "USG-S4"],
       "rubric": ["USG-01", "USG-07"],
-      "sourceFiles": ["electron/cursor-plan.ts", "src/lib/cursor-lane.ts", "src/ui/UsagePane.tsx", "src/ui/WatchPane.tsx"],
+      "sourceFiles": ["electron/cursor-plan.ts", "src/lib/cursor-lane.ts", "src/ui/UsagePane.tsx", "src/ui/WatchPane.tsx", "test/usage-metering.test.ts"],
       "verification": ["eval:validate", "eval:smoke"]
     },
     {
@@ -37,7 +37,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["ORC-S1", "ORC-S7"],
       "rubric": ["ORC-02", "ORC-15"],
-      "sourceFiles": ["src/ui/ChatRow.tsx", "src/lib/turns.ts", "src/lib/subagents.ts"],
+      "sourceFiles": ["src/ui/ChatRow.tsx", "src/lib/turns.ts", "src/lib/subagents.ts", "test/worker-observability.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -55,7 +55,7 @@
       "profiles": ["custom-kimi"],
       "scenarios": ["CAP-S4", "ORC-S6"],
       "rubric": ["CAP-10", "ORC-12"],
-      "sourceFiles": ["eval/capability-contract.json", "eval/orchestration-contract.json"],
+      "sourceFiles": ["eval/capability-contract.json", "eval/orchestration-contract.json", "scripts/workhorse-eval-plan-fixture.mjs"],
       "verification": ["eval:plan-fixture-check"]
     },
     {
@@ -64,7 +64,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S2"],
       "rubric": ["ORC-14"],
-      "sourceFiles": ["src/lib/skills-catalog.ts", "electron/workhorse-mcp.ts"],
+      "sourceFiles": ["src/lib/skills-catalog.ts", "electron/workhorse-mcp.ts", "test/mcp-exposure.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -91,7 +91,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S7"],
       "rubric": ["ORC-15"],
-      "sourceFiles": ["src/lib/turns.ts"],
+      "sourceFiles": ["src/lib/turns.ts", "test/workhorse.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -100,7 +100,7 @@
       "profiles": ["cursor-acp"],
       "scenarios": ["REL-S1", "REL-S3"],
       "rubric": ["REL-01", "REL-03"],
-      "sourceFiles": ["package.json", "electron/main.ts", "src/ui/Welcome.tsx"],
+      "sourceFiles": ["package.json", "electron/main.ts", "src/ui/Welcome.tsx", "test/detect-release.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -109,7 +109,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["SET-S1", "SET-S2"],
       "rubric": ["SET-01", "SET-02"],
-      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx"],
+      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx", "test/austerity.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -118,7 +118,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["MOD-S1", "MOD-S3"],
       "rubric": ["MOD-01", "MOD-06"],
-      "sourceFiles": ["src/lib/session.ts", "src/lib/session-bridge.ts", "src/ui/ChatRow.tsx"],
+      "sourceFiles": ["src/lib/session.ts", "src/lib/session-bridge.ts", "src/ui/ChatRow.tsx", "test/custom-http.test.ts", "test/usage-metering.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -127,7 +127,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["ORC-S2", "CAP-S1"],
       "rubric": ["ORC-03", "CAP-01", "CAP-02"],
-      "sourceFiles": ["src/lib/routing.ts", "electron/workhorse-mcp.ts"],
+      "sourceFiles": ["src/lib/routing.ts", "electron/workhorse-mcp.ts", "scripts/workhorse-eval-fixture.mjs"],
       "verification": ["eval:fixture-check"]
     },
     {
@@ -136,7 +136,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["ORC-S3", "ORC-S5"],
       "rubric": ["ORC-04", "ORC-05", "ORC-10"],
-      "sourceFiles": ["electron/peer-inbox.ts", "src/lib/session-bridge.ts", "src/lib/subagents.ts"],
+      "sourceFiles": ["electron/peer-inbox.ts", "src/lib/session-bridge.ts", "src/lib/subagents.ts", "scripts/workhorse-eval-plan-fixture.mjs"],
       "verification": ["eval:plan-fixture-check"]
     },
     {
@@ -154,7 +154,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
       "scenarios": ["CAP-S1", "CAP-S6", "ORC-S6"],
       "rubric": ["CAP-01", "CAP-12", "ORC-12"],
-      "sourceFiles": ["eval/config.example.json", "eval/capability-contract.json", "src/lib/routing.ts"],
+      "sourceFiles": ["eval/config.example.json", "eval/capability-contract.json", "src/lib/routing.ts", "test/routing.test.ts"],
       "verification": ["eval:validate"]
     },
     {
@@ -523,7 +523,7 @@
       "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
       "scenarios": ["SET-S1", "SET-S2"],
       "rubric": ["SET-01", "SET-02"],
-      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx", "src/ui/RoutingPane.tsx", "src/ui/LearningPane.tsx", "src/lib/usage.ts"],
+      "sourceFiles": ["src/ui/Welcome.tsx", "src/ui/Settings.tsx", "src/ui/RoutingPane.tsx", "src/ui/LearningPane.tsx", "src/lib/usage.ts", "test/austerity.test.ts"],
       "verification": ["eval:validate", "verify"]
     },
     {
@@ -714,6 +714,42 @@
       "rubric": ["SET-02", "USG-03", "ORC-17"],
       "sourceFiles": ["src/lib/workhorse-link.ts", "test/workhorse-link.test.ts", "docs/LINK.md", "docs/FEATURES.md"],
       "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-080",
+      "behavior": "Live Auto and manual shadow routing store privacy-safe versioned task signatures, selected and recommended identities, runner-up margin, and only verified task outcomes; transport success, infrastructure failure, or an agent claim cannot masquerade as verified quality.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
+      "scenarios": ["CAP-S1", "CAP-S7", "LRN-S1"],
+      "rubric": ["CAP-01", "CAP-13", "LRN-04"],
+      "sourceFiles": ["src/lib/routing.ts", "src/lib/learning-agent-evidence.ts", "src/lib/learning-policy.ts", "src/lib/store.tsx", "test/routing.test.ts", "test/learning-memory.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-081",
+      "behavior": "Grok Build remains a client rather than a model, legacy grok-build normalizes to Grok 4.6, and explicit worker provider, model, custom connection, effort, and routing evidence must match the worker that actually launches; overlapping bot names and negative prompt mentions cannot hijack identity.",
+      "profiles": ["grok-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["MOD-S1", "MOD-S3", "ORC-S2", "ORC-S8"],
+      "rubric": ["MOD-01", "MOD-02", "MOD-04", "MOD-06", "ORC-02", "ORC-03", "ORC-16"],
+      "sourceFiles": ["electron/grok-launch.ts", "electron/vendor-models.ts", "src/lib/models.ts", "src/lib/subagents.ts", "src/lib/store.tsx", "test/custom-http.test.ts", "test/routing.test.ts", "test/workhorse.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-082",
+      "behavior": "Eval scoring and finalization reject self-attested evidence labels, missing or escaping files, mismatched run/scenario records, insufficient trust tiers, empty artifacts, SHA-256 mismatches, baseline-only execution, and incomplete regression coverage.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["REL-S3"],
+      "rubric": ["REL-06"],
+      "sourceFiles": ["scripts/workhorse-eval.mjs", "eval/schemas/results.schema.json", "eval/schemas/scenario-evidence.schema.json", "test/eval-kit.test.ts"],
+      "verification": ["eval:validate", "verify"]
+    },
+    {
+      "id": "REG-083",
+      "behavior": "Live smokes fail closed: stock ACP calls require a vendor session and reject usage-model mismatch; same-key multi-model calls require discovery, exact replies, and exact observed identity; Link iteration requires a completed second pass and exact marker; the production-plan smoke uses an explicit fresh root, never auto-elevates, accepts only completion, and evaluates only workers started by that run.",
+      "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
+      "scenarios": ["MOD-S4", "SET-S2", "ORC-S6", "ORC-S9"],
+      "rubric": ["MOD-07", "SET-03", "ORC-13", "ORC-17"],
+      "sourceFiles": ["test/provider-live-smoke.ts", "test/custom-multi-model-live-smoke.ts", "test/link-iteration-live-smoke.ts", "test/real-world-plan-smoke.ts", "test/eval-kit.test.ts"],
+      "verification": ["eval:smoke", "eval:multi-model-smoke", "eval:link-iteration", "eval:real-plan-smoke", "verify"]
     }
   ]
 }

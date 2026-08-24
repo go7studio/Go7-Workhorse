@@ -9,6 +9,7 @@ import { CursorSessionHost } from "../electron/cursor-host";
 import { detectCursorLogin } from "../electron/cursor-login";
 import { GrokSessionHost, type GrokIpcEvent } from "../electron/grok-host";
 import { detectGrokLogin } from "../electron/grok-login";
+import { normalizeModelId } from "../src/lib/models";
 
 type SmokeProvider = "grok" | "codex" | "claude" | "cursor";
 
@@ -72,13 +73,15 @@ try {
   const exactReply = text === "ADAPTER_OK";
   const vendorSession = events.find((event) => event.type === "vendor-session");
   const usage = events.filter((event) => event.type === "usage").at(-1);
+  const vendorSessionReady = vendorSession?.type === "vendor-session" && Boolean(vendorSession.vendorSessionId);
+  const usageIdentityMatches = usage?.type !== "usage" || normalizeModelId(provider, usage.model) === normalizeModelId(provider, model);
   console.log(
     JSON.stringify(
       {
         provider,
         requestedModel: model,
         connected: detection.connected,
-        vendorSession: vendorSession?.type === "vendor-session" ? Boolean(vendorSession.vendorSessionId) : false,
+        vendorSession: vendorSessionReady,
         stopReason: result.stopReason ?? null,
         exactReply,
         replyLength: text.length,
@@ -87,6 +90,8 @@ try {
           usage?.type === "usage"
             ? { model: usage.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }
             : null,
+        usageState: usage?.type === "usage" ? "authoritative" : "unknown",
+        usageIdentityMatches,
       },
       null,
       2,
@@ -94,6 +99,8 @@ try {
   );
   if (!text) throw new Error(`${provider} returned an empty smoke reply.`);
   if (!exactReply) throw new Error(`${provider} did not follow the deterministic reply contract.`);
+  if (!vendorSessionReady) throw new Error(`${provider} did not prove a live vendor session.`);
+  if (!usageIdentityMatches) throw new Error(`${provider} usage reported a different model than the one requested.`);
 } finally {
   host.disposeAll();
   rmSync(smokeCwd, { recursive: true, force: true });

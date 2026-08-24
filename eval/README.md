@@ -93,8 +93,10 @@ The validator checks:
   source boundaries, and verification commands;
 - the large-desk performance contract maps its scale fixtures, rendering and
   persistence boundaries, verification commands, rubric items, and default tests;
-- every provider usage profile covers direct and orchestrated calls, authoritative
-  token and leftover boundaries, pool identity, and unknown-without-estimation behavior;
+- every provider usage profile covers direct and orchestrated calls, token and
+  leftover provenance, pool identity, and the Cursor-only estimate exception;
+- critical model, security, orchestration, usage, and release rubrics remain
+  explicit release blockers;
 - the baseline is a full commit and the example version matches package.json;
 - config and provider profiles agree; native-command examples stay runtime-discovered;
 - the Settings section inventory still matches the product.
@@ -110,7 +112,8 @@ Copy the config and keep secrets in environment variables only:
     npm run eval:init -- --config eval/config.json
 
 Initialization writes an ignored eval/runs/<timestamp>/ evidence plan. It
-does not launch Workhorse, call a provider, or spend money.
+does not launch Workhorse, call a provider, or spend money. The run binds the
+commit, branch, version, and exact worktree fingerprint it was initialized on.
 
 The later evaluator records scenario evidence under that run and fills
 results.json. Then:
@@ -118,10 +121,24 @@ results.json. Then:
     npm run eval:score -- --run eval/runs/<timestamp>
     npm run eval:finalize -- --run eval/runs/<timestamp>
 
+Change `mode` to `active`, initialize the run, then start it before collecting
+evidence:
+
+    npm run eval:start -- --run eval/runs/<timestamp>
+
+Each judged rubric must cite a generated `evidence/<scenario>.json`. Completed
+scenario records need actions, observations, non-empty artifacts, SHA-256
+hashes, the appropriate trust tier (`manifest`, `unit`, `source`, or
+`packaged-live`), and the regression IDs they exercised. Evidence and artifact
+paths cannot leave that run's evidence directory. A baseline-only run cannot
+start, produce a certifiable headline, or finalize.
+
 Verdicts are pass, partial, fail, not-found, cannot-judge, and not-run. Only
 real judged verdicts enter the score denominator. Cannot-judge and not-run
 reduce coverage instead of becoming product failures. The headline score is
-withheld below 60% coverage.
+withheld below 60% coverage, when any area is thin, or until every recorded
+production regression has completed scenario evidence. A critical release
+blocker that is anything other than pass also withholds the score.
 
 ## Required execution sequence for the full run
 

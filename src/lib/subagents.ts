@@ -12,6 +12,7 @@ import type {
   ExecutionOwner,
   MissionIteration,
   ProviderId,
+  RoutingDecision,
   Session,
   WorkerHandoff,
   WorkerSeed,
@@ -118,14 +119,15 @@ export function resolveModelHint(query: string): { provider: ProviderId; model: 
   const tokens = tokensOf(trimmed);
   if (tokens.length === 0) return null;
 
+  let best: { provider: ProviderId; model: string; score: number } | null = null;
   for (const provider of ["codex", "grok", "claude", "cursor", "custom"] as ProviderId[]) {
     for (const model of modelsFor(provider)) {
       const hay = `${model.id} ${model.name}`.toLowerCase();
-      if (tokens.some((token) => token.length >= 3 && hay.includes(token))) {
-        return { provider, model: model.id };
-      }
+      const score = tokens.filter((token) => token.length >= 3 && hay.includes(token)).length;
+      if (score > 0 && (!best || score > best.score)) best = { provider, model: model.id, score };
     }
   }
+  if (best) return { provider: best.provider, model: best.model };
 
   for (const token of tokens) {
     const alias = VENDOR_ALIASES[token];
@@ -1148,6 +1150,16 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   });
 }
 
+/** A task may name a custom bot, but merely mentioning or forbidding one is not a selection. */
+function isBareBotReference(query: string, bots: CustomBotHint[] | undefined): boolean {
+  const bot = matchCustomBot(bots, query);
+  if (!bot) return false;
+  const meaningful = tokensOf(query).filter((token) => !VENDOR_FILLER.has(token));
+  if (meaningful.length === 0 || meaningful.length > 4) return false;
+  const hay = `${bot.name} ${bot.model} ${bot.id}`.toLowerCase();
+  return meaningful.every((token) => hay.includes(token));
+}
+
 function exactCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {
   const lower = query.trim().toLowerCase();
   if (!lower) return undefined;
@@ -1240,7 +1252,10 @@ export function resolveSpawnSpec(
   const custom = !stockPick
     ? exactCustomBot(customBots, rawModel) ??
       (!rawModel || explicit === "custom"
-        ? matchCustomBot(customBots, [input.chat, input.description].filter(Boolean).join(" "))
+        ? (() => {
+            const query = [input.chat, input.description].filter(Boolean).join(" ");
+            return isBareBotReference(query, customBots) ? matchCustomBot(customBots, query) : undefined;
+          })()
         : undefined)
     : undefined;
   if (custom) {
@@ -1281,6 +1296,19 @@ export function resolveSpawnSpec(
     effort: withEffort(provider, model, parseEffort(input.effort ?? "") ?? parent?.effort ?? "medium"),
     title: subagentLabel(provider, model, input.description),
   };
+}
+
+/** Routing evidence is truthful only when the route is the worker that actually ran. */
+export function routingDecisionMatchesSpawn(
+  decision: Pick<RoutingDecision, "provider" | "model" | "customBotId"> | null | undefined,
+  spec: Pick<ResolvedSpawn, "provider" | "model" | "customBotId">,
+): boolean {
+  return Boolean(
+    decision &&
+      decision.provider === spec.provider &&
+      decision.model === spec.model &&
+      (decision.customBotId ?? undefined) === (spec.customBotId ?? undefined),
+  );
 }
 
 export function shouldSpawnInsteadOfAsk(chat: string, sessions: SessionSnapshot[]): boolean {

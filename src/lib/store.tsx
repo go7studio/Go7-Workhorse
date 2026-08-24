@@ -217,6 +217,7 @@ import {
   type WorkerNameReservation,
   type WorkerRecord,
   shouldAutoRouteSpawn,
+  routingDecisionMatchesSpawn,
   constrainRouteCandidatesForSpawn,
   spawnExclusions,
   spawnWaitsForReply,
@@ -4690,6 +4691,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 inherited: resolvedSpec.effort,
               }),
             };
+            const routedWorkerIsRouted = routingDecisionMatchesSpawn(routeDecision, spec);
             if (routingIdentityExcluded({
               provider: spec.provider,
               model: spec.model,
@@ -4953,8 +4955,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 correlationId: childCorrelationId,
                 ...(childMission ? { mission: childMission } : {}),
               },
-              routingMode: routeDecision ? "auto" : "manual",
-              routingDecision: routeDecision ?? undefined,
+              ...(routedWorkerIsRouted
+                ? { routingMode: "auto" as const, routingDecision: routeDecision ?? undefined }
+                : { routingMode: "manual" as const }),
               ...(spawnSeed === "fresh" ? { vendorSessionId: undefined, vendorProvider: undefined } : {}),
               messages: workerStartMessages({
                 seed: spawnSeed,
@@ -5233,8 +5236,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
-                    routingMode: routeDecision ? "auto" : "manual",
-                    ...(routeDecision ? { routingDecision: routeDecision } : {}),
+                    routingMode: routedWorkerIsRouted ? "auto" : "manual",
+                    ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
                     howToUse:
                       `Worker is running in its own chat. ${priorWorker ? `${workerName} picked this up with what it already knew.` : `${workerName} is new to this work.`} For the next slice of the same kind pass worker="${workerName}" and it goes back to the same worker. Spawn the rest with wait=false, then stop. The desk joins reports later. Do not sit on workhorse_await_agents or ask the user to pick.`,
                   },

@@ -159,7 +159,12 @@ import {
   runCustomBotSetup,
 } from "../src/lib/bot-setup";
 import { defaultModel } from "../src/lib/models";
-import { isBareVendorOrModel, resolveModelHint, resolveSpawnSpec } from "../src/lib/subagents";
+import {
+  isBareVendorOrModel,
+  resolveModelHint,
+  resolveSpawnSpec,
+  routingDecisionMatchesSpawn,
+} from "../src/lib/subagents";
 import {
   CUSTOM_TURN_SAFETY_DEFAULTS,
   CustomSessionHost,
@@ -2280,6 +2285,50 @@ test("explicit stock model identity cannot be hijacked by an overlapping custom 
   );
   assert.equal(assignedCustom.provider, "custom");
   assert.equal(assignedCustom.customBotId, "bot_grok");
+});
+
+test("custom bot inference requires a short affirmative name", () => {
+  const bots = [
+    { id: "bot_kimi", name: "Kimi K3", model: "hf:moonshotai/Kimi-K3" },
+    { id: "bot_grok", name: "Grok Bot", model: "grok-bot" },
+  ];
+  const parent = { provider: "grok" as const, model: "grok-4.6", effort: "high" as const };
+  const from = (description: string) =>
+    resolveSpawnSpec({ fromSessionId: "parent", prompt: "audit", description }, [], parent, bots);
+
+  assert.equal(from("Kimi K3").customBotId, "bot_kimi");
+  assert.equal(from("use the Kimi K3 bot").customBotId, "bot_kimi");
+  assert.equal(
+    from("Do not use Grok Bot; verify the Grok 4.6 worker instead").customBotId,
+    undefined,
+    "a prohibition is not a custom-bot selection",
+  );
+  assert.equal(
+    from("Audit the K3 export path and report every mismatch in the manifest").customBotId,
+    undefined,
+    "a passing token match in a task is not a selection",
+  );
+});
+
+test("model-name inference chooses the strongest catalog match", () => {
+  assert.deepEqual(resolveModelHint("Claude Opus 5"), { provider: "claude", model: "claude-opus-5" });
+  assert.deepEqual(resolveModelHint("Codex Terra"), { provider: "codex", model: "gpt-5.6-terra" });
+});
+
+test("routing evidence is kept only for the worker identity that ran", () => {
+  const route = { provider: "grok" as const, model: "grok-4.6", customBotId: undefined };
+  assert.equal(routingDecisionMatchesSpawn(route, route), true);
+  assert.equal(
+    routingDecisionMatchesSpawn(route, { provider: "custom", model: "grok-bot", customBotId: "bot_grok" }),
+    false,
+  );
+  assert.equal(
+    routingDecisionMatchesSpawn(
+      { provider: "custom", model: "MiniMax-M3", customBotId: "bot_one" },
+      { provider: "custom", model: "MiniMax-M3", customBotId: "bot_two" },
+    ),
+    false,
+  );
 });
 
 

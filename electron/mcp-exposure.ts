@@ -20,6 +20,16 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_await_agents",
   "workhorse_agent_status",
   "workhorse_cancel_agent",
+  "workhorse_local_hosts",
+  "workhorse_local_capabilities",
+  "workhorse_local_upload",
+  "workhorse_local_chat",
+  "workhorse_local_generate_3d",
+  "workhorse_local_job",
+  "workhorse_local_cancel",
+  "workhorse_local_artifact",
+  "workhorse_local_materialize",
+  "workhorse_local_continue",
 ] as const;
 
 /** Names a harness may still call. They are not the Link contract. */
@@ -78,7 +88,7 @@ export function isMcpToolAllowed(profile: McpExposureProfile, tool: string): boo
 }
 
 /**
- * The list a caller is shown. Link advertises the eight contract names.
+ * The list a caller is shown. Link advertises the versioned contract names.
  * Older names still pass isMcpToolAllowed so a harness that already calls
  * them is not refused.
  */

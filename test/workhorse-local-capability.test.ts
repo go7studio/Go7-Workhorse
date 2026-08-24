@@ -1,0 +1,223 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import type { LocalArtifact, LocalJobRequest } from "../src/lib/local-capability-contract";
+import { LocalCapabilityHostError, type LocalCapabilityHostClient } from "../electron/local-capability-host";
+import { handleWorkhorseRpc, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+
+const artifact = (mediaType: string): LocalArtifact => ({
+  id: `art_${"a".repeat(32)}`,
+  jobId: null,
+  kind: mediaType.startsWith("image/") ? "image" : "text",
+  role: mediaType.startsWith("image/") ? "source_image" : "prompt",
+  mediaType,
+  sha256: "b".repeat(64),
+  sizeBytes: 16,
+  metadata: {},
+  validation: {},
+  createdAt: "2026-08-23T12:00:00Z",
+});
+
+async function call(name: string, args: Record<string, unknown>) {
+  const value = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as {
+    error?: { message?: string };
+    result?: { content?: Array<{ text?: string }> };
+  };
+  assert.equal(value.error, undefined, value.error?.message);
+  return JSON.parse(value.result?.content?.[0]?.text ?? "{}") as Record<string, unknown>;
+}
+
+test("Workhorse Link routes typed chat and image-to-3D requests through one injected local host", async () => {
+  const previousProfile = process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  const submitted: LocalJobRequest[] = [];
+  const fake = {
+    hostIds: () => ["spark"],
+    uploadText: async () => artifact("text/plain"),
+    artifact: async () => artifact("image/png"),
+    submit: async (_hostId: string, request: LocalJobRequest) => {
+      submitted.push(request);
+      return { id: `job_${"c".repeat(32)}`, status: "queued", capability: request.capability };
+    },
+    cancel: async () => ({ id: `job_${"c".repeat(32)}`, status: "cancelled" }),
+  } as unknown as LocalCapabilityHostClient;
+  setLocalCapabilityHostClient(fake);
+  try {
+    const chat = await call("workhorse_local_chat", { prompt: "Return ROUTER_OK", traceId: "trace_chat", idempotencyKey: "idem_chat" });
+    assert.equal(chat.capability, "text.chat.generate");
+    assert.equal(submitted[0]?.traceId, "trace_chat");
+    assert.equal((submitted[0]?.inputs[0] as unknown as Record<string, unknown>)?.mediaType, undefined, "requests carry artifact references rather than inline bytes");
+    const model = await call("workhorse_local_generate_3d", {
+      sourceArtifactId: `art_${"a".repeat(32)}`,
+      maxFaces: 100000,
+      targetEngine: "godot",
+      approveBlenderContinuation: true,
+      traceId: "trace_3d",
+      idempotencyKey: "idem_3d",
+    });
+    assert.equal(model.capability, "asset.3d.generate");
+    assert.deepEqual(submitted[1]?.workflow, { autoContinue: false, approvedCapabilities: ["asset.3d.prepare.blender"], maxContinuations: 1 });
+    assert.equal(submitted[1]?.constraints.maxFaces, 100000);
+    const firstWithSharedKey = await call("workhorse_local_chat", { prompt: "one", traceId: "trace_shared", idempotencyKey: "cross-tool-key" });
+    assert.equal(firstWithSharedKey.capability, "text.chat.generate");
+    const cancelWithSharedKey = await call("workhorse_local_cancel", { jobId: `job_${"c".repeat(32)}`, traceId: "trace_shared", idempotencyKey: "cross-tool-key" });
+    assert.equal(cancelWithSharedKey.status, "cancelled", "replay keys are scoped by tool and do not swallow cancellation");
+    const raw = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "workhorse_local_submit", arguments: { request: {}, idempotencyKey: "raw-key" } },
+    }) as { error?: { message?: string } };
+    assert.match(raw.error?.message ?? "", /profile_forbidden/, "raw protocol submission is desk-only");
+  } finally {
+    setLocalCapabilityHostClient(undefined);
+    if (previousProfile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previousProfile;
+  }
+});
+
+test("an authorized local continuation becomes one visible Workhorse worker and durable retries replay it", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-local-cont-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    sessions: [{ id: "parent_chat", title: "Desk", provider: "grok", projectId: "project_1" }],
+    projects: [{ id: "project_1", name: "Project", folders: [{ path: dir }] }],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let recorded = "";
+  let spawns = 0;
+  let releases = 0;
+  const sourcePath = path.join(dir, "source.glb");
+  const sourceBytes = Buffer.alloc(384 * 1024, 0x47);
+  writeFileSync(sourcePath, sourceBytes);
+  const continuation = {
+    id: "cont_0123456789abcdef0123456789abcdef",
+    capability: "asset.3d.prepare.blender",
+    tool: "blender.prepare_game_asset",
+    inputBindings: [{
+      name: "sourceModel",
+      artifactId: `art_${"e".repeat(32)}`,
+      sha256: createHash("sha256").update(sourceBytes).digest("hex"),
+      mediaType: "model/gltf-binary",
+    }],
+    requiredOutputs: [],
+    constraints: { targetFaces: 100000, targetEngine: "godot" },
+    authorization: { mode: "explicit" as const, approvedByRequest: true },
+    autoStartEligible: false,
+    idempotencyKey: "continuation-durable-key",
+  };
+  const fake = {
+    hostIds: () => ["spark"],
+    prepareContinuation: async () => ({ job: { id: `job_${"d".repeat(32)}` }, continuation, files: [sourcePath] }),
+    recordContinuationDispatch: (_host: string, _job: string, _key: string, worker: string) => { recorded = worker; },
+    releaseContinuationDispatch: () => { releases += 1; },
+  } as unknown as LocalCapabilityHostClient;
+  setLocalCapabilityHostClient(fake);
+  setWorkhorseDeskAsk(async (ask) => {
+    spawns += 1;
+    assert.equal(ask.mode, "spawn");
+    assert.match(ask.message, /untrusted data/);
+    assert.doesNotMatch(ask.message, /continuation-durable-key/);
+    return { text: JSON.stringify({ worker: "worker_blender_1" }) };
+  });
+  try {
+    const result = await call("workhorse_local_continue", {
+      jobId: `job_${"d".repeat(32)}`,
+      continuationId: continuation.id,
+      fromSessionId: "parent_chat",
+      folder: dir,
+      traceId: "trace_continue",
+      idempotencyKey: "idem_continue",
+    });
+    assert.equal(result.worker, "worker_blender_1");
+    assert.equal(recorded, "worker_blender_1");
+    assert.equal(spawns, 1);
+    assert.equal(releases, 0);
+    const retry = await call("workhorse_local_continue", {
+      jobId: `job_${"d".repeat(32)}`,
+      continuationId: continuation.id,
+      fromSessionId: "parent_chat",
+      folder: dir,
+      traceId: "trace_continue",
+      idempotencyKey: "idem_continue",
+    });
+    assert.equal(retry.worker, "worker_blender_1");
+    assert.equal(spawns, 1, "Link replay does not dispatch a second worker");
+  } finally {
+    setLocalCapabilityHostClient(undefined);
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a restart reconciles a claimed continuation against its already-visible worker", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-local-reconcile-"));
+  const statePath = path.join(dir, "state.json");
+  const continuationId = "cont_0123456789abcdef0123456789abcdef";
+  const jobId = `job_${"f".repeat(32)}`;
+  const durableKey = "continuation-crash-key";
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    sessions: [
+      { id: "parent_chat", title: "Desk", provider: "grok", projectId: "project_1" },
+      { id: "worker_after_crash", parentId: "parent_chat", title: "Blender worker", provider: "codex", projectId: "project_1", agentRun: { correlationId: durableKey } },
+    ],
+    projects: [{ id: "project_1", name: "Project", folders: [{ path: dir }] }],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let recorded = "";
+  let spawns = 0;
+  const fake = {
+    hostIds: () => ["spark"],
+    prepareContinuation: async () => { throw new LocalCapabilityHostError("continuation_in_progress", "claimed before restart"); },
+    continuationRecord: () => ({
+      hostId: "spark",
+      jobId,
+      continuationId,
+      idempotencyKey: durableKey,
+      observedAt: "2026-08-23T12:00:00.000Z",
+      state: "dispatching",
+    }),
+    recordContinuationDispatch: (_host: string, _job: string, _key: string, worker: string) => { recorded = worker; },
+  } as unknown as LocalCapabilityHostClient;
+  setLocalCapabilityHostClient(fake);
+  setWorkhorseDeskAsk(async () => {
+    spawns += 1;
+    return { text: JSON.stringify({ worker: "unexpected_duplicate" }) };
+  });
+  try {
+    const result = await call("workhorse_local_continue", {
+      jobId,
+      continuationId,
+      fromSessionId: "parent_chat",
+      folder: dir,
+      traceId: "trace_reconcile",
+      idempotencyKey: "idem_reconcile",
+    });
+    assert.equal(result.worker, "worker_after_crash");
+    assert.equal(result.replayed, true);
+    assert.equal(result.reconciled, true);
+    assert.equal(recorded, "worker_after_crash");
+    assert.equal(spawns, 0, "reconciliation never creates a duplicate worker");
+  } finally {
+    setLocalCapabilityHostClient(undefined);
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

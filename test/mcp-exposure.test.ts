@@ -36,7 +36,7 @@ import {
 } from "../electron/mcp-install";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 
-test("Link lists the eight contract tools; older names still dispatch", () => {
+test("Link lists the versioned contract tools; older names still dispatch", () => {
   for (const tool of LINK_TOOLS) {
     assert.equal(isMcpToolAdvertised("external-runtime", tool), true, tool);
   }
@@ -157,7 +157,8 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     // The list a caller sees is the Link contract. Forbidden names stay off it.
     // Older names still answer at dispatch so a harness that already calls them is not refused.
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
-    assert.deepEqual(names.slice().sort(), [...LINK_TOOLS].slice().sort());
+    const unconfiguredLinkTools = LINK_TOOLS.filter((tool) => !tool.startsWith("workhorse_local_") || tool === "workhorse_local_hosts");
+    assert.deepEqual(names.slice().sort(), [...unconfiguredLinkTools].slice().sort());
     assert.ok(!names.includes("workhorse_spawn_agent"));
     assert.ok(!names.includes("workhorse_list_bots"));
     assert.equal(isMcpToolAllowed("external-runtime", "workhorse_spawn_agent"), true);

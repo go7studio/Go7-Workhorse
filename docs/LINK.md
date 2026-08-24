@@ -2,7 +2,7 @@
 
 One way in for every outside app. Codex, Claude Code, Grok, OpenClaw, Hermes
 and anything that speaks MCP launch the same packaged helper and get the same
-small toolset. One MCP server, one restricted profile, one installer, one
+bounded toolset. One MCP server, one restricted profile, one installer, one
 versioned contract.
 
 ## Connect
@@ -52,13 +52,22 @@ calling Claude's model through ACP is the other direction and stays separate.
 
 ```json
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "desk": "online",
-  "capabilities": ["capacity.read", "chats.read", "workers.delegate", "workers.follow_up"],
+  "capabilities": [
+    "capacity.read", "chats.read", "workers.delegate", "workers.follow_up",
+    "local.hosts.read", "local.capabilities.read", "local.jobs.submit",
+    "local.jobs.read", "local.jobs.cancel", "local.artifacts.transfer",
+    "local.continuations.dispatch"
+  ],
   "tools": [
     "workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat",
     "workhorse_query_capacity", "workhorse_delegate", "workhorse_continue_mission",
-    "workhorse_agent_status", "workhorse_ask_chat"
+    "workhorse_agent_status", "workhorse_ask_chat", "workhorse_local_hosts",
+    "workhorse_local_capabilities", "workhorse_local_upload",
+    "workhorse_local_chat", "workhorse_local_generate_3d", "workhorse_local_job",
+    "workhorse_local_cancel", "workhorse_local_artifact", "workhorse_local_materialize",
+    "workhorse_local_continue"
   ],
   "followThrough": {
     "newSlice": "workhorse_delegate",
@@ -84,16 +93,54 @@ last saved state, delegation does not.
 | `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse routes the next pass | yes |
 | `workhorse_agent_status` | follow through: `next` is wait, done, or failed; report when done | no |
 | `workhorse_ask_chat` | a message to a live chat | yes |
+| `workhorse_local_hosts` | configured local inference hosts, without credentials | no |
+| `workhorse_local_capabilities` | typed capability and model-profile discovery | no |
+| `workhorse_local_upload` | upload a base64 artifact with type and provenance | yes |
+| `workhorse_local_chat` | upload a prompt artifact and submit local text generation | yes |
+| `workhorse_local_generate_3d` | submit image-to-3D with GLB/report output requirements | yes |
+| `workhorse_local_job` | validate current job state, artifacts and continuations | no |
+| `workhorse_local_cancel` | request durable job cancellation | yes |
+| `workhorse_local_artifact` | artifact type, size, SHA-256 and validation metadata | no |
+| `workhorse_local_materialize` | byte-range download into Workhorse's SHA-verified cache | yes |
+| `workhorse_local_continue` | dispatch one approved, allowlisted continuation as a visible worker | yes |
 
 Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and
 a call is refused.
 
-`workhorse_capabilities` and `tools/list` name those eight. Older names
+`workhorse_capabilities` and `tools/list` name the current versioned contract. Older names
 (`workhorse_spawn_agent`, `workhorse_list_bots`, `workhorse_list_projects`,
 `workhorse_list_agents`, `workhorse_list_external_agents`,
 `workhorse_await_agents`, `workhorse_cancel_agent`) still answer so a harness
-that already calls them is not refused. New harnesses should use the eight.
+that already calls them is not refused. New harnesses should use the advertised contract.
+When no local host is configured, discovery advertises only
+`workhorse_local_hosts`; the remaining local execution tools appear after a
+valid host configuration is present.
+
+## Local capability hosts
+
+Local inference machines are execution hosts, not Workhorse vendors or custom
+bots. Configure one or more on the MCP helper process; the bearer token stays
+in a mode-restricted file and is never returned by Link:
+
+```json
+{
+  "WORKHORSE_LOCAL_HOSTS_JSON": "[{\"id\":\"dgx-spark\",\"baseUrl\":\"https://spark.example.ts.net/spark\",\"tokenFile\":\"/path/to/spark-token\"}]"
+}
+```
+
+Hosts must use HTTPS; plain HTTP is accepted only on loopback. Requests and
+results use protocol 1.0 with strict field validation, trace/idempotency keys,
+route history and hop counts. Jobs are asynchronous. Large artifacts use the
+broker's byte-range content route, then Workhorse verifies size and SHA-256
+before an atomic cache commit.
+
+The shipped 3D builder is image-to-3D. It returns GLB and validation artifacts
+plus an optional Blender continuation. Authorization in the original request
+does not silently run Blender: `workhorse_local_continue` separately validates
+the exact allowlisted contract, claims it in the restart journal, stages the
+verified GLB under the requested project folder, and creates one visible
+Workhorse worker. A repeated idempotency key replays that worker.
 
 When Settings → Learning is on, each Link call is stored on this machine as
 agent evidence. Keys and chat text stay out.
@@ -167,7 +214,26 @@ workhorse delegate --chat <sessionId> --task "Review this change" --key <idempot
 workhorse delegate --chat <sessionId> --task "Ship and certify" --accept "Tests pass" --accept "Marker file exists" --passes 2 --folder <dir>
 workhorse status <workerId>
 workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
+workhorse local-hosts
+workhorse local-capabilities --host dgx-spark
+workhorse local-upload source.png --kind image --role source_image --media-type image/png --host dgx-spark
+workhorse local-chat "Return ROUTER_OK" --host dgx-spark --key chat-1
+workhorse local-3d <sourceArtifactId> --host dgx-spark --max-faces 100000 --target-engine godot --approve-blender --key model-1
+workhorse local-job <jobId> --host dgx-spark
+workhorse local-materialize <artifactId> --host dgx-spark
+workhorse local-continue <jobId> <continuationId> --host dgx-spark --chat <sessionId> --folder <projectPath> --key blender-1
 ```
+
+`local-upload` accepts one file up to 64 MiB; for larger transfers use the
+broker CLI directly. Raw protocol submission is not exposed by Link or its
+CLI. All
+local subcommands call the same Link tool handler used by MCP.
+
+When 3D generation returns a valid but over-budget or non-watertight mesh,
+Link exposes it only as an explicitly authorized intermediate. The artifact
+and JSON report include `faceLimitSatisfied`, `watertightSatisfied`, and
+`requiresPreparation`; the typed continuation then dispatches Blender to
+produce the required game GLB, PNG preview, and JSON report.
 
 Without the command, the same calls are
 `"<binary>" "<workhorse-mcp.js>" link …` with the three environment variables

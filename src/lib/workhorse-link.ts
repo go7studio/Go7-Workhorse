@@ -9,7 +9,7 @@
  */
 import type { McpServerConfig } from "./types";
 
-export const LINK_PROTOCOL_VERSION = 1;
+export const LINK_PROTOCOL_VERSION = 2;
 
 /**
  * The contract. A harness may rely on these names across Workhorse versions.
@@ -26,6 +26,16 @@ export const LINK_TOOLS = [
   "workhorse_continue_mission",
   "workhorse_agent_status",
   "workhorse_ask_chat",
+  "workhorse_local_hosts",
+  "workhorse_local_capabilities",
+  "workhorse_local_upload",
+  "workhorse_local_chat",
+  "workhorse_local_generate_3d",
+  "workhorse_local_job",
+  "workhorse_local_cancel",
+  "workhorse_local_artifact",
+  "workhorse_local_materialize",
+  "workhorse_local_continue",
 ] as const;
 
 export type LinkTool = (typeof LINK_TOOLS)[number];
@@ -35,12 +45,29 @@ export const LINK_CAPABILITIES = [
   "chats.read",
   "workers.delegate",
   "workers.follow_up",
+  "local.hosts.read",
+  "local.capabilities.read",
+  "local.jobs.submit",
+  "local.jobs.read",
+  "local.jobs.cancel",
+  "local.artifacts.transfer",
+  "local.continuations.dispatch",
 ] as const;
 
 export type LinkCapability = (typeof LINK_CAPABILITIES)[number];
 
 /** Calls that change the desk. They carry the execution envelope. */
-export const LINK_MUTATING_TOOLS = ["workhorse_delegate", "workhorse_continue_mission", "workhorse_ask_chat"] as const;
+export const LINK_MUTATING_TOOLS = [
+  "workhorse_delegate",
+  "workhorse_continue_mission",
+  "workhorse_ask_chat",
+  "workhorse_local_upload",
+  "workhorse_local_chat",
+  "workhorse_local_generate_3d",
+  "workhorse_local_cancel",
+  "workhorse_local_materialize",
+  "workhorse_local_continue",
+] as const;
 
 export const LINK_FOLLOW_THROUGH = {
   newSlice: "workhorse_delegate",

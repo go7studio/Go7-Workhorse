@@ -22,15 +22,16 @@ import {
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
-import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, type InstallIo } from "../electron/mcp-install";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
-test("the Link contract: eight tools, four capabilities, one version — and the profile answers every name", () => {
-  assert.equal(LINK_PROTOCOL_VERSION, 1);
+test("the Link v2 contract publishes workers and typed local capability execution", () => {
+  assert.equal(LINK_PROTOCOL_VERSION, 2);
   // Follow-up is continue_mission: delegate publishes no worker field, because
   // which worker runs a task is Workhorse's routing, not the harness's.
   assert.deepEqual([...LINK_TOOLS], [
@@ -42,8 +43,30 @@ test("the Link contract: eight tools, four capabilities, one version — and the
     "workhorse_continue_mission",
     "workhorse_agent_status",
     "workhorse_ask_chat",
+    "workhorse_local_hosts",
+    "workhorse_local_capabilities",
+    "workhorse_local_upload",
+    "workhorse_local_chat",
+    "workhorse_local_generate_3d",
+    "workhorse_local_job",
+    "workhorse_local_cancel",
+    "workhorse_local_artifact",
+    "workhorse_local_materialize",
+    "workhorse_local_continue",
   ]);
-  assert.deepEqual([...LINK_CAPABILITIES], ["capacity.read", "chats.read", "workers.delegate", "workers.follow_up"]);
+  assert.deepEqual([...LINK_CAPABILITIES], [
+    "capacity.read",
+    "chats.read",
+    "workers.delegate",
+    "workers.follow_up",
+    "local.hosts.read",
+    "local.capabilities.read",
+    "local.jobs.submit",
+    "local.jobs.read",
+    "local.jobs.cancel",
+    "local.artifacts.transfer",
+    "local.continuations.dispatch",
+  ]);
   // Every contract tool is allowed on the external profile; admin is not.
   for (const tool of LINK_TOOLS) assert.equal(isMcpToolAllowed("external-runtime", tool), true, tool);
   for (const tool of ["workhorse_delete_chat", "workhorse_rename_project", "workhorse_setup_custom_bot", "workhorse_request_permission", "workhorse_delete_bot", "workhorse_create_project"]) {
@@ -52,7 +75,7 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   }
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
   const shake = linkHandshake({ deskOnline: true });
-  assert.equal(shake.protocolVersion, 1);
+  assert.equal(shake.protocolVersion, 2);
   assert.equal(shake.desk, "online");
   assert.deepEqual(shake.tools, [...LINK_TOOLS]);
   assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
@@ -88,6 +111,7 @@ test("`link` is the product spelling of the external profile, and an unknown wor
 test("workhorse_capabilities answers over the external profile, first, with the contract", async () => {
   const previous = process.env.WORKHORSE_MCP_PROFILE;
   process.env.WORKHORSE_MCP_PROFILE = "link";
+  setLocalCapabilityHostClient({ hostIds: () => ["spark"] } as unknown as LocalCapabilityHostClient);
   try {
     const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as { result?: { tools?: Array<{ name: string }> } };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
@@ -103,11 +127,12 @@ test("workhorse_capabilities answers over the external profile, first, with the 
       tools: string[];
       followThrough: { newSlice: string; namedWorker: string; later: string };
     };
-    assert.equal(shake.protocolVersion, 1);
+    assert.equal(shake.protocolVersion, 2);
     assert.ok(shake.desk === "online" || shake.desk === "offline");
     assert.deepEqual(shake.tools, [...LINK_TOOLS]);
     assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
   } finally {
+    setLocalCapabilityHostClient(undefined);
     if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
     else process.env.WORKHORSE_MCP_PROFILE = previous;
   }
@@ -335,6 +360,23 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
   assert.deepEqual(linkCliCall(["follow-up", "w7", "Check the failing test", "--chat", "c1", "--pass", "2", "--key", "k2"]), {
     name: "workhorse_continue_mission",
     args: { previousWorkerIds: ["w7"], previousPass: 2, remainingWork: "Check the failing test", fromSessionId: "c1", idempotencyKey: "k2" },
+  });
+  assert.deepEqual(linkCliCall(["local-hosts"]), { name: "workhorse_local_hosts", args: {} });
+  assert.deepEqual(linkCliCall(["local-chat", "Return", "ROUTER_OK", "--host", "spark", "--key", "chat-key"]), {
+    name: "workhorse_local_chat",
+    args: { hostId: "spark", idempotencyKey: "chat-key", prompt: "Return ROUTER_OK" },
+  });
+  assert.deepEqual(linkCliCall(["local-3d", "art_1", "--host", "spark", "--max-faces", "100000", "--target-engine", "godot", "--approve-blender"]), {
+    name: "workhorse_local_generate_3d",
+    args: { hostId: "spark", sourceArtifactId: "art_1", maxFaces: 100000, targetEngine: "godot", approveBlenderContinuation: true },
+  });
+  assert.deepEqual(linkCliCall(["local-materialize", "art_1", "--host", "spark"]), {
+    name: "workhorse_local_materialize",
+    args: { hostId: "spark", artifactId: "art_1" },
+  });
+  assert.deepEqual(linkCliCall(["local-continue", "job_1", "cont_1", "--chat", "c1", "--folder", "/project", "--key", "cont-key"]), {
+    name: "workhorse_local_continue",
+    args: { idempotencyKey: "cont-key", jobId: "job_1", continuationId: "cont_1", fromSessionId: "c1", folder: "/project" },
   });
   assert.ok("usage" in linkCliCall(["follow-up", "w7", "no chat given"]));
   assert.ok("usage" in linkCliCall(["delegate", "--task", "no chat"]));
@@ -577,9 +619,16 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
     const launcher = path.join(root, "workhorse");
     write(launcher, linkCliLauncherScript("darwin", real));
     chmodSync(launcher, 0o755);
-    const out = execFileSync(launcher, ["capabilities"], { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
+    const out = execFileSync(launcher, ["capabilities"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        WORKHORSE_LOCAL_HOSTS_JSON: JSON.stringify([{ id: "test-host", baseUrl: "http://127.0.0.1:1", tokenFile: "/tmp/test-token" }]),
+      },
+    });
     const shake = JSON.parse(out) as { protocolVersion: number; tools: string[] };
-    assert.equal(shake.protocolVersion, 1);
+    assert.equal(shake.protocolVersion, 2);
     assert.deepEqual(shake.tools, [...LINK_TOOLS]);
     assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
   }

@@ -140,9 +140,11 @@ withheld below 60% coverage.
    adb/Saga, and iOS simulator readiness.
 9. **Performance lane:** load the isolated large-desk fixture, then measure
    project/chat navigation, search, progressive transcript/media/diff paint,
-   streaming render isolation, compact persistence, and restart recovery.
-10. **Packaged/install lane:** compare source, package, running build, Windows
-   installer/update, macOS installer, and architecture-matched macOS update.
+   Orchestrate transcript visibility during worker streaming, compact persistence,
+   and restart recovery.
+10. **Packaged/install lane:** compare source, package, running build, isolated
+   shim ownership, Windows installer/update, macOS installer, and
+   architecture-matched macOS update.
 11. **Manual evidence:** credentials, support-report redaction, OS install/update,
    and anything automation could not prove.
 12. **Score and defect ledger:** retain exact reproductions separately from

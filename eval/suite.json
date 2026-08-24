@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "ed81fd8606c615891806b7d3946ce8b44b13c71c",
+  "baselineRef": "2b09cefdba8123147c98d83c9dc4bb6f76237a8c",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -197,6 +197,7 @@
             "Review Git edits and verify each change instance reports real files plus added and removed line counts, including a zero-duration provider call.",
             "Open the chat-scoped terminal, Review, and a relative file from a child worktree; verify all three use that exact child folder and never the parent project or app launch directory.",
             "From an unfiled parent, spawn with an explicit absolute folder: a matching linked project binds the parent and worker, while an unmatched folder stays truthful Unfiled work and still runs; a final STATUS: blocked report must fail the worker instead of appearing completed.",
+            "Link two project folders, remove the first one from disk, and verify provider launch, Terminal, the worktree control, Codex readiness, and project reporting all select or show the first surviving folder; when none survive, name the missing folder instead of reporting a missing provider.",
             "Verify the terminal starts in the working folder but can navigate elsewhere, and Review can open an explicitly cited absolute file outside that folder.",
             "Open an unbound top-level chat and verify its provider can search from the desk base, while worker or harness delegation without an absolute folder fails closed instead of borrowing another chat's directory.",
             "Confirm archived chats and attention items remain scoped to their projects."
@@ -294,8 +295,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["PRJ-S3"],
-          "passCriteria": "Search finds title and transcript matches across projects; basename-only source resolution remains deterministic in a workspace with more than 800 unrelated entries; review/terminal resolve to the selected chat's local folder or managed worktree.",
-          "evidence": "Search results, selected chat identity, review root, and terminal cwd."
+          "passCriteria": "Search finds title and transcript matches across projects; basename-only source resolution remains deterministic in a workspace with more than 800 unrelated entries; provider launch, review, terminal, worktree controls, and readiness select the same surviving linked folder, while an all-missing project names the missing folder rather than the provider.",
+          "evidence": "Search results, selected chat identity, linked-folder existence fixture, provider cwd, review root, terminal cwd, worktree action, readiness result, and missing-folder message."
         },
         {
           "id": "PRJ-07",
@@ -586,6 +587,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "steps": [
             "Request a fixture file read, a fixture file write, and a harmless command in Ask mode.",
+            "Return one long provider-generated Grok command title and verify the permission bar keeps a short action label, bounded detail, and the exact request scope.",
             "Choose Deny, Allow once, and Allow for session on separate requests.",
             "Verify the decision reaches the correct provider/tool call and is not reused outside its scope.",
             "Switch providers and verify old grants do not cross the boundary."
@@ -642,8 +644,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SEC-S1"],
-          "passCriteria": "Decisions are scoped to the exact request/session, denials stop execution, and provider switches clear stale grants.",
-          "evidence": "Permission UI, normalized request, provider response, and filesystem/command outcome."
+          "passCriteria": "Decisions are scoped to the exact request/session, long provider titles render as a compact action plus bounded detail without losing scope, denials stop execution, and provider switches clear stale grants.",
+          "evidence": "Permission UI dimensions and labels, normalized request, provider response, and filesystem/command outcome."
         },
         {
           "id": "SEC-02",
@@ -951,6 +953,7 @@
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
           "steps": [
             "Start workers on different providers, models, and reasoning efforts and inspect the parent, sidebar, and child views.",
+            "Enable Orchestrate and keep its parent transcript visible and scrollable while worker events stream; the lineup may update but must not replace the conversation.",
             "Verify each active row has visible activity, provider color, model, effort, task, status, and elapsed time.",
             "Interrupt one worker and restart while another completes; reconcile stale running records before dispatching more work.",
             "Deliver a late completion from an older correlation after the worker is reused and verify it cannot finish or overwrite the current run.",
@@ -1195,8 +1198,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
           "scenarios": ["ORC-S7"],
-          "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; internal Codex worker threads are archived without hiding user-facing chats or Workhorse transcripts; later plan waves dispatch.",
-          "evidence": "Sidebar and child screenshots, activity animation state, runtime identities, effort values, timestamps, native thread listings, Workhorse transcripts, restart reconciliation, slot counts, and terminal plan record."
+          "passCriteria": "Active rows visibly animate with the assigned provider color and show task, model, effort, status, and elapsed time; an Orchestrate parent keeps its transcript visible and scrollable while children stream; restart marks orphaned work interrupted; terminal rows stop consuming slots; recovered calls retain a nonzero duration; internal Codex worker threads are archived without hiding user-facing chats or Workhorse transcripts; later plan waves dispatch.",
+          "evidence": "Parent, sidebar, and child screenshots during streaming, transcript scroll state, activity animation state, runtime identities, effort values, timestamps, native thread listings, restart reconciliation, slot counts, and terminal plan record."
         },
         {
           "id": "ORC-16",
@@ -1658,6 +1661,7 @@
             "Build or obtain the approved package without overwriting the existing install.",
             "Inspect packaged contents for renderer, Electron main, icons, and required resources.",
             "Launch the development bundle beside production and verify its app id, display name, user data, and credential namespace are distinct while Electron's internal helper name stays stable.",
+            "Keep the production Grok Bot shim owner live, launch an isolated development or eval profile, and verify the isolated desk neither installs nor rewrites the production keepalive and never takes over port 8787.",
             "Verify copied framework links stay inside the installed bundle and never point back to a temporary build folder.",
             "Launch with isolated state and verify the UI can identify its version/build channel."
           ]
@@ -1725,6 +1729,7 @@
           "steps": [
             "Run a packaged Windows x64 build from an isolated install and offer a mocked newer release with the expected Setup executable.",
             "Verify Workhorse selects the Windows installer, validates the asset, starts it only after the desk is ready to quit, and relaunches the same application identity.",
+            "Leave the installed Grok Bot shim alive before replacement; verify NSIS stops only that exact shim, the executable metadata matches the release version, and the relaunched app owns the new bridge on port 8787.",
             "Verify the credential-store namespace and isolated user state survive the update without repeated approval prompts.",
             "Run unavailable, malformed, wrong-platform, download, launch, cancellation, and relaunch failures and verify the existing install and user state remain usable.",
             "Verify source checkouts use the documented development update path and never impersonate the packaged updater."
@@ -1740,8 +1745,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["REL-S1"],
-          "passCriteria": "Source, package, and running app identities are recorded; mismatches stop or invalidate the run rather than being hand-waved.",
-          "evidence": "Git commit, package metadata, artifact hash, platform, and in-app version."
+          "passCriteria": "Source, package, and running app identities are recorded; an isolated profile cannot install, rewrite, or seize the production Grok Bot shim keepalive; mismatches stop or invalidate the run rather than being hand-waved.",
+          "evidence": "Git commit, package metadata, artifact hash, platform, in-app version, profile paths, keepalive file hashes, shim process identity, and port owner."
         },
         {
           "id": "REL-02",
@@ -1828,8 +1833,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp"],
           "scenarios": ["REL-S6"],
-          "passCriteria": "A packaged Windows build selects and validates the Setup asset, quits only for a real installer launch, relaunches the same app identity, preserves credential access and state, and leaves the prior install usable on every failure path.",
-          "evidence": "Release metadata, platform and asset decision, installer path/hash, process transition, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
+          "passCriteria": "A packaged Windows build selects and validates the Setup asset, stops only its installed Grok Bot shim before replacement, carries the release version in executable metadata, quits only for a real installer launch, relaunches the same app identity and bridge, preserves credential access and state, and leaves the prior install usable on every failure path.",
+          "evidence": "Release metadata, executable version, platform and asset decision, installer path/hash, prior/new shim PIDs, port owner, process transition, pre/post state hashes, credential prompt count, relaunch trace, and failure fixtures."
         }
       ]
     },

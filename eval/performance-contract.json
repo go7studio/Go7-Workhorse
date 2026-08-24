@@ -24,6 +24,7 @@
   },
   "invariants": [
     "Assistant prose streaming does not rerender the whole app shell or unrelated sidebar rows; visible status and tool changes still update.",
+    "An Orchestrate parent transcript remains mounted, visible, and scrollable while child lineup events stream.",
     "Project, parent, worker, archived, and linked-chat views derive from one pass over sessions rather than a full rescan per row.",
     "Completed transcript turns retain object identity while only the live tail rebuilds; model path context remains bounded.",
     "Long transcripts paint in scheduled batches and remain pinned to the latest turn until the requested history is visible.",

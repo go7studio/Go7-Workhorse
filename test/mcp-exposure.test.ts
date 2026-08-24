@@ -217,6 +217,8 @@ test("MCP initialize identifies Workhorse as an execution desk", async () => {
   assert.match(initialized.result?.instructions ?? "", /list_chats to choose an explicit parent/);
   assert.match(initialized.result?.instructions ?? "", /workhorse_delegate before doing the task directly/);
   assert.match(initialized.result?.instructions ?? "", /Leave initialBrain unset for full Auto/);
+  assert.match(initialized.result?.instructions ?? "", /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(initialized.result?.instructions ?? "", /does not allocate grok-bot as an orchestration or builder worker/);
   assert.match(initialized.result?.instructions ?? "", /does not pin descendants/);
   assert.match(initialized.result?.instructions ?? "", /auto-routes from task fit and current capacity/);
   assert.match(initialized.result?.instructions ?? "", /Ordinary delegation is one wave/);

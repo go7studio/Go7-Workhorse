@@ -1,4 +1,5 @@
 import { isExternalAgentAddress } from "./agent-runtime";
+import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
@@ -1154,7 +1155,11 @@ export function continueWorkerRun(
 }
 
 function isGrokBotHint(bot: CustomBotHint): boolean {
-  return bot.model.trim().toLowerCase() === "grok-bot" || bot.name.trim().toLowerCase() === "grok bot";
+  return isGrokBotModel(bot.model) || isGrokBotName(bot.name);
+}
+
+function queryNamesGrokBot(query: string): boolean {
+  return /\bgrok-bot\b|\bgrok bot\b/i.test(query);
 }
 
 function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {
@@ -1162,7 +1167,7 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   const lower = query.trim().toLowerCase();
   if (!lower) return undefined;
   const tokens = tokensOf(lower);
-  const namesGrokBot = /\bgrok-bot\b|\bgrok bot\b/.test(lower);
+  const namesGrokBot = queryNamesGrokBot(lower);
   return bots.find((bot) => {
     if (isGrokBotHint(bot) && !namesGrokBot) return false;
     const name = bot.name.toLowerCase();
@@ -1295,8 +1300,21 @@ export function resolveSpawnSpec(
     };
   }
 
+  const namedGrokBot =
+    isGrokBotModel(rawModel) ||
+    isGrokBotName(rawModel) ||
+    isGrokBotModel(chat) ||
+    isGrokBotName(chat) ||
+    queryNamesGrokBot(`${chat} ${input.description ?? ""}`);
+  const parentIsGrokBot =
+    parent?.provider === "custom" &&
+    (isGrokBotModel(parent.model ?? "") ||
+      Boolean(customBots?.some((bot) => bot.id === parent.customBotId && isGrokBotHint(bot))));
+  // Grok Bot may call, analyze, and dispatch from its own chat. An unnamed
+  // child is a worker slice, so it must not inherit the grok-bot slot.
+  const inheritParent = !(parentIsGrokBot && !namedGrokBot);
   const parentCustom =
-    !stockPick && parent?.provider === "custom" && (!explicit || explicit === "custom")
+    inheritParent && !stockPick && parent?.provider === "custom" && (!explicit || explicit === "custom")
       ? customBots?.find((bot) => bot.id === parent.customBotId) ??
         customBots?.find((bot) => bot.model === parent.model) ??
         customBots?.[0]
@@ -1312,7 +1330,7 @@ export function resolveSpawnSpec(
   }
 
   const hinted = namedStock ?? named;
-  const provider = explicit ?? hinted?.provider ?? parent?.provider ?? "grok";
+  const provider = explicit ?? hinted?.provider ?? (inheritParent ? parent?.provider : undefined) ?? "grok";
   const model =
     (modelHint?.provider === provider ? modelHint.model : "") ||
     (explicit && !rawModel ? defaultModel(provider).id : hinted?.model) ||

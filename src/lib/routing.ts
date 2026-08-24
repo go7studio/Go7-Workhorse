@@ -310,6 +310,9 @@ export function routingProfileForModel(
     base = profile(5, 5, 1);
   } else if (slug.includes("grok-4.6")) {
     base = profile(10, 2, 5, { strengths: CODE });
+  } else if (slug === "grok-bot") {
+    // Calling / analyze / dispatch harness. Not a deep allocated LLM.
+    base = profile(4, 5, 1);
   } else if (slug.includes("grok-4.5")) {
     base = profile(8, 4, 3, { strengths: CODE });
   } else if (slug.includes("fable") || slug.includes("mythos")) {

@@ -8843,6 +8843,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
   assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
+  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(WORKHORSE_SESSION_RULES, /Do not spawn grok-bot as a worker, builder, or auditor/);
+  assert.match(WORKHORSE_SESSION_RULES, /Grok Bot may call, analyze, and dispatch only/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Do not spawn `grok-bot` as a worker/);
   assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);
   assert.match(WORKHORSE_SESSION_RULES, /Fan-out only when they asked for every vendor/);

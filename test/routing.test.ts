@@ -696,6 +696,17 @@ test("Grok 4.6 is ACP Grok; Auto workers never allocate grok-bot", () => {
   assert.equal(listedChatFollowThrough({ status: "idle" }).next, undefined);
   assert.equal(listedChatFollowThrough({ status: "completed", parentId: "p", worker: "Wren" }).next, "done");
   assert.equal(listedChatFollowThrough({ status: "idle", parentId: "p" }).next, "failed");
+  const grokBotProfile = routingProfileForModel("custom", "grok-bot");
+  assert.ok(grokBotProfile.intelligence < routingProfileForModel("grok", "grok-4.6").intelligence);
+  const unnamedFromBot = resolveSpawnSpec(
+    { fromSessionId: "p", prompt: "fix the leak" },
+    [],
+    { provider: "custom", model: "grok-bot", effort: "high", customBotId: "bot_grokbot" },
+    [{ id: "bot_grokbot", name: "Grok Bot", model: "grok-bot" }],
+  );
+  assert.equal(unnamedFromBot.provider, "grok");
+  assert.equal(unnamedFromBot.model, "grok-4.6");
+  assert.equal(unnamedFromBot.customBotId, undefined);
 });
 
 test("auto-route spawn fails closed when no candidate qualifies", () => {

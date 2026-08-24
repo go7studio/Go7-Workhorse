@@ -422,6 +422,24 @@ export function normalizeQueuedPrompt(raw: unknown): QueuedPrompt | null {
   };
 }
 
+export function queuedUserMessageIds(queue?: QueuedPrompt[] | null): Set<string> {
+  const ids = new Set<string>();
+  for (const item of queue ?? []) {
+    if (item.userMessageId) ids.add(item.userMessageId);
+  }
+  return ids;
+}
+
+/** Drop leftover queued bubbles so a live turn does not split around them. */
+export function omitQueuedUserMessages(
+  messages: ChatMessage[],
+  queue?: QueuedPrompt[] | null,
+): ChatMessage[] {
+  const ids = queuedUserMessageIds(queue);
+  if (ids.size === 0) return messages;
+  return messages.filter((message) => !ids.has(message.id));
+}
+
 export function enqueuePrompt(
   sessions: Session[],
   sessionId: string,
@@ -429,8 +447,6 @@ export function enqueuePrompt(
 ): Session[] | null {
   if (!sessions.some((session) => session.id === sessionId)) return null;
   const createdAt = item.createdAt ?? Date.now();
-  const showUser = item.hideUser !== true && Boolean(item.text.trim() || (item.images && item.images.length));
-  const userMessageId = showUser ? item.userMessageId ?? uid("msg") : undefined;
   const next: QueuedPrompt = {
     id: item.id ?? uid("q"),
     text: item.text.trim(),
@@ -441,28 +457,16 @@ export function enqueuePrompt(
     ...(item.vendorText?.trim() && item.vendorText.trim() !== item.text.trim()
       ? { vendorText: item.vendorText.trim() }
       : {}),
-    ...(userMessageId ? { userMessageId } : {}),
+    ...(typeof item.userMessageId === "string" && item.userMessageId.trim()
+      ? { userMessageId: item.userMessageId.trim() }
+      : {}),
     ...(item.notBefore && item.notBefore > 0 ? { notBefore: item.notBefore } : {}),
     ...(item.joinAttempt && item.joinAttempt > 0 ? { joinAttempt: item.joinAttempt } : {}),
   };
   if (!next.text && !(next.images && next.images.length)) return null;
-  return sessions.map((session) => {
-    if (session.id !== sessionId) return session;
-    const messages =
-      userMessageId && !session.messages.some((message) => message.id === userMessageId)
-        ? [
-            ...session.messages,
-            {
-              id: userMessageId,
-              role: "user" as const,
-              text: next.text,
-              createdAt,
-              ...(next.images && next.images.length > 0 ? { images: next.images } : {}),
-            },
-          ]
-        : session.messages;
-    return { ...session, queue: [...(session.queue ?? []), next], messages };
-  });
+  return sessions.map((session) =>
+    session.id === sessionId ? { ...session, queue: [...(session.queue ?? []), next] } : session,
+  );
 }
 
 export function dropQueuedPrompt(sessions: Session[], sessionId: string, id: string): Session[] | null {
@@ -492,7 +496,15 @@ export function shiftQueuedPrompt(
   return {
     item,
     sessions: sessions.map((row) =>
-      row.id === sessionId ? { ...row, queue: (row.queue ?? []).slice(1) } : row,
+      row.id === sessionId
+        ? {
+            ...row,
+            queue: (row.queue ?? []).slice(1),
+            messages: item.userMessageId
+              ? row.messages.filter((message) => message.id !== item.userMessageId)
+              : row.messages,
+          }
+        : row,
     ),
   };
 }
@@ -534,9 +546,11 @@ export function appendUserMessage(
   );
 }
 
-export function lastUserMessage(session: Pick<Session, "messages">) {
+export function lastUserMessage(session: Pick<Session, "messages"> & { queue?: QueuedPrompt[] }) {
+  const skip = queuedUserMessageIds(session.queue);
   for (let index = session.messages.length - 1; index >= 0; index -= 1) {
-    if (session.messages[index]?.role === "user") return session.messages[index];
+    const message = session.messages[index];
+    if (message?.role === "user" && !skip.has(message.id)) return message;
   }
   return undefined;
 }
@@ -563,7 +577,7 @@ export function isLiveChat(session: Pick<Session, "status">): boolean {
  * the cursor every few seconds. A turn's own timestamp does not move until the
  * run ends, so the running cohort holds the order it was sent in.
  */
-export function sidebarOrderAt(session: Pick<Session, "status" | "messages">): number {
+export function sidebarOrderAt(session: Pick<Session, "status" | "messages"> & { queue?: QueuedPrompt[] }): number {
   const talked = lastTalkedAt(session) ?? 0;
   if (!isLiveChat(session)) return talked;
   const started = lastUserMessage(session)?.createdAt;

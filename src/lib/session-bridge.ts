@@ -121,6 +121,17 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
     if (typeof session.archivedAt === "number") continue;
     const projectId = typeof session.projectId === "string" && session.projectId ? session.projectId : null;
     const messages = Array.isArray(session.messages) ? session.messages : [];
+    const queuedIds = new Set<string>();
+    if (Array.isArray(session.queue)) {
+      for (const raw of session.queue) {
+        const id = asRecord(raw).userMessageId;
+        if (typeof id === "string" && id.trim()) queuedIds.add(id);
+      }
+    }
+    const previewMessages =
+      queuedIds.size > 0
+        ? messages.filter((item) => !queuedIds.has(String(asRecord(item).id ?? "")))
+        : messages;
     const hiddenListedWorker =
       opts?.includeWorkers === true && session.hidden === true && Boolean(parentId) && liveParentIds.has(parentId!);
     if (!messages.some((item) => asRecord(item).role === "user") && !hiddenListedWorker) continue;
@@ -145,7 +156,7 @@ export function catalogSessions(state: LooseState, opts?: { fromSessionId?: stri
             ? session.status
             : "idle",
       archived: typeof session.archivedAt === "number",
-      preview: previewFrom(messages),
+      preview: previewFrom(previewMessages),
       sidebar: formatChatSidebar({
         provider,
         model,

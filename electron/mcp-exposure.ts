@@ -23,6 +23,7 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_local_hosts",
   "workhorse_local_capabilities",
   "workhorse_local_upload",
+  "workhorse_local_invoke",
   "workhorse_local_chat",
   "workhorse_local_generate_3d",
   "workhorse_local_job",
@@ -31,6 +32,29 @@ export const EXTERNAL_RUNTIME_ALLOW = [
   "workhorse_local_materialize",
   "workhorse_local_continue",
 ] as const;
+
+/**
+ * Compatibility tools are descriptors over the generic capability protocol.
+ * Keeping the requirement in data avoids host/model branches in dispatch and
+ * makes absent capability families disappear from tools/list.
+ */
+export const LOCAL_TOOL_CAPABILITY_REQUIREMENTS: Readonly<Record<string, string>> = {
+  workhorse_local_chat: "text.chat.generate",
+  workhorse_local_generate_3d: "asset.3d.generate",
+};
+
+export function isLocalMcpToolCallable(
+  tool: string,
+  capabilityIds: ReadonlySet<string>,
+  options: { continuationCallable?: boolean; invocationCallable?: boolean } = {},
+): boolean {
+  if (!tool.startsWith("workhorse_local_")) return true;
+  if (capabilityIds.size === 0) return false;
+  if (tool === "workhorse_local_continue") return options.continuationCallable === true;
+  if (tool === "workhorse_local_invoke") return options.invocationCallable === true;
+  const required = LOCAL_TOOL_CAPABILITY_REQUIREMENTS[tool];
+  return required ? capabilityIds.has(required) : true;
+}
 
 /** Names a harness may still call. They are not the Link contract. */
 export const LINK_COMPAT_TOOLS = [

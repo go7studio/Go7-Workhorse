@@ -8,6 +8,10 @@
  * stays `external-runtime` for the configs already written.
  */
 import type { McpServerConfig } from "./types";
+import type {
+  LocalCapabilityContinuationContract,
+  LocalCapabilityInvocationContract,
+} from "./local-capability-contract";
 
 export const LINK_PROTOCOL_VERSION = 2;
 
@@ -17,7 +21,7 @@ export const LINK_PROTOCOL_VERSION = 2;
  * worker name, because which worker runs a task is Workhorse's routing, not
  * the harness's; a follow-up names the finished wave it continues instead.
  */
-export const LINK_TOOLS = [
+export const LINK_BASE_TOOLS = [
   "workhorse_capabilities",
   "workhorse_list_chats",
   "workhorse_read_chat",
@@ -26,9 +30,18 @@ export const LINK_TOOLS = [
   "workhorse_continue_mission",
   "workhorse_agent_status",
   "workhorse_ask_chat",
+] as const;
+
+/**
+ * Local execution is an optional Link extension. These are stable protocol
+ * names, not a promise that a particular helper will advertise them: the
+ * live host registry and its grants decide that at tools/list time.
+ */
+export const LINK_LOCAL_TOOLS = [
   "workhorse_local_hosts",
   "workhorse_local_capabilities",
   "workhorse_local_upload",
+  "workhorse_local_invoke",
   "workhorse_local_chat",
   "workhorse_local_generate_3d",
   "workhorse_local_job",
@@ -38,13 +51,18 @@ export const LINK_TOOLS = [
   "workhorse_local_continue",
 ] as const;
 
+export const LINK_TOOLS = [...LINK_BASE_TOOLS, ...LINK_LOCAL_TOOLS] as const;
+
 export type LinkTool = (typeof LINK_TOOLS)[number];
 
-export const LINK_CAPABILITIES = [
+export const LINK_BASE_CAPABILITIES = [
   "capacity.read",
   "chats.read",
   "workers.delegate",
   "workers.follow_up",
+] as const;
+
+export const LINK_LOCAL_CAPABILITIES = [
   "local.hosts.read",
   "local.capabilities.read",
   "local.jobs.submit",
@@ -54,7 +72,24 @@ export const LINK_CAPABILITIES = [
   "local.continuations.dispatch",
 ] as const;
 
+export const LINK_CAPABILITIES = [...LINK_BASE_CAPABILITIES, ...LINK_LOCAL_CAPABILITIES] as const;
+
 export type LinkCapability = (typeof LINK_CAPABILITIES)[number];
+
+/** One discoverable tool proves each public Link capability is actually usable. */
+export const LINK_CAPABILITY_TOOL_REQUIREMENT: Readonly<Record<LinkCapability, LinkTool>> = {
+  "capacity.read": "workhorse_query_capacity",
+  "chats.read": "workhorse_read_chat",
+  "workers.delegate": "workhorse_delegate",
+  "workers.follow_up": "workhorse_continue_mission",
+  "local.hosts.read": "workhorse_local_hosts",
+  "local.capabilities.read": "workhorse_local_capabilities",
+  "local.jobs.submit": "workhorse_local_invoke",
+  "local.jobs.read": "workhorse_local_job",
+  "local.jobs.cancel": "workhorse_local_cancel",
+  "local.artifacts.transfer": "workhorse_local_materialize",
+  "local.continuations.dispatch": "workhorse_local_continue",
+};
 
 /** Calls that change the desk. They carry the execution envelope. */
 export const LINK_MUTATING_TOOLS = [
@@ -62,6 +97,7 @@ export const LINK_MUTATING_TOOLS = [
   "workhorse_continue_mission",
   "workhorse_ask_chat",
   "workhorse_local_upload",
+  "workhorse_local_invoke",
   "workhorse_local_chat",
   "workhorse_local_generate_3d",
   "workhorse_local_cancel",
@@ -82,16 +118,47 @@ export type LinkHandshake = {
   /** The tools this helper will answer. Absent names are not there to try. */
   tools: LinkTool[];
   followThrough: typeof LINK_FOLLOW_THROUGH;
+  local?: {
+    /** Only healthy hosts authorized for this caller are present. */
+    hosts: Array<{
+      id: string;
+      label: string;
+      brokerId: string;
+      brokerVersion: string;
+      capabilities: Array<{
+        id: string;
+        profileId: string;
+        description: string;
+        inputKinds: string[];
+        outputRoles: string[];
+        invocation?: LocalCapabilityInvocationContract;
+        continuations: LocalCapabilityContinuationContract[];
+        estimatedMemoryGb: number;
+        asynchronous: true;
+      }>;
+    }>;
+  };
 };
 
 /** The first thing a harness asks. The answer is the contract, not a guess. */
-export function linkHandshake(input: { deskOnline: boolean }): LinkHandshake {
+export function linkHandshake(input: {
+  deskOnline: boolean;
+  local?: {
+    tools: readonly (typeof LINK_LOCAL_TOOLS)[number][];
+    hosts: NonNullable<LinkHandshake["local"]>["hosts"];
+  };
+}): LinkHandshake {
+  const hasLocal = Boolean(input.local?.hosts.length);
   return {
     protocolVersion: LINK_PROTOCOL_VERSION,
     desk: input.deskOnline ? "online" : "offline",
-    capabilities: [...LINK_CAPABILITIES],
-    tools: [...LINK_TOOLS],
+    capabilities: [
+      ...LINK_BASE_CAPABILITIES,
+      ...(hasLocal ? LINK_LOCAL_CAPABILITIES : []),
+    ],
+    tools: [...LINK_BASE_TOOLS, ...(hasLocal ? input.local!.tools : [])],
     followThrough: { ...LINK_FOLLOW_THROUGH },
+    ...(hasLocal ? { local: { hosts: input.local!.hosts } } : {}),
   };
 }
 
@@ -188,19 +255,24 @@ export function linkEnvelope(
  * new request, which is the right failure when the first answer is gone.
  */
 export class LinkReplayCache {
-  private readonly seen = new Map<string, { at: number; text: string }>();
+  private readonly seen = new Map<string, { at: number; fingerprint: string; text: string }>();
   constructor(private readonly ttlMs = 10 * 60 * 1000, private readonly now: () => number = () => Date.now()) {}
-  get(key: string): string | undefined {
+  get(key: string, fingerprint = ""): string | undefined {
     const hit = this.seen.get(key);
     if (!hit) return undefined;
     if (this.now() - hit.at > this.ttlMs) {
       this.seen.delete(key);
       return undefined;
     }
+    if (hit.fingerprint !== fingerprint) throw new Error("idempotency_key_conflict");
     return hit.text;
   }
-  put(key: string, text: string): void {
-    this.seen.set(key, { at: this.now(), text });
+  put(key: string, text: string, fingerprint = ""): void {
+    const hit = this.seen.get(key);
+    if (hit && this.now() - hit.at <= this.ttlMs && hit.fingerprint !== fingerprint) {
+      throw new Error("idempotency_key_conflict");
+    }
+    this.seen.set(key, { at: this.now(), fingerprint, text });
     if (this.seen.size > 500) {
       const oldest = [...this.seen.entries()].sort((a, b) => a[1].at - b[1].at)[0];
       if (oldest) this.seen.delete(oldest[0]);

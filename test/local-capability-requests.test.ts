@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { LocalArtifact } from "../src/lib/local-capability-contract";
-import { buildLocal3dRequest, buildLocalChatRequest } from "../src/lib/local-capability-requests";
+import { buildLocal3dRequest, buildLocalCapabilityRequest, buildLocalChatRequest } from "../src/lib/local-capability-requests";
 
 const identity = { requestId: "req_builder_1", traceId: "trace_builder_1", idempotencyKey: "idem_builder_1" };
 const artifact = (mediaType: string): LocalArtifact => ({
@@ -34,4 +34,23 @@ test("3D builder is image-to-3D and authorizes but never silently runs Blender",
   assert.deepEqual(request.workflow, { autoContinue: false, approvedCapabilities: ["asset.3d.prepare.blender"], maxContinuations: 1 });
   assert.equal(request.constraints.maxFaces, 100000);
   assert.throws(() => buildLocal3dRequest(identity, artifact("text/plain")), /must be an image/);
+});
+
+test("generic capability builder preserves live capability and artifact contracts without family branching", () => {
+  const source = artifact("audio/wav");
+  const request = buildLocalCapabilityRequest(identity, {
+    capability: "audio.speech.transcribe",
+    inputs: [{ artifact: source, role: "recording" }],
+    requiredOutputs: [{ role: "transcript", kind: "text", mediaTypes: ["text/plain"], required: true }],
+    constraints: { language: "en" },
+    workflow: { approvedCapabilities: ["text.subtitle.prepare"], maxContinuations: 1 },
+    metadata: { requestedBy: "test" },
+  });
+
+  assert.equal(request.capability, "audio.speech.transcribe");
+  assert.deepEqual(request.inputs, [{ artifactId: source.id, role: "recording", sha256: source.sha256 }]);
+  assert.deepEqual(request.requiredOutputs, [{ role: "transcript", kind: "text", mediaTypes: ["text/plain"], required: true }]);
+  assert.deepEqual(request.constraints, { language: "en" });
+  assert.deepEqual(request.workflow, { autoContinue: false, approvedCapabilities: ["text.subtitle.prepare"], maxContinuations: 1 });
+  assert.deepEqual(request.metadata, { submittedBy: "workhorse-link", requestedBy: "test" });
 });

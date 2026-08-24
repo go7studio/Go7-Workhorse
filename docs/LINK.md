@@ -57,22 +57,49 @@ calling Claude's model through ACP is the other direction and stays separate.
   "capabilities": [
     "capacity.read", "chats.read", "workers.delegate", "workers.follow_up",
     "local.hosts.read", "local.capabilities.read", "local.jobs.submit",
-    "local.jobs.read", "local.jobs.cancel", "local.artifacts.transfer",
-    "local.continuations.dispatch"
+    "local.jobs.read", "local.jobs.cancel", "local.artifacts.transfer"
   ],
   "tools": [
     "workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat",
     "workhorse_query_capacity", "workhorse_delegate", "workhorse_continue_mission",
     "workhorse_agent_status", "workhorse_ask_chat", "workhorse_local_hosts",
     "workhorse_local_capabilities", "workhorse_local_upload",
-    "workhorse_local_chat", "workhorse_local_generate_3d", "workhorse_local_job",
-    "workhorse_local_cancel", "workhorse_local_artifact", "workhorse_local_materialize",
-    "workhorse_local_continue"
+    "workhorse_local_invoke", "workhorse_local_chat", "workhorse_local_generate_3d",
+    "workhorse_local_job", "workhorse_local_cancel", "workhorse_local_artifact",
+    "workhorse_local_materialize", "workhorse_local_continue"
   ],
   "followThrough": {
     "newSlice": "workhorse_delegate",
     "namedWorker": "workhorse_ask_chat",
     "later": "workhorse_agent_status"
+  },
+  "local": {
+    "hosts": [{
+      "id": "local-compute",
+      "label": "Local Compute",
+      "brokerId": "runtime",
+      "brokerVersion": "1.0",
+      "capabilities": [{
+        "id": "text.chat.generate",
+        "profileId": "gpu.text",
+        "description": "Text generation",
+        "inputKinds": ["text"],
+        "outputRoles": ["text_output"],
+        "invocation": {
+          "inputs": [{ "role": "prompt", "kind": "text", "mediaTypes": ["text/plain"], "required": true, "minItems": 1, "maxItems": 1 }],
+          "outputs": [{ "role": "text_output", "kind": "text", "mediaTypes": ["text/plain"], "required": true }],
+          "constraintsSchema": {
+            "type": "object",
+            "properties": { "maxTokens": { "type": "integer", "minimum": 1, "maximum": 32768, "default": 1024 } },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "continuations": [],
+        "estimatedMemoryGb": 48,
+        "asynchronous": true
+      }]
+    }]
   }
 }
 ```
@@ -96,6 +123,7 @@ last saved state, delegation does not.
 | `workhorse_local_hosts` | configured local inference hosts, without credentials | no |
 | `workhorse_local_capabilities` | typed capability and model-profile discovery | no |
 | `workhorse_local_upload` | upload a base64 artifact with type and provenance | yes |
+| `workhorse_local_invoke` | submit any live capability using typed artifact inputs and required outputs | yes |
 | `workhorse_local_chat` | upload a prompt artifact and submit local text generation | yes |
 | `workhorse_local_generate_3d` | submit image-to-3D with GLB/report output requirements | yes |
 | `workhorse_local_job` | validate current job state, artifacts and continuations | no |
@@ -113,15 +141,30 @@ a call is refused.
 `workhorse_list_agents`, `workhorse_list_external_agents`,
 `workhorse_await_agents`, `workhorse_cancel_agent`) still answer so a harness
 that already calls them is not refused. New harnesses should use the advertised contract.
-When no local host is configured, discovery advertises only
-`workhorse_local_hosts`; the remaining local execution tools appear after a
-valid host configuration is present.
+Local names appear only when a configured host is reachable and grants the
+caller at least one capability. The legacy chat and 3D names appear only when
+`text.chat.generate` and `asset.3d.generate`, respectively, are live and
+granted. `workhorse_local_invoke` carries a generated `capabilityId` enum, so
+image and future capability families need no new host- or model-specific tool.
+Each generically callable capability also describes exact input roles,
+cardinality and accepted media types, exact typed outputs, and a closed,
+bounded constraint schema. A protocol 1.0 host that supplies only the legacy
+`inputKinds`/`outputRoles` summary remains visible to compatible named tools,
+but Workhorse does not guess a generic invocation contract. Optional
+continuation descriptors name the exact capability/tool pair and its typed
+outputs; missing or empty continuations advertise no continuation.
 
 ## Local capability hosts
 
 Local inference machines are execution hosts, not Workhorse vendors or custom
-bots. Configure one or more on the MCP helper process; the bearer token stays
-in a mode-restricted file and is never returned by Link:
+bots. Configure them in Settings → LLMs → Local Compute. Workhorse persists
+only safe endpoint metadata, explicit caller/capability grants, exact
+continuation capability/tool grants, and an absolute token-file reference. The token stays in that mode-restricted file and is never
+copied into connector configuration or returned by Link. Existing environment
+configuration remains a Link-only compatibility fallback for migrated state
+until Local Compute is explicitly edited. The first add, remove, grant, or
+enable/disable action permanently makes the product registry authoritative,
+including when its host list is empty:
 
 ```json
 {
@@ -129,18 +172,40 @@ in a mode-restricted file and is never returned by Link:
 }
 ```
 
+Caller grants are explicit and fail closed:
+
+- **Workhorse** is the desk itself.
+- **Connected apps** are Link/MCP/CLI harnesses.
+- **Workers** can invoke and transfer artifacts when granted.
+- **Auditors** can inspect hosts, capabilities, jobs, and artifact metadata,
+  but cannot upload, submit, cancel, materialize bytes, or dispatch continuations.
+
+An empty role or capability grant authorizes nothing. Disabling a host,
+removing a grant, losing health, or removing an advertised capability removes
+the affected tools from both `tools/list` and `workhorse_capabilities`; calling
+a previously known name is refused by the same live check. Settings lists
+continuation families separately and leaves stale saved pairs visible only so
+they can be removed. Generic invoke appears only for granted capabilities with
+a complete typed invocation contract; upload remains independent.
+
 Hosts must use HTTPS; plain HTTP is accepted only on loopback. Requests and
 results use protocol 1.0 with strict field validation, trace/idempotency keys,
 route history and hop counts. Jobs are asynchronous. Large artifacts use the
 broker's byte-range content route, then Workhorse verifies size and SHA-256
-before an atomic cache commit.
+before an atomic cache commit. Successful submissions are journalled with the
+resolved host and canonical semantic-request fingerprint, so identical retries replay
+after a helper restart and changed payloads conflict. If a known job's live
+state is unavailable, `workhorse_local_job` returns `Unknown` plus its timestamped
+last-observed state, with continuations removed rather than guessed.
 
-The shipped 3D builder is image-to-3D. It returns GLB and validation artifacts
-plus an optional Blender continuation. Authorization in the original request
-does not silently run Blender: `workhorse_local_continue` separately validates
-the exact allowlisted contract, claims it in the restart journal, stages the
-verified GLB under the requested project folder, and creates one visible
-Workhorse worker. A repeated idempotency key replays that worker.
+The shipped compatibility 3D builder is image-to-3D. It returns GLB and
+validation artifacts plus an optional installed preparation continuation.
+Authorization in the original request does not silently run another tool:
+`workhorse_local_continue` separately validates an exact locally installed
+adapter contract, rechecks the caller grant, claims it in the restart journal,
+stages SHA-verified inputs under the requested project folder, and creates one
+visible Workhorse worker with typed required outputs. A repeated idempotency
+key replays that worker.
 
 When Settings → Learning is on, each Link call is stored on this machine as
 agent evidence. Keys and chat text stay out.
@@ -216,7 +281,8 @@ workhorse status <workerId>
 workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
 workhorse local-hosts
 workhorse local-capabilities --host dgx-spark
-workhorse local-upload source.png --kind image --role source_image --media-type image/png --host dgx-spark
+workhorse local-upload source.png --capability asset.3d.generate --kind image --role source_image --media-type image/png --host dgx-spark
+workhorse local-invoke image.upscale '{"inputs":[{"artifactId":"<artifactId>","role":"source"}],"requiredOutputs":[{"role":"image","kind":"image","mediaTypes":["image/png"],"required":true}]}' --host dgx-spark --key image-1
 workhorse local-chat "Return ROUTER_OK" --host dgx-spark --key chat-1
 workhorse local-3d <sourceArtifactId> --host dgx-spark --max-faces 100000 --target-engine godot --approve-blender --key model-1
 workhorse local-job <jobId> --host dgx-spark
@@ -225,7 +291,9 @@ workhorse local-continue <jobId> <continuationId> --host dgx-spark --chat <sessi
 ```
 
 `local-upload` accepts one file up to 64 MiB; for larger transfers use the
-broker CLI directly. Raw protocol submission is not exposed by Link or its
+broker CLI directly. Every upload names the capability it is intended for;
+Workhorse journals that scope and refuses unscoped or cross-capability input
+references after a restart. Raw protocol submission is not exposed by Link or its
 CLI. All
 local subcommands call the same Link tool handler used by MCP.
 

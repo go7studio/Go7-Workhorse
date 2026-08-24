@@ -308,6 +308,7 @@ import {
 } from "./watch";
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
+import { normalizeLocalComputeSettings } from "./local-compute";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -466,6 +467,7 @@ export type Store = AppState & {
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
+  updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
@@ -6948,6 +6950,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateLocalCompute = useCallback((settings: import("./types").LocalComputeSettings) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        localCompute: { ...normalizeLocalComputeSettings(settings), legacyEnvironmentFallback: false },
+      },
+    }));
+  }, []);
+
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
     setState((current) => ({
       ...current,
@@ -7282,6 +7294,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWatch,
       updateRouting,
       updateAgentSystems,
+      updateLocalCompute,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,
@@ -7407,6 +7420,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateWatch,
       updateRouting,
       updateAgentSystems,
+      updateLocalCompute,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,

@@ -55,6 +55,25 @@ continuation commands. `delegate --accept` starts an adaptive mission loop;
 `status` then `follow-up` continue it. Install workhorse command puts it on your
 PATH. See [docs/LINK.md](LINK.md).
 
+Settings → LLMs → Local Compute discovers each host's live capabilities and
+grants selected capabilities separately to Workhorse, connected apps, workers,
+and auditors. MCP, the `workhorse` command, and harnesses see only what is
+healthy and granted for their caller role. The generic invocation contract
+advertises exact artifact roles, cardinality, accepted media types, typed
+outputs, and a closed constraint schema, so image, 3D, audio, and future
+families do not need a new hardwired router. Legacy summary-only descriptors
+remain compatible with their named tools but are not guessed into a generic
+invocation contract. Generic invoke appears only when a granted capability
+publishes a complete typed contract; upload discovery remains independent.
+Typed continuations appear only when an installed and explicitly granted
+capability/tool pair can produce them.
+
+Successful submissions and canonical semantic-request fingerprints survive
+helper restarts. If a configured host becomes unavailable, a known job read
+reports `Unknown` with its timestamped last-observed state; stale continuations
+are not offered from that offline snapshot. Only the token-file reference is
+stored; the token is not copied into Workhorse state or connector configuration.
+
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse
 delegates before direct execution; blocked delegation returns the Workhorse

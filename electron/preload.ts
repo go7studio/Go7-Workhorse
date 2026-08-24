@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("desk:push-skill", input) as Promise<import("../src/lib/types").DeskExportResult>,
   pickFile: () => ipcRenderer.invoke("file:pick") as Promise<string | null>,
   pickAttach: () => ipcRenderer.invoke("attach:pick") as Promise<string[]>,
+  pickLocalComputeTokenFile: () => ipcRenderer.invoke("localCompute:pickTokenFile") as Promise<string | null>,
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) =>
     ipcRenderer.invoke("media:src", href, cwd, vendorSessionId) as Promise<string | null>,
   pathForFile: (file: File) => {
@@ -78,6 +79,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
   saveComposerDrafts: (drafts: Record<string, { text?: string; images?: import("../src/lib/types").ChatImage[] }>) =>
     ipcRenderer.invoke("state:save-drafts", drafts),
+  probeLocalCompute: (hosts: import("../src/lib/types").LocalComputeHostSettings[]) =>
+    ipcRenderer.invoke("localCompute:probe", hosts) as Promise<import("../src/lib/local-compute").LocalComputeHostProbe[]>,
   detectAgentRuntimes: () => ipcRenderer.invoke("agentRuntime:detect"),
   installExternalMcp: (hosts?: string[]) => ipcRenderer.invoke("agentRuntime:installMcp", hosts),
   linkConfig: () => ipcRenderer.invoke("agentRuntime:linkConfig"),

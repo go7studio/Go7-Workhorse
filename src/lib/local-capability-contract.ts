@@ -33,6 +33,51 @@ export type LocalRequiredOutput = {
   required: boolean;
 };
 
+export type LocalCapabilityInputContract = {
+  role: string;
+  kind: string;
+  mediaTypes: string[];
+  required: boolean;
+  minItems: number;
+  maxItems: number;
+};
+
+/**
+ * A deliberately small, strict JSON-Schema-like vocabulary for capability
+ * constraints. It supports harness form/tool construction without executable
+ * references or open-ended object properties.
+ */
+export type LocalConstraintSchema = {
+  type: "object" | "array" | "string" | "number" | "integer" | "boolean";
+  description?: string;
+  properties?: Record<string, LocalConstraintSchema>;
+  required?: string[];
+  additionalProperties?: false;
+  items?: LocalConstraintSchema;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  enum?: Array<string | number | boolean>;
+  default?: string | number | boolean;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+};
+
+export type LocalCapabilityInvocationContract = {
+  inputs: LocalCapabilityInputContract[];
+  outputs: LocalRequiredOutput[];
+  constraintsSchema: LocalConstraintSchema;
+};
+
+export type LocalCapabilityContinuationContract = {
+  capability: string;
+  tool: string;
+  outputs: LocalRequiredOutput[];
+  constraintsSchema: LocalConstraintSchema;
+};
+
 export type LocalContinuation = {
   id: string;
   capability: string;
@@ -104,11 +149,17 @@ export type LocalCapabilities = {
     description: string;
     inputKinds: string[];
     outputRoles: string[];
+    /** Missing means a legacy summary and is not safe for generic invocation. */
+    invocation?: LocalCapabilityInvocationContract;
+    /** Missing or empty means this capability has no discoverable continuation. */
+    continuations?: LocalCapabilityContinuationContract[];
     estimatedMemoryGb: number;
     asynchronous: true;
   }>;
   limits: { maxJsonBytes: number; maxArtifactBytes: number; maxHops: number };
 };
+
+export type LocalCapabilityDescriptor = LocalCapabilities["capabilities"][number];
 
 export class LocalContractError extends Error {
   constructor(readonly code: string, message: string) {
@@ -123,6 +174,7 @@ const CONTINUATION_ID = /^cont_[A-Za-z0-9._:-]{1,128}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const CAPABILITY = /^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9]*){1,7}$/;
 const TOOL = /^[a-z][a-z0-9_]*(?:\.[a-z0-9][a-z0-9_]*){1,7}$/;
+const MEDIA_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/(?:[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*|\*)$/;
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new LocalContractError("invalid_type", `${field} must be an object`);
@@ -151,6 +203,11 @@ function boolean(value: unknown, field: string): boolean {
   return value;
 }
 
+function number(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new LocalContractError("invalid_number", `${field} is invalid`);
+  return value;
+}
+
 function strings(value: unknown, field: string, pattern?: RegExp, max = 32): string[] {
   if (!Array.isArray(value) || value.length > max) throw new LocalContractError("invalid_array", `${field} is invalid`);
   return value.map((item, index) => string(item, `${field}[${index}]`, pattern, 256));
@@ -167,12 +224,275 @@ function requiredOutput(value: unknown, field: string): LocalRequiredOutput {
   strict(row, ["role", "kind", "mediaTypes", "required"], field);
   const mediaTypes = strings(row.mediaTypes, `${field}.mediaTypes`, undefined, 8);
   if (!mediaTypes.length) throw new LocalContractError("invalid_output", `${field}.mediaTypes is empty`);
+  if (new Set(mediaTypes).size !== mediaTypes.length || mediaTypes.some((mediaType) => !MEDIA_TYPE.test(mediaType))) {
+    throw new LocalContractError("invalid_output", `${field}.mediaTypes must be unique valid media types`);
+  }
   return {
     role: string(row.role, `${field}.role`, ID, 64),
     kind: string(row.kind, `${field}.kind`, ID, 64),
     mediaTypes,
     required: boolean(row.required, `${field}.required`),
   };
+}
+
+function scalarMatches(value: unknown, type: LocalConstraintSchema["type"]): value is string | number | boolean {
+  if (type === "string") return typeof value === "string";
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "integer") return Number.isInteger(value);
+  if (type === "boolean") return typeof value === "boolean";
+  return false;
+}
+
+function optionalDescription(row: Record<string, unknown>, field: string): Pick<LocalConstraintSchema, "description"> {
+  return row.description === undefined ? {} : { description: string(row.description, `${field}.description`, undefined, 1024) };
+}
+
+function parseConstraintSchema(value: unknown, field: string, depth = 0): LocalConstraintSchema {
+  if (depth > 4) throw new LocalContractError("invalid_schema", `${field} is nested too deeply`);
+  const row = object(value, field);
+  const type = row.type;
+  if (type !== "object" && type !== "array" && type !== "string" && type !== "number" && type !== "integer" && type !== "boolean") {
+    throw new LocalContractError("invalid_schema", `${field}.type is invalid`);
+  }
+  const description = optionalDescription(row, field);
+  if (type === "object") {
+    strict(row, ["type", "description", "properties", "required", "additionalProperties"], field);
+    const rawProperties = object(row.properties, `${field}.properties`);
+    const entries = Object.entries(rawProperties);
+    if (entries.length > 64) throw new LocalContractError("invalid_schema", `${field}.properties has too many entries`);
+    const properties: Record<string, LocalConstraintSchema> = {};
+    for (const [name, schema] of entries) {
+      string(name, `${field}.properties key`, ID, 64);
+      properties[name] = parseConstraintSchema(schema, `${field}.properties.${name}`, depth + 1);
+    }
+    const required = strings(row.required, `${field}.required`, ID, 64);
+    if (new Set(required).size !== required.length || required.some((name) => !Object.prototype.hasOwnProperty.call(properties, name))) {
+      throw new LocalContractError("invalid_schema", `${field}.required must contain unique property names`);
+    }
+    if (row.additionalProperties !== false) throw new LocalContractError("invalid_schema", `${field}.additionalProperties must be false`);
+    return { type, ...description, properties, required, additionalProperties: false };
+  }
+  if (type === "array") {
+    strict(row, ["type", "description", "items", "minItems", "maxItems", "uniqueItems"], field);
+    const minItems = row.minItems === undefined ? 0 : integer(row.minItems, `${field}.minItems`, 0, 32);
+    const maxItems = row.maxItems === undefined ? 32 : integer(row.maxItems, `${field}.maxItems`, 0, 32);
+    if (minItems > maxItems) throw new LocalContractError("invalid_schema", `${field} item bounds are invalid`);
+    return {
+      type,
+      ...description,
+      items: parseConstraintSchema(row.items, `${field}.items`, depth + 1),
+      minItems,
+      maxItems,
+      uniqueItems: row.uniqueItems === undefined ? false : boolean(row.uniqueItems, `${field}.uniqueItems`),
+    };
+  }
+  const scalarAllowed = ["type", "description", "enum", "default"];
+  if (type === "number" || type === "integer") scalarAllowed.push("minimum", "maximum");
+  if (type === "string") scalarAllowed.push("minLength", "maxLength");
+  strict(row, scalarAllowed, field);
+  const result: LocalConstraintSchema = { type, ...description };
+  if (row.enum !== undefined) {
+    if (!Array.isArray(row.enum) || row.enum.length === 0 || row.enum.length > 64 || row.enum.some((item) => !scalarMatches(item, type))) {
+      throw new LocalContractError("invalid_schema", `${field}.enum is invalid`);
+    }
+    const values = row.enum as Array<string | number | boolean>;
+    const keys = values.map((item) => `${typeof item}:${JSON.stringify(item)}`);
+    if (new Set(keys).size !== keys.length) throw new LocalContractError("invalid_schema", `${field}.enum values must be unique`);
+    result.enum = values;
+  }
+  if (row.default !== undefined) {
+    if (!scalarMatches(row.default, type) || (result.enum && !result.enum.some((item) => Object.is(item, row.default)))) {
+      throw new LocalContractError("invalid_schema", `${field}.default is invalid`);
+    }
+    result.default = row.default;
+  }
+  if (type === "number" || type === "integer") {
+    if (row.minimum !== undefined) result.minimum = number(row.minimum, `${field}.minimum`);
+    if (row.maximum !== undefined) result.maximum = number(row.maximum, `${field}.maximum`);
+    if (result.minimum !== undefined && result.maximum !== undefined && result.minimum > result.maximum) {
+      throw new LocalContractError("invalid_schema", `${field} numeric bounds are invalid`);
+    }
+    if (type === "integer" && ((result.minimum !== undefined && !Number.isInteger(result.minimum)) || (result.maximum !== undefined && !Number.isInteger(result.maximum)))) {
+      throw new LocalContractError("invalid_schema", `${field} integer bounds must be integers`);
+    }
+  }
+  if (type === "string") {
+    if (row.minLength !== undefined) result.minLength = integer(row.minLength, `${field}.minLength`, 0, 65_536);
+    if (row.maxLength !== undefined) result.maxLength = integer(row.maxLength, `${field}.maxLength`, 0, 65_536);
+    if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength) {
+      throw new LocalContractError("invalid_schema", `${field} string bounds are invalid`);
+    }
+  }
+  const declaredValues = [...(result.enum ?? []), ...(result.default === undefined ? [] : [result.default])];
+  for (const declared of declaredValues) {
+    if (typeof declared === "number") {
+      if (result.minimum !== undefined && declared < result.minimum) throw new LocalContractError("invalid_schema", `${field} declares a value below its minimum`);
+      if (result.maximum !== undefined && declared > result.maximum) throw new LocalContractError("invalid_schema", `${field} declares a value above its maximum`);
+    }
+    if (typeof declared === "string") {
+      if (result.minLength !== undefined && declared.length < result.minLength) throw new LocalContractError("invalid_schema", `${field} declares a value below its minimum length`);
+      if (result.maxLength !== undefined && declared.length > result.maxLength) throw new LocalContractError("invalid_schema", `${field} declares a value above its maximum length`);
+    }
+  }
+  return result;
+}
+
+function capabilityInput(value: unknown, field: string): LocalCapabilityInputContract {
+  const row = object(value, field);
+  strict(row, ["role", "kind", "mediaTypes", "required", "minItems", "maxItems"], field);
+  const mediaTypes = strings(row.mediaTypes, `${field}.mediaTypes`, undefined, 8);
+  if (!mediaTypes.length || new Set(mediaTypes).size !== mediaTypes.length || mediaTypes.some((mediaType) => !MEDIA_TYPE.test(mediaType))) {
+    throw new LocalContractError("invalid_capability", `${field}.mediaTypes must be unique valid media types`);
+  }
+  const required = boolean(row.required, `${field}.required`);
+  const minItems = integer(row.minItems, `${field}.minItems`, 0, 32);
+  const maxItems = integer(row.maxItems, `${field}.maxItems`, 1, 32);
+  if (minItems > maxItems || required !== (minItems > 0)) {
+    throw new LocalContractError("invalid_capability", `${field} required/cardinality is inconsistent`);
+  }
+  return {
+    role: string(row.role, `${field}.role`, ID, 64),
+    kind: string(row.kind, `${field}.kind`, ID, 64),
+    mediaTypes,
+    required,
+    minItems,
+    maxItems,
+  };
+}
+
+function uniqueOutputs(value: unknown, field: string): LocalRequiredOutput[] {
+  if (!Array.isArray(value) || value.length > 32) throw new LocalContractError("invalid_capability", `${field} is invalid`);
+  const outputs = value.map((entry, index) => requiredOutput(entry, `${field}[${index}]`));
+  if (new Set(outputs.map((output) => output.role)).size !== outputs.length) {
+    throw new LocalContractError("invalid_capability", `${field} roles must be unique`);
+  }
+  return outputs;
+}
+
+function invocationContract(value: unknown, field: string): LocalCapabilityInvocationContract {
+  const row = object(value, field);
+  strict(row, ["inputs", "outputs", "constraintsSchema"], field);
+  if (!Array.isArray(row.inputs) || row.inputs.length > 32) throw new LocalContractError("invalid_capability", `${field}.inputs is invalid`);
+  const inputs = row.inputs.map((entry, index) => capabilityInput(entry, `${field}.inputs[${index}]`));
+  if (new Set(inputs.map((input) => input.role)).size !== inputs.length) {
+    throw new LocalContractError("invalid_capability", `${field}.input roles must be unique`);
+  }
+  return {
+    inputs,
+    outputs: uniqueOutputs(row.outputs, `${field}.outputs`),
+    constraintsSchema: parseConstraintSchema(row.constraintsSchema, `${field}.constraintsSchema`),
+  };
+}
+
+function continuationContract(value: unknown, field: string): LocalCapabilityContinuationContract {
+  const row = object(value, field);
+  strict(row, ["capability", "tool", "outputs", "constraintsSchema"], field);
+  return {
+    capability: string(row.capability, `${field}.capability`, CAPABILITY, 128),
+    tool: string(row.tool, `${field}.tool`, TOOL, 128),
+    outputs: uniqueOutputs(row.outputs, `${field}.outputs`),
+    constraintsSchema: parseConstraintSchema(row.constraintsSchema, `${field}.constraintsSchema`),
+  };
+}
+
+function mediaTypeAccepted(mediaType: string, accepted: readonly string[]): boolean {
+  return accepted.some((candidate) => candidate === mediaType || (candidate.endsWith("/*") && mediaType.startsWith(candidate.slice(0, -1))));
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+/** Validate a concrete constraints object against a parsed capability schema. */
+export function validateLocalConstraints(schema: LocalConstraintSchema, value: unknown, field = "constraints"): void {
+  if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new LocalContractError("invalid_constraints", `${field} must be an object`);
+    const record = value as Record<string, unknown>;
+    const properties = schema.properties ?? {};
+    const unknown = Object.keys(record).filter((name) => !Object.prototype.hasOwnProperty.call(properties, name));
+    if (unknown.length) throw new LocalContractError("invalid_constraints", `${field} has unknown fields: ${unknown.join(", ")}`);
+    for (const name of schema.required ?? []) {
+      if (!Object.prototype.hasOwnProperty.call(record, name)) throw new LocalContractError("invalid_constraints", `${field}.${name} is required`);
+    }
+    for (const [name, child] of Object.entries(properties)) {
+      if (Object.prototype.hasOwnProperty.call(record, name)) validateLocalConstraints(child, record[name], `${field}.${name}`);
+    }
+    return;
+  }
+  if (schema.type === "array") {
+    if (!Array.isArray(value)) throw new LocalContractError("invalid_constraints", `${field} must be an array`);
+    const minItems = schema.minItems ?? 0;
+    const maxItems = schema.maxItems ?? 32;
+    if (value.length < minItems || value.length > maxItems) throw new LocalContractError("invalid_constraints", `${field} item count is invalid`);
+    if (schema.uniqueItems) {
+      const encoded = value.map((item) => JSON.stringify(item));
+      if (new Set(encoded).size !== encoded.length) throw new LocalContractError("invalid_constraints", `${field} items must be unique`);
+    }
+    value.forEach((item, index) => validateLocalConstraints(schema.items!, item, `${field}[${index}]`));
+    return;
+  }
+  if (!scalarMatches(value, schema.type)) throw new LocalContractError("invalid_constraints", `${field} must be ${schema.type}`);
+  if (schema.enum && !schema.enum.some((candidate) => Object.is(candidate, value))) {
+    throw new LocalContractError("invalid_constraints", `${field} is not an allowed value`);
+  }
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum) throw new LocalContractError("invalid_constraints", `${field} is below its minimum`);
+    if (schema.maximum !== undefined && value > schema.maximum) throw new LocalContractError("invalid_constraints", `${field} is above its maximum`);
+  }
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) throw new LocalContractError("invalid_constraints", `${field} is too short`);
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) throw new LocalContractError("invalid_constraints", `${field} is too long`);
+  }
+}
+
+export type LocalCapabilityInvocationValue = {
+  inputs: Array<{ role?: string; kind: string; mediaType: string }>;
+  requiredOutputs: LocalRequiredOutput[];
+  constraints: Record<string, unknown>;
+};
+
+/**
+ * Generic invocation enforcement shared by MCP, CLI, and future callers. It
+ * rejects legacy summary-only descriptors because guessing a family contract
+ * is not a safe compatibility mode.
+ */
+export function validateLocalCapabilityInvocation(
+  descriptor: LocalCapabilityDescriptor,
+  invocation: LocalCapabilityInvocationValue,
+): void {
+  const contract = descriptor.invocation;
+  if (!contract) throw new LocalContractError("invocation_contract_unavailable", `capability ${descriptor.id} has no typed invocation contract`);
+  const counts = new Map<string, number>();
+  for (const [index, input] of invocation.inputs.entries()) {
+    const role = input.role?.trim() ?? "";
+    const expected = contract.inputs.find((candidate) => candidate.role === role);
+    if (!expected) throw new LocalContractError("invalid_invocation_input", `inputs[${index}].role is not advertised by ${descriptor.id}`);
+    if (input.kind !== expected.kind || !mediaTypeAccepted(input.mediaType, expected.mediaTypes)) {
+      throw new LocalContractError("invalid_invocation_input", `inputs[${index}] does not match the ${role} contract`);
+    }
+    counts.set(role, (counts.get(role) ?? 0) + 1);
+  }
+  for (const expected of contract.inputs) {
+    const count = counts.get(expected.role) ?? 0;
+    if (count < expected.minItems || count > expected.maxItems) {
+      throw new LocalContractError("invalid_invocation_input", `input role ${expected.role} requires ${expected.minItems}-${expected.maxItems} artifact(s)`);
+    }
+  }
+  if (new Set(invocation.requiredOutputs.map((output) => output.role)).size !== invocation.requiredOutputs.length) {
+    throw new LocalContractError("invalid_invocation_output", "invocation output roles must be unique");
+  }
+  for (const [index, output] of invocation.requiredOutputs.entries()) {
+    const expected = contract.outputs.find((candidate) => candidate.role === output.role);
+    if (!expected || output.kind !== expected.kind || output.required !== expected.required || !sameStrings(output.mediaTypes, expected.mediaTypes)) {
+      throw new LocalContractError("invalid_invocation_output", `requiredOutputs[${index}] does not match the ${output.role} contract`);
+    }
+  }
+  for (const expected of contract.outputs) {
+    if (expected.required && !invocation.requiredOutputs.some((output) => output.role === expected.role)) {
+      throw new LocalContractError("invalid_invocation_output", `required output role ${expected.role} is missing`);
+    }
+  }
+  validateLocalConstraints(contract.constraintsSchema, invocation.constraints);
 }
 
 export function parseLocalArtifact(value: unknown): LocalArtifact {
@@ -286,18 +606,53 @@ export function parseLocalCapabilities(value: unknown): LocalCapabilities {
   if (!Array.isArray(row.capabilities) || row.capabilities.length > 128) throw new LocalContractError("invalid_capabilities", "capability list is invalid");
   const capabilities = row.capabilities.map((value, index) => {
     const item = object(value, `capabilities[${index}]`);
-    strict(item, ["id", "profileId", "description", "inputKinds", "outputRoles", "estimatedMemoryGb", "asynchronous"], `capabilities[${index}]`);
+    strict(item, ["id", "profileId", "description", "inputKinds", "outputRoles", "invocation", "continuations", "estimatedMemoryGb", "asynchronous"], `capabilities[${index}]`);
     if (item.asynchronous !== true) throw new LocalContractError("invalid_capability", "local capabilities must be asynchronous");
+    const inputKinds = strings(item.inputKinds, "capability.inputKinds", ID);
+    const outputRoles = strings(item.outputRoles, "capability.outputRoles", ID);
+    if (new Set(inputKinds).size !== inputKinds.length || new Set(outputRoles).size !== outputRoles.length) {
+      throw new LocalContractError("invalid_capability", "local capability input kinds and output roles must be unique");
+    }
+    const invocation = item.invocation === undefined ? undefined : invocationContract(item.invocation, `capabilities[${index}].invocation`);
+    if (invocation) {
+      const detailedInputKinds = new Set(invocation.inputs.map((input) => input.kind));
+      const detailedOutputRoles = new Set(invocation.outputs.map((output) => output.role));
+      if (
+        detailedInputKinds.size !== inputKinds.length ||
+        inputKinds.some((kind) => !detailedInputKinds.has(kind)) ||
+        detailedOutputRoles.size !== outputRoles.length ||
+        outputRoles.some((role) => !detailedOutputRoles.has(role))
+      ) {
+        throw new LocalContractError("invalid_capability", "capability summary does not match its typed invocation contract");
+      }
+    }
+    if (item.continuations !== undefined && (!Array.isArray(item.continuations) || item.continuations.length > 16)) {
+      throw new LocalContractError("invalid_capability", `capabilities[${index}].continuations is invalid`);
+    }
+    const continuations = item.continuations === undefined
+      ? undefined
+      : item.continuations.map((entry, continuationIndex) => continuationContract(entry, `capabilities[${index}].continuations[${continuationIndex}]`));
+    if (continuations) {
+      const identities = continuations.map((continuation) => `${continuation.capability}\u0000${continuation.tool}`);
+      if (new Set(identities).size !== identities.length) {
+        throw new LocalContractError("invalid_capability", "capability continuation identities must be unique");
+      }
+    }
     return {
       id: string(item.id, "capability.id", CAPABILITY, 128),
       profileId: string(item.profileId, "capability.profileId", ID, 128),
       description: string(item.description, "capability.description", undefined, 1024),
-      inputKinds: strings(item.inputKinds, "capability.inputKinds", ID),
-      outputRoles: strings(item.outputRoles, "capability.outputRoles", ID),
+      inputKinds,
+      outputRoles,
+      ...(invocation ? { invocation } : {}),
+      ...(continuations ? { continuations } : {}),
       estimatedMemoryGb: integer(item.estimatedMemoryGb, "capability.estimatedMemoryGb", 0, 1024),
       asynchronous: true as const,
     };
   });
+  if (new Set(capabilities.map((capability) => capability.id)).size !== capabilities.length) {
+    throw new LocalContractError("invalid_capabilities", "local capability ids must be unique");
+  }
   const limits = object(row.limits, "capabilities.limits");
   strict(limits, ["maxJsonBytes", "maxArtifactBytes", "maxHops"], "capabilities.limits");
   return {
@@ -331,6 +686,10 @@ export function parseLocalJobRequest(value: unknown): LocalJobRequest {
     };
   });
   if (!Array.isArray(row.requiredOutputs) || row.requiredOutputs.length > 32) throw new LocalContractError("invalid_outputs", "request outputs are invalid");
+  const requiredOutputs = row.requiredOutputs.map((value, index) => requiredOutput(value, `request.requiredOutputs[${index}]`));
+  if (new Set(requiredOutputs.map((output) => output.role)).size !== requiredOutputs.length) {
+    throw new LocalContractError("invalid_outputs", "request output roles must be unique");
+  }
   const workflow = object(row.workflow, "request.workflow");
   strict(workflow, ["autoContinue", "approvedCapabilities", "maxContinuations"], "request.workflow");
   return {
@@ -345,7 +704,7 @@ export function parseLocalJobRequest(value: unknown): LocalJobRequest {
     priority: integer(row.priority, "request.priority", 0, 100),
     deadline: row.deadline === null || row.deadline === undefined ? null : string(row.deadline, "request.deadline", undefined, 64),
     inputs,
-    requiredOutputs: row.requiredOutputs.map((value, index) => requiredOutput(value, `request.requiredOutputs[${index}]`)),
+    requiredOutputs,
     constraints: jsonObject(row.constraints, "request.constraints"),
     workflow: {
       autoContinue: boolean(workflow.autoContinue, "request.workflow.autoContinue"),

@@ -6,17 +6,28 @@ import {
   parseLocalCapabilities,
   parseLocalJob,
   parseLocalJobRequest,
+  validateLocalConstraints,
   type LocalArtifact,
+  type LocalCapabilityContinuationContract,
   type LocalCapabilities,
+  type LocalContinuation,
   type LocalJob,
   type LocalJobRequest,
 } from "../src/lib/local-capability-contract";
+import { isAbsoluteTokenFile } from "../src/lib/local-compute";
+import {
+  DEFAULT_LOCAL_CONTINUATION_ADAPTERS,
+  LocalContinuationAdapterRegistry,
+  type LocalContinuationAdapter,
+  type LocalContinuationDispatch,
+} from "./local-continuation-adapters";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_JSON_BYTES = 1024 * 1024;
 const DEFAULT_MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024;
 const CONTINUATION_CLAIM_TTL_MS = 10 * 60_000;
 const HOST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const CAPABILITY_ID = /^[a-z][a-z0-9]*(?:\.[a-z0-9][a-z0-9]*){1,7}$/;
 
 export class LocalCapabilityHostError extends Error {
   constructor(readonly code: string, message: string) {
@@ -51,12 +62,35 @@ export type LocalCapabilityHostClientOptions = {
   fetchImpl?: typeof fetch;
   fsImpl?: HostFs;
   clock?: LocalCapabilityHostClock;
+  continuationAdapters?: readonly LocalContinuationAdapter[];
+  authorizeContinuation?: LocalContinuationAuthorizer;
 };
+
+export type LocalContinuationAuthorizationContext = Readonly<Record<string, unknown>>;
+
+/**
+ * Injected by the product-owned registry. The host deliberately does not know
+ * how caller roles or persisted grants are represented.
+ */
+export type LocalContinuationAuthorizer = (input: {
+  hostId: string;
+  job: LocalJob;
+  continuation: NonNullable<LocalJob["result"]>["continuations"][number];
+  context?: LocalContinuationAuthorizationContext;
+}) => boolean;
 
 type Journal = {
   version: 1;
   observedJobs: Record<string, { hostId: string; job: LocalJob; observedAt: string }>;
+  submissions: Record<string, {
+    hostId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
+    job: LocalJob;
+    submittedAt: string;
+  }>;
   materializations: Record<string, { hostId: string; artifactId: string; sha256: string; sizeBytes: number; path: string; materializedAt: string }>;
+  uploadedArtifacts: Record<string, { hostId: string; artifactId: string; capability: string; uploadedAt: string }>;
   continuations: Record<string, {
     hostId: string;
     jobId: string;
@@ -92,7 +126,12 @@ function parseHost(value: unknown): HostConfig {
   const unknown = Object.keys(row).filter((key) => !allowed.has(key));
   if (unknown.length) error("invalid_config", `local host config has unknown fields: ${unknown.join(", ")}`);
   if (typeof row.id !== "string" || !HOST_ID.test(row.id)) error("invalid_config", "local host id is invalid");
-  if (typeof row.baseUrl !== "string" || typeof row.tokenFile !== "string" || !row.tokenFile.trim()) error("invalid_config", "local host baseUrl and tokenFile are required");
+  if (
+    typeof row.baseUrl !== "string" ||
+    typeof row.tokenFile !== "string" ||
+    !row.tokenFile.trim() ||
+    !isAbsoluteTokenFile(row.tokenFile.trim())
+  ) error("invalid_config", "local host baseUrl and an absolute tokenFile are required");
   let url: URL;
   try { url = new URL(row.baseUrl); } catch { error("invalid_config", "local host baseUrl is invalid"); }
   if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback(url.hostname)))) {
@@ -102,7 +141,7 @@ function parseHost(value: unknown): HostConfig {
   return {
     id: row.id,
     baseUrl: url.toString().replace(/\/$/, ""),
-    tokenFile: row.tokenFile,
+    tokenFile: row.tokenFile.trim(),
     timeoutMs: positiveInteger(row.timeoutMs, "timeoutMs", 120_000) ?? DEFAULT_TIMEOUT_MS,
     maxJsonBytes: positiveInteger(row.maxJsonBytes, "maxJsonBytes", 64 * 1024 * 1024) ?? DEFAULT_MAX_JSON_BYTES,
     maxArtifactBytes: positiveInteger(row.maxArtifactBytes, "maxArtifactBytes", 2 ** 40) ?? DEFAULT_MAX_ARTIFACT_BYTES,
@@ -131,10 +170,11 @@ export function parseLocalCapabilityHosts(env: NodeJS.ProcessEnv = process.env):
 }
 
 function journalFrom(value: unknown): Journal {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { version: 1, observedJobs: {}, materializations: {}, continuations: {} };
+  const empty = (): Journal => ({ version: 1, observedJobs: {}, submissions: {}, materializations: {}, uploadedArtifacts: {}, continuations: {} });
+  if (!value || typeof value !== "object" || Array.isArray(value)) return empty();
   const row = value as Partial<Journal>;
-  if (row.version !== 1 || !row.observedJobs || !row.materializations || !row.continuations) return { version: 1, observedJobs: {}, materializations: {}, continuations: {} };
-  return row as Journal;
+  if (row.version !== 1 || !row.observedJobs || !row.materializations || !row.continuations) return empty();
+  return { ...(row as Journal), submissions: row.submissions ?? {}, uploadedArtifacts: row.uploadedArtifacts ?? {} };
 }
 
 function asBuffer(value: unknown): Buffer {
@@ -143,11 +183,36 @@ function asBuffer(value: unknown): Buffer {
   return Buffer.from(String(value), "utf8");
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  }
+  error("invalid_input", "local capability request is not JSON serializable");
+}
+
+function requestFingerprint(request: LocalJobRequest): string {
+  // requestId and traceId are transport/correlation values Workhorse may mint
+  // again after a helper restart. Idempotency is bound to the requested work,
+  // not to those generated envelope identifiers.
+  const { requestId: _requestId, traceId: _traceId, ...semanticRequest } = request;
+  const wireValue = JSON.parse(JSON.stringify(semanticRequest)) as unknown;
+  return createHash("sha256").update(canonicalJson(wireValue)).digest("hex");
+}
+
 export class LocalCapabilityHostClient {
   private readonly hosts = new Map<string, HostConfig>();
   private readonly fetchImpl: typeof fetch;
   private readonly fs: HostFs;
   private readonly clock: LocalCapabilityHostClock;
+  private readonly continuationAdapters: LocalContinuationAdapterRegistry;
+  private readonly authorizeContinuation: LocalContinuationAuthorizer;
   private readonly journalFile: string;
   private journal: Journal;
 
@@ -161,18 +226,24 @@ export class LocalCapabilityHostClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.fs = options.fsImpl ?? fs;
     this.clock = options.clock ?? { now: () => Date.now(), setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds), clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>) };
+    this.continuationAdapters = new LocalContinuationAdapterRegistry(options.continuationAdapters ?? DEFAULT_LOCAL_CONTINUATION_ADAPTERS);
+    this.authorizeContinuation = options.authorizeContinuation ?? (() => false);
     this.journalFile = path.join(options.stateDir, "local-capability-host-journal.json");
     this.journal = this.readJournal();
   }
 
   hostIds(): string[] { return [...this.hosts.keys()]; }
 
-  async capabilities(hostId: string): Promise<LocalCapabilities> {
-    return parseLocalCapabilities(await this.json(hostId, "GET", "/v1/capabilities"));
+  supportsContinuation(continuation: { capability: string; tool: string }): boolean {
+    return this.continuationAdapters.supports(continuation);
+  }
+
+  async capabilities(hostId: string, timeoutMs?: number): Promise<LocalCapabilities> {
+    return parseLocalCapabilities(await this.json(hostId, "GET", "/v1/capabilities", undefined, timeoutMs));
   }
 
   /** Uploads one artifact as raw bytes. The broker owns artifact IDs and metadata validation. */
-  async uploadBase64(hostId: string, input: { kind: string; role: string; mediaType: string; base64: string; origin: string }): Promise<LocalArtifact> {
+  async uploadBase64(hostId: string, input: { kind: string; role: string; mediaType: string; base64: string; origin: string; scopeCapability?: string }): Promise<LocalArtifact> {
     if (typeof input.base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.base64)) error("invalid_input", "artifact base64 is invalid");
     const bytes = Buffer.from(input.base64, "base64");
     const host = this.host(hostId);
@@ -187,11 +258,16 @@ export class LocalCapabilityHostClient {
     if (!uploaded || typeof uploaded !== "object" || Array.isArray(uploaded)) error("invalid_response", "artifact upload response is invalid");
     const row = uploaded as Record<string, unknown>;
     if (Object.keys(row).some((key) => key !== "protocolVersion" && key !== "artifact") || row.protocolVersion !== "1.0") error("invalid_response", "artifact upload response is invalid");
-    return parseLocalArtifact(row.artifact);
+    const artifact = parseLocalArtifact(row.artifact);
+    if (input.scopeCapability !== undefined) {
+      if (!CAPABILITY_ID.test(input.scopeCapability)) error("invalid_input", "artifact capability scope is invalid");
+      this.recordUploadedArtifactScope(hostId, artifact.id, input.scopeCapability);
+    }
+    return artifact;
   }
 
   /** Keeps chat text on the same artifact path as every other broker input. */
-  async uploadText(hostId: string, input: { text: string; origin: string; role?: string }): Promise<LocalArtifact> {
+  async uploadText(hostId: string, input: { text: string; origin: string; role?: string; scopeCapability?: string }): Promise<LocalArtifact> {
     if (typeof input.text !== "string" || !input.text.trim() || Buffer.byteLength(input.text, "utf8") > this.host(hostId).maxArtifactBytes) error("invalid_input", "prompt text is invalid");
     return this.uploadBase64(hostId, {
       kind: "text",
@@ -199,6 +275,7 @@ export class LocalCapabilityHostClient {
       mediaType: "text/plain",
       base64: Buffer.from(input.text, "utf8").toString("base64"),
       origin: input.origin,
+      scopeCapability: input.scopeCapability,
     });
   }
 
@@ -208,34 +285,35 @@ export class LocalCapabilityHostClient {
     return this.submit(hostId, { ...input.request, inputs: [...input.request.inputs, { artifactId: prompt.id, role: prompt.role, sha256: prompt.sha256 }] });
   }
 
-  /** Image-to-3D accepts a verified image artifact, never a free-form text prompt. */
-  async generate3d(hostId: string, input: { sourceArtifactId: string; request: Omit<LocalJobRequest, "capability" | "inputs">; role?: string }): Promise<LocalJob> {
-    const source = await this.artifact(hostId, input.sourceArtifactId);
-    if (!source.mediaType.toLowerCase().startsWith("image/")) error("invalid_input", "image-to-3D requires an image artifact");
-    return this.submit(hostId, {
-      ...input.request,
-      capability: "asset.3d.generate",
-      inputs: [{ artifactId: source.id, role: input.role ?? "source", sha256: source.sha256 }],
-    });
-  }
-
   async submit(hostId: string, request: LocalJobRequest): Promise<LocalJob> {
     const parsed = parseLocalJobRequest(request);
+    const fingerprint = requestFingerprint(parsed);
+    const replay = this.successfulSubmission(hostId, parsed.idempotencyKey, fingerprint);
+    if (replay) {
+      this.observe(hostId, replay);
+      return replay;
+    }
     const job = parseLocalJob(await this.json(hostId, "POST", "/v1/jobs", parsed));
-    this.observe(hostId, job);
-    return job;
+    if (
+      job.requestId !== parsed.requestId ||
+      job.traceId !== parsed.traceId ||
+      job.origin !== parsed.origin ||
+      job.idempotencyKey !== parsed.idempotencyKey ||
+      job.capability !== parsed.capability
+    ) error("stale_completion", "submitted job identity does not match the request");
+    return this.recordSuccessfulSubmission(hostId, parsed.idempotencyKey, fingerprint, job);
   }
 
-  async status(hostId: string, jobId: string): Promise<LocalJob> {
+  async status(hostId: string, jobId: string, context?: LocalContinuationAuthorizationContext): Promise<LocalJob> {
     const job = parseLocalJob(await this.json(hostId, "GET", `/v1/jobs/${this.id(jobId, "job")}`));
     this.observe(hostId, job);
-    return job;
+    return this.withCallableContinuations(hostId, job, context);
   }
 
-  async cancel(hostId: string, jobId: string): Promise<LocalJob> {
+  async cancel(hostId: string, jobId: string, context?: LocalContinuationAuthorizationContext): Promise<LocalJob> {
     const job = parseLocalJob(await this.json(hostId, "POST", `/v1/jobs/${this.id(jobId, "job")}/cancel`, {}));
     this.observe(hostId, job);
-    return job;
+    return this.withCallableContinuations(hostId, job, context);
   }
 
   async artifact(hostId: string, artifactId: string): Promise<LocalArtifact> {
@@ -265,40 +343,41 @@ export class LocalCapabilityHostClient {
     return decoded;
   }
 
-  async prepareContinuation(hostId: string, jobId: string, continuationId: string): Promise<{
+  async availableContinuations(hostId: string, jobId: string, context?: LocalContinuationAuthorizationContext): Promise<NonNullable<LocalJob["result"]>["continuations"]> {
+    const job = await this.status(hostId, jobId, context);
+    return job.status === "completed" ? job.result?.continuations ?? [] : [];
+  }
+
+  async prepareContinuation(hostId: string, jobId: string, continuationId: string, context?: LocalContinuationAuthorizationContext): Promise<{
     replayWorkerId?: string;
     job: LocalJob;
     continuation: NonNullable<LocalJob["result"]>["continuations"][number];
     files: string[];
+    dispatch?: LocalContinuationDispatch;
   }> {
-    const job = await this.status(hostId, jobId);
+    const job = parseLocalJob(await this.json(hostId, "GET", `/v1/jobs/${this.id(jobId, "job")}`));
+    this.observe(hostId, job);
     if (job.status !== "completed" || !job.result) error("continuation_unavailable", "continuation job is not completed");
     const continuation = job.result.continuations.find((candidate) => candidate.id === continuationId);
     if (!continuation) error("continuation_unavailable", "continuation was not returned by this job");
-    if (continuation.capability !== "asset.3d.prepare.blender" || continuation.tool !== "blender.prepare_game_asset") {
-      error("continuation_forbidden", "continuation capability is not allowlisted");
-    }
     if (continuation.authorization.mode !== "explicit" || !continuation.authorization.approvedByRequest) {
       error("continuation_forbidden", "continuation was not explicitly authorized by the originating request");
     }
-    if (continuation.inputBindings.length !== 1 || continuation.inputBindings[0]?.name !== "sourceModel" || continuation.inputBindings[0]?.mediaType !== "model/gltf-binary") {
-      error("continuation_forbidden", "Blender continuation input contract is not allowlisted");
+    if (!this.authorizeContinuation({ hostId, job, continuation, context })) {
+      error("continuation_forbidden", "continuation is not granted to this caller");
     }
-    const required = new Map(continuation.requiredOutputs.map((output) => [output.role, output]));
-    const expectedOutputs: Array<[string, string, string]> = [
-      ["game_model", "model3d", "model/gltf-binary"],
-      ["preview", "image", "image/png"],
-      ["blender_report", "report", "application/json"],
-    ];
-    if (required.size !== expectedOutputs.length || expectedOutputs.some(([role, kind, mediaType]) => {
-      const output = required.get(role);
-      return !output || output.kind !== kind || !output.required || output.mediaTypes.length !== 1 || output.mediaTypes[0] !== mediaType;
-    })) error("continuation_forbidden", "Blender continuation output contract is not allowlisted");
-    const targetFaces = continuation.constraints.targetFaces;
-    const targetEngine = continuation.constraints.targetEngine;
-    if (!Number.isInteger(targetFaces) || (targetFaces as number) < 100 || (targetFaces as number) > 1_000_000 || !["generic", "blender", "godot", "unity", "unreal"].includes(String(targetEngine))) {
-      error("continuation_forbidden", "Blender continuation constraints are not allowlisted");
+    let advertised: boolean;
+    try {
+      const descriptor = await this.capabilities(hostId);
+      advertised = this.matchesAdvertisedContinuation(descriptor, job, continuation);
+    } catch {
+      advertised = false;
     }
+    if (!advertised) error("continuation_forbidden", "continuation is absent from or has drifted from the live host contract");
+    const adapter = this.continuationAdapters.find(continuation);
+    if (!adapter) error("continuation_forbidden", "continuation has no installed adapter");
+    const validationError = adapter.validate(structuredClone(continuation));
+    if (validationError) error("continuation_forbidden", validationError);
     const claim = this.withJournalLock(() => {
       this.journal = this.readJournal();
       const key = `${hostId}:${job.id}:${continuation.idempotencyKey}`;
@@ -320,16 +399,95 @@ export class LocalCapabilityHostClient {
     if (claim.replayWorkerId) return { replayWorkerId: claim.replayWorkerId, job, continuation, files: [] };
     try {
       const files: string[] = [];
+      const bindings = [];
       for (const binding of continuation.inputBindings) {
         const artifact = await this.artifact(hostId, binding.artifactId);
         if (artifact.sha256 !== binding.sha256 || artifact.mediaType !== binding.mediaType) error("stale_completion", "continuation artifact binding no longer matches metadata");
-        files.push(await this.materialize(hostId, artifact.id));
+        const localPath = await this.materialize(hostId, artifact.id);
+        files.push(localPath);
+        bindings.push({ name: binding.name, artifact, localPath });
       }
-      return { job, continuation, files };
+      const proposed = adapter.prepare({
+        job: structuredClone(job),
+        continuation: structuredClone(continuation),
+        bindings: structuredClone(bindings),
+      });
+      if (
+        proposed.bindings.length !== bindings.length ||
+        new Set(proposed.bindings.map((binding) => binding.name)).size !== proposed.bindings.length
+      ) {
+        error("continuation_forbidden", "continuation adapter changed the verified input binding set");
+      }
+      const verifiedByName = new Map(bindings.map((binding) => [binding.name, binding]));
+      const dispatchBindings = proposed.bindings.map((candidate) => {
+        const verified = verifiedByName.get(candidate.name);
+        if (
+          !verified ||
+          candidate.localPath !== verified.localPath ||
+          candidate.artifact.id !== verified.artifact.id ||
+          candidate.artifact.sha256 !== verified.artifact.sha256 ||
+          candidate.artifact.mediaType !== verified.artifact.mediaType ||
+          candidate.artifact.sizeBytes !== verified.artifact.sizeBytes
+        ) error("continuation_forbidden", "continuation adapter changed a verified input binding");
+        return { ...verified, ...(candidate.stagedName ? { stagedName: candidate.stagedName } : {}) };
+      });
+      return { job, continuation, files, dispatch: { ...proposed, bindings: dispatchBindings } };
     } catch (cause) {
       this.releaseContinuationDispatch(hostId, job.id, continuation.idempotencyKey);
       throw cause;
     }
+  }
+
+  private async withCallableContinuations(hostId: string, job: LocalJob, context?: LocalContinuationAuthorizationContext): Promise<LocalJob> {
+    if (!job.result) return job;
+    const granted = job.result.continuations.filter((continuation) => {
+      if (continuation.authorization.mode !== "explicit" || !continuation.authorization.approvedByRequest) return false;
+      return this.authorizeContinuation({ hostId, job, continuation, context });
+    });
+    let descriptor: LocalCapabilities | undefined;
+    if (granted.length) {
+      try { descriptor = await this.capabilities(hostId); } catch { descriptor = undefined; }
+    }
+    const continuations = granted.filter((continuation) => {
+      if (!descriptor || !this.matchesAdvertisedContinuation(descriptor, job, continuation)) return false;
+      const adapter = this.continuationAdapters.find(continuation);
+      return Boolean(adapter && !adapter.validate(structuredClone(continuation)));
+    });
+    return continuations.length === job.result.continuations.length
+      ? job
+      : { ...job, result: { ...job.result, continuations } };
+  }
+
+  private matchesAdvertisedContinuation(
+    descriptor: LocalCapabilities,
+    job: LocalJob,
+    continuation: LocalContinuation,
+  ): boolean {
+    const contract = descriptor.capabilities
+      .find((capability) => capability.id === job.capability)
+      ?.continuations
+      ?.find((candidate) => candidate.capability === continuation.capability && candidate.tool === continuation.tool);
+    if (!contract || !this.sameContinuationOutputs(contract, continuation)) return false;
+    try {
+      validateLocalConstraints(contract.constraintsSchema, continuation.constraints, "continuation.constraints");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private sameContinuationOutputs(contract: LocalCapabilityContinuationContract, continuation: LocalContinuation): boolean {
+    if (contract.outputs.length !== continuation.requiredOutputs.length) return false;
+    return contract.outputs.every((expected) => {
+      const actual = continuation.requiredOutputs.find((output) => output.role === expected.role);
+      return Boolean(
+        actual &&
+        actual.kind === expected.kind &&
+        actual.required === expected.required &&
+        actual.mediaTypes.length === expected.mediaTypes.length &&
+        actual.mediaTypes.every((mediaType) => expected.mediaTypes.includes(mediaType)),
+      );
+    });
   }
 
   continuationRecord(hostId: string, jobId: string, continuationId: string): Journal["continuations"][string] | undefined {
@@ -422,6 +580,88 @@ export class LocalCapabilityHostClient {
 
   journalSnapshot(): Readonly<Journal> { return JSON.parse(JSON.stringify(this.journal)) as Journal; }
 
+  /** Last broker-observed state only; callers decide when an offline fallback is honest. */
+  lastObservedJob(hostId: string, jobId: string): Readonly<{ job: LocalJob; observedAt: string }> | undefined {
+    this.host(hostId);
+    this.id(jobId, "job");
+    this.journal = this.readJournal();
+    const record = this.journal.observedJobs[`${hostId}:${jobId}`];
+    if (!record || record.hostId !== hostId || record.job.id !== jobId) return undefined;
+    try {
+      return { job: parseLocalJob(structuredClone(record.job)), observedAt: record.observedAt };
+    } catch {
+      return undefined;
+    }
+  }
+
+  uploadedArtifactCapability(hostId: string, artifactId: string): string | undefined {
+    this.journal = this.readJournal();
+    const record = this.journal.uploadedArtifacts[`${hostId}:${artifactId}`];
+    return record?.hostId === hostId && record.artifactId === artifactId ? record.capability : undefined;
+  }
+
+  private recordUploadedArtifactScope(hostId: string, artifactId: string, capability: string): void {
+    this.withJournalLock(() => {
+      this.journal = this.readJournal();
+      this.journal.uploadedArtifacts[`${hostId}:${artifactId}`] = {
+        hostId,
+        artifactId,
+        capability,
+        uploadedAt: new Date(this.clock.now()).toISOString(),
+      };
+      this.saveJournal();
+    });
+  }
+
+  private successfulSubmission(hostId: string, idempotencyKey: string, fingerprint: string): LocalJob | undefined {
+    this.journal = this.readJournal();
+    const record = this.journal.submissions[`${hostId}:${idempotencyKey}`];
+    if (!record) return undefined;
+    if (record.hostId !== hostId || record.idempotencyKey !== idempotencyKey) return undefined;
+    if (record.requestFingerprint !== fingerprint) {
+      error("idempotency_key_conflict", "idempotency key was already used for a different local capability request");
+    }
+    try {
+      const job = parseLocalJob(structuredClone(record.job));
+      if (job.idempotencyKey !== idempotencyKey) return undefined;
+      return job;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private recordSuccessfulSubmission(hostId: string, idempotencyKey: string, fingerprint: string, job: LocalJob): LocalJob {
+    return this.withJournalLock(() => {
+      this.journal = this.readJournal();
+      const key = `${hostId}:${idempotencyKey}`;
+      const previous = this.journal.submissions[key];
+      if (previous?.requestFingerprint !== undefined && previous.requestFingerprint !== fingerprint) {
+        error("idempotency_key_conflict", "idempotency key was already used for a different local capability request");
+      }
+      let recorded = job;
+      if (previous) {
+        try {
+          const priorJob = parseLocalJob(structuredClone(previous.job));
+          if (priorJob.id !== job.id) error("stale_completion", "broker returned different jobs for one idempotency key");
+          recorded = priorJob;
+        } catch (cause) {
+          if (cause instanceof LocalCapabilityHostError) throw cause;
+        }
+      }
+      const observedAt = new Date(this.clock.now()).toISOString();
+      this.journal.submissions[key] = {
+        hostId,
+        idempotencyKey,
+        requestFingerprint: fingerprint,
+        job: recorded,
+        submittedAt: previous?.submittedAt ?? observedAt,
+      };
+      this.recordObservedJob(hostId, recorded, observedAt);
+      this.saveJournal();
+      return recorded;
+    });
+  }
+
   private host(hostId: string): HostConfig {
     const host = this.hosts.get(hostId);
     if (!host) error("unknown_host", "local capability host is not configured");
@@ -456,18 +696,19 @@ export class LocalCapabilityHostClient {
     return token;
   }
 
-  private async json(hostId: string, method: string, pathname: string, body?: unknown): Promise<unknown> {
+  private async json(hostId: string, method: string, pathname: string, body?: unknown, timeoutMs?: number): Promise<unknown> {
     const encoded = body === undefined ? undefined : JSON.stringify(body);
-    return this.request(hostId, method, pathname, encoded, encoded ? { "Content-Type": "application/json" } : {});
+    return this.request(hostId, method, pathname, encoded, encoded ? { "Content-Type": "application/json" } : {}, timeoutMs);
   }
 
-  private async request(hostId: string, method: string, pathname: string, body?: string | Buffer, headers: Record<string, string> = {}): Promise<unknown> {
+  private async request(hostId: string, method: string, pathname: string, body?: string | Buffer, headers: Record<string, string> = {}, timeoutMs?: number): Promise<unknown> {
     const host = this.host(hostId);
     if (body && Buffer.byteLength(body) > (headers["Content-Type"] === "application/json" ? host.maxJsonBytes : host.maxArtifactBytes)) error("too_large", "request body exceeds host limit");
     const abort = new AbortController();
     let timer: unknown;
     const timeout = new Promise<never>((_, reject) => {
-      timer = this.clock.setTimeout(() => { abort.abort(); reject(new LocalCapabilityHostError("timeout", "local host request timed out")); }, host.timeoutMs);
+      const boundedTimeout = timeoutMs === undefined ? host.timeoutMs : Math.max(1, Math.min(host.timeoutMs, timeoutMs));
+      timer = this.clock.setTimeout(() => { abort.abort(); reject(new LocalCapabilityHostError("timeout", "local host request timed out")); }, boundedTimeout);
     });
     try {
       const response = await Promise.race([this.fetchImpl(this.endpoint(host, pathname), {
@@ -535,14 +776,18 @@ export class LocalCapabilityHostClient {
     this.withJournalLock(() => {
       this.journal = this.readJournal();
       const observedAt = new Date(this.clock.now()).toISOString();
-      this.journal.observedJobs[`${hostId}:${job.id}`] = { hostId, job, observedAt };
-      for (const continuation of job.result?.continuations ?? []) {
-        const key = `${hostId}:${job.id}:${continuation.idempotencyKey}`;
-        const previous = this.journal.continuations[key];
-        this.journal.continuations[key] = previous ?? { hostId, jobId: job.id, continuationId: continuation.id, idempotencyKey: continuation.idempotencyKey, observedAt, state: "observed" };
-      }
+      this.recordObservedJob(hostId, job, observedAt);
       this.saveJournal();
     });
+  }
+
+  private recordObservedJob(hostId: string, job: LocalJob, observedAt: string): void {
+    this.journal.observedJobs[`${hostId}:${job.id}`] = { hostId, job, observedAt };
+    for (const continuation of job.result?.continuations ?? []) {
+      const key = `${hostId}:${job.id}:${continuation.idempotencyKey}`;
+      const previous = this.journal.continuations[key];
+      this.journal.continuations[key] = previous ?? { hostId, jobId: job.id, continuationId: continuation.id, idempotencyKey: continuation.idempotencyKey, observedAt, state: "observed" };
+    }
   }
 
   private withJournalLock<T>(action: () => T): T {
@@ -568,7 +813,7 @@ export class LocalCapabilityHostClient {
   }
 
   private readJournal(): Journal {
-    try { return journalFrom(JSON.parse(asBuffer(this.fs.readFileSync(this.journalFile)).toString("utf8"))); } catch { return { version: 1, observedJobs: {}, materializations: {}, continuations: {} }; }
+    try { return journalFrom(JSON.parse(asBuffer(this.fs.readFileSync(this.journalFile)).toString("utf8"))); } catch { return { version: 1, observedJobs: {}, submissions: {}, materializations: {}, uploadedArtifacts: {}, continuations: {} }; }
   }
 
   private saveJournal(): void {

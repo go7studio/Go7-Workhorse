@@ -100,6 +100,7 @@ type WorkhorseBridge = {
   }) => Promise<import("./lib/types").DeskExportResult>;
   pickFile: () => Promise<string | null>;
   pickAttach?: () => Promise<string[]>;
+  pickLocalComputeTokenFile?: () => Promise<string | null>;
   mediaSrc: (href: string, cwd?: string, vendorSessionId?: string) => Promise<string | null>;
   pathForFile: (file: File) => string;
   listDropFiles: (paths: string[]) => Promise<
@@ -287,6 +288,9 @@ type WorkhorseBridge = {
   learningForget?: (target: import("./lib/learning-types").ForgetTarget) => Promise<{ tombstoned: number }>;
   learningPurge?: (target: import("./lib/learning-types").ForgetTarget) => Promise<import("./lib/learning-types").PurgeResult>;
   learningExport?: (dest: string) => Promise<{ ok: boolean; dest?: string; message?: string }>;
+  probeLocalCompute?: (
+    hosts: import("./lib/types").LocalComputeHostSettings[],
+  ) => Promise<import("./lib/local-compute").LocalComputeHostProbe[]>;
   detectAgentRuntimes?: () => Promise<{
     statuses: import("./lib/external-catalog").AgentRuntimeStatus[];
     agents: import("./lib/external-catalog").ExternalAgent[];

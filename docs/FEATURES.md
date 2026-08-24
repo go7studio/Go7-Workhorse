@@ -117,6 +117,9 @@ transcript rather than as a path.
   under the source chat, with a managed worktree when the project has a Git
   folder — the same isolation subagents use.
 - Rewind to an earlier turn.
+- While a turn is running, Enter queues the next prompt. It stays on Next
+  until this turn ends and is not a chat line yet. Steer interrupts and
+  sends now.
 - A long transcript opens on the latest turns. Scrolling up pages in the next older window without jumping.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.

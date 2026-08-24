@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { canPlaceInProject } from "../lib/chats";
+import { canPlaceInProject, omitQueuedUserMessages } from "../lib/chats";
 import { primaryFolder } from "../lib/project";
 import { editListKey, fileFolderFromPath, fileNameFromPath, holdEditStats, markStatsFetched, mergeEdits, projectEdits, projectWritesKey, sameEditPath, startEditStatsHarvest, type ProjectEdit } from "../lib/project-edits";
 import { sessionExecutionCwd } from "../lib/session-environment";
@@ -189,10 +189,14 @@ export function SessionPane() {
     return mergeEdits(projectEdits([session], roots), extraEdits);
   }, [session?.id, writesKey, roots, extraEdits, editsIdle]);
   const sessionId = session?.id ?? "";
-  const blocks = session ? transcriptGrouper.current.group(session.messages) : [];
+  const transcriptMessages = useMemo(
+    () => (session ? omitQueuedUserMessages(session.messages, session.queue) : []),
+    [session?.messages, session?.queue],
+  );
+  const blocks = session ? transcriptGrouper.current.group(transcriptMessages) : [];
   const nearby = useMemo(
-    () => recentTranscriptText(session?.messages ?? []),
-    [session?.messages],
+    () => recentTranscriptText(transcriptMessages),
+    [transcriptMessages],
   );
   const paintFrom =
     paint.id === sessionId && paint.from < blocks.length

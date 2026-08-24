@@ -156,7 +156,7 @@ import {
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
@@ -4785,18 +4785,39 @@ test("empty chats stay drafts until the first send names them", () => {
   const queued = enqueuePrompt([named], "live_1", { text: "then add the bot" });
   assert.equal(queued?.[0].queue?.length, 1);
   assert.equal(queued?.[0].queue?.[0]?.text, "then add the bot");
-  assert.ok(queued?.[0].messages.some((message) => message.role === "user" && message.text === "then add the bot"));
-  assert.ok(queued?.[0].queue?.[0]?.userMessageId);
+  assert.ok(!queued?.[0].messages.some((message) => message.role === "user" && message.text === "then add the bot"));
+  assert.ok(!queued?.[0].queue?.[0]?.userMessageId);
+  assert.equal(lastUserMessage(queued![0])?.text, "fix login");
   const hiddenJoin = enqueuePrompt([named], "live_1", { text: "ORCHESTRATION CALL\n- User: hi", hideUser: true });
   assert.ok(!hiddenJoin?.[0].messages.some((message) => message.text.includes("ORCHESTRATION CALL")));
   const shifted = shiftQueuedPrompt(queued!, "live_1");
   assert.equal(shifted?.item.text, "then add the bot");
   assert.equal(shifted?.sessions[0]?.queue?.length ?? 0, 0);
   assert.equal(dropQueuedPrompt(queued!, "live_1", queued![0].queue![0].id)?.[0].queue?.length ?? 0, 0);
-  assert.ok(!dropQueuedPrompt(queued!, "live_1", queued![0].queue![0].id)?.[0].messages.some((message) => message.text === "then add the bot"));
+  const leftover: Session = {
+    ...named,
+    status: "running",
+    messages: [
+      { id: "u", role: "user", text: "fix login", createdAt: 1 },
+      { id: "a", role: "assistant", text: "Working on login.", createdAt: 2 },
+      { id: "msg_q", role: "user", text: "then add the bot", createdAt: 3 },
+      { id: "t", role: "system", kind: "tool", text: "Read · completed — src/login.ts", createdAt: 4 },
+    ],
+    queue: [{ id: "q_old", text: "then add the bot", createdAt: 3, userMessageId: "msg_q" }],
+  };
+  const split = groupTranscript(leftover.messages);
+  assert.equal(split.filter((block) => block.type === "reply").length, 2);
+  const held = omitQueuedUserMessages(leftover.messages, leftover.queue);
+  assert.ok(!held.some((message) => message.id === "msg_q"));
+  assert.equal(groupTranscript(held).filter((block) => block.type === "reply").length, 1);
+  assert.equal(lastUserMessage(leftover)?.text, "fix login");
+  const flushed = shiftQueuedPrompt([leftover], leftover.id);
+  assert.ok(!flushed?.sessions[0]?.messages.some((message) => message.id === "msg_q"));
+  assert.equal(flushed?.sessions[0]?.queue?.length ?? 0, 0);
   const composer = readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8");
   assert.match(composer, /Steer/);
   assert.match(composer, /Queue for next/);
+  assert.match(readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8"), /omitQueuedUserMessages/);
   assert.match(composer, /fitComposerField/);
   assert.match(composer, /composer-tools/);
   assert.match(
@@ -6039,7 +6060,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   // A deferred openFor flag stayed false on Orchestrate chats: worker streams
   // kept cancelling the after-paint open, so the composer worked on an empty
   // thread. Group the live messages up front; first-paint windowing is enough.
-  assert.match(pane, /transcriptGrouper\.current\.group\(session\.messages\)/);
+  // Queued prompts stay off the transcript so they cannot split the live turn.
+  assert.match(pane, /omitQueuedUserMessages\(session\.messages, session\.queue\)/);
+  assert.match(pane, /transcriptGrouper\.current\.group\(transcriptMessages\)/);
   assert.doesNotMatch(pane, /transcriptOpen/);
   assert.doesNotMatch(pane, /setOpenFor/);
   assert.doesNotMatch(pane, /scheduleAfterPaint/);
@@ -6574,7 +6597,8 @@ test("Goal state set pause resume clear maps to display actions", () => {
     text: "/goal ship the backlog",
     vendorText: goalVendorPrompt({ status: "active", objective: "ship the backlog" }, "set"),
   });
-  assert.ok(queuedGoal?.[0].messages.some((message) => message.text === "/goal ship the backlog"));
+  assert.ok(!queuedGoal?.[0].messages.some((message) => message.text === "/goal ship the backlog"));
+  assert.ok(queuedGoal?.[0].queue?.some((item) => item.text === "/goal ship the backlog"));
   assert.match(queuedGoal?.[0].queue?.[0]?.vendorText ?? "", /ongoing Workhorse goal/);
   assert.notEqual(queuedGoal?.[0].queue?.[0]?.hideUser, true);
   const set = applyGoalCommand(undefined, "/goal ship the 18 features in BACKLOG.md", 1);
@@ -9252,10 +9276,11 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.ok(repairedParent?.queue?.some((item) => item.hideUser && item.text.includes("ORCHESTRATION CALL")));
   const withFollowUp = enqueuePrompt(joinedAfter, "orch", { text: "also check the HUD scripts" });
   const followParent = withFollowUp?.find((item) => item.id === "orch");
-  assert.ok(followParent?.messages.some((message) => message.role === "user" && message.text === "also check the HUD scripts"));
+  assert.ok(followParent?.queue?.some((item) => item.text === "also check the HUD scripts"));
+  assert.ok(!followParent?.messages.some((message) => message.role === "user" && message.text === "also check the HUD scripts"));
   assert.ok(!followParent?.messages.some((message) => message.role === "user" && message.text.includes("ORCHESTRATION CALL")));
   const followBlocks = groupTranscript(followParent?.messages ?? []);
-  assert.ok(followBlocks.some((block) => block.type === "user" && block.message.text === "also check the HUD scripts"));
+  assert.ok(!followBlocks.some((block) => block.type === "user" && block.message.text === "also check the HUD scripts"));
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "Composer.tsx"), "utf8"), /hideUser !== true/);
 
   const rateJson =
@@ -9316,7 +9341,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
   assert.match(store, /applyJoinRateLimitRetry/);
   assert.match(store, /reconcileIdleChildren/);
   assert.match(store, /hideUser\s*\n\s*\? item\.title/);
-  assert.match(store, /userMessageId/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "chats.ts"), "utf8"), /omitQueuedUserMessages/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "lineup.ts"), "utf8"), /ORCHESTRATION CALL/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "lineup.ts"), "utf8"), /userText/);
   assert.equal(

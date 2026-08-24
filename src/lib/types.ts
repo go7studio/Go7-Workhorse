@@ -133,7 +133,7 @@ export type QueuedPrompt = {
   hideUser?: boolean;
   /** Model payload when it differs from the visible player text (e.g. /goal). */
   vendorText?: string;
-  /** Already inserted into the transcript so flush must not add a second user bubble. */
+  /** Leftover from older builds that inserted the bubble while queued. Flush strips it. */
   userMessageId?: string;
   /** Do not flush this queued send until this time. Used to cool a rate-limited key before join. */
   notBefore?: number;

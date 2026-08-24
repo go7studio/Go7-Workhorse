@@ -2866,7 +2866,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           images: item.images,
           sessionId: session.id,
           joinAttempt: item.joinAttempt,
-          hideUser: item.hideUser === true || Boolean(item.userMessageId),
+          hideUser: item.hideUser === true,
           scheduledRunId: item.scheduledRunId,
         });
       });

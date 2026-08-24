@@ -4547,7 +4547,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 })
               : [];
             const spawnRole =
-              payload.role === "auditor" ? "auditor" as const : routeSpawn && !isNested ? "worker" as const : undefined;
+              payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined;
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,

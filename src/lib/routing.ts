@@ -142,7 +142,10 @@ export function grokBotAllowedOnRoute(request: Pick<RoutingRequest, "role" | "cu
     return false;
   }
   if (request.current?.provider === "grok") return false;
-  return true;
+  if (request.current && isGrokBotCandidate({ provider: request.current.provider, model: request.current.model })) {
+    return true;
+  }
+  return false;
 }
 
 export function routingIdentityExcluded(

@@ -604,6 +604,11 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   assert.match(store, /outcomesFromLearningEvents/);
   assert.match(store, /shouldAutoRouteSpawn/);
   assert.match(store, /constrainRouteCandidatesForSpawn/);
+  const spawnRoleAt = store.indexOf("const spawnRole =");
+  assert.ok(spawnRoleAt >= 0);
+  const spawnRole = store.slice(spawnRoleAt, spawnRoleAt + 220);
+  assert.match(spawnRole, /routeSpawn \? "worker"/);
+  assert.doesNotMatch(spawnRole, /!isNested/);
   assert.match(settingsUi, /id: "routing"/);
   assert.doesNotMatch(settingsUi, /id: "models"/);
   assert.doesNotMatch(welcome, /brain picker|pick a model before/i);
@@ -645,10 +650,18 @@ test("Grok 4.6 is ACP Grok; Auto workers never allocate grok-bot", () => {
   assert.equal(rankedWorker.some((row) => row.model === "grok-bot"), false);
   const dispatch = chooseRoutingDecision(
     [grokBot],
-    { prompt: "Summarize this log", now },
+    { prompt: "Summarize this log", current: { provider: "custom", model: "grok-bot", customBotId: "bot_grokbot" }, now },
     settings,
   );
   assert.equal(dispatch?.model, "grok-bot");
+  const nestedQuick = chooseRoutingDecision(
+    [grokAcp, grokBot],
+    { prompt: "Quick: list these names", tier: "quick", now },
+    settings,
+  );
+  assert.equal(nestedQuick?.provider, "grok");
+  assert.equal(nestedQuick?.model, "grok-4.6");
+  assert.notEqual(nestedQuick?.model, "grok-bot");
   const stolen = chooseRoutingDecision(
     [grokAcp, grokBot],
     { prompt: "Keep going", current: { provider: "grok", model: "grok-4.6" }, now },

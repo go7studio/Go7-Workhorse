@@ -64,7 +64,10 @@ official key-only JSON meters (MiniMax, Synthetic, OpenRouter). DeepSeek,
 Novita, AI/ML API, and Vercel AI Gateway fill prepaid balance. Together,
 Fireworks, Groq, Hugging Face, Cerebras, Kimi Code, and Gemini stay
 unknown until those hosts publish leftover JSON. Grok Bot is a local
-OpenAI-compatible shim on 127.0.0.1. Workhorse keeps the Grok Bot loopback shim
+OpenAI-compatible shim on 127.0.0.1, model `grok-bot`, not Grok 4.6.
+Auto does not allocate it as an orchestration or builder worker; it may
+call, analyze, and dispatch. Grok ACP (`grok-4.6` / `grok-4.5` / `grok-build`)
+is a separate vendor. Workhorse keeps the Grok Bot loopback shim
 on that port on Mac and Windows (login keepalive, restart if it dies). Each
 install mints its own loopback token; completions refuse any other caller.
 The port binds loopback only. A webhook wake file, when present, stays in

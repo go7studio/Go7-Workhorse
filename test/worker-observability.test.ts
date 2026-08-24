@@ -150,6 +150,19 @@ test("status tells a harness wait, done, or failed", () => {
     }),
   );
   assert.equal(failed.next, "failed");
+  const empty = workerStatusSnapshot(
+    worker({
+      status: "idle",
+      agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "worktree" },
+      messages: [
+        { id: "u", role: "user", text: "Patch isolation.", createdAt: 1 },
+        { id: "t", role: "assistant", kind: "tool", text: "read_file src/lib/subagents.ts", createdAt: 2 },
+        { id: "a", role: "assistant", text: "   ", createdAt: 3 },
+      ],
+    }),
+  );
+  assert.equal(empty.next, "failed");
+  assert.equal(Object.prototype.hasOwnProperty.call(empty, "report"), false);
 });
 
 test("a checkpoint on a running worker keeps the original startedAt", () => {

@@ -570,7 +570,9 @@ export function spawnExclusions(
   const inherited = nested ? parent?.agentRun?.exclusions ?? [] : [];
   const added = Array.isArray(requested)
     ? requested.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-    : [];
+    : typeof requested === "string" && requested.trim()
+      ? [requested.trim()]
+      : [];
   return [...new Set([...inherited, ...added].map((item) => item.trim()))];
 }
 
@@ -760,7 +762,10 @@ export function workerProgressCheckpoint(
 export type WorkerFollowNext = "wait" | "done" | "failed";
 
 /** What a harness does next. One word, so Claude/Codex/OpenClaw do not invent a loop. */
-export function workerFollowThrough(status: string): { next: WorkerFollowNext; how: string } {
+export function workerFollowThrough(
+  status: string,
+  opts?: { hasReport?: boolean },
+): { next: WorkerFollowNext; how: string } {
   if (status === "running" || status === "queued") {
     return {
       next: "wait",
@@ -768,6 +773,12 @@ export function workerFollowThrough(status: string): { next: WorkerFollowNext; h
     };
   }
   if (status === "completed") {
+    if (opts?.hasReport === false) {
+      return {
+        next: "failed",
+        how: "This worker finished without a durable report. Do not treat a missing report as success.",
+      };
+    }
     return {
       next: "done",
       how: "The report is in this payload. workhorse_continue_mission if work remains (previousWorkerIds: this id). workhorse_ask_chat to talk to this worker.",
@@ -777,6 +788,16 @@ export function workerFollowThrough(status: string): { next: WorkerFollowNext; h
     next: "failed",
     how: "This worker did not finish. Do not treat a missing report as success. Delegate remaining work as a new slice if the user still wants it.",
   };
+}
+
+/** Parent chats are not workers. Idle must not become next=failed. */
+export function listedChatFollowThrough(row: {
+  parentId?: string;
+  worker?: string;
+  status: string;
+}): { next?: WorkerFollowNext } {
+  if (!row.parentId && !row.worker) return {};
+  return { next: workerFollowThrough(row.status).next };
 }
 
 /** Attach `next`/`how` to any status payload, including an ExternalTask dump. */
@@ -794,7 +815,7 @@ export function workerStatusSnapshot(
   const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
-  const follow = workerFollowThrough(status);
+  const follow = workerFollowThrough(status, { hasReport: Boolean(raw) });
   return {
     id: worker.id,
     title: worker.title,
@@ -1132,12 +1153,18 @@ export function continueWorkerRun(
   };
 }
 
+function isGrokBotHint(bot: CustomBotHint): boolean {
+  return bot.model.trim().toLowerCase() === "grok-bot" || bot.name.trim().toLowerCase() === "grok bot";
+}
+
 function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {
   if (!bots?.length) return undefined;
   const lower = query.trim().toLowerCase();
   if (!lower) return undefined;
   const tokens = tokensOf(lower);
+  const namesGrokBot = /\bgrok-bot\b|\bgrok bot\b/.test(lower);
   return bots.find((bot) => {
+    if (isGrokBotHint(bot) && !namesGrokBot) return false;
     const name = bot.name.toLowerCase();
     const model = bot.model.toLowerCase();
     const id = bot.id.toLowerCase();
@@ -1210,10 +1237,11 @@ export function resolveSpawnSpec(
       provider: session.provider,
     }));
   const chat = input.chat?.trim() ?? "";
+  const explicit = parseProviderId(input.provider);
   const assignedCustom = input.customBotId
     ? customBots?.find((bot) => bot.id === input.customBotId)
     : undefined;
-  if (assignedCustom) {
+  if (assignedCustom && explicit !== "grok") {
     return {
       provider: "custom",
       model: input.model?.trim() || assignedCustom.model,
@@ -1226,7 +1254,6 @@ export function resolveSpawnSpec(
       title: subagentLabel("custom", input.model?.trim() || assignedCustom.model, input.description || assignedCustom.name),
     };
   }
-  const explicit = parseProviderId(input.provider);
   const rawModel = input.model?.trim() ?? "";
   const modelHint = explicitModelHint(rawModel, explicit);
   if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {

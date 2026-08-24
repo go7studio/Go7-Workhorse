@@ -2083,6 +2083,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         prompt: originalText,
         attachments: images,
         parentTier: hideUser ? session.routingDecision?.taskTier : undefined,
+        role: session.parentId ? ("worker" as const) : undefined,
         outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
         current: {
           provider: session.provider,
@@ -4695,10 +4696,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             if (routingIdentityExcluded({
               provider: spec.provider,
               model: spec.model,
-              label: spec.title,
               customBotId: spec.customBotId,
             }, effectiveExclusions)) {
-              await replyAsk({ error: `${spec.title} is excluded by this orchestration policy` });
+              await replyAsk({
+                error: `no capable route: ${describeRoutingMiss(routeCandidates, routeRequest, latest.settings.routing)}`,
+              });
               return;
             }
             if (vendorSendTarget(spec.provider) === "preview") {

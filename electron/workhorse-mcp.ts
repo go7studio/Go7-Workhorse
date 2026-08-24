@@ -39,7 +39,7 @@ import {
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
   withFollowThrough,
-  workerFollowThrough,
+  listedChatFollowThrough,
   workerNameFromTitle,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
@@ -1731,8 +1731,8 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
 async function callDeskTool(name: string, args: Record<string, unknown>, from?: string): Promise<string> {
   if (name === "workhorse_list_chats") {
     const rows = catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }).map((row) => {
-      const follow = workerFollowThrough(row.status);
-      return { ...row, next: follow.next };
+      const follow = listedChatFollowThrough(row);
+      return { ...row, ...(follow.next ? { next: follow.next } : {}) };
     });
     if (!isLinkProfile()) return JSON.stringify(rows, null, 2);
     return formatLinkChatList(rows, { full: args.full === true, parents: args.parents === true });

@@ -11,6 +11,7 @@ import type {
   TaskDomain,
 } from "./types";
 import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
+import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
@@ -122,6 +123,26 @@ export function shouldShadowRouteSessionTurn(input: {
   hideUser?: boolean;
 }): boolean {
   return input.learningEnabled && input.routingMode !== "auto" && !input.hideUser && !input.text.startsWith("/");
+}
+
+/** Custom grok-bot slot. Not ACP Grok (provider grok, grok-4.6 / 4.5 / grok-build). */
+export function isGrokBotCandidate(
+  candidate: Pick<RoutingCandidate, "provider" | "model"> & Partial<Pick<RoutingCandidate, "label">>,
+): boolean {
+  if (candidate.provider !== "custom") return false;
+  return isGrokBotModel(candidate.model) || isGrokBotName(candidate.label ?? "");
+}
+
+/**
+ * Auto may keep Grok Bot on a person's own chat for call / analyze / dispatch.
+ * Desk spawn workers (orchestrator, builder, auditor, worker) must not use it.
+ */
+export function grokBotAllowedOnRoute(request: Pick<RoutingRequest, "role" | "current">): boolean {
+  if (request.role === "orchestrator" || request.role === "builder" || request.role === "auditor" || request.role === "worker") {
+    return false;
+  }
+  if (request.current?.provider === "grok") return false;
+  return true;
 }
 
 export function routingIdentityExcluded(
@@ -411,7 +432,9 @@ export function describeRoutingMiss(
   if (allowed.length === 0) return "local models are off";
   const notExcluded = allowed.filter((candidate) => !routingIdentityExcluded(candidate, request.exclude));
   if (notExcluded.length === 0) return "all candidates are excluded";
-  const capable = notExcluded.filter((candidate) => supports(candidate.profile, required));
+  const roleOk = notExcluded.filter((candidate) => !isGrokBotCandidate(candidate) || grokBotAllowedOnRoute(request));
+  if (roleOk.length === 0) return "all candidates are excluded";
+  const capable = roleOk.filter((candidate) => supports(candidate.profile, required));
   if (capable.length === 0) {
     const need = INPUT_KEYS.filter((key) => required[key]);
     return `no vendor accepts ${need.join(", ") || "the required inputs"}`;
@@ -810,6 +833,7 @@ export function rankRoutingCandidates(
   for (const candidate of candidates) {
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
     if (routingIdentityExcluded(candidate, request.exclude)) continue;
+    if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) continue;
     // A model that cannot hold the conversation is not a worse pick, it is a
     // failed send. Routing never knew the window before, so a 300k thread
     // could rank onto a 128k bot and die on arrival.

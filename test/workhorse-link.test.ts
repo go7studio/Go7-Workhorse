@@ -262,7 +262,7 @@ test("Link chat list is compact by default so a 64 KB host cap does not clip it"
     worker: index % 4 === 0 ? "Marlow" : undefined,
     parentId: index % 4 === 0 ? "sess_parent" : undefined,
     status: index % 4 === 0 ? "completed" : "idle",
-    next: index % 4 === 0 ? "done" : "failed",
+    next: index % 4 === 0 ? "done" : undefined,
     projectName: index % 3 === 0 ? "Workhorse Review" : null,
     preview: "x".repeat(160),
     sidebar: "Grok 4.6 · High · Always approve",
@@ -279,6 +279,7 @@ test("Link chat list is compact by default so a 64 KB host cap does not clip it"
   const parents = JSON.parse(formatLinkChatList(rows, { parents: true })) as Array<Record<string, unknown>>;
   assert.equal(parents.length, rows.filter((row) => !row.parentId).length);
   assert.equal(parents.every((row) => !row.parentId), true);
+  assert.equal(parents.every((row) => row.next === undefined), true);
   const full = JSON.parse(formatLinkChatList(rows, { full: true })) as Array<Record<string, unknown>>;
   assert.equal(full[0]?.preview, "x".repeat(160));
 });

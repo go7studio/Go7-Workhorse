@@ -1,6 +1,6 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { uid } from "./id";
-import { defaultModel, findChoice, modelsFor, parseEffort, withEffort } from "./models";
+import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import type {
@@ -1148,6 +1148,35 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   });
 }
 
+function exactCustomBot(bots: CustomBotHint[] | undefined, query: string): CustomBotHint | undefined {
+  const lower = query.trim().toLowerCase();
+  if (!lower) return undefined;
+  return bots?.find((bot) =>
+    bot.id.toLowerCase() === lower ||
+    bot.name.toLowerCase() === lower ||
+    bot.model.toLowerCase() === lower,
+  );
+}
+
+/** Resolve only an explicit model value; surrounding task copy must not influence identity. */
+function explicitModelHint(
+  rawModel: string,
+  provider: ProviderId | null,
+): { provider: ProviderId; model: string } | null {
+  const raw = rawModel.trim();
+  if (!raw) return null;
+  if (provider) {
+    const canonical = normalizeModelId(provider, raw);
+    if (canonical !== raw) return { provider, model: canonical };
+  } else {
+    const legacyGrok = normalizeModelId("grok", raw);
+    if (legacyGrok !== raw) return { provider: "grok", model: legacyGrok };
+  }
+  const exact = findChoice(raw);
+  if (exact) return { provider: exact.provider, model: exact.model };
+  return isBareVendorOrModel(raw) ? resolveModelHint(raw) : null;
+}
+
 export function resolveSpawnSpec(
   input: SpawnRequest,
   sessions: Array<Pick<Session, "id" | "title" | "provider" | "model" | "effort" | "customBotId" | "archivedAt">>,
@@ -1185,15 +1214,20 @@ export function resolveSpawnSpec(
       title: subagentLabel("custom", input.model?.trim() || assignedCustom.model, input.description || assignedCustom.name),
     };
   }
-  const hintedQuery = [input.provider, input.model, input.chat, input.description].filter(Boolean).join(" ");
-  const named =
-    (chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null) ??
-    (isBareVendorOrModel(hintedQuery) ? resolveModelHint(hintedQuery) : null);
+  const explicit = parseProviderId(input.provider);
+  const rawModel = input.model?.trim() ?? "";
+  const modelHint = explicitModelHint(rawModel, explicit);
+  if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {
+    throw new Error(`Model ${rawModel} belongs to ${modelHint.provider}, not ${explicit}.`);
+  }
+  const chatHint = chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null;
+  const named = modelHint ?? chatHint;
   const namedStock = named && named.provider !== "custom" ? named : null;
+  const stockPick = Boolean((explicit && explicit !== "custom") || namedStock);
 
   const match = chat && !namedStock ? findSession(listed as SessionSnapshot[], chat) : null;
   const matched = match ? sessions.find((session) => session.id === match.id) : undefined;
-  if (matched && !namedStock) {
+  if (matched && !stockPick) {
     return {
       provider: matched.provider,
       model: matched.model,
@@ -1203,7 +1237,12 @@ export function resolveSpawnSpec(
     };
   }
 
-  const custom = !namedStock ? matchCustomBot(customBots, hintedQuery) : undefined;
+  const custom = !stockPick
+    ? exactCustomBot(customBots, rawModel) ??
+      (!rawModel || explicit === "custom"
+        ? matchCustomBot(customBots, [input.chat, input.description].filter(Boolean).join(" "))
+        : undefined)
+    : undefined;
   if (custom) {
     return {
       provider: "custom",
@@ -1215,7 +1254,7 @@ export function resolveSpawnSpec(
   }
 
   const parentCustom =
-    !namedStock && parent?.provider === "custom" && (!input.provider || parseProviderId(input.provider) === "custom")
+    !stockPick && parent?.provider === "custom" && (!explicit || explicit === "custom")
       ? customBots?.find((bot) => bot.id === parent.customBotId) ??
         customBots?.find((bot) => bot.model === parent.model) ??
         customBots?.[0]
@@ -1230,17 +1269,12 @@ export function resolveSpawnSpec(
     };
   }
 
-  const explicit = parseProviderId(input.provider);
-  const hinted = namedStock ?? named ?? (explicit ? null : resolveModelHint(hintedQuery));
+  const hinted = namedStock ?? named;
   const provider = explicit ?? hinted?.provider ?? parent?.provider ?? "grok";
-  const rawModel = input.model?.trim() ?? "";
-  const mappedModel = rawModel
-    ? resolveModelHint(rawModel) ?? resolveModelHint(`${provider} ${rawModel}`)
-    : null;
   const model =
-    mappedModel?.model ||
+    (modelHint?.provider === provider ? modelHint.model : "") ||
     (explicit && !rawModel ? defaultModel(provider).id : hinted?.model) ||
-    (rawModel && !isBareVendorOrModel(rawModel) && !parseProviderId(rawModel) ? rawModel : defaultModel(provider).id);
+    (rawModel ? normalizeModelId(provider, rawModel) : defaultModel(provider).id);
   return {
     provider,
     model,

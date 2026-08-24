@@ -2193,6 +2193,95 @@ test("API bots treat vendor names as summons and resolve Sol to Codex not MiniMa
   assert.notEqual(fromModelNick.model, "Sol");
 });
 
+test("explicit stock model identity cannot be hijacked by an overlapping custom bot", () => {
+  const grokBot = [{ id: "bot_grok", name: "Grok Bot", model: "grok-bot" }];
+  const customParent = {
+    provider: "custom" as const,
+    model: "grok-bot",
+    effort: "high" as const,
+    customBotId: "bot_grok",
+  };
+  const explicit = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "audit the model boundary",
+      description: "Review identity contract",
+      provider: "grok",
+      model: "grok-4.6",
+      effort: "xhigh",
+    },
+    [],
+    customParent,
+    grokBot,
+  );
+  assert.equal(explicit.provider, "grok");
+  assert.equal(explicit.model, "grok-4.6");
+  assert.equal(explicit.customBotId, undefined);
+
+  const modelOnly = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "audit",
+      description: "Ask the Grok reviewer",
+      model: "grok-4.6",
+    },
+    [],
+    customParent,
+    grokBot,
+  );
+  assert.equal(modelOnly.provider, "grok");
+  assert.equal(modelOnly.model, "grok-4.6");
+
+  const future = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "audit",
+      description: "Ask the Grok reviewer",
+      provider: "grok",
+      model: "grok-4.7",
+    },
+    [],
+    customParent,
+    grokBot,
+  );
+  assert.equal(future.provider, "grok");
+  assert.equal(future.model, "grok-4.7", "an uncached future model id stays explicit");
+
+  const legacy = resolveSpawnSpec(
+    { fromSessionId: "parent", prompt: "audit", provider: "grok", model: "grok-build" },
+    [],
+    customParent,
+    grokBot,
+  );
+  assert.equal(legacy.provider, "grok");
+  assert.equal(legacy.model, "grok-4.6");
+
+  assert.throws(
+    () => resolveSpawnSpec(
+      { fromSessionId: "parent", prompt: "audit", provider: "codex", model: "grok-4.6" },
+      [],
+      customParent,
+      grokBot,
+    ),
+    /Model grok-4\.6 belongs to grok, not codex/,
+  );
+
+  const assignedCustom = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "audit",
+      provider: "custom",
+      model: "grok-bot",
+      customBotId: "bot_grok",
+    },
+    [],
+    null,
+    grokBot,
+  );
+  assert.equal(assignedCustom.provider, "custom");
+  assert.equal(assignedCustom.customBotId, "bot_grok");
+});
+
 
 /**
  * A worker reads a file carrying hostile instructions and follows them. It

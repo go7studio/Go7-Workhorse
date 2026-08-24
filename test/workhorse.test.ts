@@ -156,7 +156,7 @@ import {
 } from "../src/lib/markdown";
 import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
-import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats } from "../src/lib/chats";
+import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
 import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
@@ -4978,7 +4978,8 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /project-new/);
   assert.match(sidebar, /project-info/);
   assert.match(sidebar, /lastProjectChat/);
-  assert.match(sidebar, /if \(open\) \{\s*onToggle\(\);\s*return;/);
+  assert.match(sidebar, /if \(open\) \{\s*toggleFolder\(\);\s*return;/);
+  assert.match(sidebar, /if \(open\) setOpenCrew\(\{\}\);/);
   assert.match(sidebar, /if \(last\) store\.selectSession\(last\.id\)/);
   assert.match(sidebar, /store\.selectProject\(project\.id\)/);
   assert.match(css, /\.tool-name\s*\{[\s\S]*text-overflow:\s*ellipsis/);
@@ -5032,6 +5033,14 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.equal(pinnedCollapsedChat(pinRows, false, "a")?.id, "a");
   assert.equal(pinnedCollapsedChat(pinRows, false, "w")?.id, "b");
   assert.equal(pinnedCollapsedChat(pinRows, false, "z")?.id, undefined);
+  assert.equal(workersFoldOpen(true, true), true);
+  assert.equal(workersFoldOpen(true, false), false);
+  assert.equal(workersFoldOpen(false, true), false);
+  assert.match(sidebar, /workersFoldOpen\(open, Boolean\(openCrew/);
+  assert.doesNotMatch(
+    sidebar,
+    /session\.workers\.some\(\(worker\) => worker\.id === store\.activeSessionId\)/,
+  );
   const rows = [1, 2, 3, 4, 5, 6, 7].map((id) => ({ id: String(id) }));
   assert.deepEqual(visibleProjectChats(rows, false).map((item) => item.id), ["1", "2", "3", "4", "5"]);
   assert.deepEqual(visibleProjectChats(rows, false, "7").map((item) => item.id), ["1", "2", "3", "4", "7"]);

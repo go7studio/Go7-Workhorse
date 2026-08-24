@@ -125,7 +125,8 @@ transcript rather than as a path.
 - Search runs over chat titles and message text across every project.
 - Each chat row shows how old the last prompt is in a compact form such as
   `25m`, `2h`, or `3d`. Hover the stamp for the full time. A parent with workers
-  folds them on the count button; they ease open and closed.
+  folds them on the count button. Closing the project hides those workers too,
+  even if that parent stays pinned.
 - A chat that ran a wave says so on its own row: who called it, and how it
   went — `OpenClaw · Working…`, or nothing at all once every worker finished
   clean. Failure is the only word in red; interrupted and timed-out work is

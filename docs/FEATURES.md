@@ -7,7 +7,7 @@ When you add a feature, add it here in the same commit.
 
 | Vendor | How it connects | Notes |
 | --- | --- | --- |
-| Grok | ACP over stdio | Runs the local Grok CLI |
+| Grok | ACP over stdio | Runs the local Grok Build CLI |
 | Claude | ACP over stdio | Runs the local Claude Code CLI |
 | Codex | ACP, plus an App Server | App Server adds native history and capability discovery |
 | Cursor | ACP over stdio | Runs `cursor-agent` |
@@ -15,6 +15,11 @@ When you add a feature, add it here in the same commit.
 
 Each vendor runs under its own login. Subscriptions, context and sandboxes are
 never pooled.
+
+The client and model are separate. For Grok, **Grok Build CLI** is the local
+client; **Grok 4.6** and **Grok 4.5** are model IDs it can run. The CLI's live
+catalog is authoritative as models change. Workhorse records, routes, and
+displays the model identity, never the client name as a model.
 
 OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
 whether each runtime is installed and lets you select its callable agents. A

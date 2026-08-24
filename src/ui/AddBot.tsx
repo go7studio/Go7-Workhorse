@@ -10,7 +10,7 @@ const CATALOG: {
   name: string;
   hint: string;
 }[] = [
-  { id: "grok", name: "Grok", hint: "Local Grok Build." },
+  { id: "grok", name: "Grok", hint: "Local Grok Build CLI." },
   { id: "codex", name: "Codex", hint: "Local Codex." },
   { id: "claude", name: "Claude", hint: "Local Claude Code." },
   { id: "cursor", name: "Cursor", hint: "Local Cursor Agent." },

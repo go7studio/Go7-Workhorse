@@ -5,7 +5,7 @@ export const PROVIDERS: Provider[] = [
     id: "grok",
     name: "Grok",
     short: "G",
-    tagline: "Grok Build via ACP",
+    tagline: "Grok Build CLI via ACP",
     connected: false,
     statusNote: "Adapter ready. Uses your existing Grok login on this machine.",
   },

@@ -10,7 +10,7 @@ may read. Do not add operator Bibles, studio memory, or working papers here.
 
 - **A project is a named container.** Create it with a name only. Folders and other references are optional links, added later.
 - **Chats belong to a project.** Rename, archive, delete, or drag a chat onto another project. Archived chats stay on that project until unarchived.
-- **A chat starts, then you pick the model.** The composer menu holds vendor, model (Grok 4.5 / 4.6 / Build, Claude, Codex), and brain effort. Do not put a brain picker in front of New chat.
+- **A chat starts, then you pick the model.** The composer menu holds vendor, model (for example Grok 4.6 or GPT-5.6-Sol), and brain effort. A vendor client such as the Grok Build CLI or Codex CLI is not a model. Do not put a brain picker in front of New chat.
 - **Tools** (Figma, GitHub, and so on) attach to a runtime. They are not extra tabs.
 - Permissions are one inbox. Each click is translated to that vendor’s own protocol later.
 - **Settings holds Profile, connected LLMs, skills, routing, learning, usage, watch.** Usage is not a top-level sidebar item. Adapters call `recordUsage`. Do not invent tokens for preview chats.
@@ -29,7 +29,7 @@ src/styles/   design tokens and layout
 
 - Keep the UI learnable: few files, plain names, no extra frameworks.
 - Adapters live behind `src/lib/providers.ts`. Do not call vendor CLIs from React components.
-- Grok, Codex, Claude, and Cursor are live ACP adapters (Electron main only). Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login. Cursor usage is two pools (Composer/Cursor Grok vs Other Models). Do not fold Cursor into Grok. Custom HTTP includes a Grok Bot preset on 127.0.0.1:8787; its weekly leftover reads `grok-bot-leftover.json` into that bot’s custom plan slot only. Workhorse never writes that file.
+- Grok (through the Grok Build CLI), Codex, Claude, and Cursor are live ACP adapters (Electron main only). Client/runtime identity and model identity stay separate. Custom is live HTTP from a pasted Anthropic/OpenAI-compatible URL and key. Never invent a login. Cursor usage is two pools (Composer/Cursor Grok vs Other Models). Do not fold Cursor into Grok. Custom HTTP includes a Grok Bot preset on 127.0.0.1:8787; its weekly leftover reads `grok-bot-leftover.json` into that bot’s custom plan slot only. Workhorse never writes that file.
 - **Workhorse Link** is how an outside runtime talks to this desk: capabilities, capacity, chats, read, ask, delegate. Connect Grok is `grok mcp add` (TUI). Connect Grok Bot is the same launch plus a one-shot paste; Grok Bot must persist it off the remote box. Workhorse owns that shim on Mac and Windows. Do not rebind the desk bridge.
 - Apple-like means space, hairlines, and short motion — not decoration.
 

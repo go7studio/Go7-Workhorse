@@ -57,9 +57,17 @@ async function call(model: string) {
 
 const calls = [];
 for (const model of models) calls.push(await call(model));
+const discoveredRequestedModels = models.map((model) => discovered.includes(model));
+if (discoveredRequestedModels.some((found) => !found)) {
+  throw new Error("The live catalog did not expose both requested models on this key.");
+}
+if (calls.some((item) => !item.exactReply)) throw new Error("A requested model failed the deterministic reply contract.");
+if (calls.some((item) => item.observedModel !== item.requestedModel)) {
+  throw new Error("A response did not prove the exact requested model identity.");
+}
 console.log(JSON.stringify({
   connection: new URL(baseUrl).host,
-  discoveredRequestedModels: models.map((model) => discovered.includes(model)),
+  discoveredRequestedModels,
   calls,
   sameKey: true,
   distinctRequestedModels: new Set(calls.map((item) => item.requestedModel)).size === 2,

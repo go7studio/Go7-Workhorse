@@ -45,7 +45,7 @@
     {
       "id": "cursor-acp",
       "provider": "cursor",
-      "tokenSource": "ACP request or authoritative turn usage when supplied; otherwise unknown",
+      "tokenSource": "ACP request or authoritative turn usage when supplied; otherwise a Cursor-only four-characters-per-token estimate",
       "tokenBoundary": "electron/grok-agent.ts",
       "leftoverBoundary": "electron/cursor-plan.ts",
       "pools": ["cursor:cursor-models", "cursor:other-models"],

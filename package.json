@@ -38,6 +38,7 @@
     "eval:validate": "node scripts/workhorse-eval.mjs validate",
     "eval:list": "node scripts/workhorse-eval.mjs list",
     "eval:init": "node scripts/workhorse-eval.mjs init",
+    "eval:start": "node scripts/workhorse-eval.mjs start",
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
     "eval:smoke": "tsx test/provider-live-smoke.ts",
     "eval:multi-model-smoke": "tsx test/custom-multi-model-live-smoke.ts",

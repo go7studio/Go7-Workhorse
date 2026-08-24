@@ -3,12 +3,13 @@
   "$id": "https://go7.studio/workhorse/eval/scenario-evidence.schema.json",
   "title": "Workhorse scenario evidence",
   "type": "object",
-  "required": ["schemaVersion", "runId", "scenarioId", "status", "profiles", "observations", "artifacts"],
+  "required": ["schemaVersion", "runId", "scenarioId", "status", "trustTier", "profiles", "actions", "observations", "artifacts", "regressions", "provenance"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "runId": { "type": "string", "minLength": 1 },
     "scenarioId": { "type": "string", "pattern": "^[A-Z]{3}-S[0-9]+$" },
     "status": { "enum": ["completed", "blocked", "error", "not_run"] },
+    "trustTier": { "enum": ["manifest", "unit", "source", "packaged-live"] },
     "startedAt": { "type": "string", "format": "date-time" },
     "finishedAt": { "type": "string", "format": "date-time" },
     "profiles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
@@ -44,17 +45,22 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "kind", "path", "redacted"],
+        "required": ["id", "kind", "path", "sha256", "redacted"],
         "properties": {
           "id": { "type": "string" },
           "kind": { "enum": ["screenshot", "video", "state", "launch", "http", "log", "support", "file", "clipboard"] },
-          "path": { "type": "string" },
+          "path": { "type": "string", "pattern": "^evidence/[A-Za-z0-9._/-]+$" },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "redacted": { "type": "boolean" },
           "description": { "type": "string" }
         },
         "additionalProperties": false
       }
+    },
+    "regressions": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^REG-[0-9]{3}$" },
+      "uniqueItems": true
     },
     "provenance": {
       "type": "array",
@@ -65,12 +71,24 @@
           "profile": { "type": "string" },
           "stage": { "enum": ["selection", "launch-or-request", "runtime-observation", "transcript", "usage"] },
           "value": { "type": ["string", "null"] },
-          "evidence": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^evidence/[A-Za-z0-9._/-]+$" } },
           "uncertain": { "type": "boolean" }
         },
         "additionalProperties": false
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "status": { "const": "completed" } }, "required": ["status"] },
+    "then": {
+      "properties": {
+        "profiles": { "minItems": 1 },
+        "actions": { "minItems": 1 },
+        "observations": { "minItems": 1 },
+        "artifacts": { "minItems": 1 },
+        "provenance": { "minItems": 1 }
+      }
+    }
+  }],
   "additionalProperties": false
 }

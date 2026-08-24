@@ -16,8 +16,8 @@
           "properties": {
             "verdict": { "enum": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"] },
             "notes": { "type": "string" },
-            "evidence": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-            "profiles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "evidence": { "type": "array", "items": { "type": "string", "pattern": "^evidence/[A-Z]{3}-S[0-9]+[.]json$" }, "uniqueItems": true },
+            "profiles": { "type": "array", "items": { "enum": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"] }, "uniqueItems": true },
             "defects": { "type": "array", "items": { "type": "string" } }
           },
           "additionalProperties": false

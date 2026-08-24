@@ -17,6 +17,7 @@ import {
   learningCompiles,
   learningAutoPromotes,
   outcomeIsVerified,
+  outcomeVerification,
   MISMATCH_INTELLIGENCE_LANE,
   mismatchCompilerPrompt,
   parseBriefText,
@@ -511,8 +512,12 @@ export class LearningService {
       const outputIds: string[] = [];
       const apply = (proposal: (typeof brief.intent)[number]) => {
         const sourceEvents = events.filter((event) => proposal.sourceEventIds.includes(event.id));
-        const verified = sourceEvents
-          .some((event) => outcomeIsVerified((event.payload.signals as Parameters<typeof outcomeIsVerified>[0]) ?? {}));
+        const verified = sourceEvents.some((event) => {
+          const signals = (event.payload.signals as Parameters<typeof outcomeIsVerified>[0]) ?? {};
+          return lane === AGENT_INTELLIGENCE_LANE
+            ? outcomeVerification(signals) !== "none"
+            : outcomeIsVerified(signals);
+        });
         const correlationIds = [...new Set(sourceEvents.map((event) => event.correlationId).filter((id): id is string => Boolean(id)))];
         const status = promoteProposal(proposal, mode, verified || learningAutoPromotes(mode) && proposal.memoryClass === "intent");
         if (proposal.supersedesId) {

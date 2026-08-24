@@ -137,14 +137,30 @@ export type OutcomeSignals = {
   userAccepted?: boolean;
   userRejected?: boolean;
   testsPassed?: boolean;
+  testsFailed?: boolean;
   artifactChecked?: boolean;
+  artifactRejected?: boolean;
   adapterTerminal?: boolean;
   agentClaimed?: boolean;
 };
 
+export type OutcomeVerification = "positive" | "negative" | "none";
+
+/**
+ * Evidence quality is not adapter lifecycle. A provider reaching a terminal
+ * event proves that the transport stopped, not that the work was correct.
+ *
+ * Negative evidence stays distinct so routing can learn from a rejected or
+ * test-proven failure without promoting that event as an accepted memory.
+ */
+export function outcomeVerification(signals: OutcomeSignals): OutcomeVerification {
+  if (signals.userRejected || signals.testsFailed || signals.artifactRejected) return "negative";
+  if (signals.userAccepted || signals.testsPassed || signals.artifactChecked) return "positive";
+  return "none";
+}
+
 export function outcomeIsVerified(signals: OutcomeSignals): boolean {
-  if (signals.userRejected) return false;
-  return Boolean(signals.userAccepted || signals.testsPassed || signals.artifactChecked || signals.adapterTerminal);
+  return outcomeVerification(signals) === "positive";
 }
 
 export function memoryVisibleTo(item: MemoryItem, query: RetrievalQuery, now = query.now ?? Date.now()): boolean {

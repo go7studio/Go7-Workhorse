@@ -32,6 +32,7 @@ import {
   memoryVisibleTo,
   mismatchCompilerPrompt,
   outcomeIsVerified,
+  outcomeVerification,
   parseBriefText,
   selectAdaptiveRoute,
   UNTRUSTED_MEMORY_FRAME,
@@ -193,8 +194,10 @@ test("evidence gate rejects agent claims alone", () => {
   assert.equal(outcomeIsVerified({ testsPassed: true }), true);
   assert.equal(outcomeIsVerified({ userAccepted: true }), true);
   assert.equal(outcomeIsVerified({ artifactChecked: true }), true);
-  assert.equal(outcomeIsVerified({ adapterTerminal: true }), true);
+  assert.equal(outcomeIsVerified({ adapterTerminal: true }), false);
   assert.equal(outcomeIsVerified({ userRejected: true, testsPassed: true }), false);
+  assert.equal(outcomeVerification({ testsFailed: true }), "negative");
+  assert.equal(outcomeVerification({ adapterTerminal: true }), "none");
 });
 
 test("agent turn evidence captures outputs, tools, tests, and artifacts without reasoning text", () => {
@@ -232,8 +235,30 @@ test("agent turn evidence captures outputs, tools, tests, and artifacts without 
   assert.deepEqual(evidence.payload.artifactPaths, ["src/release.ts"]);
   assert.equal(evidence.payload.reasoningObserved, true);
   assert.equal(evidence.payload.reasoningStepCount, 1);
+  assert.equal(evidence.payload.outcomeEvidenceVersion, 1);
+  assert.equal(evidence.payload.deliveryState, "interrupted");
+  assert.equal(evidence.payload.evidenceClass, "verified-failure");
   assert.deepEqual(evidence.toolIds, ["call_test", "call_write"]);
   assert.doesNotMatch(JSON.stringify(evidence.payload), /private reasoning must stay out/);
+});
+
+test("agent outcome evidence separates transport failure from task quality", () => {
+  const transport = agentTurnEvidence({
+    assistantId: "msg_transport",
+    outcome: "failed",
+    error: "Gateway connection timed out",
+    messages: [{ id: "msg_transport", role: "assistant", text: "", createdAt: 10 }],
+  });
+  assert.equal(transport.payload.deliveryState, "not-delivered");
+  assert.equal(transport.payload.evidenceClass, "infrastructure-failure");
+
+  const unverified = agentTurnEvidence({
+    assistantId: "msg_claim",
+    outcome: "completed",
+    messages: [{ id: "msg_claim", role: "assistant", text: "I finished it.", createdAt: 10 }],
+  });
+  assert.equal(unverified.payload.deliveryState, "delivered");
+  assert.equal(unverified.payload.evidenceClass, "unverified");
 });
 
 test("correction supersedes the old memory and both remain auditable", async () => {
@@ -872,7 +897,9 @@ test("human, agent, and mismatch intelligence compile end to end without blendin
     payload: {
       summary: "Release verification failed because tests failed",
       status: "failed",
-      signals: { adapterTerminal: true, testsPassed: false, agentClaimed: true },
+      outcomeEvidenceVersion: 1,
+      evidenceClass: "verified-failure",
+      signals: { adapterTerminal: true, testsPassed: false, testsFailed: true, agentClaimed: true },
     },
   }));
 

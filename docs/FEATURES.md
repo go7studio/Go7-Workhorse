@@ -244,13 +244,17 @@ transcript rather than as a path.
   bots, several independent reviews, or a named list. Equal-intelligence picks
   go to the cheaper slot. A model with its own extra pool is kept for visual,
   creative, or complex work. Settings → Routing turns that off, and tunes how
-  any routing weighs leftover, reserve, and local models.
+  any routing weighs leftover, reserve, and local models. When Learning is on,
+  a manually picked chat stays on that exact model while the
+  private learning store records what Auto would have recommended. The record
+  contains bounded task characteristics and model identities, never the raw
+  prompt.
 
 ## Memory
 
 - A private learning store on your own disk, in SQLite.
 - The compiler is a custom bot. Settings → Learning can backfill the last day of human prompts from saved chats.
-- Human intent, agent performance, and mismatches between them compile as separate private lanes. Agent evidence includes model outcomes, terminal tools, retries, tests, artifacts, usage, errors, and inbound Workhorse Link calls from a harness (tool, envelope, and outcome — not keys or chat text).
+- Human intent, agent performance, and mismatches between them compile as separate private lanes. Agent evidence includes model outcomes, terminal tools, retries, tests, artifacts, usage, errors, and inbound Workhorse Link calls from a harness (tool, envelope, and outcome — not keys or chat text). Delivery and task quality stay separate: a provider reaching a terminal event is not a verified success, and network or transport failures do not lower a model’s task-quality record.
 - Settings shows index counts and inferred memories, not raw prompt text or internal provenance ids.
 - Export it, or wipe it, from Settings.
 - Nothing is sent anywhere to hold it.

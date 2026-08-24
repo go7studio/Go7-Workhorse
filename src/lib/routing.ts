@@ -13,7 +13,7 @@ import type {
 import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
-import { outcomeIsVerified } from "./learning-policy";
+import { outcomeVerification } from "./learning-policy";
 import { modelsFor, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
@@ -75,12 +75,53 @@ export type RankedRoutingCandidate = RoutingCandidate & {
   usedPercent?: number;
 };
 
+export const ROUTING_EVIDENCE_VERSION = 1;
+export const ROUTING_POLICY_VERSION = "fit-capacity-outcomes-v1";
+
+export type RoutingEvidenceMode = "live-auto" | "shadow";
+export type RoutingEvidenceSource = "chat" | "spawn";
+
+export type RoutingTaskSignatureV1 = {
+  version: 1;
+  tier: RoutingTaskTier;
+  domain: TaskDomain;
+  role?: RoutingJobRole;
+  promptLength: "empty" | "short" | "medium" | "long";
+  attachmentKinds: Partial<Record<NonNullable<ChatImage["kind"]>, number>>;
+  requirements: Partial<ModelInputCapabilities>;
+  contextNeed: "unknown" | "small" | "medium" | "large";
+  explicitTier: boolean;
+};
+
+export type RoutingDecisionEvidenceV1 = {
+  routingEvidenceVersion: 1;
+  policyVersion: string;
+  mode: RoutingEvidenceMode;
+  source: RoutingEvidenceSource;
+  task: RoutingTaskSignatureV1;
+  selected: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
+  recommendation: Pick<RoutingCandidate, "provider" | "model" | "customBotId"> & { score: number };
+  runnerUp?: Pick<RoutingCandidate, "provider" | "model" | "customBotId"> & { score: number };
+  margin?: number;
+  eligibleCandidateCount: number;
+  selectedMatchesRecommendation: boolean;
+};
+
 export function shouldRouteSessionTurn(input: {
   routingMode?: "auto" | "manual";
   text: string;
   hideUser?: boolean;
 }): boolean {
   return input.routingMode === "auto" && !input.hideUser && !input.text.startsWith("/");
+}
+
+export function shouldShadowRouteSessionTurn(input: {
+  learningEnabled: boolean;
+  routingMode?: "auto" | "manual";
+  text: string;
+  hideUser?: boolean;
+}): boolean {
+  return input.learningEnabled && input.routingMode !== "auto" && !input.hideUser && !input.text.startsWith("/");
 }
 
 export function routingIdentityExcluded(
@@ -617,10 +658,17 @@ export function outcomesFromLearningEvents(
   for (const event of events) {
     if (event.kind !== "outcome" || event.tombstone || event.purged) continue;
     if (!event.provider || !event.model?.trim()) continue;
+    const evidenceClass = String(event.payload?.evidenceClass ?? "");
     const signals = event.payload?.signals;
-    if (!outcomeIsVerified(signals && typeof signals === "object" ? signals : {})) continue;
+    const verification = outcomeVerification(signals && typeof signals === "object" ? signals : {});
     const status = String(event.payload?.status ?? event.payload?.outcome ?? "").toLowerCase();
-    const failed = status === "failed" || status === "safety-paused" || status === "cancelled";
+    const verifiedSuccess = evidenceClass
+      ? evidenceClass === "verified-success" && status === "completed" && verification === "positive"
+      : status === "completed" && verification === "positive";
+    const verifiedFailure = evidenceClass
+      ? evidenceClass === "verified-failure" && verification === "negative"
+      : verification === "negative";
+    if (!verifiedSuccess && !verifiedFailure) continue;
     const key = `${event.provider}\0${event.model}\0${event.customBotId ?? ""}`;
     const current = map.get(key) ?? {
       provider: event.provider,
@@ -629,11 +677,101 @@ export function outcomesFromLearningEvents(
       verifiedSuccesses: 0,
       verifiedFailures: 0,
     };
-    if (failed) current.verifiedFailures += 1;
+    if (verifiedFailure) current.verifiedFailures += 1;
     else current.verifiedSuccesses += 1;
     map.set(key, current);
   }
   return [...map.values()];
+}
+
+function promptLengthBucket(prompt: string): RoutingTaskSignatureV1["promptLength"] {
+  const length = prompt.trim().length;
+  if (length === 0) return "empty";
+  if (length < 180) return "short";
+  if (length <= 1_200) return "medium";
+  return "long";
+}
+
+function contextNeedBucket(contextNeed?: number): RoutingTaskSignatureV1["contextNeed"] {
+  if (!contextNeed) return "unknown";
+  if (contextNeed < 32_000) return "small";
+  if (contextNeed < 128_000) return "medium";
+  return "large";
+}
+
+export function routingTaskSignature(request: RoutingRequest): RoutingTaskSignatureV1 {
+  const attachmentKinds: RoutingTaskSignatureV1["attachmentKinds"] = {};
+  for (const attachment of request.attachments ?? []) {
+    const kind = attachment.kind ?? "image";
+    attachmentKinds[kind] = (attachmentKinds[kind] ?? 0) + 1;
+  }
+  const requirements = Object.fromEntries(
+    Object.entries(request.requirements ?? {}).filter(([, required]) => required === true),
+  ) as Partial<ModelInputCapabilities>;
+  return {
+    version: ROUTING_EVIDENCE_VERSION,
+    tier:
+      request.tier ??
+      inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier }),
+    domain: request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments),
+    role: request.role,
+    promptLength: promptLengthBucket(request.prompt),
+    attachmentKinds,
+    requirements,
+    contextNeed: contextNeedBucket(request.contextNeed),
+    explicitTier: request.tier !== undefined,
+  };
+}
+
+/**
+ * Privacy-safe evidence for both live Auto decisions and manual shadow
+ * recommendations. The prompt never enters the payload; only bounded task
+ * characteristics and model identities are retained.
+ */
+export function routingDecisionEvidence(input: {
+  candidates: RoutingCandidate[];
+  request: RoutingRequest;
+  settings: RoutingSettings;
+  selected: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
+  mode: RoutingEvidenceMode;
+  source: RoutingEvidenceSource;
+}): RoutingDecisionEvidenceV1 | null {
+  const ranked = rankRoutingCandidates(input.candidates, input.request, input.settings);
+  const recommendation = ranked[0];
+  if (!recommendation) return null;
+  const runnerUp = ranked[1];
+  const selected = {
+    provider: input.selected.provider,
+    model: input.selected.model,
+    ...(input.selected.customBotId ? { customBotId: input.selected.customBotId } : {}),
+  };
+  return {
+    routingEvidenceVersion: ROUTING_EVIDENCE_VERSION,
+    policyVersion: ROUTING_POLICY_VERSION,
+    mode: input.mode,
+    source: input.source,
+    task: routingTaskSignature(input.request),
+    selected,
+    recommendation: {
+      provider: recommendation.provider,
+      model: recommendation.model,
+      ...(recommendation.customBotId ? { customBotId: recommendation.customBotId } : {}),
+      score: recommendation.score,
+    },
+    ...(runnerUp
+      ? {
+          runnerUp: {
+            provider: runnerUp.provider,
+            model: runnerUp.model,
+            ...(runnerUp.customBotId ? { customBotId: runnerUp.customBotId } : {}),
+            score: runnerUp.score,
+          },
+          margin: Math.round((recommendation.score - runnerUp.score) * 10) / 10,
+        }
+      : {}),
+    eligibleCandidateCount: ranked.length,
+    selectedMatchesRecommendation: sameRoutingIdentity(selected, recommendation),
+  };
 }
 
 function outcomeFor(

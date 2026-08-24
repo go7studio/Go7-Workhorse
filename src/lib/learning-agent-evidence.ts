@@ -1,8 +1,19 @@
 import { pathFromToolText, splitToolLine, toolIsFinished } from "./grok-events";
 import { boundText } from "./learning-redact";
+import { outcomeVerification, type OutcomeSignals } from "./learning-policy";
 import type { ChatMessage } from "./types";
 
 export type AgentTurnOutcome = "completed" | "failed" | "safety-paused" | "cancelled";
+export type AgentTurnDeliveryState = "delivered" | "interrupted" | "not-delivered";
+export type AgentTurnEvidenceClass =
+  | "verified-success"
+  | "verified-failure"
+  | "infrastructure-failure"
+  | "unverified"
+  | "safety-paused"
+  | "cancelled";
+
+export const OUTCOME_EVIDENCE_VERSION = 1;
 
 export type AgentTurnEvidenceInput = {
   messages: ChatMessage[];
@@ -24,6 +35,33 @@ function isTestTool(title: string, detail: string): boolean {
 
 function isArtifactTool(title: string): boolean {
   return /\b(write|edit|create|patch|render|export|save|screenshot)\b/i.test(title);
+}
+
+function isInfrastructureFailure(error?: string, stopReason?: string): boolean {
+  return /\b(?:429|5\d\d|connection|connectivity|disconnect|gateway|network|offline|process exited|rate limit|socket|timed? out|timeout|transport|unavailable)\b/i.test(
+    `${error ?? ""} ${stopReason ?? ""}`,
+  );
+}
+
+function classifyOutcome(input: {
+  outcome: AgentTurnOutcome;
+  hasActivity: boolean;
+  infrastructureFailure: boolean;
+  signals: OutcomeSignals;
+}): { deliveryState: AgentTurnDeliveryState; evidenceClass: AgentTurnEvidenceClass } {
+  const deliveryState: AgentTurnDeliveryState =
+    input.outcome === "failed" ? (input.hasActivity ? "interrupted" : "not-delivered") : "delivered";
+  if (input.outcome === "safety-paused") return { deliveryState, evidenceClass: "safety-paused" };
+  if (input.outcome === "cancelled") return { deliveryState, evidenceClass: "cancelled" };
+  const verification = outcomeVerification(input.signals);
+  // A failed test or rejected artifact is direct task evidence even when the
+  // adapter later disconnects while reporting it.
+  if (verification === "negative") return { deliveryState, evidenceClass: "verified-failure" };
+  if (input.infrastructureFailure) return { deliveryState, evidenceClass: "infrastructure-failure" };
+  if (verification === "positive" && input.outcome === "completed") {
+    return { deliveryState, evidenceClass: "verified-success" };
+  }
+  return { deliveryState, evidenceClass: "unverified" };
 }
 
 export function agentTurnEvidence(input: AgentTurnEvidenceInput): {
@@ -53,9 +91,23 @@ export function agentTurnEvidence(input: AgentTurnEvidenceInput): {
     .filter(Boolean);
   const finalOutput = (assistant?.text ?? "").trim() || input.queuedText?.trim() || "";
   const testsPassed = testCalls.length > 0 && testCalls.every((tool) => toolIsFinished(tool.status) && !isFailure(tool.status));
+  const testsFailed = testCalls.some((tool) => isFailure(tool.status));
+  const signals: OutcomeSignals = {
+    adapterTerminal: true,
+    testsPassed,
+    testsFailed,
+    agentClaimed: Boolean(finalOutput),
+  };
+  const classification = classifyOutcome({
+    outcome: input.outcome,
+    hasActivity: Boolean(finalOutput || toolCalls.length || thoughts.length),
+    infrastructureFailure: input.outcome === "failed" && isInfrastructureFailure(input.error, input.stopReason),
+    signals,
+  });
   return {
     toolIds: toolCalls.map((tool) => tool.id),
     payload: {
+      outcomeEvidenceVersion: OUTCOME_EVIDENCE_VERSION,
       summary: boundText(
         finalOutput || input.error || `Agent turn ${input.outcome.replace("-", " ")}`,
         1_200,
@@ -73,11 +125,9 @@ export function agentTurnEvidence(input: AgentTurnEvidenceInput): {
       artifactPaths: [...new Set(artifactPaths)].slice(0, 20),
       reasoningObserved: thoughts.length > 0,
       reasoningStepCount: thoughts.length,
-      signals: {
-        adapterTerminal: true,
-        testsPassed,
-        agentClaimed: Boolean(finalOutput),
-      },
+      deliveryState: classification.deliveryState,
+      evidenceClass: classification.evidenceClass,
+      signals,
     },
   };
 }

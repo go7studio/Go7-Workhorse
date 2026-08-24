@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "0.8.2",
+  "contractVersion": "0.8.3",
   "title": "Multi-agent, cross-chat, and goal orchestration contract",
   "referenceWalk": {
     "product": "Cursor",
@@ -65,6 +65,23 @@
       "workhorse_agent_status",
       "workhorse_cancel_agent"
     ],
+    "grokBotSetup": {
+      "source": "src/lib/workhorse-link.ts#linkGrokBotOneshot",
+      "hosts": ["darwin", "win32"],
+      "modelRequirement": "No fixed Grok Bot model; the selected model must support local MCP/CLI tool calling.",
+      "workerRouting": "Workhorse independently selects delegated worker provider, model, and effort unless the user explicitly assigns them.",
+      "usageExporter": "The weekly usage producer is LLM-free; no model may supply or infer usage.",
+      "requiredInstructions": [
+        "permanent memory",
+        "local computer versus remote scratch",
+        "capabilities first",
+        "exact Link tools and follow-through",
+        "permission allowlist",
+        "loopback and secret boundaries",
+        "weekly usage exporter",
+        "capacity verification"
+      ]
+    },
     "sourceFiles": [
       "electron/agent-runtime-host.ts",
       "electron/mcp-exposure.ts",
@@ -84,8 +101,10 @@
       "src/lib/plan-admission.ts",
       "src/lib/ask-default.ts",
       "src/lib/turns.ts",
+      "src/lib/workhorse-link.ts",
       "src/ui/ChatRow.tsx",
-      "src/ui/GoalBar.tsx"
+      "src/ui/GoalBar.tsx",
+      "test/workhorse-link.test.ts"
     ],
     "goalCommands": [
       "/goal <objective>",

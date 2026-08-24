@@ -375,6 +375,10 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /one-shot install for Grok Bot/);
   assert.match(text, /permanent agent \/ session memory/);
   assert.match(text, /remote box is scratch/);
+  assert.match(text, /Model: no fixed Grok Bot model/);
+  assert.match(text, /only needs local MCP\/CLI tool calling/);
+  assert.match(text, /Workhorse routes delegated workers/);
+  assert.match(text, /weekly exporter is LLM-free/);
   assert.match(text, /user's Mac/);
   assert.match(text, /workhorse capabilities/);
   assert.match(text, /Install workhorse command/);

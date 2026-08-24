@@ -15,7 +15,9 @@ through its own tool (`codex mcp add`, `claude mcp add`, `grok mcp add`,
 same launch plus install steps for this computer (Mac or Windows); paste it
 into Grok Bot once and tell it to save in permanent agent memory (the remote
 box is scratch). The handoff replaces older leftover setup and tells Grok Bot
-to keep a local, non-LLM weekly-usage exporter current. Workhorse keeps a private loopback shim on Mac and Windows.
+to keep a local, non-LLM weekly-usage exporter current. It requires no fixed
+Grok Bot model; the selected model only needs local MCP/CLI tool calling, and
+Workhorse routes delegated workers. Workhorse keeps a private loopback shim on Mac and Windows.
 Each install has its own loopback token; 8787 is not a shared open API. A
 webhook key, if used, lives only in `grok-bot-wake.json` on that computer.
 Grok Bot writes `grok-bot-leftover.json` from its real runtime reading now, on

@@ -76,7 +76,8 @@ expired, or over-30-minute-old readings stay unknown. Workhorse never writes tha
 file and never folds Cursor Composer / Other Models monthly leftover onto this ring.
 The Grok Bot handoff replaces older setup and requires fresh runtime values on
 launch, after work, and every 15 minutes while active; it never asks a model to
-invent them.
+invent them. It names no fixed Grok Bot model: the selected model only needs
+local MCP/CLI tool calling, and Workhorse routes delegated workers.
 The connection fails closed if the shim is down. It is not a fifth stock vendor.
 
 ## Files you can hand a chat

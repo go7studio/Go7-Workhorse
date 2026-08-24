@@ -42,6 +42,8 @@
             "If discovery omits a valid model, add its id manually and approve it without creating another connection.",
             "Switch between two approved models on one custom connection and verify one connection card and usage ring retain separate model rows.",
             "Run two bounded calls through one Synthetic key, verify Kimi and GLM request identities reach the HTTP boundary, then revoke one model and verify its chats fall back before another call.",
+            "Generate Connect Grok Bot instructions for Mac and Windows and verify permanent memory, local-versus-remote execution, capabilities-first discovery, exact Link tools and follow-through, permission allowlists, loopback boundaries, the weekly exporter, and final capacity proof are present.",
+            "Verify the Grok Bot handoff requires local MCP/CLI tool calling but names no fixed model, leaves delegated worker model and effort selection to Workhorse unless explicitly assigned, and never uses a model to produce usage.",
             "Save, disable, re-enable, edit, and remove one bot.",
             "Verify secrets are masked and never copied into ordinary persisted state or support exports."
           ]
@@ -94,8 +96,8 @@
           "testability": "auto-partial",
           "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-anthropic"],
           "scenarios": ["SET-S1", "SET-S2"],
-          "passCriteria": "Grok, Codex, Claude, Cursor, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit.",
-          "evidence": "Harness inventory screenshots plus detection payloads with secrets removed.",
+          "passCriteria": "Grok, Codex, Claude, Cursor, OpenAI-compatible, and Anthropic-compatible paths are visible; detected does not mean authenticated; missing binaries and login needs are explicit. Connect Grok Bot emits complete Mac and Windows setup instructions, states the local MCP/CLI capability requirement without fixing a model, leaves worker routing to Workhorse, and keeps usage export LLM-free.",
+          "evidence": "Harness inventory screenshots, detection payloads with secrets removed, and generated Mac and Windows Grok Bot handoffs.",
           "baseline": { "status": "partial", "basis": "Static source walk: Settings and Welcome both enumerate stock and custom connections with readiness labels; live evidence must still prove Ready, Recognized, Sign in needed, Unavailable, and Not found match binary, authentication, and ACP facts." }
         },
         {

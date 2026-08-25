@@ -1042,6 +1042,7 @@ function probeRuntime(): string {
     ? run("xcrun", ["simctl", "list", "devices", "available", "--json"])
     : { available: false, output: "" };
   const settings = normalizeSettings(readState().settings);
+  const enabledMcpServers = settings.mcpServers.filter((server) => server.enabled !== false);
   return JSON.stringify(
     {
       godot,
@@ -1050,8 +1051,8 @@ function probeRuntime(): string {
         devices: adb.output.split("\n").filter((line) => /\bdevice\b/.test(line)),
       },
       ios: { available: ios.available },
-      mcp: settings.mcpServers.map((server) => server.name),
-      computerUse: settings.mcpServers.some((server) => /computer|desktop|screen/i.test(server.name)),
+      mcp: enabledMcpServers.map((server) => server.name),
+      computerUse: enabledMcpServers.some((server) => /computer|desktop|screen/i.test(server.name)),
     },
     null,
     2,

@@ -8,6 +8,7 @@ import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
+import { probeMcpServer } from "./mcp-tool-bridge";
 import { guardIpcSender } from "./ipc-sender";
 import { detectGrokLogin } from "./grok-login";
 import { detectCodexLogin } from "./codex-login";
@@ -1111,6 +1112,13 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
+  });
+  ipcMain.handle("mcp:probe", async (_event, serverName: unknown) => {
+    const name = typeof serverName === "string" ? serverName.trim() : "";
+    if (!name) return { ok: false, message: "Choose a saved MCP server.", tools: [] };
+    const saved = normalizeSettings(readState().settings).mcpServers.find((server) => server.name === name);
+    if (!saved) return { ok: false, message: "Save this MCP server before testing it.", tools: [] };
+    return probeMcpServer(saved);
   });
   ipcMain.handle("models:list", () => listVendorModels());
   ipcMain.removeHandler("grok:plan-usage");

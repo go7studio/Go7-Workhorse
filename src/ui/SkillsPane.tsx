@@ -3,6 +3,7 @@ import { filterDeskSkills, skillBodyFromMarkdown } from "../lib/skills-catalog";
 import { useStore } from "../lib/store";
 import type { SkillOrigin } from "../lib/types";
 import { MessageBody } from "./MessageBody";
+import { McpServersPane } from "./McpServersPane";
 
 const FILTERS: { id: "all" | SkillOrigin; label: string }[] = [
   { id: "all", label: "All" },
@@ -137,6 +138,12 @@ export function SkillsPane() {
 
   return (
     <>
+      <McpServersPane />
+      <div className="settings-section-divider" />
+      <div className="link-head skills-heading">
+        <strong>Skills</strong>
+        <span className="row-meta">Reusable instructions from your agent homes and projects.</span>
+      </div>
       <input
         className="settings-search"
         type="search"

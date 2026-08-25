@@ -40,6 +40,51 @@ test("custom API credentials leave normal state and round-trip through the encry
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("MCP environment values leave normal state and round-trip through the encrypted vault", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-mcp-credentials-"));
+  const file = path.join(root, "credentials.json");
+  const vault = new CredentialStore(file, cipher);
+  const original = {
+    settings: {
+      llms: { custom: {} },
+      customBots: [],
+      mcpServers: [{ name: "github", command: "github-mcp", args: [], env: { GITHUB_TOKEN: "github-secret" } }],
+    },
+  };
+  const protectedState = protectStateCredentials(original, vault);
+  const server = protectedState.settings.mcpServers[0] as { env?: Record<string, string>; envCredentialIds?: Record<string, string> } | undefined;
+  assert.equal(server?.env, undefined);
+  assert.ok(server?.envCredentialIds?.GITHUB_TOKEN);
+  assert.doesNotMatch(JSON.stringify(protectedState), /github-secret/);
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), /github-secret/);
+
+  const hydrated = hydrateStateCredentials(protectedState, new CredentialStore(file, cipher));
+  assert.equal(hydrated.settings.mcpServers[0]?.env?.GITHUB_TOKEN, "github-secret");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("removed MCP environment values are pruned from the encrypted vault", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-mcp-prune-"));
+  const file = path.join(root, "credentials.json");
+  const vault = new CredentialStore(file, cipher);
+  const protectedState = protectStateCredentials({
+    settings: {
+      llms: { custom: {} },
+      customBots: [],
+      mcpServers: [{ name: "github", command: "github-mcp", args: [], env: { GITHUB_TOKEN: "github-secret" } }],
+    },
+  }, vault);
+  const id = (protectedState.settings.mcpServers[0] as { envCredentialIds?: Record<string, string> } | undefined)?.envCredentialIds?.GITHUB_TOKEN;
+  assert.ok(id);
+  assert.equal(vault.get(id), "github-secret");
+  protectStateCredentials({
+    settings: { llms: { custom: {} }, customBots: [], mcpServers: [] },
+  }, vault);
+  assert.equal(vault.get(id), "");
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), new RegExp(String(id)));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("credential protection refuses plaintext persistence when OS encryption is unavailable", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-credentials-off-"));
   const unavailable: SecretCipher = { ...cipher, isEncryptionAvailable: () => false };
@@ -61,6 +106,7 @@ test("a locked credential vault does not freeze non-secret desk saves", () => {
       settings: {
         llms: { custom: { apiKey: "default-secret", credentialId: "custom-default" } },
         customBots: [{ id: "bot-1", apiKey: "bot-secret", credentialId: "custom-bot-bot-1" }],
+        mcpServers: [{ name: "github", env: { TOKEN: "mcp-secret" }, envCredentialIds: { TOKEN: "mcp-token" } }],
       },
     },
     vault,
@@ -69,6 +115,8 @@ test("a locked credential vault does not freeze non-secret desk saves", () => {
   assert.equal(saved.settings.llms.custom.apiKey, undefined);
   assert.equal(saved.settings.customBots[0]?.apiKey, undefined);
   assert.equal(saved.settings.customBots[0]?.credentialId, "custom-bot-bot-1");
+  assert.equal(saved.settings.mcpServers[0]?.env, undefined);
+  assert.equal(saved.settings.mcpServers[0]?.envCredentialIds.TOKEN, "mcp-token");
   assert.equal(fs.existsSync(path.join(root, "credentials.json")), false);
   fs.rmSync(root, { recursive: true, force: true });
 });

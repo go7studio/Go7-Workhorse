@@ -293,7 +293,33 @@ export function normalizeMcpServers(raw: unknown): McpServerConfig[] {
             ),
           )
         : undefined;
-    servers.push({ name, command, args, ...(env && Object.keys(env).length > 0 ? { env } : {}) });
+    const envCredentialIds =
+      record.envCredentialIds && typeof record.envCredentialIds === "object"
+        ? Object.fromEntries(
+            Object.entries(record.envCredentialIds).filter(
+              (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+            ),
+          )
+        : undefined;
+    const runtimeIds = Array.isArray(record.runtimeIds)
+      ? [...new Set(record.runtimeIds.map((value) => String(value).trim()).filter((value) =>
+          value === "grok" || value === "claude" || value === "codex" || value === "cursor" ||
+          value === "custom" || /^custom:[^\s:][^\s]*$/.test(value)
+        ))] as McpServerConfig["runtimeIds"]
+      : undefined;
+    const includeTools = Array.isArray(record.includeTools)
+      ? [...new Set(record.includeTools.map((value) => String(value).trim()).filter(Boolean))]
+      : undefined;
+    servers.push({
+      name,
+      command,
+      args,
+      ...(env && Object.keys(env).length > 0 ? { env } : {}),
+      ...(envCredentialIds && Object.keys(envCredentialIds).length > 0 ? { envCredentialIds } : {}),
+      ...(record.enabled === false ? { enabled: false } : {}),
+      ...(runtimeIds !== undefined ? { runtimeIds } : {}),
+      ...(includeTools !== undefined ? { includeTools } : {}),
+    });
   }
   return servers;
 }

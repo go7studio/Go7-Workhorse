@@ -3,7 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { withDeskToolEnv } from "./desk-path";
+import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { grokSpawnArgs, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
@@ -114,7 +114,7 @@ export function spawnGrokProcess(spec: GrokLaunchSpec): ChildProcessWithoutNullS
   const { args, cwd } = grokSpawnArgs(spec);
   return spawn(resolveGrokBinary(), args, {
     cwd: spawnCwd(cwd),
-    env: withDeskToolEnv(process.env),
+    env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   }) as ChildProcessWithoutNullStreams;
@@ -1225,4 +1225,3 @@ export class GrokAgent {
     this.pending.clear();
   }
 }
-

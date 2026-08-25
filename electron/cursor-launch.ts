@@ -15,7 +15,7 @@ import {
   isGrokCommand,
   type CursorLoginDetectInput,
 } from "./cursor-login";
-import { withDeskToolEnv } from "./desk-path";
+import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 
 export type CursorLaunchInput = {
   sessionId?: string;
@@ -119,6 +119,6 @@ export function cursorSpawnArgs(spec: GrokLaunchSpec & { env?: Record<string, st
     // Same desk environment the other three vendors get. Without it a
     // Finder-launched app hands Cursor a bare PATH, so its tools cannot find
     // git, node, ripgrep or a command-named MCP server.
-    env: withDeskToolEnv({ ...process.env, ...(spec as { env?: Record<string, string> }).env }),
+    env: withDeskToolEnv({ ...withoutWorkhorsePrivateEnv(process.env), ...(spec as { env?: Record<string, string> }).env }),
   };
 }

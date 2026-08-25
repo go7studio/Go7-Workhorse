@@ -215,6 +215,10 @@ export function resolveGrokPermissionMode(
 export function mergeMcpServers(user: McpServerConfig[] | undefined, extra: GrokMcpServer | null): GrokMcpServer[] {
   const servers: GrokMcpServer[] = [];
   for (const item of user ?? []) {
+    // ACP clients own their MCP process and cannot enforce a per-tool subset.
+    // Refuse restricted rows here as well as in the renderer so a missed send
+    // path or forged IPC payload cannot silently widen access.
+    if (item.enabled === false || item.includeTools !== undefined) continue;
     const name = item.name?.trim();
     const command = item.command?.trim();
     if (!name || !command) continue;

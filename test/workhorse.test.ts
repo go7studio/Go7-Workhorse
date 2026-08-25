@@ -40,6 +40,7 @@ import {
   resolveDeskBinary,
   resolveRipgrep,
   withDeskToolEnv,
+  withoutWorkhorsePrivateEnv,
   workhorseToolBin,
 } from "../electron/desk-path";
 import {
@@ -1350,6 +1351,10 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   assert.equal(env.Path, env.PATH);
   assert.equal(env.RIPGREP, fakeRg);
   assert.equal(env.GIT, fakeGit);
+  assert.deepEqual(
+    withoutWorkhorsePrivateEnv({ PATH: "desk", WORKHORSE_BRIDGE_TOKEN: "secret", WORKHORSE_STATE_PATH: "state", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" }),
+    { PATH: "desk", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" },
+  );
 
   // A Mac machine: the same lookups take the bare name and never mirror Path.
   const macToolsDir = path.join(os.tmpdir(), "workhorse-user-path", "mac-tools");
@@ -1990,6 +1995,18 @@ test("parseEffort and COMMANDS ship extra as xhigh and include /compact", () => 
   assert.deepEqual(
     effortsFor("custom", "MiniMax-M2.7").map((item) => item.id),
     ["off", "minimal", "low", "medium", "high"],
+  );
+  assert.deepEqual(
+    effortsFor("custom", "qwen3.8-27b").map((item) => item.id),
+    ["off", "low", "medium", "xhigh"],
+  );
+  assert.notDeepEqual(
+    effortsFor("custom", "Qwen3-8B").map((item) => item.id),
+    ["off", "low", "medium", "xhigh"],
+  );
+  assert.notDeepEqual(
+    effortsFor("custom", "Qwen3-80B").map((item) => item.id),
+    ["off", "low", "medium", "xhigh"],
   );
   assert.ok(effortsFor("codex", "gpt-5.6-sol").some((item) => item.id === "ultra"));
   assert.ok(COMMANDS.some((command) => command.name === "/compact" && command.run === "compact"));

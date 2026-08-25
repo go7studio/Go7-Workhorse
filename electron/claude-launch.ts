@@ -17,7 +17,7 @@ import {
   resolveClaudeCliBinary,
   type ClaudeLoginDetectInput,
 } from "./claude-login";
-import { isInsideAsar, withDeskToolEnv } from "./desk-path";
+import { isInsideAsar, withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { APP_VERSION } from "../src/lib/app-info";
 
 export type ClaudeLaunchInput = {
@@ -211,6 +211,6 @@ export function claudeSpawnArgs(spec: ClaudeLaunchSpec): {
     command: spec.command,
     args: spec.argv,
     cwd: spec.cwd,
-    env: withDeskToolEnv({ ...process.env, ...spec.env }),
+    env: withDeskToolEnv({ ...withoutWorkhorsePrivateEnv(process.env), ...spec.env }),
   };
 }

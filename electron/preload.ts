@@ -153,6 +153,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>
     ipcRenderer.invoke("custom:probe", config),
   customPrompt: (input: import("./custom-host").CustomPromptInput) => ipcRenderer.invoke("custom:prompt", input),
+  probeMcpServer: (serverName: string) =>
+    ipcRenderer.invoke("mcp:probe", serverName) as Promise<import("../src/lib/types").McpProbeResult>,
   customAnswerPermission: (requestId: string, answer: PermissionAnswer) =>
     ipcRenderer.invoke("custom:answer-permission", { requestId, answer }),
   customCancel: (sessionId: string) => ipcRenderer.invoke("custom:cancel", sessionId),

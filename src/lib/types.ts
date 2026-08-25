@@ -19,6 +19,22 @@ export type McpServerConfig = {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /** References to OS-encrypted environment values; hydrated into `env` only in memory. */
+  envCredentialIds?: Record<string, string>;
+  /** Missing keeps older saved servers enabled. */
+  enabled?: boolean;
+  /** Missing means every runtime for backward compatibility; an empty list means none. */
+  runtimeIds?: McpRuntimeId[];
+  /** Missing means every tool reported by the server; an empty list means none. */
+  includeTools?: string[];
+};
+
+export type McpRuntimeId = ProviderId | `custom:${string}`;
+
+export type McpProbeResult = {
+  ok: boolean;
+  message: string;
+  tools: string[];
 };
 
 export type SessionStatus = "idle" | "running" | "needs-input";

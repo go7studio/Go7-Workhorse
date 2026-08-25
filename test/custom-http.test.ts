@@ -126,6 +126,39 @@ test("DeepSeek thinking tool loops replay reasoning and meter cache provenance",
   assert.equal(calls, 2);
   assert.equal(reply.text, "Done.");
 });
+
+test("Qwen 3.8 uses its native reasoning and sampling controls", () => {
+  const thinking = buildOpenAiBody({
+    model: "qwen3.8-27b",
+    effort: "medium",
+    messages: [{ role: "user", text: "inspect" }],
+  }) as Record<string, any>;
+  assert.equal(thinking.reasoning_effort, "medium");
+  assert.equal(thinking.temperature, 1.0);
+  assert.equal(thinking.top_p, 0.95);
+  assert.equal(thinking.top_k, 20);
+  assert.equal(thinking.min_p, 0.0);
+  assert.equal(thinking.presence_penalty, 0.0);
+  assert.equal(thinking.repetition_penalty, 1.0);
+  assert.deepEqual(thinking.chat_template_kwargs, { enable_thinking: true, preserve_thinking: true });
+
+  const direct = buildOpenAiBody({
+    model: "Qwen/Qwen3.8-27B-FP8",
+    effort: "off",
+    messages: [],
+  }) as Record<string, any>;
+  assert.equal(direct.reasoning_effort, undefined);
+  assert.equal(direct.temperature, 0.7);
+  assert.equal(direct.top_p, 0.8);
+  assert.equal(direct.presence_penalty, 1.5);
+  assert.deepEqual(direct.chat_template_kwargs, { enable_thinking: false, preserve_thinking: true });
+
+  for (const model of ["Qwen3-8B", "Qwen3-80B"]) {
+    const other = buildOpenAiBody({ model, effort: "medium", messages: [] }) as Record<string, any>;
+    assert.equal(other.reasoning_effort, undefined);
+    assert.equal(other.chat_template_kwargs, undefined);
+  }
+});
 import {
   detectCustomLogin,
   fillEmptyCustomBotKeys,
@@ -1756,6 +1789,14 @@ test("Custom is wired through Settings store and IPC", () => {
   assert.doesNotMatch(preview, /customPrompt/);
   assert.match(store, /installCustomBot/);
   assert.match(store, /mode === "bots"/);
+  const mcpSave = store.slice(store.indexOf("const setMcpServers"), store.indexOf("const probeMcpServer"));
+  assert.match(mcpSave, /useCallback\(async/);
+  assert.match(mcpSave, /clearTimeout\(persistTimer\.current\)/);
+  assert.ok(mcpSave.indexOf("clearTimeout(persistTimer.current)") < mcpSave.indexOf("await window.workhorse.saveState"));
+  assert.match(mcpSave, /await window\.workhorse\.saveState/);
+  const mcpPane = readFileSync(path.join(ROOT, "src", "ui", "McpServersPane.tsx"), "utf8");
+  assert.match(mcpPane, /disabled=\{!editor\.everyTool\}/);
+  assert.match(mcpPane, /Custom HTTP only/);
 });
 
 test("a Workhorse agent can assemble, test, and create a custom desk slot", async () => {

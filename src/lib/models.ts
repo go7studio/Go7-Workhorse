@@ -55,6 +55,14 @@ export const MINIMAX_EFFORTS: ReasoningLevel[] = [
   { id: "high", label: "High", hint: "Deep thinking for hard work." },
 ];
 
+/** Qwen 3.8's published reasoning controls, plus its explicit direct mode. */
+export const QWEN38_EFFORTS: ReasoningLevel[] = [
+  { id: "off", label: "Off", hint: "Answer directly without a thinking block." },
+  { id: "low", label: "Low", hint: "Efficient reasoning for quick tasks." },
+  { id: "medium", label: "Medium", hint: "Balanced Qwen reasoning." },
+  { id: "xhigh", label: "Extra", hint: "Qwen's deepest reasoning mode." },
+];
+
 export const CODEX_EFFORTS: ReasoningLevel[] = [
   { id: "low", label: "Low", hint: "Fast responses with lighter reasoning." },
   { id: "medium", label: "Medium", hint: "Balances speed and reasoning depth for everyday tasks." },
@@ -308,6 +316,7 @@ export function effortsFor(provider: ProviderId, modelId?: string): ReasoningLev
 export function thinkingLevelsForModel(modelId?: string): ReasoningLevel[] | undefined {
   if (!modelId) return undefined;
   const slug = modelId.trim().toLowerCase();
+  if (/qwen(?:[^a-z0-9]+)?3[._]8(?!\d)/.test(slug)) return QWEN38_EFFORTS;
   if (!slug.includes("minimax")) return undefined;
   return MINIMAX_EFFORTS;
 }

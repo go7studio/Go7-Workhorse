@@ -226,6 +226,7 @@ type WorkhorseBridge = {
       inputs?: Partial<import("./lib/types").ModelInputCapabilities>;
     };
   }) => Promise<{ text?: string; stopReason?: string }>;
+  probeMcpServer?: (serverName: string) => Promise<import("./lib/types").McpProbeResult>;
   customCancel: (sessionId: string) => Promise<void>;
   onCustomEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
   listVendorModels: () => Promise<Record<import("./lib/types").ProviderId, import("./lib/models").ModelInfo[]>>;

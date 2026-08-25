@@ -91,6 +91,22 @@ export class CredentialStore {
     this.write(state);
   }
 
+  /** Remove encrypted entries in a reserved namespace that state no longer references. */
+  prune(prefix: string, keep: ReadonlySet<string>): void {
+    for (const id of [...this.memory.keys()]) {
+      if (id.startsWith(prefix) && !keep.has(id)) this.memory.delete(id);
+    }
+    if (this.memoryOnly) return;
+    const state = this.read();
+    let changed = false;
+    for (const id of Object.keys(state.credentials)) {
+      if (!id.startsWith(prefix) || keep.has(id)) continue;
+      delete state.credentials[id];
+      changed = true;
+    }
+    if (changed) this.write(state);
+  }
+
   private read(): CredentialFile {
     if (this.loaded) return this.loaded;
     for (const candidate of [this.file, `${this.file}.bak`]) {
@@ -150,6 +166,47 @@ function hydrateRow(row: LooseRecord, vault: CredentialStore): void {
   row.apiKey = legacy || vault.get(credentialId);
 }
 
+function mcpCredentialId(serverName: string, envName: string): string {
+  const stable = crypto.createHash("sha256").update(`${serverName}\0${envName}`).digest("hex").slice(0, 24);
+  return `mcp-env-${stable}`;
+}
+
+function secureMcpRow(row: LooseRecord, vault: CredentialStore): void {
+  const name = typeof row.name === "string" ? row.name : "server";
+  const env = record(row.env) ?? {};
+  const existing = record(row.envCredentialIds) ?? {};
+  const ids: Record<string, string> = {};
+  for (const [envName, rawValue] of Object.entries(env)) {
+    const secret = typeof rawValue === "string" ? rawValue.trim() : "";
+    const prior = typeof existing[envName] === "string" ? String(existing[envName]).trim() : "";
+    if (secret) ids[envName] = vault.put(secret, prior || mcpCredentialId(name, envName));
+    else if (prior) ids[envName] = prior;
+  }
+  for (const [envName, rawId] of Object.entries(existing)) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (id && !ids[envName]) ids[envName] = id;
+  }
+  if (Object.keys(ids).length > 0) row.envCredentialIds = ids;
+  if (vault.persists()) delete row.env;
+}
+
+function hydrateMcpRow(row: LooseRecord, vault: CredentialStore): void {
+  const legacy = record(row.env) ?? {};
+  const ids = record(row.envCredentialIds) ?? {};
+  const env: Record<string, string> = {};
+  for (const [envName, rawValue] of Object.entries(legacy)) {
+    if (typeof rawValue === "string" && rawValue) env[envName] = rawValue;
+  }
+  for (const [envName, rawId] of Object.entries(ids)) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!env[envName] && id) {
+      const value = vault.get(id);
+      if (value) env[envName] = value;
+    }
+  }
+  if (Object.keys(env).length > 0) row.env = env;
+}
+
 /** Return a clone safe to write to workhorse-state.json. */
 export function protectStateCredentials<T extends LooseRecord>(state: T, vault: CredentialStore): T {
   const next = cloneState(state);
@@ -166,6 +223,20 @@ export function protectStateCredentials<T extends LooseRecord>(state: T, vault: 
       secureRow(bot, vault, `custom-bot-${id}`);
     }
   }
+  const mcpServers = settings?.mcpServers;
+  if (Array.isArray(mcpServers)) {
+    const activeMcpCredentialIds = new Set<string>();
+    for (const item of mcpServers) {
+      const server = record(item);
+      if (!server) continue;
+      secureMcpRow(server, vault);
+      const ids = record(server.envCredentialIds) ?? {};
+      for (const rawId of Object.values(ids)) {
+        if (typeof rawId === "string" && rawId.startsWith("mcp-env-")) activeMcpCredentialIds.add(rawId);
+      }
+    }
+    vault.prune("mcp-env-", activeMcpCredentialIds);
+  }
   return next;
 }
 
@@ -180,6 +251,13 @@ function redactStateCredentials<T extends LooseRecord>(state: T): T {
     for (const item of bots) {
       const bot = record(item);
       if (bot) delete bot.apiKey;
+    }
+  }
+  const mcpServers = settings?.mcpServers;
+  if (Array.isArray(mcpServers)) {
+    for (const item of mcpServers) {
+      const server = record(item);
+      if (server) delete server.env;
     }
   }
   return next;
@@ -207,6 +285,13 @@ export function hydrateStateCredentials<T extends LooseRecord>(state: T, vault: 
     for (const item of bots) {
       const bot = record(item);
       if (bot) hydrateRow(bot, vault);
+    }
+  }
+  const mcpServers = settings?.mcpServers;
+  if (Array.isArray(mcpServers)) {
+    for (const item of mcpServers) {
+      const server = record(item);
+      if (server) hydrateMcpRow(server, vault);
     }
   }
   return next;

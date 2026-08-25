@@ -104,6 +104,7 @@ import {
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
+import { mcpServersForSession } from "./mcp-servers";
 import {
   applyUpdateStockBot,
   DEFAULT_SETTINGS,
@@ -415,7 +416,8 @@ export type Store = AppState & {
   setMode: (mode: PermissionMode) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
-  setMcpServers: (servers: McpServerConfig[]) => void;
+  setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
+  probeMcpServer: (serverName: string) => Promise<import("./types").McpProbeResult>;
   refreshGrokLogin: () => void;
   refreshCodexLogin: () => void;
   refreshClaudeLogin: () => void;
@@ -1403,11 +1405,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const setMcpServers = useCallback((servers: McpServerConfig[]) => {
-    setState((current) => ({
+  const setMcpServers = useCallback(async (servers: McpServerConfig[]) => {
+    const current = stateRef.current;
+    const next = {
       ...current,
       settings: { ...current.settings, mcpServers: servers },
-    }));
+    };
+    stateRef.current = next;
+    setState(next);
+    if (persistTimer.current) {
+      window.clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    if (!window.workhorse?.saveState) return;
+    const saved = listedChats(applyComposerDrafts(next.sessions, composerDraftsRef.current));
+    await window.workhorse.saveState({
+      ...next,
+      sessions: saved,
+      activeSessionId:
+        next.activeSessionId && saved.some((session) => session.id === next.activeSessionId)
+          ? next.activeSessionId
+          : null,
+    });
+  }, []);
+
+  const probeMcpServer = useCallback(async (serverName: string) => {
+    if (!window.workhorse?.probeMcpServer) {
+      return { ok: false, message: "MCP testing runs in the Workhorse desktop window.", tools: [] };
+    }
+    return window.workhorse.probeMcpServer(serverName);
   }, []);
 
   const refreshVendorModels = useCallback(() => {
@@ -1954,7 +1980,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             note,
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
-            mcpServers: stateRef.current.settings.mcpServers,
+            mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           });
           setState((latest) => ({
             ...latest,
@@ -2375,7 +2401,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           hidden: session.hidden,
           role: deskRoleOf(session),
           crewModes: session.crewModes,
-          mcpServers: stateRef.current.settings.mcpServers,
+          mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
           preface: withPortableHistory(buildSessionPreface({
             sessionId: session.id,
             cwd,
@@ -2429,7 +2455,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sandbox: session.sandbox,
             preface: promptInput.preface,
             history,
-            mcpServers: stateRef.current.settings.mcpServers,
+            mcpServers: mcpServersForSession(stateRef.current.settings.mcpServers, session),
             securityPolicy: session.securityPolicy,
             permissionGrants: session.permissionGrants,
             folders: projectFolderPaths(project, folderExists),
@@ -2974,7 +3000,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           cwd,
           vendorSessionId: source.vendorSessionId,
           sandbox: source.sandbox,
-          mcpServers: current.settings.mcpServers,
+          mcpServers: mcpServersForSession(current.settings.mcpServers, source),
         })
         .then((result) => {
           if (!result?.vendorSessionId) return;
@@ -3121,6 +3147,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           restartRuntime = false,
         ) => {
           const snapshot = stateRef.current;
+          const runtimeMcpServers = mcpServersForSession(mcpServers, session);
           const hold = evaluateWatchHold({
             session,
             settings: snapshot.settings,
@@ -3155,7 +3182,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cwd,
             vendorSessionId: vendorSessionForSend(session),
             sandbox: session.sandbox,
-            mcpServers,
+            mcpServers: runtimeMcpServers,
             preface,
             parentId: session.parentId,
             hidden: session.hidden,
@@ -3188,7 +3215,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // is why Kimi and MiniMax answered each message as if it were
               // the first. Text only; see custom-history for why.
               history: customChatHistory(session.messages),
-              mcpServers,
+              mcpServers: runtimeMcpServers,
               securityPolicy: session.securityPolicy,
               permissionGrants: session.permissionGrants,
               folders: projectFolderPaths(project, folderExists),
@@ -7215,6 +7242,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSandbox,
       setSecurityPolicy,
       setMcpServers,
+      probeMcpServer,
       refreshGrokLogin,
       refreshCodexLogin,
       refreshClaudeLogin,
@@ -7340,6 +7368,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSandbox,
       setSecurityPolicy,
       setMcpServers,
+      probeMcpServer,
       refreshGrokLogin,
       refreshCodexLogin,
       refreshClaudeLogin,

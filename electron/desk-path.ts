@@ -337,3 +337,13 @@ export function withDeskToolEnv(
   if (node) next.NODE = node;
   return next;
 }
+
+/**
+ * ACP vendor processes need the user's normal login environment, but a user
+ * MCP launched by that vendor must not inherit Workhorse's private bridge
+ * token or state paths. The built-in Workhorse MCP receives its exact env on
+ * its own server row instead.
+ */
+export function withoutWorkhorsePrivateEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(base).filter(([name]) => !name.toUpperCase().startsWith("WORKHORSE_")));
+}

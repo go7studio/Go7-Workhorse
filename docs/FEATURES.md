@@ -277,11 +277,16 @@ transcript rather than as a path.
 - **Skills** — two ship with the desk, `desk` for chat-to-chat control and
   `setup` for adding bots and references. Skills are also listed from Grok,
   Codex, Claude and Cursor homes, and can be pushed back to a vendor.
-- **MCP servers** — attached to a runtime, with the same approval and result
-  path as built-in tools.
+- **MCP servers** — Settings → Skills can add and test local stdio servers,
+  attach each one only to selected runtimes, and choose the tools exposed to
+  custom HTTP models. Calls use the same approval and result path as built-in
+  tools. Environment values move into the OS-encrypted credential store rather
+  than normal desk state.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own
   name and colour. Large catalogs are grouped, frontier-first, searchable, and
   explicitly approved; one key keeps one ring with separate model rows.
+  Qwen 3.8 bots use the model's native Off/Low/Medium/Extra reasoning levels
+  and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,

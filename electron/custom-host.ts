@@ -349,7 +349,7 @@ export class CustomSessionHost {
     ];
     const baseMessageCount = messages.length;
     const preface = customPrefaceForLimits(input.preface, input.mode, input.sandbox);
-    const mcp = new McpToolBridge(input.mcpServers ?? []);
+    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: input.cwd });
     const mcpTools = await mcp.tools();
     let text = "";
     const startedAt = this.now();

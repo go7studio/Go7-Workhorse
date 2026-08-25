@@ -330,6 +330,23 @@ export function buildOpenAiBody(input: {
     messages,
     tools: customHttpToolsOpenAi(input.tools, { role: input.role }),
   };
+  const qwen38 = /qwen(?:[^a-z0-9]+)?3[._]8(?!\d)/i.test(input.model);
+  if (qwen38) {
+    const direct = input.effort === "off";
+    body.temperature = direct ? 0.7 : 1.0;
+    body.top_p = direct ? 0.8 : 0.95;
+    body.presence_penalty = direct ? 1.5 : 0.0;
+    body.repetition_penalty = 1.0;
+    body.top_k = 20;
+    body.min_p = 0.0;
+    body.chat_template_kwargs = {
+      enable_thinking: !direct,
+      preserve_thinking: true,
+    };
+    if (!direct) {
+      body.reasoning_effort = input.effort === "low" || input.effort === "medium" ? input.effort : "xhigh";
+    }
+  }
   const deepSeek = /(?:^|\.)api\.deepseek\.com(?=\/|$)/i.test(input.baseUrl ?? "") || /^deepseek-v4-(?:pro|flash)$/i.test(input.model);
   if (deepSeek) {
     if (input.effort === "off") {

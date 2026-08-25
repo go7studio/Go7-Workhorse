@@ -4831,6 +4831,158 @@ html.pane-dragging * {
   margin: 0;
 }
 
+.grok-bot-wake {
+  width: 100%;
+  max-width: 640px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg-solid) 82%, var(--accent) 2%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  text-align: left;
+}
+
+.grok-bot-wake-head,
+.grok-bot-wake-done,
+.grok-bot-wake-connect {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.grok-bot-wake-head > div {
+  min-width: 0;
+}
+
+.grok-bot-wake-head .tiny {
+  flex: none;
+  white-space: nowrap;
+}
+
+.grok-bot-wake-head strong,
+.grok-bot-wake-head span {
+  display: block;
+}
+
+.grok-bot-wake-head strong {
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.grok-bot-wake-head > div > span {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.grok-bot-wake-state {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.grok-bot-wake-state i {
+  width: 7px;
+  height: 7px;
+  background: var(--text-tertiary);
+  border-radius: 50%;
+}
+
+.grok-bot-wake.ready .grok-bot-wake-state i {
+  background: #30d158;
+}
+
+.grok-bot-wake-help {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.grok-bot-wake-help summary {
+  width: fit-content;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.grok-bot-wake-help p,
+.grok-bot-wake-done p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: left;
+  text-wrap: pretty;
+}
+
+.grok-bot-wake-help p strong {
+  color: var(--text);
+  font-weight: 560;
+}
+
+.grok-bot-wake-guide {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.grok-bot-wake-guide:hover {
+  text-decoration: underline;
+}
+
+.grok-bot-wake-help .grok-bot-wake-stale {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.grok-bot-wake-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.grok-bot-wake .grok-bot-wake-fields .field {
+  margin: 0;
+}
+
+.grok-bot-wake-connect {
+  align-items: flex-end;
+  margin-top: 14px;
+}
+
+.grok-bot-wake-connect .row-meta {
+  margin: 0;
+  text-align: left;
+}
+
+.grok-bot-wake-done {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.grok-bot-wake-done p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .grok-bot-wake-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mass-send {
   display: flex;
   flex-direction: column;
@@ -5304,8 +5456,15 @@ html.pane-dragging * {
 
 @media (max-width: 720px) {
   .add-bot-catalog,
-  .add-bot-form {
+  .add-bot-form,
+  .grok-bot-wake-fields {
     grid-template-columns: 1fr;
+  }
+
+  .grok-bot-wake-done,
+  .grok-bot-wake-connect {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .add-bot-form .field:nth-child(n + 3) {

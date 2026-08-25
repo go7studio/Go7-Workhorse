@@ -298,6 +298,8 @@ type WorkhorseBridge = {
   installExternalMcp?: (hosts?: string[]) => Promise<{ ok: boolean; message?: string }>;
   linkConfig?: () => Promise<string>;
   linkGrokBotOneshot?: () => Promise<string>;
+  grokBotWakeStatus?: () => Promise<import("./lib/grok-bot-wake").GrokBotWakeStatus>;
+  saveGrokBotWake?: (input: import("./lib/grok-bot-wake").GrokBotWakeInput) => Promise<import("./lib/grok-bot-wake").GrokBotWakeStatus>;
   installLinkCommand?: () => Promise<{ ok: boolean; message?: string }>;
   startExternalRuntimeTask?: (
     request: import("./lib/external-task").RuntimeStartRequest,

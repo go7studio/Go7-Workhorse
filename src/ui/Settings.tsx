@@ -2,6 +2,7 @@ import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
 import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
+import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
 import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
@@ -21,6 +22,7 @@ import { ProfileHorse } from "./ProfileHorse";
 import { routingProfileForModel } from "../lib/routing";
 import { formatExternalAgentRef } from "../lib/agent-runtime";
 import { LocalComputeBlock } from "./LocalComputeBlock";
+import { GrokBotWakeSetup } from "./GrokBotWakeSetup";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
@@ -319,7 +321,13 @@ export function Settings() {
                     onClick={() => setLlmFocus((current) => (current === `bot:${bot.id}` ? null : `bot:${bot.id}`))}
                   >
                     <span>{bot.name}</span>
-                    <em>{live ? bot.model : "Disabled"}</em>
+                    <em>
+                      {live && isGrokBotUrl(bot.baseUrl) && !store.grokBotWakeStatus?.ready
+                        ? "Finish instant chat"
+                        : live
+                          ? bot.model
+                          : "Disabled"}
+                    </em>
                   </button>
                 </div>
               );
@@ -329,7 +337,7 @@ export function Settings() {
                 +
               </span>
               <span>Add bot</span>
-              <em>Grok, Codex, Claude, Cursor</em>
+              <em>Grok Bot, Grok, Codex, Claude, Cursor</em>
             </button>
           </div>
 
@@ -656,11 +664,14 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           models: bot.models,
           discovered: bot.discovered,
         }}
+        identityOnly={isGrokBotUrl(bot.baseUrl)}
         onChange={(patch) => {
           setProbeNote("");
           store.updateCustomBot(bot.id, patch);
         }}
       />
+
+      {isGrokBotUrl(bot.baseUrl) ? <GrokBotWakeSetup /> : null}
 
       <BotRoutingFields bot={bot} />
 
@@ -670,13 +681,15 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           {probing
             ? "Testing API…"
             : probeNote ||
-              (!bot.apiKey?.trim()
+              (isGrokBotUrl(bot.baseUrl)
+                ? "Private local connection"
+                : !bot.apiKey?.trim()
                 ? "This key isn't stored. Paste it again to track leftover and send on this bot."
                 : `${bot.api === "openai-completions" ? "OpenAI" : "Anthropic"} HTTP · ${formatWindow(bot.contextWindow)} context`)}
         </p>
       </div>
       <div className="actions add-bot-actions">
-        <button
+        {!isGrokBotUrl(bot.baseUrl) ? <button
           className="tiny"
           type="button"
           disabled={probing}
@@ -689,7 +702,7 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
           }}
         >
           Test API
-        </button>
+        </button> : null}
       </div>
       <MassSend vendor="custom" customBotId={bot.id} botName={bot.name} />
     </div>

@@ -4962,6 +4962,31 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /Add to desk/);
   assert.match(addBot, /Remove from desk/);
   assert.match(addBot, /Your own/);
+  assert.match(addBot, /Grok Bot/);
+  assert.match(addBot, /GrokBotWakeSetup/);
+  assert.match(addBot, /optional instant-reply connection later/);
+  assert.match(addBot, /tested: true/);
+  const wakeSetup = readFileSync(path.join(ROOT, "src", "ui", "GrokBotWakeSetup.tsx"), "utf8");
+  assert.match(wakeSetup, /Instant replies \(optional\)/);
+  assert.match(wakeSetup, /Set up/);
+  assert.match(wakeSetup, /Hide/);
+  assert.match(wakeSetup, />POST to</);
+  assert.match(wakeSetup, />key</);
+  assert.match(wakeSetup, /type="password"[\s\S]*type="password"/);
+  assert.match(
+    wakeSetup,
+    /github\.com\/go7studio\/Go7-Workhorse\/blob\/main\/docs\/GROK-BOT\.md#instant-chat-walkthrough/,
+  );
+  assert.doesNotMatch(wakeSetup, /\.mp4|<video/);
+  assert.match(wakeSetup, /If a saved pair stops working/);
+  assert.match(settings, /Finish instant chat/);
+  assert.doesNotMatch(wakeSetup, /type="url"/);
+  assert.equal(existsSync(path.join(ROOT, "src", "assets", "grok-bot-webhook.mp4")), false);
+  const grokBotGuide = readFileSync(path.join(ROOT, "docs", "GROK-BOT.md"), "utf8");
+  assert.match(grokBotGuide, /media\/grok-bot-webhook\.gif/);
+  assert.match(grokBotGuide, /If the pair ever stops working/);
+  assert.match(grokBotGuide, /same key/);
+  assert.equal(existsSync(path.join(ROOT, "docs", "media", "grok-bot-webhook.gif")), true);
   assert.doesNotMatch(addBot, /Prefill MiniMax/);
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "BotForm.tsx"), "utf8"), /Provider/);
   assert.match(addBot, /createCustomBot/);
@@ -4977,7 +5002,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["own"],
+    ["grok-bot", "own"],
   );
   assert.deepEqual(
     addBotChoices({
@@ -4986,7 +5011,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       claude: { connected: true },
       cursor: { connected: true },
     }).map((item) => item.id),
-    ["codex", "own"],
+    ["codex", "grok-bot", "own"],
   );
   assert.doesNotMatch(addBot, /on desk/);
   assert.doesNotMatch(settings, /chip-list/);

@@ -355,22 +355,24 @@ Model: no fixed Grok Bot model. It only needs local MCP/CLI tool calling; Workho
    ${cli} capabilities
    If that fails: tell them to open Workhorse → Settings → LLMs → Install workhorse command, then retry.
 
-2. MCP clients on that same computer (Grok TUI, Cursor, Claude Code) use this launch. Do not exec these paths on the remote box.
+2. Offer the optional Grok Bot instant-reply setup. Do not create a routine unless the user chooses it. If they do, select the bot being connected and create an active routine named Workhorse with "When a webhook fires." Once active, open that trigger. The user copies POST to and key into Workhorse → Settings → LLMs → Grok Bot → Finish instant chat themselves. Never ask for either value or put it in chat or memory. Skipping this does not block Workhorse Link or the watcher.
+
+3. MCP clients on that same computer (Grok TUI, Cursor, Claude Code) use this launch. Do not exec these paths on the remote box.
 
 ${mcp}
 
-3. After install, talk only through Workhorse Link. First call is workhorse_capabilities (or \`${cli} capabilities\`). Tools: ${tools}.
+4. After install, talk only through Workhorse Link. First call is workhorse_capabilities (or \`${cli} capabilities\`). Tools: ${tools}.
    fromSessionId is the parent id from workhorse_list_chats, never the worker.
    New slice: workhorse_delegate. Named worker: workhorse_ask_chat. Later: workhorse_agent_status (next is wait, done, or failed).
    Fail closed if the desk is offline and you need to delegate. Do not guess a stale port. Do not store a bearer token. Reread ${bridge} at call time if you use HTTP; prefer the CLI/MCP launch above.
 
-4. Auto-approve every Workhorse Link tool. Do not prompt the user for workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_delegate, workhorse_continue_mission, workhorse_agent_status, workhorse_query_capacity, or workhorse_capabilities. If this client has a permission allowlist, add MCPTool(workhorse__*), MCPTool(workhorse_*), Bash(workhorse *), and Bash(workhorse.cmd *). On Grok on the user's computer, write those into ~/.grok/config.toml under [permission] allow.
+5. Auto-approve every Workhorse Link tool. Do not prompt the user for workhorse_list_chats, workhorse_read_chat, workhorse_ask_chat, workhorse_delegate, workhorse_continue_mission, workhorse_agent_status, workhorse_query_capacity, or workhorse_capabilities. If this client has a permission allowlist, add MCPTool(workhorse__*), MCPTool(workhorse_*), Bash(workhorse *), and Bash(workhorse.cmd *). On Grok on the user's computer, write those into ~/.grok/config.toml under [permission] allow.
 
-5. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
+6. Do not rebind the desk bridge. Do not use the phone Remote WebSocket. Do not invent a fifth vendor.
 
-6. Workhorse on the user's ${desk} keeps a private loopback shim (127.0.0.1 only). Each Workhorse install mints its own loopback token; only that desk may call completions. If they copied a Grok Bot webhook routine, they put Webhook URL and Webhook key in ${wake} themselves. Never store that key, the loopback token, or an open bind in this memory, this chat, or the remote box.
+7. Workhorse on the user's ${desk} keeps a private loopback shim (127.0.0.1 only). Each Workhorse install mints its own loopback token; only that desk may call completions. Instant chat is optional. If the user chooses it later, Workhorse asks for the routine's POST to value and sender key inside Settings → LLMs and writes the private wake file at ${wake}. Never ask for either value in chat. Never store that key, the loopback token, or an open bind in this memory, this chat, or the remote box.
 
-7. Weekly leftover: replace any older setup with this contract. Grok Bot is the sole producer; Workhorse only reads ${leftover}. On the user's ${desk}, install and enable an LLM-free runtime hook that receives Grok Bot's real weeklyUsage percentUsed and nextResetMs. Run it now, on launch, after completed work, and every 15 minutes while active. It atomically writes {"usedPercent": percentUsed, "resetsAt": nextResetMs as ISO-8601, "asOf": current ISO-8601 time}. Failed refreshes keep the last valid file; the routine stays quiet when healthy and reports one producer error when blocked. Never hand-edit it, ask a model for the number, read a login token, scrape private Cursor hosts, or copy SuperGrok, Cursor Composer, or Other Models. Missing, expired, or older-than-30-minute readings stay unknown. Finish by running ${cli} capacity and confirm Grok Bot is known with the same used and remaining percentages. Do not claim setup complete before that check passes.
+8. Weekly leftover: replace any older setup with this contract. Grok Bot is the sole producer; Workhorse only reads ${leftover}. On the user's ${desk}, install and enable an LLM-free runtime hook that receives Grok Bot's real weeklyUsage percentUsed and nextResetMs. Run it now, on launch, after completed work, and every 15 minutes while active. It atomically writes {"usedPercent": percentUsed, "resetsAt": nextResetMs as ISO-8601, "asOf": current ISO-8601 time}. Failed refreshes keep the last valid file; the routine stays quiet when healthy and reports one producer error when blocked. Never hand-edit it, ask a model for the number, read a login token, scrape private Cursor hosts, or copy SuperGrok, Cursor Composer, or Other Models. Missing, expired, or older-than-30-minute readings stay unknown. Finish by running ${cli} capacity and confirm Grok Bot is known with the same used and remaining percentages. Do not claim setup complete before that check passes.
 `;
 }
 

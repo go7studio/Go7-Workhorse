@@ -63,6 +63,7 @@ import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
 import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot } from "./mcp-install";
 import { ensureGrokBotShim } from "./grok-bot-shim-host";
+import { grokBotWakePath, inspectGrokBotWake, saveGrokBotWake } from "./grok-bot-wake";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
@@ -724,6 +725,9 @@ app.whenReady().then(async () => {
       userData: app.getPath("userData"),
     });
   });
+  ipcMain.handle("grokBotWake:status", () => inspectGrokBotWake(grokBotWakePath(app.getPath("userData"))));
+  ipcMain.handle("grokBotWake:save", (_event, input: import("../src/lib/grok-bot-wake").GrokBotWakeInput) =>
+    saveGrokBotWake(grokBotWakePath(app.getPath("userData")), input));
 
   // The `workhorse` command: a launcher with this install's exact paths, and
   // a symlink onto PATH where one can be made without a privilege prompt.

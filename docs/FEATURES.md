@@ -286,7 +286,12 @@ transcript rather than as a path.
   second only to check that output, unless you asked for every vendor, all
   bots, several independent reviews, or a named list. Equal-intelligence picks
   go to the cheaper slot. A model with its own extra pool is kept for visual,
-  creative, or complex work. Settings → Routing turns that off, and tunes how
+  creative, or complex work. A bot served from this machine is local because of
+  its address, not its name, so a model you named yourself is still covered by
+  Allow local models and is never paced against a weekly gauge it does not
+  have. What it is good at stays what you told the desk it is good at: costing
+  nothing breaks a tie between two candidates that both fit, and never buys
+  work a model cannot do. Settings → Routing turns that off, and tunes how
   any routing weighs leftover, reserve, and local models. When Learning is on,
   a manually picked chat stays on that exact model while the
   private learning store records what Auto would have recommended. The record

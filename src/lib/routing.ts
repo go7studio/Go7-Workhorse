@@ -10,6 +10,7 @@ import type {
   Settings,
   TaskDomain,
 } from "./types";
+import { isLocalEndpoint } from "./usage";
 import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
@@ -226,6 +227,24 @@ export function routingCandidatesForDesk(
         plan !== undefined &&
         plan.usedPercent === 0 &&
         (plan.products ?? []).some((item) => item.usagePercent > 0);
+      /*
+       * Locality is a property of the endpoint, not the model's name.
+       * routingProfileForModel can only read the slug, so it tagged
+       * local-qwen and ollama/* while a Qwen on http://127.0.0.1:11434 named
+       * "qwen3.8-spark" came through as an ordinary paid row. Leftover knew
+       * better — isLocalEndpoint has decided this for Usage and Watch all
+       * along — so the two halves of the desk disagreed about the same bot,
+       * and "Allow local models" did not exclude the one box it was for.
+       *
+       * Only the flag is taken from the URL. Intelligence, speed and cost stay
+       * where they were: a local box is not automatically cheap in wall-clock
+       * or capable at 4, and free is a tie-break at rank time, never a merit.
+       * An owner who ticks Local, or unticks it for a LAN host they do not
+       * trust, still wins — the override is read after this.
+       */
+      const localByUrl = isLocalEndpoint(bot.baseUrl);
+      const routed = routingProfileForModel("custom", model, customModelRoutingOverride(bot, model));
+      const profile = localByUrl && !routed.local ? { ...routed, local: true } : routed;
       candidates.push({
         provider: "custom",
         model,
@@ -233,15 +252,20 @@ export function routingCandidatesForDesk(
         customBotId: bot.id,
         connected: !capacity?.holding,
         contextWindow: contextWindowFor("custom", model, bot.contextWindow),
-        profile: routingProfileForModel("custom", model, customModelRoutingOverride(bot, model)),
+        profile,
         ...(paceUnmetered ? { paceUnmetered: true } : {}),
-        capacity: paceUnmetered
-          ? {}
-          : {
-              usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-              resetsAt: product?.resetsAt ?? capacity?.resetsAt,
-              period: plan?.period ?? capacity?.period,
-            },
+        // A box with no meter has no usedPercent to be ahead of. Reporting 0%
+        // would hand it the same spare-capacity subsidy a dead gauge used to
+        // get, and a 0%-used local bot already outscored a metered model that
+        // fit better. No gauge means no gauge.
+        capacity:
+          paceUnmetered || profile.local
+            ? {}
+            : {
+                usedPercent: product?.usagePercent ?? capacity?.usedPercent,
+                resetsAt: product?.resetsAt ?? capacity?.resetsAt,
+                period: plan?.period ?? capacity?.period,
+              },
       });
     }
   }

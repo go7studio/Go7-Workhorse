@@ -33,8 +33,8 @@ Workhorse Link connects each with one button. Connect Grok Bot copies the same
 launch plus install instructions to paste into Grok Bot once (Mac or Windows),
 including its runtime-owned weekly-usage exporter contract. Copy generic MCP
 configuration covers the rest. Every app gets the same versioned Link contract:
-eight core collaboration tools for capabilities, list/read/ask chats, leftover
-and availability, delegation, continuation, and worker status, plus typed local
+eight core collaboration tools for capabilities, list/read/ask chats, query leftover and availability,
+delegation, continuation, and worker status, plus typed local
 capability tools when a host is configured. The first call,
 `workhorse_capabilities`, names follow-through: new slice, named worker, later
 status. Status says wait, done, or failed. List chats is compact by default (id,

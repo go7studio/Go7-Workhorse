@@ -8,6 +8,26 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.35](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.34...v0.6.35) (2026-08-25)
+
+
+### Features
+
+* add durable local capability plane ([9af01b9](https://github.com/go7studio/Go7-Workhorse/commit/9af01b91529abaf8ff08687eaee4f2598655d88b))
+* connect Grok Bot instant chats ([b2033cd](https://github.com/go7studio/Go7-Workhorse/commit/b2033cd56f607818ebcee99e7f7ee875882a2f63))
+* expose scoped MCP tools to local models ([5f05206](https://github.com/go7studio/Go7-Workhorse/commit/5f052064f609da3f6b051ef1dab4b4a2981ef8da))
+
+
+### Bug Fixes
+
+* collapsing a project hides its worker list ([d832059](https://github.com/go7studio/Go7-Workhorse/commit/d83205998eddaa791f1f703280c6f60dab2752bc))
+* collapsing a project hides its worker list ([473b91a](https://github.com/go7studio/Go7-Workhorse/commit/473b91a1e0993b206c29b4f2bc38917cbca376b2))
+* keep Grok Bot instant replies optional ([97cc859](https://github.com/go7studio/Go7-Workhorse/commit/97cc859c46235e10f514075034b7e9993ae02f49))
+* keep walkthrough media out of the app ([7e0ae17](https://github.com/go7studio/Go7-Workhorse/commit/7e0ae175b00a64df6e71c628e66b43b7936fa1d4))
+* Link accepts Grok Bot handoff spelling ([351b389](https://github.com/go7studio/Go7-Workhorse/commit/351b389996f54d06e872f04c7d94b5393cec3340))
+* queued prompts stay on Next, not in the transcript ([0387326](https://github.com/go7studio/Go7-Workhorse/commit/0387326984aa03ad23080c260b3616749c657d15))
+* queued prompts stay on Next, not in the transcript ([f4efc02](https://github.com/go7studio/Go7-Workhorse/commit/f4efc027e54bf8d08a8b81e607f69ae711ecf3fe))
+
 ## [0.6.34](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.33...v0.6.34) (2026-08-24)
 
 

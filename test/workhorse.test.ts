@@ -4968,6 +4968,8 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /tested: true/);
   const wakeSetup = readFileSync(path.join(ROOT, "src", "ui", "GrokBotWakeSetup.tsx"), "utf8");
   assert.match(wakeSetup, /Instant replies \(optional\)/);
+  assert.match(wakeSetup, /workhorse grok-pending/);
+  assert.match(wakeSetup, /workhorse grok-reply/);
   assert.match(wakeSetup, /Set up/);
   assert.match(wakeSetup, /Hide/);
   assert.match(wakeSetup, />POST to</);

@@ -32,7 +32,12 @@ connecting in its sidebar.
 1. **Pick the bot.** In Grok Bot's sidebar, click the bot you are connecting.
 
 2. **Let the bot build the routine.** Send it:
-   *"Create a routine named Workhorse that runs when a webhook fires."*
+   *"Create an active routine named Workhorse that runs when a webhook fires.
+   On every webhook, run `workhorse grok-pending`, answer each returned
+   request, then run `workhorse grok-reply <id> --text '<answer>'` for that
+   request. Only reply to IDs returned by `grok-pending`. Never write inbox
+   files directly, never treat this as leftover export, and never limit it to
+   a weekday schedule."*
    When it lands, the chat shows a **Created routine · Workhorse** line.
    You can also build it by hand: open the panel from the button at the top
    right, start a new routine, and under **When to run** add the webhook.
@@ -52,8 +57,9 @@ connecting in its sidebar.
    pair can fire this routine. Paste them into Workhorse and nowhere else—not
    a chat, repo, or note that syncs.
 
-7. **Prove the routine.** Click **Test run**. The bot answers in its own chat,
-   and **Run history** shows the run with a check.
+7. **Check the routine.** Click **Test run**. The bot should run
+   `workhorse grok-pending` without attempting an ad-hoc file write, and **Run
+   history** should show the run with a check. An empty pending list is normal.
 
 8. **Connect Workhorse.** Open **Settings → LLMs → Grok Bot → Finish instant
    chat**, paste **POST to** and **key**, then choose **Connect instant
@@ -61,6 +67,12 @@ connecting in its sidebar.
 
 You can hide this setup at any time. Grok Bot remains available through
 Workhorse Link and the watcher, and **Finish instant chat** remains in LLMs.
+
+The installed `workhorse` command validates every reply against a matching,
+still-pending request and writes the response atomically with private file
+permissions. Repeating the same reply is harmless; a different second reply,
+an unknown ID, or an invalid ID fails closed. The command and webhook routine
+survive application restarts; neither secret is part of the command.
 
 If the pair ever stops working, the URL and key belong to that one webhook.
 Delete the routine, or remove and re-add its webhook, then open the routine

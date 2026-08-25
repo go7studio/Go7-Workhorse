@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -604,6 +604,11 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(text, /optional Grok Bot instant-reply setup/);
   assert.match(text, /Do not create a routine unless the user chooses it/);
   assert.match(text, /When a webhook fires/);
+  assert.match(text, /workhorse grok-pending/);
+  assert.match(text, /workhorse grok-reply <id>/);
+  assert.match(text, /Only reply to ids returned by grok-pending/);
+  assert.match(text, /Never write inbox files directly/);
+  assert.match(text, /never limit it to a weekday schedule/);
   assert.match(text, /POST to and key/);
   assert.match(text, /Grok Bot → Finish instant chat/);
   assert.match(text, /Never ask for either value/);
@@ -644,6 +649,8 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(win, /user's Windows PC/);
   assert.match(win, /workhorse\.cmd capabilities/);
   assert.match(win, /workhorse\.cmd capacity/);
+  assert.match(win, /workhorse\.cmd grok-pending/);
+  assert.match(win, /workhorse\.cmd grok-reply <id>/);
   assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\workhorse-bridge\.json/);
   assert.match(win, /C:\\Users\\steve\\AppData\\Roaming\\Go7 Workhorse\\grok-bot-leftover\.json/);
   assert.doesNotMatch(win, /Library\/Application Support/);
@@ -814,6 +821,28 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
     assert.equal(shake.protocolVersion, 2);
     for (const tool of LINK_BASE_TOOLS) assert.ok(shake.tools.includes(tool), `packaged helper includes ${tool}`);
     assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
+
+    const inbox = path.join(root, "grok-bot-inbox");
+    const requestId = "gb_eeeeeeeeeeeeeeee";
+    mkdirSync(inbox, { recursive: true });
+    writeFileSync(path.join(inbox, `${requestId}.req.json`), JSON.stringify({
+      id: requestId,
+      createdAt: Date.now(),
+      model: "grok-bot",
+      text: "packaged helper check",
+      origin: "workhorse",
+    }), { mode: 0o600 });
+    const pending = JSON.parse(execFileSync(launcher, ["grok-pending"], { encoding: "utf8" })) as Array<{ id: string }>;
+    assert.deepEqual(pending.map((row) => row.id), [requestId]);
+    const replied = JSON.parse(execFileSync(launcher, ["grok-reply", requestId, "--text", "packaged reply"], { encoding: "utf8" })) as {
+      ok: boolean;
+      id: string;
+      created: boolean;
+    };
+    assert.deepEqual(replied, { ok: true, id: requestId, created: true });
+    const response = path.join(inbox, `${requestId}.res.json`);
+    assert.deepEqual(JSON.parse(readFileSync(response, "utf8")), { id: requestId, text: "packaged reply" });
+    assert.equal(statSync(response).mode & 0o777, 0o600);
   }
   rmSync(root, { recursive: true, force: true });
 });

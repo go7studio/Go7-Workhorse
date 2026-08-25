@@ -76,7 +76,8 @@ export function GrokBotWakeSetup() {
             <summary>2-minute Grok Bot setup</summary>
             <p>
               Choose this bot in Grok Bot. Ask it to create an active Workhorse routine that runs
-              <strong> When a webhook fires</strong>. Open that trigger, then copy <strong>POST to</strong> and
+              <strong> When a webhook fires</strong>, checks <strong>workhorse grok-pending</strong>, and returns each
+              answer with <strong>workhorse grok-reply</strong>. Open that trigger, then copy <strong>POST to</strong> and
               <strong> key</strong> here. Never send either value in chat.
             </p>
             <a

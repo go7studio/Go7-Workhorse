@@ -355,7 +355,7 @@ Model: no fixed Grok Bot model. It only needs local MCP/CLI tool calling; Workho
    ${cli} capabilities
    If that fails: tell them to open Workhorse → Settings → LLMs → Install workhorse command, then retry.
 
-2. Offer the optional Grok Bot instant-reply setup. Do not create a routine unless the user chooses it. If they do, select the bot being connected and create an active routine named Workhorse with "When a webhook fires." Once active, open that trigger. The user copies POST to and key into Workhorse → Settings → LLMs → Grok Bot → Finish instant chat themselves. Never ask for either value or put it in chat or memory. Skipping this does not block Workhorse Link or the watcher.
+2. Offer the optional Grok Bot instant-reply setup. Do not create a routine unless the user chooses it. If they do, select the bot being connected and create an active routine named Workhorse with "When a webhook fires." Give that routine this exact job: on every webhook run \`${cli} grok-pending\`; answer each returned request; submit each answer with \`${cli} grok-reply <id> --text '<answer>'\`. Only reply to ids returned by grok-pending. Never write inbox files directly, never treat this run as leftover export, and never limit it to a weekday schedule. Once active, open that trigger. The user copies POST to and key into Workhorse → Settings → LLMs → Grok Bot → Finish instant chat themselves. Never ask for either value or put it in chat or memory. Skipping this does not block Workhorse Link or the watcher.
 
 3. MCP clients on that same computer (Grok TUI, Cursor, Claude Code) use this launch. Do not exec these paths on the remote box.
 

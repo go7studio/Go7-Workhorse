@@ -282,6 +282,48 @@ test("excluding a family uses whole tokens, not substrings", () => {
   assert.equal(solaris.length, 3, "letters inside a label word exclude nothing");
 });
 
+test("two generations at one price are not the same model", () => {
+  // One `opus` row gave both generations an identical profile, so they tied
+  // at 105.8 on the live desk and the final tiebreak — a.label.localeCompare
+  // — handed every deep task to "Opus 4.8" because 4 sorts before 5.
+  assert.equal(routingProfileForModel("claude", "claude-opus-5").intelligence, 10);
+  assert.equal(routingProfileForModel("claude", "claude-opus-4-8").intelligence, 9);
+  // Same price, so nothing about cost separates them.
+  assert.equal(routingProfileForModel("claude", "claude-opus-5").cost, routingProfileForModel("claude", "claude-opus-4-8").cost);
+});
+
+test("smarter at the same cost wins, at every tier", () => {
+  const five = bot("claude-opus-5", 10, 3, 4, midWeek(43), { label: "Opus 5" });
+  const older = bot("claude-opus-4-8", 9, 3, 4, midWeek(43), { label: "Opus 4.8" });
+  for (const tier of ["quick", "balanced", "deep"] as const) {
+    const ranked = rankRoutingCandidates([older, five], { prompt: "", tier, now: NOW }, settings);
+    assert.equal(ranked[0]?.label, "Opus 5", `${tier}: the newer generation wins`);
+  }
+  // And it is not the alphabet doing it: reverse the names and the smarter
+  // model still wins.
+  const swapped = rankRoutingCandidates(
+    [bot("a-smart", 10, 3, 4, midWeek(43), { label: "Zeta" }), bot("z-dim", 9, 3, 4, midWeek(43), { label: "Alpha" })],
+    { prompt: "", tier: "deep", now: NOW },
+    settings,
+  );
+  assert.equal(swapped[0]?.label, "Zeta", "capability decides, not the label");
+});
+
+test("being smarter is free; paying more for it is not", () => {
+  // The premium is charged against the cheapest model that clears the bar,
+  // so trivia still goes to the cheap model and never burns a frontier seat.
+  const luna = bot("gpt-5.6-luna", 5, 5, 1, midWeek(45));
+  const opus = bot("claude-opus-5", 10, 3, 4, midWeek(43));
+  const quick = rankRoutingCandidates([opus, luna], { prompt: "", tier: "quick", now: NOW }, settings);
+  assert.equal(quick[0]?.model, "gpt-5.6-luna", "quick work does not pay the premium");
+
+  // But two models that cost the same are separated by capability alone.
+  const cheapDim = bot("dim", 8, 3, 4, midWeek(43));
+  const cheapSmart = bot("smart", 10, 3, 4, midWeek(43));
+  const balanced = rankRoutingCandidates([cheapDim, cheapSmart], { prompt: "", tier: "balanced", now: NOW }, settings);
+  assert.equal(balanced[0]?.model, "smart", "no premium to charge, so the better model wins");
+});
+
 test("free capacity is a filler, not a merit", () => {
   // A local model and an unlimited weekly are the same shape: nothing meters
   // them, so nothing should crown them either. The old flat +8 put a local

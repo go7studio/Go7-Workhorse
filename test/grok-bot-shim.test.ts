@@ -77,7 +77,7 @@ test("the inbox follows the installed state path on Mac and Windows", () => {
 });
 
 test("pending lists only valid unpaired Workhorse requests", () => {
-  const inbox = "/fixture/grok-bot-inbox";
+  const inbox = grokBotInboxFromStatePath(path.join(path.parse(process.cwd()).root, "fixture", "workhorse-state.json"));
   const valid = "gb_1111111111111111";
   const answered = "gb_2222222222222222";
   const mismatch = "gb_3333333333333333";
@@ -126,8 +126,8 @@ test("the default writer creates one private, complete response", () => {
 });
 
 test("the dedicated CLI is narrow and does not become an MCP tool", () => {
-  const statePath = "/fixture/workhorse-state.json";
-  const inbox = "/fixture/grok-bot-inbox";
+  const statePath = path.join(path.parse(process.cwd()).root, "fixture", "workhorse-state.json");
+  const inbox = grokBotInboxFromStatePath(statePath);
   const id = "gb_dddddddddddddddd";
   const { io } = inboxMemoryIo({ [path.join(inbox, `${id}.req.json`)]: inboxRequest(id) });
   const pending = runGrokBotInboxCli(["grok-pending"], { statePath, io });

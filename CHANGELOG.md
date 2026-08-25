@@ -8,6 +8,32 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.39](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.38...v0.6.39) (2026-08-25)
+
+
+### Features
+
+* one call shows the whole worker board ([97d0b6d](https://github.com/go7studio/Go7-Workhorse/commit/97d0b6dacd759edf4df7b4bca223a3fb6240751a))
+* one call shows the whole worker board ([7fb49f6](https://github.com/go7studio/Go7-Workhorse/commit/7fb49f6937fea2b7c6914e54d54a40293a42169b))
+* **routing:** a bot is local because of its address, not its name ([50f5016](https://github.com/go7studio/Go7-Workhorse/commit/50f501677702b570c6533d8a2fb4bf2a276629a1))
+* **routing:** a bot is local because of its address, not its name ([d2ea952](https://github.com/go7studio/Go7-Workhorse/commit/d2ea9521e83c00db8a933570b3fe17dff1cd573d))
+* tell a harness when its worker finished ([8444de3](https://github.com/go7studio/Go7-Workhorse/commit/8444de3a973606eec777a1edc47617263efab6b3))
+* tell a harness when its worker finished ([b55bd80](https://github.com/go7studio/Go7-Workhorse/commit/b55bd80afe1ba7649b0b52a458d96bccb3883ec8))
+
+
+### Bug Fixes
+
+* a host at capacity is asking for a wait, not reporting a failure ([7d5581b](https://github.com/go7studio/Go7-Workhorse/commit/7d5581bacb3922a649ae335501e39b72dd4bb737))
+* a host at capacity is asking for a wait, not reporting a failure ([bfb9621](https://github.com/go7studio/Go7-Workhorse/commit/bfb96213462ec6440b249e48f81d0f0999092739))
+* being smarter is free, paying more for it is not ([e41ba61](https://github.com/go7studio/Go7-Workhorse/commit/e41ba6173ac3154d8741110d28a5f439088a54bc))
+* being smarter is free, paying more for it is not ([94595af](https://github.com/go7studio/Go7-Workhorse/commit/94595af417580d325b03dd15ca400f0fddcbc97a))
+* buffer notifications until the host's framing is known ([af76551](https://github.com/go7studio/Go7-Workhorse/commit/af765518b722871eedd601c6a38eea420b1c8971))
+* forbidding a bot is not naming it ([0142817](https://github.com/go7studio/Go7-Workhorse/commit/0142817affbf503b9acb2c0cad1adf57d370a925))
+* forbidding a bot is not naming it ([63ad34f](https://github.com/go7studio/Go7-Workhorse/commit/63ad34f965a1cbef0620e195197fa1bfc703ebd2))
+* latch the settled flush, and stop racing fs.watch in a test ([f99a6ab](https://github.com/go7studio/Go7-Workhorse/commit/f99a6ab7f41df109ee35499c11f59911fe4e6755))
+* the completion notification stops promising a report it never sent ([907893e](https://github.com/go7studio/Go7-Workhorse/commit/907893e68c6104700ece7449da8b747ba295bf7b))
+* the completion notification stops promising a report it never sent ([39eb1fe](https://github.com/go7studio/Go7-Workhorse/commit/39eb1fe7a9ee05a1f226b55f98ac8f4db7457455))
+
 ## [0.6.38](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.37...v0.6.38) (2026-08-25)
 
 

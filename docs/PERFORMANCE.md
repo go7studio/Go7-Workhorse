@@ -42,9 +42,11 @@ Three habits cover the rest:
   event per turn and is re-read on every launch. Any new list with that shape
   needs a plan for its size before it ships. Picture bytes do not belong in
   `workhorse-state.json`; they write once under `userData/attachments/` and the
-  chat keeps a path. Save also collapses tool lines and caps lineup reports so
-  a worker essay is not stored twice. Enforced by `test/attachments.test.ts`
-  and `test/persist-compact.test.ts`.
+  chat keeps a path. Link helpers parse that file once per version, drop inline
+  `data` while parsing, and reuse one snapshot for a whole RPC. A finished
+  worker runtime is disposed; `vendorSessionId` stays so the next prompt can
+  `session/load`. Enforced by `test/attachments.test.ts`, `test/link-state.test.ts`,
+  and `test/workhorse.test.ts`.
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
 

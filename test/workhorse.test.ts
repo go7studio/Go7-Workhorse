@@ -24,7 +24,7 @@ import {
   textFromContent,
   updateKind,
 } from "../electron/grok-agent";
-import { GrokSessionHost, shouldLoadVendorSession } from "../electron/grok-host";
+import { GrokSessionHost, isWorkerRuntime, shouldLoadVendorSession } from "../electron/grok-host";
 import { parseGrokPlanUsage } from "../electron/grok-plan";
 import { parseCodexPlanUsage } from "../electron/codex-plan";
 import { detectGrokLogin } from "../electron/grok-login";
@@ -7174,6 +7174,10 @@ test("turns keep the bot that ran them after a switch", () => {
 });
 
 test("shouldLoadVendorSession chooses new vs load vs reuse", () => {
+  assert.equal(isWorkerRuntime({ parentId: "sess_parent" }), true);
+  assert.equal(isWorkerRuntime({ hidden: true }), true);
+  assert.equal(isWorkerRuntime({ role: "worker" }), true);
+  assert.equal(isWorkerRuntime({}), false);
   assert.equal(shouldLoadVendorSession({ nextKey: "a" }), "new");
   assert.equal(shouldLoadVendorSession({ vendorSessionId: "v1", nextKey: "a" }), "load");
   assert.equal(shouldLoadVendorSession({ vendorSessionId: "v1", existingSlotKey: "a", nextKey: "a" }), "reuse");
@@ -7379,6 +7383,42 @@ test("GrokSessionHost rewind resets the first prompt and executes later points",
   assert.equal(later.rewound, true);
   assert.ok(methods.includes("_x.ai/rewind/points"));
   assert.ok(methods.includes("_x.ai/rewind/execute"));
+});
+
+test("GrokSessionHost releases a finished worker runtime and reloads the vendor session", async () => {
+  const methods: string[] = [];
+  const host = new GrokSessionHost(() => fakeAcp({ methods, nextId: "worker-session" }));
+  await host.prompt(
+    {
+      sessionId: "kid_1",
+      parentId: "sess_parent",
+      hidden: true,
+      text: "slice",
+      model: "grok-4.6",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+    },
+    () => undefined,
+  );
+  assert.equal(await host.sessionInfo("kid_1"), null, "the vendor child must not sit idle after the slice");
+  methods.length = 0;
+  await host.prompt(
+    {
+      sessionId: "kid_1",
+      parentId: "sess_parent",
+      hidden: true,
+      text: "again",
+      model: "grok-4.6",
+      effort: "medium",
+      mode: "ask",
+      cwd: ROOT,
+      vendorSessionId: "worker-session",
+    },
+    () => undefined,
+  );
+  host.disposeAll();
+  assert.deepEqual(methods, ["initialize", "session/load", "session/prompt"]);
 });
 
 test("GrokSessionHost loads a stored vendor id after dispose", async () => {

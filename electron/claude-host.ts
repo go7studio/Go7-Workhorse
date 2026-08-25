@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { GrokAgent, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
 import {
+  isWorkerRuntime,
   shouldLoadVendorSession,
   type GrokCompactInput,
   type GrokEventSink,
@@ -106,6 +107,8 @@ export class ClaudeSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      if (isWorkerRuntime(input)) this.dispose(input.sessionId);
     }
   }
 

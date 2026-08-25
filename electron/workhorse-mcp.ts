@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
+import { loadLinkState, readLinkState, runWithLinkState } from "./link-state";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -124,13 +125,7 @@ function readState(): {
   watchPermits?: WatchPermits;
   watchDayMarks?: WatchDayMarks;
 } {
-  const dest = process.env.WORKHORSE_STATE_PATH;
-  if (!dest) return {};
-  try {
-    return JSON.parse(fs.readFileSync(dest, "utf8")) as ReturnType<typeof readState>;
-  } catch {
-    return {};
-  }
+  return readLinkState() as ReturnType<typeof readState>;
 }
 
 export function encodeMcpFrame(message: object, framing: McpFraming = "content-length"): string {
@@ -3281,7 +3276,8 @@ export async function handleWorkhorseRpc(
       );
     };
     try {
-      const text = await callTool(toolName, toolArgs, ctx?.fromSessionId);
+      const snap = loadLinkState(process.env.WORKHORSE_STATE_PATH ?? "");
+      const text = await runWithLinkState(snap, () => callTool(toolName, toolArgs, ctx?.fromSessionId));
       captureCall(true, text);
       return { jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text }] } };
     } catch (error) {

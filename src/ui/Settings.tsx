@@ -20,6 +20,7 @@ import { LearningPane } from "./LearningPane";
 import { ProfileHorse } from "./ProfileHorse";
 import { routingProfileForModel } from "../lib/routing";
 import { formatExternalAgentRef } from "../lib/agent-runtime";
+import { LocalComputeBlock } from "./LocalComputeBlock";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
@@ -347,6 +348,7 @@ export function Settings() {
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
           )}
 
+          <LocalComputeBlock />
           <AgentSystemsBlock />
         </>
       )}

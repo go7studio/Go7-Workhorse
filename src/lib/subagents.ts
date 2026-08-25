@@ -443,6 +443,7 @@ function takenWorkerNames(workers: WorkerRecord[], parentId: string): string[] {
  * for the MCP transport; the two lists are asserted equal.
  */
 export const WORKER_DESK_TOOLS = [
+  "workhorse_capabilities",
   "workhorse_list_chats",
   "workhorse_read_chat",
   "workhorse_ask_chat",
@@ -454,16 +455,32 @@ export const WORKER_DESK_TOOLS = [
   "workhorse_list_skills",
   "workhorse_read_skill",
   "workhorse_probe_runtime",
+  // Local Compute is still fail closed here: these static names are visible
+  // only when the product registry grants this worker a healthy capability.
+  "workhorse_local_hosts",
+  "workhorse_local_capabilities",
+  "workhorse_local_upload",
+  "workhorse_local_invoke",
+  "workhorse_local_job",
+  "workhorse_local_artifact",
+  "workhorse_local_materialize",
+  "workhorse_local_continue",
 ] as const;
 
 /** Auditor may read the folder and chats. It may not spawn or raise access. */
 export const AUDITOR_DESK_TOOLS = [
+  "workhorse_capabilities",
   "workhorse_list_chats",
   "workhorse_read_chat",
   "workhorse_list_references",
   "workhorse_list_skills",
   "workhorse_read_skill",
   "workhorse_probe_runtime",
+  // Auditors may inspect granted local outputs but never submit or cancel work.
+  "workhorse_local_hosts",
+  "workhorse_local_capabilities",
+  "workhorse_local_job",
+  "workhorse_local_artifact",
 ] as const;
 
 export function agentDepth(

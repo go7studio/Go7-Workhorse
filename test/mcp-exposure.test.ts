@@ -12,6 +12,7 @@ import {
   inboundDeskAction,
   inboundSessionIdFromState,
   inboundSpawnParent,
+  isLocalMcpToolCallable,
   isMcpToolAdvertised,
   isMcpToolAllowed,
   mcpExposureProfile,
@@ -20,8 +21,8 @@ import {
   resolveMcpSpawnFrom,
 } from "../electron/mcp-exposure";
 import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, mcpToolInputSchema, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
-import { LINK_TOOLS } from "../src/lib/workhorse-link";
-import { WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
+import { LINK_BASE_TOOLS, LINK_TOOLS } from "../src/lib/workhorse-link";
+import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
   hermesConfigPath,
   installWorkhorseExternalMcp,
@@ -36,7 +37,7 @@ import {
 } from "../electron/mcp-install";
 import { filterWorkhorseVendorRows } from "../src/lib/agent-runtime";
 
-test("Link lists the eight contract tools; older names still dispatch", () => {
+test("Link lists the versioned contract tools; older names still dispatch", () => {
   for (const tool of LINK_TOOLS) {
     assert.equal(isMcpToolAdvertised("external-runtime", tool), true, tool);
   }
@@ -45,6 +46,14 @@ test("Link lists the eight contract tools; older names still dispatch", () => {
     assert.equal(isMcpToolAdvertised("external-runtime", tool), false, tool);
   }
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
+});
+
+test("generic local invoke is discoverable only when a typed invocation contract exists", () => {
+  const ids = new Set(["image.generate"]);
+  assert.equal(isLocalMcpToolCallable("workhorse_local_upload", ids), true);
+  assert.equal(isLocalMcpToolCallable("workhorse_local_invoke", ids), false);
+  assert.equal(isLocalMcpToolCallable("workhorse_local_invoke", ids, { invocationCallable: true }), true);
+  assert.equal(isLocalMcpToolCallable("workhorse_local_continue", ids, { continuationCallable: false }), false);
 });
 
 test("external-runtime allows execution discovery, delegation, chat, and worker lifecycle", () => {
@@ -157,7 +166,7 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     // The list a caller sees is the Link contract. Forbidden names stay off it.
     // Older names still answer at dispatch so a harness that already calls them is not refused.
     assert.ok(!names.includes("workhorse_delete_chat"), "forbidden tools are not advertised");
-    assert.deepEqual(names.slice().sort(), [...LINK_TOOLS].slice().sort());
+    assert.deepEqual(names.slice().sort(), [...LINK_BASE_TOOLS].slice().sort());
     assert.ok(!names.includes("workhorse_spawn_agent"));
     assert.ok(!names.includes("workhorse_list_bots"));
     assert.equal(isMcpToolAllowed("external-runtime", "workhorse_spawn_agent"), true);
@@ -722,7 +731,7 @@ test("a worker is offered only the desk tools it may call, and a hidden name is 
     const worker = await list("worker_1");
     assert.ok(orchestrator.includes("workhorse_delete_project"), "the orchestrator keeps the whole desk");
     assert.ok(orchestrator.includes("workhorse_list_bots"));
-    assert.deepEqual(worker, [...WORKER_DESK_TOOLS].sort(), "a worker sees exactly its allowlist");
+    assert.deepEqual(worker, [...WORKER_DESK_TOOLS].filter((tool) => !tool.startsWith("workhorse_local_")).sort(), "an ungranted worker sees its non-local allowlist");
     // The Bible: one bounded helper is the ceiling — spawn and await stay.
     assert.ok(worker.includes("workhorse_spawn_agent"));
     assert.ok(worker.includes("workhorse_await_agents"));
@@ -774,6 +783,38 @@ test("the worker allowlist is one list, and the profile follows the caller, not 
   assert.equal(isWorkerOmittedTool("list_dir"), false);
   assert.equal(isWorkerOmittedTool("read_file"), false);
   assert.equal(isWorkerOmittedTool("workhorse_delete_project"), true);
+});
+
+test("auditors can inspect granted local work but cannot create or alter it", () => {
+  for (const name of AUDITOR_DESK_TOOLS) assert.equal(isMcpToolAllowed("auditor", name), true, name);
+  for (const name of [
+    "workhorse_local_upload",
+    "workhorse_local_invoke",
+    "workhorse_local_chat",
+    "workhorse_local_generate_3d",
+    "workhorse_local_cancel",
+    "workhorse_local_materialize",
+    "workhorse_local_continue",
+  ]) assert.equal(isMcpToolAllowed("auditor", name), false, name);
+});
+
+test("workhorse_capabilities never advertises tools forbidden to the caller profile", async () => {
+  const previous = process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_MCP_PROFILE = "auditor";
+  try {
+    const reply = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 91,
+      method: "tools/call",
+      params: { name: "workhorse_capabilities", arguments: {} },
+    }) as { result?: { content?: Array<{ text?: string }> } };
+    const handshake = JSON.parse(reply.result?.content?.[0]?.text ?? "{}") as { tools?: string[]; capabilities?: string[] };
+    assert.deepEqual(handshake.tools, ["workhorse_capabilities", "workhorse_list_chats", "workhorse_read_chat"]);
+    assert.deepEqual(handshake.capabilities, ["chats.read"]);
+  } finally {
+    if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous;
+  }
 });
 
 test("a worker's CLI is launched with worker rules, an orchestrator's with the bible", async () => {

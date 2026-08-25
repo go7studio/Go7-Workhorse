@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   LINK_CAPABILITIES,
+  LINK_BASE_TOOLS,
   LINK_FOLLOW_THROUGH,
   LINK_HOSTS,
   LINK_HOST_LABEL,
+  LINK_LOCAL_TOOLS,
   LINK_PROTOCOL_VERSION,
   LINK_TOOLS,
   LinkReplayCache,
@@ -22,15 +24,16 @@ import {
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
-import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
 import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, type InstallIo } from "../electron/mcp-install";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
-test("the Link contract: eight tools, four capabilities, one version — and the profile answers every name", () => {
-  assert.equal(LINK_PROTOCOL_VERSION, 1);
+test("the Link v2 contract publishes workers and typed local capability execution", () => {
+  assert.equal(LINK_PROTOCOL_VERSION, 2);
   // Follow-up is continue_mission: delegate publishes no worker field, because
   // which worker runs a task is Workhorse's routing, not the harness's.
   assert.deepEqual([...LINK_TOOLS], [
@@ -42,8 +45,31 @@ test("the Link contract: eight tools, four capabilities, one version — and the
     "workhorse_continue_mission",
     "workhorse_agent_status",
     "workhorse_ask_chat",
+    "workhorse_local_hosts",
+    "workhorse_local_capabilities",
+    "workhorse_local_upload",
+    "workhorse_local_invoke",
+    "workhorse_local_chat",
+    "workhorse_local_generate_3d",
+    "workhorse_local_job",
+    "workhorse_local_cancel",
+    "workhorse_local_artifact",
+    "workhorse_local_materialize",
+    "workhorse_local_continue",
   ]);
-  assert.deepEqual([...LINK_CAPABILITIES], ["capacity.read", "chats.read", "workers.delegate", "workers.follow_up"]);
+  assert.deepEqual([...LINK_CAPABILITIES], [
+    "capacity.read",
+    "chats.read",
+    "workers.delegate",
+    "workers.follow_up",
+    "local.hosts.read",
+    "local.capabilities.read",
+    "local.jobs.submit",
+    "local.jobs.read",
+    "local.jobs.cancel",
+    "local.artifacts.transfer",
+    "local.continuations.dispatch",
+  ]);
   // Every contract tool is allowed on the external profile; admin is not.
   for (const tool of LINK_TOOLS) assert.equal(isMcpToolAllowed("external-runtime", tool), true, tool);
   for (const tool of ["workhorse_delete_chat", "workhorse_rename_project", "workhorse_setup_custom_bot", "workhorse_request_permission", "workhorse_delete_bot", "workhorse_create_project"]) {
@@ -51,8 +77,8 @@ test("the Link contract: eight tools, four capabilities, one version — and the
     assert.equal((EXTERNAL_RUNTIME_ALLOW as readonly string[]).includes(tool), false, tool);
   }
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
-  const shake = linkHandshake({ deskOnline: true });
-  assert.equal(shake.protocolVersion, 1);
+  const shake = linkHandshake({ deskOnline: true, local: { tools: LINK_LOCAL_TOOLS, hosts: [{ id: "spark", label: "Spark", brokerId: "spark", brokerVersion: "1", capabilities: [] }] } });
+  assert.equal(shake.protocolVersion, 2);
   assert.equal(shake.desk, "online");
   assert.deepEqual(shake.tools, [...LINK_TOOLS]);
   assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
@@ -69,6 +95,7 @@ test("the Link contract: eight tools, four capabilities, one version — and the
   assert.doesNotMatch(features, /\bRemote\b/);
   assert.doesNotMatch(agents, /\bRemote\b/);
   assert.doesNotMatch(link, /\bRemote\b/);
+  assert.deepEqual(linkHandshake({ deskOnline: true }).tools, [...LINK_BASE_TOOLS], "no live host means no local tools");
 });
 
 test("`link` is the product spelling of the external profile, and an unknown word fails closed", () => {
@@ -88,11 +115,25 @@ test("`link` is the product spelling of the external profile, and an unknown wor
 test("workhorse_capabilities answers over the external profile, first, with the contract", async () => {
   const previous = process.env.WORKHORSE_MCP_PROFILE;
   process.env.WORKHORSE_MCP_PROFILE = "link";
+  setLocalCapabilityHostClient({
+    hostIds: () => ["spark"],
+    capabilities: async () => ({
+      protocolVersion: "1.0", brokerVersion: "test", brokerId: "spark",
+      capabilities: [
+        { id: "text.chat.generate", profileId: "text", description: "text", inputKinds: ["text"], outputRoles: ["text_output"], estimatedMemoryGb: 1, asynchronous: true },
+        { id: "asset.3d.generate", profileId: "3d", description: "3d", inputKinds: ["image"], outputRoles: ["shape_model"], estimatedMemoryGb: 1, asynchronous: true },
+      ],
+      limits: { maxJsonBytes: 1024, maxArtifactBytes: 1024, maxHops: 8 },
+    }),
+  } as unknown as LocalCapabilityHostClient);
   try {
     const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as { result?: { tools?: Array<{ name: string }> } };
     const names = (listed.result?.tools ?? []).map((tool) => tool.name);
     assert.equal(names[0], "workhorse_capabilities", "capabilities lists first");
-    for (const tool of LINK_TOOLS) assert.ok(names.includes(tool), tool);
+    const expectedTools = LINK_TOOLS.filter((tool) => tool !== "workhorse_local_continue" && tool !== "workhorse_local_invoke");
+    for (const tool of expectedTools) assert.ok(names.includes(tool), tool);
+    assert.ok(!names.includes("workhorse_local_continue"), "a host with no continuation descriptor cannot advertise dispatch");
+    assert.ok(!names.includes("workhorse_local_invoke"), "summary-only descriptors cannot advertise generic invocation");
     assert.ok(!names.includes("workhorse_delete_chat"));
     const reply = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "workhorse_capabilities", arguments: {} } })) as {
       result?: { content?: Array<{ text?: string }> };
@@ -103,13 +144,145 @@ test("workhorse_capabilities answers over the external profile, first, with the 
       tools: string[];
       followThrough: { newSlice: string; namedWorker: string; later: string };
     };
-    assert.equal(shake.protocolVersion, 1);
+    assert.equal(shake.protocolVersion, 2);
     assert.ok(shake.desk === "online" || shake.desk === "offline");
-    assert.deepEqual(shake.tools, [...LINK_TOOLS]);
+    assert.deepEqual(shake.tools, expectedTools);
     assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
+    assert.ok(!((shake as unknown as { capabilities: string[] }).capabilities).includes("local.continuations.dispatch"));
   } finally {
+    setLocalCapabilityHostClient(undefined);
     if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
     else process.env.WORKHORSE_MCP_PROFILE = previous;
+  }
+});
+
+test("persisted grants and live health fail closed across tools/list, capabilities, and generic invocation", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-local-registry-"));
+  const statePath = path.join(dir, "state.json");
+  const tokenFile = path.join(dir, "token");
+  writeFileSync(tokenFile, "state-token\n", { mode: 0o600 });
+  chmodSync(tokenFile, 0o600);
+  writeFileSync(statePath, JSON.stringify({
+    settings: {
+      localCompute: {
+        version: 1,
+        hosts: [{
+          id: "state-host",
+          label: "Local Compute",
+          baseUrl: "https://local.test/runtime",
+          tokenFile,
+          enabled: true,
+          allowedCallerRoles: ["external-runtime"],
+          allowedCapabilities: ["text.chat.generate"],
+        }],
+      },
+    },
+  }));
+  const previous = {
+    profile: process.env.WORKHORSE_MCP_PROFILE,
+    state: process.env.WORKHORSE_STATE_PATH,
+    hosts: process.env.WORKHORSE_LOCAL_HOSTS_JSON,
+    fetch: globalThis.fetch,
+  };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  process.env.WORKHORSE_LOCAL_HOSTS_JSON = JSON.stringify([{ id: "env-host", baseUrl: "https://ignored.test", tokenFile }]);
+  let healthy = true;
+  globalThis.fetch = (async (input, init) => {
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer state-token");
+    assert.match(String(input), /^https:\/\/local\.test\/runtime\//, "persisted registry wins over environment fallback");
+    if (!healthy) throw new Error("offline");
+    return new Response(JSON.stringify({
+      protocolVersion: "1.0",
+      brokerVersion: "test",
+      brokerId: "runtime",
+      capabilities: [
+        {
+          id: "text.chat.generate", profileId: "text", description: "Text", inputKinds: ["text"], outputRoles: ["text_output"],
+          invocation: {
+            inputs: [{ role: "prompt", kind: "text", mediaTypes: ["text/plain"], required: true, minItems: 1, maxItems: 1 }],
+            outputs: [{ role: "text_output", kind: "text", mediaTypes: ["text/plain"], required: true }],
+            constraintsSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+          },
+          estimatedMemoryGb: 1, asynchronous: true,
+        },
+        { id: "asset.3d.generate", profileId: "3d", description: "3D", inputKinds: ["image"], outputRoles: ["shape_model"], estimatedMemoryGb: 1, asynchronous: true },
+      ],
+      limits: { maxJsonBytes: 1024, maxArtifactBytes: 1024, maxHops: 8 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  setLocalCapabilityHostClient(undefined);
+  try {
+    const listed = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as { result?: { tools?: Array<{ name: string; inputSchema?: { properties?: { capabilityId?: { enum?: string[] } } } }> } };
+    const tools = listed.result?.tools ?? [];
+    const names = tools.map((tool) => tool.name);
+    assert.ok(names.includes("workhorse_local_chat"));
+    assert.ok(!names.includes("workhorse_local_generate_3d"), "an ungranted live capability is invisible");
+    assert.deepEqual(tools.find((tool) => tool.name === "workhorse_local_invoke")?.inputSchema?.properties?.capabilityId?.enum, ["text.chat.generate"]);
+    assert.deepEqual(tools.find((tool) => tool.name === "workhorse_local_upload")?.inputSchema?.properties?.capabilityId?.enum, ["text.chat.generate"]);
+    const refusedLegacy = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: { name: "workhorse_local_generate_3d", arguments: { sourceArtifactId: `art_${"a".repeat(32)}` } },
+    }) as { error?: { message?: string } };
+    assert.match(refusedLegacy.error?.message ?? "", /local_capability_unavailable/);
+    const refusedGeneric = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 12,
+      method: "tools/call",
+      params: { name: "workhorse_local_invoke", arguments: { capabilityId: "asset.3d.generate", inputs: [], requiredOutputs: [] } },
+    }) as { error?: { message?: string } };
+    assert.match(refusedGeneric.error?.message ?? "", /local_capability_unavailable/);
+    const capabilitiesReply = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "workhorse_capabilities", arguments: {} } })) as { result?: { content?: Array<{ text?: string }> } };
+    const handshake = JSON.parse(capabilitiesReply.result?.content?.[0]?.text ?? "{}") as { local?: { hosts?: Array<{ id: string; capabilities: Array<{ id: string }> }> } };
+    assert.equal(handshake.local?.hosts?.[0]?.id, "state-host");
+    assert.deepEqual(handshake.local?.hosts?.[0]?.capabilities.map((capability) => capability.id), ["text.chat.generate"]);
+    assert.doesNotMatch(JSON.stringify(handshake), /state-token|tokenFile|ignored\.test/);
+
+    healthy = false;
+    const unavailable = (await handleWorkhorseRpc({ jsonrpc: "2.0", id: 3, method: "tools/list" })) as { result?: { tools?: Array<{ name: string }> } };
+    assert.equal((unavailable.result?.tools ?? []).some((tool) => tool.name.startsWith("workhorse_local_")), false);
+  } finally {
+    setLocalCapabilityHostClient(undefined);
+    globalThis.fetch = previous.fetch;
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE; else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH; else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.hosts === undefined) delete process.env.WORKHORSE_LOCAL_HOSTS_JSON; else process.env.WORKHORSE_LOCAL_HOSTS_JSON = previous.hosts;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy env hosts migrate until the Local Compute registry is explicitly made authoritative", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-local-migrate-"));
+  const statePath = path.join(dir, "state.json");
+  const tokenFile = path.join(dir, "token");
+  writeFileSync(tokenFile, "migration-token\n", { mode: 0o600 });
+  writeFileSync(statePath, JSON.stringify({ settings: { localCompute: { version: 1, hosts: [] } } }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH, hosts: process.env.WORKHORSE_LOCAL_HOSTS_JSON, fetch: globalThis.fetch };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  process.env.WORKHORSE_LOCAL_HOSTS_JSON = JSON.stringify([{ id: "legacy-host", baseUrl: "https://legacy.test", tokenFile }]);
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    protocolVersion: "1.0", brokerVersion: "test", brokerId: "legacy",
+    capabilities: [{ id: "text.chat.generate", profileId: "text", description: "Text", inputKinds: ["text"], outputRoles: ["text_output"], estimatedMemoryGb: 1, asynchronous: true }],
+    limits: { maxJsonBytes: 1024, maxArtifactBytes: 1024, maxHops: 8 },
+  }), { status: 200 })) as typeof fetch;
+  setLocalCapabilityHostClient(undefined);
+  try {
+    const migrated = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "workhorse_capabilities", arguments: {} } }) as { result?: { content?: Array<{ text?: string }> } };
+    assert.match(migrated.result?.content?.[0]?.text ?? "", /legacy-host/);
+    writeFileSync(statePath, JSON.stringify({ settings: { localCompute: { version: 1, hosts: [], legacyEnvironmentFallback: false } } }));
+    setLocalCapabilityHostClient(undefined);
+    const authoritative = await handleWorkhorseRpc({ jsonrpc: "2.0", id: 22, method: "tools/call", params: { name: "workhorse_capabilities", arguments: {} } }) as { result?: { content?: Array<{ text?: string }> } };
+    assert.doesNotMatch(authoritative.result?.content?.[0]?.text ?? "", /legacy-host|workhorse_local_/);
+  } finally {
+    setLocalCapabilityHostClient(undefined);
+    globalThis.fetch = previous.fetch;
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE; else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH; else process.env.WORKHORSE_STATE_PATH = previous.state;
+    if (previous.hosts === undefined) delete process.env.WORKHORSE_LOCAL_HOSTS_JSON; else process.env.WORKHORSE_LOCAL_HOSTS_JSON = previous.hosts;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -130,10 +303,11 @@ test("the execution envelope: Workhorse fills what is missing and says so; a rep
   let now = 1000;
   const cache = new LinkReplayCache(60_000, () => now);
   assert.equal(cache.get("k"), undefined);
-  cache.put("k", '{"worker":"w1"}');
-  assert.equal(cache.get("k"), '{"worker":"w1"}', "a retry gets the first answer");
+  cache.put("k", '{"worker":"w1"}', "request-a");
+  assert.equal(cache.get("k", "request-a"), '{"worker":"w1"}', "a retry gets the first answer");
+  assert.throws(() => cache.get("k", "request-b"), /idempotency_key_conflict/, "one key cannot alias a different request");
   now += 60_001;
-  assert.equal(cache.get("k"), undefined, "after the window it is a new request");
+  assert.equal(cache.get("k", "request-b"), undefined, "after the window it is a new request");
 });
 
 test("delegate over Link dedupes by idempotencyKey and echoes the envelope it ran under", async () => {
@@ -149,12 +323,12 @@ test("delegate over Link dedupes by idempotencyKey and echoes the envelope it ra
     return { text: JSON.stringify({ ok: true, worker: `w${spawns}` }) };
   });
   try {
-    const call = (id: number, key?: string) =>
+    const call = (id: number, key?: string, task = "review this") =>
       handleWorkhorseRpc({
         jsonrpc: "2.0",
         id,
         method: "tools/call",
-        params: { name: "workhorse_delegate", arguments: { task: "review this", fromSessionId: "parent_chat", folder: dir, ...(key ? { idempotencyKey: key } : {}) } },
+        params: { name: "workhorse_delegate", arguments: { task, fromSessionId: "parent_chat", folder: dir, ...(key ? { idempotencyKey: key } : {}) } },
       }) as Promise<{ error?: { message?: string }; result?: { content?: Array<{ text?: string }> } }>;
     const first = await call(1, "same-key");
     assert.equal(first.error, undefined, first.error?.message);
@@ -167,9 +341,16 @@ test("delegate over Link dedupes by idempotencyKey and echoes the envelope it ra
     const againBody = JSON.parse(again.result?.content?.[0]?.text ?? "{}") as { worker?: string };
     assert.equal(againBody.worker, "w1", "the retry got the first answer");
     assert.equal(spawns, 1, "and spawned nothing new");
+    const conflict = await call(4, "same-key", "a different request");
+    assert.match(conflict.error?.message ?? "", /idempotency_key_conflict/);
+    assert.equal(spawns, 1, "a conflicting request cannot borrow or replace the first result");
     const fresh = await call(3, "other-key");
     assert.equal(JSON.parse(fresh.result?.content?.[0]?.text ?? "{}").worker, "w2");
     assert.equal(spawns, 2);
+    const [parallelA, parallelB] = await Promise.all([call(5, "parallel-key"), call(6, "parallel-key")]);
+    assert.equal(JSON.parse(parallelA.result?.content?.[0]?.text ?? "{}").worker, "w3");
+    assert.equal(JSON.parse(parallelB.result?.content?.[0]?.text ?? "{}").worker, "w3");
+    assert.equal(spawns, 3, "simultaneous retries share one in-flight mutation");
   } finally {
     setWorkhorseDeskAsk(null as never);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
@@ -335,6 +516,31 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
   assert.deepEqual(linkCliCall(["follow-up", "w7", "Check the failing test", "--chat", "c1", "--pass", "2", "--key", "k2"]), {
     name: "workhorse_continue_mission",
     args: { previousWorkerIds: ["w7"], previousPass: 2, remainingWork: "Check the failing test", fromSessionId: "c1", idempotencyKey: "k2" },
+  });
+  assert.deepEqual(linkCliCall(["local-hosts"]), { name: "workhorse_local_hosts", args: {} });
+  assert.deepEqual(linkCliCall(["local-upload", "source.png", "--capability", "asset.3d.generate", "--kind", "image", "--role", "source_image", "--media-type", "image/png", "--host", "spark"]), {
+    name: "workhorse_local_upload",
+    args: { hostId: "spark", capabilityId: "asset.3d.generate", kind: "image", role: "source_image", mediaType: "image/png", origin: "workhorse-cli", __localUploadPath: "source.png" },
+  });
+  assert.deepEqual(linkCliCall(["local-invoke", "image.upscale", '{"constraints":{"scale":2}}', "--host", "spark"]), {
+    name: "workhorse_local_invoke",
+    args: { constraints: { scale: 2 }, hostId: "spark", capabilityId: "image.upscale" },
+  });
+  assert.deepEqual(linkCliCall(["local-chat", "Return", "ROUTER_OK", "--host", "spark", "--key", "chat-key"]), {
+    name: "workhorse_local_chat",
+    args: { hostId: "spark", idempotencyKey: "chat-key", prompt: "Return ROUTER_OK" },
+  });
+  assert.deepEqual(linkCliCall(["local-3d", "art_1", "--host", "spark", "--max-faces", "100000", "--target-engine", "godot", "--approve-blender"]), {
+    name: "workhorse_local_generate_3d",
+    args: { hostId: "spark", sourceArtifactId: "art_1", maxFaces: 100000, targetEngine: "godot", approveBlenderContinuation: true },
+  });
+  assert.deepEqual(linkCliCall(["local-materialize", "art_1", "--host", "spark"]), {
+    name: "workhorse_local_materialize",
+    args: { hostId: "spark", artifactId: "art_1" },
+  });
+  assert.deepEqual(linkCliCall(["local-continue", "job_1", "cont_1", "--chat", "c1", "--folder", "/project", "--key", "cont-key"]), {
+    name: "workhorse_local_continue",
+    args: { idempotencyKey: "cont-key", jobId: "job_1", continuationId: "cont_1", fromSessionId: "c1", folder: "/project" },
   });
   assert.ok("usage" in linkCliCall(["follow-up", "w7", "no chat given"]));
   assert.ok("usage" in linkCliCall(["delegate", "--task", "no chat"]));
@@ -577,10 +783,17 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
     const launcher = path.join(root, "workhorse");
     write(launcher, linkCliLauncherScript("darwin", real));
     chmodSync(launcher, 0o755);
-    const out = execFileSync(launcher, ["capabilities"], { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
+    const out = execFileSync(launcher, ["capabilities"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        WORKHORSE_LOCAL_HOSTS_JSON: JSON.stringify([{ id: "test-host", baseUrl: "http://127.0.0.1:1", tokenFile: "/tmp/test-token" }]),
+      },
+    });
     const shake = JSON.parse(out) as { protocolVersion: number; tools: string[] };
-    assert.equal(shake.protocolVersion, 1);
-    assert.deepEqual(shake.tools, [...LINK_TOOLS]);
+    assert.equal(shake.protocolVersion, 2);
+    for (const tool of LINK_BASE_TOOLS) assert.ok(shake.tools.includes(tool), `packaged helper includes ${tool}`);
     assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
   }
   rmSync(root, { recursive: true, force: true });

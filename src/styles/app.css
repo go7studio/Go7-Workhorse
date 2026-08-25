@@ -6558,6 +6558,159 @@ html.pane-dragging * {
   white-space: normal;
 }
 
+.local-compute-add {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line);
+}
+
+.local-compute-add label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.local-compute-add input {
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.local-compute-add input:focus {
+  border-color: var(--accent);
+}
+
+.local-compute-token {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.local-compute-token > span {
+  grid-column: 1 / -1;
+}
+
+.local-compute-add-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.local-compute-host {
+  padding: 13px 0;
+  border-top: 1px solid var(--line);
+}
+
+.local-compute-host.off {
+  opacity: 0.58;
+}
+
+.local-compute-host-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.local-compute-host-head > div:first-child {
+  min-width: 0;
+}
+
+.local-compute-host-head strong,
+.local-compute-host-head span {
+  display: block;
+}
+
+.local-compute-host-head > div:first-child > span {
+  max-width: 560px;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-compute-grants {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 13px;
+}
+
+.local-compute-grants b,
+.local-compute-grants > div > span:not(.agent-chips) {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.local-capability {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  gap: 2px 12px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.local-capability.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.local-capability.stale {
+  border-style: dashed;
+  border-color: var(--text-tertiary);
+  background: transparent;
+}
+
+.local-capability strong {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-capability span {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.local-capability-family {
+  display: block;
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .local-compute-add,
+  .local-compute-grants {
+    grid-template-columns: 1fr;
+  }
+}
+
 /*
  * Harnesses: OpenClaw and Hermes are runtimes, not vendors, so they do not
  * get a ring. A square monogram tile keeps them apart from the vendor circles

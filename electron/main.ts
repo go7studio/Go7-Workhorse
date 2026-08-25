@@ -85,6 +85,7 @@ import { LearningService } from "./learning-service";
 import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
+import { probeLocalComputeHosts } from "./local-compute-registry";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {
@@ -918,6 +919,16 @@ app.whenReady().then(async () => {
     return result.filePaths.filter((item) => typeof item === "string" && item.trim());
   });
 
+  ipcMain.handle("localCompute:pickTokenFile", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Choose local host token file",
+      buttonLabel: "Choose",
+      properties: ["openFile"],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return result.filePaths[0];
+  });
+
   ipcMain.handle("media:src", async (_event, href: string, cwd?: string, vendorSessionId?: string) =>
     readMediaSrc(href, cwd, vendorSessionId),
   );
@@ -1035,6 +1046,11 @@ app.whenReady().then(async () => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
     writeComposerDraftFile(statePath(), drafts);
   });
+  ipcMain.handle("localCompute:probe", (_event, hosts: unknown) =>
+    probeLocalComputeHosts(
+      Array.isArray(hosts) ? hosts as import("../src/lib/types").LocalComputeHostSettings[] : [],
+    ),
+  );
   ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 
   ipcMain.handle("app:quit", () => app.quit());

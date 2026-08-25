@@ -28,27 +28,51 @@ or `hermes/<profile>`. Those tasks join the lineup. They do not get a Usage
 ring.
 
 **Workhorse Link** is how any outside app calls this desk — Codex, Claude
-Code, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs → Workhorse
-Link connects each with one button. Connect Grok Bot copies the same launch
-plus install instructions to paste into Grok Bot once (Mac or Windows), including
-its runtime-owned weekly-usage exporter contract. Copy
-generic MCP configuration covers the rest. Every app gets the same eight
-tools: capabilities, list/read/ask chats, query leftover and availability,
-delegate a task, continue a finished wave, worker status. The first call,
-`workhorse_capabilities`, names follow-through: new slice, named worker,
-later status. Status says wait, done, or failed. List chats is compact by
-default (id, title, worker, parentId, status, next, project) so a host output
-cap does not clip the roster; `parents` omits workers and `full` adds
-preview. Duplicate worker names need that row’s `id`. Link never waits on a
-long worker.
-The leftover check never includes keys or chat content. Older names still
-answer so a harness that already calls them is not refused. Delete, rename,
-credentials, bot setup and project changes are not offered and are refused.
-No token is stored. Connecting an app adds no vendor, login or Usage ring.
-The same helper is a JSON CLI for a harness without MCP (`chats`, `read`,
-`ask`, `delegate`, `status`, `follow-up`). `delegate --accept` starts an
-adaptive mission loop; `status` then `follow-up` continue it. Install
-workhorse command puts it on your PATH. See [docs/LINK.md](LINK.md).
+Code, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs →
+Workhorse Link connects each with one button. Connect Grok Bot copies the same
+launch plus install instructions to paste into Grok Bot once (Mac or Windows),
+including its runtime-owned weekly-usage exporter contract. Copy generic MCP
+configuration covers the rest. Every app gets the same versioned Link contract:
+eight core collaboration tools for capabilities, list/read/ask chats, query leftover and availability,
+delegation, continuation, and worker status, plus typed local
+capability tools when a host is configured. The first call,
+`workhorse_capabilities`, names follow-through: new slice, named worker, later
+status. Status says wait, done, or failed. List chats is compact by default (id,
+title, worker, parentId, status, next, project) so a host output cap does not clip
+the roster; `parents` omits workers and `full` adds preview. Duplicate worker
+names need that row’s `id`. Link never waits on a long worker.
+
+Local hosts can discover profiles, accept asynchronous text or image-to-3D
+jobs, report or cancel jobs, transfer SHA-verified artifacts, and dispatch an
+explicitly authorized Blender continuation as a visible worker. They are
+execution hosts, not vendors, custom bots, or Usage rings. The leftover check
+never includes keys or chat content. Older names still answer so a harness that
+already calls them is not refused. Delete, rename, credentials, bot setup and
+project changes are not offered and are refused. No token is stored. Connecting
+an app adds no vendor, login or Usage ring. The same helper is a JSON CLI for a
+harness without MCP, including local host, chat, 3D, job, artifact and
+continuation commands. `delegate --accept` starts an adaptive mission loop;
+`status` then `follow-up` continue it. Install workhorse command puts it on your
+PATH. See [docs/LINK.md](LINK.md).
+
+Settings → LLMs → Local Compute discovers each host's live capabilities and
+grants selected capabilities separately to Workhorse, connected apps, workers,
+and auditors. MCP, the `workhorse` command, and harnesses see only what is
+healthy and granted for their caller role. The generic invocation contract
+advertises exact artifact roles, cardinality, accepted media types, typed
+outputs, and a closed constraint schema, so image, 3D, audio, and future
+families do not need a new hardwired router. Legacy summary-only descriptors
+remain compatible with their named tools but are not guessed into a generic
+invocation contract. Generic invoke appears only when a granted capability
+publishes a complete typed contract; upload discovery remains independent.
+Typed continuations appear only when an installed and explicitly granted
+capability/tool pair can produce them.
+
+Successful submissions and canonical semantic-request fingerprints survive
+helper restarts. If a configured host becomes unavailable, a known job read
+reports `Unknown` with its timestamped last-observed state; stale continuations
+are not offered from that offline snapshot. Only the token-file reference is
+stored; the token is not copied into Workhorse state or connector configuration.
 
 Unnamed inbound spawns create a new chat in Chats by default, or in a project
 you pick, titled from the prompt. An explicit request to work with Workhorse

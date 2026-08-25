@@ -733,6 +733,39 @@ export type AgentSystemsSettings = {
   allowedAgents?: string[];
 };
 
+/** Execution callers that may be explicitly granted a local capability. */
+export type LocalComputeCallerRole = "desk" | "external-runtime" | "worker" | "auditor";
+
+/** Exact continuation adapter identity; capability alone is not authority. */
+export type LocalComputeContinuationGrant = {
+  capability: string;
+  tool: string;
+};
+
+/**
+ * Safe, persisted connection metadata for one local execution host. Tokens
+ * stay in a mode-restricted file owned by the operating system user.
+ */
+export type LocalComputeHostSettings = {
+  id: string;
+  label: string;
+  baseUrl: string;
+  tokenFile: string;
+  enabled: boolean;
+  allowedCallerRoles: LocalComputeCallerRole[];
+  /** Empty means no capability is authorized. It is never a wildcard. */
+  allowedCapabilities: string[];
+  /** Source capability grants never imply continuation authority. */
+  allowedContinuations: LocalComputeContinuationGrant[];
+};
+
+export type LocalComputeSettings = {
+  version: 1;
+  hosts: LocalComputeHostSettings[];
+  /** Migration bridge; any explicit Local Compute edit permanently disables it. */
+  legacyEnvironmentFallback: boolean;
+};
+
 export type RoutingDecision = {
   at: number;
   taskTier: RoutingTaskTier;
@@ -788,6 +821,7 @@ export type Settings = {
   routing: RoutingSettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;
+  localCompute: LocalComputeSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

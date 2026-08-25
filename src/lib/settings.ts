@@ -1,6 +1,7 @@
 import { customBotEnabled, customBotServes, EMPTY_CUSTOM_DRAFT, normalizeCustomBots } from "./custom-bots";
 import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
+import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
@@ -32,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
     includeExternalAgents: false,
   },
   learning: { ...DEFAULT_LEARNING },
+  localCompute: structuredClone(DEFAULT_LOCAL_COMPUTE_SETTINGS),
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -343,6 +345,7 @@ export function normalizeSettings(raw: unknown): Settings {
     routing: normalizeRouting(record.routing),
     learning: normalizeLearning((record as { learning?: unknown }).learning),
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
+    localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
   };
 }
 

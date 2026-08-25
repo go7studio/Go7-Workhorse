@@ -42,6 +42,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
+import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
 import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
@@ -949,6 +950,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (previous && deskPersistBodyEqual(previous, state)) return;
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
     const busy = state.sessions.some((session) => session.status === "running" || session.status === "needs-input");
+    // A worker reaching a terminal state is the one write an outside caller is
+    // waiting on. The Link helper learns a slice finished by reading this file,
+    // so holding a settled worker behind the 2s busy debounce — which applies
+    // exactly when other workers are still running — leaves a harness blind for
+    // the whole window. Everything else can wait its turn.
+    const settled = workerJustSettled(previous?.sessions, state.sessions);
     persistTimer.current = window.setTimeout(() => {
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
       void window.workhorse
@@ -961,7 +968,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : null,
         })
         .catch(() => undefined);
-    }, busy ? 2_000 : 400);
+    }, settled ? 0 : busy ? 2_000 : 400);
   }, [ready, state]);
 
   const createProject = useCallback((name: string, folderPaths: string[] = []) => {

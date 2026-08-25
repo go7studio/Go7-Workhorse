@@ -6,7 +6,7 @@
     "channel": "source",
     "repository": "https://github.com/go7studio/Go7-Workhorse.git",
     "ref": "origin/main",
-    "expectedVersion": "0.6.38"
+    "expectedVersion": "0.6.39"
   },
   "install": {
     "existingAppPath": "",

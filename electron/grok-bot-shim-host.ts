@@ -271,11 +271,15 @@ export async function ensureGrokBotShim(input: {
     },
       })
     : { ok: true, dest: grokBotShimKeepalivePaths(platform, input.home, input.userData).dest };
-  if (await probeGrokBotShim()) return { ok: true, mode: "running", dest: keepalive.dest };
+  if (await probeGrokBotShim()) {
+    return { ok: keepalive.ok, mode: keepalive.ok ? "running" : "failed", dest: keepalive.dest };
+  }
   if (platform === "darwin") {
     for (let i = 0; i < 12; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 200));
-      if (await probeGrokBotShim()) return { ok: true, mode: "spawned", dest: keepalive.dest };
+      if (await probeGrokBotShim()) {
+        return { ok: keepalive.ok, mode: keepalive.ok ? "spawned" : "failed", dest: keepalive.dest };
+      }
     }
   }
   const child = spawn(input.command, [input.script], {
@@ -287,7 +291,9 @@ export async function ensureGrokBotShim(input: {
   child.unref();
   for (let i = 0; i < 10; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 150));
-    if (await probeGrokBotShim()) return { ok: true, mode: "spawned", dest: keepalive.dest };
+    if (await probeGrokBotShim()) {
+      return { ok: keepalive.ok, mode: keepalive.ok ? "spawned" : "failed", dest: keepalive.dest };
+    }
   }
   return { ok: false, mode: "failed", dest: keepalive.dest };
 }

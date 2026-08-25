@@ -78,13 +78,20 @@ export function installGrokBotShimKeepalive(input: {
         ? `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexport WORKHORSE_USER_DATA=${qSh(input.userData)}\nexec ${qSh(input.command)} ${qSh(input.script)}\n`
         : grokBotShimAgentPlist(launch, paths.log || "");
   input.io.writeFile(paths.dest, body);
+  let registered = true;
   if (input.platform === "darwin" && input.io.exec) {
     const uid = process.getuid?.() ?? 0;
-    input.io.exec("launchctl", ["bootout", `gui/${uid}/${GROK_BOT_SHIM_LAUNCH_AGENT}`]);
-    input.io.exec("launchctl", ["bootstrap", `gui/${uid}`, paths.dest]);
+    const domain = `gui/${uid}`;
+    const service = `${domain}/${GROK_BOT_SHIM_LAUNCH_AGENT}`;
+    const bootstrap = input.io.exec("launchctl", ["bootstrap", domain, paths.dest]);
+    // A loaded agent makes bootstrap fail. Keep it registered and force a
+    // restart so an app update loads the new shim from the stable app path.
+    // Booting it out first creates a race where an immediate bootstrap can
+    // fail and leave only the desk-owned fallback process alive.
+    registered = bootstrap.status === 0 || input.io.exec("launchctl", ["kickstart", "-k", service]).status === 0;
   }
   return {
-    ok: true,
+    ok: registered,
     dest: paths.dest,
     message: `Grok Bot shim keepalive on ${input.platform} writes ${paths.dest} and keeps 127.0.0.1:${GROK_BOT_SHIM_PORT} up. No webhook key is stored there.`,
   };

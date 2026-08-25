@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.36](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.35...v0.6.36) (2026-08-25)
+
+
+### Bug Fixes
+
+* preserve Grok Bot identity through Link delegation ([9386df6](https://github.com/go7studio/Go7-Workhorse/commit/9386df6d503d50b62c61a0e62f033d906b630ea4))
+
 ## [0.6.35](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.34...v0.6.35) (2026-08-25)
 
 

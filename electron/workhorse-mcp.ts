@@ -91,6 +91,7 @@ import {
   shouldCaptureInboundProfile,
   type InboundLearningDraft,
 } from "../src/lib/learning-inbound";
+import { runGrokBotInboxCli } from "./grok-bot-inbox";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -3300,9 +3301,11 @@ function isMcpEntry(): boolean {
 }
 
 /**
- * Workhorse Link's JSON CLI, for a harness that cannot speak MCP. Each
- * subcommand is one tools/call through the same handler MCP uses, printed as
- * JSON — not a second API. Invoke the packaged helper with `link` first:
+ * Workhorse Link's JSON CLI, for a harness that cannot speak MCP. Collaboration
+ * subcommands are tools/call through the same handler MCP uses, printed as
+ * JSON — not a second API. The Grok Bot inbox pair is deliberately CLI-only:
+ * it validates one pending request and cannot become a general write tool.
+ * Invoke the packaged helper with `link` first:
  *
  *   <helper> link capabilities
  *   <helper> link capacity [--provider <id>] [--callable]
@@ -3312,6 +3315,8 @@ function isMcpEntry(): boolean {
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
  *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--key <idempotencyKey>]
+ *   <helper> link grok-pending
+ *   <helper> link grok-reply <requestId> --text "<answer>"
  *
  * `--json` is accepted and ignored: the output is always JSON. Exit 0 on a
  * result, 1 on an error, with the error as JSON on stdout.
@@ -3344,7 +3349,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>] | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3505,6 +3510,11 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
 }
 
 export async function runLinkCli(argv: string[]): Promise<number> {
+  const inbox = runGrokBotInboxCli(argv);
+  if (inbox) {
+    process.stdout.write(`${inbox.output}\n`);
+    return inbox.code;
+  }
   const call = linkCliCall(argv);
   if ("usage" in call) {
     process.stdout.write(`${JSON.stringify({ error: call.usage })}\n`);

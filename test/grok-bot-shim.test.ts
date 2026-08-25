@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -30,9 +30,114 @@ import {
   installGrokBotShimKeepalive,
 } from "../electron/grok-bot-shim-keepalive";
 import { createGrokBotShimServer } from "../electron/grok-bot-shim-host";
+import {
+  grokBotInboxFromStatePath,
+  listGrokBotPending,
+  runGrokBotInboxCli,
+  writeGrokBotReply,
+  type GrokBotInboxIo,
+} from "../electron/grok-bot-inbox";
 import { linkGrokBotOneshot } from "../src/lib/workhorse-link";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function inboxRequest(id: string, createdAt = 1) {
+  return JSON.stringify({ id, createdAt, model: "grok-bot", text: `prompt ${id}`, origin: "workhorse" });
+}
+
+function inboxMemoryIo(initial: Record<string, string> = {}) {
+  const files = new Map(Object.entries(initial));
+  const writes: Array<{ file: string; value: { id: string; text: string } }> = [];
+  const io: GrokBotInboxIo = {
+    mkdirp: () => undefined,
+    list: (dir) => [...files.keys()].filter((file) => path.dirname(file) === dir).map((file) => path.basename(file)),
+    exists: (file) => files.has(file),
+    read: (file) => {
+      const value = files.get(file);
+      if (value === undefined) throw new Error("missing fixture");
+      return value;
+    },
+    writeReply: (file, value) => {
+      writes.push({ file, value });
+      files.set(file, JSON.stringify(value));
+    },
+  };
+  return { io, writes };
+}
+
+test("the inbox follows the installed state path on Mac and Windows", () => {
+  assert.equal(
+    grokBotInboxFromStatePath("/Users/fixture/Library/Application Support/Go7 Workhorse/workhorse-state.json"),
+    "/Users/fixture/Library/Application Support/Go7 Workhorse/grok-bot-inbox",
+  );
+  assert.equal(
+    grokBotInboxFromStatePath("C:\\Users\\fixture\\AppData\\Roaming\\Go7 Workhorse\\workhorse-state.json"),
+    "C:\\Users\\fixture\\AppData\\Roaming\\Go7 Workhorse\\grok-bot-inbox",
+  );
+});
+
+test("pending lists only valid unpaired Workhorse requests", () => {
+  const inbox = "/fixture/grok-bot-inbox";
+  const valid = "gb_1111111111111111";
+  const answered = "gb_2222222222222222";
+  const mismatch = "gb_3333333333333333";
+  const { io } = inboxMemoryIo({
+    [path.join(inbox, `${valid}.req.json`)]: inboxRequest(valid, 2),
+    [path.join(inbox, `${answered}.req.json`)]: inboxRequest(answered, 1),
+    [path.join(inbox, `${answered}.res.json`)]: JSON.stringify({ id: answered, text: "done" }),
+    [path.join(inbox, `${mismatch}.req.json`)]: inboxRequest("gb_4444444444444444", 3),
+    [path.join(inbox, "random.req.json")]: "not json",
+  });
+  assert.deepEqual(listGrokBotPending(inbox, io), [{
+    id: valid,
+    createdAt: 2,
+    model: "grok-bot",
+    text: `prompt ${valid}`,
+    origin: "workhorse",
+  }]);
+});
+
+test("reply requires a matching pending request and fails closed on path traversal", () => {
+  const inbox = "/fixture/grok-bot-inbox";
+  const id = "gb_aaaaaaaaaaaaaaaa";
+  const { io, writes } = inboxMemoryIo({ [path.join(inbox, `${id}.req.json`)]: inboxRequest(id) });
+  assert.deepEqual(writeGrokBotReply(inbox, id, "answer", io), { id, created: true });
+  assert.deepEqual(writes, [{ file: path.join(inbox, `${id}.res.json`), value: { id, text: "answer" } }]);
+  assert.throws(() => writeGrokBotReply(inbox, "../../outside", "answer", io), /invalid_grok_bot_request_id/);
+  assert.throws(() => writeGrokBotReply(inbox, "gb_bbbbbbbbbbbbbbbb", "answer", io), /grok_bot_request_not_found/);
+  assert.throws(() => writeGrokBotReply(inbox, id, "different", io), /grok_bot_reply_already_exists/);
+  assert.deepEqual(writeGrokBotReply(inbox, id, "answer", io), { id, created: false });
+});
+
+test("the default writer creates one private, complete response", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "workhorse-grok-inbox-"));
+  const inbox = path.join(root, "grok-bot-inbox");
+  const id = "gb_cccccccccccccccc";
+  mkdirSync(inbox, { recursive: true });
+  writeFileSync(path.join(inbox, `${id}.req.json`), inboxRequest(id), { mode: 0o600 });
+  try {
+    assert.deepEqual(writeGrokBotReply(inbox, id, "durable answer"), { id, created: true });
+    const reply = path.join(inbox, `${id}.res.json`);
+    assert.deepEqual(JSON.parse(readFileSync(reply, "utf8")), { id, text: "durable answer" });
+    if (process.platform !== "win32") assert.equal(statSync(reply).mode & 0o777, 0o600);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the dedicated CLI is narrow and does not become an MCP tool", () => {
+  const statePath = "/fixture/workhorse-state.json";
+  const inbox = "/fixture/grok-bot-inbox";
+  const id = "gb_dddddddddddddddd";
+  const { io } = inboxMemoryIo({ [path.join(inbox, `${id}.req.json`)]: inboxRequest(id) });
+  const pending = runGrokBotInboxCli(["grok-pending"], { statePath, io });
+  assert.equal(pending?.code, 0);
+  assert.equal(JSON.parse(pending?.output ?? "[]")[0]?.id, id);
+  const reply = runGrokBotInboxCli(["grok-reply", id, "--text", "answer"], { statePath, io });
+  assert.deepEqual(JSON.parse(reply?.output ?? "{}"), { ok: true, id, created: true });
+  assert.equal(runGrokBotInboxCli(["capabilities"], { statePath, io }), undefined);
+  assert.equal(runGrokBotInboxCli(["grok-reply", "../../outside", "--text", "answer"], { statePath, io })?.code, 1);
+});
 
 test("wake file needs https webhook URL plus sender key, and never treats a placeholder as live", () => {
   assert.equal(parseGrokBotWake({ url: "https://...", senderKey: "abc" }), undefined);

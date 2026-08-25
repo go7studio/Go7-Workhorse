@@ -75,9 +75,16 @@ export function watchWorkerCompletions(input: {
   const basename = path.basename(statePath);
   const announced = new Set<string>();
 
-  // The first read is a baseline, not an announcement: workers that were
-  // already terminal when this helper started belong to somebody else's turn,
-  // and replaying them would wake a host for work it never asked about.
+  // The first read is a baseline, not an announcement: workers already
+  // terminal when this helper started belong to somebody else's turn, and
+  // replaying them would wake a host for work it never asked about.
+  //
+  // A read landing mid-replace returns nothing, and a finish that happens
+  // entirely inside that window cannot be recovered here — from the next read
+  // it is indistinguishable from work that finished before this helper
+  // existed, and guessing wrong wakes a host for someone else's slice.
+  // workhorse_agent_status is the answer for that, which is why the pull stays
+  // the contract rather than being replaced by this.
   let previous = readWorkerRows(statePath);
   for (const worker of previous) {
     if (worker.agentRun?.status && worker.agentRun.status !== "running") announced.add(worker.id);

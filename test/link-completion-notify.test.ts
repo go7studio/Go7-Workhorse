@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { settledWorkers, workerJustSettled, isTerminalRunStatus } from "../src/lib/worker-settled";
-import { WORKER_TERMINAL_NOTIFICATION, unannounced, workerTerminalNotification } from "../src/lib/link-notify";
+import { WORKER_TERMINAL_NOTIFICATION, createFramedSender, unannounced, workerTerminalNotification } from "../src/lib/link-notify";
 import { watchWorkerCompletions } from "../electron/link-watch";
 import { normalizeSession } from "../src/lib/session";
 import type { WorkerRunRow } from "../src/lib/worker-settled";
@@ -181,6 +181,36 @@ test("the watcher must not normalize: a live running worker is not a crashed one
     agentRun: { status: "running", startedAt: 1 },
   } as never) as { agentRun?: { status?: string } } | undefined;
   assert.equal(live?.agentRun?.status, "interrupted", "normalizeSession still reconciles on load");
+});
+
+test("a finish that beats the first message waits for the host framing", () => {
+  // Framing is the host's choice, learned from its first frame. An ndjson host
+  // handed a Content-Length header receives garbage. So this buffers instead of
+  // guessing — behaviour, not a grep over the source.
+  const written: Array<{ frame: object; framing: string }> = [];
+  const sender = createFramedSender<string>((frame, framing) => written.push({ frame, framing }));
+
+  sender.send({ id: "first" });
+  sender.send({ id: "second" });
+  assert.equal(written.length, 0, "nothing goes out before the framing is known");
+  assert.equal(sender.pending(), 2);
+
+  sender.framingIs("ndjson");
+  assert.deepEqual(written.map((row) => row.framing), ["ndjson", "ndjson"], "flushed in the host's framing");
+  assert.deepEqual(written.map((row) => (row.frame as { id: string }).id), ["first", "second"], "in order");
+
+  // Later frames go straight out, and a second framing report does not replay.
+  sender.send({ id: "third" });
+  assert.equal(written.length, 3);
+  sender.framingIs("ndjson");
+  assert.equal(written.length, 3, "no replay on a later frame");
+});
+
+test("the helper buffers rather than guessing a default framing", () => {
+  const helper = read("electron/workhorse-mcp.ts");
+  assert.match(helper, /createFramedSender<McpFraming>/, "uses the buffered sender");
+  assert.match(helper, /sender\.framingIs\(frame\.framing\)/, "learns framing from inbound frames");
+  assert.doesNotMatch(helper, /let framing: McpFraming = /, "no guessed default");
 });
 
 test("a settled worker skips the persist debounce, and cannot lose it", () => {

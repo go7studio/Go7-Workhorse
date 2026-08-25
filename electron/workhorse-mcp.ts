@@ -93,6 +93,7 @@ import {
 } from "../src/lib/learning-inbound";
 import { runGrokBotInboxCli } from "./grok-bot-inbox";
 import { watchWorkerCompletions } from "./link-watch";
+import { createFramedSender } from "../src/lib/link-notify";
 
 type JsonRpc = {
   jsonrpc?: string;
@@ -3282,10 +3283,15 @@ export async function runWorkhorseMcp(): Promise<void> {
   // the desk — so a finished worker is announced from here. The framing has to
   // match what this host is already speaking, or the frame is unreadable: hosts
   // that sent Content-Length get Content-Length, and ndjson hosts get ndjson.
-  let framing: McpFraming = "content-length";
+  // Framing is the host's choice and this side only learns it from an inbound
+  // frame, so a worker that finishes before the first message waits rather
+  // than going out in a shape the host cannot read.
+  const sender = createFramedSender<McpFraming>((frame, framing) =>
+    process.stdout.write(encodeMcpFrame(frame, framing)),
+  );
   const completions = watchWorkerCompletions({
     statePath: process.env.WORKHORSE_STATE_PATH ?? "",
-    emit: (frame) => process.stdout.write(encodeMcpFrame(frame, framing)),
+    emit: sender.send,
   });
   process.stdin.on("error", (error) => {
     console.error("workhorse mcp stdin", error);
@@ -3299,7 +3305,7 @@ export async function runWorkhorseMcp(): Promise<void> {
     const parsed = consumeMcpBuffers(buffer);
     buffer = parsed.rest;
     for (const frame of parsed.frames) {
-      framing = frame.framing;
+      sender.framingIs(frame.framing);
       void onMessage(frame.message, frame.framing);
     }
   });

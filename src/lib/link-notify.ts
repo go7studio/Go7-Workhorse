@@ -75,3 +75,35 @@ export function unannounced(settled: SettledWorker[], seen: Set<string>): Settle
   }
   return fresh;
 }
+
+/**
+ * Holds notifications until the host's framing is known.
+ *
+ * Framing is the host's choice and this side only learns it from an inbound
+ * frame. Guessing is not harmless: an ndjson host handed a `Content-Length`
+ * header receives garbage it cannot parse, and a Content-Length host handed a
+ * bare line loses the message. So anything that finishes before the first
+ * message waits, in order, and goes out once there is an answer.
+ */
+export function createFramedSender<F>(
+  write: (frame: object, framing: F) => void,
+): { send: (frame: object) => void; framingIs: (framing: F) => void; pending: () => number } {
+  let framing: F | undefined;
+  const held: object[] = [];
+  return {
+    send: (frame) => {
+      if (framing === undefined) {
+        held.push(frame);
+        return;
+      }
+      write(frame, framing);
+    },
+    framingIs: (next) => {
+      const first = framing === undefined;
+      framing = next;
+      if (!first) return;
+      for (const frame of held.splice(0)) write(frame, next);
+    },
+    pending: () => held.length,
+  };
+}

@@ -228,7 +228,11 @@ export function base64DecodedBytes(data: string): number {
 
 export function modelImagePayloadBytes(images: ChatImage[]): number {
   return images.reduce((total, image) => {
-    if (image.kind === "image") return total + base64DecodedBytes(image.data);
+    if (image.kind === "image") {
+      if (image.data) return total + base64DecodedBytes(image.data);
+      if (typeof image.size === "number" && image.size >= 0) return total + image.size;
+      return total;
+    }
     return total + modelImagePayloadBytes(image.derivedImages ?? []);
   }, 0);
 }
@@ -318,7 +322,8 @@ export function normalizeImages(raw: unknown): ChatImage[] {
     } else if (kind === "image") {
       const imageType = imageMime({ type: mimeType, name: record.name });
       const data = typeof record.data === "string" ? record.data.replace(/^data:[^;]+;base64,/, "") : "";
-      if (!imageType || !data) continue;
+      const sourcePath = typeof record.sourcePath === "string" ? record.sourcePath.trim() : "";
+      if (!imageType || (!data && !sourcePath)) continue;
       images.push({
         id: typeof record.id === "string" && record.id ? record.id : uid("img"),
         name: name === "file" ? "image" : name,
@@ -326,7 +331,7 @@ export function normalizeImages(raw: unknown): ChatImage[] {
         data,
         kind: "image",
         ...(typeof record.folder === "string" && record.folder.trim() ? { folder: record.folder.trim() } : {}),
-        ...(typeof record.sourcePath === "string" && record.sourcePath.trim() ? { sourcePath: record.sourcePath.trim() } : {}),
+        ...(sourcePath ? { sourcePath } : {}),
         ...(typeof record.size === "number" && record.size >= 0 ? { size: record.size } : {}),
       });
     } else if (kind === "document" || kind === "audio" || kind === "video") {

@@ -1853,14 +1853,16 @@ export function spawnAttachments(files: string[] | undefined, cwd: string): Chat
     if (!kind) throw new Error(`Workhorse does not take ${path.extname(name) || "extensionless"} files: ${file}`);
     const cap = ATTACHMENT_CAP[kind];
     if (stat.size > cap) throw new Error(`Attachment is over ${describeBytes(cap)}: ${file} is ${describeBytes(stat.size)}`);
+    const text = kind === "file" ? fs.readFileSync(resolved, "utf8") : undefined;
     return {
       id: `spawn_file_${Date.now()}_${index}`,
       name,
       mimeType: attachmentMime({ name }, kind),
-      data: fs.readFileSync(resolved).toString("base64"),
+      data: "",
       kind,
       sourcePath: resolved,
       size: stat.size,
+      ...(text !== undefined ? { text } : {}),
     } satisfies ChatImage;
   });
 }

@@ -52,6 +52,8 @@ test("hot state saves skip fsync so an 11MB desk does not stall the UI", () => {
   assert.match(persist, /fsync: options\.rotateBackups !== false/);
   const main = fs.readFileSync(path.join(root, "electron", "main.ts"), "utf8");
   assert.match(main, /sweepStaleUserData/);
+  assert.match(main, /offloadStateAttachments/);
+  assert.match(main, /compactPersistedState/);
   assert.match(main, /disk-cache-size/);
   assert.match(main, /pruneOrphanWorktrees/);
 });

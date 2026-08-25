@@ -7,6 +7,7 @@ import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { grokSpawnArgs, type GrokLaunchSpec } from "./grok-launch";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
+import { hydrateChatImages } from "./attachment-store";
 import { buildAcpPrompt } from "../src/lib/images";
 import { describePeerTool, prettyToolTitle } from "../src/lib/tool-labels";
 import type { ChatImage, Command } from "../src/lib/types";
@@ -886,7 +887,7 @@ export class GrokAgent {
     };
     const result = await this.request("session/prompt", {
       sessionId: this.sessionId,
-      prompt: buildAcpPrompt(text, images),
+      prompt: buildAcpPrompt(text, hydrateChatImages(images)),
     });
     // PromptResponse.usage is the adapter's own total for this turn — Claude's
     // adapter sums every API call it made into it. It is the one number to

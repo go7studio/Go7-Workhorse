@@ -52,6 +52,8 @@ import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
 import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
+import { offloadStateAttachments } from "./attachment-store";
+import { compactPersistedState } from "../src/lib/persist-compact";
 import {
   CredentialStore,
   hydrateStateCredentials,
@@ -342,9 +344,15 @@ function readState(): Persistable {
   const result = readVersionedState(statePath());
   const { state } = result;
   try {
-    const protectedState = protectStateCredentials(state, credentialStore());
+    const protectedState = compactPersistedState(
+      offloadStateAttachments(protectStateCredentials(state, credentialStore()), app.getPath("userData")),
+    );
     if (result.recovered || JSON.stringify(protectedState) !== JSON.stringify(state)) {
-      writeVersionedState(statePath(), protectedState, (snapshot) => protectStateCredentials(snapshot, credentialStore()));
+      writeVersionedState(statePath(), protectedState, (snapshot) =>
+        compactPersistedState(
+          offloadStateAttachments(protectStateCredentials(snapshot, credentialStore()), app.getPath("userData")),
+        ),
+      );
     }
   } catch {
     // The credential vault may be unavailable while the OS is locked. Keep the
@@ -405,7 +413,10 @@ function writeState(state: Persistable) {
     writeVersionedState(
       file,
       state,
-      (snapshot) => protectStateCredentialsForSave(snapshot, credentialStore()),
+      (snapshot) =>
+        compactPersistedState(
+          offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
+        ),
       { rotateBackups },
     );
     if (rotateBackups) lastStateBackupAt = now;

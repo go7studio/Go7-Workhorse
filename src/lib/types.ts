@@ -253,6 +253,7 @@ export type DeskLineupRow = {
   startedAt: number;
   finishedAt?: number;
   report?: string;
+  reportRef?: { messageId: string; chars: number; truncated: boolean; omittedChars?: number };
   planStepId?: string;
   rationale?: string;
   constraints?: string[];

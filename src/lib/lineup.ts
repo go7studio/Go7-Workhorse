@@ -1,7 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { crewHasParentTakeover, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import { boundWorkerReport, crewHasParentTakeover, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
@@ -109,6 +109,19 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     ...(typeof record.finishedAt === "number" ? { finishedAt: record.finishedAt } : {}),
     ...(typeof record.report === "string" && record.report.trim() ? { report: record.report } : {}),
+    ...(record.reportRef &&
+    typeof record.reportRef === "object" &&
+    typeof record.reportRef.messageId === "string" &&
+    typeof record.reportRef.chars === "number"
+      ? {
+          reportRef: {
+            messageId: record.reportRef.messageId,
+            chars: record.reportRef.chars,
+            truncated: Boolean(record.reportRef.truncated),
+            ...(typeof record.reportRef.omittedChars === "number" ? { omittedChars: record.reportRef.omittedChars } : {}),
+          },
+        }
+      : {}),
     ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
     ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
     ...(record.kind === "external" || record.kind === "workhorse" ? { kind: record.kind } : {}),
@@ -299,12 +312,12 @@ export function stripSafetyPauseNotice(text: string): string {
 }
 
 export function childReportText(session: Pick<Session, "messages"> | undefined): string {
-  const raw =
-    [...(session?.messages ?? [])]
-      .reverse()
-      .find((message) => message.role === "assistant" && message.text.trim())
-      ?.text.trim() ?? "";
-  return stripSafetyPauseNotice(raw);
+  const last = [...(session?.messages ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.text.trim());
+  if (!last) return "";
+  const raw = stripSafetyPauseNotice(last.text.trim());
+  return boundWorkerReport(raw, { messageId: last.id }).report;
 }
 
 function agentStatusForRow(

@@ -847,7 +847,7 @@ test("dropped images become ACP image blocks and stay on the user turn", () => {
   assert.match(turn, /useMediaPaintReady/);
   assert.match(turn, /say-image-pending/);
   const agent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
-  assert.match(agent, /buildAcpPrompt\(text, images\)/);
+  assert.match(agent, /buildAcpPrompt\(text, hydrateChatImages\(images\)\)/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /images,/);
   assert.match(store, /from "\.\/store-context"/);

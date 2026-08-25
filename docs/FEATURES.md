@@ -313,7 +313,12 @@ transcript rather than as a path.
   tools. Environment values move into the OS-encrypted credential store rather
   than normal desk state.
 - **Custom bots** — a pasted URL and key become a first-class bot with its own
-  name and colour. Large catalogs are grouped, frontier-first, searchable, and
+  name and colour. A host that answers "at capacity, try again shortly" is
+  waited out rather than failed: a box you own has a fixed number of slots, so
+  a wave of workers landing together will collide. Workhorse waits when the
+  host asks it to, for about twenty-three seconds, honouring Retry-After when
+  one is sent. It keeps no count of its own — the host is the only thing that
+  knows who else is using it. Large catalogs are grouped, frontier-first, searchable, and
   explicitly approved; one key keeps one ring with separate model rows.
   Qwen 3.8 bots use the model's native Off/Low/Medium/Extra reasoning levels
   and its published thinking/direct-mode sampling profiles.

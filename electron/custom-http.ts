@@ -660,13 +660,36 @@ export async function streamCustomHttp(
     ...customHttpIdentityHeaders(baseUrl),
   };
 
-  const run = async (payload: Record<string, unknown>) => {
+  const run = async (
+    payload: Record<string, unknown>,
+    attempt = 0,
+  ): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> => {
     const response = await fetchImpl(url, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
       signal: input.signal,
     });
+    /*
+     * A host that says "at capacity, try again shortly" is asking for a wait,
+     * not reporting a failure. A self-hosted box has a fixed number of slots —
+     * the DGX gateway holds a semaphore of eight — so a wave of workers landing
+     * together makes the last of them collide with the first. Every one of
+     * those became a dead worker, because any non-2xx was thrown.
+     *
+     * The host stays the authority on its own occupancy. Mirroring its count
+     * here would be a second copy of a number that moves for reasons this
+     * process cannot see: other people, other tools, a restart, a model being
+     * swapped out. So this only waits when asked to, and only for a bounded
+     * while. If the slots are still full after that, the message keeps its 429
+     * so it reads as a rate limit rather than a fault.
+     */
+    if (response.status === 429 && attempt < BUSY_WAITS_MS.length) {
+      await response.body?.cancel().catch(() => {});
+      const asked = retryAfterMs(response.headers.get("retry-after"));
+      await waitForCapacity(asked ?? BUSY_WAITS_MS[attempt], input.signal);
+      return run(payload, attempt + 1);
+    }
     if (!response.ok) {
       const detail = (await response.text().catch(() => "")).slice(0, 400);
       throw new Error(`Custom model HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
@@ -819,6 +842,51 @@ export async function streamCustomHttp(
     }
     throw error;
   }
+}
+
+/**
+ * How long to sit out a busy host before trying again. Three waits, about
+ * twenty-three seconds in total: long enough for a slice ahead of you to
+ * finish and hand back its slot, short enough that a genuinely saturated box
+ * still reports itself instead of hanging the worker.
+ */
+const BUSY_WAITS_MS = [2_000, 6_000, 15_000];
+
+/** The longest a server may ask us to wait. Beyond this it is not a retry. */
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/** Retry-After, in either of the two forms HTTP allows. Undefined when absent or unusable. */
+export function retryAfterMs(header: string | null | undefined, now = Date.now()): number | undefined {
+  const raw = header?.trim();
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) {
+    if (seconds < 0) return undefined;
+    return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
+  }
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return undefined;
+  return Math.min(Math.max(at - now, 0), MAX_RETRY_AFTER_MS);
+}
+
+/** Sleep that a cancelled turn can cut short, so a stop does not wait out the backoff. */
+function waitForCapacity(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("Custom model request was cancelled"));
+  return new Promise((resolve, reject) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      done();
+      reject(new Error("Custom model request was cancelled"));
+    };
+    const timer = setTimeout(() => {
+      done();
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function modelsUrl(baseUrl: string): string {

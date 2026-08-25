@@ -100,6 +100,19 @@ test("the notification is a notification, and carries no report", () => {
   );
 });
 
+test("the notification does not promise a report it did not send", () => {
+  // workerFollowThrough writes for agent_status, where the report IS in the
+  // payload. Reusing it verbatim here told a host "The report is in this
+  // payload" on a frame that deliberately carries none. Caught by reading a
+  // real notification off a live helper, not by a unit test.
+  for (const status of ["completed", "failed", "interrupted", "timed-out"]) {
+    const frame = workerTerminalNotification({ workerId: "w1", status });
+    assert.doesNotMatch(frame.params.how, /report is in this payload/i, status);
+    assert.match(frame.params.how, /workhorse_agent_status/, "it points at the pull instead");
+    assert.match(frame.params.how, /carries no report/i, "and says so plainly");
+  }
+});
+
 test("unannounced is at-most-once per helper", () => {
   const seen = new Set<string>();
   const settled = [{ workerId: "w1", status: "completed" }, { workerId: "w2", status: "failed" }];

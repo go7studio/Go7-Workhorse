@@ -42,6 +42,7 @@ import {
   withFollowThrough,
   listedChatFollowThrough,
   workerNameFromTitle,
+  workerProgressCheckpoint,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
 import { uid } from "../src/lib/id";
@@ -2658,9 +2659,29 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
     return JSON.stringify(artifact, null, 2);
   }
   if (name === "workhorse_list_chats") {
-    const rows = catalogSessions(readState(), { fromSessionId: from, includeWorkers: true }).map((row) => {
+    // A host monitoring its workers should get one board, not a call per
+    // worker. This list already says who is out and whether they are done;
+    // adding what a running one is doing now is the difference between a
+    // roster and a live view, and it saves a workhorse_agent_status per
+    // worker just to render one.
+    const listState = readState();
+    const liveById = new Map(
+      (Array.isArray(listState.sessions) ? listState.sessions : [])
+        .filter((raw): raw is { id: string } => Boolean(raw) && typeof (raw as { id?: unknown }).id === "string")
+        .map((raw) => [raw.id, raw as unknown as Parameters<typeof workerProgressCheckpoint>[0]] as const),
+    );
+    const rows = catalogSessions(listState, { fromSessionId: from, includeWorkers: true }).map((row) => {
       const follow = listedChatFollowThrough(row);
-      return { ...row, ...(follow.next ? { next: follow.next } : {}) };
+      const base = { ...row, ...(follow.next ? { next: follow.next } : {}) };
+      // Only while running: once a worker is done, `next` is the whole story.
+      if (!row.parentId || row.status !== "running") return base;
+      const live = liveById.get(row.id);
+      const checkpoint = live ? workerProgressCheckpoint(live) : undefined;
+      return {
+        ...base,
+        ...(checkpoint?.currentStep ? { currentStep: checkpoint.currentStep } : {}),
+        ...(typeof checkpoint?.lastActivityAt === "number" ? { lastActivityAt: checkpoint.lastActivityAt } : {}),
+      };
     });
     if (!isLinkProfile()) return JSON.stringify(rows, null, 2);
     return formatLinkChatList(rows, { full: args.full === true, parents: args.parents === true });

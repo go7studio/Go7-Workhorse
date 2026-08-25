@@ -175,6 +175,9 @@ export type LinkChatListRow = {
   status: string;
   next?: string;
   project?: string | null;
+  /** What a running worker is doing right now; absent once it is finished. */
+  currentStep?: string;
+  lastActivityAt?: number;
 };
 
 export function formatLinkChatList(
@@ -186,6 +189,9 @@ export function formatLinkChatList(
     status: string;
     next?: string;
     projectName?: string | null;
+    /** What a running worker is doing right now. Absent once it is finished. */
+    currentStep?: string;
+    lastActivityAt?: number;
   }>,
   opts?: { full?: boolean; parents?: boolean },
 ): string {
@@ -198,6 +204,10 @@ export function formatLinkChatList(
     ...(row.parentId ? { parentId: row.parentId } : {}),
     status: row.status,
     ...(row.next ? { next: row.next } : {}),
+    // A host monitoring its workers wants one board, not a call per worker.
+    // Only while running: once a worker is done, `next` is the whole story.
+    ...(row.currentStep ? { currentStep: row.currentStep } : {}),
+    ...(typeof row.lastActivityAt === "number" ? { lastActivityAt: row.lastActivityAt } : {}),
     ...(row.projectName ? { project: row.projectName } : {}),
   }));
   return JSON.stringify(compact);

@@ -36,6 +36,18 @@ export type WorkerTerminalParams = {
  * caller reads the report through workhorse_agent_status, which is already
  * the contract and already access-checked.
  */
+/**
+ * What to do next, said for THIS channel.
+ *
+ * workerFollowThrough writes for workhorse_agent_status, where the report is
+ * in the payload it is describing. Here it is not — deliberately — so reusing
+ * that wording verbatim told a host to read a report that was never sent.
+ */
+function notificationHow(status: string, follow: { next: string; how: string }): string {
+  if (follow.next === "wait") return follow.how;
+  return `Call workhorse_agent_status with this id to read the ${status === "completed" ? "report" : "outcome"}. This notification carries no report.`;
+}
+
 export function workerTerminalNotification(worker: SettledWorker): {
   jsonrpc: "2.0";
   method: string;
@@ -49,7 +61,7 @@ export function workerTerminalNotification(worker: SettledWorker): {
       id: worker.workerId,
       status: worker.status,
       next: follow.next,
-      how: follow.how,
+      how: notificationHow(worker.status, follow),
       ...(worker.parentSessionId ? { parentId: worker.parentSessionId } : {}),
       ...(worker.correlationId ? { traceId: worker.correlationId } : {}),
       ...(typeof worker.finishedAt === "number" ? { finishedAt: worker.finishedAt } : {}),

@@ -237,6 +237,47 @@ test("install keepalive writes through injected io and never reads the machine h
   assert.doesNotMatch(JSON.stringify(written), /senderKey/);
 });
 
+test("Mac keepalive never unregisters a live shim and restarts an existing agent", () => {
+  const calls: Array<{ file: string; args: string[] }> = [];
+  const report = installGrokBotShimKeepalive({
+    platform: "darwin",
+    home: "/Users/fixture",
+    userData: "/Users/fixture/Library/Application Support/Go7 Workhorse",
+    command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+    script: "/Applications/Go7 Workhorse.app/Contents/Resources/app.asar/dist-electron/grok-bot-shim-host.js",
+    io: {
+      existsSync: () => false,
+      mkdirp: () => undefined,
+      writeFile: () => undefined,
+      exec: (file, args) => {
+        calls.push({ file, args });
+        return { status: args[0] === "kickstart" ? 0 : 5 };
+      },
+    },
+  });
+  assert.equal(report.ok, true);
+  assert.deepEqual(calls.map(({ args }) => args[0]), ["bootstrap", "kickstart"]);
+  assert.equal(calls.some(({ args }) => args.includes("bootout")), false);
+  assert.deepEqual(calls[1]?.args, ["kickstart", "-k", `gui/${process.getuid?.() ?? 0}/${GROK_BOT_SHIM_LAUNCH_AGENT}`]);
+});
+
+test("Mac keepalive reports when neither bootstrap nor restart registered the agent", () => {
+  const report = installGrokBotShimKeepalive({
+    platform: "darwin",
+    home: "/Users/fixture",
+    userData: "/Users/fixture/Library/Application Support/Go7 Workhorse",
+    command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse",
+    script: "/Applications/Go7 Workhorse.app/Contents/Resources/app.asar/dist-electron/grok-bot-shim-host.js",
+    io: {
+      existsSync: () => false,
+      mkdirp: () => undefined,
+      writeFile: () => undefined,
+      exec: () => ({ status: 5 }),
+    },
+  });
+  assert.equal(report.ok, false);
+});
+
 test("the loopback server writes inbox files and answers SSE once a reply lands", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "workhorse-grok-bot-shim-"));
   const token = mintGrokBotShimToken();

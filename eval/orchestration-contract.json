@@ -65,6 +65,20 @@
       "workhorse_agent_status",
       "workhorse_cancel_agent"
     ],
+    "localCapabilityTools": [
+      "workhorse_local_hosts",
+      "workhorse_local_capabilities",
+      "workhorse_local_upload",
+      "workhorse_local_invoke",
+      "workhorse_local_chat",
+      "workhorse_local_generate_3d",
+      "workhorse_local_job",
+      "workhorse_local_cancel",
+      "workhorse_local_artifact",
+      "workhorse_local_materialize",
+      "workhorse_local_continue"
+    ],
+    "localCapabilityPolicy": "These conditional Link/MCP/CLI tools appear only for healthy role-granted Local Compute capabilities. Generic invoke requires a typed descriptor; continuation requires an exact installed and granted pair. They do not create a provider or Usage ring.",
     "grokBotSetup": {
       "source": "src/lib/workhorse-link.ts#linkGrokBotOneshot",
       "hosts": ["darwin", "win32"],
@@ -102,9 +116,16 @@
       "src/lib/ask-default.ts",
       "src/lib/turns.ts",
       "src/lib/workhorse-link.ts",
+      "src/lib/local-capability-contract.ts",
+      "src/lib/local-capability-requests.ts",
+      "src/lib/local-compute.ts",
+      "electron/local-capability-host.ts",
+      "electron/local-compute-registry.ts",
+      "electron/local-continuation-adapters.ts",
       "src/ui/ChatRow.tsx",
       "src/ui/GoalBar.tsx",
-      "test/workhorse-link.test.ts"
+      "test/workhorse-link.test.ts",
+      "test/workhorse-local-capability.test.ts"
     ],
     "goalCommands": [
       "/goal <objective>",

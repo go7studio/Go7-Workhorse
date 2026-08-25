@@ -16,6 +16,7 @@ const deviceCapabilityPath = path.join(evalDir, "device-capability-contract.json
 const learningMemoryPath = path.join(evalDir, "learning-memory-contract.json");
 const performancePath = path.join(evalDir, "performance-contract.json");
 const usagePath = path.join(evalDir, "usage-contract.json");
+const localModelPath = path.join(evalDir, "local-model-contract.json");
 const regressionPath = path.join(evalDir, "regression-contract.json");
 const configExamplePath = path.join(evalDir, "config.example.json");
 const sourceCommandPath = path.join(root, "src", "lib", "commands.ts");
@@ -230,7 +231,7 @@ function sourceSettingsSections(source) {
 }
 
 async function validate() {
-  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
+  const [suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, localModel, regressions, configExample, packageManifest, commandSource, settingsSource, deskToolsSource] = await Promise.all([
     json(suitePath),
     json(commandPath),
     json(providerPath),
@@ -241,6 +242,7 @@ async function validate() {
     json(learningMemoryPath),
     json(performancePath),
     json(usagePath),
+    json(localModelPath),
     json(regressionPath),
     json(configExamplePath),
     json(packagePath),
@@ -260,6 +262,7 @@ async function validate() {
     learningMemory.schemaVersion !== 1 ||
     performance.schemaVersion !== 1 ||
     usage.schemaVersion !== 1 ||
+    localModel.schemaVersion !== 1 ||
     regressions.schemaVersion !== 1 ||
     configExample.schemaVersion !== 1
   ) {
@@ -278,6 +281,17 @@ async function validate() {
     problems.push(
       `config expectedVersion must match package version (${configExample.source?.expectedVersion ?? "missing"} != ${packageManifest.version})`,
     );
+  }
+  if (
+    configExample.localCapabilitySmoke?.enabled !== false ||
+    configExample.localCapabilitySmoke?.maxJobs !== 1 ||
+    configExample.localCapabilitySmoke?.allowContinuation !== false ||
+    configExample.localCapabilitySmoke?.requireTypedInvocation !== true
+  ) {
+    problems.push("local capability smoke must default off, typed, one-job, and no-continuation");
+  }
+  if (/baseUrl|tokenFile|apiKey/i.test(JSON.stringify(configExample.localCapabilitySmoke ?? {}))) {
+    problems.push("local capability smoke config must not carry endpoint or token fields");
   }
 
   const profileIds = providers.profiles.map((profile) => profile.id);
@@ -491,7 +505,7 @@ async function validate() {
     problems.push("usage-contract profiles and provider-matrix profiles differ");
   }
   const usagePresentation = (usage.presentationInvariants ?? []).join(" ");
-  for (const required of [/weekly.*monthly/i, /Cursor Auto.*Other Models/i, /aliases.*canonical model row/i]) {
+  for (const required of [/weekly.*monthly/i, /Cursor Auto.*Other Models/i, /aliases.*canonical model row/i, /Local Compute.*no provider.*ring/i]) {
     if (!required.test(usagePresentation)) problems.push(`usage presentation invariant is missing: ${required}`);
   }
   for (const profile of usage.profiles ?? []) {
@@ -517,6 +531,55 @@ async function validate() {
   }
   for (const command of usage.verificationCommands ?? []) {
     if (!packageManifest.scripts?.[command]) problems.push(`usage verification command is missing: ${command}`);
+  }
+  if (localModel.profile !== "custom-openai") {
+    problems.push("local-model contract must stay on the custom-openai profile");
+  }
+  if (profileIds.some((id) => /spark|qwen|local-compute/i.test(id))) {
+    problems.push("Spark, Qwen, and Local Compute must not become runtime provider profiles");
+  }
+  if (!/not a provider, vendor, custom bot, or Usage ring/i.test(localModel.productBoundary ?? "")) {
+    problems.push("local-model contract must keep Spark Local Compute outside providers, bots, and Usage rings");
+  }
+  if (localModel.scopedMcp?.settingsSurface !== "skills") {
+    problems.push("local-model MCP setup must stay in Settings Skills");
+  }
+  if (!sameMembers(localModel.requiredRubric ?? [], ["SET-08", "SET-09", "MOD-08", "SEC-08", "SEC-09", "CAP-14", "CAP-15", "USG-09", "USG-10"])) {
+    problems.push("local-model contract must map both Custom HTTP and Local Compute setup, security, capability, and usage gates");
+  }
+  for (const rubric of localModel.requiredRubric ?? []) {
+    if (!rubricSet.has(rubric)) problems.push(`local-model contract references missing rubric ${rubric}`);
+  }
+  if (!sameMembers(localModel.qwen38?.efforts ?? [], ["off", "low", "medium", "xhigh"])) {
+    problems.push("Qwen 3.8 local-model contract must preserve off, low, medium, and xhigh");
+  }
+  if (!/explicit empty list exposes none/i.test(localModel.scopedMcp?.allowlist ?? "")) {
+    problems.push("local-model MCP contract must preserve empty-allowlist fail-closed behavior");
+  }
+  if (!/ACP vendors.*fail closed/i.test(localModel.scopedMcp?.transportBoundary ?? "")) {
+    problems.push("local-model MCP contract must fail closed for restricted ACP tool subsets");
+  }
+  if (localModel.localCompute?.settingsSurface !== "llms/local-compute") {
+    problems.push("Spark Local Compute setup must stay under Settings LLMs Local Compute");
+  }
+  if (!/Empty grants expose nothing/i.test(localModel.localCompute?.discovery ?? "")) {
+    problems.push("Spark Local Compute discovery must fail closed on empty grants");
+  }
+  if (!/Unknown.*last-observed.*removes stale continuations/i.test(localModel.localCompute?.offline ?? "")) {
+    problems.push("Spark Local Compute offline jobs must stay truthful and remove stale continuations");
+  }
+  for (const file of localModel.sourceFiles ?? []) {
+    try {
+      await readFile(path.join(root, file), "utf8");
+    } catch {
+      problems.push(`local-model source file is missing: ${file}`);
+    }
+  }
+  for (const command of localModel.verificationCommands ?? []) {
+    if (!packageManifest.scripts?.[command]) problems.push(`local-model verification command is missing: ${command}`);
+  }
+  if (!packageManifest.scripts?.[localModel.liveSmokeCommand]) {
+    problems.push(`local-model live smoke command is missing: ${localModel.liveSmokeCommand}`);
   }
   for (const file of (performance.sourceFiles ?? []).filter((item) => /^test\/.*\.test\.ts$/.test(item))) {
     if (!defaultTestScript.includes(file)) {
@@ -553,6 +616,16 @@ async function validate() {
       problems.push(`orchestration desk tool ${tool} is missing from electron/workhorse-mcp.ts`);
     }
   }
+  for (const tool of orchestration.workhorseSurfaces?.localCapabilityTools ?? []) {
+    if (!deskToolsSource.includes(`name: "${tool}"`)) {
+      problems.push(`local capability tool ${tool} is missing from electron/workhorse-mcp.ts`);
+    }
+  }
+  if (!/healthy role-granted.*typed descriptor.*exact installed and granted pair.*do not create a provider or Usage ring/i.test(
+    orchestration.workhorseSurfaces?.localCapabilityPolicy ?? "",
+  )) {
+    problems.push("local capability tool policy must preserve health, grants, typed invocation, continuation, and usage boundaries");
+  }
   for (const file of orchestration.workhorseSurfaces?.sourceFiles ?? []) {
     try {
       await readFile(path.join(root, file), "utf8");
@@ -578,10 +651,11 @@ async function validate() {
   console.log(
     `Workhorse eval kit valid: ${suite.areas.length} areas, ${scenarioCount} scenarios, ` +
       `${itemCount} rubric items, ${commands.commands.length} core commands, ` +
-      `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ${profileIds.length} runtime profiles, ` +
+      `${orchestration.workhorseSurfaces.deskTools.length} orchestration tools, ` +
+      `${orchestration.workhorseSurfaces.localCapabilityTools?.length ?? 0} conditional local tools, ${profileIds.length} runtime profiles, ` +
       `${regressionIds.length} regression contracts.`,
   );
-  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, regressions };
+  return { suite, commands, providers, orchestration, capabilities, executionPlan, deviceCapabilities, learningMemory, performance, usage, localModel, regressions };
 }
 
 function list({ suite, commands, providers }) {

@@ -2,14 +2,16 @@
   "schemaVersion": 1,
   "suite": "go7-workhorse",
   "title": "Go7 Workhorse outer-harness evaluation",
-  "baselineRef": "91a39a5cb13fe845e3ba7facad665e466adda988",
+  "baselineRef": "4394454a5bac15db65d1f10a812f8c9a26cc91af",
   "statusVocabulary": ["pass", "partial", "fail", "not_found", "cannot_judge", "not_run"],
   "verdictPoints": { "pass": 1, "partial": 0.5, "fail": 0, "not_found": 0 },
   "releaseBlockers": [
-    "MOD-02", "MOD-04", "MOD-06",
-    "SEC-01", "SEC-03", "SEC-04", "SEC-07",
+    "SET-09",
+    "MOD-02", "MOD-04", "MOD-06", "MOD-08",
+    "SEC-01", "SEC-03", "SEC-04", "SEC-07", "SEC-08", "SEC-09",
     "ORC-07", "ORC-09", "ORC-13", "ORC-15", "ORC-17",
-    "USG-01", "USG-02", "USG-03", "USG-07", "USG-08",
+    "CAP-14", "CAP-15",
+    "USG-01", "USG-02", "USG-03", "USG-07", "USG-08", "USG-09", "USG-10",
     "REL-01", "REL-02", "REL-05", "REL-06", "REL-07", "REL-09"
   ],
   "profiles": ["grok-acp", "codex-acp", "claude-acp", "cursor-acp", "custom-openai", "custom-kimi", "custom-anthropic"],
@@ -79,6 +81,32 @@
             "List current Cursor models and verify Auto launches as the advertised auto id, including a migrated legacy auto-smart chat.",
             "Run bounded Auto and Composer 2.5 ACP turns through initialize, session/new, and prompt.",
             "Record the selected binary, auth state, requested and launched model, and concise remediation without dumping the full model list."
+          ]
+        },
+        {
+          "id": "SET-S5",
+          "name": "Connect Spark as a local Qwen bot with scoped MCP tools",
+          "executor": "electron",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Add Spark as one OpenAI-compatible custom connection, discover or enter an exact Qwen 3.8 model id, approve it, and keep Spark out of the stock provider inventory.",
+            "Open Settings Skills, add and probe a deterministic local stdio MCP server, assign it only to custom:spark, and allow only one read-only tool.",
+            "Save and restart; verify the connection, approved Qwen model, runtime scope, and tool allowlist persist without exposing an extra Settings tab or provider ring.",
+            "Select another custom bot and one ACP vendor; verify neither receives Spark's scoped tool.",
+            "Verify setup copy is one-line where possible and accurately names the required base URL, key, model approval, runtime, and tool scope."
+          ]
+        },
+        {
+          "id": "SET-S6",
+          "name": "Configure Spark as a Local Compute host without creating a vendor",
+          "executor": "electron",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Open Settings LLMs Local Compute in isolated state and add a Spark host with an HTTPS or loopback URL plus an absolute token-file reference.",
+            "Probe live capabilities and grant selected capabilities independently to Workhorse, connected apps, workers, and auditors; grant one exact continuation pair separately.",
+            "Save and restart; verify safe endpoint/grant metadata and the token-file reference persist while token contents remain outside state, diagnostics, clipboard, and Link output.",
+            "Disable the host, remove every grant, and remove the host; verify each edit immediately narrows discovery and the product registry remains authoritative even when empty.",
+            "Verify no new provider, custom bot, login, model row, Usage ring, or Settings tab appears."
           ]
         }
       ],
@@ -161,6 +189,28 @@
           "scenarios": ["SET-S4"],
           "passCriteria": "A different vendor's agent binary, desktop-app login, stale config artifact, or status exit code cannot produce a ready state; current Auto and Composer ACP turns must succeed and legacy Auto must migrate to the advertised id.",
           "evidence": "Resolved binary identity, auth probe, model list, requested/launched model ids, ACP handshakes, deterministic replies, readiness row, and bounded failure remediation."
+        },
+        {
+          "id": "SET-08",
+          "criterion": "A local Spark/Qwen setup uses the existing Custom HTTP and Skills surfaces with explicit model approval and MCP runtime/tool scope.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["custom-openai"],
+          "scenarios": ["SET-S5"],
+          "passCriteria": "Spark remains one custom connection; Qwen is an approved model; MCP setup lives under Skills; custom:spark receives only the selected tools after restart; other custom bots and ACP vendors do not inherit them.",
+          "evidence": "Connection/model card, Skills screenshots, normalized MCP config, probe result, restart state, and runtime tool inventories."
+        },
+        {
+          "id": "SET-09",
+          "criterion": "Spark Local Compute setup persists only safe host metadata and explicit role/capability/continuation grants without adding a vendor, bot, login, or ring.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["SET-S6"],
+          "passCriteria": "Settings LLMs Local Compute probes the host; HTTPS or loopback and absolute token-file rules hold; token bytes never persist; first edit makes the saved registry authoritative; empty/disabled/removed grants expose nothing; provider and Usage inventories do not change.",
+          "evidence": "Settings/probe screenshots, normalized registry, restart state, state/support secret scan, Link capability inventory, provider matrix, and Usage rings."
         }
       ]
     },
@@ -386,6 +436,19 @@
             "Record unavailable, unauthenticated, declined, rate-limited, or unsupported profiles as explicit outcomes rather than silently substituting MiniMax-M3.",
             "Reconcile the smoke-call count against the configured per-profile ceiling."
           ]
+        },
+        {
+          "id": "MOD-S5",
+          "name": "Prove Qwen 3.8 native direct and thinking requests",
+          "executor": "api",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Select an exact Qwen 3.8 family model on Spark and record its Off, Low, Medium, and Extra High choices.",
+            "Inspect a fixture Off request for Qwen's direct sampling and disabled-thinking fields, then a Medium request for its thinking sampling and reasoning_effort.",
+            "Repeat with Qwen3-8B and Qwen3-80B fixture ids and verify they do not receive Qwen 3.8 controls.",
+            "Run the opt-in bounded live smoke and reconcile catalog identity, outbound model, response model when supplied, transcript stamp, and usage model.",
+            "Treat unsupported effort, silent fallback, missing exact catalog identity, or a third model request as failure."
+          ]
         }
       ],
       "rubric": [
@@ -465,6 +528,17 @@
           "scenarios": ["MOD-S4"],
           "passCriteria": "Each enabled exception runs no more than the configured call ceiling, returns or fails under its own identity, invokes no tools/agents/chats, and records sanitized launch/request, reply, usage, and failure evidence.",
           "evidence": "Smoke-call ledger, provider launch/request trace, response stamp, usage event, and secret scan."
+        },
+        {
+          "id": "MOD-08",
+          "criterion": "Qwen 3.8 exposes and sends only its native reasoning levels and sampling controls without false family matches or silent identity fallback.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto-partial",
+          "profiles": ["custom-openai"],
+          "scenarios": ["MOD-S5"],
+          "passCriteria": "Exact Qwen 3.8 ids offer Off/Low/Medium/Extra High; direct and thinking bodies match the local-model contract; Qwen3-8B/80B do not match; selected, requested, observed, transcript, and usage identities agree or state unknown.",
+          "evidence": "Model menu, request bodies, negative fixtures, live catalog, sanitized response identity, transcript stamp, usage events, and call ledger."
         }
       ]
     },
@@ -642,6 +716,32 @@
             "Confirm development and installed builds use separate credential namespaces.",
             "Restart the same install and update it with the same signed app identity; verify only documented scopes expire."
           ]
+        },
+        {
+          "id": "SEC-S5",
+          "name": "Keep local MCP scopes and secrets fail closed",
+          "executor": "unit",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Normalize legacy, empty, and populated MCP runtime/tool scopes and verify none widens during save or restart.",
+            "Give Spark one selected read-only tool and verify an unselected tool, another custom bot, and a restricted ACP path cannot invoke it.",
+            "Store a canary MCP environment secret and verify it is encrypted, probe errors are redacted, removed values are pruned, and unrelated Workhorse/cloud secrets are absent from the subprocess environment.",
+            "Exercise macOS/native launch fixtures plus Windows .cmd, .bat, and native executable decisions.",
+            "Fail if ordinary state, diagnostics, logs, or tool results contain the canary."
+          ]
+        },
+        {
+          "id": "SEC-S6",
+          "name": "Enforce Local Compute role, protocol, artifact, and replay boundaries",
+          "executor": "unit",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Discover the same healthy Spark host as desk, external runtime, worker, and auditor with distinct grants; verify each tools/list and capabilities response contains only its live allowed surface.",
+            "Submit unknown fields, route cycles, wrong artifact role/media/cardinality/hash, duplicate outputs, open constraint fields, raw Link requests, and unauthorized mutations; verify each fails before host work.",
+            "Transfer a bounded artifact and verify byte range, size, SHA-256, and atomic destination checks; confirm JSON never carries binary bytes.",
+            "Retry an identical semantic request across restart and verify replay; reuse the key with changed payload and verify conflict without another submission.",
+            "Take the host offline and verify a known job reports timestamped Unknown, exposes no stale continuation, and grants no new work."
+          ]
         }
       ],
       "rubric": [
@@ -721,6 +821,28 @@
           "scenarios": ["SEC-S4"],
           "passCriteria": "One pending request has one prompt; an in-scope session grant suppresses repeats; each credential decrypts at most once per process; a locked vault keeps non-secret desk state durable without plaintext keys; development cannot open the installed app's vault; macOS updates keep the same signed identity; expired or out-of-scope access prompts once with a clear reason.",
           "evidence": "Permission request ids, scope cache, cipher call counts, runtime name and vault path, macOS designated requirement, Windows identity, restart/update trace, and action outcomes."
+        },
+        {
+          "id": "SEC-08",
+          "criterion": "Local MCP runtime/tool scopes and environment secrets remain least-privilege across custom bots, ACP vendors, restarts, and macOS/Windows launch paths.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["custom-openai"],
+          "scenarios": ["SEC-S5"],
+          "passCriteria": "custom:spark receives only selected tools; explicit empty means none; restricted ACP access fails closed; secrets remain encrypted/redacted; minimal ambient env is used; Windows shell use is limited to command shims.",
+          "evidence": "Normalized config, runtime inventories, denied calls, credential-store assertions, redaction scan, subprocess env, and platform launch fixtures."
+        },
+        {
+          "id": "SEC-09",
+          "criterion": "Local Compute discovery, invocation, artifacts, replay, offline state, and continuations remain strictly typed, role-granted, bounded, and fail closed.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["SEC-S6"],
+          "passCriteria": "Empty or mismatched grants expose nothing; auditors cannot mutate; protocol/route/schema/artifact violations stop before execution; verified transfers commit atomically; exact retries replay; changed payloads conflict; offline reads become Unknown without continuations.",
+          "evidence": "Per-role tool inventories, rejected payloads, host call count, artifact hashes/sizes, cache path, journal/restart record, and offline snapshot."
         }
       ]
     },
@@ -1341,6 +1463,32 @@
             "Spawn unassigned desk work with Settings Routing enabled and verify automatic routing applies only to the spawn.",
             "Repeat with Settings Routing disabled and with an explicit spawn assignment; verify the setting and explicit choice each win in their documented scope."
           ]
+        },
+        {
+          "id": "CAP-S8",
+          "name": "Complete a Spark Qwen scoped MCP tool round",
+          "executor": "api",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Expose one read-only marker tool from a deterministic local MCP server to custom:spark and keep a second tool unselected.",
+            "Ask the exact approved Qwen 3.8 model to call the marker tool and return its result.",
+            "Verify the first HTTP request contains only the selected tool, the MCP result is returned to the same model, and the second request returns the exact marker.",
+            "Verify no third model request, hidden tool, child, peer chat, file write, or network target is used.",
+            "Record model identity, tool lifecycle, result marker, request count, and authoritative per-request usage."
+          ]
+        },
+        {
+          "id": "CAP-S9",
+          "name": "Run a typed asynchronous Qwen job through Spark Local Compute",
+          "executor": "api",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "From a granted caller, discover Spark text.chat.generate and require its complete typed invocation contract before exposing generic invoke.",
+            "Upload one text/plain prompt artifact, submit one asynchronous Qwen job with exact required outputs and closed constraints, then poll its journaled status.",
+            "Verify the completed job identity, route/hop history, profileId, output roles, artifact metadata, size, SHA-256, and validation before materializing content.",
+            "For a separately granted typed continuation, require installed adapter evidence and the exact capability/tool pair, then create one visible worker with staged verified inputs; verify a retry returns that worker.",
+            "Confirm the host job and continuation create no provider/custom-bot identity or Usage ring."
+          ]
         }
       ],
       "rubric": [
@@ -1486,6 +1634,28 @@
           "scenarios": ["CAP-S7"],
           "passCriteria": "Manual chat turns never reroute because of the global setting; Auto is an explicit per-chat mode; unassigned spawns use Settings Routing; explicit spawn provider, model, or chat assignment wins.",
           "evidence": "Session routing mode, Settings state, spawn payloads, route decisions, launch identity, transcript stamps, and usage rows."
+        },
+        {
+          "id": "CAP-14",
+          "criterion": "A local Custom HTTP model can complete one allowlisted MCP tool round end to end without widening tools, identity, authority, or request count.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["custom-openai"],
+          "scenarios": ["CAP-S8"],
+          "passCriteria": "The exact Qwen model sees one tool, calls it once, receives its marker, returns the exact marker on request two, emits matching usage, and never sees or invokes the unselected tool.",
+          "evidence": "Catalog result, two sanitized request bodies, MCP tool list/call/result events, final reply, usage events, and call ceiling."
+        },
+        {
+          "id": "CAP-15",
+          "criterion": "A granted Spark Local Compute host completes a typed asynchronous Qwen job and optional exact continuation with verified artifacts and durable identity.",
+          "weight": 3,
+          "type": "roundtrip",
+          "testability": "auto-partial",
+          "profiles": ["grok-acp"],
+          "scenarios": ["CAP-S9"],
+          "passCriteria": "Live discovery gates invocation; prompt and outputs match the descriptor; one job completes with consistent route/profile/artifacts; bytes materialize only after verification; an exact installed/granted continuation creates one visible replayable worker; no vendor surface appears.",
+          "evidence": "Capabilities payload, typed request, job ledger, route/profile ids, artifact metadata/hash/materialization, continuation grant/adapter/worker record, and provider inventory."
         }
       ]
     },
@@ -1560,6 +1730,32 @@
             "Use two approved models on one custom connection and verify one connection ring retains separate truthful model rows.",
             "Use the same model name on a stock provider and two custom connections; verify explicit provider and customBotId identity wins and ambiguous legacy events are not assigned arbitrarily.",
             "Verify canceled-before-send, failed preflight, and missing-usage ACP turns never invent tokens."
+          ]
+        },
+        {
+          "id": "USG-S6",
+          "name": "Attribute Spark Qwen direct and tool-loop usage",
+          "executor": "unit",
+          "profiles": ["custom-openai"],
+          "steps": [
+            "Record Spark with two approved Qwen models on one Custom HTTP connection and an empty usage baseline.",
+            "Feed authoritative OpenAI-compatible usage for one direct call and both requests of one MCP tool round.",
+            "Verify requests sum once beneath the actual Qwen model rows while the connection retains one ring.",
+            "Omit usage and local capacity in separate fixtures and verify tokens and leftover remain unknown rather than zero or estimated.",
+            "Run the same tool round as a worker and verify usage stays on the worker's Spark connection/model, not its parent."
+          ]
+        },
+        {
+          "id": "USG-S7",
+          "name": "Keep Local Compute jobs outside vendor usage",
+          "executor": "unit",
+          "profiles": ["grok-acp"],
+          "steps": [
+            "Record provider, custom-bot, model-row, and Usage-ring inventories before configuring a Spark Local Compute host.",
+            "Discover and complete a text job plus one continuation worker using fixture host events that include profile and artifact facts but no provider usage event.",
+            "Verify no Spark host, capability, profileId, job, artifact, or continuation appears as a vendor/custom connection/model usage row or leftover ring.",
+            "Verify an independent Qwen Custom HTTP call still books only to its own connection and model row.",
+            "Export diagnostics and verify safe Local Compute status is distinct from vendor usage and excludes the token."
           ]
         }
       ],
@@ -1651,6 +1847,28 @@
           "scenarios": ["USG-S1", "USG-S5"],
           "passCriteria": "Authoritative turn usage wins, request usage sums once, gauges book no tokens, unknown creates no synthetic count, workers book under their actual bot, and custom models remain separate beneath one connection ring.",
           "evidence": "Raw events with source classes, finalization trace, worker lineage, connection/model keys, Usage rows, and independent arithmetic."
+        },
+        {
+          "id": "USG-09",
+          "criterion": "Spark and its Qwen models retain one Custom HTTP connection ring, separate model rows, authoritative request usage, and truthful unknown local capacity.",
+          "weight": 3,
+          "type": "provenance",
+          "testability": "auto",
+          "profiles": ["custom-openai"],
+          "scenarios": ["USG-S6"],
+          "passCriteria": "Direct and two-request MCP usage books exactly once under the actual Spark/Qwen owner; another Qwen model remains separate; absent usage or capacity creates no synthetic tokens or percent.",
+          "evidence": "Raw HTTP usage blocks, request source tags, worker lineage, connection/model keys, Usage rows, and unknown-capacity fixtures."
+        },
+        {
+          "id": "USG-10",
+          "criterion": "Spark Local Compute hosts, capabilities, jobs, profiles, artifacts, and continuation workers never become vendor usage or leftover rings.",
+          "weight": 3,
+          "type": "scoping",
+          "testability": "auto",
+          "profiles": ["grok-acp"],
+          "scenarios": ["USG-S7"],
+          "passCriteria": "Local Compute execution changes no provider/custom/model/ring inventory and creates no token event without an authoritative provider bill; a separate Qwen Custom HTTP call remains attributable only to that custom connection.",
+          "evidence": "Before/after provider and Usage inventories, local job/worker records, raw usage events, independent Qwen call row, and support export."
         }
       ]
     },

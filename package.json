@@ -42,6 +42,7 @@
     "eval:preflight": "tsx scripts/workhorse-eval-preflight.ts",
     "eval:smoke": "tsx test/provider-live-smoke.ts",
     "eval:multi-model-smoke": "tsx test/custom-multi-model-live-smoke.ts",
+    "eval:local-model-smoke": "tsx test/local-model-live-smoke.ts",
     "eval:capability-smoke": "tsx test/capability-live-smoke.ts",
     "eval:plan-fixture-check": "node scripts/workhorse-eval-plan-fixture.mjs",
     "eval:admission-smoke": "tsx scripts/workhorse-eval-plan-admission.ts",

@@ -297,16 +297,17 @@ test("Godot suite evidence rejects exit-zero parse failures", async () => {
   assert.equal(parseGodotSuiteOutput("RESULT passed=788 failed=1", 0).ok, false);
 });
 
-test("plan, device, learning, performance, and usage contracts map to suite rubrics and commands", () => {
+test("plan, device, learning, performance, usage, and local-model contracts map to suite rubrics and commands", () => {
   const suite = json("eval/suite.json");
   const plan = json("eval/execution-plan-contract.json");
   const devices = json("eval/device-capability-contract.json");
   const learning = json("eval/learning-memory-contract.json");
   const performance = json("eval/performance-contract.json");
   const usage = json("eval/usage-contract.json");
+  const localModel = json("eval/local-model-contract.json");
   const manifest = json("package.json");
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
-  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric, ...performance.requiredRubric, ...usage.requiredRubric]) assert.ok(rubric.has(id), id);
+  for (const id of [...plan.requiredRubric, ...devices.requiredRubric, ...learning.requiredRubric, ...performance.requiredRubric, ...usage.requiredRubric, ...localModel.requiredRubric]) assert.ok(rubric.has(id), id);
   assert.ok(manifest.scripts[devices.probeCommand]);
   assert.ok(manifest.scripts[devices.godotSuiteCommand]);
   assert.ok(manifest.scripts[learning.packagedSmokeCommand]);
@@ -315,12 +316,14 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
   assert.ok(manifest.scripts[plan.admissionSmokeCommand]);
   for (const command of performance.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const command of usage.verificationCommands) assert.ok(manifest.scripts[command]);
+  for (const command of localModel.verificationCommands) assert.ok(manifest.scripts[command]);
   for (const file of performance.sourceFiles.filter((item: string) => /^test\/.*\.test\.ts$/.test(item))) {
     assert.match(manifest.scripts.test, new RegExp(`(?:^|\\s)${file.replaceAll(".", "\\.")}(?:\\s|$)`), file);
   }
   assert.ok(manifest.scripts["eval:harness-smoke"]);
   assert.ok(manifest.scripts["eval:link-iteration"]);
   assert.ok(manifest.scripts["eval:multi-model-smoke"]);
+  assert.ok(manifest.scripts["eval:local-model-smoke"]);
   assert.ok(suite.profiles.includes("custom-kimi"));
   assert.ok(suite.areaOrder.includes("learning-memory"));
   assert.deepEqual(usage.profiles.map((profile: any) => profile.id), suite.profiles);
@@ -328,6 +331,8 @@ test("plan, device, learning, performance, and usage contracts map to suite rubr
   assert.match(usage.presentationInvariants.join(" "), /weekly.*monthly/i);
   assert.match(usage.presentationInvariants.join(" "), /Cursor Auto.*Other Models/i);
   assert.match(usage.presentationInvariants.join(" "), /aliases.*canonical model row/i);
+  assert.match(usage.presentationInvariants.join(" "), /Spark.*one connection ring.*Qwen model rows/i);
+  assert.match(usage.presentationInvariants.join(" "), /Local Compute.*no provider.*ring/i);
 });
 
 test("observed regressions stay mapped to live suite coverage", () => {
@@ -361,6 +366,10 @@ test("observed regressions stay mapped to live suite coverage", () => {
     "test/bidirectional-loop.test.ts",
     "test/mcp-exposure.test.ts",
     "test/performance.test.ts",
+    "test/local-capability-contract.test.ts",
+    "test/local-capability-host.test.ts",
+    "test/local-compute-settings.test.ts",
+    "test/workhorse-local-capability.test.ts",
   ]) {
     assert.ok(mappedSources.has(source), source);
   }
@@ -378,8 +387,8 @@ test("eval baseline and contracts track the current product generation", () => {
   const rubric = new Set(suite.areas.flatMap((area: any) => area.rubric.map((item: any) => item.id)));
   assert.match(suite.baselineRef, /^[a-f0-9]{40}$/);
   assert.equal(config.source.expectedVersion, manifest.version);
-  for (const id of ["PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "ORC-S10", "CAP-S7", "USG-S5", "REL-S4", "REL-S5", "REL-S6", "LRN-S3"]) assert.ok(scenario.has(id), id);
-  for (const id of ["PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "ORC-18", "CAP-13", "USG-08", "REL-07", "REL-08", "REL-09", "LRN-06"]) assert.ok(rubric.has(id), id);
+  for (const id of ["SET-S5", "SET-S6", "MOD-S5", "SEC-S5", "SEC-S6", "PRJ-S4", "PRJ-S5", "CON-S4", "ORC-S8", "ORC-S9", "ORC-S10", "CAP-S7", "CAP-S8", "CAP-S9", "USG-S5", "USG-S6", "USG-S7", "REL-S4", "REL-S5", "REL-S6", "LRN-S3"]) assert.ok(scenario.has(id), id);
+  for (const id of ["SET-08", "SET-09", "MOD-08", "SEC-08", "SEC-09", "PRJ-07", "PRJ-08", "CON-07", "ORC-16", "ORC-17", "ORC-18", "CAP-13", "CAP-14", "CAP-15", "USG-08", "USG-09", "USG-10", "REL-07", "REL-08", "REL-09", "LRN-06"]) assert.ok(rubric.has(id), id);
   const setupBaseline = suite.areas.find((area: any) => area.id === "setup").rubric.find((item: any) => item.id === "SET-01").baseline;
   assert.equal(setupBaseline.status, "partial");
   assert.match(setupBaseline.basis, /Getting started.*inventories recognized harnesses/i);
@@ -393,6 +402,20 @@ test("eval baseline and contracts track the current product generation", () => {
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_bots"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_query_capacity"));
   assert.ok(orchestration.workhorseSurfaces.externalRuntimeTools.includes("workhorse_list_external_agents"));
+  assert.deepEqual(orchestration.workhorseSurfaces.localCapabilityTools, [
+    "workhorse_local_hosts",
+    "workhorse_local_capabilities",
+    "workhorse_local_upload",
+    "workhorse_local_invoke",
+    "workhorse_local_chat",
+    "workhorse_local_generate_3d",
+    "workhorse_local_job",
+    "workhorse_local_cancel",
+    "workhorse_local_artifact",
+    "workhorse_local_materialize",
+    "workhorse_local_continue",
+  ]);
+  assert.match(orchestration.workhorseSurfaces.localCapabilityPolicy, /healthy role-granted.*typed descriptor.*exact installed and granted pair.*do not create a provider or Usage ring/i);
   assert.deepEqual(orchestration.workhorseSurfaces.grokBotSetup.hosts, ["darwin", "win32"]);
   assert.match(orchestration.workhorseSurfaces.grokBotSetup.modelRequirement, /no fixed Grok Bot model.*local MCP\/CLI/i);
   assert.match(orchestration.workhorseSurfaces.grokBotSetup.workerRouting, /Workhorse independently selects.*model.*effort/i);
@@ -426,9 +449,41 @@ test("eval baseline and contracts track the current product generation", () => {
     assert.match(profile.capabilities.usage, /one connection ring/i);
   }
   const regressions = json("eval/regression-contract.json");
-  for (const id of ["REG-079", "REG-080", "REG-081", "REG-082", "REG-083"]) {
+  for (const id of ["REG-079", "REG-080", "REG-081", "REG-082", "REG-083", "REG-084", "REG-085", "REG-086", "REG-087", "REG-088", "REG-089"]) {
     assert.ok(regressions.regressions.some((item: any) => item.id === id));
   }
+});
+
+test("Qwen Custom HTTP and Spark Local Compute stay distinct and fail closed", () => {
+  const contract = json("eval/local-model-contract.json");
+  const config = json("eval/config.example.json");
+  const providers = json("eval/provider-matrix.json");
+  const smoke = readFileSync(path.join(ROOT, "test", "local-model-live-smoke.ts"), "utf8");
+  const custom = providers.profiles.find((profile: any) => profile.id === "custom-openai");
+  assert.equal(contract.profile, "custom-openai");
+  assert.match(contract.productBoundary, /not a provider, vendor, custom bot, or Usage ring/i);
+  assert.equal(contract.scopedMcp.settingsSurface, "skills");
+  assert.equal(contract.localCompute.settingsSurface, "llms/local-compute");
+  assert.match(contract.localCompute.discovery, /Empty grants expose nothing/i);
+  assert.match(contract.localCompute.offline, /Unknown.*last-observed.*removes stale continuations/i);
+  assert.match(contract.localCompute.continuation, /exactly capability\/tool-granted.*one visible Workhorse worker/i);
+  assert.match(contract.localCompute.usage, /no vendor or Usage ring/i);
+  assert.deepEqual(contract.qwen38.efforts, ["off", "low", "medium", "xhigh"]);
+  assert.match(contract.qwen38.match, /Qwen3-8B.*Qwen3-80B.*not matches/i);
+  assert.match(contract.scopedMcp.allowlist, /explicit empty list exposes none/i);
+  assert.match(contract.scopedMcp.transportBoundary, /ACP vendors.*fail closed/i);
+  assert.match(custom.discovery.join(" "), /Qwen 3\.8.*MCP/i);
+  assert.equal(config.localModelSmoke.profile, "custom-openai");
+  assert.equal(config.localModelSmoke.maxModelCalls, 2);
+  assert.equal(config.localModelSmoke.enabled, false);
+  assert.equal(config.localCapabilitySmoke.capability, "text.chat.generate");
+  assert.equal(config.localCapabilitySmoke.maxJobs, 1);
+  assert.equal(config.localCapabilitySmoke.allowContinuation, false);
+  assert.match(smoke, /WORKHORSE_EVAL_LOCAL_MODEL_LIVE !== "1"/);
+  assert.match(smoke, /modelCalls > 2/);
+  assert.match(smoke, /includeTools: \["read_marker"\]/);
+  assert.match(smoke, /did not complete exactly one tool-call round/);
+  assert.match(smoke, /Each real HTTP request must emit authoritative request usage/);
 });
 
 test("release automation keeps the eval target on the packaged version", () => {

@@ -750,6 +750,60 @@
       "rubric": ["MOD-07", "SET-03", "ORC-13", "ORC-17"],
       "sourceFiles": ["test/provider-live-smoke.ts", "test/custom-multi-model-live-smoke.ts", "test/link-iteration-live-smoke.ts", "test/real-world-plan-smoke.ts", "test/eval-kit.test.ts"],
       "verification": ["eval:smoke", "eval:multi-model-smoke", "eval:link-iteration", "eval:real-plan-smoke", "verify"]
+    },
+    {
+      "id": "REG-084",
+      "behavior": "Exact Qwen 3.8 models expose Off, Low, Medium, and Extra High and receive native direct/thinking sampling fields; Qwen3-8B and Qwen3-80B do not false-match, and selected, requested, observed, transcript, and usage identities cannot silently diverge.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["MOD-S5"],
+      "rubric": ["MOD-08"],
+      "sourceFiles": ["electron/custom-http.ts", "src/lib/models.ts", "test/custom-http.test.ts", "test/workhorse.test.ts", "test/local-model-live-smoke.ts"],
+      "verification": ["eval:local-model-smoke", "verify"]
+    },
+    {
+      "id": "REG-085",
+      "behavior": "A Spark local bot receives only its selected MCP runtime and tools; explicit empty allowlists expose none, restricted ACP subsets fail closed, MCP secrets remain encrypted and redacted, and Windows command shims launch without widening native executable behavior.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["SET-S5", "SEC-S5", "CAP-S8"],
+      "rubric": ["SET-08", "SEC-08", "CAP-14"],
+      "sourceFiles": ["electron/mcp-tool-bridge.ts", "src/lib/mcp-servers.ts", "src/ui/McpServersPane.tsx", "test/mcp-tool-bridge.test.ts", "test/credential-store.test.ts", "test/local-model-live-smoke.ts"],
+      "verification": ["eval:local-model-smoke", "verify"]
+    },
+    {
+      "id": "REG-086",
+      "behavior": "Spark stays one Custom HTTP connection ring while each Qwen model retains a separate row; direct and multi-request tool-loop usage books once under the actual bot/model, and missing usage or local capacity remains unknown.",
+      "profiles": ["custom-openai"],
+      "scenarios": ["USG-S6", "CAP-S8"],
+      "rubric": ["USG-09", "CAP-14"],
+      "sourceFiles": ["electron/custom-host.ts", "src/lib/usage.ts", "test/mcp-tool-bridge.test.ts", "test/usage-metering.test.ts", "test/custom-multi-model.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-087",
+      "behavior": "Spark Local Compute remains an execution host rather than a vendor, custom bot, or Usage ring; saved configuration contains only safe endpoint metadata, absolute token-file reference, and exact caller/capability/continuation grants, while live health and those grants control tool discovery.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["SET-S6", "SEC-S6", "USG-S7"],
+      "rubric": ["SET-09", "SEC-09", "USG-10"],
+      "sourceFiles": ["src/lib/local-compute.ts", "electron/local-compute-registry.ts", "src/ui/LocalComputeBlock.tsx", "test/local-compute-settings.test.ts", "test/local-compute-registry.test.ts", "test/workhorse-local-capability.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-088",
+      "behavior": "Local capability protocol 1.0 strictly validates typed invocation roles, cardinality, media, outputs, constraints, route/hops, asynchronous jobs, artifacts, and semantic idempotency; verified artifacts commit atomically, changed replays conflict, and offline jobs become timestamped Unknown without stale continuations.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["SEC-S6", "CAP-S9"],
+      "rubric": ["SEC-09", "CAP-15"],
+      "sourceFiles": ["src/lib/local-capability-contract.ts", "src/lib/local-capability-requests.ts", "electron/local-capability-host.ts", "test/local-capability-contract.test.ts", "test/local-capability-requests.test.ts", "test/local-capability-host.test.ts", "test/workhorse-local-capability.test.ts"],
+      "verification": ["verify"]
+    },
+    {
+      "id": "REG-089",
+      "behavior": "A local continuation appears only for a live installed and exactly capability/tool-granted descriptor, rechecks authority, stages SHA-verified inputs into the requested project, creates one visible worker, and replays that worker for an identical idempotency key without creating vendor usage.",
+      "profiles": ["grok-acp"],
+      "scenarios": ["CAP-S9", "USG-S7"],
+      "rubric": ["CAP-15", "USG-10"],
+      "sourceFiles": ["electron/local-continuation-adapters.ts", "electron/workhorse-mcp.ts", "src/lib/local-compute.ts", "test/workhorse-local-capability.test.ts", "test/local-compute-settings.test.ts"],
+      "verification": ["verify"]
     }
   ]
 }

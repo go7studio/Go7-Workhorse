@@ -46,10 +46,10 @@
       "provider": "custom",
       "transport": "http",
       "apiShape": "openai-completions",
-      "discovery": ["provider preset", "base URL", "models endpoint probe", "provider-neutral maker grouping with automatic and frontier choices first", "bounded searchable catalog", "manual model id when discovery is incomplete", "user-approved model subset and default"],
+      "discovery": ["provider preset", "base URL", "models endpoint probe", "provider-neutral maker grouping with automatic and frontier choices first", "bounded searchable catalog", "manual model id when discovery is incomplete", "user-approved model subset and default", "model-native Qwen 3.8 reasoning controls", "Skills-scoped local MCP runtime and tool probe"],
       "launchBoundary": "electron/custom-http.ts",
-      "expectedModelEvidence": ["connection id", "approved configured model", "same-key second approved model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row"],
-      "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
+      "expectedModelEvidence": ["connection id", "approved configured model", "same-key second approved model", "outbound request body", "response model when supplied", "message stamp", "connection ring and model usage row", "selected MCP tool inventory and tool-call result"],
+      "capabilities": { "resume": "safe Workhorse user/assistant text history", "fork": "workhorse", "rewind": "workhorse", "compact": "workhorse", "usage": "one connection ring with separate approved-model rows", "mcp": "runtime- and tool-scoped local stdio bridge; restricted ACP subsets fail closed", "routing": "workhorse", "inputs": { "images": "native", "documents": "manifest", "audio": "model-declared", "video": "frames" } },
       "baselineStatus": "unrun"
     },
     {

@@ -114,6 +114,28 @@
     "requireSameKey": true,
     "requireDistinctRequestedModels": true
   },
+  "localModelSmoke": {
+    "enabled": false,
+    "profile": "custom-openai",
+    "bot": "spark",
+    "baseUrlEnv": "WORKHORSE_EVAL_SPARK_BASE_URL",
+    "apiKeyEnv": "WORKHORSE_EVAL_SPARK_API_KEY",
+    "modelEnv": "WORKHORSE_EVAL_SPARK_QWEN_MODEL",
+    "enableEnv": "WORKHORSE_EVAL_LOCAL_MODEL_LIVE",
+    "requireExactQwen38Identity": true,
+    "requireMcpToolRound": true,
+    "maxModelCalls": 2,
+    "notes": "Opt-in only. This tests a Custom HTTP bot named Spark; Qwen is its model. It is distinct from a Spark Local Compute host and adds no provider."
+  },
+  "localCapabilitySmoke": {
+    "enabled": false,
+    "hostIdEnv": "WORKHORSE_EVAL_LOCAL_HOST_ID",
+    "capability": "text.chat.generate",
+    "requireTypedInvocation": true,
+    "maxJobs": 1,
+    "allowContinuation": false,
+    "notes": "Use isolated Workhorse state. Host URL and token-file reference come from Local Compute settings, never this config. Local Compute is not a vendor or Usage ring."
+  },
   "spend": {
     "liveApiAllowed": false,
     "approvedUsd": 0,

@@ -58,6 +58,14 @@ Catalog names and model caches are discovery hints, not runtime proof. The
 required provenance chain is selection → launch/request → runtime observation
 → transcript → usage.
 
+A direct Qwen 3.8 chat is evaluated on the Custom HTTP path, including a bot
+named Spark when configured that way. Its native direct/thinking controls and
+Skills-scoped MCP tools must remain exact. A Spark Local Compute machine is a
+different execution-host surface under LLMs: it is not a vendor, custom bot, or
+Usage ring. The eval keeps those identities, credentials, grants, and accounting
+separate. The opt-in Custom HTTP smoke permits exactly two model requests and
+never runs during the free/default gate.
+
 ## Free commands
 
     npm run eval:validate
@@ -69,6 +77,14 @@ required provenance chain is selection → launch/request → runtime observatio
     npm run eval:admission-smoke
     npm run eval:device-probes -- --fixture eval/fixtures/device-capabilities.json
     npm run eval:capability-smoke
+
+Opt-in local Spark/Qwen proof (requires explicit environment authorization):
+
+    WORKHORSE_EVAL_LOCAL_MODEL_LIVE=1 \
+    WORKHORSE_EVAL_SPARK_BASE_URL=http://127.0.0.1:PORT/v1 \
+    WORKHORSE_EVAL_SPARK_API_KEY=... \
+    WORKHORSE_EVAL_SPARK_QWEN_MODEL=Qwen/Qwen3.8-27B-FP8 \
+    npm run eval:local-model-smoke
 
 The validator checks:
 
@@ -88,6 +104,9 @@ The validator checks:
   ask-default helpers without a provider call;
 - every routing/media source boundary in eval/capability-contract.json exists
   and every CAP rubric item is mapped;
+- the local-model contract keeps Qwen Custom HTTP identity and sampling exact,
+  MCP tools least-privilege, Spark Local Compute typed and role-granted, and
+  both usage boundaries truthful;
 - learning-memory commands and every LRN rubric item remain mapped;
 - every observed regression maps to valid profiles, scenarios, rubrics,
   source boundaries, and verification commands;
@@ -147,8 +166,9 @@ blocker that is anything other than pass also withholds the score.
    the artifact inventory.
 3. **Fresh-state desktop walk:** use isolated Electron userData; never mutate
    the user's normal Workhorse state.
-4. **Local direct-API fixtures:** test both custom schemas against deterministic
-   local endpoints before any paid endpoint.
+4. **Local execution fixtures:** test both custom schemas, Qwen 3.8 reasoning,
+   scoped MCP, and Spark's typed asynchronous capability/artifact plane before
+   any paid endpoint or live host.
 5. **Installed stock harnesses:** enable one profile at a time and collect
    sanitized launch/runtime evidence.
 6. **Cross-provider journeys:** goal, schedule, plan, compact, custom history,
@@ -156,8 +176,9 @@ blocker that is anything other than pass also withholds the score.
 7. **Orchestration lane:** import and approve the plan, then test routing,
    naming, reuse, concurrency, peer correlation, interruption, join, auditor
    admission, ask defaults, and resume.
-8. **Capability lane:** test Watch fallback, Kimi visual work, media, Godot,
-   adb/Saga, and iOS simulator readiness.
+8. **Capability lane:** test Watch fallback, Kimi visual work, media, a granted
+   Spark Local Compute job/artifact/continuation, Godot, adb/Saga, and iOS
+   simulator readiness.
 9. **Performance lane:** load the isolated large-desk fixture, then measure
    project/chat navigation, search, progressive transcript/media/diff paint,
    Orchestrate transcript visibility during worker streaming, compact persistence,
@@ -213,6 +234,8 @@ verdict.
 - orchestration-contract.json — Cursor reference walk, Workhorse desk tools,
   message/spawn semantics, routing rules, lifecycle, and ORC coverage.
 - capability-contract.json — model routing, capacity, attachments, and CAP coverage.
+- local-model-contract.json — Qwen identity/reasoning, scoped MCP, Spark Local
+  Compute, artifacts, replay, continuations, usage, and bounded-live proof.
 - execution-plan-contract.json — plan import, approval, routing, and resume rules.
 - device-capability-contract.json — read-only Godot, adb, and iOS probes.
 - regression-contract.json — durable coverage for observed production defects.

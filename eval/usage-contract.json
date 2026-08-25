@@ -8,9 +8,11 @@
     "Grok Bot leftover is unknown when its local snapshot is missing, malformed, expired, or older than 30 minutes.",
     "Workhorse only reads grok-bot-leftover.json; it never invents, copies Cursor monthly pools, or writes that file.",
     "Connect Grok Bot replaces older setup with a non-LLM producer using real weeklyUsage now, on launch, after work, and every 15 minutes; setup passes only after capacity matches.",
-    "Retired model aliases merge into one canonical model row without changing token totals."
+    "Retired model aliases merge into one canonical model row without changing token totals.",
+    "A local custom bot such as Spark keeps one connection ring, separate Qwen model rows, authoritative response usage only, and unknown leftover without a separate meter.",
+    "A Spark Local Compute execution host is not that custom bot and creates no provider, model, token, or leftover ring."
   ],
-  "requiredRubric": ["USG-01", "USG-02", "USG-03", "USG-04", "USG-05", "USG-06", "USG-07", "USG-08"],
+  "requiredRubric": ["USG-01", "USG-02", "USG-03", "USG-04", "USG-05", "USG-06", "USG-07", "USG-08", "USG-09", "USG-10"],
   "profiles": [
     {
       "id": "grok-acp",
@@ -101,6 +103,9 @@
     "test/subagent-usage.test.ts",
     "test/custom-multi-model.test.ts",
     "test/custom-http.test.ts",
+    "test/mcp-tool-bridge.test.ts",
+    "test/workhorse-local-capability.test.ts",
+    "test/local-compute-settings.test.ts",
     "test/vendor-meter.test.ts"
   ],
   "verificationCommands": ["eval:validate", "eval:smoke", "verify"]

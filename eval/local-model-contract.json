@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "0.1.0",
+  "title": "Qwen Custom HTTP and Spark Local Compute contract",
+  "profile": "custom-openai",
+  "productBoundary": "A Qwen chat can be a Custom HTTP bot. A Spark Local Compute machine is a separate execution host, not a provider, vendor, custom bot, or Usage ring. Their identities, credentials, and accounting never merge.",
+  "qwen38": {
+    "match": "Exact Qwen 3.8 family names, including Qwen/Qwen3.8-27B-FP8; Qwen3-8B and Qwen3-80B are not matches.",
+    "efforts": ["off", "low", "medium", "xhigh"],
+    "direct": {
+      "temperature": 0.7,
+      "topP": 0.8,
+      "presencePenalty": 1.5,
+      "enableThinking": false,
+      "preserveThinking": true
+    },
+    "thinking": {
+      "temperature": 1,
+      "topP": 0.95,
+      "presencePenalty": 0,
+      "enableThinking": true,
+      "preserveThinking": true
+    },
+    "shared": {
+      "repetitionPenalty": 1,
+      "topK": 20,
+      "minP": 0
+    },
+    "truthRule": "The approved model id, outbound request model, response model when supplied, transcript stamp, and usage row must agree; mismatch or silent fallback fails."
+  },
+  "scopedMcp": {
+    "settingsSurface": "skills",
+    "runtimeId": "custom:<botId>",
+    "setup": ["add", "probe", "select runtimes", "select tools", "persist", "restart"],
+    "allowlist": "Missing includeTools preserves legacy all-tools access; an explicit empty list exposes none; a populated list exposes only exact selected tools.",
+    "transportBoundary": "Restricted tool subsets are supported for Custom HTTP. ACP vendors that cannot enforce the subset fail closed.",
+    "secrets": "MCP environment values stay in the encrypted credential store and are absent from ordinary state, probe errors, support exports, and child ambient environment.",
+    "platforms": "macOS and Windows use the same saved contract; Windows .cmd and .bat shims use the shell while native executables launch directly.",
+    "liveProof": "The selected Qwen model must call one allowlisted read-only local MCP fixture, receive its marker, and return the exact final marker within two model requests."
+  },
+  "localCompute": {
+    "settingsSurface": "llms/local-compute",
+    "identity": "A host and its advertised profileId or capability never become a Workhorse provider, custom bot, or model row.",
+    "configuration": "Persist only safe endpoint metadata, explicit desk/external-runtime/worker/auditor capability grants, exact continuation grants, and an absolute token-file reference. HTTPS is required except loopback HTTP; the token is never copied into state or Link.",
+    "discovery": "Only healthy, role-granted live capabilities appear in workhorse_capabilities and tools/list. Empty grants expose nothing; generic invoke requires a complete typed invocation contract.",
+    "invocation": "Jobs are asynchronous and use strict protocol 1.0 identity, route, hop, artifact role/cardinality/media, typed output, and closed constraint validation.",
+    "artifacts": "Transfers verify declared size and SHA-256 before atomic cache commit; JSON carries artifact references rather than binary payloads.",
+    "replay": "Successful semantic request fingerprints survive restart; an identical idempotency key replays and a changed payload conflicts.",
+    "offline": "A known job whose host is unavailable reports Unknown with timestamped last-observed state and removes stale continuations.",
+    "continuation": "Only an installed and exactly capability/tool-granted continuation may stage verified artifacts and create one visible Workhorse worker; retries replay that worker.",
+    "usage": "Local Compute execution creates no vendor or Usage ring and cannot be attributed to the Qwen Custom HTTP connection."
+  },
+  "usage": {
+    "connection": "A Custom HTTP bot named Spark retains one connection ring; this is not the Spark Local Compute host.",
+    "models": "Each Qwen or other approved model retains a separate model row beneath that connection.",
+    "tokens": "Only OpenAI-compatible response usage is booked; missing usage remains unknown.",
+    "leftover": "Local model capacity is unknown unless the connection has a separate authoritative meter; Workhorse never invents a percentage."
+  },
+  "requiredRubric": ["SET-08", "SET-09", "MOD-08", "SEC-08", "SEC-09", "CAP-14", "CAP-15", "USG-09", "USG-10"],
+  "liveSmokeCommand": "eval:local-model-smoke",
+  "sourceFiles": [
+    "electron/custom-http.ts",
+    "electron/custom-host.ts",
+    "electron/mcp-tool-bridge.ts",
+    "electron/local-capability-host.ts",
+    "electron/local-compute-registry.ts",
+    "src/lib/mcp-servers.ts",
+    "src/lib/local-capability-contract.ts",
+    "src/lib/local-capability-requests.ts",
+    "src/lib/local-compute.ts",
+    "src/lib/models.ts",
+    "src/ui/McpServersPane.tsx",
+    "test/custom-http.test.ts",
+    "test/mcp-tool-bridge.test.ts",
+    "test/local-capability-contract.test.ts",
+    "test/local-capability-host.test.ts",
+    "test/local-capability-requests.test.ts",
+    "test/local-compute-registry.test.ts",
+    "test/local-compute-settings.test.ts",
+    "test/workhorse-local-capability.test.ts",
+    "test/workhorse.test.ts",
+    "test/credential-store.test.ts",
+    "test/local-model-live-smoke.ts"
+  ],
+  "verificationCommands": ["eval:validate", "eval:local-model-smoke", "verify"]
+}

@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.37](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.36...v0.6.37) (2026-08-25)
+
+
+### Bug Fixes
+
+* make Grok Bot webhook replies durable ([8465683](https://github.com/go7studio/Go7-Workhorse/commit/8465683aef2b80c881fde95de6ddea6ae2430be2))
+* make Grok Bot webhook replies durable ([77c9beb](https://github.com/go7studio/Go7-Workhorse/commit/77c9bebea3ef413de291dc36f310da9e2cd32ccd))
+
 ## [0.6.36](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.35...v0.6.36) (2026-08-25)
 
 

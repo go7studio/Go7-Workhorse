@@ -107,32 +107,37 @@ test("unannounced is at-most-once per helper", () => {
   assert.equal(unannounced(settled, seen).length, 0, "a rewritten state file does not re-announce");
 });
 
-test("the watcher survives the atomic replace that swaps the file", async () => {
-  // writeVersionedState replaces the state file, so the original inode is gone
-  // after the first write. A watcher bound to the file silently stops firing;
-  // watching the directory is what keeps it alive.
+test("the watcher binds to the directory, so an atomic replace cannot mute it", () => {
+  // writeVersionedState replaces the state file, so the inode the path pointed
+  // at is gone after the first write. A watcher bound to the file stops firing
+  // and it looks exactly like "no worker ever finished". Asserting the watched
+  // path is deterministic; racing a real fs.watch under a loaded suite is not.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wh-link-"));
   const statePath = path.join(dir, "workhorse-state.json");
-  const write = (sessions: object[]) => {
-    const tmp = `${statePath}.tmp-${Math.random().toString(36).slice(2)}`;
-    fs.writeFileSync(tmp, JSON.stringify({ sessions }));
-    fs.renameSync(tmp, statePath);
-  };
-  write([persisted("w1", "running")]);
-
-  const frames: Array<{ method: string; params: { id: string; status: string } }> = [];
+  fs.writeFileSync(statePath, JSON.stringify({ sessions: [persisted("w1", "running")] }));
+  const watched: string[] = [];
+  let fire: ((event: string, filename: string) => void) | undefined;
+  const frames: Array<{ params: { id: string; status: string } }> = [];
   const handle = watchWorkerCompletions({
     statePath,
-    emit: (frame) => frames.push(frame as { method: string; params: { id: string; status: string } }),
+    emit: (frame) => frames.push(frame as { params: { id: string; status: string } }),
+    watch: ((target: string, _opts: unknown, listener: (event: string, filename: string) => void) => {
+      watched.push(String(target));
+      fire = listener;
+      return { close: () => undefined, on: () => undefined } as unknown as fs.FSWatcher;
+    }) as unknown as typeof fs.watch,
   });
   try {
-    write([persisted("w1", "completed")]);
-    const deadline = Date.now() + 4_000;
-    while (frames.length === 0 && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25));
-    assert.equal(frames.length, 1, "the replace was seen");
-    assert.equal(frames[0]?.method, WORKER_TERMINAL_NOTIFICATION);
+    assert.deepEqual(watched, [dir], "the directory, not the file");
+    // Now drive the change the way an atomic replace does.
+    fs.writeFileSync(statePath, JSON.stringify({ sessions: [persisted("w1", "completed")] }));
+    fire?.("rename", "workhorse-state.json");
+    assert.equal(frames.length, 1, "the replace produced one notification");
     assert.equal(frames[0]?.params.id, "w1");
     assert.equal(frames[0]?.params.status, "completed");
+    // A second identical write announces nothing more.
+    fire?.("rename", "workhorse-state.json");
+    assert.equal(frames.length, 1, "at most once per finish");
   } finally {
     handle.stop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -178,10 +183,19 @@ test("the watcher must not normalize: a live running worker is not a crashed one
   assert.equal(live?.agentRun?.status, "interrupted", "normalizeSession still reconciles on load");
 });
 
-test("a settled worker skips the persist debounce", () => {
+test("a settled worker skips the persist debounce, and cannot lose it", () => {
   // The helper learns from the file, so holding a terminal row behind the 2s
   // busy debounce is 2s of a harness sitting blind.
   const store = read("src/lib/store.tsx");
-  assert.match(store, /const settled = workerJustSettled\(previous\?\.sessions, state\.sessions\)/);
-  assert.match(store, /\}, settled \? 0 : busy \? 2_000 : 400\)/);
+  assert.match(store, /if \(workerJustSettled\(previous\?\.sessions, state\.sessions\)\) settledPending\.current = true/);
+  assert.match(store, /\}, settledPending\.current \? 0 : busy \? 2_000 : 400\)/);
+
+  // Latched rather than recomputed. Every state change clears the pending
+  // timer and re-enters; recomputing against the newer previous would read
+  // false and drop the finish back to 2s, which is the common case mid-wave
+  // because other workers are still streaming.
+  const at = store.indexOf("settledPending.current = false");
+  const set = store.indexOf("settledPending.current = true");
+  assert.ok(set > 0 && at > set, "the latch clears inside the write, not before it");
+  assert.doesNotMatch(store, /const settled = workerJustSettled/, "no recomputed local");
 });

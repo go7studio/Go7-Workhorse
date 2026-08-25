@@ -10,7 +10,7 @@
  */
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -36,19 +36,16 @@ test("a picture is only dropped from state once its blob is verified", () => {
 });
 
 test("a write that cannot happen keeps the bytes inline", () => {
-  // A read-only store is the honest stand-in for a full disk or a bad
-  // permission. The wrong outcome here is a cleared `data` and a path to
-  // nothing, which is a picture destroyed rather than a save skipped.
+  // A file where the attachments directory should be is a full disk or a
+  // permission error that works on Windows too — chmod on a folder does not.
+  // The wrong outcome here is a cleared `data` and a path to nothing.
   const root = tmp();
   try {
-    const dir = attachmentsDir(root);
-    mkdirSync(dir, { recursive: true });
-    chmodSync(dir, 0o500);
+    writeFileSync(attachmentsDir(root), "not a directory");
     const out = offloadChatImage(shot(), root);
     assert.equal(out.data, shot().data, "the picture survives a store that refuses writes");
     assert.equal(out.sourcePath, undefined);
   } finally {
-    try { chmodSync(attachmentsDir(root), 0o700); } catch { /* already gone */ }
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -1199,6 +1199,20 @@ function matchCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   });
 }
 
+/**
+ * Naming it on purpose, as opposed to writing its name.
+ *
+ * matchCustomBot already refuses a bot the query only mentions, and its comment
+ * says forbidding is not selecting. The inheritance guard did not use the same
+ * standard: it asked only whether the words appeared. So a brief that said
+ * "Provider must be grok/grok-4.6. Do not use Grok Bot" counted as naming the
+ * bot, kept the parent's slot, and ran the slice on the one vendor it forbade.
+ */
+function namesGrokBotOnPurpose(query: string, bots: CustomBotHint[] | undefined): boolean {
+  if (!queryNamesGrokBot(query)) return false;
+  return isBareBotReference(query, bots);
+}
+
 /** A task may name a custom bot, but merely mentioning or forbidding one is not a selection. */
 function isBareBotReference(query: string, bots: CustomBotHint[] | undefined): boolean {
   const bot = matchCustomBot(bots, query);
@@ -1328,7 +1342,7 @@ export function resolveSpawnSpec(
     isGrokBotName(rawModel) ||
     isGrokBotModel(chat) ||
     isGrokBotName(chat) ||
-    queryNamesGrokBot(`${chat} ${input.description ?? ""}`);
+    namesGrokBotOnPurpose(`${chat} ${input.description ?? ""}`, customBots);
   const parentIsGrokBot =
     parent?.provider === "custom" &&
     (isGrokBotModel(parent.model ?? "") ||

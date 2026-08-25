@@ -42,6 +42,7 @@ import {
   shiftQueuedPrompt,
   sidebarKeepsChat,
 } from "./chats";
+import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
 import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
@@ -813,6 +814,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [watchHold, setWatchHold] = useState<WatchHold | null>(null);
   const [watchRestore, setWatchRestore] = useState<{ text: string; images?: import("./types").ChatImage[] } | null>(null);
   const persistTimer = useRef<number | null>(null);
+  /** A worker finished and its write has not gone out yet. */
+  const settledPending = useRef(false);
   const persistBody = useRef<AppState | null>(null);
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
@@ -949,7 +952,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (previous && deskPersistBodyEqual(previous, state)) return;
     if (persistTimer.current) window.clearTimeout(persistTimer.current);
     const busy = state.sessions.some((session) => session.status === "running" || session.status === "needs-input");
+    // A worker reaching a terminal state is the one write an outside caller is
+    // waiting on. The Link helper learns a slice finished by reading this file,
+    // so holding a settled worker behind the 2s busy debounce — which applies
+    // exactly when other workers are still running — leaves a harness blind for
+    // the whole window. Everything else can wait its turn.
+    // Latched, not recomputed. Every state change clears the pending timer and
+    // re-enters here; if a worker settled and then anything else moved before
+    // that 0ms write ran — another worker streaming, which is the normal case
+    // mid-wave — the recomputed `settled` would be false against the newer
+    // previous and the finish would fall back to the 2s debounce. The latch
+    // holds until a write actually happens.
+    if (workerJustSettled(previous?.sessions, state.sessions)) settledPending.current = true;
     persistTimer.current = window.setTimeout(() => {
+      settledPending.current = false;
       const saved = listedChats(applyComposerDrafts(state.sessions, composerDraftsRef.current));
       void window.workhorse
         ?.saveState({
@@ -961,7 +977,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : null,
         })
         .catch(() => undefined);
-    }, busy ? 2_000 : 400);
+    }, settledPending.current ? 0 : busy ? 2_000 : 400);
   }, [ready, state]);
 
   const createProject = useCallback((name: string, folderPaths: string[] = []) => {

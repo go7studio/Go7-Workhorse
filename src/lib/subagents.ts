@@ -1260,9 +1260,16 @@ export function resolveSpawnSpec(
     }));
   const chat = input.chat?.trim() ?? "";
   const explicit = parseProviderId(input.provider);
-  const assignedCustom = input.customBotId
+  const rawModel = input.model?.trim() ?? "";
+  // A custom bot's exact model is an address, not a stock-model nickname.
+  // Resolve it before resolveModelHint: that fuzzy helper intentionally sees
+  // "grok-bot" as Grok-shaped language and otherwise turns the explicit
+  // custom handoff into custom/grok-4.6 with no customBotId. The callability
+  // gate then cannot find the bot row even though capacity just listed it.
+  const assignedCustom = (input.customBotId
     ? customBots?.find((bot) => bot.id === input.customBotId)
-    : undefined;
+    : undefined) ??
+    ((!explicit || explicit === "custom") ? exactCustomBot(customBots, rawModel) : undefined);
   if (assignedCustom && explicit !== "grok") {
     return {
       provider: "custom",
@@ -1276,7 +1283,6 @@ export function resolveSpawnSpec(
       title: subagentLabel("custom", input.model?.trim() || assignedCustom.model, input.description || assignedCustom.name),
     };
   }
-  const rawModel = input.model?.trim() ?? "";
   const modelHint = explicitModelHint(rawModel, explicit);
   if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {
     throw new Error(`Model ${rawModel} belongs to ${modelHint.provider}, not ${explicit}.`);

@@ -481,6 +481,17 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
     name: "workhorse_delegate",
     args: { task: "Review this change", fromSessionId: "c1", idempotencyKey: "k9" },
   });
+  assert.deepEqual(linkCliCall([
+    "delegate", "--chat", "c1", "--task", "Review this change",
+    "--provider", "grok-bot", "--model", "grok-bot", "--effort", "high",
+  ]), {
+    name: "workhorse_delegate",
+    args: {
+      task: "Review this change",
+      fromSessionId: "c1",
+      initialBrain: { provider: "grok-bot", model: "grok-bot", effort: "high" },
+    },
+  });
   assert.deepEqual(
     linkCliCall([
       "delegate",

@@ -2326,6 +2326,31 @@ test("explicit stock model identity cannot be hijacked by an overlapping custom 
   );
   assert.equal(assignedCustom.provider, "custom");
   assert.equal(assignedCustom.customBotId, "bot_grok");
+
+  const canonicalPair = resolveSpawnSpec(
+    {
+      fromSessionId: "parent",
+      prompt: "review",
+      provider: "custom",
+      model: "grok-bot",
+    },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "medium" },
+    grokBot,
+  );
+  assert.equal(canonicalPair.provider, "custom");
+  assert.equal(canonicalPair.model, "grok-bot");
+  assert.equal(canonicalPair.customBotId, "bot_grok");
+
+  const modelAddress = resolveSpawnSpec(
+    { fromSessionId: "parent", prompt: "review", model: "grok-bot" },
+    [],
+    { provider: "grok", model: "grok-4.6", effort: "medium" },
+    grokBot,
+  );
+  assert.equal(modelAddress.provider, "custom");
+  assert.equal(modelAddress.model, "grok-bot");
+  assert.equal(modelAddress.customBotId, "bot_grok");
 });
 
 test("a Grok Bot parent does not inherit grok-bot onto an unnamed worker", () => {

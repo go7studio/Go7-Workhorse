@@ -3309,7 +3309,7 @@ function isMcpEntry(): boolean {
  *   <helper> link chats [--parents] [--full]
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
- *   <helper> link delegate --chat <sessionId> --task "<text>" [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
+ *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
  *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--key <idempotencyKey>]
  *
@@ -3320,7 +3320,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
   const VALUE_FLAGS = new Set([
-    "--provider", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
+    "--provider", "--model", "--effort", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
     "--host", "--capability", "--kind", "--role", "--media-type", "--origin", "--system",
     "--max-tokens", "--temperature", "--mode", "--seed", "--max-faces",
     "--target-engine", "--folder",
@@ -3344,7 +3344,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>] | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>] | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3375,11 +3375,17 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
     if (!task || !chat) return { usage };
     const criteria = accepts.map((item) => item.trim()).filter(Boolean);
     const passes = Number(flag("passes") ?? "");
+    const initialBrain = {
+      ...(flag("provider") ? { provider: flag("provider") } : {}),
+      ...(flag("model") ? { model: flag("model") } : {}),
+      ...(flag("effort") ? { effort: flag("effort") } : {}),
+    };
     return {
       name: "workhorse_delegate",
       args: {
         task,
         fromSessionId: chat,
+        ...(Object.keys(initialBrain).length > 0 ? { initialBrain } : {}),
         ...(flag("folder") ? { folder: flag("folder") } : {}),
         ...(criteria.length
           ? { loop: { acceptanceCriteria: criteria, ...(Number.isFinite(passes) && passes >= 2 ? { maxIterations: Math.min(8, Math.floor(passes)) } : {}) } }

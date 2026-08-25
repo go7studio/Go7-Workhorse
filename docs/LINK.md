@@ -278,6 +278,7 @@ workhorse chats --full
 workhorse read <sessionId>
 workhorse ask --chat <sessionId> --message "Review this change" --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Review this change" --key <idempotencyKey>
+workhorse delegate --chat <sessionId> --task "Ask the Grok Bot reviewer" --provider grok-bot --effort high --folder <dir> --key <idempotencyKey>
 workhorse delegate --chat <sessionId> --task "Ship and certify" --accept "Tests pass" --accept "Marker file exists" --passes 2 --folder <dir>
 workhorse status <workerId>
 workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
@@ -291,6 +292,10 @@ workhorse local-job <jobId> --host dgx-spark
 workhorse local-materialize <artifactId> --host dgx-spark
 workhorse local-continue <jobId> <continuationId> --host dgx-spark --chat <sessionId> --folder <projectPath> --key blender-1
 ```
+
+`delegate --provider grok-bot` selects the custom Grok Bot slot. It is not
+Grok ACP: use `--provider grok --model grok-4.6` for that. Omit provider,
+model, and effort for full Auto routing.
 
 `local-upload` accepts one file up to 64 MiB; for larger transfers use the
 broker CLI directly. Every upload names the capability it is intended for;

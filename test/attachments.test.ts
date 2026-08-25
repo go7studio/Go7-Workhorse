@@ -35,14 +35,32 @@ test("spawned visual agents receive bounded workspace attachments", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-files."));
   const imagePath = path.join(root, "screen.png");
   writeFileSync(imagePath, Buffer.from("image"));
+  // Own the environment: whether a store exists decides the answer, so leaving
+  // it to whatever launched the suite makes this pass or fail by accident.
+  const priorStatePath = process.env.WORKHORSE_STATE_PATH;
+  delete process.env.WORKHORSE_STATE_PATH;
   try {
     const attachments = spawnAttachments(["screen.png"], root);
     assert.equal(attachments[0]?.kind, "image");
-    assert.equal(attachments[0]?.sourcePath, imagePath);
-    assert.equal(attachments[0]?.data, "");
+    // The desk keeps its own copy rather than pointing at the caller's file,
+    // which is only true until they move or delete it. With no store configured
+    // this stays fail-closed: the bytes travel inline instead of vanishing.
+    assert.equal(attachments[0]?.sourcePath, undefined, "no store configured, so nothing was offloaded");
+    assert.equal(Buffer.from(attachments[0]?.data ?? "", "base64").toString(), "image");
     assert.equal(Buffer.from(hydrateChatImages(attachments)[0]?.data ?? "", "base64").toString(), "image");
     assert.throws(() => spawnAttachments(["../outside.png"], root), /outside the project/);
+
+    // With a store, the bytes are copied into it and the caller's path is not
+    // what the chat remembers.
+    process.env.WORKHORSE_STATE_PATH = path.join(root, "workhorse-state.json");
+    const stored = spawnAttachments(["screen.png"], root);
+    assert.notEqual(stored[0]?.sourcePath, imagePath, "the desk must not depend on the caller's file");
+    assert.match(stored[0]?.sourcePath ?? "", /attachments[/\\][0-9a-f]{64}\./, "stored under its own checksum");
+    assert.equal(stored[0]?.data, "", "the inline copy is only cleared once the blob is verified");
+    assert.equal(Buffer.from(hydrateChatImages(stored)[0]?.data ?? "", "base64").toString(), "image");
   } finally {
+    if (priorStatePath === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = priorStatePath;
     rmSync(root, { recursive: true, force: true });
   }
 });

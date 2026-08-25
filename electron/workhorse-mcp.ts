@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { offloadChatImage } from "./attachment-store";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -1829,6 +1830,12 @@ function describeBytes(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${Math.round(bytes / (1024 * 1024))} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
+/** The desk's user-data directory, which is where the state file lives. */
+function spawnUserDataDir(): string {
+  const statePath = process.env.WORKHORSE_STATE_PATH?.trim() ?? "";
+  return statePath ? path.dirname(statePath) : "";
+}
+
 export function spawnAttachments(files: string[] | undefined, cwd: string): ChatImage[] {
   if (!files?.length) return [];
   if (!cwd) throw new Error("Attach files only from a bound project folder");
@@ -1854,16 +1861,26 @@ export function spawnAttachments(files: string[] | undefined, cwd: string): Chat
     const cap = ATTACHMENT_CAP[kind];
     if (stat.size > cap) throw new Error(`Attachment is over ${describeBytes(cap)}: ${file} is ${describeBytes(stat.size)}`);
     const text = kind === "file" ? fs.readFileSync(resolved, "utf8") : undefined;
-    return {
-      id: `spawn_file_${Date.now()}_${index}`,
-      name,
-      mimeType: attachmentMime({ name }, kind),
-      data: "",
-      kind,
-      sourcePath: resolved,
-      size: stat.size,
-      ...(text !== undefined ? { text } : {}),
-    } satisfies ChatImage;
+    /*
+     * Take our own copy rather than pointing at the caller's file. A path into
+     * someone's project is only true until they move, rename or delete it, and
+     * the chat keeps that picture for as long as the chat exists. Falling back
+     * to the inline bytes keeps this fail-closed: a store that cannot be
+     * written means the attachment travels the old way, not that it vanishes.
+     */
+    const bytes = fs.readFileSync(resolved);
+    const stored = offloadChatImage(
+      {
+        id: `spawn_file_${Date.now()}_${index}`,
+        name,
+        mimeType: attachmentMime({ name }, kind),
+        data: bytes.toString("base64"),
+        kind,
+        size: stat.size,
+      } satisfies ChatImage,
+      spawnUserDataDir(),
+    );
+    return { ...stored, ...(text !== undefined ? { text } : {}) } satisfies ChatImage;
   });
 }
 

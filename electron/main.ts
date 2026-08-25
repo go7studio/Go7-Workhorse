@@ -53,7 +53,6 @@ import { applyAppUpdate, checkAppUpdate } from "./app-update";
 import { ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
 import { offloadStateAttachments } from "./attachment-store";
-import { compactPersistedState } from "../src/lib/persist-compact";
 import {
   CredentialStore,
   hydrateStateCredentials,
@@ -343,22 +342,28 @@ function pickLinkedFolder(title: string, buttonLabel: string, extra: Array<"crea
 function readState(): Persistable {
   const result = readVersionedState(statePath());
   const { state } = result;
+  let migrated: Persistable = state;
   try {
-    const protectedState = compactPersistedState(
-      offloadStateAttachments(protectStateCredentials(state, credentialStore()), app.getPath("userData")),
+    const protectedState = offloadStateAttachments(
+      protectStateCredentials(state, credentialStore()),
+      app.getPath("userData"),
     );
     if (result.recovered || JSON.stringify(protectedState) !== JSON.stringify(state)) {
       writeVersionedState(statePath(), protectedState, (snapshot) =>
-        compactPersistedState(
-          offloadStateAttachments(protectStateCredentials(snapshot, credentialStore()), app.getPath("userData")),
-        ),
+        offloadStateAttachments(protectStateCredentials(snapshot, credentialStore()), app.getPath("userData")),
       );
     }
-  } catch {
+    // Hand back the offloaded copy, not the one we read. Returning the original
+    // left the window holding every picture it had just written to disk, so the
+    // relief only arrived on the next launch — which is the launch after the
+    // one where someone ran out of memory.
+    migrated = protectedState;
+  } catch (error) {
     // The credential vault may be unavailable while the OS is locked. Keep the
     // recovered state in memory, but never persist a plaintext replacement.
+    console.warn("state protect/offload skipped", error);
   }
-  const hydrated = hydrateStateCredentials(state, credentialStore());
+  const hydrated = hydrateStateCredentials(migrated, credentialStore());
   const detected = useVolatileCredentials()
     ? hydrateDetectedCustomCredentials(hydrated, detectCustomLogin())
     : hydrated;
@@ -414,9 +419,7 @@ function writeState(state: Persistable) {
       file,
       state,
       (snapshot) =>
-        compactPersistedState(
-          offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
-        ),
+        offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
       { rotateBackups },
     );
     if (rotateBackups) lastStateBackupAt = now;

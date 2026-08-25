@@ -391,9 +391,9 @@ const TOOLS = [
         description: { type: "string", description: "Short 3–5 word label" },
         initialBrain: {
           type: "object",
-          description: "Optional first coordinating brain; descendants stay independently routed. grok / grok-4.6 is ACP Grok. grok-bot only when the user chose Grok Bot to call, analyze, or dispatch — never for orchestration or builder work.",
+          description: "Optional first coordinating brain; descendants stay independently routed. grok / grok-4.6 is ACP Grok. grok-bot is accepted as shorthand for provider custom + model grok-bot only when the user chose Grok Bot to call, analyze, or dispatch — never for orchestration or builder work.",
           properties: {
-            provider: { type: "string", description: "First coordinator vendor" },
+            provider: { type: "string", description: "First coordinator vendor: grok, claude, codex, cursor, custom, or grok-bot shorthand" },
             model: { type: "string", description: "First coordinator model" },
             effort: { type: "string", description: "First coordinator reasoning level" },
           },
@@ -1700,6 +1700,38 @@ function mergedDelegateExclusions(task: string, value: unknown): string[] | unde
   return unique.length > 0 ? unique : undefined;
 }
 
+/**
+ * Link clients speak in the names people see. Grok Bot is a custom HTTP slot,
+ * but requiring every harness to know that internal pair turned an explicit
+ * `initialBrain: { provider: "grok-bot" }` handoff into `not_callable` before
+ * it reached the desk. Normalize the two unambiguous Grok spellings here; the
+ * usual provider/model validation still runs in the desk.
+ */
+function normalizeDelegateInitialBrain(value: unknown): { provider?: string; model?: string; effort?: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const rawProvider = typeof record.provider === "string" ? record.provider.trim() : "";
+  const rawModel = typeof record.model === "string" ? record.model.trim() : "";
+  const effort = typeof record.effort === "string" ? record.effort.trim() : "";
+  const alias = (text: string) => text.toLowerCase().replace(/[\s_]+/g, "-");
+  const providerAlias = alias(rawProvider);
+  const modelAlias = alias(rawModel);
+  if (providerAlias === "grok-bot" || providerAlias === "grokbot" || modelAlias === "grok-bot" || modelAlias === "grokbot") {
+    return { provider: "custom", model: "grok-bot", ...(effort ? { effort } : {}) };
+  }
+  if (providerAlias === "grok-4.6") {
+    return { provider: "grok", model: rawModel || "grok-4.6", ...(effort ? { effort } : {}) };
+  }
+  const provider = ["grok", "claude", "codex", "cursor", "custom"].includes(providerAlias)
+    ? providerAlias
+    : rawProvider;
+  return {
+    ...(provider ? { provider } : {}),
+    ...(rawModel ? { model: rawModel } : {}),
+    ...(effort ? { effort } : {}),
+  };
+}
+
 function isLinkProfile(): boolean {
   return mcpExposureProfile(process.env.WORKHORSE_MCP_PROFILE) === "external-runtime";
 }
@@ -2296,9 +2328,7 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
     const traceId = envelope.supplied.includes("traceId") ? envelope.traceId : undefined;
     const missionIteration = missionIterationFromArgs(args, task, traceId);
     const effectiveTraceId = missionIteration?.id ?? traceId;
-    const initialBrain = args.initialBrain && typeof args.initialBrain === "object" && !Array.isArray(args.initialBrain)
-      ? args.initialBrain as Record<string, unknown>
-      : {};
+    const initialBrain = normalizeDelegateInitialBrain(args.initialBrain);
     const route =
       args.route === "quick" || args.route === "balanced" || args.route === "deep" || args.route === "auto"
         ? args.route
@@ -2307,9 +2337,9 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
       {
         prompt: task,
         description: typeof args.description === "string" ? args.description : undefined,
-        provider: typeof initialBrain.provider === "string" ? initialBrain.provider : undefined,
-        model: typeof initialBrain.model === "string" ? initialBrain.model : undefined,
-        effort: typeof initialBrain.effort === "string" ? initialBrain.effort : undefined,
+        provider: initialBrain.provider,
+        model: initialBrain.model,
+        effort: initialBrain.effort,
         route,
         exclude: mergedDelegateExclusions(task, args.exclude),
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,

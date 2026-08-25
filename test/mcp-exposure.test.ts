@@ -437,6 +437,44 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(seenModel, "gpt-5.6-terra");
     assert.equal(seenEffort, "medium");
 
+    const grokBotHandoff = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Route this review ping through the selected Grok Bot",
+          initialBrain: { provider: "grok-bot", effort: "high" },
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(grokBotHandoff.error, undefined, grokBotHandoff.error?.message);
+    assert.equal(seenProvider, "custom");
+    assert.equal(seenModel, "grok-bot");
+    assert.equal(seenEffort, "high");
+
+    const grokAcpHandoff = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 62,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Route this review through Grok 4.6",
+          initialBrain: { provider: "grok-4.6", effort: "high" },
+          folder: dir,
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(grokAcpHandoff.error, undefined, grokAcpHandoff.error?.message);
+    assert.equal(seenProvider, "grok");
+    assert.equal(seenModel, "grok-4.6");
+    assert.equal(seenEffort, "high");
+
     const collapsed = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 7,

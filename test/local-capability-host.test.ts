@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { LocalCapabilityHostClient, LocalCapabilityHostError, parseLocalCapabilityHosts, type HostFs, type LocalCapabilityHostConfig } from "../electron/local-capability-host";
 import type { LocalContinuationAdapter } from "../electron/local-continuation-adapters";
 import type { LocalJobRequest } from "../src/lib/local-capability-contract";
@@ -9,6 +10,10 @@ import type { LocalJobRequest } from "../src/lib/local-capability-contract";
 const jobId = "job_0123456789abcdef0123456789abcdef";
 const artifactId = "art_0123456789abcdef0123456789abcdef";
 const sha = (value: Buffer) => createHash("sha256").update(value).digest("hex");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const STATE_DIR = path.join(ROOT, ".local-capability-test-state");
+const TOKEN_FILE = path.join(STATE_DIR, "token");
+const OUTSIDE_FILE = path.join(ROOT, ".local-capability-test-outside");
 
 class FakeFs {
   readonly files = new Map<string, Buffer>();
@@ -133,13 +138,13 @@ function withCapabilities(fetchImpl: typeof fetch, manifest: unknown = capabilit
 function client(
   fake: FakeFs,
   fetchImpl: typeof fetch,
-  hosts: LocalCapabilityHostConfig[] = [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
+  hosts: LocalCapabilityHostConfig[] = [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
   manifest: unknown | null = capabilityManifest(),
 ) {
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   return new LocalCapabilityHostClient({
     hosts,
-    stateDir: "/state",
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: manifest === null ? fetchImpl : withCapabilities(fetchImpl, manifest),
     clock: now,
@@ -184,7 +189,7 @@ test("base64 uploads use the broker's raw-byte contract with provenance and a co
 
 test("broker response caps reject oversized JSON before parsing", async () => {
   const fake = new FakeFs();
-  const host = client(fake, (async () => response({ padding: "x".repeat(2048) }, 200, { "content-length": "2049" })) as typeof fetch, [{ id: "spark", baseUrl: "https://broker.test", tokenFile: "/token", maxJsonBytes: 1024 }], null);
+  const host = client(fake, (async () => response({ padding: "x".repeat(2048) }, 200, { "content-length": "2049" })) as typeof fetch, [{ id: "spark", baseUrl: "https://broker.test", tokenFile: TOKEN_FILE, maxJsonBytes: 1024 }], null);
   await assert.rejects(() => host.capabilities("spark"), (cause: unknown) => cause instanceof LocalCapabilityHostError && cause.code === "too_large");
 });
 
@@ -192,7 +197,7 @@ test("observed jobs journal atomically and remain available to a restarted clien
   const fake = new FakeFs();
   const first = client(fake, (async () => response(job("cancelled"))) as typeof fetch);
   await first.status("spark", jobId);
-  const journalFile = "/state/local-capability-host-journal.json";
+  const journalFile = path.join(STATE_DIR, "local-capability-host-journal.json");
   assert.ok(fake.files.has(journalFile));
   assert.equal([...fake.files.keys()].some((file) => file.includes(".tmp-")), false);
   const restarted = client(fake, (async () => response(job("cancelled"))) as typeof fetch);
@@ -264,7 +269,7 @@ test("materialization rejects traversal-shaped IDs, verifies hash, and commits o
   }) as typeof fetch;
   const host = client(fake, fetchImpl);
   const output = await host.materialize("spark", artifactId);
-  assert.equal(output, path.resolve("/state/local-capability-cache/spark", artifactId));
+  assert.equal(output, path.resolve(STATE_DIR, "local-capability-cache/spark", artifactId));
   assert.deepEqual(fake.readFileSync(output), bytes);
   assert.equal([...fake.files.keys()].some((file) => file.includes(".tmp-")), false);
   assert.equal((await host.materialize("spark", artifactId)), output, "materialization journal makes repeat calls idempotent");
@@ -300,8 +305,8 @@ test("materialization ignores a journal path outside its managed cache", async (
   const fake = new FakeFs();
   const bytes = Buffer.from("fresh managed copy");
   const validArtifact = artifact(bytes);
-  fake.files.set("/outside/attacker-selected", bytes);
-  fake.files.set("/state/local-capability-host-journal.json", Buffer.from(JSON.stringify({
+  fake.files.set(OUTSIDE_FILE, bytes);
+  fake.files.set(path.join(STATE_DIR, "local-capability-host-journal.json"), Buffer.from(JSON.stringify({
     version: 1,
     observedJobs: {},
     continuations: {},
@@ -311,7 +316,7 @@ test("materialization ignores a journal path outside its managed cache", async (
         artifactId,
         sha256: validArtifact.sha256,
         sizeBytes: validArtifact.sizeBytes,
-        path: "/outside/attacker-selected",
+        path: OUTSIDE_FILE,
         materializedAt: "2026-01-01T00:00:00.000Z",
       },
     },
@@ -325,7 +330,7 @@ test("materialization ignores a journal path outside its managed cache", async (
     return response({ protocolVersion: "1.0", artifact: validArtifact });
   }) as typeof fetch);
   const output = await host.materialize("spark", artifactId);
-  assert.equal(output, path.resolve("/state/local-capability-cache/spark", artifactId));
+  assert.equal(output, path.resolve(STATE_DIR, "local-capability-cache/spark", artifactId));
   assert.equal(downloads, 1, "the untrusted journal path is never reused");
 });
 
@@ -422,10 +427,10 @@ test("continuation preparation re-resolves the descriptor after callability disc
     if (url.includes("/v1/artifacts/")) artifactReads += 1;
     return response(completed3d(bytes));
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl,
     clock: now,
@@ -451,10 +456,10 @@ test("continuations without an installed adapter are invisible and refused befor
     if (String(input).includes("/v1/artifacts/")) artifactReads += 1;
     return response(value);
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl,
     clock: now,
@@ -477,10 +482,10 @@ test("an installed continuation adapter still fails closed without a product gra
     if (String(input).includes("/v1/artifacts/")) artifactReads += 1;
     return response(completed3d(bytes));
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: withCapabilities(fetchImpl),
     clock: now,
@@ -537,10 +542,10 @@ test("an injected typed adapter adds a new continuation family without host bran
       additionalProperties: false,
     },
   }]);
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: withCapabilities(fetchImpl, customManifest),
     clock: now,
@@ -563,10 +568,10 @@ test("continuation authorization is injected from persisted caller grants and fa
     if (url.includes("/v1/artifacts/")) return response({ protocolVersion: "1.0", artifact: model });
     return response(completed3d(bytes));
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: withCapabilities(fetchImpl),
     clock: now,
@@ -612,10 +617,10 @@ test("an installed adapter cannot swap a host-verified continuation input", asyn
     if (url.includes("/v1/artifacts/")) return response({ protocolVersion: "1.0", artifact: model });
     return response(completed3d(bytes));
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: withCapabilities(fetchImpl),
     clock: now,
@@ -632,13 +637,13 @@ test("cancel applies the same continuation visibility filter as status", async (
   const fake = new FakeFs();
   const bytes = Buffer.from("cancelled continuation");
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: (async () => response(completed3d(bytes))) as typeof fetch,
     clock: now,
   });
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const cancelled = await host.cancel("spark", jobId, { callerRole: "external-runtime" });
   assert.deepEqual(cancelled.result?.continuations, []);
 });
@@ -677,10 +682,10 @@ test("an expired continuation claim can be reopened after a crash with no worker
     if (url.includes("/v1/artifacts/")) return response({ protocolVersion: "1.0", artifact: model });
     return response(completed3d(bytes));
   }) as typeof fetch;
-  fake.files.set("/token", Buffer.from("secret-token\n"));
+  fake.files.set(TOKEN_FILE, Buffer.from("secret-token\n"));
   const host = new LocalCapabilityHostClient({
-    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: "/token" }],
-    stateDir: "/state",
+    hosts: [{ id: "spark", baseUrl: "https://broker.test/api", tokenFile: TOKEN_FILE }],
+    stateDir: STATE_DIR,
     fsImpl: fake as unknown as HostFs,
     fetchImpl: withCapabilities(fetchImpl),
     clock: liveClock,

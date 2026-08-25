@@ -320,9 +320,15 @@ export function routingProfileForModel(
     // separate extra pool. Keep it for visual, creative, or complex work
     // that named that specialist. Cost and leftover assign the rest.
     base = profile(10, 2, 5, { strengths: FABLE });
-  } else if (slug.includes("opus")) {
+  } else if (slug.includes("opus-5")) {
     // Near-Fable intelligence at half the price. Default for agentic coding.
     base = profile(10, 3, 4, { strengths: CODE });
+  } else if (slug.includes("opus")) {
+    // Opus 4.8: the previous generation at the same price. The understudy
+    // when Opus 5 is drained, never the default — one row for both
+    // generations made them score identically, and the alphabetical
+    // tiebreak then handed every deep task to 4.8.
+    base = profile(9, 3, 4, { strengths: CODE });
   } else if (slug.includes("sonnet-4-6") || slug.includes("sonnet-4.6")) {
     base = profile(8, 4, 3, { strengths: CODE_PROSE });
   } else if (slug.includes("sonnet")) {
@@ -835,6 +841,18 @@ export function rankRoutingCandidates(
   const hasImageGenerator = wantsImageGen && candidates.some((item) => item.connected && candidateCanGenerateImages(item));
   const minimum = requiredIntelligence(tier);
   const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
+  // The cheapest candidate that clears the bar sets the going rate for doing
+  // this work. Anything above that is a premium the desk actually pays; at or
+  // below it, extra capability is free and must not be penalised.
+  const eligible = candidates.filter(
+    (candidate) =>
+      candidate.connected &&
+      (settings.allowLocal || !candidate.profile.local) &&
+      candidate.profile.intelligence >= minimum,
+  );
+  const barCost = eligible.length
+    ? Math.min(...eligible.map((candidate) => candidate.profile.cost))
+    : 0;
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
@@ -845,15 +863,25 @@ export function rankRoutingCandidates(
     // could rank onto a 128k bot and die on arrival.
     if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) continue;
     const gap = candidate.profile.intelligence - minimum;
-    // On deep work we want fit to dominate. The over-fit penalty gets softer
-    // for higher tiers and the gap penalty gets harder if the model falls
-    // below the bar. Agentic coding pays for intelligence; cost assigns
-    // among models that can do the work.
-    const overfitPenalty = tier === "deep" ? 1 : tier === "balanced" ? 2 : 3;
+    // Falling below the bar is a quality failure and is charged by how far.
     const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
+    // Being smarter than the task needs is NOT waste — paying more for it is.
+    // This used to be charged against the intelligence gap, so a better model
+    // was docked for being better even when it cost exactly the same. Two
+    // Opus generations at one price then tied, and the alphabetical tiebreak
+    // handed every deep task to the older one. Charge the price premium over
+    // the cheapest model that clears the bar; at equal cost there is nothing
+    // to charge, so the smarter model wins on the intelligence term below.
+    const premiumPenalty = tier === "deep" ? 1 : tier === "balanced" ? 2 : 5;
+    const costPremium = Math.max(0, candidate.profile.cost - barCost);
     const codingFit =
       domain === "coding" && candidate.profile.strengths?.includes("coding") === true && gap > 0;
-    let score = 100 + (gap < 0 ? gap * underfitPenalty : codingFit ? 0 : -gap * overfitPenalty);
+    let score = 100 + (gap < 0 ? gap * underfitPenalty : codingFit ? 0 : -costPremium * premiumPenalty);
+    // All else equal, more capable is better. Deliberately a fraction of a
+    // point per unit: it must never lift a drained frontier model over an
+    // on-pace one, only settle a tie that nothing else can — which is exactly
+    // the two-Opus case the alphabet used to decide.
+    score += candidate.profile.intelligence * 0.5;
     score += candidate.profile.speed * (tier === "quick" ? 6 : tier === "balanced" ? 3 : 1);
     score -= candidate.profile.cost * (tier === "quick" ? 5 : tier === "balanced" ? 3 : 1);
     // Free capacity — a local model, or an unlimited plan whose gauge never

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
 } from "../src/lib/images";
 import { mdImageInitialSrc, mediaUrlContext, mediaUrlToPath, pathToMediaUrl } from "../src/lib/media-display";
 import type { AttachmentKind, ChatImage } from "../src/lib/types";
+import { hydrateChatImages, offloadStateAttachments } from "../electron/attachment-store";
 import { spawnAttachments } from "../electron/workhorse-mcp";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -34,13 +35,32 @@ test("spawned visual agents receive bounded workspace attachments", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-files."));
   const imagePath = path.join(root, "screen.png");
   writeFileSync(imagePath, Buffer.from("image"));
+  // Own the environment: whether a store exists decides the answer, so leaving
+  // it to whatever launched the suite makes this pass or fail by accident.
+  const priorStatePath = process.env.WORKHORSE_STATE_PATH;
+  delete process.env.WORKHORSE_STATE_PATH;
   try {
     const attachments = spawnAttachments(["screen.png"], root);
     assert.equal(attachments[0]?.kind, "image");
-    assert.equal(attachments[0]?.sourcePath, imagePath);
+    // The desk keeps its own copy rather than pointing at the caller's file,
+    // which is only true until they move or delete it. With no store configured
+    // this stays fail-closed: the bytes travel inline instead of vanishing.
+    assert.equal(attachments[0]?.sourcePath, undefined, "no store configured, so nothing was offloaded");
     assert.equal(Buffer.from(attachments[0]?.data ?? "", "base64").toString(), "image");
+    assert.equal(Buffer.from(hydrateChatImages(attachments)[0]?.data ?? "", "base64").toString(), "image");
     assert.throws(() => spawnAttachments(["../outside.png"], root), /outside the project/);
+
+    // With a store, the bytes are copied into it and the caller's path is not
+    // what the chat remembers.
+    process.env.WORKHORSE_STATE_PATH = path.join(root, "workhorse-state.json");
+    const stored = spawnAttachments(["screen.png"], root);
+    assert.notEqual(stored[0]?.sourcePath, imagePath, "the desk must not depend on the caller's file");
+    assert.match(stored[0]?.sourcePath ?? "", /attachments[/\\][0-9a-f]{64}\./, "stored under its own checksum");
+    assert.equal(stored[0]?.data, "", "the inline copy is only cleared once the blob is verified");
+    assert.equal(Buffer.from(hydrateChatImages(stored)[0]?.data ?? "", "base64").toString(), "image");
   } finally {
+    if (priorStatePath === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = priorStatePath;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -306,4 +326,73 @@ test("saved media attachments retain path and derived frames", () => {
   assert.equal(rows[0]?.kind, "video");
   assert.equal(rows[0]?.sourcePath, "/tmp/demo.mp4");
   assert.equal(rows[0]?.derivedImages?.length, 1);
+});
+
+test("saved pictures with a disk path survive empty data", () => {
+  const rows = normalizeImages([{
+    id: "img1",
+    name: "shot.png",
+    mimeType: "image/png",
+    data: "",
+    kind: "image",
+    sourcePath: "/tmp/shot.png",
+    size: 12,
+  }]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.data, "");
+  assert.equal(rows[0]?.sourcePath, "/tmp/shot.png");
+  assert.equal(modelImagePayloadBytes(rows), 12);
+  assert.equal(imageSrc(rows[0]!), pathToMediaUrl("/tmp/shot.png"));
+});
+
+test("state save writes picture bytes once and keeps a path", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-attach-"));
+  const bytes = Buffer.from("png-bytes");
+  const data = bytes.toString("base64");
+  const image: ChatImage = {
+    id: "img1",
+    name: "shot.png",
+    mimeType: "image/png",
+    data,
+    kind: "image",
+  };
+  try {
+    const saved = offloadStateAttachments(
+      {
+        sessions: [
+          { id: "a", messages: [{ id: "m1", role: "user", text: "see", images: [image] }] },
+          { id: "b", messages: [{ id: "m2", role: "user", text: "also", images: [{ ...image, id: "img2" }] }] },
+        ],
+      },
+      root,
+    );
+    const first = saved.sessions[0]?.messages?.[0]?.images?.[0];
+    const second = saved.sessions[1]?.messages?.[0]?.images?.[0];
+    assert.equal(first?.data, "");
+    assert.equal(second?.data, "");
+    assert.equal(first?.sourcePath, second?.sourcePath);
+    assert.ok(first?.sourcePath?.startsWith(path.join(root, "attachments")));
+    assert.equal(readFileSync(first!.sourcePath!).equals(bytes), true);
+    const files = readdirSync(path.join(root, "attachments")).filter((name) => !name.includes(".tmp-"));
+    assert.equal(files.length, 1);
+    const hydrated = hydrateChatImages([first!]);
+    assert.equal(hydrated[0]?.data, data);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("offload keeps inlined bytes when the blob write fails", () => {
+  const image: ChatImage = {
+    id: "img1",
+    name: "shot.png",
+    mimeType: "image/png",
+    data: Buffer.from("keep-me").toString("base64"),
+    kind: "image",
+  };
+  const saved = offloadStateAttachments(
+    { sessions: [{ id: "a", messages: [{ id: "m1", role: "user", text: "x", images: [image] }] }] },
+    "",
+  );
+  assert.equal(saved.sessions[0]?.messages?.[0]?.images?.[0]?.data, image.data);
 });

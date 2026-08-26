@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { GrokAgent, usageHasBilledTokens, type GrokPromptResult, type GrokToolEvent } from "./grok-agent";
 import { harvestCodexSessionBills } from "./codex-usage";
-import { shouldLoadVendorSession, type GrokCompactInput, type GrokEventSink, type GrokPromptInput, type GrokSessionOpenInput } from "./grok-host";
+import { isWorkerRuntime, shouldLoadVendorSession, type GrokCompactInput, type GrokEventSink, type GrokPromptInput, type GrokSessionOpenInput } from "./grok-host";
 import { CODEX_ACP_NOT_INSTALLED } from "./codex-login";
 import { buildCodexLaunchSpec, codexSpawnArgs } from "./codex-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
@@ -178,6 +178,8 @@ export class CodexSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      if (isWorkerRuntime(input) && this.slots.has(input.sessionId)) this.dispose(input.sessionId);
     }
   }
 

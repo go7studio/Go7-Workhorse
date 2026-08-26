@@ -10,6 +10,7 @@ import { uid } from "../src/lib/id";
 import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
+import { hydrateChatImages } from "./attachment-store";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
@@ -325,7 +326,9 @@ export class CustomSessionHost {
     this.aborts.get(input.sessionId)?.abort();
     const abort = new AbortController();
     this.aborts.set(input.sessionId, abort);
-    const history = (input.history ?? []).filter((item) => item.role === "user" || item.role === "assistant");
+    const history = (input.history ?? [])
+      .filter((item) => item.role === "user" || item.role === "assistant")
+      .map((item) => (item.images?.length ? { ...item, images: hydrateChatImages(item.images) } : item));
     let mode = input.mode ?? "ask";
     let sandbox = input.sandbox ?? "off";
     const role = input.role ?? deskRoleOf({ parentId: input.parentId, hidden: input.hidden });
@@ -344,7 +347,7 @@ export class CustomSessionHost {
           input.crewModes,
           role,
         ),
-        images: input.images,
+        ...(input.images?.length ? { images: hydrateChatImages(input.images) } : {}),
       },
     ];
     const baseMessageCount = messages.length;

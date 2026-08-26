@@ -95,6 +95,10 @@ export function launchKey(input: Pick<GrokSessionOpenInput, "model" | "effort" |
   return `${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}`;
 }
 
+export function isWorkerRuntime(input: { parentId?: string; hidden?: boolean; role?: string }): boolean {
+  return Boolean(input.parentId || input.hidden || input.role === "worker");
+}
+
 export function shouldLoadVendorSession(input: {
   vendorSessionId?: string;
   existingSlotKey?: string;
@@ -180,7 +184,14 @@ export class GrokSessionHost {
       const message = error instanceof Error ? error.message : String(error);
       emit({ type: "error", sessionId: input.sessionId, message });
       throw error;
+    } finally {
+      this.releaseWorkerRuntime(input);
     }
+  }
+
+  private releaseWorkerRuntime(input: { sessionId: string; parentId?: string; hidden?: boolean; role?: string }) {
+    if (!isWorkerRuntime(input)) return;
+    this.dispose(input.sessionId);
   }
 
   async compact(input: GrokCompactInput, emit: GrokEventSink): Promise<import("./grok-agent").GrokCompactEvent> {

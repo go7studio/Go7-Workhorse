@@ -23,3 +23,6 @@ eval/config.json
 workhorse-state.json
 credentials.json
 .worktrees/
+
+# A desk attachment store is user data, never repo content.
+attachments/

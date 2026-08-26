@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { loadLinkState } from "./link-state";
 import { settledWorkers, type WorkerRunRow } from "../src/lib/worker-settled";
 import { unannounced, workerTerminalNotification } from "../src/lib/link-notify";
 
@@ -29,7 +30,7 @@ export type LinkWatchHandle = { stop: () => void };
  */
 function readWorkerRows(statePath: string): WorkerRunRow[] {
   try {
-    const raw = JSON.parse(fs.readFileSync(statePath, "utf8")) as { sessions?: unknown[] };
+    const raw = loadLinkState(statePath);
     if (!Array.isArray(raw.sessions)) return [];
     const rows: WorkerRunRow[] = [];
     for (const entry of raw.sessions) {

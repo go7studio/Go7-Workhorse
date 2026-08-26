@@ -13,6 +13,9 @@ test("sweepStaleUserData drops leftover update installers and oversized Chromium
   fs.writeFileSync(path.join(root, "pending-update-0.6.6.vbs"), "CreateObject");
   fs.writeFileSync(path.join(root, "workhorse-state.json"), "{\"sessions\":[]}");
   fs.writeFileSync(path.join(root, "workhorse-state.json.tmp-123"), "{}");
+  fs.writeFileSync(path.join(root, "workhorse-state.json.bak.tmp-94759-leftover"), "{}");
+  fs.mkdirSync(path.join(root, "attachments"));
+  fs.writeFileSync(path.join(root, "attachments", "keep.png"), "png");
   const cache = path.join(root, "Cache");
   fs.mkdirSync(path.join(cache, "Cache_Data"), { recursive: true });
   fs.writeFileSync(path.join(cache, "Cache_Data", "data"), Buffer.alloc(8 * 1024));
@@ -37,6 +40,9 @@ test("sweepStaleUserData drops leftover update installers and oversized Chromium
   assert.ok(swept.removed.includes("pending-update-0.6.5.exe"));
   assert.ok(swept.removed.includes("pending-update-0.6.6.vbs"));
   assert.ok(swept.removed.includes("workhorse-state.json.tmp-123"));
+  assert.ok(swept.removed.includes("workhorse-state.json.bak.tmp-94759-leftover"));
+  assert.ok(!swept.removed.includes("attachments"));
+  assert.ok(fs.existsSync(path.join(root, "attachments", "keep.png")));
   assert.ok(swept.removed.includes("Cache"));
   assert.ok(swept.removed.includes("Code Cache"));
   assert.ok(swept.removed.includes("workhorse-update-old"));

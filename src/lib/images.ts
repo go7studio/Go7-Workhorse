@@ -240,6 +240,12 @@ export function modelImagePayloadBytes(images: ChatImage[]): number {
 function loadImage(image: ChatImage): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const element = new Image();
+    // An offloaded picture loads from workhorse-media:// on a file:// page.
+    // Without this the load succeeds and the canvas is tainted, so
+    // toDataURL throws SecurityError at export — the spawn still died, one
+    // step later than before. Verified in the desk's own Electron wiring:
+    // the same URL with crossOrigin set exports clean.
+    element.crossOrigin = "anonymous";
     element.onload = () => resolve(element);
     element.onerror = () => reject(new Error(`Could not resize ${image.name}`));
     element.src = imageSrc(image);
@@ -247,7 +253,12 @@ function loadImage(image: ChatImage): Promise<HTMLImageElement> {
 }
 
 async function resizeModelImage(image: ChatImage, maxEdge: number, quality: number): Promise<ChatImage> {
-  if (image.kind !== "image" || !image.data) return image;
+  // An offloaded picture has empty data and a sourcePath; loadImage reads it
+  // through imageSrc, which prefers the path. Bailing on empty data refused
+  // every spawn whose attachments had been offloaded: resize never ran, the
+  // payload never shrank, and two 3 MB screenshots that used to fit were
+  // rejected with "Images are too large".
+  if (image.kind !== "image" || (!image.data && !image.sourcePath)) return image;
   const element = await loadImage(image);
   const ratio = Math.min(1, maxEdge / Math.max(element.naturalWidth, element.naturalHeight));
   const canvas = document.createElement("canvas");
@@ -259,8 +270,12 @@ async function resizeModelImage(image: ChatImage, maxEdge: number, quality: numb
   const encoded = canvas.toDataURL("image/jpeg", quality);
   const data = encoded.slice(encoded.indexOf(",") + 1);
   const name = image.name.replace(/\.[^.]+$/, "") || "image";
+  // The resized picture is a new, smaller image. Keeping the old sourcePath
+  // would make the UI and any later hydrate prefer the full-size original on
+  // disk over the bytes we just shrank.
+  const { sourcePath: _dropped, ...rest } = image;
   return {
-    ...image,
+    ...rest,
     name: `${name}.jpg`,
     mimeType: "image/jpeg",
     data,

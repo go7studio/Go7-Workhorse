@@ -1828,7 +1828,11 @@ function describeBytes(bytes: number): string {
 /** The desk's user-data directory, which is where the state file lives. */
 function spawnUserDataDir(): string {
   const statePath = process.env.WORKHORSE_STATE_PATH?.trim() ?? "";
-  return statePath ? path.dirname(statePath) : "";
+  // Relative would offload into whatever the working directory happens to be
+  // and persist a sourcePath that never resolves again. The same file already
+  // demands absolute for durable jobs; attachments hold pictures, so same bar.
+  if (!statePath || !path.isAbsolute(statePath)) return "";
+  return path.dirname(statePath);
 }
 
 export function spawnAttachments(files: string[] | undefined, cwd: string): ChatImage[] {

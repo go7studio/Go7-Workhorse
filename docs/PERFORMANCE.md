@@ -41,12 +41,21 @@ Three habits cover the rest:
 - **Watch for unbounded arrays in persisted state.** The usage log grows by one
   event per turn and is re-read on every launch. Any new list with that shape
   needs a plan for its size before it ships. Picture bytes do not belong in
-  `workhorse-state.json`; they write once under `userData/attachments/` and the
-  chat keeps a path. Link helpers parse that file once per version, drop inline
-  `data` while parsing, and reuse one snapshot for a whole RPC. A finished
-  worker runtime is disposed; `vendorSessionId` stays so the next prompt can
-  `session/load`. Enforced by `test/attachments.test.ts`, `test/link-state.test.ts`,
-  and `test/workhorse.test.ts`.
+  `workhorse-state.json`; they write once under `userData/attachments/`, named
+  by their sha256, and the chat keeps a path. A blob is verified before the
+  inline copy is cleared, and a picture that cannot be stored stays inline.
+  Link helpers parse that file once per version, drop inline `data` while
+  parsing, and reuse one snapshot for a whole RPC. A finished worker runtime
+  is disposed; `vendorSessionId` stays so the next prompt can `session/load`.
+  Enforced by `test/attachments.test.ts`,
+  `test/attachment-store-safety.test.ts`, `test/link-state.test.ts`, and
+  `test/workhorse.test.ts`. The store's plan for its own size: blobs are
+  content-addressed so a repeated screenshot costs one file;
+  `attachments/*.tmp-*` older than a day is swept by user-data-hygiene; blob
+  garbage collection (deleting files no chat references) is deliberately not
+  built yet — deleting a shared blob wrongly loses a picture, so it waits for
+  a reference count, and until then the store grows with distinct pictures
+  only.
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
 

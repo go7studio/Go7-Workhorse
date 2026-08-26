@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { attachmentsDir, hydrateChatImage, offloadChatImage } from "../electron/attachment-store";
+import { attachmentsDir, hydrateChatImage, hydrateChatImagesForHistory, hydrateHistoryMessage, offloadChatImage } from "../electron/attachment-store";
 import type { ChatImage } from "../src/lib/types";
 
 const PIXELS = Buffer.from("the original picture bytes");
@@ -116,4 +116,72 @@ test("no store configured writes nothing anywhere", () => {
   const out = offloadChatImage(shot(), "");
   assert.equal(out.data, shot().data);
   assert.equal(out.sourcePath, undefined);
+});
+
+test("base64 one character past a whole group stays inline — the byte it would lose", () => {
+  // A shape regex passed this: every character legal, length % 4 == 1, and
+  // Buffer.from quietly drops the trailing byte. Proved in review — the
+  // offloaded blob hydrated back shorter than what the person attached.
+  const root = tmp();
+  try {
+    for (const raw of ["AAAAA", "QUJDREVGR"]) {
+      const out = offloadChatImage({ ...shot(), data: raw } as ChatImage, root);
+      assert.equal(out.data, raw, "kept inline rather than stored mangled");
+      assert.equal(out.sourcePath, undefined);
+    }
+    // Whitespace-wrapped but honest base64 still offloads.
+    const wrapped = { ...shot(), data: PIXELS.toString("base64").replace(/(.{8})/g, "$1\n") } as ChatImage;
+    const stored = offloadChatImage(wrapped, root);
+    assert.equal(stored.data, "");
+    assert.equal(Buffer.from(hydrateChatImage(stored).data ?? "", "base64").toString(), PIXELS.toString());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a history picture that will not load is dropped; the current turn still throws", () => {
+  // One dead old blob used to end the chat: history is replayed on every later
+  // turn, and the loud hydrate threw for a picture from three turns ago.
+  const root = tmp();
+  try {
+    const good = offloadChatImage(shot(), root);
+    const dead = { ...offloadChatImage({ ...shot(), data: Buffer.from("other pixels").toString("base64") } as ChatImage, root) };
+    rmSync(dead.sourcePath!, { force: true });
+
+    const history = hydrateChatImagesForHistory([good, dead]);
+    assert.equal(history.length, 1, "the dead picture is dropped, the good one kept");
+    assert.equal(Buffer.from(history[0].data ?? "", "base64").toString(), PIXELS.toString());
+
+    assert.throws(() => hydrateChatImage(dead), /missing from disk/, "the current turn stays loud");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a history message that was only pictures never goes out empty", () => {
+  // Round four's residual: dropping every dead picture from an image-only turn
+  // sent empty user content, and some HTTP APIs refuse that with a 400 — so
+  // one dead blob still cost the chat, one layer later.
+  const root = tmp();
+  try {
+    const dead = offloadChatImage(shot(), root);
+    rmSync(dead.sourcePath!, { force: true });
+
+    const emptied = hydrateHistoryMessage({ text: "", images: [dead] });
+    assert.equal(emptied.images?.length, 0);
+    assert.equal(emptied.text, "An attached image is no longer available.", "words stand in for the lost picture");
+
+    // A message that still has words, or a surviving picture, keeps its own text.
+    const wordy = hydrateHistoryMessage({ text: "look at this", images: [dead] });
+    assert.equal(wordy.text, "look at this");
+    // Different bytes on purpose: the store is content-addressed, so a second
+    // picture with the SAME pixels would recreate the exact blob deleted above
+    // and quietly resurrect the "dead" one too.
+    const alive = offloadChatImage({ ...shot(), data: Buffer.from("different pixels").toString("base64") } as ChatImage, root);
+    const mixed = hydrateHistoryMessage({ text: "", images: [dead, alive] });
+    assert.equal(mixed.images?.length, 1);
+    assert.equal(mixed.text, "", "a surviving picture carries the turn");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -12,7 +12,9 @@ import {
   writeComposerDraftFile,
   writeStringMapFile,
   writeVersionedState,
+  writeVersionedStateAsync,
 } from "../electron/state-persistence";
+import type { PersistableState } from "../electron/state-persistence";
 
 const scrub = (state: Record<string, unknown>) => JSON.parse(
   JSON.stringify(state, (key, value) => key === "apiKey" ? undefined : value),
@@ -97,4 +99,61 @@ test("file instance baselines survive a process restart", () => {
   fs.writeFileSync(file, "{broken", "utf8");
   assert.equal(readStringMapFile(file).size, 0);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the async write is the same atomic write, recoverable the same way", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-async-save-"));
+  const file = path.join(root, "workhorse-state.json");
+  try {
+    // Round-trips through the same versioning and protect hook.
+    const first = await writeVersionedStateAsync(file, { sessions: [{ id: "a" }] }, (s) => s);
+    assert.equal(first.stateVersion, CURRENT_STATE_VERSION);
+    assert.equal((readVersionedState(file).state.sessions as unknown[]).length, 1);
+
+    // Rotation still stacks backups the recovery walk depends on.
+    await writeVersionedStateAsync(file, { sessions: [{ id: "a" }, { id: "b" }] }, (s) => s);
+    assert.ok(fs.existsSync(`${file}.bak`), "the previous file became the backup");
+
+    // A torn main file recovers from that backup, exactly as the sync path does.
+    fs.writeFileSync(file, "{ torn");
+    const recovered = readVersionedState(file);
+    assert.equal(recovered.recovered, true);
+    assert.equal((recovered.state.sessions as unknown[]).length, 1, "the .bak snapshot answers");
+
+    // No temp litter is left beside the state file.
+    const litter = fs.readdirSync(root).filter((name) => name.includes(".tmp-"));
+    assert.deepEqual(litter, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("overlapping saves keep last-writer-wins order", async () => {
+  // The save moved off the main thread, which makes overlap possible for the
+  // first time. Serialization is the guard: an older snapshot's rename must
+  // never land after a newer one. This drives the same chain shape main.ts
+  // uses and proves the end state is the last write.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-save-order-"));
+  const file = path.join(root, "workhorse-state.json");
+  try {
+    let chain: Promise<unknown> = Promise.resolve();
+    const save = (state: PersistableState) => {
+      chain = chain.then(() => writeVersionedStateAsync(file, state, (s) => s, { rotateBackups: false }));
+      return chain;
+    };
+    const writes = [1, 2, 3, 4, 5].map((n) => save({ sessions: Array.from({ length: n }, (_, i) => ({ id: String(i) })) }));
+    await Promise.all(writes);
+    assert.equal((readVersionedState(file).state.sessions as unknown[]).length, 5, "the last snapshot is the file");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the desk save path is the async write, chained", () => {
+  // Shape pin: reverting state:save to the synchronous write restores a
+  // ~120ms main-process block per save that no unit test can feel.
+  const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "main.ts"), "utf8");
+  assert.match(main, /await writeVersionedStateAsync\(/, "the save must not hold the main thread for the disk");
+  assert.match(main, /stateSaveChain = stateSaveChain\.then\(\(\) => writeState\(state\)\)/, "overlapping saves must serialize");
+  assert.match(main, /setPerfCause\("state:save"\)/, "a recorded stall must name the save");
 });

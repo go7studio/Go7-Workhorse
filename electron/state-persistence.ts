@@ -50,6 +50,74 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number, opt
   }
 }
 
+/**
+ * The same atomic write, without holding the main process for the disk.
+ *
+ * atomicWriteJson is correct and stays for boot-path callers, but its
+ * writeFileSync + fsyncSync run on the thread that brokers every IPC message —
+ * measured at ~40ms of the ~120ms save block on a real desk, a third of the
+ * stall, and it is disk, not CPU. fs.promises does the same open-exclusive,
+ * write, fsync, rename sequence on the libuv pool; the rename is still atomic
+ * and the crash story is unchanged.
+ */
+export async function atomicWriteJsonAsync(
+  file: string,
+  value: unknown,
+  mode?: number,
+  options?: { fsync?: boolean },
+): Promise<void> {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const handle = await fs.promises.open(temp, "wx", mode);
+  try {
+    await handle.writeFile(JSON.stringify(value), "utf8");
+    if (options?.fsync !== false) await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await fs.promises.rename(temp, file);
+  } catch (error) {
+    // Windows can refuse replacement renames. Same recovery dance as the sync
+    // path: keep the old file reachable until the new one is in place.
+    const displaced = `${file}.replace-${process.pid}`;
+    try {
+      if (fs.existsSync(file)) await fs.promises.rename(file, displaced);
+      await fs.promises.rename(temp, file);
+      try { await fs.promises.unlink(displaced); } catch { /* best effort */ }
+    } catch {
+      try { if (fs.existsSync(displaced) && !fs.existsSync(file)) await fs.promises.rename(displaced, file); } catch { /* best effort */ }
+      try { await fs.promises.unlink(temp); } catch { /* best effort */ }
+      throw error;
+    }
+  }
+}
+
+async function rotateFileBackupsAsync(file: string): Promise<void> {
+  const bak = `${file}.bak`;
+  const bak1 = `${file}.bak.1`;
+  const bak2 = `${file}.bak.2`;
+  try { await fs.promises.rm(bak2, { force: true }); } catch { /* missing */ }
+  try { await fs.promises.rename(bak1, bak2); } catch { /* missing */ }
+  try { await fs.promises.rename(bak, bak1); } catch { /* missing */ }
+  if (fs.existsSync(file)) {
+    try { await fs.promises.copyFile(file, bak); } catch { /* live file may be locked */ }
+  }
+}
+
+export async function writeVersionedStateAsync(
+  file: string,
+  state: PersistableState,
+  protect: (state: PersistableState) => PersistableState,
+  options: { rotateBackups?: boolean } = {},
+): Promise<PersistableState> {
+  const migrated = migrateState(state);
+  const protectedState = migrateState(protect(migrated));
+  if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
+  await atomicWriteJsonAsync(file, protectedState, undefined, { fsync: options.rotateBackups !== false });
+  return protectedState;
+}
+
 function parseObject(file: string): PersistableState | null {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;

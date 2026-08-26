@@ -50,6 +50,21 @@ Three habits cover the rest:
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
 
+## Measuring the running app
+
+The budgets above are tripwires in Node. The desk can also watch itself run:
+launch with `WORKHORSE_PERF_TRACE=1` (or `--workhorse-perf-trace`) and the main
+process records every event-loop stall over 80ms to
+`userData/perf/heartbeat.jsonl` — a timestamp, the gap, and a one-word cause
+(`state:save`, `state:read`), never content. The file rotates at 1 MB. The
+instrument exists because the main process brokers every IPC message, so a
+block there is felt on every surface at once and no renderer tooling can see
+it. Two independent reviews traced the felt stall to the save pipeline and
+named this recorder as the first thing to build; the save's disk half now runs
+off-thread (`writeVersionedStateAsync`), and whether the remaining
+clone-and-stringify half justifies incremental persistence is a question the
+trace answers, not a guess.
+
 ## On file size
 
 `src/lib/store.tsx` is large, and a few other files are near it. Size is not

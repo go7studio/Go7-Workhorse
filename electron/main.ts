@@ -69,8 +69,9 @@ import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { sweepStaleUserData } from "./user-data-hygiene";
+import { clearPerfCause, perfTraceEnabled, setPerfCause, startPerfHeartbeat } from "./perf-heartbeat";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
+import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -197,6 +198,7 @@ function pinUserData() {
   }
 }
 pinUserData();
+if (perfTraceEnabled()) startPerfHeartbeat(app.getPath("userData"));
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
   const swept = sweepStaleUserData(app.getPath("userData"), {
@@ -340,6 +342,15 @@ function pickLinkedFolder(title: string, buttonLabel: string, extra: Array<"crea
 }
 
 function readState(): Persistable {
+  setPerfCause("state:read");
+  try {
+    return readStateInner();
+  } finally {
+    clearPerfCause();
+  }
+}
+
+function readStateInner(): Persistable {
   const result = readVersionedState(statePath());
   const { state } = result;
   let migrated: Persistable = state;
@@ -393,8 +404,16 @@ function handleMediaProtocol(request: Request): Promise<Response> | Response {
 
 let lastStateBackupAt = 0;
 
-function writeState(state: Persistable) {
+/*
+ * Saves are serialized: an overlapping save must not let an older snapshot's
+ * rename land after a newer one. The chain keeps last-writer-wins ordering
+ * without holding the IPC handler.
+ */
+let stateSaveChain: Promise<void> = Promise.resolve();
+
+async function writeState(state: Persistable) {
   try {
+    setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     const file = statePath();
     const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
@@ -415,7 +434,7 @@ function writeState(state: Persistable) {
     }
     const now = Date.now();
     const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
-    writeVersionedState(
+    await writeVersionedStateAsync(
       file,
       state,
       (snapshot) =>
@@ -430,6 +449,8 @@ function writeState(state: Persistable) {
     jobEngine?.sync(state.sessions);
   } catch (error) {
     console.error("workhorse state save failed", error);
+  } finally {
+    clearPerfCause();
   }
 }
 
@@ -1061,7 +1082,9 @@ app.whenReady().then(async () => {
     return loaded;
   });
   ipcMain.handle("state:save", (_event, state: Persistable) => {
-    if (state && typeof state === "object") writeState(state);
+    if (!state || typeof state !== "object") return;
+    stateSaveChain = stateSaveChain.then(() => writeState(state));
+    return stateSaveChain;
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;

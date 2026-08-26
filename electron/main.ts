@@ -1051,10 +1051,13 @@ app.whenReady().then(async () => {
   ipcMain.handle("state:load", () => {
     const loaded = readState();
     const sessions = Array.isArray(loaded.sessions) ? loaded.sessions : [];
-    pruneOrphanWorktrees(
+    const pruned = pruneOrphanWorktrees(
       path.join(app.getPath("userData"), "worktrees"),
       sessions.map((session) => (session && typeof session === "object" && typeof (session as { id?: unknown }).id === "string" ? (session as { id: string }).id : "")).filter(Boolean),
     );
+    for (const held of pruned.kept) {
+      console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
+    }
     return loaded;
   });
   ipcMain.handle("state:save", (_event, state: Persistable) => {

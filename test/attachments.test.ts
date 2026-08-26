@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +66,10 @@ test("spawned visual agents receive bounded workspace attachments", () => {
 });
 
 test("the CLI takes every file type the desk takes", () => {
+  // Own the store: with an ambient WORKHORSE_STATE_PATH these spawns would
+  // offload into the real desk store instead of this test's temp root.
+  const priorState = process.env.WORKHORSE_STATE_PATH;
+  delete process.env.WORKHORSE_STATE_PATH;
   // The desk accepts 84 extensions when you drag one onto the window. This path
   // knew 14, from a private table beside the real one, so html, svg, every
   // Office document, most audio and most video arrived as
@@ -95,11 +99,17 @@ test("the CLI takes every file type the desk takes", () => {
     writeFileSync(path.join(root, "bundle.zip"), Buffer.from("x"));
     assert.throws(() => spawnAttachments(["bundle.zip"], root), /does not take \.zip files/);
   } finally {
+    if (priorState === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = priorState;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("attachment size is capped per family, and nothing is dropped in silence", () => {
+  // Own the store: with an ambient WORKHORSE_STATE_PATH these spawns would
+  // offload into the real desk store instead of this test's temp root.
+  const priorState = process.env.WORKHORSE_STATE_PATH;
+  delete process.env.WORKHORSE_STATE_PATH;
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-caps."));
   try {
     // One flat 30 MB cap refused a 60 MB video the desk accepts and waved
@@ -118,6 +128,8 @@ test("attachment size is capped per family, and nothing is dropped in silence", 
     assert.throws(() => spawnAttachments(many, root), /at most 24 files/);
     assert.equal(spawnAttachments(many.slice(0, MAX_IMAGES), root).length, MAX_IMAGES);
   } finally {
+    if (priorState === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = priorState;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -395,4 +407,67 @@ test("offload keeps inlined bytes when the blob write fails", () => {
     "",
   );
   assert.equal(saved.sessions[0]?.messages?.[0]?.images?.[0]?.data, image.data);
+});
+
+test("offloaded spawn attachments reach resize instead of being refused", async (t) => {
+  /*
+   * The regression both re-reviews proved: two 3 MB pictures whose bytes had
+   * been offloaded (data:"", sourcePath set) were refused with "Images are too
+   * large" — resize bailed on empty data, never read the blob, and the payload
+   * never shrank. Two 3 MB screenshots fit fine before offloading existed.
+   *
+   * Node has no DOM, so this uses the review's own technique: stub Image and
+   * document with a tagged error, and assert the pipeline REACHES the load —
+   * meaning the early return is gone — rather than throwing "too large" first.
+   */
+  const g = globalThis as Record<string, unknown>;
+  const priorImage = g.Image;
+  const priorDocument = g.document;
+  class ProbeImage {
+    onload: (() => void) | null = null;
+    onerror: ((e?: unknown) => void) | null = null;
+    set src(_value: string) {
+      throw new Error("PROBE: image load reached");
+    }
+  }
+  g.Image = ProbeImage;
+  g.document = { createElement: () => { throw new Error("PROBE: canvas reached"); } };
+  t.after(() => {
+    if (priorImage === undefined) delete g.Image; else g.Image = priorImage;
+    if (priorDocument === undefined) delete g.document; else g.document = priorDocument;
+  });
+
+  const offloaded = (name: string): ChatImage =>
+    ({ id: name, name, mimeType: "image/png", kind: "image", data: "", sourcePath: `/tmp/${name}`, size: 3 * 1024 * 1024 }) as ChatImage;
+
+  await assert.rejects(
+    () => fitModelImages([offloaded("one.png"), offloaded("two.png")]),
+    /PROBE: image load reached/,
+    "resize must attempt to load the stored picture, not refuse the spawn unseen",
+  );
+});
+
+test("a relative state path means no store, so nothing lands in the working directory", () => {
+  // A relative WORKHORSE_STATE_PATH used to offload into cwd and persist a
+  // relative sourcePath that would never resolve again — a lost picture and a
+  // stray attachments directory wherever the process happened to run.
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-spawn-rel."));
+  const prior = process.env.WORKHORSE_STATE_PATH;
+  process.env.WORKHORSE_STATE_PATH = "workhorse-state.json";
+  // Own the cwd too: if the guard regresses, the stray directory must land in
+  // this test's temp root, not in the repository the suite runs from.
+  const priorCwd = process.cwd();
+  process.chdir(root);
+  try {
+    writeFileSync(path.join(root, "shot.png"), Buffer.from("image"));
+    const [attachment] = spawnAttachments(["shot.png"], root);
+    assert.equal(attachment?.sourcePath, undefined, "no absolute store, no offload");
+    assert.equal(Buffer.from(attachment?.data ?? "", "base64").toString(), "image", "bytes travel inline instead");
+    assert.equal(existsSync(path.join(root, "attachments")), false, "nothing written into cwd");
+  } finally {
+    process.chdir(priorCwd);
+    if (prior === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = prior;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

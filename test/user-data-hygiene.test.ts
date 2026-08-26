@@ -234,4 +234,23 @@ test("pruneOrphanWorktrees destroys nothing when git cannot be run", () => {
     else process.env.GIT = realGit;
   }
   fs.rmSync(root, { recursive: true, force: true });
+test("attachment write temps older than a day are swept; fresh ones and blobs are not", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-hygiene-attach-"));
+  try {
+    const dir = path.join(root, "attachments");
+    fs.mkdirSync(dir, { recursive: true });
+    const hash = "a".repeat(64);
+    fs.writeFileSync(path.join(dir, `${hash}.png`), "blob");
+    fs.writeFileSync(path.join(dir, `${hash}.png.tmp-123-456`), "stale temp");
+    fs.writeFileSync(path.join(dir, `${hash}.png.tmp-123-999`), "fresh temp");
+    const old = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    fs.utimesSync(path.join(dir, `${hash}.png.tmp-123-456`), old / 1000, old / 1000);
+
+    const swept = sweepStaleUserData(root, { now: Date.now() });
+    assert.ok(swept.removed.includes(path.join("attachments", `${hash}.png.tmp-123-456`)), "stale temp swept");
+    assert.ok(fs.existsSync(path.join(dir, `${hash}.png`)), "a verified blob is never hygiene's business");
+    assert.ok(fs.existsSync(path.join(dir, `${hash}.png.tmp-123-999`)), "a temp under a day may be a live write");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

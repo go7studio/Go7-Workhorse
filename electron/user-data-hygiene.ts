@@ -86,6 +86,35 @@ function writeCacheVersion(root: string, version: string) {
   }
 }
 
+/**
+ * Attachment blob writes go temp-then-rename; a killed write leaves the temp.
+ * The store never trusts a temp (blobs are verified by hash), so these are
+ * pure litter — but attachment-store promises this sweep exists, so it must.
+ * A day of age keeps a mid-write temp safe from a sweep racing a save.
+ */
+function sweepAttachmentTemps(userData: string, now: number, removed: string[], addBytes: (n: number) => void) {
+  const dir = path.join(userData, "attachments");
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!/\.tmp-/.test(name)) continue;
+    const full = path.join(dir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (!stat.isFile() || now - stat.mtimeMs < DAY_MS) continue;
+      addBytes(stat.size);
+      fs.rmSync(full, { force: true });
+      removed.push(path.join("attachments", name));
+    } catch {
+      /* still being written, or already gone */
+    }
+  }
+}
+
 function sweepTmpUpdates(tmpDir: string, now: number, removed: string[], addBytes: (n: number) => void) {
   let names: string[] = [];
   try {
@@ -146,6 +175,7 @@ export function sweepStaleUserData(root: string, options: SweepOptions = {}): Us
     }
   }
   if (options.tmpDir) sweepTmpUpdates(options.tmpDir, now, removed, (n) => { bytes += n; });
+  sweepAttachmentTemps(root, now, removed, (n) => { bytes += n; });
   if (options.appVersion) writeCacheVersion(root, options.appVersion);
   return { removed, bytes };
 }

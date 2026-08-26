@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { attachmentsDir, hydrateChatImage, offloadChatImage } from "../electron/attachment-store";
+import { attachmentsDir, hydrateChatImage, hydrateChatImagesForHistory, offloadChatImage } from "../electron/attachment-store";
 import type { ChatImage } from "../src/lib/types";
 
 const PIXELS = Buffer.from("the original picture bytes");
@@ -116,4 +116,44 @@ test("no store configured writes nothing anywhere", () => {
   const out = offloadChatImage(shot(), "");
   assert.equal(out.data, shot().data);
   assert.equal(out.sourcePath, undefined);
+});
+
+test("base64 one character past a whole group stays inline — the byte it would lose", () => {
+  // A shape regex passed this: every character legal, length % 4 == 1, and
+  // Buffer.from quietly drops the trailing byte. Proved in review — the
+  // offloaded blob hydrated back shorter than what the person attached.
+  const root = tmp();
+  try {
+    for (const raw of ["AAAAA", "QUJDREVGR"]) {
+      const out = offloadChatImage({ ...shot(), data: raw } as ChatImage, root);
+      assert.equal(out.data, raw, "kept inline rather than stored mangled");
+      assert.equal(out.sourcePath, undefined);
+    }
+    // Whitespace-wrapped but honest base64 still offloads.
+    const wrapped = { ...shot(), data: PIXELS.toString("base64").replace(/(.{8})/g, "$1\n") } as ChatImage;
+    const stored = offloadChatImage(wrapped, root);
+    assert.equal(stored.data, "");
+    assert.equal(Buffer.from(hydrateChatImage(stored).data ?? "", "base64").toString(), PIXELS.toString());
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a history picture that will not load is dropped; the current turn still throws", () => {
+  // One dead old blob used to end the chat: history is replayed on every later
+  // turn, and the loud hydrate threw for a picture from three turns ago.
+  const root = tmp();
+  try {
+    const good = offloadChatImage(shot(), root);
+    const dead = { ...offloadChatImage({ ...shot(), data: Buffer.from("other pixels").toString("base64") } as ChatImage, root) };
+    rmSync(dead.sourcePath!, { force: true });
+
+    const history = hydrateChatImagesForHistory([good, dead]);
+    assert.equal(history.length, 1, "the dead picture is dropped, the good one kept");
+    assert.equal(Buffer.from(history[0].data ?? "", "base64").toString(), PIXELS.toString());
+
+    assert.throws(() => hydrateChatImage(dead), /missing from disk/, "the current turn stays loud");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

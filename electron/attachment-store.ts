@@ -41,8 +41,18 @@ function extFor(image: Pick<ChatImage, "mimeType" | "name">, fallbackPath = ""):
   return named || "bin";
 }
 
-/** Base64 as a decoder will actually round-trip. Buffer.from silently drops junk. */
-const BASE64_ONLY = /^[A-Za-z0-9+/\r\n]*={0,2}$/;
+/**
+ * Base64 that decodes back to itself. Buffer.from does not throw on junk — it
+ * drops what it cannot read — and a shape regex is not enough: a string whose
+ * length is one past a whole group passes the character test and still loses a
+ * byte. The only honest check is decode, re-encode, compare.
+ */
+function base64RoundTrips(raw: string): boolean {
+  const packed = raw.replace(/\s+/g, "");
+  if (!packed) return false;
+  const bytes = Buffer.from(packed, "base64");
+  return bytes.toString("base64").replace(/=+$/, "") === packed.replace(/=+$/, "");
+}
 
 /**
  * Is the blob on disk the blob we meant to write?
@@ -90,6 +100,10 @@ function writeHashedBlob(userData: string, bytes: Buffer, ext: string): string |
     }
     fs.renameSync(temp, dest);
     temp = "";
+    // Defence in depth, by choice untestable: fs is not injected here, so no
+    // test can make a confirmed fsync+rename produce wrong bytes. We keep the
+    // check anyway because the cost is one read and the failure it guards is a
+    // person's picture.
     if (!blobMatches(dest, hash, bytes.length)) return null;
     return dest;
   } catch {
@@ -99,7 +113,7 @@ function writeHashedBlob(userData: string, bytes: Buffer, ext: string): string |
       try {
         fs.unlinkSync(temp);
       } catch {
-        /* a temp we could not clean is swept elsewhere */
+        /* user-data-hygiene sweeps attachments/*.tmp-* older than a day */
       }
     }
   }
@@ -114,11 +128,10 @@ export function offloadChatImage(image: ChatImage, userData: string): ChatImage 
   const next: ChatImage = derived ? { ...image, derivedImages: derived } : { ...image };
   const raw = typeof next.data === "string" ? stripDataUrl(next.data) : "";
   if (raw) {
-    // Buffer.from does not throw on malformed base64 — it drops what it cannot
-    // read and returns the rest. Offloading that would store a corrupted blob
-    // and then clear the only good copy, so anything questionable stays inline.
-    if (!BASE64_ONLY.test(raw)) return next;
-    const bytes = Buffer.from(raw, "base64");
+    // Anything that does not decode back to itself stays inline: offloading it
+    // would store a mangled blob and then clear the only good copy.
+    if (!base64RoundTrips(raw)) return next;
+    const bytes = Buffer.from(raw.replace(/\s+/g, ""), "base64");
     if (!bytes.length) return next;
     const dest = writeHashedBlob(userData, bytes, extFor(next));
     if (!dest) return next;
@@ -203,6 +216,26 @@ export function hydrateChatImage(image: ChatImage): ChatImage {
     if (actual !== named) throw new Error(`Attachment does not match its checksum: ${next.name || source}`);
   }
   return { ...next, data: bytes.toString("base64"), size: bytes.length };
+}
+
+/**
+ * Hydrate a PAST message's pictures, dropping the ones that will not load.
+ *
+ * The current turn throws on a miss — that turn can be retried. History is
+ * different: it is replayed on every later turn, so one dead old blob would
+ * end the chat rather than a turn, with no way out from the UI. The model
+ * loses a picture it saw once before; the person keeps their chat.
+ */
+export function hydrateChatImagesForHistory(images: ChatImage[] | undefined): ChatImage[] {
+  const out: ChatImage[] = [];
+  for (const image of images ?? []) {
+    try {
+      out.push(hydrateChatImage(image));
+    } catch {
+      /* dropped: a history picture that no longer loads */
+    }
+  }
+  return out;
 }
 
 export function hydrateChatImages(images: ChatImage[] | undefined): ChatImage[] {

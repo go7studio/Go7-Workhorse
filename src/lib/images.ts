@@ -247,7 +247,12 @@ function loadImage(image: ChatImage): Promise<HTMLImageElement> {
 }
 
 async function resizeModelImage(image: ChatImage, maxEdge: number, quality: number): Promise<ChatImage> {
-  if (image.kind !== "image" || !image.data) return image;
+  // An offloaded picture has empty data and a sourcePath; loadImage reads it
+  // through imageSrc, which prefers the path. Bailing on empty data refused
+  // every spawn whose attachments had been offloaded: resize never ran, the
+  // payload never shrank, and two 3 MB screenshots that used to fit were
+  // rejected with "Images are too large".
+  if (image.kind !== "image" || (!image.data && !image.sourcePath)) return image;
   const element = await loadImage(image);
   const ratio = Math.min(1, maxEdge / Math.max(element.naturalWidth, element.naturalHeight));
   const canvas = document.createElement("canvas");
@@ -259,8 +264,12 @@ async function resizeModelImage(image: ChatImage, maxEdge: number, quality: numb
   const encoded = canvas.toDataURL("image/jpeg", quality);
   const data = encoded.slice(encoded.indexOf(",") + 1);
   const name = image.name.replace(/\.[^.]+$/, "") || "image";
+  // The resized picture is a new, smaller image. Keeping the old sourcePath
+  // would make the UI and any later hydrate prefer the full-size original on
+  // disk over the bytes we just shrank.
+  const { sourcePath: _dropped, ...rest } = image;
   return {
-    ...image,
+    ...rest,
     name: `${name}.jpg`,
     mimeType: "image/jpeg",
     data,

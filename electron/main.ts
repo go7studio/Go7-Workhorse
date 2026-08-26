@@ -69,8 +69,9 @@ import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { sweepStaleUserData } from "./user-data-hygiene";
+import { clearPerfCause, perfTraceEnabled, setPerfCause, startPerfHeartbeat } from "./perf-heartbeat";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState } from "./state-persistence";
+import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -197,6 +198,7 @@ function pinUserData() {
   }
 }
 pinUserData();
+if (perfTraceEnabled()) startPerfHeartbeat(app.getPath("userData"));
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
   const swept = sweepStaleUserData(app.getPath("userData"), {
@@ -340,6 +342,15 @@ function pickLinkedFolder(title: string, buttonLabel: string, extra: Array<"crea
 }
 
 function readState(): Persistable {
+  setPerfCause("state:read");
+  try {
+    return readStateInner();
+  } finally {
+    clearPerfCause();
+  }
+}
+
+function readStateInner(): Persistable {
   const result = readVersionedState(statePath());
   const { state } = result;
   let migrated: Persistable = state;
@@ -393,8 +404,25 @@ function handleMediaProtocol(request: Request): Promise<Response> | Response {
 
 let lastStateBackupAt = 0;
 
-function writeState(state: Persistable) {
+/*
+ * Saves are serialized: an overlapping save must not let an older snapshot's
+ * rename land after a newer one. The chain keeps last-writer-wins ordering
+ * without holding the IPC handler.
+ */
+let stateSaveChain: Promise<void> = Promise.resolve();
+
+async function writeState(state: Persistable) {
   try {
+    /*
+     * The tag covers the clones and the stringify — the stretch that actually
+     * holds the loop. It clears before the disk await: an instrument that kept
+     * "state:save" set across the off-thread wait blamed the save for every
+     * unrelated stall in that window, and an instrument that leans toward the
+     * hypothesis it was built to test is worse than none. The stringify runs
+     * before the first await inside the write, so clearing on the next
+     * microtask leaves only genuinely-off-thread time untagged.
+     */
+    setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     const file = statePath();
     const sessions = Array.isArray(state.sessions) ? state.sessions.length : 0;
@@ -415,13 +443,19 @@ function writeState(state: Persistable) {
     }
     const now = Date.now();
     const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
-    writeVersionedState(
+    const pending = writeVersionedStateAsync(
       file,
       state,
       (snapshot) =>
         offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
       { rotateBackups },
     );
+    queueMicrotask(clearPerfCause);
+    await pending;
+    // The tail is save work too — the bookmark walk and jobEngine.sync run on
+    // the loop over every session. Untagged, a stall here reads "unknown" and
+    // the instrument grows a blind spot exactly where it used to over-blame.
+    setPerfCause("state:save");
     if (rotateBackups) lastStateBackupAt = now;
     const io = folderAccessIo();
     for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {
@@ -430,6 +464,8 @@ function writeState(state: Persistable) {
     jobEngine?.sync(state.sessions);
   } catch (error) {
     console.error("workhorse state save failed", error);
+  } finally {
+    clearPerfCause();
   }
 }
 
@@ -1061,7 +1097,12 @@ app.whenReady().then(async () => {
     return loaded;
   });
   ipcMain.handle("state:save", (_event, state: Persistable) => {
-    if (state && typeof state === "object") writeState(state);
+    if (!state || typeof state !== "object") return;
+    // The catch keeps the chain alive: writeState guards its own body, but a
+    // future edit that throws before its try would otherwise poison the chain
+    // and silently end every save after it.
+    stateSaveChain = stateSaveChain.then(() => writeState(state)).catch(() => {});
+    return stateSaveChain;
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;

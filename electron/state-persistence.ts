@@ -50,6 +50,76 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number, opt
   }
 }
 
+/**
+ * The disk half, and only the disk half. Serialization is the caller's —
+ * review found the stringify (52ms on a 28MB desk state) hiding inside the
+ * function sold as off-thread, which made the disk-half numbers read as the
+ * whole call's, and left the block outside the stall recorder's tagged window
+ * on rotate saves. Text in, bytes out, nothing on the loop but the syscalls'
+ * bookkeeping.
+ */
+export async function atomicWriteTextAsync(
+  file: string,
+  text: string,
+  mode?: number,
+  options?: { fsync?: boolean },
+): Promise<void> {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const handle = await fs.promises.open(temp, "wx", mode);
+  try {
+    await handle.writeFile(text, "utf8");
+    if (options?.fsync !== false) await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await fs.promises.rename(temp, file);
+  } catch (error) {
+    // Windows can refuse replacement renames. Same recovery dance as the sync
+    // path: keep the old file reachable until the new one is in place.
+    const displaced = `${file}.replace-${process.pid}`;
+    try {
+      if (fs.existsSync(file)) await fs.promises.rename(file, displaced);
+      await fs.promises.rename(temp, file);
+      try { await fs.promises.unlink(displaced); } catch { /* best effort */ }
+    } catch {
+      try { if (fs.existsSync(displaced) && !fs.existsSync(file)) await fs.promises.rename(displaced, file); } catch { /* best effort */ }
+      try { await fs.promises.unlink(temp); } catch { /* best effort */ }
+      throw error;
+    }
+  }
+}
+
+async function rotateFileBackupsAsync(file: string): Promise<void> {
+  const bak = `${file}.bak`;
+  const bak1 = `${file}.bak.1`;
+  const bak2 = `${file}.bak.2`;
+  try { await fs.promises.rm(bak2, { force: true }); } catch { /* missing */ }
+  try { await fs.promises.rename(bak1, bak2); } catch { /* missing */ }
+  try { await fs.promises.rename(bak, bak1); } catch { /* missing */ }
+  if (fs.existsSync(file)) {
+    try { await fs.promises.copyFile(file, bak); } catch { /* live file may be locked */ }
+  }
+}
+
+export async function writeVersionedStateAsync(
+  file: string,
+  state: PersistableState,
+  protect: (state: PersistableState) => PersistableState,
+  options: { rotateBackups?: boolean } = {},
+): Promise<PersistableState> {
+  const migrated = migrateState(state);
+  const protectedState = migrateState(protect(migrated));
+  // Serialize before the first await: everything that can hold the loop —
+  // clones above, stringify here — happens on the caller's tagged stretch,
+  // and what follows is genuinely off-thread.
+  const text = JSON.stringify(protectedState);
+  if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
+  await atomicWriteTextAsync(file, text, undefined, { fsync: options.rotateBackups !== false });
+  return protectedState;
+}
+
 function parseObject(file: string): PersistableState | null {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;

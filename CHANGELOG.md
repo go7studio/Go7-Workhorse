@@ -8,6 +8,17 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.40](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.39...v0.6.40) (2026-08-26)
+
+
+### Bug Fixes
+
+* drop idle worker CLIs and parse desk state once per Link request ([9e88028](https://github.com/go7studio/Go7-Workhorse/commit/9e880287c538e0bc1e6954b1c0b30b9b0907049a))
+* keep pictures and clones out of the hot state JSON ([28bbf17](https://github.com/go7studio/Go7-Workhorse/commit/28bbf17f55de83e98d211768b77108ae9aeefef3))
+* shrink desk state and stop idle workers holding RAM ([e1abc55](https://github.com/go7studio/Go7-Workhorse/commit/e1abc55d0bfc7feb325b82074cf6bc1b37c06f89))
+* the worktree sweep must not delete a worker's only copy ([#184](https://github.com/go7studio/Go7-Workhorse/issues/184)) ([8c52290](https://github.com/go7studio/Go7-Workhorse/commit/8c52290dda6cc274686877c2ad7afaed0edb5b6a))
+* verify a picture is on disk before dropping the only copy ([334285f](https://github.com/go7studio/Go7-Workhorse/commit/334285f21e46b4b4f3130dd440a8d6a531b6b2f0))
+
 ## [0.6.39](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.38...v0.6.39) (2026-08-25)
 
 

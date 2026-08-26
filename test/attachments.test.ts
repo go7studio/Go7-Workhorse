@@ -426,7 +426,12 @@ test("offloaded spawn attachments reach resize instead of being refused", async 
   class ProbeImage {
     onload: (() => void) | null = null;
     onerror: ((e?: unknown) => void) | null = null;
+    crossOrigin: string | null = null;
     set src(_value: string) {
+      // Round four found the load succeeding and the EXPORT throwing: without
+      // crossOrigin, a workhorse-media:// picture taints the canvas and
+      // toDataURL dies with SecurityError. Reaching the load is not enough.
+      if (this.crossOrigin !== "anonymous") throw new Error("PROBE: crossOrigin missing — canvas would taint");
       throw new Error("PROBE: image load reached");
     }
   }

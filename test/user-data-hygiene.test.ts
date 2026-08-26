@@ -234,6 +234,8 @@ test("pruneOrphanWorktrees destroys nothing when git cannot be run", () => {
     else process.env.GIT = realGit;
   }
   fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("attachment write temps older than a day are swept; fresh ones and blobs are not", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-hygiene-attach-"));
   try {

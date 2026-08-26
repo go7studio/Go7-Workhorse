@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { attachmentsDir, hydrateChatImage, hydrateChatImagesForHistory, offloadChatImage } from "../electron/attachment-store";
+import { attachmentsDir, hydrateChatImage, hydrateChatImagesForHistory, hydrateHistoryMessage, offloadChatImage } from "../electron/attachment-store";
 import type { ChatImage } from "../src/lib/types";
 
 const PIXELS = Buffer.from("the original picture bytes");
@@ -153,6 +153,34 @@ test("a history picture that will not load is dropped; the current turn still th
     assert.equal(Buffer.from(history[0].data ?? "", "base64").toString(), PIXELS.toString());
 
     assert.throws(() => hydrateChatImage(dead), /missing from disk/, "the current turn stays loud");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a history message that was only pictures never goes out empty", () => {
+  // Round four's residual: dropping every dead picture from an image-only turn
+  // sent empty user content, and some HTTP APIs refuse that with a 400 — so
+  // one dead blob still cost the chat, one layer later.
+  const root = tmp();
+  try {
+    const dead = offloadChatImage(shot(), root);
+    rmSync(dead.sourcePath!, { force: true });
+
+    const emptied = hydrateHistoryMessage({ text: "", images: [dead] });
+    assert.equal(emptied.images?.length, 0);
+    assert.equal(emptied.text, "An attached image is no longer available.", "words stand in for the lost picture");
+
+    // A message that still has words, or a surviving picture, keeps its own text.
+    const wordy = hydrateHistoryMessage({ text: "look at this", images: [dead] });
+    assert.equal(wordy.text, "look at this");
+    // Different bytes on purpose: the store is content-addressed, so a second
+    // picture with the SAME pixels would recreate the exact blob deleted above
+    // and quietly resurrect the "dead" one too.
+    const alive = offloadChatImage({ ...shot(), data: Buffer.from("different pixels").toString("base64") } as ChatImage, root);
+    const mixed = hydrateHistoryMessage({ text: "", images: [dead, alive] });
+    assert.equal(mixed.images?.length, 1);
+    assert.equal(mixed.text, "", "a surviving picture carries the turn");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

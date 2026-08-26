@@ -238,6 +238,22 @@ export function hydrateChatImagesForHistory(images: ChatImage[] | undefined): Ch
   return out;
 }
 
+/**
+ * A history message, its pictures hydrated leniently, never left empty.
+ *
+ * Dropping a dead picture keeps the chat alive — but a message that was ONLY
+ * pictures then goes to the vendor as empty user content, which some HTTP
+ * APIs refuse with a 400. The words stand in for what was lost, in the same
+ * voice the ACP manifest already uses for media it cannot send.
+ */
+export function hydrateHistoryMessage<T extends { text: string; images?: ChatImage[] }>(message: T): T {
+  if (!message.images?.length) return message;
+  const images = hydrateChatImagesForHistory(message.images);
+  if (images.length === message.images.length) return { ...message, images };
+  const text = message.text.trim() || (images.length === 0 ? "An attached image is no longer available." : message.text);
+  return { ...message, text, images };
+}
+
 export function hydrateChatImages(images: ChatImage[] | undefined): ChatImage[] {
   return (images ?? []).map(hydrateChatImage);
 }

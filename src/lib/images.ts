@@ -240,6 +240,12 @@ export function modelImagePayloadBytes(images: ChatImage[]): number {
 function loadImage(image: ChatImage): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const element = new Image();
+    // An offloaded picture loads from workhorse-media:// on a file:// page.
+    // Without this the load succeeds and the canvas is tainted, so
+    // toDataURL throws SecurityError at export — the spawn still died, one
+    // step later than before. Verified in the desk's own Electron wiring:
+    // the same URL with crossOrigin set exports clean.
+    element.crossOrigin = "anonymous";
     element.onload = () => resolve(element);
     element.onerror = () => reject(new Error(`Could not resize ${image.name}`));
     element.src = imageSrc(image);

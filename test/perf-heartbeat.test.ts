@@ -12,6 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   appendHeartbeatEntry,
+  causeForGap,
   clearPerfCause,
   heartbeatGap,
   perfTraceEnabled,
@@ -79,4 +80,52 @@ test("a running heartbeat records a real block with its cause", async () => {
     clearPerfCause();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("blame starts when the tick was due, not when the last one ran", async () => {
+  /*
+   * The two-word fix this file exists to hold. causeForGap was handed lastAt
+   * instead of the due time, and the extra 50ms let a cause that set and
+   * cleared BEFORE the stall began take full blame for it. The final verify
+   * proved the buggy algebra passes every other test in this file identically
+   * — so this one drives the recorder end to end through both cases and pins
+   * the boundary itself.
+   */
+  const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-perf-blame."));
+  const stop = startPerfHeartbeat(root, { intervalMs: 25, thresholdMs: 60 });
+  try {
+    // An innocent cause, set and cleared before the next tick is due...
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    setPerfCause("state:read");
+    clearPerfCause();
+    // ...then an untagged block that starves that tick.
+    const until = Date.now() + 90;
+    while (Date.now() < until) {
+      /* untagged stall */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const rows = readFileSync(perfTracePath(root), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const stall = rows.filter((row) => row.gapMs >= 60);
+    assert.ok(stall.length > 0, "the untagged block was recorded");
+    assert.ok(
+      stall.every((row) => row.cause !== "state:read"),
+      `an innocent cause that finished before the stall began must not be blamed: ${JSON.stringify(stall)}`,
+    );
+  } finally {
+    stop();
+    clearPerfCause();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("causeForGap: cleared before the due time is unknown; alive at the due time is named", () => {
+  clearPerfCause();
+  setPerfCause("state:read");
+  clearPerfCause();
+  const clearedAt = Date.now();
+  assert.equal(causeForGap(clearedAt + 10), "unknown", "a cause that ended before the window is not the cause");
+  assert.equal(causeForGap(clearedAt - 10), "state:read", "a cause alive inside the window is named");
+  setPerfCause("state:save");
+  assert.equal(causeForGap(Date.now() + 1000), "state:save", "a cause still set always wins");
+  clearPerfCause();
 });

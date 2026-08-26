@@ -63,7 +63,10 @@ it. Two independent reviews traced the felt stall to the save pipeline and
 named this recorder as the first thing to build; the save's disk half now runs
 off-thread (`writeVersionedStateAsync`), and whether the remaining
 clone-and-stringify half justifies incremental persistence is a question the
-trace answers, not a guess.
+trace answers, not a guess. One reading rule: a cause word means that work
+held the loop somewhere inside the gap's window, not that it caused the whole
+gap — a tagged region overlapping the window's edge takes full blame, so treat
+a single surprising row as a hint and a repeated one as evidence.
 
 ## On file size
 

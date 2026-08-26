@@ -14,6 +14,11 @@ import path from "node:path";
  * The trace is timings only — a timestamp, a gap, a one-word cause. Never
  * content, never titles, never paths. It lives under userData/perf/ beside the
  * desk's other private files and rotates at 1 MB so it cannot grow unbounded.
+ *
+ * Read a cause as "held the loop inside this gap's window", not proof. A
+ * tagged region that merely overlaps the window's trailing edge takes the
+ * whole gap's blame — review measured the fix cutting false blame about 4x,
+ * not to zero — so one surprising row is a hint, and a pattern is evidence.
  */
 
 export type HeartbeatEntry = { t: number; gapMs: number; cause: string };

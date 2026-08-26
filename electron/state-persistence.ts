@@ -51,31 +51,12 @@ export function atomicWriteJson(file: string, value: unknown, mode?: number, opt
 }
 
 /**
- * The same atomic write, without holding the main process for the disk.
- *
- * atomicWriteJson is correct and stays for boot-path callers, but its
- * writeFileSync + fsyncSync run on the thread that brokers every IPC message —
- * measured at ~40ms of the ~120ms save block on a real desk, a third of the
- * stall, and it is disk, not CPU. fs.promises does the same open-exclusive,
- * write, fsync, rename sequence on the libuv pool; the rename is still atomic
- * and the crash story is unchanged.
- */
-export async function atomicWriteJsonAsync(
-  file: string,
-  value: unknown,
-  mode?: number,
-  options?: { fsync?: boolean },
-): Promise<void> {
-  return atomicWriteTextAsync(file, JSON.stringify(value), mode, options);
-}
-
-/**
  * The disk half, and only the disk half. Serialization is the caller's —
- * review measured the stringify at 16-29ms on a real-size state and found it
- * hiding inside the function sold as off-thread, which made the disk-half
- * numbers read as the whole call's, and left the block outside the stall
- * recorder's tagged window on rotate saves. Text in, bytes out, nothing on
- * the loop but the syscalls' bookkeeping.
+ * review found the stringify (52ms on a 28MB desk state) hiding inside the
+ * function sold as off-thread, which made the disk-half numbers read as the
+ * whole call's, and left the block outside the stall recorder's tagged window
+ * on rotate saves. Text in, bytes out, nothing on the loop but the syscalls'
+ * bookkeeping.
  */
 export async function atomicWriteTextAsync(
   file: string,

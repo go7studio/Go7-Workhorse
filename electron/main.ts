@@ -452,6 +452,10 @@ async function writeState(state: Persistable) {
     );
     queueMicrotask(clearPerfCause);
     await pending;
+    // The tail is save work too — the bookmark walk and jobEngine.sync run on
+    // the loop over every session. Untagged, a stall here reads "unknown" and
+    // the instrument grows a blind spot exactly where it used to over-blame.
+    setPerfCause("state:save");
     if (rotateBackups) lastStateBackupAt = now;
     const io = folderAccessIo();
     for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {

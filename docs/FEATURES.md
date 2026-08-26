@@ -110,8 +110,11 @@ the user can add a Grok Bot without its webhook, hide the guide,
 and return later from LLMs. Its installed command lists only valid pending
 requests and atomically accepts one matching reply, so a routine cannot write
 an arbitrary inbox path or replace a different answer. See the
-[Grok Bot guide](GROK-BOT.md). It is not a
-fifth stock vendor.
+[Grok Bot guide](GROK-BOT.md). Grok Bot is a cloud computer harness: like
+OpenClaw and Hermes it carries its own agents, and unlike them its agents
+live and work on Grok Bot's own remote computer and it carries its own
+usage — its own ring, from its own exporter. Grok over ACP stays a
+separate vendor and login.
 
 ## Files you can hand a chat
 

@@ -153,7 +153,8 @@ test("the desk save path is the async write, chained", () => {
   // Shape pin: reverting state:save to the synchronous write restores a
   // ~120ms main-process block per save that no unit test can feel.
   const main = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "electron", "main.ts"), "utf8");
-  assert.match(main, /await writeVersionedStateAsync\(/, "the save must not hold the main thread for the disk");
-  assert.match(main, /stateSaveChain = stateSaveChain\.then\(\(\) => writeState\(state\)\)/, "overlapping saves must serialize");
+  assert.match(main, /writeVersionedStateAsync\(/, "the save must not hold the main thread for the disk");
+  assert.match(main, /stateSaveChain = stateSaveChain\.then\(\(\) => writeState\(state\)\)\.catch\(/, "overlapping saves must serialize, and a rejection must not end all future saves");
   assert.match(main, /setPerfCause\("state:save"\)/, "a recorded stall must name the save");
+  assert.match(main, /queueMicrotask\(clearPerfCause\)/, "the tag must clear at the first await, or the instrument blames the save for every stall during the off-thread wait");
 });

@@ -66,11 +66,28 @@ export async function atomicWriteJsonAsync(
   mode?: number,
   options?: { fsync?: boolean },
 ): Promise<void> {
+  return atomicWriteTextAsync(file, JSON.stringify(value), mode, options);
+}
+
+/**
+ * The disk half, and only the disk half. Serialization is the caller's —
+ * review measured the stringify at 16-29ms on a real-size state and found it
+ * hiding inside the function sold as off-thread, which made the disk-half
+ * numbers read as the whole call's, and left the block outside the stall
+ * recorder's tagged window on rotate saves. Text in, bytes out, nothing on
+ * the loop but the syscalls' bookkeeping.
+ */
+export async function atomicWriteTextAsync(
+  file: string,
+  text: string,
+  mode?: number,
+  options?: { fsync?: boolean },
+): Promise<void> {
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const handle = await fs.promises.open(temp, "wx", mode);
   try {
-    await handle.writeFile(JSON.stringify(value), "utf8");
+    await handle.writeFile(text, "utf8");
     if (options?.fsync !== false) await handle.sync();
   } finally {
     await handle.close();
@@ -113,8 +130,12 @@ export async function writeVersionedStateAsync(
 ): Promise<PersistableState> {
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
+  // Serialize before the first await: everything that can hold the loop —
+  // clones above, stringify here — happens on the caller's tagged stretch,
+  // and what follows is genuinely off-thread.
+  const text = JSON.stringify(protectedState);
   if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
-  await atomicWriteJsonAsync(file, protectedState, undefined, { fsync: options.rotateBackups !== false });
+  await atomicWriteTextAsync(file, text, undefined, { fsync: options.rotateBackups !== false });
   return protectedState;
 }
 

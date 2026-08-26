@@ -413,6 +413,15 @@ let stateSaveChain: Promise<void> = Promise.resolve();
 
 async function writeState(state: Persistable) {
   try {
+    /*
+     * The tag covers the clones and the stringify — the stretch that actually
+     * holds the loop. It clears before the disk await: an instrument that kept
+     * "state:save" set across the off-thread wait blamed the save for every
+     * unrelated stall in that window, and an instrument that leans toward the
+     * hypothesis it was built to test is worse than none. The stringify runs
+     * before the first await inside the write, so clearing on the next
+     * microtask leaves only genuinely-off-thread time untagged.
+     */
     setPerfCause("state:save");
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     const file = statePath();
@@ -434,13 +443,15 @@ async function writeState(state: Persistable) {
     }
     const now = Date.now();
     const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
-    await writeVersionedStateAsync(
+    const pending = writeVersionedStateAsync(
       file,
       state,
       (snapshot) =>
         offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
       { rotateBackups },
     );
+    queueMicrotask(clearPerfCause);
+    await pending;
     if (rotateBackups) lastStateBackupAt = now;
     const io = folderAccessIo();
     for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {
@@ -1083,7 +1094,10 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
-    stateSaveChain = stateSaveChain.then(() => writeState(state));
+    // The catch keeps the chain alive: writeState guards its own body, but a
+    // future edit that throws before its try would otherwise poison the chain
+    // and silently end every save after it.
+    stateSaveChain = stateSaveChain.then(() => writeState(state)).catch(() => {});
     return stateSaveChain;
   });
   ipcMain.handle("state:save-drafts", (_event, drafts: unknown) => {

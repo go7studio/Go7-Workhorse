@@ -93,7 +93,12 @@ export function startPerfHeartbeat(
     const gapMs = heartbeatGap(lastAt, now, intervalMs);
     lastAt = now;
     if (gapMs >= thresholdMs) {
-      appendHeartbeatEntry(file, { t: now, gapMs, cause: causeForGap(now - gapMs - intervalMs) });
+      // now - gapMs is when the tick was DUE — the true start of the stall.
+      // Subtracting the interval as well widened the judged window to lastAt,
+      // and a cause that set and cleared in that leading 50ms — before the
+      // stall began — took full blame for it. Review proved the misattribution
+      // with an innocent state:read blamed for an untagged block after it.
+      appendHeartbeatEntry(file, { t: now, gapMs, cause: causeForGap(now - gapMs) });
     }
   }, intervalMs);
   timer.unref?.();

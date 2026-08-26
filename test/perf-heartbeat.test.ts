@@ -67,9 +67,13 @@ test("a running heartbeat records a real block with its cause", async () => {
     clearPerfCause();
     await new Promise((resolve) => setTimeout(resolve, 30));
     const rows = readFileSync(perfTracePath(root), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    const stall = rows.find((row) => row.gapMs >= 40);
-    assert.ok(stall, "the held loop was recorded");
-    assert.equal(stall.cause, "state:save", "the gap names what held it");
+    // Gap AND cause together: on a loaded runner the settling sleep can itself
+    // stall past the threshold as "unknown", and picking the first row over
+    // the threshold made that innocent row fail the test.
+    assert.ok(
+      rows.some((row) => row.gapMs >= 40 && row.cause === "state:save"),
+      "the held loop was recorded and names what held it",
+    );
   } finally {
     stop();
     clearPerfCause();

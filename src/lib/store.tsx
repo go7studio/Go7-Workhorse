@@ -106,6 +106,7 @@ import {
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
+import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
 import {
   applyUpdateStockBot,
@@ -1724,6 +1725,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isWorkhorseGoalControl(originalText, liveSession.goal)
     ) ? parseGoalInput(originalText) : null;
     let vendorText = prep.vendorText;
+    // Vendor slash commands must remain the first bytes of the prompt. The
+    // radar is for natural language; explicit commands already chose a route.
+    if (!originalText.startsWith("/")) {
+      vendorText = withSkillDiscoveryHint(vendorText, originalText, deskSkillsRef.current);
+    }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
       : planHaltForward({

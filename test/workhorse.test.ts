@@ -6584,6 +6584,8 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   const storeSend = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(storeSend, /commandContinuesToVendor\(match\.run\)/);
   assert.match(storeSend, /prepareVendorSend\(/);
+  assert.match(storeSend, /if \(!originalText\.startsWith\("\/"\)\)/);
+  assert.match(storeSend, /withSkillDiscoveryHint\(vendorText, originalText, deskSkillsRef\.current\)/);
   assert.match(storeSend, /nextGoalForSend\(/);
   assert.doesNotMatch(storeSend, /vendorText = goalVendorPrompt/);
   assert.doesNotMatch(storeSend, /hideUser = true/);

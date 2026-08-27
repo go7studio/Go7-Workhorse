@@ -350,12 +350,12 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_list_skills",
-    description: "List desk skills from Grok, Codex, Claude, and Workhorse.",
-    input_schema: { type: "object", properties: { origin: { type: "string" } } },
+    description: "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse. Call proactively when the request or Workhorse skill radar resembles an installed workflow, even if the user did not name it.",
+    input_schema: { type: "object", properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, cursor, or workhorse" } } },
   },
   {
     name: "workhorse_read_skill",
-    description: "Read one SKILL.md by name or origin:name.",
+    description: "Read one matching SKILL.md by name or origin:name before acting.",
     input_schema: { type: "object", properties: { skill: { type: "string" } }, required: ["skill"] },
   },
 ];

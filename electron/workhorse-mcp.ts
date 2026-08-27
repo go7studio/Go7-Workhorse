@@ -844,17 +844,17 @@ const TOOLS = [
   {
     name: "workhorse_list_skills",
     description:
-      "List desk skills from Grok, Codex, Claude, and Workhorse (name, origin, description). Call this before reading a skill. Skills are instruction folders — reading one does not run its scripts.",
+      "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse (name, origin, description). Call this proactively when a request or Workhorse skill-radar hint resembles an installed workflow, even if the user did not name a skill. Skills are instruction folders — reading one does not run its scripts.",
     inputSchema: {
       type: "object",
-      properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, or workhorse" } },
+      properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, cursor, or workhorse" } },
       additionalProperties: false,
     },
   },
   {
     name: "workhorse_read_skill",
     description:
-      "Read one SKILL.md by name (or origin:name). Returns instructions only. If the skill needs files or shell, say so — a custom HTTP bot cannot run those scripts.",
+      "Read one SKILL.md by name (or origin:name) before acting on a genuine match from the skill list or Workhorse skill radar. Returns instructions only. If the skill needs files or shell, say so — a custom HTTP bot cannot run those scripts.",
     inputSchema: {
       type: "object",
       properties: { skill: { type: "string", description: "Skill name, or grok:pdf" } },

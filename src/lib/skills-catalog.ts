@@ -78,15 +78,32 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
   const block = match[1];
-  const name = block.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
-  const description = block
-    .match(/^description:\s*[>|]?\s*(.+)$/m)?.[1]
-    ?.trim()
-    .replace(/^["']|["']$/g, "");
+  const name = frontmatterText(block, "name");
+  const description = frontmatterText(block, "description");
   return {
     ...(name ? { name } : {}),
     ...(description ? { description } : {}),
   };
+}
+
+function frontmatterText(block: string, key: string): string | undefined {
+  const lines = block.split(/\r?\n/);
+  const at = lines.findIndex((line) => new RegExp(`^${key}:\\s*`).test(line));
+  if (at < 0) return undefined;
+  let value = lines[at].replace(new RegExp(`^${key}:\\s*`), "").trim();
+  const multiline = value === "" || value === ">" || value === "|";
+  if (multiline) {
+    const continuation: string[] = [];
+    for (const line of lines.slice(at + 1)) {
+      if (line.trim() && !/^\s/.test(line)) break;
+      if (line.trim()) continuation.push(line.trim());
+    }
+    value = continuation.join(" ");
+  } else if (/^[>|]\s+/.test(value)) {
+    value = value.slice(1).trim();
+  }
+  const quoted = value.match(/^(["'])([\s\S]*)\1$/);
+  return (quoted?.[2] ?? value).trim() || undefined;
 }
 
 export function catalogSkills(

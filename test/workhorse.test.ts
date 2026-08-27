@@ -3436,10 +3436,12 @@ test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () =
       secondary_window: { used_percent: 41, limit_window_seconds: 604_800, reset_at: 1787202379 },
     },
   });
-  assert.equal(chatgptWeekly?.usedPercent, 1);
-  assert.equal(chatgptWeekly?.leftPercent, 99);
+  assert.equal(chatgptWeekly?.usedPercent, 41);
+  assert.equal(chatgptWeekly?.leftPercent, 59);
   assert.equal(chatgptWeekly?.period, "weekly");
   assert.ok(chatgptWeekly?.resetsAt);
+  assert.equal(chatgptWeekly?.products[0]?.product, "five_hour");
+  assert.equal(chatgptWeekly?.products[1]?.product, "weekly");
 
   const activePlus = parseCodexPlanUsage({
     plan_type: "plus",
@@ -3457,6 +3459,7 @@ test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () =
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(pane, /leftoverForCard/);
+  assert.match(pane, /showCodexLeftover/);
   assert.match(pane, /\$\{planName\} ·/);
   assert.match(store, /codexPlanUsage/);
   assert.match(store, /refreshCodexPlan/);
@@ -5445,7 +5448,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(pane, /usage-limits/);
   assert.match(pane, /claudeWindowTabs/);
   assert.match(pane, /setClaudeWindow/);
-  assert.match(pane, /% used/);
+  assert.match(pane, /showCodexLeftover \? "left" : "used"/);
   assert.match(pane, /Unlimited/);
   assert.match(pane, /ContextMeter/);
   assert.match(pane, /referenceOnly/);

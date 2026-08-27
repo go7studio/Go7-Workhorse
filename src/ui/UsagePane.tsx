@@ -459,9 +459,15 @@ export function UsagePane({
       ? settings.customBots.find((bot) => `bot:${bot.id}` === focused.focus)
       : undefined;
   const weeklyUnlimited = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
-  const usedFact = windowPick?.unlimited
+  const showCodexLeftover = focused?.provider === "codex";
+  const selectedUsagePercent =
+    windowPick?.usagePercent ??
+    (focused?.provider === "claude"
+      ? (claudePick?.usagePercent ?? plan?.usedPercent ?? 0)
+      : (plan?.usedPercent ?? 0));
+  const allowanceFact = windowPick?.unlimited
     ? "∞"
-    : `${Math.round(windowPick?.usagePercent ?? (focused?.provider === "claude" ? (claudePick?.usagePercent ?? plan?.usedPercent ?? 0) : plan?.usedPercent ?? 0))}%`;
+    : `${Math.round(showCodexLeftover ? Math.max(0, 100 - selectedUsagePercent) : selectedUsagePercent)}%`;
   const planCopyBase = plan
     ? weeklyUnlimited
       ? windowPick && !windowPick.unlimited && windowPick.resetsAt
@@ -607,29 +613,34 @@ export function UsagePane({
                   ))}
                 </div>
               ) : null}
-              {timeWindows.map((item) => (
-                <button
-                  key={item.product}
-                  className={`usage-limit${windowPick?.product === item.product ? " on" : ""}${item.unlimited ? " unlimited" : ""}`}
-                  type="button"
-                  onClick={() => setClaudeWindow(item.product)}
-                >
-                  <div className="usage-limit-top">
-                    <strong>{item.label}</strong>
-                    <em>{item.unlimited ? "Unlimited" : `${Math.round(item.usagePercent)}% used`}</em>
-                  </div>
-                  <div className="usage-split-track wide">
-                    <i
-                      className={focused.provider}
-                      style={{
-                        width: item.unlimited ? "100%" : `${Math.max(3, Math.round(item.usagePercent))}%`,
-                        ...(focused.color ? { background: focused.color } : {}),
-                      }}
-                    />
-                  </div>
-                  {item.unlimited ? <span>No weekly cap on this seat</span> : item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
-                </button>
-              ))}
+              {timeWindows.map((item) => {
+                const displayPercent = showCodexLeftover
+                  ? Math.max(0, 100 - item.usagePercent)
+                  : item.usagePercent;
+                return (
+                  <button
+                    key={item.product}
+                    className={`usage-limit${windowPick?.product === item.product ? " on" : ""}${item.unlimited ? " unlimited" : ""}`}
+                    type="button"
+                    onClick={() => setClaudeWindow(item.product)}
+                  >
+                    <div className="usage-limit-top">
+                      <strong>{item.label}</strong>
+                      <em>{item.unlimited ? "Unlimited" : `${Math.round(displayPercent)}% ${showCodexLeftover ? "left" : "used"}`}</em>
+                    </div>
+                    <div className="usage-split-track wide">
+                      <i
+                        className={focused.provider}
+                        style={{
+                          width: item.unlimited ? "100%" : `${Math.max(3, Math.round(displayPercent))}%`,
+                          ...(focused.color ? { background: focused.color } : {}),
+                        }}
+                      />
+                    </div>
+                    {item.unlimited ? <span>No weekly cap on this seat</span> : item.resetsAt ? <span>{formatPlanReset(item.resetsAt)}</span> : null}
+                  </button>
+                );
+              })}
               {planCopy ? (
                 <div className="usage-limits-foot">
                   <p className="usage-limit-note">{planCopy}</p>
@@ -676,9 +687,9 @@ export function UsagePane({
               <strong>{focusFacts?.apiTraffic ?? "-"}</strong>
             </div>
             <div className="usage-fact">
-              <span>{plan ? "Used" : "Cost"}</span>
+              <span>{plan ? (showCodexLeftover ? "Left" : "Used") : "Cost"}</span>
               <strong>
-                {plan ? usedFact : formatCost(focused)}
+                {plan ? allowanceFact : formatCost(focused)}
               </strong>
             </div>
             <div className="usage-fact">

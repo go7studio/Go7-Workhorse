@@ -109,19 +109,32 @@ export function parseCodexPlanUsage(raw: unknown): CodexPlanUsage | undefined {
   const windows = [
     readWindow(rate.primary_window ?? rate.primary ?? root.primary_window ?? root.primary, "primary", "5h"),
     readWindow(rate.secondary_window ?? rate.secondary ?? root.secondary_window ?? root.secondary, "weekly", "Weekly"),
-  ].filter((item): item is CodexWindow => Boolean(item));
+  ]
+    .filter((item): item is CodexWindow => Boolean(item))
+    .map((item) => ({
+      ...item,
+      // Codex currently calls the rolling five-hour limit `primary` and the
+      // plan allowance `secondary`. Preserve older one-window responses by
+      // deriving the meaning from the duration instead of the API field name.
+      product:
+        item.windowSeconds >= WEEK_SECONDS
+          ? "weekly"
+          : item.windowSeconds > 0
+            ? "five_hour"
+            : item.product,
+    }));
   const fallback = readWindow(root, "primary", "5h");
-  if (fallback && !windows.some((item) => item.product === "primary")) windows.unshift(fallback);
-  const primary = windows.find((item) => item.product === "primary") ?? windows[0];
-  if (!primary) return undefined;
+  if (fallback && windows.length === 0) windows.unshift(fallback);
   const weekly = windows.find((item) => item.windowSeconds >= WEEK_SECONDS);
+  const governing = weekly ?? windows[0];
+  if (!governing) return undefined;
   const credits = asRecord(root.credits);
   const balance = numberVal(credits.balance);
   return {
-    usedPercent: primary.usedPercent,
-    leftPercent: Math.max(0, 100 - primary.usedPercent),
-    period: weekly ? "weekly" : periodFromWindow(primary.windowSeconds),
-    resetsAt: weekly?.resetsAt ?? primary.resetsAt ?? resetOf(root),
+    usedPercent: governing.usedPercent,
+    leftPercent: Math.max(0, 100 - governing.usedPercent),
+    period: weekly ? "weekly" : periodFromWindow(governing.windowSeconds),
+    resetsAt: governing.resetsAt ?? resetOf(root),
     prepaidBalance: Number.isFinite(balance) ? balance : 0,
     products: windows.map((item) => ({
       product: item.product,

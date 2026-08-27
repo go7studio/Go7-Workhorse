@@ -119,10 +119,15 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
 };
 
-const CURSOR_RETIRED_MODEL_ALIASES: Record<string, string> = {
+const CURSOR_MODEL_ALIASES: Record<string, string> = {
   "auto-smart": "auto",
   "grok-4.6": "cursor-grok-4.6-high",
   "grok-4.5": "cursor-grok-4.5-high",
+  // The picker stores collapsed family ids. On a just-opened desk the main
+  // process may launch before `cursor-agent models` has populated its variant
+  // cache, so these must still resolve to slugs Cursor accepts on their own.
+  "cursor-grok-4.6": "cursor-grok-4.6-high",
+  "cursor-grok-4.5": "cursor-grok-4.5-high",
 };
 
 const GROK_RETIRED_MODEL_ALIASES: Record<string, string> = {
@@ -135,7 +140,7 @@ const GROK_RETIRED_MODEL_ALIASES: Record<string, string> = {
 export function normalizeModelId(provider: ProviderId, modelId: string): string {
   const id = modelId.trim();
   if (provider === "grok") return GROK_RETIRED_MODEL_ALIASES[id.toLowerCase()] ?? id;
-  if (provider === "cursor") return CURSOR_RETIRED_MODEL_ALIASES[id.toLowerCase()] ?? id;
+  if (provider === "cursor") return CURSOR_MODEL_ALIASES[id.toLowerCase()] ?? id;
   return id;
 }
 

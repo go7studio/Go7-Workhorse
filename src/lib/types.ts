@@ -324,6 +324,10 @@ export type AgentRun = {
   lifetimeUsedTokens?: number;
   /** Fresh input at the first meter this slice. Later input growth is new work. */
   budgetBaseline?: number;
+  /** Output summed across this slice's turns. Per-turn, so it accumulates. */
+  outputTokensTotal?: number;
+  /** Cached reads summed across this slice's turns. Discounted, never free. */
+  cacheTokensTotal?: number;
   budgetPhase?: BudgetPhase;
   budgetWarnedAt?: number;
   budgetHandoffAt?: number;

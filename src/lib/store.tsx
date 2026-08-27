@@ -6065,6 +6065,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...session.agentRun,
                   usedTokens: next.usedTokens,
                   budgetBaseline: next.budgetBaseline,
+                  outputTokensTotal: next.outputTokensTotal,
+                  cacheTokensTotal: next.cacheTokensTotal,
                   ...(next.budgetPhase ? { budgetPhase: next.budgetPhase } : {}),
                   ...(next.budgetWarnedAt ? { budgetWarnedAt: next.budgetWarnedAt } : {}),
                   ...(next.budgetHandoffAt ? { budgetHandoffAt: next.budgetHandoffAt } : {}),

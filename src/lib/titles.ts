@@ -7,6 +7,8 @@ const TITLE_MAX_CHARS = 48;
 const TITLE_MAX_WORDS = 8;
 const PING_TITLE = "Availability check";
 
+const WORKHORSE_INSTRUCTION_TITLE = /^(?:workhorse\s+(?:desk|skill radar|private operating context|task)\b|you are (?:inside|a worker (?:on|inside)|an auditor (?:on|inside)|the cursor agent inside) workhorse\b|this workhorse (?:workspace|chat)\b|this chat['’]s (?:immutable workhorse|live desk limits)\b)/i;
+
 const TASK_HINT =
   /\b(fix|implement|build|refactor|debug|write|code|login|error|file|project|function|component|bug|game|access|redirect|settings|webhook|sidebar|title)\b/;
 
@@ -16,6 +18,11 @@ export function foldedTitle(title: string | undefined): string {
 
 export function isGenericVendorTitle(title: string | undefined): boolean {
   return GENERIC_VENDOR_TITLES.has(foldedTitle(title));
+}
+
+/** Vendor title generators sometimes summarize Workhorse's injected preface. */
+export function isWorkhorseInstructionTitle(title: string | undefined): boolean {
+  return WORKHORSE_INSTRUCTION_TITLE.test(cleanTitle(title ?? ""));
 }
 
 export function isDefaultTitle(title: string | undefined): boolean {
@@ -157,12 +164,16 @@ export function titleNeedsUpgrade(session: Pick<Session, "title" | "titleLocked"
   if (isDefaultTitle(session.title)) return true;
   const first = firstUserText(session);
   if (!first) return false;
+  if (isWorkhorseInstructionTitle(session.title)) return true;
   return looksLikePromptSlice(session.title, first) || looksLikeIntentTitle(session.title, first);
 }
 
 /** A vendor may name an initial placeholder once; later metadata cannot retitle a live task. */
-export function titleAcceptsVendor(session: Pick<Session, "title" | "titleLocked" | "messages">): boolean {
-  return titleNeedsUpgrade(session);
+export function titleAcceptsVendor(
+  session: Pick<Session, "title" | "titleLocked" | "messages">,
+  proposed?: string,
+): boolean {
+  return !isWorkhorseInstructionTitle(proposed) && titleNeedsUpgrade(session);
 }
 
 export function applyAutoTitle(current: string, next: string | undefined, locked?: boolean): string | undefined {

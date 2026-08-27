@@ -8,6 +8,7 @@ import { exportVendorBundle, importSkillFromPath, listDeskSkills, pushSkillToVen
 import { chatExportFiles, defaultExportRoot, sessionToMarkdown, slugTitle } from "../src/lib/desk-export";
 import { commandsForSession } from "../src/lib/commands";
 import { catalogSkills, filterDeskSkills, findDeskSkill, parseSkillFrontmatter, resolveRequestedSkills, sameDeskSkills, skillBodyFromMarkdown, skillHomes } from "../src/lib/skills-catalog";
+import { suggestDeskSkills, withSkillDiscoveryHint } from "../src/lib/skill-suggestions";
 import { deleteDeskSkill } from "../electron/desk-export-host";
 import { isSettingsSection } from "../src/lib/settings";
 import type { Session } from "../src/lib/types";
@@ -36,6 +37,89 @@ test("spawn skill requests distinguish installed skills from free-form capabilit
   const result = resolveRequestedSkills(catalog, ["codex:play-release", "Godot Android billing", "play-release"]);
   assert.deepEqual(result.resolved.map((skill) => `${skill.origin}:${skill.name}`), ["codex:play-release"]);
   assert.deepEqual(result.unresolved, ["Godot Android billing"]);
+});
+
+test("skill radar recognizes natural intent without requiring a slash command", () => {
+  const catalog = [
+    {
+      name: "unity-ui-to-figma",
+      description: "Extract and reconstruct Unity game UI in Figma while preserving layout fidelity",
+      origin: "workhorse" as const,
+      dir: "/skills/unity-ui-to-figma",
+      skillFile: "/skills/unity-ui-to-figma/SKILL.md",
+    },
+    {
+      name: "send-taildrop",
+      description: "Transfer local files to another Tailscale device with Taildrop",
+      origin: "codex" as const,
+      dir: "/skills/send-taildrop",
+      skillFile: "/skills/send-taildrop/SKILL.md",
+    },
+  ];
+  const matches = suggestDeskSkills(catalog, "Please reconstruct this Unity HUD in Figma and preserve its layout");
+  assert.deepEqual(matches.map((skill) => `${skill.origin}:${skill.name}`), ["workhorse:unity-ui-to-figma"]);
+});
+
+test("skill radar recognizes compound names and collapses duplicate vendor copies", () => {
+  const skill = (origin: "workhorse" | "codex", name: string, description: string) => ({
+    name,
+    description,
+    origin,
+    dir: `/skills/${origin}/${name}`,
+    skillFile: `/skills/${origin}/${name}/SKILL.md`,
+  });
+  const catalog = [
+    skill("codex", "imagegen", "Generate or edit raster images and illustrations"),
+    skill("codex", "unity-ui-to-figma", "Reconstruct Unity UI in Figma"),
+    skill("workhorse", "unity-ui-to-figma", "Reconstruct Unity UI in Figma"),
+  ];
+  assert.deepEqual(
+    suggestDeskSkills(catalog, "Create an image of a horse").map((item) => `${item.origin}:${item.name}`),
+    ["codex:imagegen"],
+  );
+  assert.deepEqual(
+    suggestDeskSkills(catalog, "Move this Unity UI into Figma").map((item) => `${item.origin}:${item.name}`),
+    ["workhorse:unity-ui-to-figma"],
+  );
+  assert.deepEqual(
+    suggestDeskSkills(catalog, "Use codex:unity-ui-to-figma for this Unity UI").map((item) => `${item.origin}:${item.name}`),
+    ["codex:unity-ui-to-figma"],
+  );
+});
+
+test("skill radar is quiet for generic conversation and preserves explicit skill prompts", () => {
+  const catalog = [
+    {
+      name: "documents",
+      description: "Create and edit polished document files",
+      origin: "codex" as const,
+      dir: "/skills/documents",
+      skillFile: "/skills/documents/SKILL.md",
+    },
+  ];
+  assert.deepEqual(suggestDeskSkills(catalog, "Thanks, that looks good to me"), []);
+  assert.equal(withSkillDiscoveryHint("Thanks, that looks good to me", "Thanks, that looks good to me", catalog), "Thanks, that looks good to me");
+  const explicit = 'Use the installed skill "documents". Follow its SKILL.md exactly.\n\nCreate a report';
+  assert.equal(withSkillDiscoveryHint(explicit, "/documents Create a report", catalog), explicit);
+});
+
+test("skill radar gives the agent exact identities and keeps the user request intact", () => {
+  const catalog = [
+    {
+      name: "send-taildrop",
+      description: "Transfer local files to another Tailscale device with Taildrop",
+      origin: "workhorse" as const,
+      dir: "/skills/send-taildrop",
+      skillFile: "/skills/send-taildrop/SKILL.md",
+    },
+  ];
+  const prompt = "Send this APK to my Tailscale phone using Taildrop";
+  const hinted = withSkillDiscoveryHint(prompt, prompt, catalog);
+  assert.match(hinted, /private context; do not quote this block/);
+  assert.match(hinted, /workhorse:send-taildrop/);
+  assert.match(hinted, /workhorse_list_skills/);
+  assert.match(hinted, /workhorse_read_skill/);
+  assert.ok(hinted.endsWith(prompt));
 });
 
 function sampleSession(partial: Partial<Session> = {}): Session {
@@ -102,6 +186,13 @@ test("skill catalog labels Grok Codex Claude and Workhorse", () => {
   const meta = parseSkillFrontmatter("---\nname: pdf\ndescription: Make PDFs\n---\nbody");
   assert.equal(meta.name, "pdf");
   assert.equal(meta.description, "Make PDFs");
+  assert.deepEqual(
+    parseSkillFrontmatter("---\nname: imagegen\ndescription: >\n  Generate raster images from natural prompts.\n  Edit supplied artwork while preserving intent.\nlicense: MIT\n---\nbody"),
+    {
+      name: "imagegen",
+      description: "Generate raster images from natural prompts. Edit supplied artwork while preserving intent.",
+    },
+  );
   const rows = catalogSkills({ homedir: home });
   assert.deepEqual(
     rows.map((row) => `${row.origin}:${row.name}`),

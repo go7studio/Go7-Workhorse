@@ -187,6 +187,7 @@ export function composeVendorPrompt(
   preface: string | undefined,
   opened: "session/new" | "session/load",
   limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole; crewMode?: CrewMode | CrewMode[] },
+  visibleText?: string,
 ): string {
   const hinted = withWriteLimitHint(
     withCrewStatusHint(
@@ -206,6 +207,23 @@ export function composeVendorPrompt(
   const live = limits
     ? buildPolicyContext(limits)
     : capabilityFromPreface(preface);
-  if (opened === "session/new") return withVendorPreface(hinted, preface);
+  if (opened === "session/new") {
+    const visible = visibleText?.trim() || text.trim();
+    if (!visible) return withVendorPreface(hinted, preface);
+    // Turn hints are prefixes, so the last occurrence is the real prompt when
+    // the same words also happen to appear inside a Workhorse instruction.
+    const at = hinted.lastIndexOf(visible);
+    const privateTurnContext = at >= 0
+      ? `${hinted.slice(0, at)}${hinted.slice(at + visible.length)}`.trim()
+      : hinted.trim() === visible
+        ? ""
+        : hinted.trim();
+    return [
+      visible,
+      "Workhorse private operating context follows. Do not use this section to name or title the chat; title it from the user request above.",
+      preface?.trim() ?? "",
+      privateTurnContext,
+    ].filter((item) => item.trim()).join("\n\n");
+  }
   return live ? `${live}\n\n${hinted}` : hinted;
 }

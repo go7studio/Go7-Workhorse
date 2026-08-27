@@ -44,7 +44,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
-import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
+import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
   autoAllowPermission,
@@ -106,6 +106,7 @@ import {
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
 import { sameDeskSkills } from "./skills-catalog";
+import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
 import {
   applyUpdateStockBot,
@@ -1724,6 +1725,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isWorkhorseGoalControl(originalText, liveSession.goal)
     ) ? parseGoalInput(originalText) : null;
     let vendorText = prep.vendorText;
+    // Vendor slash commands must remain the first bytes of the prompt. The
+    // radar is for natural language; explicit commands already chose a route.
+    if (!originalText.startsWith("/")) {
+      vendorText = withSkillDiscoveryHint(vendorText, originalText, deskSkillsRef.current);
+    }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
       : planHaltForward({
@@ -2411,6 +2417,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           sessionId: session.id,
           projectId: session.projectId ?? undefined,
           text: vendorText,
+          visibleText: firstUserText({ messages: working }) || originalText || images[0]?.name || "Image",
           images,
           model: session.model,
           effort: session.effort,
@@ -5734,7 +5741,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // placeholder once; later metadata cannot retitle a task in progress.
         setState((current) => {
           const owner = current.sessions.find((item) => item.id === event.sessionId);
-          if (!owner || !titleAcceptsVendor(owner)) return current;
+          if (!owner || !titleAcceptsVendor(owner, event.title)) return current;
           const sessions = autoRenameChat(current.sessions, event.sessionId, event.title);
           return sessions ? { ...current, sessions } : current;
         });

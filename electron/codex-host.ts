@@ -142,7 +142,7 @@ export class CodexSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
-    });
+    }, input.visibleText);
 
     try {
       const handlers = this.handlersFor(input, emit);

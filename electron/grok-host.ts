@@ -32,6 +32,8 @@ export type GrokSessionOpenInput = {
 
 export type GrokPromptInput = GrokSessionOpenInput & {
   text: string;
+  /** Exact visible user prompt, before Workhorse adds goal/skill/desk context. */
+  visibleText?: string;
   images?: import("../src/lib/types").ChatImage[];
   crewModes?: CrewMode[];
 };
@@ -173,7 +175,7 @@ export class GrokSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
-    });
+    }, input.visibleText);
 
     try {
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);

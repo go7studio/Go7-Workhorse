@@ -146,6 +146,9 @@ transcript rather than as a path.
 - Chats belong to a project, and can be renamed, archived, deleted, or dragged
   to another project.
 - Vendor, model and thinking effort are set per chat, not per app.
+- New native vendor sessions begin with the visible user prompt so Codex,
+  Grok, Claude and Cursor title the chat from the task. Workhorse's private
+  operating context follows and is rejected if a vendor echoes it as a title.
 - Fork a chat to try a different model on the same history. The fork is layered
   under the source chat, with a managed worktree when the project has a Git
   folder — the same isolation subagents use.
@@ -314,7 +317,10 @@ transcript rather than as a path.
 
 - **Skills** — two ship with the desk, `desk` for chat-to-chat control and
   `setup` for adding bots and references. Skills are also listed from Grok,
-  Codex, Claude and Cursor homes, and can be pushed back to a vendor.
+  Codex, Claude and Cursor homes, and can be pushed back to a vendor. A small
+  per-turn skill radar matches natural task language against installed names
+  and descriptions, then asks the agent to read and verify only the strongest
+  candidates. Slash commands remain the explicit, exact route.
 - **MCP servers** — Settings → Skills can add and test local stdio servers,
   attach each one only to selected runtimes, and choose the tools exposed to
   custom HTTP models. Calls use the same approval and result path as built-in

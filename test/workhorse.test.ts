@@ -165,7 +165,7 @@ import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCoun
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
 import { findSourceFile, isAbsolutePath, readFileDiff } from "../electron/project-diff";
 import { citedAbsolutePaths, editSearchRoots, fileFolderFromPath, formatEditWhen, harvestFilePath, holdEditStats, isDirectoryEditPath, isWriteToolTitle, looksLikeSourceFile, markStatsFetched, mergeEdits, pathFromNearbyWrite, pathFromWriteTool, pathsNeedingStats, planEditStatsHarvest, projectEdits, projectFileChanges, projectWritesKey, sameEditPath, startEditStatsHarvest, statForPath, stripPathSizeSuffix, takeEditStatsChunk, writeChangeKind } from "../src/lib/project-edits";
-import { autoTitleForSend, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
+import { autoTitleForSend, isWorkhorseInstructionTitle, looksLikeIntentTitle, looksLikePing, looksLikePromptSlice, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent, titleFromPrompt, titleNeedsUpgrade } from "../src/lib/titles";
 import { isVendorRateLimitError, vendorFailedMessage } from "../src/lib/vendor-bridge";
 import { clampPaneWidth, FILE_PANE, SIDEBAR_PANE, THREAD_PANE } from "../src/lib/pane";
 import { composerMaxHeightPx, fitComposerField, isComposerTypeToFocus, pinComposerInput } from "../src/ui/Composer";
@@ -1501,6 +1501,8 @@ test("ACP text extractors walk nested content and update kinds", () => {
   assert.equal(extractSessionTitle({ displayName: "Cursor agent name" }), "Cursor agent name");
   assert.equal(extractSessionTitle({ displayName: "Cursor Agent Guide" }), undefined);
   assert.equal(titleFromRecord({ title: "Cursor Agent" }), undefined);
+  assert.equal(titleFromRecord({ title: "Workhorse desk agent spawn and bot rules" }), undefined);
+  assert.equal(isWorkhorseInstructionTitle("You are inside Workhorse, a desktop multiplexer"), true);
   assert.equal(extractSessionTitle({ sessionTitle: "Claude session title" }), "Claude session title");
   assert.equal(extractSessionTitle({ threadTitle: "Codex thread title" }), "Codex thread title");
   assert.equal(extractSessionTitle({ name: "sess_abc123" }), undefined);
@@ -3064,7 +3066,7 @@ test("auto titles come from the prompt and upgrade raw slices", () => {
   assert.equal(vendor?.[0].titleLocked, false);
   assert.equal(autoRenameChat([{ ...sliced, titleLocked: true }], sliced.id, "Should not win"), null);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /titleAcceptsVendor\(owner\)/);
+  assert.match(store, /titleAcceptsVendor\(owner, event\.title\)/);
   assert.match(store, /Never bill a model/);
   assert.match(store, /later metadata cannot retitle/);
   assert.doesNotMatch(store, /refreshGeneratedTitle/);
@@ -3113,6 +3115,7 @@ test("intent titles reduce pings and filler without calling a model", () => {
   assert.equal(looksLikeIntentTitle(intent.title, prompt), true);
   assert.equal(titleNeedsUpgrade(intent), true);
   assert.equal(titleAcceptsVendor(intent), true);
+  assert.equal(titleAcceptsVendor(intent, "Workhorse desk orchestration rules"), false);
   const stolen = autoRenameChat([intent], intent.id, "Connection check");
   assert.equal(stolen?.[0].title, "Connection check");
   assert.equal(stolen?.[0].titleLocked, false);
@@ -3123,13 +3126,19 @@ test("intent titles reduce pings and filler without calling a model", () => {
   assert.equal(locked?.[0].titleLocked, true);
   assert.equal(titleAcceptsVendor(locked![0]), false);
   assert.equal(autoRenameChat(locked!, intent.id, "Vendor should lose"), null);
+  const polluted = {
+    ...intent,
+    title: "Workhorse desk agent spawn and bot rules",
+  };
+  assert.equal(titleNeedsUpgrade(polluted), true);
+  assert.equal(suggestedTitleForSession(polluted), "Availability check");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   const http = readFileSync(path.join(ROOT, "electron", "custom-http.ts"), "utf8");
   const row = readFileSync(path.join(ROOT, "src", "ui", "ChatRow.tsx"), "utf8");
   assert.equal(existsSync(path.join(ROOT, "src", "lib", "title-generate.ts")), false);
   assert.doesNotMatch(store, /generateChatTitle|completeChatTitle|refreshGeneratedTitle/);
-  assert.match(store, /titleAcceptsVendor\(owner\)/);
+  assert.match(store, /titleAcceptsVendor\(owner, event\.title\)/);
   assert.doesNotMatch(main, /custom:complete-title|completeCustomTitle/);
   assert.doesNotMatch(http, /completeCustomTitle|textFromCustomCompletion/);
   assert.match(row, /onDoubleClick/);
@@ -8135,6 +8144,10 @@ test("vendor preface lists extra folders and references, not cwd", () => {
   assert.match(withDesk, /Sidebar subtitle/);
   assert.match(withDesk, /Preview \(last message snippet\): Hey — I'm here and ready\./);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /buildSessionPreface/);
+  assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /visibleText: firstUserText\(\{ messages: working \}\) \|\| originalText \|\| images\[0\]\?\.name \|\| "Image"/);
+  for (const host of ["grok-host.ts", "codex-host.ts", "claude-host.ts", "cursor-host.ts"]) {
+    assert.match(readFileSync(path.join(ROOT, "electron", host), "utf8"), /input\.visibleText/);
+  }
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /applySessionModelChange/);
   assert.match(readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8"), /vendorSessionForSend/);
 });
@@ -8298,8 +8311,20 @@ test("desk-bot requests get a turn hint instead of a source dive", () => {
   assert.match(loaded, /workhorse_list_bots/);
   assert.match(loaded, /Set up MiniMax/);
   const fresh = composeVendorPrompt("hi", WORKHORSE_SESSION_RULES, "session/new");
-  assert.equal(fresh.startsWith(WORKHORSE_SESSION_RULES), true);
+  assert.equal(fresh.startsWith("hi\n\nWorkhorse private operating context follows."), true);
+  assert.match(fresh, new RegExp(WORKHORSE_SESSION_RULES.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(fresh, new RegExp(DESK_BOT_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const visible = "Fix the body bag placement behavior";
+  const transformed = composeVendorPrompt(
+    `Internal driver for this turn.\n\n${visible}`,
+    WORKHORSE_SESSION_RULES,
+    "session/new",
+    undefined,
+    visible,
+  );
+  assert.equal(transformed.startsWith(visible), true);
+  assert.equal(transformed.split(visible).length - 1, 1);
+  assert.ok(transformed.indexOf("Internal driver for this turn") > transformed.indexOf(visible));
   assert.equal(looksLikePreviewQuestion("What does the preview message say?"), true);
   assert.equal(looksLikePreviewQuestion("hi"), false);
   const previewAsk = composeVendorPrompt("What does the preview message say?", WORKHORSE_SESSION_RULES, "session/load");

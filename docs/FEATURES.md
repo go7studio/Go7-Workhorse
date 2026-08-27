@@ -146,6 +146,9 @@ transcript rather than as a path.
 - Chats belong to a project, and can be renamed, archived, deleted, or dragged
   to another project.
 - Vendor, model and thinking effort are set per chat, not per app.
+- New native vendor sessions begin with the visible user prompt so Codex,
+  Grok, Claude and Cursor title the chat from the task. Workhorse's private
+  operating context follows and is rejected if a vendor echoes it as a title.
 - Fork a chat to try a different model on the same history. The fork is layered
   under the source chat, with a managed worktree when the project has a Git
   folder — the same isolation subagents use.

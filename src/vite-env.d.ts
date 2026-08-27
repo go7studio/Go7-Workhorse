@@ -4,6 +4,7 @@ type GrokPromptBridgeInput = {
   sessionId: string;
   projectId?: string;
   text: string;
+  visibleText?: string;
   images?: import("./lib/types").ChatImage[];
   model: string;
   effort: import("./lib/types").EffortLevel | null;

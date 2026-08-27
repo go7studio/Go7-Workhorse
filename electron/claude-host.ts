@@ -97,7 +97,7 @@ export class ClaudeSessionHost {
       sandbox: input.sandbox,
       role: input.role ?? (input.parentId || input.hidden ? "worker" : "orchestrator"),
       crewMode: input.crewModes,
-    });
+    }, input.visibleText);
 
     try {
       const result = await slot.agent.prompt(text, this.handlersFor(input, emit), input.images ?? []);

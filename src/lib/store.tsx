@@ -44,7 +44,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
-import { autoTitleForSend, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
+import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
   autoAllowPermission,
@@ -2417,6 +2417,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           sessionId: session.id,
           projectId: session.projectId ?? undefined,
           text: vendorText,
+          visibleText: firstUserText({ messages: working }) || originalText || images[0]?.name || "Image",
           images,
           model: session.model,
           effort: session.effort,
@@ -5740,7 +5741,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // placeholder once; later metadata cannot retitle a task in progress.
         setState((current) => {
           const owner = current.sessions.find((item) => item.id === event.sessionId);
-          if (!owner || !titleAcceptsVendor(owner)) return current;
+          if (!owner || !titleAcceptsVendor(owner, event.title)) return current;
           const sessions = autoRenameChat(current.sessions, event.sessionId, event.title);
           return sessions ? { ...current, sessions } : current;
         });

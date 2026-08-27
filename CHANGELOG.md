@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.42](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.41...v0.6.42) (2026-08-27)
+
+
+### Bug Fixes
+
+* launch Cursor families with valid model slugs ([907b445](https://github.com/go7studio/Go7-Workhorse/commit/907b445343504a274c69e82065eeb84f6075a77b))
+* launch Cursor families with valid model slugs ([a5d339e](https://github.com/go7studio/Go7-Workhorse/commit/a5d339e3f07e84339231aa5bffb722457b90d30d))
+
 ## [0.6.41](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.40...v0.6.41) (2026-08-27)
 
 

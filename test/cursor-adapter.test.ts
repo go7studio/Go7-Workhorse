@@ -160,14 +160,15 @@ test("vendorFailedMessage prefixes Cursor, never Preview only", () => {
   assert.match(previewOnlyReply("Cursor", "Demo", [], "hi"), /Preview only/);
   const rejected = vendorFailedMessage(
     "cursor",
-    "Cursor agent exited (1): Cannot use this model: retired. Available models: auto, composer-2.5, hundreds-more",
+    "Cursor agent exited (1): Cannot use this model: cursor-grok-4.6-medium. Available models: auto, composer-2.5, hundreds-more",
   );
-  assert.equal(rejected, "Cursor cannot use “retired”. Choose another model.");
+  assert.equal(rejected, "Cursor cannot use “cursor-grok-4.6-medium”. Choose another model.");
   assert.doesNotMatch(rejected, /Available models|hundreds-more/);
 });
 
 test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {
   resetCursorBases();
+  assert.equal(resolveCursorModel("cursor-grok-4.6", "medium"), "cursor-grok-4.6-high");
   const spec = buildCursorLaunchSpec({
     model: "composer-2.5",
     effort: "medium",

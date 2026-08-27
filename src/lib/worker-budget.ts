@@ -1,12 +1,25 @@
 /**
- * A worker token ceiling is a runaway brake on this slice's new work.
- * Occupancy, leftover, cache, and the prompt already in the worker are not
- * a spend. The first meter sets a baseline; later input growth plus output
- * count.
+ * A worker token ceiling is a runaway brake on what this slice actually spends.
+ *
+ * It used to count only fresh input growth plus the LAST turn's output, and it
+ * dropped cached reads entirely on the theory that re-reading context the
+ * worker already holds is not new work. Billing disagrees. Measured against
+ * 2,912 vendor receipts on a real desk, cached reads are discounted but not
+ * free — roughly a third of the fresh-input rate — and because a deep agentic
+ * turn re-reads its whole context on every round trip they were about 69% of
+ * the money. A worker's on-screen number came out a median 27x under what it
+ * had spent, and the ceiling it was compared against could never be reached.
+ *
+ * So: input growth is cumulative by nature (the prompt only grows), while
+ * output and cached reads are per-turn and are summed. Cache is counted at
+ * CACHE_BILLED_RATIO, deliberately a little above the measured ratio, because
+ * a brake that trips early costs a pass and a brake that trips late costs a
+ * week.
  *
  * When a ceiling is set, one pass cannot spend the whole mission. The last
  * fifth is held for verifying and handing off. An unset ceiling is unbounded:
- * every reserve, warning, and stop is a no-op.
+ * every reserve, warning, and stop is a no-op — which is why spawns now carry
+ * DEFAULT_WORKER_TOKEN_BUDGET rather than nothing.
  */
 
 export type WorkerBudgetMeter = {
@@ -21,6 +34,9 @@ export type WorkerBudgetState = {
   tokenBudget?: number;
   usedTokens?: number;
   budgetBaseline?: number;
+  /** Running totals. Output and cached reads are per-turn, so they must be summed. */
+  outputTokensTotal?: number;
+  cacheTokensTotal?: number;
   missionTokenBudget?: number;
   lifetimeUsedTokens?: number;
   budgetPhase?: BudgetPhase;
@@ -36,6 +52,23 @@ export type BudgetAction = "none" | "warn" | "handoff" | "terminate";
 /** 18% of a pass ceiling is held back for verify and handoff (in the 15–20% band). */
 export const VERIFY_RESERVE_RATIO = 0.18;
 
+/**
+ * What a cached read costs against the ceiling, relative to a fresh token.
+ * Regression on 2,912 real vendor receipts put cached reads near a third of
+ * the fresh-input rate; 0.3 rounds toward counting more, because this is a
+ * brake and under-counting is the failure that costs a week.
+ */
+export const CACHE_BILLED_RATIO = 0.3;
+
+/**
+ * The ceiling a spawn carries when nobody names one. Without it `exceeded` is
+ * false forever and the reserve, the warning and the stop are all no-ops — a
+ * runaway brake wired to nothing. Generous enough for a deep pass and far
+ * below the tens of millions a single unattended worker has been measured
+ * spending.
+ */
+export const DEFAULT_WORKER_TOKEN_BUDGET = 8_000_000;
+
 export const BUDGET_HANDOFF_PROMPT =
   "TOKEN BUDGET: stop producing. Verify what is already on disk and return a bounded handoff. Say what exists, what was verified, and what remains. Example: patches present; verification incomplete.";
 
@@ -47,7 +80,7 @@ function positive(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
-/** Fresh billed input: drop cache. Occupancy is not passed in. */
+/** The uncached part of this turn's prompt. Cache is counted separately, not dropped. */
 export function billedFreshInput(event: WorkerBudgetMeter): number {
   const input = nonNeg(event.inputTokens);
   const cache = nonNeg(event.cacheReadTokens);
@@ -68,21 +101,32 @@ export function applyWorkerBudgetUsage(
 ): {
   usedTokens: number;
   budgetBaseline: number;
+  outputTokensTotal: number;
+  cacheTokensTotal: number;
   exceeded: boolean;
   warn: boolean;
   reserveCrossed: boolean;
   phase: BudgetPhase;
 } {
   const fresh = billedFreshInput(event);
-  const output = nonNeg(event.outputTokens);
   const budgetBaseline = run.budgetBaseline ?? fresh;
+  // The prompt only grows, so its growth is already cumulative and must not be
+  // summed per turn or every turn would re-charge the whole context.
   const growth = Math.max(0, fresh - budgetBaseline);
-  const usedTokens = Math.max(run.usedTokens ?? 0, growth + output);
+  // Output and cached reads are what THIS turn spent, so they accumulate.
+  const outputTokensTotal = nonNeg(run.outputTokensTotal) + nonNeg(event.outputTokens);
+  const cacheTokensTotal = nonNeg(run.cacheTokensTotal) + nonNeg(event.cacheReadTokens);
+  const billed = growth + outputTokensTotal + Math.round(cacheTokensTotal * CACHE_BILLED_RATIO);
+  // Never let a reported total fall: a late or duplicated meter must not hand
+  // a worker its ceiling back.
+  const usedTokens = Math.max(nonNeg(run.usedTokens), billed);
   const budget = positive(run.tokenBudget);
   if (!budget) {
     return {
       usedTokens,
       budgetBaseline,
+      outputTokensTotal,
+      cacheTokensTotal,
       exceeded: false,
       warn: false,
       reserveCrossed: false,
@@ -94,7 +138,7 @@ export function applyWorkerBudgetUsage(
   const reserveCrossed = usedTokens >= (reserveAt ?? budget);
   const warn = !exceeded && !reserveCrossed && usedTokens >= (warnAt ?? reserveAt ?? budget);
   const phase: BudgetPhase = exceeded ? "exhausted" : reserveCrossed ? "verify" : "produce";
-  return { usedTokens, budgetBaseline, exceeded, warn, reserveCrossed, phase };
+  return { usedTokens, budgetBaseline, outputTokensTotal, cacheTokensTotal, exceeded, warn, reserveCrossed, phase };
 }
 
 /**
@@ -138,11 +182,12 @@ export function splitPassBudget(assignment: {
   const requested = positive(assignment.tokenBudget);
   const mission = assignment.mission;
   if (!mission) {
-    return requested ? { tokenBudget: requested } : {};
+    // No ceiling asked for still means a ceiling. Returning {} here left
+    // tokenBudget undefined, and an undefined budget makes every stop a no-op.
+    return { tokenBudget: requested ?? DEFAULT_WORKER_TOKEN_BUDGET };
   }
   const firstPassSetsMission = mission.iteration === 1 && !positive(mission.tokenBudget);
-  const missionBudget = positive(mission.tokenBudget) ?? requested;
-  if (!missionBudget) return {};
+  const missionBudget = positive(mission.tokenBudget) ?? requested ?? DEFAULT_WORKER_TOKEN_BUDGET;
   const remaining = Math.max(0, missionBudget - nonNeg(mission.usedTokens));
   const leftPasses = Math.max(1, mission.maxIterations - mission.iteration + 1);
   const fairShare = Math.floor(remaining / leftPasses);
@@ -179,6 +224,8 @@ export function nextBudgetRunState(
 ): {
   usedTokens: number;
   budgetBaseline: number;
+  outputTokensTotal: number;
+  cacheTokensTotal: number;
   budgetPhase?: BudgetPhase;
   budgetWarnedAt?: number;
   budgetHandoffAt?: number;
@@ -190,14 +237,18 @@ export function nextBudgetRunState(
 } {
   const usedTokens = spend.usedTokens;
   const budgetBaseline = spend.budgetBaseline;
+  const outputTokensTotal = spend.outputTokensTotal;
+  const cacheTokensTotal = spend.cacheTokensTotal;
   if (!positive(run.tokenBudget)) {
-    return { usedTokens, budgetBaseline, action: "none" };
+    return { usedTokens, budgetBaseline, outputTokensTotal, cacheTokensTotal, action: "none" };
   }
   const alreadyHandoff = run.budgetPhase === "verify" || run.budgetPhase === "handoff" || Boolean(run.budgetHandoffAt);
   if (spend.exceeded && alreadyHandoff) {
     return {
       usedTokens,
       budgetBaseline,
+      outputTokensTotal,
+      cacheTokensTotal,
       budgetPhase: "exhausted",
       budgetWarnedAt: run.budgetWarnedAt,
       budgetHandoffAt: run.budgetHandoffAt,
@@ -212,6 +263,8 @@ export function nextBudgetRunState(
     return {
       usedTokens,
       budgetBaseline,
+      outputTokensTotal,
+      cacheTokensTotal,
       budgetPhase: "verify",
       budgetWarnedAt: run.budgetWarnedAt ?? now,
       action: "handoff",
@@ -222,6 +275,8 @@ export function nextBudgetRunState(
     return {
       usedTokens,
       budgetBaseline,
+      outputTokensTotal,
+      cacheTokensTotal,
       budgetPhase: "produce",
       budgetWarnedAt: now,
       action: "warn",
@@ -232,6 +287,8 @@ export function nextBudgetRunState(
   return {
     usedTokens,
     budgetBaseline,
+    outputTokensTotal,
+    cacheTokensTotal,
     budgetPhase: run.budgetPhase,
     budgetWarnedAt: run.budgetWarnedAt,
     budgetHandoffAt: run.budgetHandoffAt,

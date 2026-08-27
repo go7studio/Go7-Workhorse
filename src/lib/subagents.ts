@@ -1162,6 +1162,8 @@ export function continueWorkerRun(
           tokenBudget: undefined,
           usedTokens: undefined,
           budgetBaseline: undefined,
+          outputTokensTotal: undefined,
+          cacheTokensTotal: undefined,
           budgetPhase: undefined,
           budgetWarnedAt: undefined,
           budgetHandoffAt: undefined,

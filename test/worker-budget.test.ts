@@ -15,6 +15,8 @@ import {
   nextBudgetRunState,
   splitPassBudget,
   VERIFY_RESERVE_RATIO,
+  CACHE_BILLED_RATIO,
+  DEFAULT_WORKER_TOKEN_BUDGET,
 } from "../src/lib/worker-budget";
 import { lineupJoinPrompt } from "../src/lib/lineup";
 import { isParentTakeoverTool } from "../src/lib/project-edits";
@@ -37,34 +39,58 @@ test("reading a 70k repo on the first meter does not spend a 70k ceiling", () =>
   assert.equal(first.usedTokens, 500);
 });
 
-test("later input growth plus output is the slice spend", () => {
+test("input growth is cumulative; output is summed across turns", () => {
+  // Output is what one turn produced, so it adds up. The old accounting kept
+  // only the latest turn's output beside the growth and took the max of the
+  // two, which is why fifty turns could report the size of one.
   const first = applyWorkerBudgetUsage(
     { tokenBudget: 70_000 },
     { inputTokens: 70_000, outputTokens: 500 },
   );
+  assert.equal(first.usedTokens, 500);
   const second = applyWorkerBudgetUsage(
     { tokenBudget: 70_000, ...first },
     { inputTokens: 80_000, outputTokens: 2_000 },
   );
   assert.equal(second.exceeded, false);
-  assert.equal(second.usedTokens, 12_000);
+  // 10,000 of growth + 2,500 of output across both turns.
+  assert.equal(second.usedTokens, 12_500);
   const runaway = applyWorkerBudgetUsage(
     { tokenBudget: 70_000, ...second },
     { inputTokens: 80_000, outputTokens: 71_000 },
   );
   assert.equal(runaway.exceeded, true);
-  assert.equal(runaway.usedTokens, 81_000);
+  assert.equal(runaway.usedTokens, 83_500);
 });
 
-test("occupancy is not a spend; cache is not a spend", () => {
+test("many small turns still reach the ceiling", () => {
+  // The defect in one test: a worker looping forever on modest turns. Under
+  // max-of-one-turn its number sat at a few thousand no matter how long it
+  // ran, so the brake could never engage.
+  let run: Record<string, unknown> = { tokenBudget: 100_000 };
+  let spend = applyWorkerBudgetUsage(run, { inputTokens: 50_000, outputTokens: 2_000 });
+  for (let turn = 0; turn < 60; turn += 1) {
+    run = { tokenBudget: 100_000, ...spend };
+    spend = applyWorkerBudgetUsage(run, { inputTokens: 50_000, outputTokens: 2_000 });
+  }
+  assert.ok(spend.usedTokens > 100_000, `sixty turns must accumulate, got ${spend.usedTokens}`);
+  assert.equal(spend.exceeded, true);
+});
+
+test("occupancy is not a spend, but a cached read is", () => {
+  // billedFreshInput still names the uncached part — that has not changed.
   assert.equal(billedFreshInput({ inputTokens: 70_000, cacheReadTokens: 60_000 }), 10_000);
   const first = applyWorkerBudgetUsage(
     { tokenBudget: 5_000 },
     { inputTokens: 70_000, outputTokens: 200, cacheReadTokens: 60_000 },
   );
+  // The prompt the worker arrived holding is still not charged: baseline.
   assert.equal(first.budgetBaseline, 10_000);
-  assert.equal(first.usedTokens, 200);
-  assert.equal(first.exceeded, false);
+  // But re-reading 60k of context is billed, at the discounted rate. Counting
+  // it at zero is what made a real worker's number a median 27x too low.
+  assert.equal(first.cacheTokensTotal, 60_000);
+  assert.equal(first.usedTokens, 200 + Math.round(60_000 * CACHE_BILLED_RATIO));
+  assert.equal(first.exceeded, true, "18k of billed cache is past a 5k ceiling");
 });
 
 test("no ceiling never exceeds, warns, or reserves", () => {
@@ -157,7 +183,11 @@ test("one mission pass cannot consume the whole mission", () => {
 test("a reused worker does not inherit the previous slice ceiling or spend", () => {
   const prior = { tokenBudget: 100_000, usedTokens: 110_883, budgetBaseline: 70_000 };
   const unbound = beginAssignmentBudget(prior, {});
-  assert.equal(unbound.tokenBudget, undefined);
+  // It does not inherit the prior ceiling — but it is no longer unbounded.
+  // An undefined budget makes every reserve, warning and stop a no-op, which
+  // is a runaway brake wired to nothing.
+  assert.notEqual(unbound.tokenBudget, 100_000, "the prior slice ceiling must not carry over");
+  assert.equal(unbound.tokenBudget, DEFAULT_WORKER_TOKEN_BUDGET);
   assert.equal(unbound.missionTokenBudget, undefined);
   assert.equal(unbound.lifetimeUsedTokens, 110_883);
   const spend = applyWorkerBudgetUsage(unbound, { inputTokens: 200_000, outputTokens: 50_000 });
@@ -168,6 +198,7 @@ test("a reused worker does not inherit the previous slice ceiling or spend", () 
   assert.equal(capped.lifetimeUsedTokens, 110_883);
   const firstMeter = applyWorkerBudgetUsage(capped, { inputTokens: 200_000, outputTokens: 100 });
   assert.equal(firstMeter.usedTokens, 100);
+  assert.equal(firstMeter.budgetBaseline, 200_000, "the inherited prompt is still not a spend");
   assert.equal(firstMeter.exceeded, false);
 });
 

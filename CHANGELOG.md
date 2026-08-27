@@ -8,6 +8,33 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.41](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.40...v0.6.41) (2026-08-27)
+
+
+### Features
+
+* make skills and chat identity feel native ([9b3f0ec](https://github.com/go7studio/Go7-Workhorse/commit/9b3f0ecf236de36c155e5bc460a587c28f7277bb))
+* surface matching skills from natural prompts ([87c0ca4](https://github.com/go7studio/Go7-Workhorse/commit/87c0ca42f58f08c037a6b5b03b023fd7dd411341))
+
+
+### Bug Fixes
+
+* an offloaded picture still resizes, and one dead blob no longer ends a chat ([e90aef6](https://github.com/go7studio/Go7-Workhorse/commit/e90aef6950c48e7a00016b5a55d9242c43e6a8a3))
+* keep pictures out of the hot state JSON, verifiably ([0d8c09b](https://github.com/go7studio/Go7-Workhorse/commit/0d8c09b4c9aa279cb3a8b73478f0ee10211706b5))
+* pin the blame boundary, tag the save's tail, and correct the numbers ([3706d15](https://github.com/go7studio/Go7-Workhorse/commit/3706d1546a1c2eb17bdda03b3032ea230ee9b685))
+* show Codex allowance remaining ([a10764f](https://github.com/go7studio/Go7-Workhorse/commit/a10764ffce48c64ebeefd99b93f49a914f342b89))
+* the resized picture can leave the canvas, and a history turn is never empty ([e31cea7](https://github.com/go7studio/Go7-Workhorse/commit/e31cea72aae61ab65f1fdc51f812520a1faf0d9c))
+* the stall recorder blames the right window, and the chain cannot die ([f1e1803](https://github.com/go7studio/Go7-Workhorse/commit/f1e18035fd9bdb335aea9571b362ef9578ef95b4))
+* the worker token ceiling counts what a worker actually spends ([7d437d0](https://github.com/go7studio/Go7-Workhorse/commit/7d437d0c9907bae96ae6fdce3629d4768ab1145a))
+* the worker token ceiling counts what a worker actually spends ([3367069](https://github.com/go7studio/Go7-Workhorse/commit/3367069017d880e15a033a1a0f18a787534a3dfe))
+* title vendor chats from user prompts ([ca3fdd0](https://github.com/go7studio/Go7-Workhorse/commit/ca3fdd0c85e2fb2958053fb3ccad480a37dc6d6c))
+
+
+### Performance Improvements
+
+* record main-process stalls, and stop holding the loop for the disk ([503eb58](https://github.com/go7studio/Go7-Workhorse/commit/503eb58be3256598dd975f2ebffa19c03845df78))
+* record main-process stalls, and stop holding the loop for the disk ([7ae4a44](https://github.com/go7studio/Go7-Workhorse/commit/7ae4a4429be8e9ae580b5dd5c0708e44ad19f387))
+
 ## [0.6.40](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.39...v0.6.40) (2026-08-26)
 
 

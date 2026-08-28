@@ -22,7 +22,8 @@ import { evaluateWatchHold, leftoverPercentForKey, deskCallCatalog } from "../sr
 import { normalizeSettings } from "../src/lib/settings";
 import { buildCursorLaunchSpec, cursorSpawnArgs, resolveCursorModel } from "../electron/cursor-launch";
 import { withDeskToolEnv } from "../electron/desk-path";
-import { cursorAboutLoggedIn, detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
+import { cursorAboutLoggedIn, detectCursorLogin, resolveCursorBinary, resolveCursorPrefixArgs } from "../electron/cursor-login";
+import { cursorModelsCommand } from "../electron/vendor-models";
 import { CursorSessionHost, spawnCursorProcess } from "../electron/cursor-host";
 import {
   cursorStateDatabasePath,
@@ -345,6 +346,40 @@ test("Cursor discovery finds the official Windows CLI folder, never Cursor.exe",
     }),
     null,
   );
+});
+
+test("reading the Cursor model list spawns the same node+script a launch does", () => {
+  const local = "C:\\Users\\desk\\AppData\\Local";
+  const node = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\node.exe`;
+  const script = `${local}\\cursor-agent\\versions\\2026.08.11-e8db854\\index.js`;
+  const files = new Set([node, script]);
+  const detect = {
+    env: { LOCALAPPDATA: local },
+    platform: "win32" as const,
+    homedir: "C:\\Users\\desk",
+    pathDirs: [] as string[],
+    existsSync: (file: string) => files.has(file),
+    readdir: (dir: string) =>
+      dir === `${local}\\cursor-agent\\versions` ? ["2026.08.11-e8db854"] : [],
+  };
+  // `cursor-agent models` is the only source of real launch slugs. On Windows
+  // the CLI is node.exe plus an index.js, so a reader that takes the binary
+  // and drops the script runs `node models`, exits non-zero, and leaves the
+  // desk on the stock four rows with no effort variants for the whole session.
+  assert.equal(resolveCursorBinary(detect), node);
+  assert.deepEqual(resolveCursorPrefixArgs(detect), [script]);
+  assert.deepEqual(cursorModelsCommand(detect), { command: node, args: [script, "models"] });
+  // The launch and the model-list read must agree on the whole command, or
+  // the picker and the launcher disagree about which slugs exist.
+  const spec = buildCursorLaunchSpec({
+    model: "composer-2.5",
+    effort: "medium",
+    cwd: "C:\\proj",
+    mode: "ask",
+    detect: { ...detect, probeAuth: () => true },
+  });
+  assert.equal(cursorModelsCommand(detect)?.command, spec.command);
+  assert.equal(cursorModelsCommand(detect)?.args[0], spec.argv[0]);
 });
 
 test("Cursor discovery prefers cursor-agent and rejects an unrelated agent binary", () => {

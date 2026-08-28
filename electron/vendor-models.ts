@@ -15,7 +15,7 @@ import {
 } from "../src/lib/models";
 import type { ProviderId } from "../src/lib/types";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
-import { resolveCursorBinary } from "./cursor-login";
+import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
 
 export { parseCursorModelsOutput };
 
@@ -34,11 +34,26 @@ export function reconcileCursorModels(live: ModelInfo[]): ModelInfo[] {
   return collapseCursorLive(live, MODEL_CATALOG.cursor);
 }
 
-function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
-  const binary = resolveCursorBinary({ env });
+/**
+ * The command that reads `cursor-agent models`, in the same binary+script
+ * shape a launch spawns. The official Windows CLI is node.exe plus an
+ * index.js, so dropping the script here runs `node models`, exits non-zero,
+ * and leaves the desk on the stock four rows for the life of the process —
+ * no live slugs and no effort variants behind the picker.
+ */
+export function cursorModelsCommand(
+  input: CursorLoginDetectInput = {},
+): { command: string; args: string[] } | null {
+  const binary = resolveCursorBinary(input);
   if (!binary) return null;
+  return { command: binary, args: [...resolveCursorPrefixArgs(input), "models"] };
+}
+
+function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
+  const spawnAs = cursorModelsCommand({ env });
+  if (!spawnAs) return null;
   try {
-    return execFileSync(binary, ["models"], {
+    return execFileSync(spawnAs.command, spawnAs.args, {
       encoding: "utf8",
       env: { ...process.env, ...env },
       timeout: 4_000,

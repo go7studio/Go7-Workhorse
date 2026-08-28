@@ -15,6 +15,7 @@ import {
   CURSOR_DEFAULT_WINDOW,
 } from "../src/lib/cursor-catalog";
 import { cursorWatchLane } from "../src/lib/cursor-lane";
+import { resolveCursorModel } from "../electron/cursor-launch";
 import { applyVendorCatalog, modelsFor, modelsForPicker, MODEL_CATALOG, resetVendorCatalog } from "../src/lib/models";
 import {
   chooseRoutingDecision,
@@ -294,4 +295,62 @@ test("desk Auto and spawn score modelsFor; compiler pick is documented as a sepa
   assert.match(compiler, /rankRoutingCandidates/);
   assert.doesNotMatch(settings, /id: "models"/);
   assert.doesNotMatch(welcome, /brain picker|pick a model before/i);
+});
+
+// A Cursor launch may only ever name a slug the CLI actually listed. The family
+// id (`cursor-grok-4.6`) is ours, not Cursor's: the CLI offers
+// `cursor-grok-4.6-high` and exits 1 on the bare family with
+// "Cannot use this model". Regression for the desk that launched
+// `--model cursor-grok-4.6` straight into that error.
+const LAUNCH_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+test("collapse never offers a family id Cursor did not list as a launch slug", () => {
+  const bases = fixtureBases();
+  const listed = new Set(fixtureRows().map((row) => row.id));
+  const grok = bases.find((row) => row.id === "cursor-grok-4.6");
+  assert.ok(grok, "fixture still collapses a cursor-grok-4.6 family");
+  assert.equal(listed.has("cursor-grok-4.6"), false, "fixture still has no bare family slug");
+  assert.equal(grok.launchIds?.includes("cursor-grok-4.6"), false);
+  assert.ok(grok.launchIds?.includes("cursor-grok-4.6-medium"));
+  for (const row of bases) {
+    for (const id of row.launchIds ?? []) {
+      assert.ok(listed.has(id), `${row.id} offers ${id}, which the CLI never listed`);
+    }
+  }
+});
+
+test("every family at every effort launches a slug the live CLI listed", () => {
+  const rows = fixtureRows();
+  const listed = new Set(rows.map((row) => row.id));
+  reconcileCursorModels(rows, MODEL_CATALOG.cursor);
+  const families = [...new Set(rows.map((row) => cursorFamilyId(row.id)))];
+  assert.ok(families.length >= 30, "fixture still covers the full family spread");
+  for (const family of families) {
+    for (const effort of LAUNCH_EFFORTS) {
+      const slug = resolveCursorModel(family, effort);
+      assert.ok(listed.has(slug), `${family} at ${effort} resolved to ${slug}, which Cursor rejects`);
+    }
+  }
+});
+
+test("a cold desk on the stock fallback still launches a slug Cursor accepts", () => {
+  const listed = new Set(fixtureRows().map((row) => row.id));
+  // `cursor-agent models` unread or timed out: reconcile falls back to stock.
+  reconcileCursorModels([], MODEL_CATALOG.cursor);
+  for (const family of ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"]) {
+    for (const effort of LAUNCH_EFFORTS) {
+      const slug = resolveCursorModel(family, effort);
+      assert.ok(listed.has(slug), `${family} at ${effort} resolved to ${slug}, which Cursor rejects`);
+    }
+  }
+  assert.equal(resolveCursorModel("cursor-grok-4.6", "medium"), "cursor-grok-4.6-high");
+});
+
+test("an unread catalog still resolves the picker families to real slugs", () => {
+  const listed = new Set(fixtureRows().map((row) => row.id));
+  resetCursorBases();
+  for (const family of ["composer-2.5", "auto", "cursor-grok-4.6", "cursor-grok-4.5"]) {
+    const slug = resolveCursorModel(family, "medium");
+    assert.ok(listed.has(slug), `${family} resolved to ${slug}, which Cursor rejects`);
+  }
 });

@@ -13,6 +13,8 @@ import {
 } from "./grok-host";
 import { CURSOR_ACP_NOT_INSTALLED, isCursorAppCommand, isGrokCommand } from "./cursor-login";
 import { buildCursorLaunchSpec, cursorSpawnArgs } from "./cursor-launch";
+import { cursorFamilyId, rememberedCursorBases } from "../src/lib/cursor-catalog";
+import { listVendorModels } from "./vendor-models";
 import { composeVendorPrompt } from "../src/lib/context-preface";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
@@ -33,6 +35,30 @@ export function cursorLaunchKey(
     mcpServers: input.mcpServers,
   });
   return `${spec.command}\0${spec.argv.join("\0")}\0${spec.cwd}\0${JSON.stringify(spec.sessionParams.mcpServers)}\0${spec.model}\0${spec.effort}\0${spec.sandbox}\0${input.mode}`;
+}
+
+/** A failed `cursor-agent models` read should not re-stall every launch. */
+const CURSOR_CATALOG_RETRY_MS = 60_000;
+let lastCursorCatalogRead = 0;
+
+/**
+ * `cursor-agent models` is the only source of real launch slugs, and in the
+ * main process nothing reads it until the renderer asks for `models:list`.
+ * A desk that restores a Cursor chat on boot launches before that, so the
+ * family id would resolve against an empty catalog and Cursor would reject it.
+ */
+function warmCursorCatalog(model: string | null | undefined): void {
+  const family = cursorFamilyId(model?.trim() || "");
+  const known = rememberedCursorBases();
+  if (family && known.some((row) => row.id === family)) return;
+  const now = Date.now();
+  if (known.length > 0 && now - lastCursorCatalogRead < CURSOR_CATALOG_RETRY_MS) return;
+  lastCursorCatalogRead = now;
+  try {
+    listVendorModels();
+  } catch {
+    // Stock fallback still resolves to a slug Cursor listed.
+  }
 }
 
 function isBareWindowsCmd(command: string): boolean {
@@ -137,6 +163,7 @@ export class CursorSessionHost {
   }
 
   private async ensureAgent(input: GrokSessionOpenInput, emit: CursorEventSink): Promise<void> {
+    warmCursorCatalog(input.model);
     const key = cursorLaunchKey(input);
     let slot = this.slots.get(input.sessionId);
     if (slot && !slot.agent.canReuse) {

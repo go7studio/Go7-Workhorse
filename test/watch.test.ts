@@ -589,8 +589,9 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.doesNotMatch(formatDeskRoster(rows), /turned off in Settings/);
   assert.equal(mini?.kind, "custom");
   assert.equal(mini?.name, "MiniMax");
+  // Spent-but-callable is now only reachable with the guard deliberately off.
   const unlocked = deskCallCatalog({
-    settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false } },
+    settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false } },
     usage: [],
     plans: { grok: plan(0, { resetsAt: reset }) },
     permits: {},
@@ -1137,4 +1138,56 @@ test("projectCapacitySnapshot does not copy free-text reasons or trap fields", (
   assert.equal(snapshot.rows[0]?.availability.reasonCode, "spent");
   assert.equal(snapshot.rows[0]?.availability.canCall, false);
   assert.equal("reason" in snapshot.rows[0]!, false);
+});
+
+test("a bot with no leftover is not a spawn target, daily bank or not", () => {
+  const now = Date.parse("2026-08-13T18:00:00");
+  const reset = new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const base = {
+    customBots: [],
+    usageBudgets: {},
+    llms: links({ grok: { connected: true }, claude: { connected: true } }),
+  };
+  const spent = (watch: Settings["watch"]) =>
+    deskCallCatalog({
+      settings: { ...base, watch },
+      usage: [],
+      // Grok is out for the week; Claude has room.
+      plans: { grok: plan(0, { resetsAt: reset }), claude: plan(80, { resetsAt: reset }) },
+      permits: {},
+      now,
+    });
+
+  // The daily bank is a spending policy. Running out is the vendor's own fact,
+  // so it must hold with the bank off — otherwise list_bots hands an
+  // orchestrator a canCall row for a vendor whose every call dies at the CLI.
+  const guarded = spent({ ...DEFAULT_WATCH, lockDaily: false });
+  const grok = guarded.find((row) => row.id === "grok");
+  assert.equal(grok?.leftoverPercent, 0);
+  assert.equal(grok?.canCall, false);
+  assert.equal(grok?.status, "spent");
+  assert.equal(spawnAllowed(grok), false);
+  assert.match(spawnIsNoGo(grok) ?? "", /no leftover/);
+  assert.equal(callableDeskRows(guarded).some((row) => row.id === "grok"), false);
+  // A healthy vendor is untouched, so the orchestrator still has somewhere to go.
+  assert.equal(guarded.find((row) => row.id === "claude")?.canCall, true);
+
+  // The escape hatch: overage or prepaid credit may still be worth spending.
+  const allowed = spent({ ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false });
+  assert.equal(allowed.find((row) => row.id === "grok")?.canCall, true);
+
+  // Older saves predate the flag and still get the guard.
+  assert.equal(normalizeWatch({ lockDaily: false }).blockSpentSpawns, true);
+  assert.equal(normalizeWatch({ blockSpentSpawns: false }).blockSpentSpawns, false);
+  assert.equal(normalizeWatch({ spentPercent: 5 }).spentPercent, 5);
+
+  // The threshold is adjustable: at 5%, a vendor on 4% left is already out.
+  const nearly = deskCallCatalog({
+    settings: { ...base, watch: { ...DEFAULT_WATCH, lockDaily: false, spentPercent: 5 } },
+    usage: [],
+    plans: { grok: plan(4, { resetsAt: reset }) },
+    permits: {},
+    now,
+  });
+  assert.equal(nearly.find((row) => row.id === "grok")?.canCall, false);
 });

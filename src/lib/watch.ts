@@ -27,9 +27,9 @@ import {
   weeklyPlanLeftover,
 } from "./usage";
 import { cursorWatchKeyLabel, cursorWatchLane, isCursorWatchKey, type CursorWatchKey } from "./cursor-lane";
-import { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
+import { DAY_SHARE_PERCENT, DEFAULT_SPENT_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
-export { DAY_SHARE_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
+export { DAY_SHARE_PERCENT, DEFAULT_SPENT_PERCENT, DEFAULT_WATCH } from "./watch-defaults";
 
 export type WatchPlans = {
   grok?: GrokPlanUsage;
@@ -109,10 +109,14 @@ export function normalizeWatch(raw: unknown): WatchSettings {
   const lockKeys = Array.isArray(record.lockKeys)
     ? record.lockKeys.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : undefined;
+  const spent = Number(record.spentPercent);
   return {
     dailyLimitPercent: DAY_SHARE_PERCENT,
     lockDaily: record.lockDaily === true,
     desktopNotify: record.desktopNotify !== false,
+    // Older saves predate the flag and should still get the guard.
+    blockSpentSpawns: record.blockSpentSpawns !== false,
+    spentPercent: Number.isFinite(spent) ? Math.min(50, Math.max(0, spent)) : DEFAULT_SPENT_PERCENT,
     ...(lockKeys ? { lockKeys } : {}),
   };
 }
@@ -770,6 +774,9 @@ function deskCallRow(input: {
   overPercent?: number;
   resetsAt?: string;
   holding: boolean;
+  /** Treat no-leftover as un-callable even when the daily bank is not holding. */
+  blockSpent: boolean;
+  spentPercent: number;
 }): DeskCallRow {
   let code: DeskCallStatus = "ok";
   let reason: string | undefined;
@@ -782,7 +789,14 @@ function deskCallRow(input: {
     code = "disabled";
     canCall = false;
     reason = `${input.name} is turned off in Settings → LLMs.`;
-  } else if (input.holding && input.leftover != null && input.leftover <= 0.5) {
+  } else if (
+    (input.blockSpent || input.holding) &&
+    input.leftover != null &&
+    input.leftover <= (input.blockSpent ? input.spentPercent : 0.5)
+  ) {
+    // Running out is the vendor's own fact. Gating it on the daily bank let a
+    // 0% vendor list as callable, so an orchestrator obeying "spawn only a
+    // canCall row" picked it and the worker died at the CLI.
     code = "spent";
     canCall = false;
     reason = watchHoldMessage({ label: input.name, reason: "spent" });
@@ -828,6 +842,11 @@ export function deskCallCatalog(input: {
   now?: number;
 }): DeskCallRow[] {
   const statuses = watchVendorStatuses(input);
+  const catalogWatch = input.settings.watch ?? DEFAULT_WATCH;
+  const blockSpent = catalogWatch.blockSpentSpawns !== false;
+  const spentPercent = Number.isFinite(catalogWatch.spentPercent)
+    ? (catalogWatch.spentPercent as number)
+    : DEFAULT_SPENT_PERCENT;
   const byKey = new Map(statuses.map((status) => [status.key, status]));
   const rows: DeskCallRow[] = [];
   for (const id of DESK_STOCK) {
@@ -857,6 +876,8 @@ export function deskCallCatalog(input: {
           overPercent: composer?.overPercent,
           resetsAt: composer?.resetsAt,
           holding: Boolean(composer?.holding),
+          blockSpent,
+          spentPercent,
         }),
       );
       rows.push(
@@ -876,6 +897,8 @@ export function deskCallCatalog(input: {
           overPercent: api?.overPercent,
           resetsAt: api?.resetsAt,
           holding: Boolean(api?.holding),
+          blockSpent,
+          spentPercent,
         }),
       );
       continue;
@@ -898,6 +921,8 @@ export function deskCallCatalog(input: {
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
         holding: Boolean(status?.holding),
+        blockSpent,
+        spentPercent,
       }),
     );
   }
@@ -926,6 +951,8 @@ export function deskCallCatalog(input: {
         overPercent: status?.overPercent,
         resetsAt: status?.resetsAt,
         holding: Boolean(status?.holding),
+        blockSpent,
+        spentPercent,
       }),
     );
   }

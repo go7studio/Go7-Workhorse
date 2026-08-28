@@ -154,7 +154,12 @@ export class ClaudeSessionHost {
 
   private async ensureAgent(input: GrokSessionOpenInput, emit: ClaudeEventSink): Promise<void> {
     const key = claudeLaunchKey(input);
-    const slot = this.slots.get(input.sessionId);
+    let slot = this.slots.get(input.sessionId);
+    if (slot && !slot.agent.canReuse) {
+      slot.agent.dispose();
+      this.slots.delete(input.sessionId);
+      slot = undefined;
+    }
     const action = shouldLoadVendorSession({
       vendorSessionId: input.vendorSessionId,
       existingSlotKey: slot?.key,

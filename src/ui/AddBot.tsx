@@ -26,6 +26,32 @@ export function addBotChoices(llms: Record<"grok" | "codex" | "claude" | "cursor
   return CATALOG.filter((item) => item.id === "grok-bot" || item.id === "own" || !llms[item.id]?.connected);
 }
 
+type StockStage = "grok" | "codex" | "claude" | "cursor";
+
+export function vendorStatusCopy(stage: StockStage, link: Pick<LlmLink, "available" | "connected" | "needsAuth">) {
+  const linked = Boolean(link?.connected);
+  const needsAuth = Boolean(link?.needsAuth);
+  const found = Boolean(link?.available) || needsAuth;
+  if (linked && found && !needsAuth) return "Ready on the desk";
+  if (linked) return "Needs attention";
+  if (needsAuth) return stage === "cursor" ? "Installed - sign in with agent login" : "Needs auth";
+  if (found) return "Ready to add";
+  return stage === "cursor" ? "Needs Cursor Agent CLI" : "Not found";
+}
+
+export function vendorSetupHelpCopy(stage: StockStage, link: Pick<LlmLink, "available" | "connected" | "needsAuth">) {
+  const linked = Boolean(link?.connected);
+  const needsAuth = Boolean(link?.needsAuth);
+  const found = Boolean(link?.available) || needsAuth;
+  if (stage === "cursor" && !linked && !found) {
+    return "Install Cursor Agent CLI so cursor-agent or agent is on PATH, then Recheck.";
+  }
+  if (stage === "cursor" && needsAuth && !linked) {
+    return "Run agent login in PowerShell or Terminal, then Recheck.";
+  }
+  return "";
+}
+
 export function AddBot() {
   const store = useStore();
   const draft = store.settings.llms.custom;
@@ -212,6 +238,7 @@ function VendorStatus({
   const needsAuth = Boolean(link?.needsAuth);
   const found = Boolean(link?.available) || needsAuth;
   const name = stage === "grok" ? "Grok" : stage === "codex" ? "Codex" : stage === "cursor" ? "Cursor" : "Claude";
+  const setupHelp = vendorSetupHelpCopy(stage, link);
 
   return (
     <>
@@ -230,23 +257,10 @@ function VendorStatus({
         </span>
         <div>
           <strong>{name}</strong>
-          <em>
-            {linked && found && !needsAuth
-              ? "Ready on the desk"
-              : linked
-                ? "Needs attention"
-                : needsAuth
-                  ? stage === "cursor"
-                    ? "Installed — sign in with agent login"
-                    : "Needs auth"
-                  : found
-                    ? "Ready to add"
-                    : stage === "cursor"
-                      ? "Needs Cursor Agent CLI, not the editor app"
-                      : "Not found"}
-          </em>
+          <em>{vendorStatusCopy(stage, link)}</em>
         </div>
       </div>
+      {setupHelp ? <p className="row-meta vendor-setup-help">{setupHelp}</p> : null}
       <div className="actions add-bot-actions">
         <button
           className="tiny"

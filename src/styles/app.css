@@ -5454,6 +5454,12 @@ html.pane-dragging * {
   text-align: left;
 }
 
+.add-bot .vendor-setup-help {
+  max-width: 560px;
+  white-space: normal;
+  line-height: 1.45;
+}
+
 @media (max-width: 720px) {
   .add-bot-catalog,
   .add-bot-form,

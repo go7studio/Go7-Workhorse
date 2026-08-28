@@ -5046,7 +5046,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(addBot, /addBotChoices/);
   assert.match(addBot, /choices.length === 1/);
   assert.match(addBot, /item.id === "own" \|\| !llms\[item.id\]\?\.connected/);
-  const { addBotChoices } = await import("../src/ui/AddBot.tsx");
+  const { addBotChoices, vendorSetupHelpCopy, vendorStatusCopy } = await import("../src/ui/AddBot.tsx");
   assert.deepEqual(
     addBotChoices({
       grok: { connected: true },
@@ -5064,6 +5064,15 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
       cursor: { connected: true },
     }).map((item) => item.id),
     ["codex", "grok-bot", "own"],
+  );
+  assert.equal(vendorStatusCopy("cursor", { connected: false, available: false }), "Needs Cursor Agent CLI");
+  assert.equal(
+    vendorSetupHelpCopy("cursor", { connected: false, available: false }),
+    "Install Cursor Agent CLI so cursor-agent or agent is on PATH, then Recheck.",
+  );
+  assert.equal(
+    vendorSetupHelpCopy("cursor", { connected: false, needsAuth: true }),
+    "Run agent login in PowerShell or Terminal, then Recheck.",
   );
   assert.doesNotMatch(addBot, /on desk/);
   assert.doesNotMatch(settings, /chip-list/);

@@ -8,6 +8,16 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.43](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.42...v0.6.43) (2026-08-28)
+
+
+### Bug Fixes
+
+* condense simultaneous usage alerts ([adfacc6](https://github.com/go7studio/Go7-Workhorse/commit/adfacc6bd8690be5d2a539182ea410470e4c76ae))
+* condense simultaneous usage alerts ([e375ef4](https://github.com/go7studio/Go7-Workhorse/commit/e375ef446c06e727c488ff1db4a8adceb829a1bb))
+* make failed chat forks retryable ([36d0530](https://github.com/go7studio/Go7-Workhorse/commit/36d0530ca8def43648f56bf0b08d5477dcf3cb4d))
+* make failed chat forks retryable ([f94270d](https://github.com/go7studio/Go7-Workhorse/commit/f94270d5e516a285c4a5c3ff6d10b072263fa478))
+
 ## [0.6.42](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.41...v0.6.42) (2026-08-27)
 
 

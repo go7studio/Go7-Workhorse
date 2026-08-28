@@ -419,6 +419,7 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(notices, /watchLocksKey/);
   assert.match(notices, /watch-banners/);
   assert.match(notices, /Got it/);
+  assert.match(readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8"), /WatchNotices hidden=\{surface === "project-home"\}/);
   assert.doesNotMatch(notices, /openSettings\("watch"\)/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /notify:desktop/);
   assert.match(readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8"), /notify:desktop/);

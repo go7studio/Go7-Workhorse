@@ -89,7 +89,7 @@ export function App() {
         </main>
       </div>
       <PermissionCard />
-      <WatchNotices />
+      <WatchNotices hidden={surface === "project-home"} />
       <NewProjectSheet />
       <ReferenceSheet />
       <EditContextMenu />

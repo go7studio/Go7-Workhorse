@@ -30,6 +30,7 @@ import {
   spawnAllowed,
   spawnIsNoGo,
   isDesktopWatchNotice,
+  summarizeWatchNotices,
   leftoverPercentForKey,
   normalizeWatch,
   pruneWatchPermits,
@@ -91,6 +92,41 @@ test("watch is one daily limit, off until you turn it on", () => {
   assert.equal(isDesktopWatchNotice({ kind: "daily" }), true);
   assert.equal(isDesktopWatchNotice({ kind: "spent" }), true);
   assert.equal(isDesktopWatchNotice({ kind: "reset" }), false);
+});
+
+test("simultaneous usage notices condense into one actionable alert", () => {
+  const notices = [
+    {
+      id: "spent:grok",
+      key: "grok",
+      label: "Grok",
+      kind: "spent" as const,
+      tone: "warn" as const,
+      title: "Grok allowance is spent",
+      detail: "Nothing left on this plan window. Resets Tue 9:53 AM.",
+    },
+    {
+      id: "daily:grok:2026-08-27",
+      key: "grok",
+      label: "Grok",
+      kind: "daily" as const,
+      tone: "warn" as const,
+      title: "Grok is 57% over pace",
+      detail: "Day 3/7 · 100% used · 43% expected",
+    },
+  ];
+  assert.deepEqual(summarizeWatchNotices(notices), {
+    title: "2 usage alerts for Grok",
+    detail:
+      "Allowance spent — Nothing left on this plan window. Resets Tue 9:53 AM. · 57% over pace — Day 3/7 · 100% used · 43% expected",
+    tone: "warn",
+  });
+  assert.deepEqual(summarizeWatchNotices([notices[0]!]), {
+    title: notices[0]!.title,
+    detail: notices[0]!.detail,
+    tone: notices[0]!.tone,
+  });
+  assert.equal(summarizeWatchNotices([]), null);
 });
 
 test("weekDayIndex treats the next local date as the next Watch day", () => {

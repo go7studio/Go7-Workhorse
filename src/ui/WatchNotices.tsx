@@ -4,6 +4,7 @@ import { sameWatchDesk, selectWatchDesk } from "../lib/store-select";
 import {
   evaluateWatchHold,
   isDesktopWatchNotice,
+  summarizeWatchNotices,
   watchBarDetail,
   watchBarTitle,
   watchKeyForSession,
@@ -70,6 +71,7 @@ export const WatchBanners = memo(function WatchBanners({
         if (hold && notice.key === hold.key && (notice.kind === "daily" || notice.kind === "spent")) return false;
         return true;
       });
+  const noticeSummary = summarizeWatchNotices(notices);
 
   const vendorAsk =
     setupOpen
@@ -128,19 +130,23 @@ export const WatchBanners = memo(function WatchBanners({
           </div>
         </div>
       ) : null}
-      {notices.map((notice) => (
-        <div key={notice.id} className={`watch-toast ${notice.tone}`}>
+      {noticeSummary ? (
+        <div key={notices.map((notice) => notice.id).join(":")} className={`watch-toast ${noticeSummary.tone}`}>
           <div className="watch-toast-copy">
-            <strong>{notice.title}</strong>
-            <span>{notice.detail}</span>
+            <strong>{noticeSummary.title}</strong>
+            <span>{noticeSummary.detail}</span>
           </div>
           <div className="actions">
-            <button className="tiny" type="button" onClick={() => store.dismissWatchNotice(notice)}>
+            <button
+              className="tiny"
+              type="button"
+              onClick={() => notices.forEach((notice) => store.dismissWatchNotice(notice))}
+            >
               Got it
             </button>
           </div>
         </div>
-      ))}
+      ) : null}
     </div>
   );
 });
@@ -153,12 +159,15 @@ export function WatchNotices() {
   useEffect(() => {
     if (!store.settings.watch?.desktopNotify) return;
     const watch = store.settings.watch;
-    for (const notice of store.watchNotices) {
-      if (!isDesktopWatchNotice(notice) || !watchLocksKey(watch, notice.key) || seenDesktop.current.has(notice.id)) {
-        continue;
-      }
+    const desktopNotices = store.watchNotices.filter(
+      (notice) => isDesktopWatchNotice(notice) && watchLocksKey(watch, notice.key) && !seenDesktop.current.has(notice.id),
+    );
+    for (const notice of desktopNotices) {
       seenDesktop.current.add(notice.id);
-      void window.workhorse?.notifyDesktop?.({ title: notice.title, body: notice.detail });
+    }
+    const desktopSummary = summarizeWatchNotices(desktopNotices);
+    if (desktopSummary) {
+      void window.workhorse?.notifyDesktop?.({ title: desktopSummary.title, body: desktopSummary.detail });
     }
     for (const item of store.pending) {
       if ((item.kind !== "vendor" && item.kind !== "elevate") || seenDesktop.current.has(item.id)) continue;

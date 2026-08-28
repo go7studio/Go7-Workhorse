@@ -52,6 +52,12 @@ export type WatchNotice = {
   resetsAt?: string;
 };
 
+export type WatchNoticeSummary = {
+  title: string;
+  detail: string;
+  tone: WatchNotice["tone"];
+};
+
 export type WatchVendorStatus = {
   key: string;
   label: string;
@@ -128,6 +134,35 @@ export function toggleWatchLockKey(watch: WatchSettings, key: string, allKeys: s
 
 export function isDesktopWatchNotice(notice: Pick<WatchNotice, "kind">): boolean {
   return notice.kind === "daily" || notice.kind === "spent";
+}
+
+function watchNoticeSummaryLine(notice: WatchNotice): string {
+  if (notice.kind === "spent") return `Allowance spent — ${notice.detail}`;
+  if (notice.kind === "daily") {
+    const over = notice.title.match(/(\d+% over pace)/i)?.[1];
+    return `${over ?? "Daily bank used"} — ${notice.detail}`;
+  }
+  return `${notice.title} — ${notice.detail}`;
+}
+
+/** Collapse simultaneous Watch notices into one message and one dismissal. */
+export function summarizeWatchNotices(notices: WatchNotice[]): WatchNoticeSummary | null {
+  if (notices.length === 0) return null;
+  if (notices.length === 1) {
+    const notice = notices[0]!;
+    return { title: notice.title, detail: notice.detail, tone: notice.tone };
+  }
+  const labels = [...new Set(notices.map((notice) => notice.label))];
+  const tone = notices.some((notice) => notice.tone === "hold")
+    ? "hold"
+    : notices.some((notice) => notice.tone === "warn")
+      ? "warn"
+      : "info";
+  return {
+    title: `${notices.length} usage alerts${labels.length === 1 ? ` for ${labels[0]}` : ""}`,
+    detail: notices.map(watchNoticeSummaryLine).join(" · "),
+    tone,
+  };
 }
 
 export function normalizeWatchPermits(raw: unknown): WatchPermits {

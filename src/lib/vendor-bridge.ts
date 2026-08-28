@@ -38,6 +38,17 @@ export function vendorFailedMessage(provider: ProviderId, message: string): stri
   return `${vendorAgentLabel(provider)} agent failed: ${message}`;
 }
 
+/** A visible assistant bubble written by Workhorse because the vendor call failed. */
+export function isVendorFailureReply(text: string | undefined | null): boolean {
+  const value = (text ?? "").trim();
+  if (!value) return false;
+  return (
+    /^(?:Grok|Codex|Claude|Cursor|Custom) agent failed:/i.test(value) ||
+    /^(?:Grok|Codex|Claude|Cursor|Custom) hit a request rate limit\b/i.test(value) ||
+    /^Cursor cannot use “.+”\. Choose another model\.$/i.test(value)
+  );
+}
+
 export function vendorEmptyReply(provider: ProviderId): string {
   return `${vendorAgentLabel(provider)} finished without a visible reply.`;
 }

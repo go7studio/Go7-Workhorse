@@ -1,5 +1,6 @@
 import { uid } from "./id";
 import type { ChatImage, ChatMessage, QueuedPrompt, Session, SessionEnvironment } from "./types";
+import { isVendorFailureReply } from "./vendor-bridge";
 
 export const PROJECT_CHAT_LIMIT = 5;
 
@@ -642,6 +643,22 @@ export function cloneMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((message) => ({ ...message, id: uid("msg") }));
 }
 
+function previousUserMessageIndex(messages: ChatMessage[], before: number): number {
+  for (let index = Math.min(before - 1, messages.length - 1); index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") return index;
+  }
+  return -1;
+}
+
+function cloneChatImages(images: ChatImage[] | undefined): ChatImage[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map((image) => ({
+    ...image,
+    id: uid("img"),
+    derivedImages: image.derivedImages?.map((frame) => ({ ...frame, id: uid("img") })),
+  }));
+}
+
 export function forkTitle(title: string): string {
   const base = title.trim() || "chat";
   if (/^fork of /i.test(base)) return base;
@@ -657,8 +674,17 @@ export function forkChat(
 ): { sessions: Session[]; session: Session } | null {
   const source = sessions.find((item) => item.id === sourceId);
   if (!source) return null;
-  const kept = messagesThrough(source.messages, throughId);
-  if (!kept || kept.length === 0) return null;
+  const through = messagesThrough(source.messages, throughId);
+  if (!through || through.length === 0) return null;
+  const selectedIndex = source.messages.findIndex((message) => message.id === throughId);
+  const selected = source.messages[selectedIndex];
+  const failedReply = selected?.role === "assistant" && isVendorFailureReply(selected.text);
+  const retryIndex = failedReply ? previousUserMessageIndex(source.messages, selectedIndex) : -1;
+  const retry = retryIndex >= 0 ? source.messages[retryIndex] : undefined;
+  // A failed response is not useful branch history. Put its original request
+  // back in the composer so the fork is visibly ready to retry, including any
+  // stored attachments, instead of presenting the copied error as a new run.
+  const kept = retry ? source.messages.slice(0, retryIndex) : through;
   const session: Session = {
     ...source,
     id: nextId,
@@ -673,8 +699,8 @@ export function forkChat(
     grokCommands: undefined,
     messages: cloneMessages(kept),
     archivedAt: null,
-    composerDraft: undefined,
-    composerImages: undefined,
+    composerDraft: retry?.text || undefined,
+    composerImages: cloneChatImages(retry?.images),
     agentRun: undefined,
     lineup: undefined,
     environment: options?.environment ?? { kind: "local" },

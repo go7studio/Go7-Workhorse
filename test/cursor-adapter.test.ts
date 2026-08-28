@@ -477,6 +477,38 @@ test("CursorSessionHost new/load/launch-key", async () => {
   assert.equal(keys.filter((item) => item === "session/new").length, 2);
 });
 
+test("CursorSessionHost recreates a runtime whose stdin died between turns", async () => {
+  const methods: string[] = [];
+  const children: ChildProcessWithoutNullStreams[] = [];
+  const host = new CursorSessionHost(() => {
+    const child = fakeAcp({ methods, nextId: "cursor-recovered" });
+    children.push(child);
+    return child;
+  });
+  const input = {
+    sessionId: "work-restart",
+    text: "before update",
+    model: "composer-2.5",
+    effort: "medium" as const,
+    mode: "ask" as const,
+    cwd: ROOT,
+  };
+  const first = await host.prompt(input, () => undefined);
+  assert.equal(first.vendorSessionId, "cursor-recovered");
+  children[0]!.emit("exit", 1, null);
+
+  const second = await host.prompt(
+    { ...input, text: "after update", vendorSessionId: first.vendorSessionId },
+    () => undefined,
+  );
+  host.disposeAll();
+
+  assert.equal(children.length, 2);
+  assert.equal(methods.filter((method) => method === "initialize").length, 2);
+  assert.equal(methods.filter((method) => method === "session/load").length, 1);
+  assert.equal(second.opened, "session/load");
+});
+
 test("session/request_permission is tagged cursor by the store path", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /owner\?\.provider === "cursor"/);

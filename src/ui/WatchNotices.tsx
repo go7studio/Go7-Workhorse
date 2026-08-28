@@ -151,7 +151,7 @@ export const WatchBanners = memo(function WatchBanners({
   );
 });
 
-export function WatchNotices() {
+export function WatchNotices({ hidden = false }: { hidden?: boolean } = {}) {
   const store = useStoreSelector(selectWatchDesk, sameWatchDesk);
   const session = store.session;
   const seenDesktop = useRef(new Set<string>());
@@ -184,7 +184,7 @@ export function WatchNotices() {
 
   return (
     <>
-      {!session && <WatchBanners />}
+      {!hidden && !session && <WatchBanners />}
     </>
   );
 }

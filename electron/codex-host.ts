@@ -226,7 +226,12 @@ export class CodexSessionHost {
 
   private async ensureAgent(input: GrokSessionOpenInput, emit: CodexEventSink): Promise<void> {
     const key = codexLaunchKey(input);
-    const slot = this.slots.get(input.sessionId);
+    let slot = this.slots.get(input.sessionId);
+    if (slot && !slot.agent.canReuse) {
+      slot.agent.dispose();
+      this.slots.delete(input.sessionId);
+      slot = undefined;
+    }
     const action = shouldLoadVendorSession({
       vendorSessionId: input.vendorSessionId,
       existingSlotKey: slot?.key,

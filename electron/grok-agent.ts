@@ -746,6 +746,11 @@ export class GrokAgent {
     this.spawn = spawn;
   }
 
+  /** A host may reuse this slot only while its transport can still take input. */
+  get canReuse(): boolean {
+    return !this.closed && Boolean(this.child?.stdin.writable);
+  }
+
   async start(options?: { vendorSessionId?: string }): Promise<GrokStartResult> {
     const child = this.spawn(this.spec);
     this.child = child;
@@ -755,9 +760,14 @@ export class GrokAgent {
     child.stderr.on("data", (chunk: string) => {
       this.stderr += chunk;
     });
-    child.on("error", (error) => this.failAll(error));
+    child.on("error", (error) => {
+      if (this.closed) return;
+      this.closed = true;
+      this.failAll(error);
+    });
     child.on("exit", (code, signal) => {
       if (this.closed) return;
+      this.closed = true;
       this.failAll(new Error(`${this.who} agent exited (${code ?? signal ?? "unknown"})${this.stderr.trim() ? `: ${this.stderr.trim()}` : ""}`));
     });
 

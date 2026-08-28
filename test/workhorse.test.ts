@@ -645,6 +645,44 @@ test("forkChat copies history through a turn into a new listed chat", () => {
   assert.equal(orphaned[0]?.id, "sess_fork");
   assert.equal(deskRoleOf(forked.session), "orchestrator");
   assert.equal(isHiddenSession(forked.session), false);
+
+  const failedSource: Session = {
+    ...source,
+    id: "sess_failed",
+    provider: "cursor",
+    model: "cursor-grok-4.6-high",
+    messages: [
+      {
+        id: "retry-user",
+        role: "user",
+        text: "Inspect this image",
+        createdAt: 10,
+        images: [
+          {
+            id: "old-image",
+            name: "screen.jpg",
+            mimeType: "image/jpeg",
+            data: "",
+            kind: "image",
+            sourcePath: "C:\\attachments\\screen.jpg",
+          },
+        ],
+      },
+      {
+        id: "retry-error",
+        role: "assistant",
+        text: "Cursor cannot use “cursor-grok-4.6”. Choose another model.",
+        createdAt: 11,
+      },
+    ],
+  };
+  const retryFork = forkChat([failedSource], failedSource.id, "retry-error", "sess_retry");
+  assert.ok(retryFork);
+  assert.deepEqual(retryFork.session.messages, []);
+  assert.equal(retryFork.session.composerDraft, "Inspect this image");
+  assert.equal(retryFork.session.composerImages?.[0]?.sourcePath, "C:\\attachments\\screen.jpg");
+  assert.notEqual(retryFork.session.composerImages?.[0]?.id, "old-image");
+
   const pane = readFileSync(path.join(ROOT, "src", "ui", "SessionPane.tsx"), "utf8");
   assert.match(pane, /Copy/);
   assert.match(pane, /Fork/);

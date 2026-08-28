@@ -12,7 +12,7 @@ import { capabilitiesFor } from "../src/lib/provider-capabilities";
 import { usageProviderForSession, leftoverForCard, byProvider, cursorLaneEvents } from "../src/lib/usage";
 import { cursorUsageLane, cursorWatchLane, isCursorInnerTask } from "../src/lib/cursor-lane";
 import { asProviderId, normalizeSession } from "../src/lib/session";
-import { vendorSendTarget, vendorFailedMessage, previewOnlyReply } from "../src/lib/vendor-bridge";
+import { isVendorFailureReply, vendorSendTarget, vendorFailedMessage, previewOnlyReply } from "../src/lib/vendor-bridge";
 import { resetCursorBases } from "../src/lib/cursor-catalog";
 import { applyVendorCatalog, defaultModel, modelName, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { commandsForSession, vendorSkillOrigin } from "../src/lib/commands";
@@ -164,6 +164,9 @@ test("vendorFailedMessage prefixes Cursor, never Preview only", () => {
   );
   assert.equal(rejected, "Cursor cannot use “cursor-grok-4.6-medium”. Choose another model.");
   assert.doesNotMatch(rejected, /Available models|hundreds-more/);
+  assert.equal(isVendorFailureReply(rejected), true);
+  assert.equal(isVendorFailureReply("Cursor agent failed: connection closed"), true);
+  assert.equal(isVendorFailureReply("Cursor inspected the failure and fixed it."), false);
 });
 
 test("buildCursorLaunchSpec never spawns grok or Cursor.app", () => {

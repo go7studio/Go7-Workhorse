@@ -13,6 +13,15 @@ export type CursorCatalogRow = {
   effort: boolean;
   contextWindow: number;
   aliases?: string[];
+  /**
+   * Every slug Cursor actually listed for this family, in listing order.
+   *
+   * `id` is a display family we synthesise by stripping suffixes, and Cursor
+   * often never offers it on its own: the CLI lists `cursor-grok-4.6-high`
+   * but rejects `cursor-grok-4.6`. A launch must pick from this list, never
+   * from the family name.
+   */
+  launchIds?: string[];
 };
 
 export type CursorVariant = {
@@ -165,12 +174,14 @@ export function collapseCursorCatalog(rows: CursorCatalogRow[]): CursorCatalogRo
     const reported = variants
       .map((item) => item.contextWindow)
       .filter((window) => window !== CURSOR_DEFAULT_WINDOW);
-    const aliases = [...new Set(variants.map((item) => item.id).filter((id) => id !== family))];
+    const listed = [...new Set(variants.map((item) => item.id))];
+    const aliases = listed.filter((id) => id !== family);
     bases.push({
       id: family,
       name: variants[0]?.name || family,
       effort: true,
       contextWindow: reported.length > 0 ? Math.max(...reported) : CURSOR_DEFAULT_WINDOW,
+      launchIds: listed,
       ...(aliases.length > 0 ? { aliases } : {}),
     });
   }
@@ -237,7 +248,9 @@ export function cursorSlugForEffort(
   const row =
     rows.find((item) => item.id === family || item.id === trimmed) ??
     rows.find((item) => item.aliases?.includes(trimmed) || item.aliases?.includes(family));
-  const variants = row ? [row.id, ...(row.aliases ?? [])] : [];
+  // Only slugs Cursor listed. Rows built by hand (tests, stock literals) carry
+  // no launchIds, so those keep the older id+aliases behaviour.
+  const variants = row ? (row.launchIds?.length ? row.launchIds : [row.id, ...(row.aliases ?? [])]) : [];
   if (variants.length === 0) return trimmed;
   const want = { effort: effortWanted(effort), fast: options?.fast === true };
   let best = variants[0]!;

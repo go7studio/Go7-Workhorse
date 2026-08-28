@@ -8,6 +8,19 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.44](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.43...v0.6.44) (2026-08-28)
+
+
+### Bug Fixes
+
+* hide usage alerts on project info ([ba5dab3](https://github.com/go7studio/Go7-Workhorse/commit/ba5dab35735a0f2c1cf4122487a9695f453e4811))
+* never spawn a worker onto a vendor with no leftover ([cb0231f](https://github.com/go7studio/Go7-Workhorse/commit/cb0231f3210bc8358971eae6e44a71d287acb86e))
+* never spawn a worker onto a vendor with no leftover ([687a48a](https://github.com/go7studio/Go7-Workhorse/commit/687a48a464d23d038eddac429959e201031a20c4))
+* only ever launch Cursor with a slug it listed ([4a328d8](https://github.com/go7studio/Go7-Workhorse/commit/4a328d8c953dafd33b2bd1fc2897dd6bb30724ae))
+* only ever launch Cursor with a slug it listed ([84e7a06](https://github.com/go7studio/Go7-Workhorse/commit/84e7a065c9e1c7aee19fe8049435b517b3afe287))
+* recover updated runtimes and quiet project info ([6e1f8eb](https://github.com/go7studio/Go7-Workhorse/commit/6e1f8eb39bb2ffbcace5948e43ad75cf27b8805b))
+* recover vendor runtimes after updates ([e0127a2](https://github.com/go7studio/Go7-Workhorse/commit/e0127a2880cd887373e5daba551bbb2208adcb26))
+
 ## [0.6.43](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.42...v0.6.43) (2026-08-28)
 
 

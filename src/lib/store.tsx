@@ -202,7 +202,6 @@ import {
   assertAgentPathWrite,
   campaignGateError,
   claimSharedFiles,
-  clearCampaignPhase,
   collectChildAgentReports,
   deskRoleOf,
   descendantSessionIds,
@@ -688,6 +687,23 @@ function hydrate(value: unknown): AppState {
     typeof record.activeSessionId === "string" && sessions.some((session) => session.id === record.activeSessionId)
       ? record.activeSessionId
       : null;
+  const rawPending = Array.isArray(record.pending) ? record.pending : [];
+  const keptPending = rawPending.filter(
+    (item) => !(item && typeof item === "object" && (item as { kind?: unknown }).kind === "campaign"),
+  );
+  const gatedParents = new Set(
+    rawPending
+      .filter((item) => item && typeof item === "object" && (item as { kind?: unknown }).kind === "campaign")
+      .map((item) => String((item as { sessionId?: unknown }).sessionId ?? ""))
+      .filter(Boolean),
+  );
+  for (const parent of gatedParents) {
+    if (keptPending.some((item) => item && typeof item === "object" && (item as { sessionId?: unknown }).sessionId === parent)) continue;
+    const index = sessions.findIndex((session) => session.id === parent);
+    if (index >= 0 && sessions[index]?.status === "needs-input") {
+      sessions[index] = { ...sessions[index]!, status: "idle" };
+    }
+  }
   const leases = hydrateInterruptedPathLeases(record.leases, sessions);
   return {
     ...EMPTY,
@@ -695,7 +711,10 @@ function hydrate(value: unknown): AppState {
     projects,
     sessions,
     activeSessionId,
-    pending: Array.isArray(record.pending) ? record.pending : [],
+    // A campaign row persisted from the gated era has no approver any more; it
+    // would render as an ordinary ask and hold its parent at needs-input for a
+    // click that must never be asked for. Drop it, and let the parent run.
+    pending: keptPending,
     leases,
     dismissedAttention: Array.isArray(record.dismissedAttention)
       ? record.dismissedAttention.filter((item): item is string => typeof item === "string")
@@ -1703,32 +1722,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const answerPermission = useCallback((id: string, answer: "once" | "session" | "deny") => {
     const pending = stateRef.current.pending.find((item) => item.id === id);
     const session = stateRef.current.sessions.find((item) => item.id === pending?.sessionId);
-    if (pending?.kind === "campaign") {
-      setState((current) => ({
-        ...current,
-        pending: current.pending.filter((item) => item.id !== id),
-        sessions: current.sessions.map((item) => {
-          if (item.id !== pending.sessionId) return item;
-          const mission = item.lineup?.mission;
-          const approved =
-            answer !== "deny" &&
-            mission &&
-            mission.id === pending.campaign?.missionId &&
-            mission.phase === pending.campaign.phase
-              ? clearCampaignPhase(mission)
-              : mission;
-          return {
-            ...item,
-            status: permissionResumeStatus({
-              hasOtherPending: current.pending.some((row) => row.sessionId === item.id && row.id !== id),
-              agentRun: item.agentRun,
-            }),
-            ...(item.lineup && approved ? { lineup: { ...item.lineup, mission: approved } } : {}),
-          };
-        }),
-      }));
-      return;
-    }
     const vendorAsk = pending?.kind === "vendor" ? pending.vendor : undefined;
     const vendorAnswer = pending?.kind === "elevate" && answer !== "deny" ? "once" : answer;
     if (session?.provider === "codex") void window.workhorse?.codexAnswerPermission?.(id, vendorAnswer);
@@ -4713,37 +4706,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               openingMission,
             });
             const spawnMission = gate.mission;
-            if (gate.error && spawnMission && gate.phase) {
-              const gateError = gate.error;
-              const gatePhase = gate.phase;
-              const requestId = uid("perm");
-              setState((current) => ({
-                ...current,
-                pending: enqueuePermission(current.pending, {
-                  id: requestId,
-                  sessionId: caller.id,
-                  provider: caller.provider,
-                  tool: "campaign phase",
-                  detail: gateError,
-                  kind: "campaign",
-                  campaign: { missionId: spawnMission.id, phase: gatePhase },
-                }),
-                sessions: current.sessions.map((item) =>
-                  item.id === caller.id
-                    ? {
-                        ...item,
-                        status: "needs-input" as const,
-                        lineup: {
-                          ...(item.lineup ?? emptyLineup(payload.folder ?? "", Date.now())),
-                          mission: spawnMission,
-                        },
-                      }
-                    : item,
-                ),
-              }));
-              await replyAsk({ error: `${gateError} Approve or deny the Campaign gate in the permission inbox, then retry once if approved.` });
-              return;
-            }
             if (gate.error) {
               await replyAsk({ error: gate.error });
               return;

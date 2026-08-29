@@ -394,7 +394,7 @@ export type MissionIteration = {
   maxIterations: number;
   previousWorkerIds: string[];
   phase: CampaignPhase;
-  /** Written by the permission inbox only. A worker-supplied marker is never trusted. */
+  /** Gated-era leftover, tolerated on persisted state; nothing grants or honours it. */
   clearance?: CampaignClearance;
   /** Mission-level token ceiling. One pass cannot spend this whole amount. */
   tokenBudget?: number;
@@ -607,16 +607,12 @@ export type PermissionRequest = {
   tool: string;
   detail: string;
   path?: string;
-  kind?: "tool" | "elevate" | "vendor" | "campaign";
+  kind?: "tool" | "elevate" | "vendor";
   elevate?: { mode?: PermissionMode; sandbox?: SandboxProfile };
   vendor?: {
     provider: ProviderId;
     name: string;
     status: "day_bank" | "spent" | "disabled" | "ok";
-  };
-  campaign?: {
-    missionId: string;
-    phase: "scout" | "review" | "approve";
   };
 };
 

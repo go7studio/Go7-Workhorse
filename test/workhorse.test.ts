@@ -9887,3 +9887,11 @@ test("list chats names a live worker so a harness can find Marlow", () => {
   assert.equal("error" in named, true);
   if ("error" in named) assert.match(named.error, /Several workers named/);
 });
+
+test("hydrate strips gated-era campaign rows and lets their parents run", () => {
+  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(source, /kind === "campaign"/, "gated-era rows are filtered at hydrate");
+  assert.match(source, /gatedParents/, "their needs-input parents are set back to idle");
+  assert.doesNotMatch(source, /requires human approval/i, "no path asks a human to approve a phase");
+  assert.doesNotMatch(source, /clearCampaignPhase/, "nothing grants campaign clearance");
+});

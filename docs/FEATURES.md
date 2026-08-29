@@ -255,10 +255,10 @@ transcript rather than as a path.
   one bounded helper, ask to raise a block, read skills and references. It
   cannot create, rename, move or delete anything on the desk, and is not shown
   those tools.
-- **Campaign gate** — one worker and a two-way split start immediately. When
-  two opening workers are live or still starting, a third request mints a scout
-  Campaign card and waits for a person to clear the current phase. A worker
-  cannot clear its own gate.
+- **Campaigns** — one worker and a two-way split start immediately. A wider
+  opening wave becomes a Campaign: passes advance one phase at a time on their
+  own results, with no approval prompt. A caller cannot claim the build phase;
+  build is honoured only when the desk itself holds that mission at build.
 - **Path ownership** — assigned repo-relative paths are leased across shared
   folders and worktrees. Conflicting spawns and stale writes stay blocked until
   the owner finishes or is explicitly cancelled. Deleting a running owner's

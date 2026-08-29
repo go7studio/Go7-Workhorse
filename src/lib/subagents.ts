@@ -1568,23 +1568,19 @@ export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
   return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
 }
 
+/**
+ * Missions run without a click. Steve, 2026-08-29: the desk never asks a human
+ * to approve a campaign phase. What remains is forgery rejection: a payload
+ * claiming the build phase must match the desk's own mission state, because
+ * build is where workers write.
+ */
 export function campaignGateError(
   mission: MissionIteration | undefined,
   desk?: MissionIteration,
 ): string | undefined {
-  if (!mission) return "Campaign mission state is missing; human approval is required before a worker can start.";
-  if (mission.phase === "build") {
-    const matchingDesk = desk?.id === mission.id && desk.iteration === mission.iteration;
-    const deskAuthorized = matchingDesk && (
-      desk.phase === "build" ||
-      (desk.clearance?.clearedBy === "human" && desk.clearance.phase === "approve")
-    );
-    return deskAuthorized
-      ? undefined
-      : "Campaign build requires matching desk state or human approve clearance before a worker can start.";
-  }
-  if (mission.clearance?.clearedBy === "human" && mission.clearance.phase === mission.phase) return undefined;
-  return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
+  if (!mission || mission.phase !== "build") return undefined;
+  const matchingDesk = desk?.id === mission.id && desk.iteration === mission.iteration && desk.phase === "build";
+  return matchingDesk ? undefined : "Campaign build requires matching desk state before a worker can start.";
 }
 
 /**
@@ -1666,15 +1662,6 @@ export function openingWaveMission(input: {
 }
 
 /** The approval card is the sole caller. Approval of the approve phase enters build. */
-export function clearCampaignPhase(mission: MissionIteration, now = Date.now()): MissionIteration {
-  if (mission.phase === "build") return mission;
-  return {
-    ...mission,
-    phase: mission.phase === "approve" ? "build" : mission.phase,
-    clearance: { phase: mission.phase, clearedAt: now, clearedBy: "human" },
-  };
-}
-
 /** Ignore markers supplied by a caller; only a matching manifest already on the desk can clear a gate. */
 export function missionForDeskSpawn(
   requested: MissionIteration | undefined,
@@ -1684,25 +1671,14 @@ export function missionForDeskSpawn(
   const clean = { ...requested, clearance: undefined };
   const matchingDesk = desk?.id === requested.id && desk.iteration === requested.iteration;
   if (requested.phase === "build") {
-    const approveClearance = matchingDesk &&
-      desk.clearance?.clearedBy === "human" &&
-      desk.clearance.phase === "approve"
-        ? desk.clearance
-        : undefined;
-    if (!matchingDesk || (desk.phase !== "build" && !approveClearance)) {
-      return { ...clean, phase: "approve" };
-    }
-    return { ...clean, ...(approveClearance ? { clearance: approveClearance } : {}) };
+    // Build is honoured only when the desk itself holds it; anything else runs
+    // one phase back. Nothing grants clearance any more, so none is read.
+    if (!matchingDesk || desk.phase !== "build") return { ...clean, phase: "approve" };
+    return clean;
   }
-  if (!matchingDesk) return clean;
-  const cleared = desk.clearance;
-  if (!cleared || cleared.clearedBy !== "human") return clean;
-  if (cleared.phase !== requested.phase) return clean;
-  return {
-    ...clean,
-    phase: requested.phase === "approve" ? "build" : requested.phase,
-    clearance: cleared,
-  };
+  // A clearance persisted from the gated era buys nothing: the click is gone,
+  // and phases advance only by passes completing.
+  return clean;
 }
 
 const BUDGET_PHASES: BudgetPhase[] = ["produce", "verify", "handoff", "exhausted"];

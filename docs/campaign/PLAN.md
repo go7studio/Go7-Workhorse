@@ -92,3 +92,33 @@ The four build slices all touch `src/lib/types.ts` and `src/lib/subagents.ts`.
 They cannot run as parallel file-owned lanes — which is the argument for the
 allowlist feature, demonstrated by the campaign that proposes it. Slices 1 and
 2 are sequenced on one lane; 3 and 4 can follow.
+
+## Decisions taken at the gate (2026-08-29)
+
+1. **All four slices.**
+2. **The gate binds the first wave, not only continuation.** Scout B proved a
+   continuation-only gate leaves `workhorse_spawn_agent` free to open an
+   ungated opening fan-out — and the opening fan-out is what cost $1,468.
+3. **`reportRef` is removed, not resolved.** It names a message id nothing can
+   resolve; a footer that points nowhere is worse than no footer. The
+   truncation notice must instead name a recovery path that works today
+   (`workhorse_read_chat` by worker id).
+
+## Lanes, sequenced by the collision this plan found
+
+Slices 1+2 are one lane: both rewrite the report path in `subagents.ts`.
+Slices 3+4 follow: both touch `types.ts` and `store.tsx`, so they cannot run
+beside 1+2 or beside each other as separate writers.
+
+| Wave | Slices | Owns | Lane |
+|---|---|---|---|
+| 1 | typed findings, report bound, remove `reportRef` | `subagents.ts`, `lineup.ts`, `types.ts`, `workhorse-mcp.ts`, `session-bridge.ts` | Codex |
+| — | adversarial verify of wave 1 | read-only | Cursor Grok 4.6 |
+| 2 | first-wave gate, path allowlists, wire the dead lease | `workhorse-mcp.ts`, `types.ts`, `store.tsx`, `subagents.ts` | Codex |
+| — | adversarial verify of wave 2 | read-only | Cursor Grok 4.6 |
+
+## The dogfood
+
+Wave 2 builds the gate. Once it lands, the desk must refuse to continue this
+very mission without a human clearing the phase. If our own continuation walks
+straight through, the gate does not work — and that failure is the test.

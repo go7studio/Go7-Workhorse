@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.46](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.45...v0.6.46) (2026-08-29)
+
+
+### Bug Fixes
+
+* missions run without a click ([#205](https://github.com/go7studio/Go7-Workhorse/issues/205)) ([7192675](https://github.com/go7studio/Go7-Workhorse/commit/71926752dcd95761d8f519ab4032d532dda3b6a3))
+
 ## [0.6.45](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.44...v0.6.45) (2026-08-29)
 
 

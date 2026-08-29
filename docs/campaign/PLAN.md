@@ -122,3 +122,50 @@ beside 1+2 or beside each other as separate writers.
 Wave 2 builds the gate. Once it lands, the desk must refuse to continue this
 very mission without a human clearing the phase. If our own continuation walks
 straight through, the gate does not work — and that failure is the test.
+
+## Wave 1 adversarial verdict (Cursor Grok 4.6, 2026-08-29): DO NOT SHIP
+
+Proved by construction and by mutation, not by reading.
+
+MET: restart round-trip (deleting the `normalizeAgentRun` keep made the test
+fail — the pipeline is real, not decorative); `reportRef` removal and the new
+footer (live check: `workhorse_read_chat` genuinely returns the full text);
+additive-safety (no protocolVersion move needed).
+
+NOT MET, and blocking:
+
+1. **The parser silent-drops realistic model output.** `parseWorkerFindings`
+   (`src/lib/subagents.ts:713`) demands four CONSECUTIVE lines, exact labels,
+   exact order. Verified failures, all returning `[]`: a blank line between
+   FINDING and TITLE, markdown bold, `- ` bullets, TITLE before FINDING,
+   `FINDING: high (must fix)`, an extra OWNER line, a `### FINDING` heading.
+   `parseAuditorReport` (`plan.ts:272`) — same desk, same four-line idea —
+   already uses independent `/^\s*LABEL:\s*…$/im` matches and survives all of
+   it. One blank line from a model and the whole feature yields nothing while
+   the 4,000-char clip still eats the prose.
+2. **It forked the desk after all.** `WorkerFinding` (`types.ts:297`) is a
+   third dialect beside `WorkerHandoff` and `AuditorReport`; the join still
+   ignores the other two. This is the exact outcome the plan told wave 1 to
+   avoid.
+3. **One test is mock-echo, not coverage.** Gutting `parseWorkerFindings` to
+   return `[]` left `test/workhorse-link.test.ts:950` green: it stubs
+   `agent_status` and asserts its own stub.
+
+PARTLY HONEST: the 4,000 prose cap was kept to bound payloads, but findings are
+capped only per-row/field — worst case ~36k on `agent_status` and again in the
+join, larger than any report it refused to carry.
+
+### Queue, in order (later items are blocked by earlier ones)
+
+1. WAVE 2 lands (gate + path ownership) — in flight, owns `subagents.ts`.
+2. FIX-1 parser tolerance: match `parseAuditorReport`'s independent-label
+   approach. A `FINDING:` opens a receipt; TITLE/FILE/EVIDENCE attach until the
+   next `FINDING:`. Blank lines, extra lines and label order must not drop a
+   row; a missing required field still drops that row. Keep the type name so
+   wave 2 does not collide.
+3. FIX-2 tests that fail when tolerance is removed: blank line between FINDING
+   and TITLE, extra OWNER line, `FINDING: high (comment)`, second receipt after
+   a blank line. Replace the mock-echo assertion with production-parse coverage.
+4. FIX-3 reconcile the dialects, or write down why three is correct.
+5. Adversarial verify of wave 2 + the fixes.
+6. Push to main, then verify against the installed desk.

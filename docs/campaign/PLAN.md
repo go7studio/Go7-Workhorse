@@ -193,3 +193,59 @@ The bullet form is the single most common shape and the parser rejects it.
 
 FIX-1 must be tested against these real shapes, not invented ones. The adversary
 already proved the synthetic failures; this proves they are the common case.
+
+## FIX-1 verified (2026-08-29)
+
+Merged. Mutation-proved: gutting `parseWorkerFindings` fails 13 of 21 focused
+tests; restored, 21/21. Suite 1117 tests, 1116 pass, 0 fail. Independently
+re-checked against the seven real shapes harvested from this desk — all seven
+parse, six of which were silently dropped before.
+
+## Wave 2 adversarial verdict (Cursor Grok 4.6): DO NOT SHIP
+
+Its summary is the finding: *"Wave 2 adopted the phase names and a
+permission-inbox card, but it only gates when a MissionIteration already exists
+in scout or approve. That is 'gate loop-delegate and inherited missions', not
+'gate the opening fan-out'. The $1,468 hole the plan named is still the default
+spawn_agent path."*
+
+What IS real: the Campaign gate card is a true elevate-style block (no
+default-continue, always-approve does not auto-answer it, no agent MCP can
+clear it); caller-supplied clearance is discarded; stale scout clearance does
+not unlock approve; cross-worktree path claims genuinely conflict; fingerprints
+are checked on write, not only at claim; release runs on every terminal state.
+
+What is NOT:
+
+1. **Fail-open.** `campaignGateError` returns undefined when there is no
+   mission at all; `normalizeMissionIteration` turns a missing or garbage phase
+   into `build`, which is ungated; `review` has no gate. So one legitimate
+   scout approval buys an unlimited review wave.
+2. **The opening wave is still ungated.** `workhorse_spawn_agent`
+   (`workhorse-mcp.ts:2728`) never reads `loop` or `missionIteration` and never
+   mints mission state; inheritance is only `input.missionIteration ??
+   caller.agentRun.mission`. A Link harness, or a Mission-pinned parent with no
+   `agentRun.mission`, opens any width with no card.
+3. **The completion check cannot work on Unix.** `listGitChanges`
+   (`electron/project-diff.ts:114`) returns absolute paths;
+   `normalizePathAllowlist` rejects a leading `/`. They never match — so any
+   dirty path-owned worker fails completion including legitimate allowlisted
+   writes, while `git add && git commit` clears porcelain so an out-of-allowlist
+   write passes. Failing completion is not a revert; the damage stands.
+4. **Leases do not survive restart.** `hydrate` keeps them only while
+   `status === "running"`, and `normalizeAgentRun` rewrites running to
+   interrupted. Worse than a deadlock: an interrupted worker may still be
+   writing while a new spawn re-leases the same path.
+5. **No test dies when the store stops calling the gate.** Removing the
+   `store.tsx` call left both unit tests green — the same mock-echo class as
+   wave 1's Link test.
+
+Also flagged, product-level: path ownership forces Ask mode, so every edit is a
+human click, which makes the cheap escape the shell — and the shell is exactly
+the unguarded path in (3).
+
+### Queue
+1. FIX-2 — close 1-5 above. Owns subagents.ts, store.tsx, workhorse-mcp.ts, tests.
+2. Adversarial re-verify of FIX-2.
+3. Replace the mock-echo Link test (owner pass, test/workhorse-link.test.ts).
+4. PR to go7studio/Go7-Workhorse, CI, merge, verify on the installed desk.

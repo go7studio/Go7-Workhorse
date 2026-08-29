@@ -8,6 +8,31 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.45](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.44...v0.6.45) (2026-08-29)
+
+
+### Features
+
+* deliver Grok Bot answers that outlive the shim's wait ([#204](https://github.com/go7studio/Go7-Workhorse/issues/204)) ([ad295ba](https://github.com/go7studio/Go7-Workhorse/commit/ad295bad3053ecd7ee7cc4bf385a1a94089a8603))
+* gate campaigns and enforce worker paths ([838fb36](https://github.com/go7studio/Go7-Workhorse/commit/838fb3612e2608dce06560fa695d936aacd9dcb3))
+* typed worker findings, campaign phase gate, and path ownership ([ed6c142](https://github.com/go7studio/Go7-Workhorse/commit/ed6c1429a64c13057a1aa5c3c685e96d106ab321))
+
+
+### Bug Fixes
+
+* close campaign gate holes ([93ad3f7](https://github.com/go7studio/Go7-Workhorse/commit/93ad3f749c0e9a3903a391666dff431856c98447))
+* gate concurrent opening waves and release path owners ([74d18cf](https://github.com/go7studio/Go7-Workhorse/commit/74d18cf550d4b65c220ee4767a8b92dda978c934))
+* keep loose lists, hide disabled usage, expand subagents, drop watch nags ([c7a422c](https://github.com/go7studio/Go7-Workhorse/commit/c7a422c563b1ed45365056e66a564863712129cc))
+* opening workers keep their own reservations ([a0a0956](https://github.com/go7studio/Go7-Workhorse/commit/a0a0956d7fc5849f9b2171b402054c6df68215c9))
+* preserve opening capacity across failed starts ([7ccccfb](https://github.com/go7studio/Go7-Workhorse/commit/7ccccfb05e18c2f5a317437ed1a2bbd7ccbb0554))
+* preserve typed worker findings through bounded reports ([c5828c6](https://github.com/go7studio/Go7-Workhorse/commit/c5828c619abb313a206f64cf8391be50e7798d29))
+* reject forged campaign build phases ([6e911ba](https://github.com/go7studio/Go7-Workhorse/commit/6e911baed37fdebfae19b4be7bd665755a0bfc7f))
+* ship the 0.6.45 desk polish without a hand version bump ([a77ee5c](https://github.com/go7studio/Go7-Workhorse/commit/a77ee5cab1cb91da0f10eac73fa0aa75c1584862))
+* show Cursor CLI install guidance ([5a753d7](https://github.com/go7studio/Go7-Workhorse/commit/5a753d7fb1c2cccee7f545bf896f6520e5b9cc66))
+* tighten desk density from the live UI walk ([3e59df3](https://github.com/go7studio/Go7-Workhorse/commit/3e59df3f13db94d98c4dc034a48b57986b5e030b))
+* tighten desk density from the live UI walk ([ec34645](https://github.com/go7studio/Go7-Workhorse/commit/ec3464500a3c8a78ccb1db20a8908b271d93b90c))
+* tolerate real worker finding receipts ([5f80415](https://github.com/go7studio/Go7-Workhorse/commit/5f80415c6b2ab453e2ab4f47e9b4525be428aa96))
+
 ## [0.6.44](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.43...v0.6.44) (2026-08-28)
 
 

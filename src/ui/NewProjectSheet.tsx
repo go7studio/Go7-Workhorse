@@ -25,6 +25,16 @@ export function NewProjectSheet() {
     }
   }, [sheet]);
 
+  useEffect(() => {
+    if (sheet !== "project") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      closeSheet();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sheet, closeSheet]);
+
   if (sheet !== "project") return null;
 
   const addFolders = (paths: string[]) => {

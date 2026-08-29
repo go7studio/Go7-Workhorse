@@ -56,13 +56,25 @@ function followLatestClass(el: HTMLElement, following: boolean) {
   el.classList.toggle("follow-latest", following);
 }
 
+/** Clean finish vs a wave that named failed/interrupted/cancelled workers. */
+export function crewDoneKind(text: string): "ok" | "bad" | null {
+  if (text === LINEUP_FINISHED_NOTICE) return "ok";
+  if (/^(?:\d+ of \d+ workers finished|No worker finished) · /.test(text)) return "bad";
+  return null;
+}
+
 const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
   if (isDeskNotice(block.message)) return null;
-  if (block.message.text === LINEUP_FINISHED_NOTICE) {
+  const crew = crewDoneKind(block.message.text);
+  if (crew) {
     return (
-      <article className="turn crew-done" data-turn-id={block.message.id} aria-label={LINEUP_FINISHED_NOTICE}>
+      <article
+        className={`turn crew-done${crew === "bad" ? " failed" : ""}`}
+        data-turn-id={block.message.id}
+        aria-label={block.message.text}
+      >
         <div className="crew-done-card">
-          <strong>{LINEUP_FINISHED_NOTICE}</strong>
+          <strong>{block.message.text}</strong>
         </div>
       </article>
     );
@@ -449,7 +461,7 @@ export function SessionPane() {
         </div>
       </header>
       <div
-        className="transcript follow-latest"
+        className={`transcript follow-latest${editsBarOpen ? " has-changes" : ""}`}
         ref={scroller}
         onWheel={() => {
           userMoved.current = true;

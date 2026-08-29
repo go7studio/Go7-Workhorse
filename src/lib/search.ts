@@ -1,3 +1,4 @@
+import { missionTitle } from "./lineup";
 import type { AppState, Session } from "./types";
 
 export type ChatSearchResult = {
@@ -9,6 +10,11 @@ export type ChatSearchResult = {
   snippet: string;
   at: number;
 };
+
+/** Same words the sidebar row shows: a Link wave's name, else the stored title. */
+export function searchDisplayTitle(session: Pick<Session, "title" | "lineup">): string {
+  return missionTitle(session.lineup) ?? session.title;
+}
 
 const clip = (text: string, query: string, limit = 140) => {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -31,13 +37,14 @@ export function searchChats(
   for (const session of sessions) {
     if (session.hidden) continue;
     const project = session.projectId ? names.get(session.projectId) ?? "" : "Loose chats";
-    const header = `${session.title} ${project} ${session.provider} ${session.model}`;
+    const title = searchDisplayTitle(session);
+    const header = `${title} ${session.title} ${project} ${session.provider} ${session.model}`;
     if (header.toLowerCase().includes(needle)) {
       let at = 0;
       for (const message of session.messages) at = Math.max(at, message.createdAt);
       rows.push({
         sessionId: session.id,
-        title: session.title,
+        title,
         project,
         provider: session.provider,
         snippet: clip(header, needle),
@@ -49,7 +56,7 @@ export function searchChats(
       rows.push({
         sessionId: session.id,
         messageId: message.id,
-        title: session.title,
+        title,
         project,
         provider: message.provider ?? session.provider,
         snippet: clip(message.text, needle),

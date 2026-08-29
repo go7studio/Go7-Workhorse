@@ -192,7 +192,8 @@ test("a built-in meter that answered reads unknown, never a permanent Loading", 
   assert.doesNotMatch(pane, /fetchKnown: focused\.provider === "custom"/);
   // No invented ring: an unread meter draws nothing and reads "…", not 0%.
   assert.match(pane, /value=\{plan \? plan\.leftPercent \/ 100 : undefined\}/);
-  assert.match(pane, /: "…"\}/);
+  assert.match(pane, /leftoverUnknownMark/);
+  assert.match(pane, /missing\?\.label \?\? "…"/);
 });
 
 test("an answered meter that carries a plan still fills its ring", () => {

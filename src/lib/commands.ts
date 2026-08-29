@@ -6,7 +6,7 @@ export const COMMANDS: Command[] = [
   { id: "new", name: "/new", hint: "Back to this project’s home", run: "new", aliases: ["/clear"] },
   { id: "project", name: "/project", hint: "Create a project", run: "project" },
   { id: "link", name: "/link", hint: "Link a folder to this project", run: "link" },
-  { id: "providers", name: "/providers", hint: "Back to this project’s home", run: "providers" },
+  { id: "providers", name: "/providers", hint: "Open vendor and model", run: "providers" },
   { id: "model", name: "/model", hint: "Switch model, e.g. /model grok-4.6", run: "model", aliases: ["/m"] },
   { id: "effort", name: "/effort", hint: "Brain level: low medium high extra", run: "effort" },
   { id: "compact", name: "/compact", hint: "Compress this chat’s context, optional keep-note", run: "compact", inputHint: "what to keep" },

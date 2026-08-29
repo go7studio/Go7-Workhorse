@@ -4,6 +4,13 @@ import type { ProviderId } from "../lib/types";
 export const FUEL_TWEEN_MS = 980;
 export const FUEL_TARGET_EPS = 0.005;
 
+/** Missing leftover stays `…`. Known-missing is Unknown, not an endless load. */
+export function leftoverUnknownMark(known: boolean): { label: "…"; unknown: boolean; title: "Unknown" | "Loading leftover" } {
+  return known
+    ? { label: "…", unknown: true, title: "Unknown" }
+    : { label: "…", unknown: false, title: "Loading leftover" };
+}
+
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
@@ -63,6 +70,8 @@ export function FuelRing({
   color,
   delay = 0,
   over = 0,
+  unknown = false,
+  title,
 }: {
   value?: number;
   size: number;
@@ -71,6 +80,8 @@ export function FuelRing({
   color?: string;
   delay?: number;
   over?: number;
+  unknown?: boolean;
+  title?: string;
 }) {
   const stroke = size >= 140 ? 10 : 8;
   const radius = size / 2 - stroke;
@@ -81,9 +92,14 @@ export function FuelRing({
   const overShown = useTween(value === undefined ? undefined : overflow, delay);
   const overDraw = Math.min(overShown, Math.max(0, 1 - shown));
   const percentLabel = /^(\d+)\s*%(.*)$/.exec(label);
+  const hint = title ?? (unknown ? "Unknown" : undefined);
+  const loading = value === undefined && !unknown;
   return (
     <div
-      className={`fuel-ring ${tone}${overflow > 0 ? " has-over" : ""}`}
+      className={`fuel-ring ${tone}${overflow > 0 ? " has-over" : ""}${unknown ? " unknown" : ""}`}
+      title={hint}
+      aria-label={unknown ? "Unknown" : hint}
+      aria-busy={loading || undefined}
       style={{
         width: size,
         height: size,

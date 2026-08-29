@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { leftoverFetchKnown } from "../lib/usage";
 import { useStore } from "../lib/store";
 import { DEFAULT_WATCH, toggleWatchLockKey, watchDayFill, watchPicksKey, watchVendorStatuses } from "../lib/watch";
-import { FuelRing } from "./FuelRing";
+import { FuelRing, leftoverUnknownMark } from "./FuelRing";
 
 function dayCopy(row: ReturnType<typeof watchVendorStatuses>[number]): string {
   const allowed = Math.round(row.allowedPercent);
@@ -14,7 +15,7 @@ function dayCopy(row: ReturnType<typeof watchVendorStatuses>[number]): string {
   if (used == null) {
     if (row.ringLabel === "∞") return [day, "∞"].filter(Boolean).join(" · ");
     if (row.ringLabel) return [day, `${row.ringLabel} left`].filter(Boolean).join(" · ");
-    return [day, `${allowed}% bank`].filter(Boolean).join(" · ");
+    return [day].filter(Boolean).join(" · ");
   }
   return [day, `${Math.round(used)} / ${allowed}%`].filter(Boolean).join(" · ");
 }
@@ -44,10 +45,14 @@ export function WatchPane() {
           className={`watch-option link-block${picking ? " on" : ""}`}
           type="button"
           aria-pressed={picking}
+          aria-label={picking ? "Done choosing Daily bank bots" : "Choose watched bots"}
           onClick={() => setPicking((on) => !on)}
         >
-          <strong>Daily bank</strong>
-          <p className="watch-copy">{picking ? "Select bots." : "Choose watched bots."}</p>
+          <div className="watch-option-head">
+            <strong>Daily bank</strong>
+            <span className="watch-choose">{picking ? "Done" : "Choose bots"}</span>
+          </div>
+          <p className="watch-copy">{picking ? "Tap a bot to add or remove it." : "Choose watched bots."}</p>
         </button>
         <div className="watch-option link-block">
           <div className="watch-option-head">
@@ -87,9 +92,18 @@ export function WatchPane() {
       ) : (
         <div className={`usage-brains watch-brains${picking ? "" : " off"}`}>
           {statuses.map((row, index) => {
-            const leftover = row.leftover;
-            const ringValue = leftover != null ? leftover / 100 : row.ringLeft != null ? row.ringLeft / 100 : undefined;
-            const ringLabel = leftover != null ? `${Math.round(leftover)}%` : row.ringLabel;
+            const ringValue = row.ringLeft != null ? row.ringLeft / 100 : row.leftover != null ? row.leftover / 100 : undefined;
+            const ringLabel = row.ringLabel ?? (row.leftover != null ? `${Math.round(row.leftover)}%` : undefined);
+            const missing = ringLabel
+              ? undefined
+              : leftoverUnknownMark(
+                  leftoverFetchKnown({
+                    provider: row.provider,
+                    botId: row.key.startsWith("bot:") ? row.key.slice(4) : undefined,
+                    vendorPlanKnown: store.vendorPlanKnown,
+                    customPlanKnown: store.customPlanKnown,
+                  }),
+                );
             const fill = watchDayFill(row);
             const picked = watchPicksKey(watch, row.key);
             return (
@@ -117,7 +131,9 @@ export function WatchPane() {
                   color={row.color}
                   delay={index * 90}
                   over={row.overPercent > 0 ? Math.min(1, row.overPercent / 100) : 0}
-                  label={ringLabel ?? "…"}
+                  label={ringLabel ?? missing?.label ?? "…"}
+                  unknown={missing?.unknown}
+                  title={missing?.title}
                 />
                 <span>{row.label}</span>
                 <em>{dayCopy(row)}</em>

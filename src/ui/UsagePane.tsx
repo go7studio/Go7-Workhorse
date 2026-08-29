@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { FuelRing } from "./FuelRing";
+import { FuelRing, leftoverUnknownMark } from "./FuelRing";
 import { modelsFor, shortModelName, usageModelLabel } from "../lib/models";
 import { isCursorWatchKey } from "../lib/cursor-lane";
 import { useStoreSelector } from "../lib/store";
@@ -458,6 +458,17 @@ export function UsagePane({
     focused?.focus.startsWith("bot:")
       ? settings.customBots.find((bot) => `bot:${bot.id}` === focused.focus)
       : undefined;
+  const missingPlan =
+    focused && !plan
+      ? leftoverUnknownMark(
+          leftoverFetchKnown({
+            provider: focused.provider,
+            botId: focusedBot?.id,
+            vendorPlanKnown,
+            customPlanKnown,
+          }),
+        )
+      : undefined;
   const weeklyUnlimited = Boolean(plan?.products.some((item) => item.unlimited && /weekly/i.test(item.product)));
   const showCodexLeftover = focused?.provider === "codex";
   const selectedUsagePercent =
@@ -537,6 +548,16 @@ export function UsagePane({
                 );
                 const ring = planRingView(row, deskPlans, planWindowByFocus.get(String(row.focus)), { local });
                 const chip = planWindowChip(leftoverForCard(row, deskPlans), { local, provider: row.provider });
+                const missing = ring
+                  ? undefined
+                  : leftoverUnknownMark(
+                      leftoverFetchKnown({
+                        provider: row.provider,
+                        botId: row.focus.startsWith("bot:") ? row.focus.slice(4) : undefined,
+                        vendorPlanKnown,
+                        customPlanKnown,
+                      }),
+                    );
                 return (
                   <button
                     key={row.key}
@@ -550,7 +571,9 @@ export function UsagePane({
                       tone={row.provider}
                       color={row.color}
                       delay={index * 90}
-                      label={ring ? ring.label : "…"}
+                      label={ring ? ring.label : missing?.label ?? "…"}
+                      unknown={missing?.unknown}
+                      title={missing?.title}
                     />
                     <span>{row.label}</span>
                     <em>
@@ -654,7 +677,9 @@ export function UsagePane({
                 size={120}
                 tone={focused.provider}
                 color={focused.color}
-                label={plan ? `${Math.round(plan.leftPercent)}% left` : "…"}
+                label={plan ? `${Math.round(plan.leftPercent)}% left` : missingPlan?.label ?? "…"}
+                unknown={missingPlan?.unknown}
+                title={missingPlan?.title}
               />
               <div className="usage-plan-copy">
                 <span className="sheet-label">Weekly allowance</span>

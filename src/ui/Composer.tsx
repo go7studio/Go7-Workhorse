@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { commandNeedsInput, commandsForSession, filterPalette, shortModeLabel } from "../lib/commands";
+import { commandNeedsInput, commandsForSession, filterPalette } from "../lib/commands";
 import {
   collectDroppedFiles,
   dataTransferLooksLikeFiles,
@@ -16,8 +16,8 @@ import {
   type DroppedFile,
 } from "../lib/images";
 import { wrapMarkdown } from "../lib/markdown";
-import { effortLabel, modelName } from "../lib/models";
 import { deskInk } from "../lib/settings";
+import { formatChatSidebar } from "../lib/session";
 import { useStoreSelector } from "../lib/store";
 import { sameComposerDesk, selectComposerDesk } from "../lib/store-select";
 import type { ChatImage, CrewMode } from "../lib/types";
@@ -682,17 +682,21 @@ export const Composer = memo(function Composer({
             aria-expanded={setupOpen}
             onClick={onToggleSetup}
           >
-            {/* On Auto omit the model name (it would promise next-turn
-                vendor). Do show last/current thinking level when set. */}
+            {/* Same line as the sidebar: Auto omits the model name, and
+                Always approve (the usual permission) stays off the chip. */}
             {session.routingMode === "auto" ? (
               <span className="dot auto" aria-hidden="true" />
             ) : (
               <span className={`dot ${session.provider}`} style={ink ? { background: ink } : undefined} />
             )}
             <span>
-              {session.routingMode === "auto"
-                ? `Auto${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`
-                : `${modelName(session.provider, session.model)}${session.effort ? ` · ${effortLabel(session.effort)}` : ""} · ${shortModeLabel(session.mode)}`}
+              {formatChatSidebar({
+                provider: session.provider,
+                model: session.model,
+                effort: session.effort,
+                mode: session.mode,
+                routingMode: session.routingMode,
+              })}
             </span>
             <span className="caret" aria-hidden="true" />
           </button>

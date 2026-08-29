@@ -3295,7 +3295,7 @@ test("session setup is a compact right-side model and access inspector", () => {
   assert.match(setup, /effortStopPos/);
   assert.match(composer, /setup-trigger/);
   assert.match(composer, /deskInk/);
-  assert.match(composer, /shortModeLabel/);
+  assert.match(composer, /formatChatSidebar/);
 });
 
 test("parseSessionContext reads Grok /context occupancy and extras", () => {

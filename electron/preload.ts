@@ -59,8 +59,9 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("project:record-write", filePath, roots) as Promise<string>,
   readSourceFile: (filePath: string, roots: string[] = []) =>
     ipcRenderer.invoke("project:read-file", filePath, roots) as Promise<import("./project-diff").SourceRead | null>,
-  listGitChanges: (cwd: string) =>
-    ipcRenderer.invoke("project:git-changes", cwd) as Promise<import("./project-diff").GitChange[]>,
+  gitHead: (cwd: string) => ipcRenderer.invoke("project:git-head", cwd) as Promise<string>,
+  listGitChanges: (cwd: string, baseRef?: string) =>
+    ipcRenderer.invoke("project:git-changes", cwd, baseRef) as Promise<import("./project-diff").GitChange[]>,
   resolveFile: (filePath: string, roots: string[] = []) =>
     ipcRenderer.invoke("project:resolve-file", filePath, roots) as Promise<string | null>,
   editStats: (paths: string[], roots: string[] = [], createdPaths: string[] = []) =>

@@ -169,3 +169,27 @@ join, larger than any report it refused to carry.
 4. FIX-3 reconcile the dialects, or write down why three is correct.
 5. Adversarial verify of wave 2 + the fixes.
 6. Push to main, then verify against the installed desk.
+
+## Real-output evidence for FIX-1 (harvested from this desk, 2026-08-29)
+
+445 real terminal worker reports across every vendor on this machine were
+scanned for how models actually format labelled structured output:
+
+| Shape | Reports | Current `parseWorkerFindings` |
+|---|---|---|
+| `- Label:` bullet lines | **82** | silently drops |
+| bare `LABEL:` lines | 59 | only if four are consecutive and in order |
+| `**BOLD**:` labels | 1 | silently drops |
+
+Real samples, verbatim from worker transcripts:
+
+    Verdict: **PASS** — all four required controls confirmed
+    VERDICT: YES — live app on localhost:8080 matches commit 48b65ec.\n\nGit\n- HEAD: ...
+    Workers used: 1 — this coordinator.\n\n**VERIFICATION (item 5) — all green**
+
+So: mixed case, markdown inside the value, blank lines inside the block, and
+bullet prefixes are all NORMAL output from the models this desk actually runs.
+The bullet form is the single most common shape and the parser rejects it.
+
+FIX-1 must be tested against these real shapes, not invented ones. The adversary
+already proved the synthetic failures; this proves they are the common case.

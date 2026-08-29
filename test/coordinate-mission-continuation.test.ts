@@ -11,8 +11,14 @@ import {
   normalizeMissionIteration,
   openingWaveMission,
 } from "../src/lib/subagents";
+import { normalizeLineup } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
-import { campaignSpawnGate, hydrateInterruptedPathLeases, storeOpeningWaveMission } from "../src/lib/store";
+import {
+  campaignSpawnGate,
+  createOpeningReservationReplyAsk,
+  hydrateInterruptedPathLeases,
+  storeOpeningWaveMission,
+} from "../src/lib/store";
 import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -298,6 +304,72 @@ test("the store keeps a different in-flight reservation beside one live opening 
   assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
   assert.match(source, /openingReservationId: openingReservation\.id/);
   assert.match(source, /reservedWorkers: reservations\.length/);
+});
+
+test("lineup normalization preserves the opening reservation identity", () => {
+  const restored = normalizeLineup({
+    id: "lineup_persisted",
+    folder: "/repo",
+    startedAt: 1,
+    rows: [{
+      childId: "worker_live",
+      title: "Live worker",
+      slice: "Build",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 2,
+      openingReservationId: "reservation_live",
+    }],
+  });
+
+  assert.equal(restored?.rows[0]?.openingReservationId, "reservation_live");
+});
+
+test("the production peer reply releases failed and uncommitted opening reservations", async () => {
+  const parentId = "parent";
+  const sessions = [{
+    id: parentId,
+    lineup: { rows: [{ childId: "worker_live", status: "running" }] },
+  }];
+  const cases = [
+    { branch: "error", committed: true, result: { error: "spawn denied" } },
+    { branch: "not committed", committed: false, result: { text: "spawn not started" } },
+  ] as const;
+
+  for (const scenario of cases) {
+    const reservationId = `reservation_${scenario.branch.replace(" ", "_")}`;
+    const reservations = new Map([[parentId, [{ id: reservationId, startedAt: 1 }]]]);
+    let openingReservation: { parentId: string; id: string } | undefined = { parentId, id: reservationId };
+    const replies: Array<{ text?: string; error?: string }> = [];
+    const replyAsk = createOpeningReservationReplyAsk({
+      openingReservationCommitted: () => scenario.committed,
+      releaseOpeningReservation: () => {
+        if (!openingReservation) return;
+        const remaining = (reservations.get(openingReservation.parentId) ?? [])
+          .filter((reservation) => reservation.id !== openingReservation?.id);
+        if (remaining.length > 0) reservations.set(openingReservation.parentId, remaining);
+        else reservations.delete(openingReservation.parentId);
+        openingReservation = undefined;
+      },
+      reply: async (result) => {
+        replies.push(result);
+      },
+    });
+
+    await replyAsk(scenario.result);
+
+    assert.deepEqual(replies, [scenario.result], `${scenario.branch} still replies to the host`);
+    const opening = storeOpeningWaveMission({
+      sessions,
+      parentId,
+      objective: "Start the second opening worker",
+      missionId: `mission_${scenario.branch.replace(" ", "_")}`,
+      ordinaryOpeningReservations: reservations.get(parentId) ?? [],
+    });
+    assert.deepEqual(opening.reservations, [], `${scenario.branch} releases its reservation`);
+    assert.equal(opening.mission, undefined, `${scenario.branch} does not permanently consume opening capacity`);
+  }
 });
 
 test("restart keeps leases only for interrupted workers that still own those paths", () => {

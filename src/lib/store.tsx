@@ -646,6 +646,21 @@ export function storeOpeningWaveMission(input: {
   };
 }
 
+export function createOpeningReservationReplyAsk(input: {
+  openingReservationCommitted: () => boolean;
+  releaseOpeningReservation: () => void;
+  reply: (result: { text?: string; error?: string }) => Promise<unknown> | undefined;
+}): (result: { text?: string; error?: string }) => Promise<void> {
+  return async function replyAsk(result) {
+    if (result.error || !input.openingReservationCommitted()) input.releaseOpeningReservation();
+    try {
+      await input.reply(result);
+    } catch {
+      /* host waiter may already have settled */
+    }
+  };
+}
+
 function hydrate(value: unknown): AppState {
   if (!value || typeof value !== "object") return EMPTY;
   const record = value as Partial<AppState> & { projects?: unknown[] };
@@ -3298,14 +3313,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           else ordinaryOpeningReservations.current.delete(claimed.parentId);
           openingReservation = undefined;
         };
-        const replyAsk = async (result: { text?: string; error?: string }) => {
-          if (result.error || !openingReservationCommitted) releaseOpeningReservation();
-          try {
-            await window.workhorse?.replyPeerAsk({ id: payload.id, ...result });
-          } catch {
-            /* host waiter may already have settled */
-          }
-        };
+        const replyAsk = createOpeningReservationReplyAsk({
+          openingReservationCommitted: () => openingReservationCommitted,
+          releaseOpeningReservation,
+          reply: (result) => window.workhorse?.replyPeerAsk({ id: payload.id, ...result }),
+        });
         const promptVendor = async (
           session: Session,
           text: string,

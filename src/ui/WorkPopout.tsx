@@ -183,6 +183,9 @@ function WorkRow({
           {child?.agentRun?.constraints?.length ? (
             <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
           ) : null}
+          {child?.agentRun?.paths?.length ? (
+            <span className="subagent-scope">Paths: {child.agentRun.paths.join(" · ")}</span>
+          ) : null}
           {planStep ? <span className="subagent-task">{planStep.title}</span> : null}
           <span className={`tool-status${failed ? " failed" : ""}`}>
             {childLive

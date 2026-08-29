@@ -1,7 +1,7 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { boundWorkerReport, crewHasParentTakeover, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
 import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session, WorkerFinding } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
@@ -78,6 +78,7 @@ export function normalizeLineup(raw: unknown): DeskLineup | undefined {
     : [];
   const notifiedAt = typeof record.notifiedAt === "number" ? record.notifiedAt : undefined;
   const hasNewerWave = notifiedAt !== undefined && rows.some((row) => row.startedAt > notifiedAt);
+  const mission = normalizeMissionIteration(record.mission);
   return {
     id: record.id.trim(),
     folder: typeof record.folder === "string" ? record.folder : "",
@@ -86,6 +87,7 @@ export function normalizeLineup(raw: unknown): DeskLineup | undefined {
     ...(record.joinOwner === "desk" || record.joinOwner === "external-runtime" ? { joinOwner: record.joinOwner } : {}),
     ...(notifiedAt !== undefined && !hasNewerWave ? { notifiedAt } : {}),
     ...(typeof record.userText === "string" && record.userText.trim() ? { userText: record.userText.trim() } : {}),
+    ...(mission ? { mission } : {}),
   };
 }
 
@@ -100,6 +102,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ? (record.status as DeskLineupRowStatus)
     : "unknown";
   const findings = normalizeWorkerFindings(record.findings);
+  const paths = normalizePathAllowlist(record.paths);
   return {
     childId: record.childId.trim(),
     title: typeof record.title === "string" ? record.title : "Worker",
@@ -113,6 +116,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ...(findings ? { findings } : {}),
     ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
     ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
+    ...(paths.length ? { paths } : {}),
     ...(record.kind === "external" || record.kind === "workhorse" ? { kind: record.kind } : {}),
     ...(record.runtimeId === "openclaw" || record.runtimeId === "hermes" ? { runtimeId: record.runtimeId } : {}),
     ...(typeof record.agentId === "string" && record.agentId.trim() ? { agentId: record.agentId.trim() } : {}),

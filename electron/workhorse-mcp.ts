@@ -521,6 +521,7 @@ const TOOLS = [
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
+        paths: { type: "array", items: { type: "string" }, description: "Repo-relative files this worker may change. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
@@ -1781,14 +1782,14 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
   return first;
 }
 
-function callerSession(from?: string): { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null } | undefined {
+function callerSession(from?: string): { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: { mission?: MissionIteration; paths?: string[] } } | undefined {
   const id = fromSessionId(from);
   if (!id) return undefined;
   const sessions = readState().sessions;
   if (!Array.isArray(sessions)) return undefined;
   const row = sessions.find((item) => item && typeof item === "object" && (item as { id?: string }).id === id);
   return row && typeof row === "object"
-    ? (row as { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null })
+    ? (row as { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: { mission?: MissionIteration; paths?: string[] } })
     : undefined;
 }
 
@@ -1909,6 +1910,7 @@ async function spawnAgent(
     capabilities?: string[];
     tools?: string[];
     constraints?: string[];
+    paths?: string[];
     exclude?: string[];
     files?: string[];
     traceId?: string;
@@ -1929,16 +1931,21 @@ async function spawnAgent(
     if (blocked) throw new Error(blocked);
   }
   if (isSpawnOnlyPrompt(input.prompt)) throw new Error(SPAWN_ONLY_PROMPT_ERROR);
+  const inheritedInput = {
+    ...input,
+    missionIteration: input.missionIteration ?? caller?.agentRun?.mission,
+    paths: input.paths ?? caller?.agentRun?.paths,
+  };
   const spawnInput = isNested
     ? {
-        ...input,
+        ...inheritedInput,
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
         isolation: "shared" as const,
         route: input.route ?? "quick",
       }
     : {
-        ...input,
+        ...inheritedInput,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
@@ -2004,11 +2011,12 @@ async function spawnAgent(
     capabilities: spawnInput.capabilities,
     tools: spawnInput.tools,
     constraints: spawnInput.constraints,
+    paths: spawnInput.paths,
     exclude: spawnInput.exclude,
     files: spawnInput.files,
     attachments,
     ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-  });
+  } as PeerAsk);
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
   if (grant?.retrySpawn || grant?.allowed) {
@@ -2040,11 +2048,12 @@ async function spawnAgent(
       capabilities: spawnInput.capabilities,
       tools: spawnInput.tools,
       constraints: spawnInput.constraints,
+      paths: spawnInput.paths,
       exclude: spawnInput.exclude,
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-    });
+    } as PeerAsk);
   }
   return first;
 }
@@ -2107,6 +2116,7 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
     iteration: 1,
     maxIterations: requestedMax,
     previousWorkerIds: [],
+    phase: "scout",
   };
 }
 
@@ -2190,7 +2200,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     .map((id) => source.find((session) => session.id === id))
     .find(Boolean);
   const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
-  const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions") =>
+  const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions" | "paths") =>
     [...new Set(source.flatMap((session) => session.agentRun?.[key] ?? []).filter(Boolean))];
   const evidence = Array.isArray(args.evidence)
     ? args.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
@@ -2213,6 +2223,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       skills: union("skills"),
       capabilities: union("capabilities"),
       tools: union("tools"),
+      paths: union("paths"),
       exclude: union("exclusions"),
       timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
@@ -2745,6 +2756,7 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
+        paths: Array.isArray(args.paths) ? args.paths.filter((item): item is string => typeof item === "string") : undefined,
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,

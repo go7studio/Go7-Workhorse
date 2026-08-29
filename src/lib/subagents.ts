@@ -8,9 +8,11 @@ import type {
   AgentRun,
   AgentRunEvent,
   BudgetPhase,
+  CampaignPhase,
   ChatMessage,
   EffortLevel,
   ExecutionOwner,
+  FileLease,
   MissionIteration,
   ProviderId,
   RoutingDecision,
@@ -49,6 +51,7 @@ export type SpawnRequest = {
   capabilities?: string[];
   tools?: string[];
   constraints?: string[];
+  paths?: string[];
 };
 
 export type CustomBotHint = {
@@ -941,6 +944,7 @@ export type WorkerBriefInput = {
   slice?: string;
   vendor?: string;
   constraints?: string[];
+  paths?: string[];
   skills?: Array<{ name: string; file: string }>;
   capabilities?: string[];
   mission?: boolean;
@@ -1124,6 +1128,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (slice) lines.push(`SLICE: ${slice}`);
   if (vendor) lines.push(`VENDOR: ${vendor}`);
   if (input.constraints?.length) lines.push(`CONSTRAINTS: ${input.constraints.join("; ")}`);
+  if (input.paths?.length) lines.push(`PATHS: ${input.paths.join("; ")}`);
   if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
   if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
@@ -1517,7 +1522,65 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
     previousWorkerIds: Array.isArray(row.previousWorkerIds)
       ? [...new Set(row.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
       : [],
+    phase:
+      row.phase === "scout" || row.phase === "review" || row.phase === "approve" || row.phase === "build"
+        ? row.phase
+        : "build",
+    ...(row.clearance &&
+    typeof row.clearance === "object" &&
+    (row.clearance.phase === "scout" || row.clearance.phase === "approve") &&
+    typeof row.clearance.clearedAt === "number" &&
+    row.clearance.clearedBy === "human"
+      ? {
+          clearance: {
+            phase: row.clearance.phase,
+            clearedAt: row.clearance.clearedAt,
+            clearedBy: "human" as const,
+          },
+        }
+      : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+  };
+}
+
+const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
+
+export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
+  const index = CAMPAIGN_PHASES.indexOf(phase);
+  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
+}
+
+export function campaignGateError(mission: MissionIteration | undefined): string | undefined {
+  if (!mission || (mission.phase !== "scout" && mission.phase !== "approve")) return undefined;
+  if (mission.clearance?.clearedBy === "human" && mission.clearance.phase === mission.phase) return undefined;
+  return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
+}
+
+/** The approval card is the sole caller. Approval of the approve phase enters build. */
+export function clearCampaignPhase(mission: MissionIteration, now = Date.now()): MissionIteration {
+  if (mission.phase !== "scout" && mission.phase !== "approve") return mission;
+  return {
+    ...mission,
+    phase: mission.phase === "approve" ? "build" : "scout",
+    clearance: { phase: mission.phase, clearedAt: now, clearedBy: "human" },
+  };
+}
+
+/** Ignore markers supplied by a caller; only a matching manifest already on the desk can clear a gate. */
+export function missionForDeskSpawn(
+  requested: MissionIteration | undefined,
+  desk: MissionIteration | undefined,
+): MissionIteration | undefined {
+  if (!requested) return undefined;
+  const clean = { ...requested, clearance: undefined };
+  if (!desk || desk.id !== requested.id || desk.iteration !== requested.iteration) return clean;
+  const cleared = desk.clearance;
+  if (!cleared || cleared.clearedBy !== "human") return clean;
+  if (cleared.phase !== requested.phase) return clean;
+  return {
+    ...clean,
+    phase: requested.phase === "approve" ? "build" : requested.phase,
+    clearance: cleared,
   };
 }
 
@@ -1752,6 +1815,8 @@ export function nextMissionIteration(
       ...first,
       iteration: first.iteration + 1,
       previousWorkerIds: ids,
+      phase: nextCampaignPhase(first.phase),
+      clearance: undefined,
     },
   };
 }
@@ -1877,6 +1942,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(Array.isArray(row.capabilities) ? { capabilities: row.capabilities.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.constraints) ? { constraints: row.constraints.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.paths) ? { paths: normalizePathAllowlist(row.paths) } : {}),
     ...(Array.isArray(row.exclusions) ? { exclusions: row.exclusions.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(findings ? { findings } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
@@ -1902,15 +1968,25 @@ export function overlappingAgentFiles(
   return [...conflicts];
 }
 
-export type FileLease = {
-  sessionId: string;
-  path: string;
-  fingerprint: string;
-  claimedAt: number;
-};
-
 export function normalizeLeasePath(file: string): string {
-  return file.replaceAll("\\", "/").replace(/^\.\/+/, "");
+  return file.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/^\/+|\/+$/g, "");
+}
+
+export function normalizePathAllowlist(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => Boolean(item) && !item.startsWith("/") && !item.startsWith("\\\\") && !/^[A-Za-z]:[\\/]/.test(item))
+    .map(normalizeLeasePath)
+    .filter((item) => item !== ".." && !item.startsWith("../")))];
+}
+
+export function leasePathForWrite(file: string, root = ""): string {
+  const clean = normalizeLeasePath(file);
+  const base = normalizeLeasePath(root);
+  if (base && clean.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return clean.slice(base.length + 1);
+  return clean;
 }
 
 export function fileContentsFingerprint(contents: string): string {
@@ -1929,6 +2005,22 @@ export function releaseSessionLeases(leases: FileLease[], sessionId: string): Fi
   return leases.filter((lease) => lease.sessionId !== sessionId);
 }
 
+export function normalizeFileLeases(raw: unknown): FileLease[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<FileLease>;
+    const path = typeof row.path === "string" ? normalizeLeasePath(row.path) : "";
+    if (!path || typeof row.sessionId !== "string" || !row.sessionId.trim() || typeof row.fingerprint !== "string") return [];
+    return [{
+      sessionId: row.sessionId.trim(),
+      path,
+      fingerprint: row.fingerprint,
+      claimedAt: typeof row.claimedAt === "number" ? row.claimedAt : 0,
+    }];
+  });
+}
+
 export function claimSharedFiles(input: {
   leases: FileLease[];
   sessionId: string;
@@ -1942,17 +2034,6 @@ export function claimSharedFiles(input: {
   }
   const now = input.now ?? Date.now();
   const next = [...input.leases];
-  if (input.isolation === "worktree") {
-    for (const file of input.files) {
-      next.push({
-        sessionId: input.sessionId,
-        path: normalizeLeasePath(file.path),
-        fingerprint: file.fingerprint,
-        claimedAt: now,
-      });
-    }
-    return { ok: true, leases: next };
-  }
   const conflicts: string[] = [];
   for (const file of input.files) {
     const path = normalizeLeasePath(file.path);
@@ -1989,7 +2070,6 @@ export function assertSharedWrite(input: {
   if (!workerMayWrite(input.role)) {
     return { ok: false, error: "Review-only agents cannot write." };
   }
-  if (input.isolation === "worktree") return { ok: true };
   const key = normalizeLeasePath(input.path).toLowerCase();
   const lease = input.leases.find((item) => item.sessionId === input.sessionId && normalizeLeasePath(item.path).toLowerCase() === key);
   if (!lease) return { ok: false, error: `No shared-folder claim for ${input.path}.` };
@@ -1997,6 +2077,29 @@ export function assertSharedWrite(input: {
     return { ok: false, error: `File changed since claim: ${input.path}. Re-read before writing.` };
   }
   return { ok: true };
+}
+
+export function assertAgentPathWrite(input: {
+  leases: FileLease[];
+  sessionId: string;
+  paths: string[];
+  path: string;
+  root?: string;
+  currentFingerprint: string;
+  role?: DeskRole;
+}): { ok: true } | { ok: false; error: string } {
+  const path = leasePathForWrite(input.path, input.root);
+  const allowed = normalizePathAllowlist(input.paths);
+  if (!allowed.some((item) => item.toLowerCase() === path.toLowerCase())) {
+    return { ok: false, error: `Path ownership blocked write: ${path || input.path} is not in this worker's allowlist.` };
+  }
+  return assertSharedWrite({
+    leases: input.leases,
+    sessionId: input.sessionId,
+    role: input.role,
+    path,
+    currentFingerprint: input.currentFingerprint,
+  });
 }
 
 export function subagentTurns(

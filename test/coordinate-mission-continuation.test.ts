@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { nextMissionIteration, normalizeMissionIteration } from "../src/lib/subagents";
+import {
+  campaignGateError,
+  clearCampaignPhase,
+  missionForDeskSpawn,
+  nextMissionIteration,
+  normalizeMissionIteration,
+} from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
 
@@ -124,4 +130,28 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.equal(decision.ok, false);
   if (decision.ok) return;
   assert.match(decision.error, /do not share one mission contract/);
+});
+
+test("campaign opening and approve phases refuse until the permission inbox clears them", () => {
+  const spoofed = adaptiveMission({
+    phase: "scout",
+    clearance: { phase: "scout", clearedAt: 1, clearedBy: "human" },
+  });
+  assert.ok(spoofed);
+  const opening = missionForDeskSpawn(spoofed, undefined);
+  assert.match(campaignGateError(opening) ?? "", /requires human approval/);
+
+  const clearedScout = clearCampaignPhase(opening!, 10);
+  const admittedScout = missionForDeskSpawn(spoofed, clearedScout);
+  assert.equal(campaignGateError(admittedScout), undefined);
+  assert.equal(admittedScout?.clearance?.clearedAt, 10);
+
+  const approve = normalizeMissionIteration({ ...spoofed, phase: "approve", iteration: 2, clearance: undefined });
+  assert.ok(approve);
+  assert.match(campaignGateError(missionForDeskSpawn(approve, clearedScout)) ?? "", /approve/);
+  const clearedApprove = clearCampaignPhase(approve, 20);
+  const build = missionForDeskSpawn(approve, clearedApprove);
+  assert.equal(build?.phase, "build");
+  assert.equal(build?.clearance?.clearedBy, "human");
+  assert.equal(campaignGateError(build), undefined);
 });

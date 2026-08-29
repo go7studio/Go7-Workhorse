@@ -257,6 +257,8 @@ export type DeskLineupRow = {
   planStepId?: string;
   rationale?: string;
   constraints?: string[];
+  /** Repo-relative files this worker is allowed to change. Attachments remain `files`. */
+  paths?: string[];
   kind?: "workhorse" | "external";
   /**
    * Which harness asked for this work, when one did. `runtimeId` below is the
@@ -282,6 +284,8 @@ export type DeskLineup = {
   joinOwner?: "desk" | "external-runtime";
   /** Original user sentence that started this wave. Desk-owned; not a model paraphrase. */
   userText?: string;
+  /** Desk-owned campaign state for the current adaptive pass. */
+  mission?: MissionIteration;
 };
 
 export type WorkerSeed = "inherit" | "fresh";
@@ -361,12 +365,22 @@ export type AgentRun = {
   capabilities?: string[];
   tools?: string[];
   constraints?: string[];
+  /** Repo-relative files this worker is allowed to change. */
+  paths?: string[];
   /** Structured review receipts parsed from the worker's terminal output. */
   findings?: WorkerFinding[];
   /** Structured routing policy inherited by every nested worker. */
   exclusions?: string[];
   correlationId?: string;
   mission?: MissionIteration;
+};
+
+export type CampaignPhase = "scout" | "review" | "approve" | "build";
+
+export type CampaignClearance = {
+  phase: "scout" | "approve";
+  clearedAt: number;
+  clearedBy: "human";
 };
 
 export type MissionIteration = {
@@ -377,8 +391,18 @@ export type MissionIteration = {
   iteration: number;
   maxIterations: number;
   previousWorkerIds: string[];
+  phase: CampaignPhase;
+  /** Written by the permission inbox only. A worker-supplied marker is never trusted. */
+  clearance?: CampaignClearance;
   /** Mission-level token ceiling. One pass cannot spend this whole amount. */
   tokenBudget?: number;
+};
+
+export type FileLease = {
+  sessionId: string;
+  path: string;
+  fingerprint: string;
+  claimedAt: number;
 };
 
 export type WorkhorseWorkerRun = AgentRun & { kind?: "workhorse" };
@@ -581,12 +605,16 @@ export type PermissionRequest = {
   tool: string;
   detail: string;
   path?: string;
-  kind?: "tool" | "elevate" | "vendor";
+  kind?: "tool" | "elevate" | "vendor" | "campaign";
   elevate?: { mode?: PermissionMode; sandbox?: SandboxProfile };
   vendor?: {
     provider: ProviderId;
     name: string;
     status: "day_bank" | "spent" | "disabled" | "ok";
+  };
+  campaign?: {
+    missionId: string;
+    phase: "scout" | "approve";
   };
 };
 
@@ -941,6 +969,8 @@ export type AppState = {
   activeProjectId: string | null;
   activeSessionId: string | null;
   pending: PermissionRequest[];
+  /** Active path claims. Released when their worker reaches a terminal state. */
+  leases?: FileLease[];
   /** Stable ids dismissed from the derived attention inbox. */
   dismissedAttention?: string[];
   sheet: Sheet;

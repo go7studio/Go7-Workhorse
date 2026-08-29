@@ -148,6 +148,9 @@ type WorkhorseBridge = {
   saveComposerDrafts?: (drafts: Record<string, { text?: string; images?: import("./lib/types").ChatImage[] }>) => Promise<void>;
   syncJobs?: (sessions: import("./lib/types").Session[]) => Promise<import("../electron/job-engine").DurableJobEvent[]>;
   onJobDue?: (handler: (events: import("../electron/job-engine").DurableJobEvent[]) => void) => () => void;
+  onGrokBotLateAnswer?: (handler: (answers: import("../electron/grok-bot-late").GrokBotLateAnswer[]) => void) => () => void;
+  lateGrokBotAnswers?: () => Promise<import("../electron/grok-bot-late").GrokBotLateAnswer[]>;
+  ackGrokBotLateAnswer?: (reqId: string) => Promise<void>;
   quit: () => Promise<void>;
   notifyDesktop?: (input: { title: string; body?: string }) => Promise<boolean>;
   collectDiagnostics?: () => Promise<import("../electron/diagnostics").SupportReport>;

@@ -915,6 +915,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const persistTimer = useRef<number | null>(null);
   /** A worker finished and its write has not gone out yet. */
   const settledPending = useRef(false);
+  const lateAckPending = useRef<Map<string, string>>(new Map());
   const persistBody = useRef<AppState | null>(null);
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
@@ -1078,6 +1079,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             state.activeSessionId && saved.some((session) => session.id === state.activeSessionId)
               ? state.activeSessionId
               : null,
+        })
+        .then(() => {
+          if (!lateAckPending.current.size) return;
+          // Spent when this save carried the message — or when the chat that
+          // asked is gone from the state this save was made from, so nothing
+          // can ever carry it. A chat cannot reappear; an append cannot be
+          // mistaken for one, because the asking chat existed to ask.
+          for (const [reqId, sessionId] of [...lateAckPending.current]) {
+            const landed = saved.some((session) => session.messages.some((message) => message.id === `msg_late_${reqId}`));
+            const chatGone = !state.sessions.some((session) => session.id === sessionId);
+            if (landed || chatGone) {
+              lateAckPending.current.delete(reqId);
+              void window.workhorse?.ackGrokBotLateAnswer?.(reqId);
+            }
+          }
         })
         .catch(() => undefined);
     }, settledPending.current ? 0 : busy ? 2_000 : 400);
@@ -3072,6 +3088,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const timer = window.setTimeout(() => setQueueWake((n) => n + 1), wait);
     return () => window.clearTimeout(timer);
   }, [state.sessions, watchHold, queueWake]);
+
+  useEffect(() => {
+    if (!ready || !window.workhorse?.onGrokBotLateAnswer) return;
+    const accept = (answers: import("../../electron/grok-bot-late").GrokBotLateAnswer[]) => {
+      if (!answers.length) return;
+      setState((current) => {
+        let changed = false;
+        const sessions = current.sessions.map((session) => {
+          const mine = answers.filter((answer) => answer.sessionId === session.id);
+          if (!mine.length) return session;
+          const fresh = mine.filter((answer) => !session.messages.some((message) => message.id === `msg_late_${answer.reqId}`));
+          if (!fresh.length) return session;
+          changed = true;
+          return {
+            ...session,
+            messages: [
+              ...session.messages,
+              ...fresh.map((answer) => ({
+                id: `msg_late_${answer.reqId}`,
+                role: "assistant" as const,
+                text: answer.text,
+                createdAt: Date.now(),
+                correlationId: answer.reqId,
+                // The answering brain, not whatever the chat is set to by now.
+                provider: "custom" as const,
+                model: "grok-bot",
+              })),
+            ],
+          };
+        });
+        return changed ? { ...current, sessions } : current;
+      });
+      // Every answer is spent through the persist pass below: an appended one
+      // once its save lands, and one whose chat is gone once a saved state
+      // shows that chat absent. Deciding here would race the updater on a
+      // stale snapshot.
+      for (const answer of answers) lateAckPending.current.set(answer.reqId, answer.sessionId);
+    };
+    const off = window.workhorse.onGrokBotLateAnswer(accept);
+    void window.workhorse.lateGrokBotAnswers?.().then((answers) => answers?.length && accept(answers)).catch(() => undefined);
+    return off;
+  }, [ready]);
 
   useEffect(() => {
     if (!ready || !window.workhorse?.syncJobs || !window.workhorse.onJobDue) return;

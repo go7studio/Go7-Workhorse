@@ -179,3 +179,31 @@ export function grokBotShimLaunch(input: { command: string; script: string; user
     },
   };
 }
+
+/** Shown when the shim gives the connection back before Grok Bot finishes. */
+export const GROK_BOT_STILL_WORKING = "Grok Bot is still working. The answer lands in this chat when it finishes.";
+
+/** Marks a request whose caller already got the still-working reply. */
+export type GrokBotLateMarker = { id: string; sessionId: string; timedOutAt: number };
+
+export function grokBotLatePath(inbox: string, id: string, sep = "/"): string {
+  return `${inbox.replace(/[\\/]+$/, "")}${sep}${id}.late.json`;
+}
+
+export function parseGrokBotLateMarker(raw: unknown): GrokBotLateMarker | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  const id = String(row.id || "").trim();
+  const sessionId = String(row.sessionId || "").trim();
+  const timedOutAt = Number(row.timedOutAt);
+  if (!/^gb_[a-f0-9]{16}$/.test(id) || !sessionId || sessionId.length > 128) return undefined;
+  if (!Number.isFinite(timedOutAt) || timedOutAt <= 0) return undefined;
+  return { id, sessionId, timedOutAt };
+}
+
+/** The chat id rides the standard OpenAI `user` field, and only to the loopback shim. */
+export function grokBotSessionUser(baseUrl: string, sessionId: string | undefined): string | undefined {
+  const trimmed = (sessionId || "").trim();
+  if (!trimmed || trimmed.length > 128 || !isGrokBotUrl(baseUrl)) return undefined;
+  return trimmed;
+}

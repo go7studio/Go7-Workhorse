@@ -249,3 +249,45 @@ the unguarded path in (3).
 2. Adversarial re-verify of FIX-2.
 3. Replace the mock-echo Link test (owner pass, test/workhorse-link.test.ts).
 4. PR to go7studio/Go7-Workhorse, CI, merge, verify on the installed desk.
+
+## FIX-2 verdict (Cursor Grok 4.6): DO NOT SHIP — the dogfood failed
+
+Everything named in the last review is genuinely closed, re-proved by mutating
+each of the five fixes one at a time until a focused test died for each:
+fail-closed holds for missing mission, missing phase, garbage phase, review,
+replayed scout clearance and worker-forged clearance; minting is real for loop,
+inherited mission and a Mission-pinned parent; spawn-HEAD diffs are
+repo-relative and a commit no longer hides an out-of-allowlist write;
+interrupted owners keep their lease and a new spawn cannot take it; the extra
+files (types, main, preload, vite-env) are the IPC and clearance types the fix
+needs, not creep; `reportRef` is still gone; the parser still takes the real
+desk shapes; Link protocolVersion is still 2. Suite 1123 / 1122 pass / 0 fail.
+
+And it still does not gate the wave that matters:
+
+> "Ordinary `workhorse_delegate` and ordinary `workhorse_spawn_agent` still mint
+> nothing and therefore gate nothing. That is the cheap wide fan-out: N calls
+> from a parent with no loop and no Mission pin. **This campaign's own parent
+> has no mission and no Mission pin. This slice and Wren both started with no
+> Campaign card.**"
+
+The campaign that is building the gate was itself spawned through the hole.
+That is the dogfood the plan asked for, and it failed.
+
+Two more, both real:
+
+- **A dead owner can hold a path forever.** Cancel returns early when the worker
+  is not running (`store.tsx:4322`), delete leaves the lease behind, and hydrate
+  keeps interrupted-and-owned rows — so nothing releases it.
+- **Completion still cannot see** a write outside the repo, a write through a
+  symlink to an outside file, or a worker that never finishes. And with no path
+  allowlist there is no ownership verdict at all.
+
+### Queue
+1. FIX-3 — (a) bind the real opening wave: Link `workhorse_delegate` with no
+   loop, and in-desk `workhorse_spawn_agent` with no mission metadata, must mint
+   desk-owned scout state and gate. (b) Release leases on cancel-of-interrupted
+   and on chat delete. (c) Document the Campaign card and path ownership in
+   docs/FEATURES.md, and keep docs/campaign/PLAN.md out of the public tree.
+2. Final adversarial verify.
+3. PR, CI, merge, verify on the installed desk.

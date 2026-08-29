@@ -260,7 +260,8 @@ transcript rather than as a path.
   clear the current phase. A worker cannot clear its own gate.
 - **Path ownership** — assigned repo-relative paths are leased across shared
   folders and worktrees. Conflicting spawns and stale writes stay blocked until
-  the owner finishes, is explicitly cancelled, or its chat is deleted.
+  the owner finishes or is explicitly cancelled. Deleting a running owner's
+  chat keeps its lease until that worker stops.
 - **Plans** — multi-step work that continues after a worker joins. A checklist
   plan you tick yourself still completes on ordinary evidence. When workers run
   the plan, a step finishes when another vendor re-runs the named test at that

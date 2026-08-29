@@ -616,9 +616,34 @@ export function campaignSpawnGate(input: {
   openingMission?: MissionIteration;
 }): { mission: MissionIteration | undefined; error: string | undefined; phase: Exclude<CampaignPhase, "build"> | undefined } {
   const mission = missionForDeskSpawn(input.requested ?? input.openingMission, input.desk);
-  const error = input.campaignContext || input.openingMission ? campaignGateError(mission) : undefined;
+  const error = input.campaignContext || input.openingMission ? campaignGateError(mission, input.desk) : undefined;
   const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
   return { mission, error, phase };
+}
+
+export function storeOpeningWaveMission(input: {
+  sessions: Parameters<typeof openingWaveMission>[0]["sessions"];
+  parentId: string;
+  objective: string;
+  missionId: string;
+  ordinaryOpeningReservations: number[];
+  now?: number;
+}): { mission: MissionIteration | undefined; reservations: number[] } {
+  const now = input.now ?? Date.now();
+  const liveWorkers = openingWaveLiveWorkerIds(input.sessions, input.parentId);
+  const reservations = input.ordinaryOpeningReservations
+    .filter((startedAt) => now - startedAt < 30_000);
+  reservations.splice(0, Math.min(liveWorkers.length, reservations.length));
+  return {
+    mission: openingWaveMission({
+      sessions: input.sessions,
+      parentId: input.parentId,
+      objective: input.objective,
+      missionId: input.missionId,
+      reservedWorkers: reservations.length,
+    }),
+    reservations,
+  };
 }
 
 function hydrate(value: unknown): AppState {
@@ -4581,21 +4606,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
             const openingNow = Date.now();
-            const liveOpeningWorkers = openingWaveLiveWorkerIds(latest.sessions, caller.id);
-            const openingReservations = (ordinaryOpeningReservations.current.get(caller.id) ?? [])
-              .filter((startedAt) => openingNow - startedAt < 30_000);
-            openingReservations.splice(0, Math.min(liveOpeningWorkers.length, openingReservations.length));
+            const opening = storeOpeningWaveMission({
+              sessions: latest.sessions,
+              parentId: caller.id,
+              objective: payload.message,
+              missionId: uid("mission"),
+              ordinaryOpeningReservations: ordinaryOpeningReservations.current.get(caller.id) ?? [],
+              now: openingNow,
+            });
+            const openingReservations = opening.reservations;
             if (openingReservations.length > 0) ordinaryOpeningReservations.current.set(caller.id, openingReservations);
             else ordinaryOpeningReservations.current.delete(caller.id);
             const openingMission = suppliedMission || caller.lineup?.mission
               ? undefined
-              : openingWaveMission({
-                  sessions: latest.sessions,
-                  parentId: caller.id,
-                  objective: payload.message,
-                  missionId: uid("mission"),
-                  reservedWorkers: openingReservations.length,
-                });
+              : opening.mission;
             const requestedMission = suppliedMission ?? openingMission;
             const lineupMission = caller.lineup?.mission;
             const deskMission =

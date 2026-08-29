@@ -12,7 +12,7 @@ import {
   openingWaveMission,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
-import { campaignSpawnGate, hydrateInterruptedPathLeases } from "../src/lib/store";
+import { campaignSpawnGate, hydrateInterruptedPathLeases, storeOpeningWaveMission } from "../src/lib/store";
 import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -160,7 +160,34 @@ test("campaign opening and approve phases refuse until the permission inbox clea
   const build = missionForDeskSpawn(approve, clearedApprove);
   assert.equal(build?.phase, "build");
   assert.equal(build?.clearance?.clearedBy, "human");
-  assert.equal(campaignGateError(build), undefined);
+  assert.equal(campaignGateError(build, clearedApprove), undefined);
+});
+
+test("caller-supplied build cannot forge the Campaign gate", () => {
+  const forged = adaptiveMission({ phase: "build" });
+  assert.ok(forged);
+  assert.match(campaignGateError(forged) ?? "", /matching desk state or human approve clearance/);
+
+  const blocked = campaignSpawnGate({ campaignContext: true, requested: forged, desk: undefined });
+  assert.equal(blocked.mission?.phase, "approve");
+  assert.equal(blocked.phase, "approve");
+  assert.match(blocked.error ?? "", /requires human approval/);
+
+  const deskBuild = adaptiveMission({ phase: "build" });
+  assert.ok(deskBuild);
+  const admittedFromDeskBuild = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskBuild });
+  assert.equal(admittedFromDeskBuild.mission?.phase, "build");
+  assert.equal(admittedFromDeskBuild.error, undefined);
+
+  const deskApprove = adaptiveMission({
+    phase: "approve",
+    clearance: { phase: "approve", clearedAt: 20, clearedBy: "human" },
+  });
+  assert.ok(deskApprove);
+  const admittedFromApproval = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskApprove });
+  assert.equal(admittedFromApproval.mission?.phase, "build");
+  assert.equal(admittedFromApproval.mission?.clearance?.phase, "approve");
+  assert.equal(admittedFromApproval.error, undefined);
 });
 
 test("campaign state fails closed for absent and unknown phases", () => {
@@ -228,9 +255,26 @@ test("the live store spawn path consults the production campaign gate", () => {
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
   assert.match(source, /openingWaveMission\(\{/);
-  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission\) : undefined/);
+  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
+});
+
+test("the store counts in-flight reservations before opening another ordinary worker", () => {
+  const opening = storeOpeningWaveMission({
+    sessions: [{ id: "parent", lineup: { rows: [] } }],
+    parentId: "parent",
+    objective: "Start the third concurrent worker",
+    missionId: "mission_reserved_opening",
+    ordinaryOpeningReservations: [90_000, 95_000],
+    now: 100_000,
+  });
+  assert.equal(opening.reservations.length, 2);
+  assert.equal(opening.mission?.phase, "scout");
+
+  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
+  assert.match(source, /reservedWorkers: reservations\.length/);
 });
 
 test("restart keeps leases only for interrupted workers that still own those paths", () => {

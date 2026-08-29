@@ -1568,9 +1568,21 @@ export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
   return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
 }
 
-export function campaignGateError(mission: MissionIteration | undefined): string | undefined {
+export function campaignGateError(
+  mission: MissionIteration | undefined,
+  desk?: MissionIteration,
+): string | undefined {
   if (!mission) return "Campaign mission state is missing; human approval is required before a worker can start.";
-  if (mission.phase === "build") return undefined;
+  if (mission.phase === "build") {
+    const matchingDesk = desk?.id === mission.id && desk.iteration === mission.iteration;
+    const deskAuthorized = matchingDesk && (
+      desk.phase === "build" ||
+      (desk.clearance?.clearedBy === "human" && desk.clearance.phase === "approve")
+    );
+    return deskAuthorized
+      ? undefined
+      : "Campaign build requires matching desk state or human approve clearance before a worker can start.";
+  }
   if (mission.clearance?.clearedBy === "human" && mission.clearance.phase === mission.phase) return undefined;
   return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
 }
@@ -1651,7 +1663,19 @@ export function missionForDeskSpawn(
 ): MissionIteration | undefined {
   if (!requested) return undefined;
   const clean = { ...requested, clearance: undefined };
-  if (!desk || desk.id !== requested.id || desk.iteration !== requested.iteration) return clean;
+  const matchingDesk = desk?.id === requested.id && desk.iteration === requested.iteration;
+  if (requested.phase === "build") {
+    const approveClearance = matchingDesk &&
+      desk.clearance?.clearedBy === "human" &&
+      desk.clearance.phase === "approve"
+        ? desk.clearance
+        : undefined;
+    if (!matchingDesk || (desk.phase !== "build" && !approveClearance)) {
+      return { ...clean, phase: "approve" };
+    }
+    return { ...clean, ...(approveClearance ? { clearance: approveClearance } : {}) };
+  }
+  if (!matchingDesk) return clean;
   const cleared = desk.clearance;
   if (!cleared || cleared.clearedBy !== "human") return clean;
   if (cleared.phase !== requested.phase) return clean;

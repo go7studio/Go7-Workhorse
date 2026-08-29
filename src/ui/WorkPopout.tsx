@@ -4,11 +4,29 @@ import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
+import { workerTaskTitle } from "../lib/subagents";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
 import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
 import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
+
+function toolStatusFailed(status: string | undefined): boolean {
+  return prettyToolStatus(status) === "failed" || status === "failed";
+}
+
+/** Same identity the nested sidebar shows: `Name · slice`, never a slice fragment. */
+export function workerFoldLabel(
+  marker: { fromTitle?: string; text?: string },
+  child?: { title?: string; workerName?: string } | null,
+): string {
+  const stored = child?.title?.trim();
+  if (stored) return stored;
+  const slice = (marker.fromTitle || marker.text || "").trim();
+  const name = child?.workerName?.trim();
+  if (name && slice && slice !== name) return workerTaskTitle(name, slice);
+  return slice || name || "Subagent";
+}
 
 function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
   const line = splitToolLine(collapseToolText(tool.text, tool.toolStatus));
@@ -18,12 +36,13 @@ function ToolLine({ tool, peer }: { tool: ChatMessage; peer?: boolean }) {
   const status = rawStatus ? prettyToolStatus(rawStatus) : "";
   const detail = info ? "" : line.detail;
   const live = !toolIsFinished(tool.toolStatus);
+  const failed = toolStatusFailed(rawStatus) || toolStatusFailed(tool.toolStatus);
   return (
-    <p className={`tool-line${live ? " live" : " done"}${peer || info ? " peer" : ""}`}>
+    <p className={`tool-line${live ? " live" : " done"}${peer || info ? " peer" : ""}${failed ? " failed" : ""}`}>
       <span className="tool-name" title={title}>
         {title}
       </span>
-      {status && <span className="tool-status">{status}</span>}
+      {status && <span className={`tool-status${failed ? " failed" : ""}`}>{status}</span>}
       {detail && <span className="tool-loc">{detail}</span>}
     </p>
   );
@@ -127,7 +146,12 @@ function WorkRow({
     const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
     const childLive =
       child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
-    const title = marker.fromTitle || marker.text || child?.title || "Subagent";
+    const title = workerFoldLabel(marker, child);
+    const failed =
+      !childLive &&
+      child?.agentRun?.executionOwner !== "parent" &&
+      child?.agentRun?.status !== "interrupted" &&
+      (marker.toolStatus === "failed" || child?.agentRun?.status === "failed");
     const ink = child ? deskInk(child, store.settings) : undefined;
     const brain = child
       ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
@@ -138,7 +162,7 @@ function WorkRow({
       : undefined;
     const childMs = childLive ? now - marker.createdAt : undefined;
     return (
-      <p key={marker.id} className="tool-line subagent-preview work-step" data-kind="subagent">
+      <p key={marker.id} className={`tool-line subagent-preview work-step${failed ? " failed" : ""}`} data-kind="subagent">
         <button
           type="button"
           className="subagent-open"
@@ -160,14 +184,14 @@ function WorkRow({
             <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
           ) : null}
           {planStep ? <span className="subagent-task">{planStep.title}</span> : null}
-          <span className="tool-status">
+          <span className={`tool-status${failed ? " failed" : ""}`}>
             {childLive
               ? `working · ${formatWorked(childMs ?? 0)}`
               : child?.agentRun?.executionOwner === "parent"
                 ? "parent took over"
                 : child?.agentRun?.status === "interrupted"
                 ? "interrupted"
-                : marker.toolStatus === "failed"
+                : failed
                   ? "failed"
                   : "done"}
           </span>

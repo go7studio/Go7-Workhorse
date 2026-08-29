@@ -404,6 +404,13 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /disabled=\{!picking\}/);
   assert.match(pane, /watch-option/);
   assert.match(pane, /watch-copy/);
+  assert.match(pane, /watch-choose/);
+  assert.match(pane, /Choose bots/);
+  assert.match(pane, /Choose watched bots/);
+  assert.match(pane, /leftoverUnknownMark/);
+  assert.match(pane, /title=\{missing\?\.title\}/);
+  assert.doesNotMatch(pane, /allowedPercent \/ 100/);
+  assert.match(pane, /Skip spent bots/);
   assert.match(pane, /aria-pressed/);
   assert.doesNotMatch(pane, /setWatchDayBank/);
   assert.doesNotMatch(pane, /aria-label="Day bank"/);

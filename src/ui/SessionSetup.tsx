@@ -126,14 +126,11 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
     bot?.color ?? stockTint ?? `var(--${session.provider === "custom" ? "custom" : session.provider})`;
   const thinking = effortsFor(session.provider, session.model);
   const capabilities = capabilitiesFor(session.provider);
-  useEffect(() => {
-    const levels = effortsFor(session.provider, session.model);
-    if (levels.length === 0) return;
-    if (levels.some((item) => item.id === session.effort)) return;
-    const next = withEffort(session.provider, session.model, session.effort);
-    if (next) setSessionEffort(next);
-  }, [session.effort, session.model, session.provider, setSessionEffort]);
-  const thinkIndex = Math.max(0, thinking.findIndex((item) => item.id === session.effort));
+  // Sheet can show a default level; persist only when the user picks or slides.
+  const shownEffort = thinking.some((item) => item.id === session.effort)
+    ? session.effort
+    : withEffort(session.provider, session.model, session.effort ?? null);
+  const thinkIndex = Math.max(0, thinking.findIndex((item) => item.id === shownEffort));
   const hoverIndex =
     slide == null || thinking.length === 0 ? thinkIndex : effortStopAt(slide, thinking.length);
   const thinkNow = thinking[hoverIndex] ?? thinking[thinkIndex];

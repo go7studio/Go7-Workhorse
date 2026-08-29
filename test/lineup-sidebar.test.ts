@@ -162,11 +162,10 @@ test("an auto-routed chat says Auto where a model name would read as the plan", 
   assert.match(read("src/ui/ChatRow.tsx"), /routingMode: session\.routingMode/);
   const composer = read("src/ui/Composer.tsx");
   const chip = composer.slice(composer.indexOf('className={`setup-trigger'), composer.indexOf('className={`setup-trigger') + 1400);
-  assert.match(
-    chip,
-    /session\.routingMode === "auto"\s*\?\s*`Auto\$\{session\.effort \? ` · \$\{effortLabel\(session\.effort\)\}` : ""\} · \$\{shortModeLabel\(session\.mode\)\}`/,
-  );
+  assert.match(chip, /formatChatSidebar\(/);
+  assert.match(chip, /routingMode: session\.routingMode/);
   assert.match(chip, /className="dot auto"/);
+  assert.doesNotMatch(chip, /shortModeLabel/);
 });
 
 test("a routed pick does not become the default for the next new chat", () => {

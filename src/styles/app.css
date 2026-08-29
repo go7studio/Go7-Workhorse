@@ -2152,8 +2152,36 @@ html.pane-dragging * {
   gap: 8px;
 }
 
-.tool-line.subagent-preview {
+.tool-line.subagent-preview,
+.subagent-preview.work-step {
   margin: 2px 0 0;
+}
+
+.subagent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subagent-thread-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 180ms ease;
+}
+
+.subagent-preview.open .subagent-thread-slot {
+  grid-template-rows: 1fr;
+}
+
+.subagent-thread-slot > .subagent-thread {
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subagent-thread-slot {
+    transition: none;
+  }
 }
 
 .subagent-open {

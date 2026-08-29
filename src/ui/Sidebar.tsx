@@ -12,7 +12,7 @@ import {
 } from "../lib/chats";
 import { missionRowLook } from "../lib/lineup";
 import { useStoreReader, useStoreSelector, type Store } from "../lib/store";
-import { deskPulseLines } from "../lib/usage";
+import { deskPulseLines, visibleUsageEvents } from "../lib/usage";
 import type { Project, Session } from "../lib/types";
 import { ChatRow, type ChatRowDesk } from "./ChatRow";
 import { SplitHandle } from "./SplitHandle";
@@ -336,8 +336,11 @@ function ProjectFolder({
   );
 }
 
-function SettingsPulse({ store }: { store: Pick<SidebarStore, "usage" | "sessions"> }) {
-  const lines = deskPulseLines({ usage: store.usage ?? [], sessions: store.sessions });
+function SettingsPulse({ store }: { store: Pick<SidebarStore, "usage" | "sessions" | "settings"> }) {
+  const lines = deskPulseLines({
+    usage: visibleUsageEvents(store.usage ?? [], store.settings),
+    sessions: store.sessions,
+  });
   const [index, setIndex] = useState(0);
   useEffect(() => {
     if (lines.length < 2) return;

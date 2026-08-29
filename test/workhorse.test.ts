@@ -2465,6 +2465,64 @@ test("chat markdown turns status dumps into facts and renders inline marks", () 
   assert.ok(include.some((block) => block.type === "h"));
 });
 
+test("chat markdown keeps loose numbered lists as one incrementing sequence", () => {
+  const inlineText = (parts: { type: string; text?: string }[]) =>
+    parts.map((part) => ("text" in part ? String(part.text ?? "") : "")).join("");
+  const olBlocks = (source: string) => parseChatMarkdown(source).filter((block) => block.type === "ol");
+
+  const restarted = olBlocks(
+    [
+      "The closest matches:",
+      "",
+      "1. Bar fills, action is not done.",
+      "",
+      "1. Bar ends, nothing happens, animation loops.",
+    ].join("\n"),
+  );
+  assert.equal(restarted.length, 1);
+  if (restarted[0]?.type !== "ol") throw new Error("expected one ordered list");
+  assert.equal(restarted[0].items.length, 2);
+  assert.equal(inlineText(restarted[0].items[0] ?? []), "Bar fills, action is not done.");
+  assert.equal(inlineText(restarted[0].items[1] ?? []), "Bar ends, nothing happens, animation loops.");
+  for (const item of restarted[0].items) {
+    assert.doesNotMatch(inlineText(item), /^\s*\d+\.\s/);
+  }
+
+  const sequential = olBlocks(
+    [
+      "1. Stop Host.",
+      "",
+      "2. After Duck logs in, take the prosthesis off.",
+      "",
+      "3. Reset Amputations.",
+    ].join("\n"),
+  );
+  assert.equal(sequential.length, 1);
+  if (sequential[0]?.type !== "ol") throw new Error("expected one sequential list");
+  assert.equal(sequential[0].items.length, 3);
+  assert.deepEqual(
+    sequential[0].items.map((item) => inlineText(item)),
+    ["Stop Host.", "After Duck logs in, take the prosthesis off.", "Reset Amputations."],
+  );
+
+  const tight = olBlocks("1. First\n2. Second\n3. Third");
+  assert.equal(tight.length, 1);
+  if (tight[0]?.type !== "ol") throw new Error("expected one tight list");
+  assert.equal(tight[0].items.length, 3);
+
+  const interrupted = parseChatMarkdown("1. Keep this.\n\nA paragraph in between.\n\n1. New list.");
+  assert.deepEqual(
+    interrupted.map((block) => block.type),
+    ["ol", "p", "ol"],
+  );
+
+  const body = readFileSync(path.join(ROOT, "src", "ui", "MessageBody.tsx"), "utf8");
+  assert.match(body, /block\.type === "ol"/);
+  assert.doesNotMatch(body, /\$\{itemIndex \+ 1\}\./);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.doesNotMatch(css, /\.md ol\s*\{[^}]*list-style:\s*none/);
+});
+
 test("chat markdown drops Grok terminal table chrome before a real table", () => {
   const cellText = (cell: { type: string; text?: string }[]) =>
     cell.map((part) => ("text" in part ? String(part.text ?? "") : "")).join("");
@@ -4921,6 +4979,7 @@ test("sidebar nests project chats in folders; top New chat stays loose", async (
   assert.match(sidebar, /APP_VERSION/);
   assert.match(sidebar, /SettingsPulse/);
   assert.match(sidebar, /deskPulseLines/);
+  assert.match(sidebar, /visibleUsageEvents/);
   assert.doesNotMatch(sidebar, /profile, LLMs, watch/);
   assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /settings-pulse/);
   const pulse = deskPulseLines({
@@ -5612,6 +5671,7 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.match(css, /\.usage-tip \{[\s\S]*position: fixed/);
   assert.match(pane, /window\.innerWidth/);
   assert.match(pane, /deskUsageCards/);
+  assert.match(pane, /visibleUsageEvents/);
   assert.match(pane, /dense/);
 });
 
@@ -5854,7 +5914,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
     {
       llms: {
         grok: { connected: true },
-        claude: { connected: true, enabled: false },
+        claude: { connected: true },
         codex: { connected: true },
       },
       customBots: [
@@ -6314,9 +6374,14 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /working · \$\{formatWorked/);
   assert.match(popout, /anyChildLive/);
   assert.match(popout, /deskInk/);
-  assert.doesNotMatch(popout, /subagentTurns/);
-  assert.match(readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8"), /\.subagent-open/);
+  assert.match(popout, /subagentTurns/);
+  assert.match(popout, /subagent-thread-slot/);
+  assert.match(popout, /aria-expanded=\{open\}/);
   const workCss = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(workCss, /\.subagent-open/);
+  assert.match(workCss, /\.subagent-thread-slot\s*\{[^}]*grid-template-rows:\s*0fr/);
+  assert.match(workCss, /\.subagent-preview\.open \.subagent-thread-slot\s*\{[^}]*grid-template-rows:\s*1fr/);
+  assert.match(workCss, /prefers-reduced-motion: reduce[\s\S]*?\.subagent-thread-slot[\s\S]*?transition:\s*none/);
   const foldAt = workCss.indexOf(".work-fold > summary::before");
   const foldBlock = foldAt >= 0 ? workCss.slice(foldAt, foldAt + 280) : "";
   assert.match(foldBlock, /border-radius:\s*50%/);

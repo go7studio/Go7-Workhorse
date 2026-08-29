@@ -1,8 +1,8 @@
-import { customBotServes, findCustomBotByModel } from "./custom-bots";
+import { customBotEnabled, customBotServes, findCustomBotByModel } from "./custom-bots";
 import { projectedOccupancyAfterCompact } from "./portable-compaction";
 import { contextWindowFor, largestKnownContextWindow, modelsFor, normalizeModelId, usageModelKey, usageToneForModel } from "./models";
 import { PROVIDERS } from "./providers";
-import { vendorLabel, vendorTint } from "./settings";
+import { vendorEnabled, vendorLabel, vendorTint } from "./settings";
 import {
   cursorUsageLane,
   cursorWatchKeyLabel,
@@ -502,6 +502,33 @@ export function cursorLaneEvents(events: UsageEvent[], key: CursorWatchKey): Usa
   });
 }
 
+export type UsageVisibilitySettings = {
+  llms: Settings["llms"] | { grok: LlmLink; claude: LlmLink; codex: LlmLink; cursor?: LlmLink };
+  customBots: Array<Pick<CustomBot, "id" | "name" | "model" | "models" | "enabled">>;
+};
+
+/** Connected and still on. Off in Settings → LLMs means hidden from Usage too. */
+export function usageEventVisible(
+  event: Pick<UsageEvent, "provider" | "model" | "customBotId">,
+  settings: UsageVisibilitySettings,
+): boolean {
+  if (event.provider === "custom") {
+    const bot =
+      settings.customBots.find((item) => item.id === event.customBotId) ??
+      findCustomBotByModel(settings.customBots, event.model) ??
+      settings.customBots.find((item) => item.id === event.model || item.name === event.model);
+    return !bot || customBotEnabled(bot);
+  }
+  return vendorEnabled(settings.llms[event.provider]);
+}
+
+export function visibleUsageEvents<T extends Pick<UsageEvent, "provider" | "model" | "customBotId">>(
+  events: T[],
+  settings: UsageVisibilitySettings,
+): T[] {
+  return events.filter((event) => usageEventVisible(event, settings));
+}
+
 export function deskUsageCards(
   events: UsageEvent[],
   settings: {
@@ -511,7 +538,7 @@ export function deskUsageCards(
 ): DeskUsageCard[] {
   const cards: DeskUsageCard[] = [];
   for (const id of DESK_VENDORS) {
-    if (!settings.llms[id]?.connected) continue;
+    if (!vendorEnabled(settings.llms[id])) continue;
     if (id === "cursor") {
       for (const key of ["cursor:cursor-models", "cursor:other-models"] as const) {
         const slice = cursorLaneEvents(events, key);
@@ -537,6 +564,7 @@ export function deskUsageCards(
     });
   }
   for (const bot of settings.customBots) {
+    if (!customBotEnabled(bot)) continue;
     cards.push({
       key: bot.id,
       focus: `bot:${bot.id}`,

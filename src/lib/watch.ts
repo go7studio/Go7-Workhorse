@@ -8,7 +8,6 @@ import type {
   UsageEvent,
   WatchDayMark,
   WatchDayMarks,
-  WatchDismissed,
   WatchPermits,
   WatchSettings,
 } from "./types";
@@ -39,7 +38,7 @@ export type WatchPlans = {
   custom?: Record<string, GrokPlanUsage | undefined>;
 };
 
-export type WatchNoticeKind = "daily" | "low" | "spent" | "reset";
+export type WatchNoticeKind = "daily" | "spent";
 
 export type WatchNotice = {
   id: string;
@@ -186,15 +185,6 @@ export function normalizeWatchPermits(raw: unknown): WatchPermits {
       if (Object.keys(sessions).length) permit.sessions = sessions;
     }
     if (permit.untilReset || permit.day || permit.sessions) next[key] = permit;
-  }
-  return next;
-}
-
-export function normalizeWatchDismissed(raw: unknown): WatchDismissed {
-  if (!raw || typeof raw !== "object") return {};
-  const next: WatchDismissed = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "string" && value) next[key] = value;
   }
   return next;
 }
@@ -432,16 +422,6 @@ export function syncWatchDayMarks(
   return changed ? next : marks;
 }
 
-export function dismissStamp(notice: Pick<WatchNotice, "kind" | "resetsAt">, now = Date.now()): string {
-  return notice.kind === "reset" && notice.resetsAt ? notice.resetsAt : dayKey(now);
-}
-
-export function noticeIsDismissed(notice: WatchNotice, dismissed: WatchDismissed, now = Date.now()): boolean {
-  const stamp = dismissed[notice.id];
-  if (!stamp) return false;
-  return stamp === dismissStamp(notice, now);
-}
-
 export function pruneWatchPermits(permits: WatchPermits, now = Date.now()): WatchPermits {
   const today = dayKey(now);
   let changed = false;
@@ -567,14 +547,6 @@ export function watchBarDetail(hold: { reason?: WatchHoldReason; pending?: boole
     : "Today's share of the week is used so leftover can last later days. Switch model, or allow this conversation.";
 }
 
-function resetSoon(iso: string | undefined, now: number): boolean {
-  if (!iso) return false;
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) return false;
-  const delta = at - now;
-  return delta <= 12 * 60 * 60 * 1000;
-}
-
 function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: number): WatchNotice[] {
   const notices: WatchNotice[] = [];
   const leftover = status.leftover;
@@ -606,22 +578,6 @@ function vendorNotices(status: WatchVendorStatus, watch: WatchSettings, now: num
       tone: locked ? "hold" : "warn",
       title: over > 0 ? `${status.label} is ${over}% over pace` : `${status.label} used its daily bank`,
       detail: `${dayLabel} · ${used}% used · ${expected}% expected`,
-    });
-  }
-  if (status.resetsAt && resetSoon(status.resetsAt, now)) {
-    const at = Date.parse(status.resetsAt);
-    const overdue = !Number.isNaN(at) && at <= now;
-    notices.push({
-      id: `reset:${status.key}:${status.resetsAt}`,
-      key: status.key,
-      label: status.label,
-      kind: "reset",
-      tone: overdue ? "warn" : "info",
-      title: overdue ? `${status.label} window should have reset` : `${status.label} resets soon`,
-      detail: overdue
-        ? "The vendor window looks overdue. Recheck leftover on Usage if it stays stale."
-        : `${formatPlanReset(status.resetsAt, now)}.`,
-      resetsAt: status.resetsAt,
     });
   }
   return notices;
@@ -724,12 +680,8 @@ export function watchVendorStatuses(input: {
   });
 }
 
-export function collectWatchNotices(
-  statuses: WatchVendorStatus[],
-  dismissed: WatchDismissed,
-  now = Date.now(),
-): WatchNotice[] {
-  return statuses.flatMap((status) => status.notices).filter((notice) => !noticeIsDismissed(notice, dismissed, now));
+export function collectWatchNotices(statuses: WatchVendorStatus[]): WatchNotice[] {
+  return statuses.flatMap((status) => status.notices);
 }
 
 export function leftoverByWatchKey(

@@ -10,7 +10,6 @@ export function deskPersistBodyEqual(left: AppState, right: AppState): boolean {
     left.theme === right.theme &&
     left.lastModel === right.lastModel &&
     left.watchPermits === right.watchPermits &&
-    left.watchDismissed === right.watchDismissed &&
     left.watchDayMarks === right.watchDayMarks &&
     left.pending === right.pending &&
     left.externalTasks === right.externalTasks &&

@@ -212,7 +212,7 @@ import {
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
-  openingWaveLiveWorkerIds,
+  type OpeningWorkerReservation,
   openingWaveMission,
   overlappingAgentFiles,
   parentHasRunningChildren,
@@ -225,6 +225,7 @@ import {
   resolveNamedWorker,
   parseWorkerHandoff,
   workerStartMessages,
+  reconcileOpeningWaveReservations,
   reserveWorkerName,
   recordParentTakeover,
   releaseCancelledSessionLeases,
@@ -626,14 +627,13 @@ export function storeOpeningWaveMission(input: {
   parentId: string;
   objective: string;
   missionId: string;
-  ordinaryOpeningReservations: number[];
-  now?: number;
-}): { mission: MissionIteration | undefined; reservations: number[] } {
-  const now = input.now ?? Date.now();
-  const liveWorkers = openingWaveLiveWorkerIds(input.sessions, input.parentId);
-  const reservations = input.ordinaryOpeningReservations
-    .filter((startedAt) => now - startedAt < 30_000);
-  reservations.splice(0, Math.min(liveWorkers.length, reservations.length));
+  ordinaryOpeningReservations: OpeningWorkerReservation[];
+}): { mission: MissionIteration | undefined; reservations: OpeningWorkerReservation[] } {
+  const reservations = reconcileOpeningWaveReservations(
+    input.sessions,
+    input.parentId,
+    input.ordinaryOpeningReservations,
+  );
   return {
     mission: openingWaveMission({
       sessions: input.sessions,
@@ -905,7 +905,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const pathLeasesRef = useRef<FileLease[]>([]);
-  const ordinaryOpeningReservations = useRef(new Map<string, number[]>());
+  const ordinaryOpeningReservations = useRef(new Map<string, OpeningWorkerReservation[]>());
   const pathPermissionPreflight = useRef(new Set<string>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
@@ -3287,7 +3287,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.onPeerAsk) return;
     return window.workhorse.onPeerAsk((payload) => {
       void (async () => {
+        let openingReservation: { parentId: string; id: string } | undefined;
+        let openingReservationCommitted = false;
+        const releaseOpeningReservation = () => {
+          if (!openingReservation) return;
+          const claimed = openingReservation;
+          const reservations = ordinaryOpeningReservations.current.get(claimed.parentId) ?? [];
+          const remaining = reservations.filter((reservation) => reservation.id !== claimed.id);
+          if (remaining.length > 0) ordinaryOpeningReservations.current.set(claimed.parentId, remaining);
+          else ordinaryOpeningReservations.current.delete(claimed.parentId);
+          openingReservation = undefined;
+        };
         const replyAsk = async (result: { text?: string; error?: string }) => {
+          if (result.error || !openingReservationCommitted) releaseOpeningReservation();
           try {
             await window.workhorse?.replyPeerAsk({ id: payload.id, ...result });
           } catch {
@@ -4606,13 +4618,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
             const openingNow = Date.now();
+            const openingReservationId = payload.childSessionId?.trim() || uid("opening");
             const opening = storeOpeningWaveMission({
               sessions: latest.sessions,
               parentId: caller.id,
               objective: payload.message,
               missionId: uid("mission"),
               ordinaryOpeningReservations: ordinaryOpeningReservations.current.get(caller.id) ?? [],
-              now: openingNow,
             });
             const openingReservations = opening.reservations;
             if (openingReservations.length > 0) ordinaryOpeningReservations.current.set(caller.id, openingReservations);
@@ -4682,7 +4694,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
             }
             if (!spawnMission) {
-              ordinaryOpeningReservations.current.set(caller.id, [...openingReservations, openingNow]);
+              openingReservation = { parentId: caller.id, id: openingReservationId };
+              ordinaryOpeningReservations.current.set(caller.id, [
+                ...openingReservations,
+                { id: openingReservationId, startedAt: openingNow },
+              ]);
             }
             if (exposure === "external-runtime") {
               const inboundHop = acceptInboundEnvelope({
@@ -4750,6 +4766,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 startRuntime: (request) =>
                   window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
                 onStarted: (running) => {
+                  openingReservationCommitted = Boolean(openingReservation);
                   setState((current) => ({
                     ...current,
                     externalTasks: running.store,
@@ -4757,7 +4774,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       session.id === caller.id
                         ? {
                             ...session,
-                            lineup: addLineupRow(session.lineup, running.row),
+                            lineup: addLineupRow(session.lineup, {
+                              ...running.row,
+                              ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
+                            }),
                             ...(running.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: running.grant } : session.planRun } : {}),
                           }
                         : session,
@@ -4769,6 +4789,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: started.code });
                 return;
               }
+              openingReservationCommitted = Boolean(openingReservation);
               setState((current) => ({
                 ...current,
                 externalTasks: started.store,
@@ -4780,7 +4801,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           report: started.task.result,
                           finishedAt: started.task.finishedAt,
                           correlationId: started.task.envelope.traceId,
-                        }) ?? addLineupRow(session.lineup, started.row),
+                        }) ?? addLineupRow(session.lineup, {
+                          ...started.row,
+                          ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
+                        }),
                         ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
                       }
                     : session,
@@ -5295,6 +5319,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
+            openingReservationCommitted = Boolean(openingReservation);
             setState((current) => {
               const base =
                 inboundHost && !current.sessions.some((item) => item.id === inboundHost.id)
@@ -5324,6 +5349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 status: "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
+                                ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                                 // The caller is known here and was being dropped, so a
                                 // Link wave could not say who drove it. Only for an
                                 // inbound harness: a desk wave has no caller to name.
@@ -5563,6 +5589,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         vendor: vendorDisplayName(spec.provider),
                         status: "running",
                         startedAt,
+                        ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                         ...(planStepId ? { planStepId } : {}),
                         ...(rationale ? { rationale } : {}),
                         ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),

@@ -260,20 +260,43 @@ test("the live store spawn path consults the production campaign gate", () => {
   assert.doesNotMatch(source, /beforeChanges/);
 });
 
-test("the store counts in-flight reservations before opening another ordinary worker", () => {
+test("the store keeps a different in-flight reservation beside one live opening worker", () => {
+  const sessions = [{
+    id: "parent",
+    lineup: {
+      rows: [{
+        childId: "worker_live",
+        status: "running",
+        openingReservationId: "reservation_live",
+      }],
+    },
+  }];
   const opening = storeOpeningWaveMission({
-    sessions: [{ id: "parent", lineup: { rows: [] } }],
+    sessions,
     parentId: "parent",
     objective: "Start the third concurrent worker",
     missionId: "mission_reserved_opening",
-    ordinaryOpeningReservations: [90_000, 95_000],
-    now: 100_000,
+    ordinaryOpeningReservations: [{ id: "reservation_in_flight", startedAt: 1 }],
   });
-  assert.equal(opening.reservations.length, 2);
+  assert.deepEqual(opening.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
   assert.equal(opening.mission?.phase, "scout");
+  assert.deepEqual(opening.mission?.previousWorkerIds, ["worker_live"]);
+
+  const reconciled = storeOpeningWaveMission({
+    sessions,
+    parentId: "parent",
+    objective: "Start the third concurrent worker",
+    missionId: "mission_reserved_opening",
+    ordinaryOpeningReservations: [
+      { id: "reservation_in_flight", startedAt: 1 },
+      { id: "reservation_live", startedAt: 90_000 },
+    ],
+  });
+  assert.deepEqual(reconciled.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
 
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
+  assert.match(source, /openingReservationId: openingReservation\.id/);
   assert.match(source, /reservedWorkers: reservations\.length/);
 });
 

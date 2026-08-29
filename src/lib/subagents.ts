@@ -1599,8 +1599,27 @@ type OpeningWaveSession = {
   parentId?: string | null;
   status?: string;
   agentRun?: { status?: string };
-  lineup?: { rows?: Array<{ childId?: string; status?: string }> };
+  lineup?: { rows?: Array<{ childId?: string; status?: string; openingReservationId?: string }> };
 };
+
+export type OpeningWorkerReservation = {
+  id: string;
+  startedAt: number;
+};
+
+export function reconcileOpeningWaveReservations(
+  sessions: OpeningWaveSession[],
+  parentId: string,
+  reservations: readonly OpeningWorkerReservation[],
+): OpeningWorkerReservation[] {
+  const parent = sessions.find((session) => session.id === parentId);
+  const consumed = new Set(
+    (parent?.lineup?.rows ?? [])
+      .map((row) => row.openingReservationId?.trim())
+      .filter((id): id is string => Boolean(id)),
+  );
+  return reservations.filter((reservation) => !consumed.has(reservation.id));
+}
 
 export function openingWaveLiveWorkerIds(sessions: OpeningWaveSession[], parentId: string): string[] {
   const live = new Set<string>();

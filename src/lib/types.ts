@@ -270,6 +270,8 @@ export type DeskLineupRow = {
   agentId?: string;
   workspace?: string;
   correlationId?: string;
+  /** Identity of the opening-wave reservation this row consumed. */
+  openingReservationId?: string;
   missionId?: string;
   iteration?: number;
 };

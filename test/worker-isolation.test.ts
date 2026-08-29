@@ -7,6 +7,8 @@ import {
   fileContentsFingerprint,
   normalizeAgentRun,
   overlappingAgentFiles,
+  releaseCancelledSessionLeases,
+  releaseDeletedSessionLeases,
   releaseSessionLeases,
   resolveWorkerIsolation,
   workerMayWrite,
@@ -155,4 +157,44 @@ test("releasing a session lease lets the next shared writer claim the path", () 
     files: [{ path: "electron/workhorse-mcp.ts", fingerprint: fileContentsFingerprint("one") }],
   });
   assert.equal(next.ok, true);
+});
+
+test("explicit cancel releases an interrupted owner but not an already completed owner", () => {
+  const leases = [
+    { sessionId: "interrupted", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "completed", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+  ];
+  const afterInterrupted = releaseCancelledSessionLeases(leases, "interrupted", "interrupted");
+  assert.deepEqual(afterInterrupted.map((lease) => lease.sessionId), ["completed"]);
+  assert.equal(releaseCancelledSessionLeases(leases, "completed", "completed"), leases);
+});
+
+test("deleting a chat releases only leases owned by chats removed in that operation", () => {
+  const leases = [
+    { sessionId: "deleted", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "kept", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+    { sessionId: "unrelated-orphan", path: "docs/FEATURES.md", fingerprint: "c", claimedAt: 1 },
+  ];
+  const next = releaseDeletedSessionLeases(
+    leases,
+    [{ id: "deleted" }, { id: "kept" }],
+    [{ id: "kept" }],
+  );
+  assert.deepEqual(next.map((lease) => lease.sessionId), ["kept", "unrelated-orphan"]);
+});
+
+test("deleting a running worker keeps its lease until the vendor terminal path releases it", () => {
+  const leases = [
+    { sessionId: "running", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "interrupted", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+  ];
+  const next = releaseDeletedSessionLeases(
+    leases,
+    [
+      { id: "running", agentRun: { status: "running", startedAt: 1, isolation: "shared" } },
+      { id: "interrupted", agentRun: { status: "interrupted", startedAt: 1, isolation: "shared" } },
+    ],
+    [],
+  );
+  assert.deepEqual(next.map((lease) => lease.sessionId), ["running"]);
 });

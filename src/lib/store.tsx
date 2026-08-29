@@ -212,6 +212,8 @@ import {
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
+  openingWaveLiveWorkerIds,
+  openingWaveMission,
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
@@ -225,6 +227,8 @@ import {
   workerStartMessages,
   reserveWorkerName,
   recordParentTakeover,
+  releaseCancelledSessionLeases,
+  releaseDeletedSessionLeases,
   releaseSessionLeases,
   appendRunEvent,
   scopedChildAgentIds,
@@ -609,9 +613,10 @@ export function campaignSpawnGate(input: {
   campaignContext: boolean;
   requested: MissionIteration | undefined;
   desk: MissionIteration | undefined;
+  openingMission?: MissionIteration;
 }): { mission: MissionIteration | undefined; error: string | undefined; phase: Exclude<CampaignPhase, "build"> | undefined } {
-  const mission = missionForDeskSpawn(input.requested, input.desk);
-  const error = input.campaignContext ? campaignGateError(mission) : undefined;
+  const mission = missionForDeskSpawn(input.requested ?? input.openingMission, input.desk);
+  const error = input.campaignContext || input.openingMission ? campaignGateError(mission) : undefined;
   const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
   return { mission, error, phase };
 }
@@ -729,6 +734,21 @@ function cancelVendorSession(session: Pick<Session, "id" | "provider">) {
   else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
   else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
   else void window.workhorse?.grokCancel?.(session.id);
+}
+
+function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
+  const kept = new Set(after.map((session) => session.id));
+  for (const session of before) {
+    if (kept.has(session.id) || !session.parentId) continue;
+    if (
+      session.agentRun?.status === "running" ||
+      session.agentRun?.status === "interrupted" ||
+      session.status === "running" ||
+      session.status === "needs-input"
+    ) {
+      cancelVendorSession(session);
+    }
+  }
 }
 
 function occupancyForSession(
@@ -860,6 +880,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const pathLeasesRef = useRef<FileLease[]>([]);
+  const ordinaryOpeningReservations = useRef(new Map<string, number[]>());
   const pathPermissionPreflight = useRef(new Set<string>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
@@ -1135,10 +1156,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const gone = new Set(
         current.sessions.filter((session) => !sessions.some((item) => item.id === session.id)).map((session) => session.id),
       );
+      stopDeletedWorkerSessions(current.sessions, sessions);
+      const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
+      pathLeasesRef.current = leases;
       return {
         ...current,
         projects,
         sessions,
+        leases,
         pending: current.pending.filter((item) => !gone.has(item.sessionId)),
         activeProjectId: current.activeProjectId === id ? null : current.activeProjectId,
         activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
@@ -1357,9 +1382,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => {
       const sessions = deleteChat(current.sessions, id);
       if (!sessions) return current;
+      stopDeletedWorkerSessions(current.sessions, sessions);
+      const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
+      pathLeasesRef.current = leases;
       return {
         ...current,
         sessions,
+        leases,
         pending: current.pending.filter((item) => item.sessionId !== id),
         activeSessionId: current.activeSessionId === id ? null : current.activeSessionId,
       };
@@ -1369,15 +1398,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteWorkers = useCallback((parentId: string) => {
     setState((current) => {
       const kids = current.sessions.filter((session) => session.parentId === parentId);
-      for (const kid of kids) {
-        if (kid.status === "running" || kid.status === "needs-input") cancelVendorSession(kid);
-      }
       const sessions = deleteWorkerChats(current.sessions, parentId);
       if (!sessions) return current;
+      stopDeletedWorkerSessions(current.sessions, sessions);
       const gone = new Set(kids.map((kid) => kid.id));
+      const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
+      pathLeasesRef.current = leases;
       return {
         ...current,
         sessions,
+        leases,
         pending: current.pending.filter((item) => !gone.has(item.sessionId)),
         activeSessionId: gone.has(current.activeSessionId ?? "") ? parentId : current.activeSessionId,
       };
@@ -2134,9 +2164,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (!current.activeSessionId) return current;
           const sessions = deleteChat(current.sessions, current.activeSessionId);
           if (!sessions) return current;
+          stopDeletedWorkerSessions(current.sessions, sessions);
+          const leases = releaseDeletedSessionLeases(current.leases ?? [], current.sessions, sessions);
+          pathLeasesRef.current = leases;
           return {
             ...current,
             sessions,
+            leases,
             pending: current.pending.filter((item) => item.sessionId !== current.activeSessionId),
             activeSessionId: null,
           };
@@ -3737,18 +3771,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   return;
                 }
                 const sessions = applied.sessions;
+                stopDeletedWorkerSessions(latest.sessions, sessions);
+                const leases = releaseDeletedSessionLeases(latest.leases ?? [], latest.sessions, sessions);
+                pathLeasesRef.current = leases;
                 const gone = new Set(
                   latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
                 );
                 setState((current) => ({
                   ...current,
                   sessions,
+                  leases,
                   pending: current.pending.filter((item) => !gone.has(item.sessionId)),
                 }));
                 void window.workhorse
                   ?.saveState({
                     ...latest,
                     sessions: listedChats(sessions),
+                    leases,
                     activeSessionId: latest.activeSessionId,
                   })
                   .catch(() => undefined);
@@ -3781,12 +3820,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }
               const sessions = applied.sessions;
               const session = applied.deleted;
+              stopDeletedWorkerSessions(latest.sessions, sessions);
+              const leases = releaseDeletedSessionLeases(latest.leases ?? [], latest.sessions, sessions);
+              pathLeasesRef.current = leases;
               const gone = new Set(
                 latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
               );
               setState((current) => ({
                 ...current,
                 sessions,
+                leases,
                 pending: current.pending.filter((item) => !gone.has(item.sessionId)),
                 activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
               }));
@@ -3794,6 +3837,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ?.saveState({
                   ...latest,
                   sessions: listedChats(sessions),
+                  leases,
                   activeSessionId:
                     latest.activeSessionId && gone.has(latest.activeSessionId) ? null : latest.activeSessionId,
                 })
@@ -3825,6 +3869,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 return;
               }
               const sessions = applyProjectChatFate(latest.sessions, project.id, fate);
+              stopDeletedWorkerSessions(latest.sessions, sessions);
+              const leases = releaseDeletedSessionLeases(latest.leases ?? [], latest.sessions, sessions);
+              pathLeasesRef.current = leases;
               const gone = new Set(
                 latest.sessions.filter((item) => !sessions.some((row) => row.id === item.id)).map((item) => item.id),
               );
@@ -3835,6 +3882,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...current,
                 projects,
                 sessions,
+                leases,
                 pending: current.pending.filter((item) => !gone.has(item.sessionId)),
                 activeProjectId: current.activeProjectId === project.id ? null : current.activeProjectId,
                 activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
@@ -3844,6 +3892,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   ...latest,
                   projects,
                   sessions: listedChats(sessions),
+                  leases,
                   activeProjectId: nextActiveProject,
                   activeSessionId: nextActiveSession,
                 })
@@ -4320,6 +4369,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 // poked again, so a second cancel is a no-op.
                 const existing = worker.agentRun;
                 if (existing && existing.status !== "running") {
+                  if (existing.status === "interrupted") {
+                    // An interrupted row is uncertain, so restart retains its
+                    // lease. Explicit cancel is the acknowledgement that this
+                    // owner must not resume: make a best-effort vendor stop,
+                    // then release only this worker's paths.
+                    cancelVendorSession(worker);
+                    setState((currentState) => {
+                      const leases = releaseCancelledSessionLeases(
+                        currentState.leases ?? [],
+                        worker.id,
+                        existing.status,
+                      );
+                      pathLeasesRef.current = leases;
+                      return { ...currentState, leases };
+                    });
+                  }
                   const settled = stateRef.current.sessions.find((session) => session.id === worker.id) ?? worker;
                   await replyAsk({ text: JSON.stringify(workerStatusSnapshot(settled), null, 2) });
                   return;
@@ -4341,7 +4406,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     error: cancelled.worker?.agentRun?.error,
                     correlationId: cancelled.worker?.agentRun?.correlationId,
                   });
-                  const leases = releaseSessionLeases(currentState.leases ?? [], worker.id);
+                  const leases = releaseCancelledSessionLeases(
+                    currentState.leases ?? [],
+                    worker.id,
+                    existing?.status,
+                  );
                   pathLeasesRef.current = leases;
                   return { ...currentState, sessions, leases };
                 });
@@ -4510,16 +4579,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
               return;
             }
-            const requestedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
+            const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
+            const openingNow = Date.now();
+            const liveOpeningWorkers = openingWaveLiveWorkerIds(latest.sessions, caller.id);
+            const openingReservations = (ordinaryOpeningReservations.current.get(caller.id) ?? [])
+              .filter((startedAt) => openingNow - startedAt < 30_000);
+            openingReservations.splice(0, Math.min(liveOpeningWorkers.length, openingReservations.length));
+            if (openingReservations.length > 0) ordinaryOpeningReservations.current.set(caller.id, openingReservations);
+            else ordinaryOpeningReservations.current.delete(caller.id);
+            const openingMission = suppliedMission || caller.lineup?.mission
+              ? undefined
+              : openingWaveMission({
+                  sessions: latest.sessions,
+                  parentId: caller.id,
+                  objective: payload.message,
+                  missionId: uid("mission"),
+                  reservedWorkers: openingReservations.length,
+                });
+            const requestedMission = suppliedMission ?? openingMission;
             const lineupMission = caller.lineup?.mission;
             const deskMission =
               requestedMission && lineupMission?.id === requestedMission.id && lineupMission.iteration === requestedMission.iteration
                 ? lineupMission
                 : caller.agentRun?.mission;
             const gate = campaignSpawnGate({
-              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission),
+              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission || openingMission),
               requested: requestedMission,
               desk: deskMission,
+              openingMission,
             });
             const spawnMission = gate.mission;
             if (gate.error && spawnMission && gate.phase) {
@@ -4569,6 +4656,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
                 return;
               }
+            }
+            if (!spawnMission) {
+              ordinaryOpeningReservations.current.set(caller.id, [...openingReservations, openingNow]);
             }
             if (exposure === "external-runtime") {
               const inboundHop = acceptInboundEnvelope({

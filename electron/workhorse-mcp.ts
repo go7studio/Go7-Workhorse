@@ -39,6 +39,7 @@ import {
   nestedSpawnError,
   nextMissionIteration,
   normalizeMissionIteration,
+  openingWaveMission,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -896,6 +897,7 @@ export function mcpToolInputSchema(name: string): { properties?: Record<string, 
 
 type DeskAsk = (ask: PeerAsk) => Promise<{ text?: string; error?: string }>;
 let deskAsk: DeskAsk | null = null;
+const ordinaryOpeningReservations = new Map<string, number>();
 let localCapabilityHostOverride: LocalCapabilityHostClient | null | undefined;
 let localCapabilityHostMemo: { signature: string; client: LocalCapabilityHostClient } | null = null;
 
@@ -928,6 +930,7 @@ type LocalRuntimeDiscovery = {
 /** When MiniMax tools run inside Electron main, skip HTTP-to-self and hit the live desk. */
 export function setWorkhorseDeskAsk(handler: DeskAsk | null): void {
   deskAsk = handler;
+  if (!handler) ordinaryOpeningReservations.clear();
 }
 
 /** Test seam and Electron-main injection point; undefined restores environment discovery. */
@@ -1803,7 +1806,7 @@ type SpawnCaller = {
   hidden?: boolean;
   projectId?: string | null;
   crewModes?: string[];
-  lineup?: { mission?: MissionIteration };
+  lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[] };
 };
 
@@ -1968,14 +1971,33 @@ async function spawnAgent(
     JSON.stringify(deskMission.acceptanceCriteria) === JSON.stringify(loopMission.acceptanceCriteria)
       ? deskMission
       : undefined;
-  const campaignContext = Boolean(
+  const explicitCampaignContext = Boolean(
     input.missionIteration !== undefined ||
     input.loop !== undefined ||
     caller?.crewModes?.includes("mission") ||
     deskMission,
   );
+  const stateSessions = (readState().sessions ?? [])
+    .filter((session): session is {
+      id?: string;
+      parentId?: string | null;
+      status?: string;
+      agentRun?: { status?: string };
+      lineup?: { rows?: Array<{ childId?: string; status?: string }> };
+    } => Boolean(session) && typeof session === "object");
+  const reservedOpenings = caller?.id ? ordinaryOpeningReservations.get(caller.id) ?? 0 : 0;
+  const openingMission = !explicitCampaignContext && caller?.id
+    ? openingWaveMission({
+        sessions: stateSessions,
+        parentId: caller.id,
+        objective: input.prompt,
+        missionId: input.traceId?.trim() || uid("mission"),
+        reservedWorkers: reservedOpenings,
+      })
+    : undefined;
+  const campaignContext = explicitCampaignContext || Boolean(openingMission);
   const missionIteration = campaignContext
-    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? {
+    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? openingMission ?? {
         id: input.traceId?.trim() || uid("mission"),
         mode: "adaptive" as const,
         objective: input.prompt.trim(),
@@ -2036,7 +2058,12 @@ async function spawnAgent(
       : { ok: true as const, cwd: "" };
   if (!admitted.ok) throw new Error(admitted.error);
   const attachments = spawnAttachments(spawnInput.files, admitted.cwd);
-  const first = await postBridge("/spawn", {
+  const reservedParentId = !campaignContext ? caller?.id?.trim() : "";
+  if (reservedParentId) {
+    ordinaryOpeningReservations.set(reservedParentId, (ordinaryOpeningReservations.get(reservedParentId) ?? 0) + 1);
+  }
+  try {
+    const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromId,
     exposureProfile: currentMcpProfile(),
@@ -2110,7 +2137,14 @@ async function spawnAgent(
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
     } as PeerAsk);
   }
-  return first;
+    return first;
+  } finally {
+    if (reservedParentId) {
+      const remaining = (ordinaryOpeningReservations.get(reservedParentId) ?? 1) - 1;
+      if (remaining > 0) ordinaryOpeningReservations.set(reservedParentId, remaining);
+      else ordinaryOpeningReservations.delete(reservedParentId);
+    }
+  }
 }
 
 /**

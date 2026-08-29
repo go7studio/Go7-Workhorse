@@ -9,6 +9,7 @@ import {
   missionForDeskSpawn,
   nextMissionIteration,
   normalizeMissionIteration,
+  openingWaveMission,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
 import { campaignSpawnGate, hydrateInterruptedPathLeases } from "../src/lib/store";
@@ -198,9 +199,36 @@ test("the live store spawn path consults the production campaign gate", () => {
   const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
   assert.equal(ordinary.error, undefined);
 
+  const openingMission = openingWaveMission({
+    sessions: [
+      {
+        id: "parent",
+        lineup: {
+          rows: [
+            { childId: "worker_one", status: "running" },
+            { childId: "worker_two", status: "queued" },
+          ],
+        },
+      },
+    ],
+    parentId: "parent",
+    objective: "Start another ordinary worker",
+    missionId: "mission_opening_wave",
+  });
+  assert.equal(openingMission?.phase, "scout");
+  assert.deepEqual(openingMission?.previousWorkerIds, ["worker_one", "worker_two"]);
+  const openingGate = campaignSpawnGate({
+    campaignContext: false,
+    requested: undefined,
+    desk: undefined,
+    openingMission,
+  });
+  assert.match(openingGate.error ?? "", /requires human approval/);
+
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
-  assert.match(source, /const error = input\.campaignContext \? campaignGateError\(mission\) : undefined/);
+  assert.match(source, /openingWaveMission\(\{/);
+  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
 });

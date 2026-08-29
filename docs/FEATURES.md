@@ -255,6 +255,12 @@ transcript rather than as a path.
   one bounded helper, ask to raise a block, read skills and references. It
   cannot create, rename, move or delete anything on the desk, and is not shown
   those tools.
+- **Campaign gate** — one worker and a two-way split start immediately. A third
+  live opening worker mints a scout Campaign card and waits for a person to
+  clear the current phase. A worker cannot clear its own gate.
+- **Path ownership** — assigned repo-relative paths are leased across shared
+  folders and worktrees. Conflicting spawns and stale writes stay blocked until
+  the owner finishes, is explicitly cancelled, or its chat is deleted.
 - **Plans** — multi-step work that continues after a worker joins. A checklist
   plan you tick yourself still completes on ordinary evidence. When workers run
   the plan, a step finishes when another vendor re-runs the named test at that

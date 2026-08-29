@@ -1575,6 +1575,65 @@ export function campaignGateError(mission: MissionIteration | undefined): string
   return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
 }
 
+/**
+ * One worker is ordinary delegation and two workers are the smallest useful
+ * split. A third live worker is a wide opening wave: it must become a Campaign
+ * before any more work starts.
+ */
+export const OPENING_WAVE_IMMEDIATE_WORKER_LIMIT = 2;
+
+type OpeningWaveSession = {
+  id?: string;
+  parentId?: string | null;
+  status?: string;
+  agentRun?: { status?: string };
+  lineup?: { rows?: Array<{ childId?: string; status?: string }> };
+};
+
+export function openingWaveLiveWorkerIds(sessions: OpeningWaveSession[], parentId: string): string[] {
+  const live = new Set<string>();
+  const parent = sessions.find((session) => session.id === parentId);
+  for (const row of parent?.lineup?.rows ?? []) {
+    if ((row.status === "queued" || row.status === "running") && row.childId?.trim()) {
+      live.add(row.childId.trim());
+    }
+  }
+  for (const session of sessions) {
+    if (session.parentId !== parentId || !session.id?.trim()) continue;
+    if (session.agentRun?.status === "running" || (!session.agentRun && session.status === "running")) {
+      live.add(session.id.trim());
+    }
+  }
+  return [...live];
+}
+
+export function openingWaveMission(input: {
+  sessions: OpeningWaveSession[];
+  parentId: string;
+  objective: string;
+  missionId: string;
+  reservedWorkers?: number;
+}): MissionIteration | undefined {
+  const parentId = input.parentId.trim();
+  const objective = input.objective.trim();
+  const missionId = input.missionId.trim();
+  if (!parentId || !objective || !missionId) return undefined;
+
+  const live = openingWaveLiveWorkerIds(input.sessions, parentId);
+  const reservedWorkers = Math.max(0, Math.floor(input.reservedWorkers ?? 0));
+  if (live.length + reservedWorkers < OPENING_WAVE_IMMEDIATE_WORKER_LIMIT) return undefined;
+  return {
+    id: missionId,
+    mode: "adaptive",
+    objective,
+    acceptanceCriteria: ["The opening wave is bounded and the assigned work is verified."],
+    iteration: 1,
+    maxIterations: 3,
+    previousWorkerIds: live,
+    phase: "scout",
+  };
+}
+
 /** The approval card is the sole caller. Approval of the approve phase enters build. */
 export function clearCampaignPhase(mission: MissionIteration, now = Date.now()): MissionIteration {
   if (mission.phase === "build") return mission;
@@ -2022,6 +2081,32 @@ export function fileContentsFingerprint(contents: string): string {
 
 export function releaseSessionLeases(leases: FileLease[], sessionId: string): FileLease[] {
   return leases.filter((lease) => lease.sessionId !== sessionId);
+}
+
+export function releaseCancelledSessionLeases(
+  leases: FileLease[],
+  sessionId: string,
+  status: AgentRun["status"] | undefined,
+): FileLease[] {
+  return status === "running" || status === "interrupted"
+    ? releaseSessionLeases(leases, sessionId)
+    : leases;
+}
+
+/** Release only owners removed by this deletion; unrelated orphan recovery is explicit. */
+export function releaseDeletedSessionLeases(
+  leases: FileLease[],
+  before: Array<Pick<Session, "id" | "agentRun">>,
+  after: Array<Pick<Session, "id">>,
+): FileLease[] {
+  const kept = new Set(after.map((session) => session.id));
+  const deleted = new Set(before.filter((session) => !kept.has(session.id)).map((session) => session.id));
+  const stillWriting = new Set(
+    before
+      .filter((session) => deleted.has(session.id) && session.agentRun?.status === "running")
+      .map((session) => session.id),
+  );
+  return leases.filter((lease) => !deleted.has(lease.sessionId) || stillWriting.has(lease.sessionId));
 }
 
 export function normalizeFileLeases(raw: unknown): FileLease[] {

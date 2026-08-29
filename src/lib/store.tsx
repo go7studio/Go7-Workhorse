@@ -300,7 +300,6 @@ import {
 import { cursorUsageLane } from "./cursor-lane";
 import {
   collectWatchNotices,
-  dismissStamp,
   deskCallCatalog,
   deskCallRowFor,
   formatDeskRoster,
@@ -315,7 +314,6 @@ import {
   dayKey,
   watchKeyForSession,
   normalizeWatch,
-  normalizeWatchDismissed,
   normalizeWatchDayMarks,
   normalizeWatchPermits,
   pruneWatchPermits,
@@ -377,7 +375,6 @@ const EMPTY: AppState = {
   settingsSection: "profile",
   settings: structuredClone(DEFAULT_SETTINGS),
   watchPermits: {},
-  watchDismissed: {},
   watchDayMarks: {},
   usage: [],
   usageRange: "month",
@@ -504,7 +501,6 @@ export type Store = AppState & {
   watchNotices: WatchNotice[];
   watchHold: WatchHold | null;
   watchRestore: { text: string; images?: import("./types").ChatImage[] } | null;
-  dismissWatchNotice: (notice: WatchNotice) => void;
   permitWatchHold: (kind: "once" | "conversation" | "until-reset") => void;
   denyWatchHold: () => void;
   clearWatchRestore: () => void;
@@ -663,7 +659,10 @@ export function createOpeningReservationReplyAsk(input: {
 
 function hydrate(value: unknown): AppState {
   if (!value || typeof value !== "object") return EMPTY;
-  const record = value as Partial<AppState> & { projects?: unknown[] };
+  const { watchDismissed: _droppedWatchDismissed, ...record } = value as Partial<AppState> & {
+    watchDismissed?: unknown;
+    projects?: unknown[];
+  };
   const projects = Array.isArray(record.projects)
     ? record.projects.map(normalizeProject).filter((item): item is Project => item !== null)
     : [];
@@ -711,7 +710,6 @@ function hydrate(value: unknown): AppState {
           : "profile",
     settings,
     watchPermits: normalizeWatchPermits((record as { watchPermits?: unknown }).watchPermits),
-    watchDismissed: normalizeWatchDismissed((record as { watchDismissed?: unknown }).watchDismissed),
     watchDayMarks: normalizeWatchDayMarks((record as { watchDayMarks?: unknown }).watchDayMarks),
     deskPlans: (record as { deskPlans?: AppState["deskPlans"] }).deskPlans,
     usage,
@@ -7506,13 +7504,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const dismissWatchNotice = useCallback((notice: WatchNotice) => {
-    setState((current) => ({
-      ...current,
-      watchDismissed: { ...current.watchDismissed, [notice.id]: dismissStamp(notice) },
-    }));
-  }, []);
-
   const denyWatchHold = useCallback(() => {
     setWatchHold((current) => {
       if (current) setWatchRestore({ text: current.restoreText ?? current.text, images: current.images });
@@ -7578,10 +7569,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [state.settings, state.usage, state.watchPermits, state.watchDayMarks, grokPlan, codexPlan, claudePlan, customPlans],
   );
 
-  const watchNotices = useMemo(
-    () => collectWatchNotices(watchStatuses, state.watchDismissed),
-    [watchStatuses, state.watchDismissed],
-  );
+  const watchNotices = useMemo(() => collectWatchNotices(watchStatuses), [watchStatuses]);
 
   useEffect(() => {
     const leftovers = leftoverByWatchKey(watchStatuses);
@@ -7799,7 +7787,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       watchNotices,
       watchHold,
       watchRestore,
-      dismissWatchNotice,
       permitWatchHold,
       denyWatchHold,
       clearWatchRestore,
@@ -7928,7 +7915,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       watchNotices,
       watchHold,
       watchRestore,
-      dismissWatchNotice,
       permitWatchHold,
       denyWatchHold,
       clearWatchRestore,

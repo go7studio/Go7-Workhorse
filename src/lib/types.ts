@@ -852,8 +852,6 @@ export type WatchPermit = {
 
 export type WatchPermits = Record<string, WatchPermit>;
 
-export type WatchDismissed = Record<string, string>;
-
 export type WatchDayMark = {
   day: string;
   leftover: number;
@@ -980,7 +978,6 @@ export type AppState = {
   settingsSection: SettingsSection;
   settings: Settings;
   watchPermits: WatchPermits;
-  watchDismissed: WatchDismissed;
   watchDayMarks: WatchDayMarks;
   usage: UsageEvent[];
   usageRange: UsageRange;

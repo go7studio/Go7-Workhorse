@@ -4,7 +4,7 @@ import { unsquashSentences } from "../lib/markdown";
 import { deskInk } from "../lib/settings";
 import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
-import { workerTaskTitle } from "../lib/subagents";
+import { subagentTurns, workerTaskTitle } from "../lib/subagents";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
 import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
 import type { ChatMessage } from "../lib/types";
@@ -95,6 +95,121 @@ function workRowKey(row: GroupedWorkRow, index: number): string {
   return row.step.message.id;
 }
 
+function SubagentRow({
+  marker,
+  now,
+  onOpenThread,
+}: {
+  marker: ChatMessage;
+  now: number;
+  onOpenThread?: (id: string) => void;
+}) {
+  const store = useStore();
+  const [open, setOpen] = useState(false);
+  const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
+  const childLive =
+    child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
+  const title = workerFoldLabel(marker, child);
+  const failed =
+    !childLive &&
+    child?.agentRun?.executionOwner !== "parent" &&
+    child?.agentRun?.status !== "interrupted" &&
+    (marker.toolStatus === "failed" || child?.agentRun?.status === "failed");
+  const ink = child ? deskInk(child, store.settings) : undefined;
+  const brain = child
+    ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
+    : undefined;
+  const stepId = child?.agentRun?.planStepId;
+  const planStep = stepId
+    ? store.sessions.find((session) => session.planRun?.steps?.some((item) => item.id === stepId))?.planRun?.steps?.find((item) => item.id === stepId)
+    : undefined;
+  const childMs = childLive ? now - marker.createdAt : undefined;
+  const turns = subagentTurns(child, marker.createdAt);
+  return (
+    <div className={`subagent-preview work-step${failed ? " failed" : ""}${open ? " open" : ""}`} data-kind="subagent">
+      <div className="tool-line subagent-head">
+        <button
+          type="button"
+          className="subagent-open"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span
+            className={`dot ${child?.provider ?? "custom"}`}
+            style={ink ? { background: ink, color: ink } : undefined}
+            aria-hidden="true"
+          />
+          <span className="tool-name">{title}</span>
+          {brain ? <span className="subagent-model">{[brain.name, child?.effort].filter(Boolean).join(" · ")}</span> : null}
+          {child?.agentRun?.constraints?.length ? (
+            <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
+          ) : null}
+          {child?.agentRun?.paths?.length ? (
+            <span className="subagent-scope">Paths: {child.agentRun.paths.join(" · ")}</span>
+          ) : null}
+          {planStep ? <span className="subagent-task">{planStep.title}</span> : null}
+          <span className={`tool-status${failed ? " failed" : ""}`}>
+            {childLive
+              ? `working · ${formatWorked(childMs ?? 0)}`
+              : child?.agentRun?.executionOwner === "parent"
+                ? "parent took over"
+                : child?.agentRun?.status === "interrupted"
+                  ? "interrupted"
+                  : failed
+                    ? "failed"
+                    : "done"}
+          </span>
+        </button>
+        {child?.agentRun?.status === "interrupted" ? (
+          <button
+            type="button"
+            className="tiny subagent-resume"
+            title="Send this worker's brief again and carry on from what it already did"
+            onClick={() => store.resumeAgentRun(child.id)}
+          >
+            Resume
+          </button>
+        ) : null}
+      </div>
+      <div className="subagent-thread-slot" aria-hidden={!open}>
+        <div className="subagent-thread">
+          {turns.length === 0 ? (
+            <p className="tool-line live">
+              <span className="tool-name">Waiting for the other agent</span>
+            </p>
+          ) : (
+            turns.map((turn) =>
+              turn.role === "user" ? (
+                <article key={turn.id} className="turn user chat peer subagent-turn">
+                  <div className="say">
+                    <span className="peer-from">From {turn.fromTitle || "another agent"}</span>
+                    {turn.text.trim() ? <MessageBody text={turn.text} vendorSessionId={child?.vendorSessionId} /> : null}
+                  </div>
+                </article>
+              ) : (
+                <article key={turn.id} className="turn assistant reply subagent-turn">
+                  <div className="say final">
+                    {turn.text.trim() ? (
+                      <MessageBody text={unsquashSentences(turn.text)} vendorSessionId={child?.vendorSessionId} />
+                    ) : (
+                      <p className="work-draft-text">Still working</p>
+                    )}
+                  </div>
+                </article>
+              ),
+            )
+          )}
+          {onOpenThread && marker.subagentSessionId ? (
+            <button type="button" className="peer-open" onClick={() => onOpenThread(marker.subagentSessionId!)}>
+              Open conversation
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function isSpawnTool(tool: ChatMessage): boolean {
   const key = toolNameKey(splitToolLine(tool.text).title);
   return key === "spawn_agent" || key === "request_vendor";
@@ -124,7 +239,6 @@ function WorkRow({
   onOpenThread?: (id: string) => void;
   now: number;
 }) {
-  const store = useStore();
   const toolsFold = useStartOpen(active || reveal);
   if (row.type === "thought") {
     return (
@@ -142,75 +256,7 @@ function WorkRow({
     );
   }
   if (row.type === "subagent") {
-    const marker = row.step.message;
-    const child = store.sessions.find((item) => item.id === marker.subagentSessionId);
-    const childLive =
-      child?.status === "running" || child?.status === "needs-input" || marker.toolStatus === "running";
-    const title = workerFoldLabel(marker, child);
-    const failed =
-      !childLive &&
-      child?.agentRun?.executionOwner !== "parent" &&
-      child?.agentRun?.status !== "interrupted" &&
-      (marker.toolStatus === "failed" || child?.agentRun?.status === "failed");
-    const ink = child ? deskInk(child, store.settings) : undefined;
-    const brain = child
-      ? brainCaption(brainStamp(child), store.settings.customBots, store.settings.llms)
-      : undefined;
-    const stepId = child?.agentRun?.planStepId;
-    const planStep = stepId
-      ? store.sessions.find((session) => session.planRun?.steps?.some((item) => item.id === stepId))?.planRun?.steps?.find((item) => item.id === stepId)
-      : undefined;
-    const childMs = childLive ? now - marker.createdAt : undefined;
-    return (
-      <p key={marker.id} className={`tool-line subagent-preview work-step${failed ? " failed" : ""}`} data-kind="subagent">
-        <button
-          type="button"
-          className="subagent-open"
-          onClick={() => {
-            const id = marker.subagentSessionId;
-            if (!id) return;
-            if (onOpenThread) onOpenThread(id);
-            store.selectSession(id);
-          }}
-        >
-          <span
-            className={`dot ${child?.provider ?? "custom"}`}
-            style={ink ? { background: ink, color: ink } : undefined}
-            aria-hidden="true"
-          />
-          <span className="tool-name">{title}</span>
-          {brain ? <span className="subagent-model">{[brain.name, child?.effort].filter(Boolean).join(" · ")}</span> : null}
-          {child?.agentRun?.constraints?.length ? (
-            <span className="subagent-scope">{child.agentRun.constraints.join(" · ")}</span>
-          ) : null}
-          {child?.agentRun?.paths?.length ? (
-            <span className="subagent-scope">Paths: {child.agentRun.paths.join(" · ")}</span>
-          ) : null}
-          {planStep ? <span className="subagent-task">{planStep.title}</span> : null}
-          <span className={`tool-status${failed ? " failed" : ""}`}>
-            {childLive
-              ? `working · ${formatWorked(childMs ?? 0)}`
-              : child?.agentRun?.executionOwner === "parent"
-                ? "parent took over"
-                : child?.agentRun?.status === "interrupted"
-                ? "interrupted"
-                : failed
-                  ? "failed"
-                  : "done"}
-          </span>
-        </button>
-        {child?.agentRun?.status === "interrupted" ? (
-          <button
-            type="button"
-            className="tiny subagent-resume"
-            title="Send this worker's brief again and carry on from what it already did"
-            onClick={() => store.resumeAgentRun(child.id)}
-          >
-            Resume
-          </button>
-        ) : null}
-      </p>
-    );
+    return <SubagentRow marker={row.step.message} now={now} onOpenThread={onOpenThread} />;
   }
   const count = row.items.length;
   const firstId = row.items[0]?.step.message.id ?? `tools-${rowIndex}`;

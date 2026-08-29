@@ -133,7 +133,6 @@ export type WatchDesk = {
   cursorPlan: Store["cursorPlan"];
   customPlans: Store["customPlans"];
   answerPermission: Store["answerPermission"];
-  dismissWatchNotice: Store["dismissWatchNotice"];
   permitWatchHold: Store["permitWatchHold"];
   denyWatchHold: Store["denyWatchHold"];
 };
@@ -154,7 +153,6 @@ export function selectWatchDesk(store: Store): WatchDesk {
     cursorPlan: store.cursorPlan,
     customPlans: store.customPlans,
     answerPermission: store.answerPermission,
-    dismissWatchNotice: store.dismissWatchNotice,
     permitWatchHold: store.permitWatchHold,
     denyWatchHold: store.denyWatchHold,
   };
@@ -190,7 +188,6 @@ export function sameWatchDesk(left: WatchDesk, right: WatchDesk): boolean {
     left.cursorPlan === right.cursorPlan &&
     left.customPlans === right.customPlans &&
     left.answerPermission === right.answerPermission &&
-    left.dismissWatchNotice === right.dismissWatchNotice &&
     left.permitWatchHold === right.permitWatchHold &&
     left.denyWatchHold === right.denyWatchHold
   );

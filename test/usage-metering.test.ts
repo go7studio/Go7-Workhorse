@@ -19,11 +19,13 @@ import {
   finalizeTurnUsage,
   formatIoLine,
   leftoverForCard,
+  deskPulseLines,
   normalizeUsage,
   occupancyFromUsage,
   repairSummedPromptTurn,
   settleTurnUsage,
   sumRequestBills,
+  visibleUsageEvents,
   usageFocusFacts,
 } from "../src/lib/usage";
 import type { UsageDraft } from "../src/lib/types";
@@ -772,6 +774,112 @@ test("Cursor Composer billed bars and stretch cells use cursor grey, not Grok wh
   );
   const api = heatCellBots([{ ...event, model: "gpt-5.4" }]);
   assert.equal(api[0]?.provider, "codex");
+});
+
+test("disabled LLMs stay out of the usage view until they are turned back on", () => {
+  const claudeEvent = {
+    id: "u-claude",
+    at: 1,
+    provider: "claude" as const,
+    model: "claude-fable-5",
+    inputTokens: 80_000,
+    outputTokens: 2_000,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const grokEvent = {
+    id: "u-grok",
+    at: 1,
+    provider: "grok" as const,
+    model: "grok-4.6",
+    inputTokens: 40,
+    outputTokens: 10,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const botEvent = {
+    id: "u-bot",
+    at: 1,
+    provider: "custom" as const,
+    model: "MiniMax-M3",
+    customBotId: "bot_mini",
+    inputTokens: 200,
+    outputTokens: 20,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const offBot = {
+    id: "bot_mini",
+    name: "MiniMax",
+    color: "#30d158",
+    baseUrl: "https://api.minimax.io/anthropic",
+    model: "MiniMax-M3",
+    apiKey: "sk",
+    api: "anthropic-messages" as const,
+    contextWindow: 1_000_000,
+    createdAt: 1,
+    enabled: false,
+  };
+  const settings = {
+    llms: {
+      grok: { connected: true },
+      claude: { connected: true, enabled: false },
+      codex: { connected: true },
+      cursor: { connected: true, enabled: false },
+    },
+    customBots: [offBot],
+  };
+  const events = [claudeEvent, grokEvent, botEvent];
+  const cards = deskUsageCards(events, settings);
+  assert.deepEqual(
+    cards.map((card) => card.label),
+    ["Grok", "Codex"],
+    "connected-but-disabled stock vendors and off custom bots must not get a card",
+  );
+  assert.equal(
+    cards.some((card) => card.provider === "claude" || card.label === "Claude"),
+    false,
+  );
+  assert.equal(
+    cards.some((card) => card.provider === "cursor" || String(card.focus).startsWith("cursor:")),
+    false,
+  );
+
+  const shown = visibleUsageEvents(events, settings);
+  assert.deepEqual(
+    shown.map((event) => event.provider),
+    ["grok"],
+  );
+  assert.equal(
+    byModel(shown).some((row) => row.provider === "claude" || /claude/i.test(row.label)),
+    false,
+  );
+  assert.equal(
+    heatCellBots(shown).some((row) => row.provider === "claude" || /claude/i.test(row.label)),
+    false,
+  );
+
+  const pulse = deskPulseLines({ usage: shown, sessions: [] });
+  assert.ok(pulse.some((line) => line.id === "tokens"));
+  assert.equal(
+    pulse.some((line) => /82k|80k|82,000/.test(line.text)),
+    false,
+    "sidebar pulse must not count disabled Claude tokens",
+  );
+
+  const onAgain = {
+    ...settings,
+    llms: { ...settings.llms, claude: { connected: true, enabled: true } },
+    customBots: [{ ...offBot, enabled: true }],
+  };
+  const restored = deskUsageCards(events, onAgain);
+  assert.ok(restored.some((card) => card.provider === "claude"));
+  assert.equal(restored.find((card) => card.provider === "claude")?.inputTokens, 80_000);
+  assert.ok(restored.some((card) => card.label === "MiniMax"));
+  assert.deepEqual(
+    visibleUsageEvents(events, onAgain).map((event) => event.provider).sort(),
+    ["claude", "custom", "grok"],
+  );
 });
 
 test("Spend docs keep leftover, billed tokens, and retained context distinct", () => {

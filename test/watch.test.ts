@@ -91,7 +91,6 @@ test("watch is one daily limit, off until you turn it on", () => {
   assert.equal(normalizeWatch({ desktopNotify: false }).desktopNotify, false);
   assert.equal(isDesktopWatchNotice({ kind: "daily" }), true);
   assert.equal(isDesktopWatchNotice({ kind: "spent" }), true);
-  assert.equal(isDesktopWatchNotice({ kind: "reset" }), false);
 });
 
 test("simultaneous usage notices condense into one actionable alert", () => {
@@ -425,7 +424,9 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(notices, /isDesktopWatchNotice/);
   assert.match(notices, /watchLocksKey/);
   assert.match(notices, /watch-banners/);
-  assert.match(notices, /Got it/);
+  assert.doesNotMatch(notices, /Got it/);
+  assert.doesNotMatch(notices, /watch-toast /);
+  assert.doesNotMatch(notices, /dismissWatchNotice/);
   assert.match(readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8"), /WatchNotices hidden=\{surface === "project-home"\}/);
   assert.doesNotMatch(notices, /openSettings\("watch"\)/);
   assert.match(readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8"), /notify:desktop/);
@@ -458,7 +459,7 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.doesNotMatch(notices, /Allow today/);
   assert.doesNotMatch(notices, /Watch · Safety/);
   assert.doesNotMatch(notices, /permission-overlay/);
-  assert.match(notices, /watchKeyForSession/);
+  assert.doesNotMatch(notices, /watchKeyForSession/);
   assert.match(notices, /if \(setupOpen \|\|/);
   assert.doesNotMatch(notices, /watchNoticeKeysForChat/);
   assert.equal(watchKeyForSession({ provider: "custom", customBotId: "bot_minimax" }), "bot:bot_minimax");
@@ -841,9 +842,12 @@ test("the daily-over banner is a short used-vs-expected line", () => {
   assert.equal(cursorDaily?.detail, `Day ${cursorCycle.day}/${cursorCycle.days} · 61% used · ${cursorExpected}% expected`);
 
   const watchSource = readFileSync(path.join(ROOT, "src", "lib", "watch.ts"), "utf8");
+  const noticeUi = readFileSync(path.join(ROOT, "src", "ui", "WatchNotices.tsx"), "utf8");
   assert.doesNotMatch(watchSource, /over the expected pace/);
   assert.doesNotMatch(watchSource, /what is left covers the days remaining/);
   assert.doesNotMatch(watchSource, /% expected by now/);
+  assert.doesNotMatch(watchSource, /resets soon/);
+  assert.doesNotMatch(noticeUi, /Got it/);
 });
 
 test("a full context window never holds a send the way a spent daily bank does", () => {

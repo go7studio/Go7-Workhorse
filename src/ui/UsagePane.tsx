@@ -28,6 +28,7 @@ import {
   formatIoLine,
   formatTokens,
   usageFocusFacts,
+  visibleUsageEvents,
   inRange,
   modelsForProvider,
   heatLevel,
@@ -383,7 +384,7 @@ export function UsagePane({
     setClaudeWindowState(focus === "claude" ? "weekly_all" : "");
   }, [focus]);
   const range = usageRange ?? "month";
-  const events = (usage ?? []).filter((event) => inRange(event, range));
+  const events = visibleUsageEvents((usage ?? []).filter((event) => inRange(event, range)), settings);
   const cards = deskUsageCards(events, settings);
   const models = byModel(events, settings.customBots).map((row) => ({
     ...row,

@@ -7,7 +7,6 @@ import {
   summarizeWatchNotices,
   watchBarDetail,
   watchBarTitle,
-  watchKeyForSession,
   watchLocksKey,
 } from "../lib/watch";
 
@@ -27,7 +26,6 @@ export const WatchBanners = memo(function WatchBanners({
 } = {}) {
   const store = useStoreSelector(selectWatchDesk, sameWatchDesk);
   const session = store.session;
-  const ownKey = session ? watchKeyForSession(session) : null;
   const pending = store.watchHold && session && store.watchHold.sessionId === session.id ? store.watchHold : null;
   const live = useMemo(() => {
     if (!session) return null;
@@ -64,22 +62,13 @@ export const WatchBanners = memo(function WatchBanners({
         text: "",
       }
     : null);
-  const notices = setupOpen
-    ? []
-    : store.watchNotices.filter((notice) => {
-        if (ownKey && notice.key !== ownKey) return false;
-        if (hold && notice.key === hold.key && (notice.kind === "daily" || notice.kind === "spent")) return false;
-        return true;
-      });
-  const noticeSummary = summarizeWatchNotices(notices);
-
   const vendorAsk =
     setupOpen
       ? null
       : store.pending.find((item) => item.kind === "vendor" && (!session || item.sessionId === session.id));
 
   const showHold = Boolean(hold) && !setupOpen;
-  if (setupOpen || (!showHold && notices.length === 0 && !vendorAsk)) return null;
+  if (setupOpen || (!showHold && !vendorAsk)) return null;
   return (
     <div className="watch-banners" role="status">
       {vendorAsk?.vendor ? (
@@ -127,23 +116,6 @@ export const WatchBanners = memo(function WatchBanners({
                 Send once
               </button>
             ) : null}
-          </div>
-        </div>
-      ) : null}
-      {noticeSummary ? (
-        <div key={notices.map((notice) => notice.id).join(":")} className={`watch-toast ${noticeSummary.tone}`}>
-          <div className="watch-toast-copy">
-            <strong>{noticeSummary.title}</strong>
-            <span>{noticeSummary.detail}</span>
-          </div>
-          <div className="actions">
-            <button
-              className="tiny"
-              type="button"
-              onClick={() => notices.forEach((notice) => store.dismissWatchNotice(notice))}
-            >
-              Got it
-            </button>
           </div>
         </div>
       ) : null}

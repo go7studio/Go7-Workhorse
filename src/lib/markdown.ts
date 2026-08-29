@@ -608,6 +608,35 @@ export function parseMarkdownTable(rawLines: string[]): Extract<MdBlock, { type:
   };
 }
 
+const UL_ITEM = /^\s*[-*]\s+/;
+const OL_ITEM = /^\s*\d+\.\s+/;
+
+function nextNonBlankLine(lines: string[], from: number): number {
+  let i = from;
+  while (i < lines.length && !lines[i]?.trim()) i += 1;
+  return i;
+}
+
+/** Collect tight or loose list items. A blank line does not start a new list when the next non-blank line is the same marker. */
+function consumeListItems(lines: string[], start: number, marker: RegExp): { items: Inline[][]; next: number } {
+  const items: Inline[][] = [];
+  let i = start;
+  while (i < lines.length) {
+    if (!lines[i]?.trim()) {
+      const peek = nextNonBlankLine(lines, i);
+      if (peek < lines.length && marker.test(lines[peek] ?? "")) {
+        i = peek;
+        continue;
+      }
+      break;
+    }
+    if (!marker.test(lines[i] ?? "")) break;
+    items.push(parseInline((lines[i] ?? "").replace(marker, "")));
+    i += 1;
+  }
+  return { items, next: i };
+}
+
 export function parseChatMarkdown(source: string): MdBlock[] {
   const lines = peelAskMarkup(String(source ?? "")).replace(/\r\n/g, "\n").split("\n");
   const blocks: MdBlock[] = [];
@@ -669,22 +698,16 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       i = j;
       continue;
     }
-    if (/^\s*[-*]\s+/.test(lines[i])) {
-      const items: Inline[][] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push(parseInline(lines[i].replace(/^\s*[-*]\s+/, "")));
-        i += 1;
-      }
-      blocks.push({ type: "ul", items });
+    if (UL_ITEM.test(lines[i])) {
+      const list = consumeListItems(lines, i, UL_ITEM);
+      blocks.push({ type: "ul", items: list.items });
+      i = list.next;
       continue;
     }
-    if (/^\s*\d+\.\s+/.test(lines[i])) {
-      const items: Inline[][] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(parseInline(lines[i].replace(/^\s*\d+\.\s+/, "")));
-        i += 1;
-      }
-      blocks.push({ type: "ol", items });
+    if (OL_ITEM.test(lines[i])) {
+      const list = consumeListItems(lines, i, OL_ITEM);
+      blocks.push({ type: "ol", items: list.items });
+      i = list.next;
       continue;
     }
     const para: string[] = [];
@@ -692,8 +715,8 @@ export function parseChatMarkdown(source: string): MdBlock[] {
       i < lines.length &&
       lines[i].trim() &&
       !lines[i].startsWith("```") &&
-      !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !UL_ITEM.test(lines[i]) &&
+      !OL_ITEM.test(lines[i]) &&
       !/^(#{1,6})\s+/.test(lines[i]) &&
       !isTableRelatedLine(lines[i])
     ) {

@@ -244,7 +244,6 @@ test("selection-only desk updates do not look like persist work", () => {
     theme: "dark",
     lastModel: {},
     watchPermits: {},
-    watchDismissed: {},
     watchDayMarks: {},
     pending: [],
   } as unknown as AppState;
@@ -330,7 +329,6 @@ const watchDesk = (chat: Session | null, overrides: Record<string, unknown> = {}
     cursorPlan: undefined,
     customPlans: noCustomPlans,
     answerPermission: noop,
-    dismissWatchNotice: noop,
     permitWatchHold: noop,
     denyWatchHold: noop,
     ...overrides,

@@ -9,7 +9,7 @@ import { applyLineDiff, countLineChanges, countLineDelta, countLines, lineDiff, 
 import { countCreatedReview, growInstanceBaseline, instancePathKey, rememberInstance, reviewCreatedDiff } from "../src/lib/file-instances";
 import { countMotion } from "../src/lib/count";
 import { editListKey, markStatsFetched, planEditStatsHarvest, projectWritesKey, startEditStatsHarvest, takeEditStatsChunk } from "../src/lib/project-edits";
-import { countFileLines, dottedConfigAlt, findSourceFile, readEditStats, readFileDiff, readSourceText, recordFileInstance, resolveExistingFile, resolveStatFile } from "../electron/project-diff";
+import { countFileLines, dottedConfigAlt, findSourceFile, listGitChanges, readEditStats, readFileDiff, readGitHead, readSourceText, recordFileInstance, resolveExistingFile, resolveStatFile } from "../electron/project-diff";
 import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,6 +45,26 @@ function reconstructs(before: string, after: string, lines: { kind: string; text
   const fromBefore = splitLines(before);
   for (const text of deleted) assert.ok(fromBefore.includes(text), `deleted ${text} was in before`);
 }
+
+test("spawn-head changes are repo-relative and a commit cannot hide an out-of-allowlist write", () => {
+  const repo = makeRepo("wh-spawn-head-");
+  try {
+    commitFile(repo, "src/owned.ts", "owned before\n");
+    commitFile(repo, "src/outside.ts", "outside before\n");
+    const spawnHead = readGitHead(repo);
+    assert.match(spawnHead, /^[0-9a-f]{40}$/);
+    writeFileSync(path.join(repo, "src", "owned.ts"), "owned after\n");
+    writeFileSync(path.join(repo, "src", "outside.ts"), "outside after\n");
+    git(repo, ["add", "--", "src/owned.ts", "src/outside.ts"]);
+    git(repo, ["commit", "-m", "worker writes"]);
+    assert.equal(git(repo, ["status", "--porcelain"]), "");
+    const changes = listGitChanges(repo, spawnHead);
+    assert.deepEqual(changes.map((change) => change.path).sort(), ["src/outside.ts", "src/owned.ts"]);
+    assert.equal(changes.every((change) => !path.isAbsolute(change.path)), true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
 
 test("project diffs use the linked-root file, not a whole-file or sibling steal", () => {
   const treeA = makeRepo("wh-diff-a-");

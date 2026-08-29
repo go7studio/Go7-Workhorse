@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   campaignGateError,
@@ -8,7 +11,10 @@ import {
   normalizeMissionIteration,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
+import { campaignSpawnGate, hydrateInterruptedPathLeases } from "../src/lib/store";
 import type { Session } from "../src/lib/types";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Regression for P0-2: workhorse_continue_mission rejects valid missions.
@@ -154,4 +160,78 @@ test("campaign opening and approve phases refuse until the permission inbox clea
   assert.equal(build?.phase, "build");
   assert.equal(build?.clearance?.clearedBy, "human");
   assert.equal(campaignGateError(build), undefined);
+});
+
+test("campaign state fails closed for absent and unknown phases", () => {
+  assert.match(campaignGateError(undefined) ?? "", /mission state is missing/i);
+  const missing = adaptiveMission({ phase: undefined });
+  const garbage = adaptiveMission({ phase: "unlimited" });
+  assert.equal(missing?.phase, "scout");
+  assert.equal(garbage?.phase, "scout");
+  assert.match(campaignGateError(missing) ?? "", /scout/);
+  assert.match(campaignGateError(garbage) ?? "", /scout/);
+});
+
+test("review has a distinct gate so scout clearance cannot buy an unlimited review wave", () => {
+  const scout = adaptiveMission({ phase: "scout" });
+  assert.ok(scout);
+  const clearedScout = clearCampaignPhase(scout, 10);
+  const coordinator = worker("coordinator", "parent", {
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: clearedScout },
+  });
+  const next = nextMissionIteration([coordinator], "parent", ["coordinator"]);
+  assert.equal(next.ok, true);
+  if (!next.ok) return;
+  assert.equal(next.mission.phase, "review");
+  assert.equal(next.mission.clearance, undefined);
+  assert.match(campaignGateError(next.mission) ?? "", /review/);
+  const clearedReview = clearCampaignPhase(next.mission, 20);
+  assert.equal(clearedReview.clearance?.phase, "review");
+  assert.equal(campaignGateError(clearedReview), undefined);
+});
+
+test("the live store spawn path consults the production campaign gate", () => {
+  const mission = adaptiveMission({ id: "mission_store", objective: "Close the opening fan-out" });
+  assert.ok(mission);
+  const blocked = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
+  assert.match(blocked.error ?? "", /requires human approval/);
+  const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
+  assert.equal(ordinary.error, undefined);
+
+  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(source, /const gate = campaignSpawnGate\(\{/);
+  assert.match(source, /const error = input\.campaignContext \? campaignGateError\(mission\) : undefined/);
+  assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
+  assert.doesNotMatch(source, /beforeChanges/);
+});
+
+test("restart keeps leases only for interrupted workers that still own those paths", () => {
+  const interrupted = normalizeSession({
+    id: "worker_interrupted",
+    parentId: "parent",
+    hidden: true,
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    title: "Interrupted writer",
+    mode: "ask",
+    sandbox: "off",
+    status: "running",
+    contextUsed: 0,
+    messages: [],
+    agentRun: {
+      status: "running",
+      startedAt: 1,
+      isolation: "shared",
+      paths: ["src/lib/store.tsx"],
+    },
+  });
+  assert.ok(interrupted);
+  assert.equal(interrupted.agentRun?.status, "interrupted");
+  const leases = hydrateInterruptedPathLeases([
+    { sessionId: interrupted.id, path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: interrupted.id, path: "src/lib/subagents.ts", fingerprint: "b", claimedAt: 1 },
+    { sessionId: "missing", path: "src/lib/store.tsx", fingerprint: "c", claimedAt: 1 },
+  ], [interrupted]);
+  assert.deepEqual(leases.map((lease) => lease.path), ["src/lib/store.tsx"]);
 });

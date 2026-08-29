@@ -378,7 +378,7 @@ export type AgentRun = {
 export type CampaignPhase = "scout" | "review" | "approve" | "build";
 
 export type CampaignClearance = {
-  phase: "scout" | "approve";
+  phase: "scout" | "review" | "approve";
   clearedAt: number;
   clearedBy: "human";
 };
@@ -614,7 +614,7 @@ export type PermissionRequest = {
   };
   campaign?: {
     missionId: string;
-    phase: "scout" | "approve";
+    phase: "scout" | "review" | "approve";
   };
 };
 

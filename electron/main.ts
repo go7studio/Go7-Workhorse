@@ -37,7 +37,7 @@ import { existingPeerReply } from "../src/lib/session-bridge";
 import { listDropFiles } from "./drop-files";
 
 import { displaySrcForHref, resolveMediaProtocolFile } from "./media-src";
-import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readSourceText, recordFileInstance } from "./project-diff";
+import { findSourceFile, listGitChanges, readEditStatsAsync, readFileDiff, readGitHead, readSourceText, recordFileInstance } from "./project-diff";
 import { TerminalHost, type TerminalEvent } from "./terminal-host";
 import {
   deleteDeskSkill,
@@ -1034,8 +1034,15 @@ app.whenReady().then(async () => {
     return readSourceText(filePath, Array.isArray(roots) ? roots.filter((item) => typeof item === "string") : []);
   });
 
-  ipcMain.handle("project:git-changes", (_event, cwd: unknown) =>
-    listGitChanges(typeof cwd === "string" ? resolveSessionCwd(cwd) : ""),
+  ipcMain.handle("project:git-head", (_event, cwd: unknown) =>
+    readGitHead(typeof cwd === "string" ? resolveSessionCwd(cwd) : ""),
+  );
+
+  ipcMain.handle("project:git-changes", (_event, cwd: unknown, baseRef: unknown) =>
+    listGitChanges(
+      typeof cwd === "string" ? resolveSessionCwd(cwd) : "",
+      typeof baseRef === "string" ? baseRef : undefined,
+    ),
   );
 
   ipcMain.handle("terminal:start", (event, raw: { sessionId?: string; cwd?: string }) =>

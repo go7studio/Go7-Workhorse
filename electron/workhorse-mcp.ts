@@ -38,6 +38,7 @@ import {
   isSpawnOnlyPrompt,
   nestedSpawnError,
   nextMissionIteration,
+  normalizeMissionIteration,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -535,6 +536,20 @@ const TOOLS = [
         handoff: {
           type: "object",
           description: "Bounded report for seed=fresh: status, summary, evidence, nextSteps, blocker.",
+        },
+        loop: {
+          type: "object",
+          description: "Opt-in adaptive sequential mission. Its opening worker is gated before dispatch.",
+          properties: {
+            acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
+            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+          },
+          required: ["acceptanceCriteria"],
+          additionalProperties: false,
+        },
+        missionIteration: {
+          type: "object",
+          description: "Optional inherited adaptive mission manifest. Human clearance is always taken from desk state.",
         },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
@@ -1782,14 +1797,24 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
   return first;
 }
 
-function callerSession(from?: string): { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: { mission?: MissionIteration; paths?: string[] } } | undefined {
+type SpawnCaller = {
+  id?: string;
+  parentId?: string | null;
+  hidden?: boolean;
+  projectId?: string | null;
+  crewModes?: string[];
+  lineup?: { mission?: MissionIteration };
+  agentRun?: { mission?: MissionIteration; paths?: string[] };
+};
+
+function callerSession(from?: string): SpawnCaller | undefined {
   const id = fromSessionId(from);
   if (!id) return undefined;
   const sessions = readState().sessions;
   if (!Array.isArray(sessions)) return undefined;
   const row = sessions.find((item) => item && typeof item === "object" && (item as { id?: string }).id === id);
   return row && typeof row === "object"
-    ? (row as { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null; agentRun?: { mission?: MissionIteration; paths?: string[] } })
+    ? (row as SpawnCaller)
     : undefined;
 }
 
@@ -1901,7 +1926,8 @@ async function spawnAgent(
     folder?: string;
     wait?: boolean;
     mission?: boolean;
-    missionIteration?: MissionIteration;
+    missionIteration?: unknown;
+    loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
     role?: "auditor";
     planStepId?: string;
@@ -1931,9 +1957,38 @@ async function spawnAgent(
     if (blocked) throw new Error(blocked);
   }
   if (isSpawnOnlyPrompt(input.prompt)) throw new Error(SPAWN_ONLY_PROMPT_ERROR);
+  const suppliedMission = normalizeMissionIteration(input.missionIteration);
+  const deskMission = normalizeMissionIteration(caller?.lineup?.mission ?? caller?.agentRun?.mission);
+  const loopMission = input.loop === undefined
+    ? undefined
+    : missionIterationFromArgs({ loop: input.loop }, input.prompt, input.traceId);
+  const matchingDeskLoop = loopMission && deskMission &&
+    deskMission.objective === loopMission.objective &&
+    deskMission.maxIterations === loopMission.maxIterations &&
+    JSON.stringify(deskMission.acceptanceCriteria) === JSON.stringify(loopMission.acceptanceCriteria)
+      ? deskMission
+      : undefined;
+  const campaignContext = Boolean(
+    input.missionIteration !== undefined ||
+    input.loop !== undefined ||
+    caller?.crewModes?.includes("mission") ||
+    deskMission,
+  );
+  const missionIteration = campaignContext
+    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? {
+        id: input.traceId?.trim() || uid("mission"),
+        mode: "adaptive" as const,
+        objective: input.prompt.trim(),
+        acceptanceCriteria: ["The assigned task is complete and verified."],
+        iteration: 1,
+        maxIterations: 3,
+        previousWorkerIds: [],
+        phase: "scout" as const,
+      }
+    : undefined;
   const inheritedInput = {
     ...input,
-    missionIteration: input.missionIteration ?? caller?.agentRun?.mission,
+    missionIteration,
     paths: input.paths ?? caller?.agentRun?.paths,
   };
   const spawnInput = isNested
@@ -2760,6 +2815,8 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
+        loop: args.loop,
+        missionIteration: args.missionIteration,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );

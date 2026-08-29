@@ -328,6 +328,7 @@ import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
 import type {
   AppState,
   CrewMode,
+  CampaignPhase,
   CustomBot,
   CustomLlm,
   EffortLevel,
@@ -344,6 +345,7 @@ import type {
   Session,
   SessionEnvironment,
   SessionSecurityPolicy,
+  MissionIteration,
   DeskExportKind,
   DeskExportResult,
   DeskSkill,
@@ -591,6 +593,29 @@ function emitLearningEvent(draft: {
   });
 }
 
+export function hydrateInterruptedPathLeases(raw: unknown, sessions: Session[]): FileLease[] {
+  return normalizeFileLeases(raw).filter((lease) =>
+    sessions.some((session) => {
+      if (session.id !== lease.sessionId || !session.agentRun) return false;
+      if (session.agentRun.status !== "running" && session.agentRun.status !== "interrupted") return false;
+      return normalizePathAllowlist(session.agentRun.paths).some(
+        (owned) => owned.toLowerCase() === lease.path.toLowerCase(),
+      );
+    }),
+  );
+}
+
+export function campaignSpawnGate(input: {
+  campaignContext: boolean;
+  requested: MissionIteration | undefined;
+  desk: MissionIteration | undefined;
+}): { mission: MissionIteration | undefined; error: string | undefined; phase: Exclude<CampaignPhase, "build"> | undefined } {
+  const mission = missionForDeskSpawn(input.requested, input.desk);
+  const error = input.campaignContext ? campaignGateError(mission) : undefined;
+  const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
+  return { mission, error, phase };
+}
+
 function hydrate(value: unknown): AppState {
   if (!value || typeof value !== "object") return EMPTY;
   const record = value as Partial<AppState> & { projects?: unknown[] };
@@ -619,9 +644,7 @@ function hydrate(value: unknown): AppState {
     typeof record.activeSessionId === "string" && sessions.some((session) => session.id === record.activeSessionId)
       ? record.activeSessionId
       : null;
-  const leases = normalizeFileLeases(record.leases).filter((lease) =>
-    sessions.some((session) => session.id === lease.sessionId && session.agentRun?.status === "running"),
-  );
+  const leases = hydrateInterruptedPathLeases(record.leases, sessions);
   return {
     ...EMPTY,
     ...record,
@@ -4493,10 +4516,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               requestedMission && lineupMission?.id === requestedMission.id && lineupMission.iteration === requestedMission.iteration
                 ? lineupMission
                 : caller.agentRun?.mission;
-            const spawnMission = missionForDeskSpawn(requestedMission, deskMission);
-            const gateError = campaignGateError(spawnMission);
-            const gatePhase = spawnMission?.phase === "scout" || spawnMission?.phase === "approve" ? spawnMission.phase : undefined;
-            if (gateError && spawnMission && gatePhase) {
+            const gate = campaignSpawnGate({
+              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission),
+              requested: requestedMission,
+              desk: deskMission,
+            });
+            const spawnMission = gate.mission;
+            if (gate.error && spawnMission && gate.phase) {
+              const gateError = gate.error;
+              const gatePhase = gate.phase;
               const requestId = uid("perm");
               setState((current) => ({
                 ...current,
@@ -4523,6 +4551,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ),
               }));
               await replyAsk({ error: `${gateError} Approve or deny the Campaign gate in the permission inbox, then retry once if approved.` });
+              return;
+            }
+            if (gate.error) {
+              await replyAsk({ error: gate.error });
               return;
             }
             if (spawnMission) {
@@ -5240,11 +5272,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
             };
             const runChild = async () => {
-              const beforeChanges = new Set(
-                window.workhorse?.listGitChanges && childCwd
-                  ? (await window.workhorse.listGitChanges(childCwd)).map((change) => `${change.status}:${change.path}`)
-                  : [],
-              );
+              const spawnHead = window.workhorse?.gitHead && childCwd
+                ? await window.workhorse.gitHead(childCwd)
+                : "";
               let reply = "";
               try {
                 reply = await promptVendor(
@@ -5346,11 +5376,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 worked,
               });
               const afterChanges = window.workhorse?.listGitChanges && childCwd
-                ? await window.workhorse.listGitChanges(childCwd)
+                ? await window.workhorse.listGitChanges(childCwd, spawnHead || undefined)
                 : [];
-              const changedFiles = afterChanges
-                .filter((change) => !beforeChanges.has(`${change.status}:${change.path}`))
-                .map((change) => change.path);
+              const changedFiles = afterChanges.map((change) => change.path);
               const unauthorizedFiles = assignedPaths.length > 0
                 ? changedFiles.filter((file) => !assignedPaths.some((owned) => owned.toLowerCase() === file.replaceAll("\\", "/").toLowerCase()))
                 : [];

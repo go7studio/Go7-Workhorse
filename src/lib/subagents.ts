@@ -1543,10 +1543,10 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
     phase:
       row.phase === "scout" || row.phase === "review" || row.phase === "approve" || row.phase === "build"
         ? row.phase
-        : "build",
+        : "scout",
     ...(row.clearance &&
     typeof row.clearance === "object" &&
-    (row.clearance.phase === "scout" || row.clearance.phase === "approve") &&
+    (row.clearance.phase === "scout" || row.clearance.phase === "review" || row.clearance.phase === "approve") &&
     typeof row.clearance.clearedAt === "number" &&
     row.clearance.clearedBy === "human"
       ? {
@@ -1569,17 +1569,18 @@ export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
 }
 
 export function campaignGateError(mission: MissionIteration | undefined): string | undefined {
-  if (!mission || (mission.phase !== "scout" && mission.phase !== "approve")) return undefined;
+  if (!mission) return "Campaign mission state is missing; human approval is required before a worker can start.";
+  if (mission.phase === "build") return undefined;
   if (mission.clearance?.clearedBy === "human" && mission.clearance.phase === mission.phase) return undefined;
   return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
 }
 
 /** The approval card is the sole caller. Approval of the approve phase enters build. */
 export function clearCampaignPhase(mission: MissionIteration, now = Date.now()): MissionIteration {
-  if (mission.phase !== "scout" && mission.phase !== "approve") return mission;
+  if (mission.phase === "build") return mission;
   return {
     ...mission,
-    phase: mission.phase === "approve" ? "build" : "scout",
+    phase: mission.phase === "approve" ? "build" : mission.phase,
     clearance: { phase: mission.phase, clearedAt: now, clearedBy: "human" },
   };
 }

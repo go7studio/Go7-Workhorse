@@ -111,7 +111,22 @@ export function dottedConfigAlt(filePath: string): string {
   return parts.join(sep);
 }
 
-export function listGitChanges(cwd: string): GitChange[] {
+export function readGitHead(cwd: string): string {
+  if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return "";
+  try {
+    return execFileSync("git", ["-C", cwd, "rev-parse", "--verify", "HEAD^{commit}"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 2_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Repo-relative changes, optionally including commits made after `baseRef`. */
+export function listGitChanges(cwd: string, baseRef?: string): GitChange[] {
   if (!isAbsolutePath(cwd) || !fs.existsSync(cwd)) return [];
   try {
     const root = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
@@ -120,28 +135,57 @@ export function listGitChanges(cwd: string): GitChange[] {
       timeout: 2_000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const raw = execFileSync("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+    const reference = typeof baseRef === "string" && baseRef.trim() ? baseRef.trim() : "";
+    const raw = execFileSync(
+      "git",
+      reference
+        ? ["-C", root, "diff", "--name-status", "-z", "--find-renames", reference, "--"]
+        : ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      {
       encoding: "utf8",
       windowsHide: true,
       timeout: 3_000,
       stdio: ["ignore", "pipe", "ignore"],
-    });
+      },
+    );
     const fields = raw.split("\0").filter(Boolean);
     const changes: GitChange[] = [];
-    for (let index = 0; index < fields.length; index += 1) {
-      const row = fields[index]!;
-      const status = row.slice(0, 2);
-      let relative = row.slice(3);
-      if (/[RC]/.test(status)) {
-        const renamed = fields[index + 1];
-        if (renamed) {
-          relative = fs.existsSync(path.resolve(root, renamed)) ? renamed : relative;
+    if (reference) {
+      for (let index = 0; index < fields.length; index += 2) {
+        const status = fields[index] ?? "M";
+        let relative = fields[index + 1] ?? "";
+        if (/^[RC]/.test(status)) {
+          relative = fields[index + 2] ?? relative;
           index += 1;
         }
+        if (relative) changes.push({ path: relative.replaceAll("\\", "/"), status });
       }
-      changes.push({ path: path.resolve(root, relative), status: status.trim() || "M" });
+      const untracked = execFileSync("git", ["-C", root, "ls-files", "--others", "--exclude-standard", "-z"], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 3_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).split("\0").filter(Boolean);
+      for (const relative of untracked) {
+        changes.push({ path: relative.replaceAll("\\", "/"), status: "?" });
+      }
+    } else {
+      for (let index = 0; index < fields.length; index += 1) {
+        const row = fields[index]!;
+        const status = row.slice(0, 2);
+        let relative = row.slice(3);
+        if (/[RC]/.test(status)) {
+          const renamed = fields[index + 1];
+          if (renamed) {
+            relative = fs.existsSync(path.resolve(root, renamed)) ? renamed : relative;
+            index += 1;
+          }
+        }
+        changes.push({ path: relative.replaceAll("\\", "/"), status: status.trim() || "M" });
+      }
     }
-    return changes;
+    const unique = new Map(changes.map((change) => [change.path.toLowerCase(), change]));
+    return [...unique.values()];
   } catch {
     return [];
   }

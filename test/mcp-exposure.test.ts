@@ -637,6 +637,61 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
   }
 });
 
+test("spawn_agent mints scout state for loop and Mission-pinned openings but leaves ordinary delegation alone", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-gate-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    sessions: [
+      { id: "mission_parent", title: "Mission", provider: "codex", projectId: null, crewModes: ["mission"], messages: [] },
+      { id: "ordinary_parent", title: "Ordinary", provider: "codex", projectId: null, messages: [] },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  const seen: Array<{ fromSessionId?: string; missionIteration?: { phase?: string; acceptanceCriteria?: string[] } }> = [];
+  setWorkhorseDeskAsk(async (payload) => {
+    if (payload.mode === "spawn") seen.push(payload);
+    return { text: JSON.stringify({ childSessionId: `worker_${seen.length}` }) };
+  });
+  try {
+    const call = (id: number, fromSessionId: string, extra: Record<string, unknown> = {}) =>
+      handleWorkhorseRpc({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name: "workhorse_spawn_agent",
+          arguments: { prompt: "Inspect the opening wave", folder: dir, fromSessionId, ...extra },
+        },
+      }) as Promise<{ error?: { message?: string } }>;
+    assert.equal((await call(71, "ordinary_parent")).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration, undefined);
+
+    assert.equal((await call(72, "mission_parent")).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["The assigned task is complete and verified."]);
+
+    assert.equal((await call(73, "ordinary_parent", {
+      loop: { acceptanceCriteria: ["Opening wave is bounded"], maxIterations: 2 },
+      traceId: "mission_opening",
+    })).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["Opening wave is bounded"]);
+    const spawnFields = mcpToolInputSchema("workhorse_spawn_agent")?.properties ?? {};
+    assert.ok("loop" in spawnFields);
+    assert.ok("missionIteration" in spawnFields);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("MCP install writes official OpenClaw and Hermes config, not a sidecar", () => {
   assert.equal(mcpExposureProfile("external-runtime"), "external-runtime");
   const statePath = "/Users/ci/Library/Application Support/Go7 Workhorse/state.json";

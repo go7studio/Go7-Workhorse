@@ -128,7 +128,8 @@ type WorkhorseBridge = {
     filePath: string,
     roots?: string[],
   ) => Promise<import("../electron/project-diff").SourceRead | null>;
-  listGitChanges?: (cwd: string) => Promise<import("../electron/project-diff").GitChange[]>;
+  gitHead?: (cwd: string) => Promise<string>;
+  listGitChanges?: (cwd: string, baseRef?: string) => Promise<import("../electron/project-diff").GitChange[]>;
   resolveFile?: (filePath: string, roots?: string[]) => Promise<string | null>;
   editStats: (
     paths: string[],

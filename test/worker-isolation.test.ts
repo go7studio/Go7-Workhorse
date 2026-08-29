@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  assertAgentPathWrite,
   assertSharedWrite,
   claimSharedFiles,
   fileContentsFingerprint,
   normalizeAgentRun,
   overlappingAgentFiles,
+  releaseCancelledSessionLeases,
+  releaseDeletedSessionLeases,
   releaseSessionLeases,
   resolveWorkerIsolation,
   workerMayWrite,
@@ -82,7 +85,7 @@ test("two shared writers cannot claim the same path, and a fingerprint change bl
   assert.equal(fresh.ok, true);
 });
 
-test("worktree writers do not lease-clash; overlappingAgentFiles still ignores them", () => {
+test("path leases prevent the same file being assigned across separate worktrees", () => {
   const first = claimSharedFiles({
     leases: [],
     sessionId: "wren",
@@ -97,12 +100,44 @@ test("worktree writers do not lease-clash; overlappingAgentFiles still ignores t
     isolation: "worktree",
     files: [{ path: "src/lib/subagents.ts", fingerprint: fileContentsFingerprint("a") }],
   });
-  assert.equal(second.ok, true);
+  assert.equal(second.ok, false);
   assert.deepEqual(overlappingAgentFiles([
     { id: "parent" },
     { id: "a", parentId: "parent", agentRun: { status: "completed", startedAt: 1, isolation: "worktree", changedFiles: ["src/lib/subagents.ts"] } },
     { id: "b", parentId: "parent", agentRun: { status: "running", startedAt: 2, isolation: "worktree" } },
   ], "b", ["src/lib/subagents.ts"]), []);
+});
+
+test("an allowlist blocks a disallowed path and a stale allowed path before write approval", () => {
+  const fingerprint = fileContentsFingerprint("before");
+  const claim = claimSharedFiles({
+    leases: [],
+    sessionId: "wren",
+    isolation: "worktree",
+    files: [{ path: "src/lib/store.tsx", fingerprint }],
+  });
+  assert.equal(claim.ok, true);
+  if (!claim.ok) return;
+  const denied = assertAgentPathWrite({
+    leases: claim.leases,
+    sessionId: "wren",
+    paths: ["src/lib/store.tsx"],
+    path: "/repo/src/lib/types.ts",
+    root: "/repo",
+    currentFingerprint: fileContentsFingerprint("before"),
+  });
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.match(denied.error, /not in this worker's allowlist/);
+  const stale = assertAgentPathWrite({
+    leases: claim.leases,
+    sessionId: "wren",
+    paths: ["src/lib/store.tsx"],
+    path: "/repo/src/lib/store.tsx",
+    root: "/repo",
+    currentFingerprint: fileContentsFingerprint("changed"),
+  });
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.match(stale.error, /changed since claim/);
 });
 
 test("releasing a session lease lets the next shared writer claim the path", () => {
@@ -122,4 +157,44 @@ test("releasing a session lease lets the next shared writer claim the path", () 
     files: [{ path: "electron/workhorse-mcp.ts", fingerprint: fileContentsFingerprint("one") }],
   });
   assert.equal(next.ok, true);
+});
+
+test("explicit cancel releases an interrupted owner but not an already completed owner", () => {
+  const leases = [
+    { sessionId: "interrupted", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "completed", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+  ];
+  const afterInterrupted = releaseCancelledSessionLeases(leases, "interrupted", "interrupted");
+  assert.deepEqual(afterInterrupted.map((lease) => lease.sessionId), ["completed"]);
+  assert.equal(releaseCancelledSessionLeases(leases, "completed", "completed"), leases);
+});
+
+test("deleting a chat releases only leases owned by chats removed in that operation", () => {
+  const leases = [
+    { sessionId: "deleted", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "kept", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+    { sessionId: "unrelated-orphan", path: "docs/FEATURES.md", fingerprint: "c", claimedAt: 1 },
+  ];
+  const next = releaseDeletedSessionLeases(
+    leases,
+    [{ id: "deleted" }, { id: "kept" }],
+    [{ id: "kept" }],
+  );
+  assert.deepEqual(next.map((lease) => lease.sessionId), ["kept", "unrelated-orphan"]);
+});
+
+test("deleting a running worker keeps its lease until the vendor terminal path releases it", () => {
+  const leases = [
+    { sessionId: "running", path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: "interrupted", path: "src/lib/types.ts", fingerprint: "b", claimedAt: 1 },
+  ];
+  const next = releaseDeletedSessionLeases(
+    leases,
+    [
+      { id: "running", agentRun: { status: "running", startedAt: 1, isolation: "shared" } },
+      { id: "interrupted", agentRun: { status: "interrupted", startedAt: 1, isolation: "shared" } },
+    ],
+    [],
+  );
+  assert.deepEqual(next.map((lease) => lease.sessionId), ["running"]);
 });

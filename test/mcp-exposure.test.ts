@@ -637,6 +637,153 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
   }
 });
 
+test("ordinary opening work stays immediate until a third live worker mints scout state", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-gate-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    sessions: [
+      { id: "mission_parent", title: "Mission", provider: "codex", projectId: null, crewModes: ["mission"], messages: [] },
+      { id: "ordinary_parent", title: "Ordinary", provider: "codex", projectId: null, messages: [] },
+      {
+        id: "wide_parent",
+        title: "Wide",
+        provider: "codex",
+        projectId: null,
+        messages: [],
+        lineup: {
+          id: "lineup_wide",
+          folder: dir,
+          startedAt: 1,
+          rows: [
+            { childId: "wide_one", title: "One", slice: "one", folder: dir, vendor: "Codex", status: "running", startedAt: 1 },
+            { childId: "wide_two", title: "Two", slice: "two", folder: dir, vendor: "Claude", status: "running", startedAt: 2 },
+          ],
+        },
+      },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  const seen: Array<{
+    fromSessionId?: string;
+    missionIteration?: { phase?: string; acceptanceCriteria?: string[]; previousWorkerIds?: string[] };
+  }> = [];
+  setWorkhorseDeskAsk(async (payload) => {
+    if (payload.mode === "spawn") seen.push(payload);
+    return { text: JSON.stringify({ childSessionId: `worker_${seen.length}` }) };
+  });
+  try {
+    const call = (id: number, fromSessionId: string, extra: Record<string, unknown> = {}) =>
+      handleWorkhorseRpc({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name: "workhorse_spawn_agent",
+          arguments: { prompt: "Inspect the opening wave", folder: dir, fromSessionId, ...extra },
+        },
+      }) as Promise<{ error?: { message?: string } }>;
+    assert.equal((await call(71, "ordinary_parent")).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration, undefined);
+
+    assert.equal((await call(72, "mission_parent")).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["The assigned task is complete and verified."]);
+
+    assert.equal((await call(73, "ordinary_parent", {
+      loop: { acceptanceCriteria: ["Opening wave is bounded"], maxIterations: 2 },
+      traceId: "mission_opening",
+    })).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["Opening wave is bounded"]);
+
+    assert.equal((await call(74, "wide_parent")).error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+
+    const delegate = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 75,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: { task: "Inspect another slice", folder: dir, fromSessionId: "wide_parent" },
+      },
+    }) as { error?: { message?: string } };
+    assert.equal(delegate.error, undefined);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+    const spawnFields = mcpToolInputSchema("workhorse_spawn_agent")?.properties ?? {};
+    assert.ok("loop" in spawnFields);
+    assert.ok("missionIteration" in spawnFields);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("simultaneous ordinary opening calls reserve width before persisted workers catch up", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-race-"));
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    sessions: [{ id: "race_parent", title: "Race", provider: "codex", projectId: null, messages: [] }],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  const seen: Array<{ missionIteration?: { phase?: string } }> = [];
+  let releaseOrdinary!: () => void;
+  const ordinaryHold = new Promise<void>((resolve) => { releaseOrdinary = resolve; });
+  let twoReserved!: () => void;
+  const twoReservedPromise = new Promise<void>((resolve) => { twoReserved = resolve; });
+  let ordinaryStarted = 0;
+  setWorkhorseDeskAsk(async (payload) => {
+    if (payload.mode === "spawn") seen.push(payload);
+    if (!payload.missionIteration) {
+      ordinaryStarted += 1;
+      if (ordinaryStarted === 2) twoReserved();
+      await ordinaryHold;
+    }
+    return { text: JSON.stringify({ childSessionId: `worker_${seen.length}` }) };
+  });
+  const call = (id: number) => handleWorkhorseRpc({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: {
+      name: "workhorse_spawn_agent",
+      arguments: { prompt: "Inspect a concurrent slice", folder: dir, fromSessionId: "race_parent" },
+    },
+  }) as Promise<{ error?: { message?: string } }>;
+  try {
+    const first = call(76);
+    const second = call(77);
+    await twoReservedPromise;
+    const third = await call(78);
+    assert.equal(third.error, undefined);
+    assert.equal(seen.filter((payload) => !payload.missionIteration).length, 2);
+    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    releaseOrdinary();
+    const settled = await Promise.all([first, second]);
+    assert.ok(settled.every((reply) => reply.error === undefined));
+  } finally {
+    releaseOrdinary();
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("MCP install writes official OpenClaw and Hermes config, not a sidecar", () => {
   assert.equal(mcpExposureProfile("external-runtime"), "external-runtime");
   const statePath = "/Users/ci/Library/Application Support/Go7 Workhorse/state.json";

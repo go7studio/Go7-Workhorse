@@ -1,8 +1,27 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { nextMissionIteration, normalizeMissionIteration } from "../src/lib/subagents";
+import {
+  campaignGateError,
+  clearCampaignPhase,
+  missionForDeskSpawn,
+  nextMissionIteration,
+  normalizeMissionIteration,
+  openingWaveMission,
+} from "../src/lib/subagents";
+import { normalizeLineup } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
+import {
+  campaignSpawnGate,
+  createOpeningReservationReplyAsk,
+  hydrateInterruptedPathLeases,
+  storeOpeningWaveMission,
+} from "../src/lib/store";
 import type { Session } from "../src/lib/types";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Regression for P0-2: workhorse_continue_mission rejects valid missions.
@@ -124,4 +143,262 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.equal(decision.ok, false);
   if (decision.ok) return;
   assert.match(decision.error, /do not share one mission contract/);
+});
+
+test("campaign opening and approve phases refuse until the permission inbox clears them", () => {
+  const spoofed = adaptiveMission({
+    phase: "scout",
+    clearance: { phase: "scout", clearedAt: 1, clearedBy: "human" },
+  });
+  assert.ok(spoofed);
+  const opening = missionForDeskSpawn(spoofed, undefined);
+  assert.match(campaignGateError(opening) ?? "", /requires human approval/);
+
+  const clearedScout = clearCampaignPhase(opening!, 10);
+  const admittedScout = missionForDeskSpawn(spoofed, clearedScout);
+  assert.equal(campaignGateError(admittedScout), undefined);
+  assert.equal(admittedScout?.clearance?.clearedAt, 10);
+
+  const approve = normalizeMissionIteration({ ...spoofed, phase: "approve", iteration: 2, clearance: undefined });
+  assert.ok(approve);
+  assert.match(campaignGateError(missionForDeskSpawn(approve, clearedScout)) ?? "", /approve/);
+  const clearedApprove = clearCampaignPhase(approve, 20);
+  const build = missionForDeskSpawn(approve, clearedApprove);
+  assert.equal(build?.phase, "build");
+  assert.equal(build?.clearance?.clearedBy, "human");
+  assert.equal(campaignGateError(build, clearedApprove), undefined);
+});
+
+test("caller-supplied build cannot forge the Campaign gate", () => {
+  const forged = adaptiveMission({ phase: "build" });
+  assert.ok(forged);
+  assert.match(campaignGateError(forged) ?? "", /matching desk state or human approve clearance/);
+
+  const blocked = campaignSpawnGate({ campaignContext: true, requested: forged, desk: undefined });
+  assert.equal(blocked.mission?.phase, "approve");
+  assert.equal(blocked.phase, "approve");
+  assert.match(blocked.error ?? "", /requires human approval/);
+
+  const deskBuild = adaptiveMission({ phase: "build" });
+  assert.ok(deskBuild);
+  const admittedFromDeskBuild = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskBuild });
+  assert.equal(admittedFromDeskBuild.mission?.phase, "build");
+  assert.equal(admittedFromDeskBuild.error, undefined);
+
+  const deskApprove = adaptiveMission({
+    phase: "approve",
+    clearance: { phase: "approve", clearedAt: 20, clearedBy: "human" },
+  });
+  assert.ok(deskApprove);
+  const admittedFromApproval = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskApprove });
+  assert.equal(admittedFromApproval.mission?.phase, "build");
+  assert.equal(admittedFromApproval.mission?.clearance?.phase, "approve");
+  assert.equal(admittedFromApproval.error, undefined);
+});
+
+test("campaign state fails closed for absent and unknown phases", () => {
+  assert.match(campaignGateError(undefined) ?? "", /mission state is missing/i);
+  const missing = adaptiveMission({ phase: undefined });
+  const garbage = adaptiveMission({ phase: "unlimited" });
+  assert.equal(missing?.phase, "scout");
+  assert.equal(garbage?.phase, "scout");
+  assert.match(campaignGateError(missing) ?? "", /scout/);
+  assert.match(campaignGateError(garbage) ?? "", /scout/);
+});
+
+test("review has a distinct gate so scout clearance cannot buy an unlimited review wave", () => {
+  const scout = adaptiveMission({ phase: "scout" });
+  assert.ok(scout);
+  const clearedScout = clearCampaignPhase(scout, 10);
+  const coordinator = worker("coordinator", "parent", {
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: clearedScout },
+  });
+  const next = nextMissionIteration([coordinator], "parent", ["coordinator"]);
+  assert.equal(next.ok, true);
+  if (!next.ok) return;
+  assert.equal(next.mission.phase, "review");
+  assert.equal(next.mission.clearance, undefined);
+  assert.match(campaignGateError(next.mission) ?? "", /review/);
+  const clearedReview = clearCampaignPhase(next.mission, 20);
+  assert.equal(clearedReview.clearance?.phase, "review");
+  assert.equal(campaignGateError(clearedReview), undefined);
+});
+
+test("the live store spawn path consults the production campaign gate", () => {
+  const mission = adaptiveMission({ id: "mission_store", objective: "Close the opening fan-out" });
+  assert.ok(mission);
+  const blocked = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
+  assert.match(blocked.error ?? "", /requires human approval/);
+  const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
+  assert.equal(ordinary.error, undefined);
+
+  const openingMission = openingWaveMission({
+    sessions: [
+      {
+        id: "parent",
+        lineup: {
+          rows: [
+            { childId: "worker_one", status: "running" },
+            { childId: "worker_two", status: "queued" },
+          ],
+        },
+      },
+    ],
+    parentId: "parent",
+    objective: "Start another ordinary worker",
+    missionId: "mission_opening_wave",
+  });
+  assert.equal(openingMission?.phase, "scout");
+  assert.deepEqual(openingMission?.previousWorkerIds, ["worker_one", "worker_two"]);
+  const openingGate = campaignSpawnGate({
+    campaignContext: false,
+    requested: undefined,
+    desk: undefined,
+    openingMission,
+  });
+  assert.match(openingGate.error ?? "", /requires human approval/);
+
+  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(source, /const gate = campaignSpawnGate\(\{/);
+  assert.match(source, /openingWaveMission\(\{/);
+  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
+  assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
+  assert.doesNotMatch(source, /beforeChanges/);
+});
+
+test("the store keeps a different in-flight reservation beside one live opening worker", () => {
+  const sessions = [{
+    id: "parent",
+    lineup: {
+      rows: [{
+        childId: "worker_live",
+        status: "running",
+        openingReservationId: "reservation_live",
+      }],
+    },
+  }];
+  const opening = storeOpeningWaveMission({
+    sessions,
+    parentId: "parent",
+    objective: "Start the third concurrent worker",
+    missionId: "mission_reserved_opening",
+    ordinaryOpeningReservations: [{ id: "reservation_in_flight", startedAt: 1 }],
+  });
+  assert.deepEqual(opening.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
+  assert.equal(opening.mission?.phase, "scout");
+  assert.deepEqual(opening.mission?.previousWorkerIds, ["worker_live"]);
+
+  const reconciled = storeOpeningWaveMission({
+    sessions,
+    parentId: "parent",
+    objective: "Start the third concurrent worker",
+    missionId: "mission_reserved_opening",
+    ordinaryOpeningReservations: [
+      { id: "reservation_in_flight", startedAt: 1 },
+      { id: "reservation_live", startedAt: 90_000 },
+    ],
+  });
+  assert.deepEqual(reconciled.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
+
+  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
+  assert.match(source, /openingReservationId: openingReservation\.id/);
+  assert.match(source, /reservedWorkers: reservations\.length/);
+});
+
+test("lineup normalization preserves the opening reservation identity", () => {
+  const restored = normalizeLineup({
+    id: "lineup_persisted",
+    folder: "/repo",
+    startedAt: 1,
+    rows: [{
+      childId: "worker_live",
+      title: "Live worker",
+      slice: "Build",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 2,
+      openingReservationId: "reservation_live",
+    }],
+  });
+
+  assert.equal(restored?.rows[0]?.openingReservationId, "reservation_live");
+});
+
+test("the production peer reply releases failed and uncommitted opening reservations", async () => {
+  const parentId = "parent";
+  const sessions = [{
+    id: parentId,
+    lineup: { rows: [{ childId: "worker_live", status: "running" }] },
+  }];
+  const cases = [
+    { branch: "error", committed: true, result: { error: "spawn denied" } },
+    { branch: "not committed", committed: false, result: { text: "spawn not started" } },
+  ] as const;
+
+  for (const scenario of cases) {
+    const reservationId = `reservation_${scenario.branch.replace(" ", "_")}`;
+    const reservations = new Map([[parentId, [{ id: reservationId, startedAt: 1 }]]]);
+    let openingReservation: { parentId: string; id: string } | undefined = { parentId, id: reservationId };
+    const replies: Array<{ text?: string; error?: string }> = [];
+    const replyAsk = createOpeningReservationReplyAsk({
+      openingReservationCommitted: () => scenario.committed,
+      releaseOpeningReservation: () => {
+        if (!openingReservation) return;
+        const remaining = (reservations.get(openingReservation.parentId) ?? [])
+          .filter((reservation) => reservation.id !== openingReservation?.id);
+        if (remaining.length > 0) reservations.set(openingReservation.parentId, remaining);
+        else reservations.delete(openingReservation.parentId);
+        openingReservation = undefined;
+      },
+      reply: async (result) => {
+        replies.push(result);
+      },
+    });
+
+    await replyAsk(scenario.result);
+
+    assert.deepEqual(replies, [scenario.result], `${scenario.branch} still replies to the host`);
+    const opening = storeOpeningWaveMission({
+      sessions,
+      parentId,
+      objective: "Start the second opening worker",
+      missionId: `mission_${scenario.branch.replace(" ", "_")}`,
+      ordinaryOpeningReservations: reservations.get(parentId) ?? [],
+    });
+    assert.deepEqual(opening.reservations, [], `${scenario.branch} releases its reservation`);
+    assert.equal(opening.mission, undefined, `${scenario.branch} does not permanently consume opening capacity`);
+  }
+});
+
+test("restart keeps leases only for interrupted workers that still own those paths", () => {
+  const interrupted = normalizeSession({
+    id: "worker_interrupted",
+    parentId: "parent",
+    hidden: true,
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    title: "Interrupted writer",
+    mode: "ask",
+    sandbox: "off",
+    status: "running",
+    contextUsed: 0,
+    messages: [],
+    agentRun: {
+      status: "running",
+      startedAt: 1,
+      isolation: "shared",
+      paths: ["src/lib/store.tsx"],
+    },
+  });
+  assert.ok(interrupted);
+  assert.equal(interrupted.agentRun?.status, "interrupted");
+  const leases = hydrateInterruptedPathLeases([
+    { sessionId: interrupted.id, path: "src/lib/store.tsx", fingerprint: "a", claimedAt: 1 },
+    { sessionId: interrupted.id, path: "src/lib/subagents.ts", fingerprint: "b", claimedAt: 1 },
+    { sessionId: "missing", path: "src/lib/store.tsx", fingerprint: "c", claimedAt: 1 },
+  ], [interrupted]);
+  assert.deepEqual(leases.map((lease) => lease.path), ["src/lib/store.tsx"]);
 });

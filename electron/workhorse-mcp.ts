@@ -38,6 +38,8 @@ import {
   isSpawnOnlyPrompt,
   nestedSpawnError,
   nextMissionIteration,
+  normalizeMissionIteration,
+  openingWaveMission,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -521,6 +523,7 @@ const TOOLS = [
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
+        paths: { type: "array", items: { type: "string" }, description: "Repo-relative files this worker may change. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
@@ -534,6 +537,20 @@ const TOOLS = [
         handoff: {
           type: "object",
           description: "Bounded report for seed=fresh: status, summary, evidence, nextSteps, blocker.",
+        },
+        loop: {
+          type: "object",
+          description: "Opt-in adaptive sequential mission. Its opening worker is gated before dispatch.",
+          properties: {
+            acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
+            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+          },
+          required: ["acceptanceCriteria"],
+          additionalProperties: false,
+        },
+        missionIteration: {
+          type: "object",
+          description: "Optional inherited adaptive mission manifest. Human clearance is always taken from desk state.",
         },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
@@ -578,7 +595,7 @@ const TOOLS = [
   {
     name: "workhorse_agent_status",
     description:
-      "Follow through on a worker. Pass the id from delegate. next is wait, done, or failed. When done, report is in the payload. Do not spawn another worker for the same slice.",
+      "Follow through on a worker. Pass the id from delegate. next is wait, done, or failed. When done, report keeps the prose and optional findings carries typed severity, file, and evidence rows. Do not spawn another worker for the same slice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -880,6 +897,7 @@ export function mcpToolInputSchema(name: string): { properties?: Record<string, 
 
 type DeskAsk = (ask: PeerAsk) => Promise<{ text?: string; error?: string }>;
 let deskAsk: DeskAsk | null = null;
+const ordinaryOpeningReservations = new Map<string, number>();
 let localCapabilityHostOverride: LocalCapabilityHostClient | null | undefined;
 let localCapabilityHostMemo: { signature: string; client: LocalCapabilityHostClient } | null = null;
 
@@ -912,6 +930,7 @@ type LocalRuntimeDiscovery = {
 /** When MiniMax tools run inside Electron main, skip HTTP-to-self and hit the live desk. */
 export function setWorkhorseDeskAsk(handler: DeskAsk | null): void {
   deskAsk = handler;
+  if (!handler) ordinaryOpeningReservations.clear();
 }
 
 /** Test seam and Electron-main injection point; undefined restores environment discovery. */
@@ -1781,14 +1800,24 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
   return first;
 }
 
-function callerSession(from?: string): { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null } | undefined {
+type SpawnCaller = {
+  id?: string;
+  parentId?: string | null;
+  hidden?: boolean;
+  projectId?: string | null;
+  crewModes?: string[];
+  lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
+  agentRun?: { mission?: MissionIteration; paths?: string[] };
+};
+
+function callerSession(from?: string): SpawnCaller | undefined {
   const id = fromSessionId(from);
   if (!id) return undefined;
   const sessions = readState().sessions;
   if (!Array.isArray(sessions)) return undefined;
   const row = sessions.find((item) => item && typeof item === "object" && (item as { id?: string }).id === id);
   return row && typeof row === "object"
-    ? (row as { id?: string; parentId?: string | null; hidden?: boolean; projectId?: string | null })
+    ? (row as SpawnCaller)
     : undefined;
 }
 
@@ -1900,7 +1929,8 @@ async function spawnAgent(
     folder?: string;
     wait?: boolean;
     mission?: boolean;
-    missionIteration?: MissionIteration;
+    missionIteration?: unknown;
+    loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
     role?: "auditor";
     planStepId?: string;
@@ -1909,6 +1939,7 @@ async function spawnAgent(
     capabilities?: string[];
     tools?: string[];
     constraints?: string[];
+    paths?: string[];
     exclude?: string[];
     files?: string[];
     traceId?: string;
@@ -1929,16 +1960,69 @@ async function spawnAgent(
     if (blocked) throw new Error(blocked);
   }
   if (isSpawnOnlyPrompt(input.prompt)) throw new Error(SPAWN_ONLY_PROMPT_ERROR);
+  const suppliedMission = normalizeMissionIteration(input.missionIteration);
+  const deskMission = normalizeMissionIteration(caller?.lineup?.mission ?? caller?.agentRun?.mission);
+  const loopMission = input.loop === undefined
+    ? undefined
+    : missionIterationFromArgs({ loop: input.loop }, input.prompt, input.traceId);
+  const matchingDeskLoop = loopMission && deskMission &&
+    deskMission.objective === loopMission.objective &&
+    deskMission.maxIterations === loopMission.maxIterations &&
+    JSON.stringify(deskMission.acceptanceCriteria) === JSON.stringify(loopMission.acceptanceCriteria)
+      ? deskMission
+      : undefined;
+  const explicitCampaignContext = Boolean(
+    input.missionIteration !== undefined ||
+    input.loop !== undefined ||
+    caller?.crewModes?.includes("mission") ||
+    deskMission,
+  );
+  const stateSessions = (readState().sessions ?? [])
+    .filter((session): session is {
+      id?: string;
+      parentId?: string | null;
+      status?: string;
+      agentRun?: { status?: string };
+      lineup?: { rows?: Array<{ childId?: string; status?: string }> };
+    } => Boolean(session) && typeof session === "object");
+  const reservedOpenings = caller?.id ? ordinaryOpeningReservations.get(caller.id) ?? 0 : 0;
+  const openingMission = !explicitCampaignContext && caller?.id
+    ? openingWaveMission({
+        sessions: stateSessions,
+        parentId: caller.id,
+        objective: input.prompt,
+        missionId: input.traceId?.trim() || uid("mission"),
+        reservedWorkers: reservedOpenings,
+      })
+    : undefined;
+  const campaignContext = explicitCampaignContext || Boolean(openingMission);
+  const missionIteration = campaignContext
+    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? openingMission ?? {
+        id: input.traceId?.trim() || uid("mission"),
+        mode: "adaptive" as const,
+        objective: input.prompt.trim(),
+        acceptanceCriteria: ["The assigned task is complete and verified."],
+        iteration: 1,
+        maxIterations: 3,
+        previousWorkerIds: [],
+        phase: "scout" as const,
+      }
+    : undefined;
+  const inheritedInput = {
+    ...input,
+    missionIteration,
+    paths: input.paths ?? caller?.agentRun?.paths,
+  };
   const spawnInput = isNested
     ? {
-        ...input,
+        ...inheritedInput,
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
         isolation: "shared" as const,
         route: input.route ?? "quick",
       }
     : {
-        ...input,
+        ...inheritedInput,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
@@ -1974,7 +2058,12 @@ async function spawnAgent(
       : { ok: true as const, cwd: "" };
   if (!admitted.ok) throw new Error(admitted.error);
   const attachments = spawnAttachments(spawnInput.files, admitted.cwd);
-  const first = await postBridge("/spawn", {
+  const reservedParentId = !campaignContext ? caller?.id?.trim() : "";
+  if (reservedParentId) {
+    ordinaryOpeningReservations.set(reservedParentId, (ordinaryOpeningReservations.get(reservedParentId) ?? 0) + 1);
+  }
+  try {
+    const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromId,
     exposureProfile: currentMcpProfile(),
@@ -2004,11 +2093,12 @@ async function spawnAgent(
     capabilities: spawnInput.capabilities,
     tools: spawnInput.tools,
     constraints: spawnInput.constraints,
+    paths: spawnInput.paths,
     exclude: spawnInput.exclude,
     files: spawnInput.files,
     attachments,
     ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-  });
+  } as PeerAsk);
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
   if (grant?.retrySpawn || grant?.allowed) {
@@ -2040,13 +2130,21 @@ async function spawnAgent(
       capabilities: spawnInput.capabilities,
       tools: spawnInput.tools,
       constraints: spawnInput.constraints,
+      paths: spawnInput.paths,
       exclude: spawnInput.exclude,
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-    });
+    } as PeerAsk);
   }
-  return first;
+    return first;
+  } finally {
+    if (reservedParentId) {
+      const remaining = (ordinaryOpeningReservations.get(reservedParentId) ?? 1) - 1;
+      if (remaining > 0) ordinaryOpeningReservations.set(reservedParentId, remaining);
+      else ordinaryOpeningReservations.delete(reservedParentId);
+    }
+  }
 }
 
 /**
@@ -2107,6 +2205,7 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
     iteration: 1,
     maxIterations: requestedMax,
     previousWorkerIds: [],
+    phase: "scout",
   };
 }
 
@@ -2190,7 +2289,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     .map((id) => source.find((session) => session.id === id))
     .find(Boolean);
   const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
-  const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions") =>
+  const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions" | "paths") =>
     [...new Set(source.flatMap((session) => session.agentRun?.[key] ?? []).filter(Boolean))];
   const evidence = Array.isArray(args.evidence)
     ? args.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
@@ -2213,6 +2312,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       skills: union("skills"),
       capabilities: union("capabilities"),
       tools: union("tools"),
+      paths: union("paths"),
       exclude: union("exclusions"),
       timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
@@ -2745,9 +2845,12 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         capabilities: Array.isArray(args.capabilities) ? args.capabilities.filter((item): item is string => typeof item === "string") : undefined,
         tools: Array.isArray(args.tools) ? args.tools.filter((item): item is string => typeof item === "string") : undefined,
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
+        paths: Array.isArray(args.paths) ? args.paths.filter((item): item is string => typeof item === "string") : undefined,
         exclude: Array.isArray(args.exclude) ? args.exclude.filter((item): item is string => typeof item === "string") : undefined,
         files: Array.isArray(args.files) ? args.files.filter((item): item is string => typeof item === "string") : undefined,
         traceId: typeof args.traceId === "string" ? args.traceId : undefined,
+        loop: args.loop,
+        missionIteration: args.missionIteration,
       },
       typeof args.fromSessionId === "string" ? args.fromSessionId : from,
     );

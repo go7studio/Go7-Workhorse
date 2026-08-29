@@ -20,6 +20,7 @@ export function PermissionCard() {
   const tint = child ? deskInk(child, settings) : undefined;
   const who = child?.hidden || child?.agentRun ? `${label} subagent` : label;
   const elevate = request.kind === "elevate" && request.elevate;
+  const campaign = request.kind === "campaign" && request.campaign;
   const action = permissionActionLabel(request.tool);
   const detail = elevate
     ? [
@@ -34,22 +35,24 @@ export function PermissionCard() {
 
   return (
     <div
-      className={`palette-overlay permission-overlay${elevate ? " elevate-overlay" : ""}`}
+      className={`palette-overlay permission-overlay${elevate || campaign ? " elevate-overlay" : ""}`}
       role="dialog"
       aria-modal="true"
     >
-      <div className={`permission-card${elevate ? " elevate-card" : ""}`}>
+      <div className={`permission-card${elevate || campaign ? " elevate-card" : ""}`}>
         <div className="session-who">
           <span className={`dot ${request.provider}`} style={tint ? { background: tint } : undefined} />
-          <span className="eyebrow">{elevate ? `${label} · Elevate` : `${label} · Ask`}</span>
+          <span className="eyebrow">{campaign ? "Campaign gate" : elevate ? `${label} · Elevate` : `${label} · Ask`}</span>
         </div>
-        <strong>{elevate ? `${who} needs more access` : `${who} wants to ${action}`}</strong>
+        <strong>{campaign ? `Approve ${request.campaign?.phase} phase` : elevate ? `${who} needs more access` : `${who} wants to ${action}`}</strong>
         {detail ? <span className="permission-detail">{detail}</span> : null}
         <div className="actions">
           <button className="tiny deny" type="button" onClick={() => answerPermission(request.id, "deny")}>
-            Deny
+            {campaign ? "Stop" : "Deny"}
           </button>
-          {elevate ? (
+          {campaign ? (
+            <button className="primary" type="button" onClick={() => answerPermission(request.id, "session")}>Approve phase</button>
+          ) : elevate ? (
             <button className="primary" type="button" onClick={() => answerPermission(request.id, "session")}>
               {nextMode && nextBox ? `Elevate to ${nextMode} · ${nextBox}` : "Elevate"}
             </button>

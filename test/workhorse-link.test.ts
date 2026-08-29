@@ -950,7 +950,14 @@ test("Link iteration: assign a mission loop, then status carries the report", as
     if (payload.action === "agent-status") {
       statuses += 1;
       if (statuses === 1) return { text: JSON.stringify({ id: "sess_w1", status: "running" }) };
-      return { text: JSON.stringify({ id: "sess_w1", status: "completed", report: "WH_OK file written" }) };
+      return {
+        text: JSON.stringify({
+          id: "sess_w1",
+          status: "completed",
+          report: "WH_OK file written",
+          findings: [{ severity: "high", title: "Marker risk", file: "src/marker.ts:1", evidence: "Marker was missing." }],
+        }),
+      };
     }
     return { text: "{}" };
   });
@@ -990,9 +997,14 @@ test("Link iteration: assign a mission loop, then status carries the report", as
       method: "tools/call",
       params: { name: "workhorse_agent_status", arguments: { id: "sess_w1" } },
     })) as { result?: { content?: Array<{ text?: string }> } };
-    const doneBody = JSON.parse(done.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    const doneBody = JSON.parse(done.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+      findings?: Array<{ severity?: string; file?: string }>;
+    };
     assert.equal(doneBody.next, "done");
     assert.match(doneBody.report ?? "", /WH_OK/);
+    assert.deepEqual(doneBody.findings, [{ severity: "high", title: "Marker risk", file: "src/marker.ts:1", evidence: "Marker was missing." }]);
   } finally {
     setWorkhorseDeskAsk(null as never);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

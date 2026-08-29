@@ -8311,6 +8311,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
           iteration: 2,
           maxIterations: 3,
           previousWorkerIds: ["worker_pass_1"],
+          phase: "review",
         },
       },
     }),
@@ -9136,6 +9137,7 @@ test("desk builds one named join prompt and syncs idle children", () => {
       iteration: 2,
       maxIterations: 3,
       previousWorkerIds: ["worker_1"],
+      phase: "review",
     },
   });
   assert.match(loopBrief, /ADAPTIVE LOOP: Pass 2 of 3/);

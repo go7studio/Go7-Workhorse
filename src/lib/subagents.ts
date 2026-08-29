@@ -8,13 +8,17 @@ import type {
   AgentRun,
   AgentRunEvent,
   BudgetPhase,
+  CampaignPhase,
   ChatMessage,
   EffortLevel,
   ExecutionOwner,
+  FileLease,
   MissionIteration,
   ProviderId,
   RoutingDecision,
   Session,
+  WorkerFinding,
+  WorkerFindingSeverity,
   WorkerHandoff,
   WorkerSeed,
 } from "./types";
@@ -47,6 +51,7 @@ export type SpawnRequest = {
   capabilities?: string[];
   tools?: string[];
   constraints?: string[];
+  paths?: string[];
 };
 
 export type CustomBotHint = {
@@ -644,6 +649,7 @@ export function collectChildAgentReports(
   effort: Session["effort"];
   exclusions?: string[];
   mission?: MissionIteration;
+  findings?: WorkerFinding[];
 }> {
   return sessions
     .filter((session) => session.parentId === parentId && (!childIds || childIds.has(session.id)) && isWorkerSession(session))
@@ -651,6 +657,8 @@ export function collectChildAgentReports(
       const reply = [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant" && message.text.trim());
+      const findings = normalizeWorkerFindings(session.agentRun?.findings)
+        ?? (reply ? parseWorkerFindings(reply.text) : undefined);
       return {
         title: session.title,
         status: session.agentRun?.status ?? session.status,
@@ -661,18 +669,12 @@ export function collectChildAgentReports(
         effort: session.effort,
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
         ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
+        ...(findings?.length ? { findings } : {}),
       };
     });
 }
 
 export const WORKER_REPORT_CHAR_LIMIT = 4_000;
-
-export type WorkerReportRef = {
-  messageId: string;
-  chars: number;
-  truncated: boolean;
-  omittedChars?: number;
-};
 
 export type WorkerProgressCheckpoint = {
   phase: string;
@@ -682,8 +684,68 @@ export type WorkerProgressCheckpoint = {
   checksRun: string[];
   blockers: string[];
   partialReport: string | null;
-  reportRef: WorkerReportRef | null;
 };
+
+const WORKER_FINDING_SEVERITIES: WorkerFindingSeverity[] = ["critical", "high", "medium", "low"];
+const WORKER_FINDING_LIMIT = 20;
+const WORKER_FINDING_TITLE_LIMIT = 240;
+const WORKER_FINDING_FILE_LIMIT = 500;
+const WORKER_FINDING_EVIDENCE_LIMIT = 1_000;
+
+function boundedFindingText(value: unknown, limit: number): string {
+  return typeof value === "string" ? value.trim().slice(0, limit) : "";
+}
+
+/** Normalize persisted findings so restart cannot revive an unbounded or malformed receipt. */
+export function normalizeWorkerFindings(raw: unknown): WorkerFinding[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const findings = raw.flatMap((item): WorkerFinding[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<WorkerFinding>;
+    const severity = typeof row.severity === "string" ? row.severity.toLowerCase() as WorkerFindingSeverity : undefined;
+    const title = boundedFindingText(row.title, WORKER_FINDING_TITLE_LIMIT);
+    const file = boundedFindingText(row.file, WORKER_FINDING_FILE_LIMIT);
+    const evidence = boundedFindingText(row.evidence, WORKER_FINDING_EVIDENCE_LIMIT);
+    if (!severity || !WORKER_FINDING_SEVERITIES.includes(severity) || !title || !file || !evidence) return [];
+    return [{ severity, title, file, evidence }];
+  });
+  return findings.length > 0 ? findings.slice(0, WORKER_FINDING_LIMIT) : undefined;
+}
+
+type WorkerFindingDraft = Partial<Record<"severity" | "title" | "file" | "evidence", string>>;
+
+const WORKER_FINDING_LABEL = /^\s*(?:[-*]\s+)?(?:#{1,6}\s*)?(?:(\*\*|__)(FINDING|TITLE|FILE|EVIDENCE)(?:\1\s*:|:\s*\1)|(FINDING|TITLE|FILE|EVIDENCE)\s*:)\s*(.*?)\s*$/i;
+
+/** Parse one or more labelled receipts from a worker's ordinary prose report. */
+export function parseWorkerFindings(text: string): WorkerFinding[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const receipts: WorkerFinding[] = [];
+
+  let draft: WorkerFindingDraft | undefined;
+  const finishDraft = () => {
+    if (!draft || receipts.length >= WORKER_FINDING_LIMIT) return;
+    const normalized = normalizeWorkerFindings([draft]);
+    if (normalized?.[0]) receipts.push(normalized[0]);
+  };
+
+  for (const line of lines) {
+    const match = line.match(WORKER_FINDING_LABEL);
+    if (!match) continue;
+    const label = (match[2] ?? match[3])?.toLowerCase();
+    const value = match[4]?.trim();
+    if (label === "finding") {
+      finishDraft();
+      if (receipts.length >= WORKER_FINDING_LIMIT) break;
+      const severity = value?.match(/^(?:\*\*|__)?(critical|high|medium|low)\b/i)?.[1]?.toLowerCase();
+      draft = severity ? { severity } : {};
+      continue;
+    }
+    if (!draft || !value || (label !== "title" && label !== "file" && label !== "evidence")) continue;
+    draft[label] = value;
+  }
+  finishDraft();
+  return receipts;
+}
 
 const CHECK_MARKERS: Array<[RegExp, string]> = [
   [/\bnpm test\b/i, "npm test"],
@@ -700,22 +762,23 @@ function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage |
 
 export function boundWorkerReport(
   text: string,
-  source: { messageId: string; limit?: number },
-): { report: string; truncated: boolean; reportRef: WorkerReportRef } {
+  source: { workerId: string; limit?: number },
+): { report: string; truncated: boolean; chars: number; omittedChars?: number } {
   const limit = source.limit ?? WORKER_REPORT_CHAR_LIMIT;
   const chars = text.length;
   if (chars <= limit) {
     return {
       report: text,
       truncated: false,
-      reportRef: { messageId: source.messageId, chars, truncated: false },
+      chars,
     };
   }
   const omittedChars = chars - limit;
   return {
-    report: `${text.slice(0, limit).trimEnd()}\n\n[report truncated: ${omittedChars} chars omitted; full text is assistant message ${source.messageId} (${chars} chars)]`,
+    report: `${text.slice(0, limit).trimEnd()}\n\n[report truncated: ${omittedChars} chars omitted. The full text lives in workhorse_read_chat; pass worker id "${source.workerId}" (${chars} chars total).]`,
     truncated: true,
-    reportRef: { messageId: source.messageId, chars, truncated: true, omittedChars },
+    chars,
+    omittedChars,
   };
 }
 
@@ -749,7 +812,7 @@ export function workerReportedBlocked(text: string | undefined): boolean {
 }
 
 export function workerProgressCheckpoint(
-  worker: Pick<Session, "status" | "agentRun" | "messages">,
+  worker: Pick<Session, "id" | "status" | "agentRun" | "messages">,
 ): WorkerProgressCheckpoint {
   const messages = worker.messages ?? [];
   const status = worker.agentRun?.status ?? worker.status;
@@ -764,7 +827,7 @@ export function workerProgressCheckpoint(
   const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
     || lastNote?.text.trim().split("\n")[0]?.trim()
     || (status === "running" ? "no vendor output" : status);
-  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { messageId: lastNote.id }) : null;
+  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { workerId: worker.id }) : null;
   return {
     phase: status,
     currentStep,
@@ -773,7 +836,6 @@ export function workerProgressCheckpoint(
     checksRun: extractChecks(messages),
     blockers: extractBlockers(lastNote?.text),
     partialReport: bounded?.report ?? null,
-    reportRef: bounded?.truncated ? bounded.reportRef : null,
   };
 }
 
@@ -830,10 +892,11 @@ export function workerStatusSnapshot(
 ): Record<string, unknown> {
   const last = lastAssistantReport(worker.messages);
   const raw = last?.text.trim();
-  const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
+  const bounded = raw ? boundWorkerReport(raw, { workerId: worker.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
   const follow = workerFollowThrough(status, { hasReport: Boolean(raw) });
+  const findings = normalizeWorkerFindings(worker.agentRun?.findings) ?? (raw ? parseWorkerFindings(raw) : undefined);
   return {
     id: worker.id,
     title: worker.title,
@@ -856,7 +919,7 @@ export function workerStatusSnapshot(
     ...(typeof worker.agentRun?.usedTokens === "number" ? { usedTokens: worker.agentRun.usedTokens } : {}),
     ...(worker.agentRun?.budgetPhase ? { budgetPhase: worker.agentRun.budgetPhase } : {}),
     ...(status !== "running" && bounded ? { report: bounded.report } : {}),
-    ...(status !== "running" && bounded?.truncated ? { reportRef: bounded.reportRef } : {}),
+    ...(status !== "running" && findings?.length ? { findings } : {}),
     ...(status === "running"
       ? {
           phase: checkpoint.phase,
@@ -865,7 +928,6 @@ export function workerStatusSnapshot(
           ...(checkpoint.checksRun.length ? { checksRun: checkpoint.checksRun } : {}),
           ...(checkpoint.blockers.length ? { blockers: checkpoint.blockers } : {}),
           ...(checkpoint.partialReport ? { partialReport: checkpoint.partialReport } : {}),
-          ...(checkpoint.reportRef ? { reportRef: checkpoint.reportRef } : {}),
         }
       : {}),
     routingMode: worker.routingMode ?? "manual",
@@ -900,6 +962,7 @@ export type WorkerBriefInput = {
   slice?: string;
   vendor?: string;
   constraints?: string[];
+  paths?: string[];
   skills?: Array<{ name: string; file: string }>;
   capabilities?: string[];
   mission?: boolean;
@@ -972,6 +1035,11 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
   if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
   lines.push("", "Do this slice only. Quote real files. Return the report as plain text.");
+  lines.push("When you have review findings, append one fixed four-line receipt per finding:");
+  lines.push("FINDING: critical|high|medium|low");
+  lines.push("TITLE: <short finding>");
+  lines.push("FILE: <repo-relative path:line>");
+  lines.push("EVIDENCE: <one-line concrete evidence>");
   return lines.join("\n");
 }
 
@@ -1078,6 +1146,7 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   if (slice) lines.push(`SLICE: ${slice}`);
   if (vendor) lines.push(`VENDOR: ${vendor}`);
   if (input.constraints?.length) lines.push(`CONSTRAINTS: ${input.constraints.join("; ")}`);
+  if (input.paths?.length) lines.push(`PATHS: ${input.paths.join("; ")}`);
   if (input.skills?.length) lines.push(`SKILLS: ${input.skills.map((skill) => `${skill.name} @ ${skill.file}`).join("; ")}`);
   if (input.capabilities?.length) lines.push(`CAPABILITIES: ${input.capabilities.join("; ")}`);
   lines.push("");
@@ -1100,6 +1169,11 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
   lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
   lines.push("Return the report as plain text.");
+  lines.push("When you have review findings, append one fixed four-line receipt per finding so the desk can carry it without paraphrase:");
+  lines.push("FINDING: critical|high|medium|low");
+  lines.push("TITLE: <short finding>");
+  lines.push("FILE: <repo-relative path:line>");
+  lines.push("EVIDENCE: <one-line concrete evidence>");
   lines.push("");
   lines.push("TASK:");
   lines.push(task);
@@ -1168,6 +1242,7 @@ export function continueWorkerRun(
           budgetWarnedAt: undefined,
           budgetHandoffAt: undefined,
           missionTokenBudget: undefined,
+          findings: undefined,
         }),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
   };
@@ -1465,7 +1540,168 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
     previousWorkerIds: Array.isArray(row.previousWorkerIds)
       ? [...new Set(row.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
       : [],
+    phase:
+      row.phase === "scout" || row.phase === "review" || row.phase === "approve" || row.phase === "build"
+        ? row.phase
+        : "scout",
+    ...(row.clearance &&
+    typeof row.clearance === "object" &&
+    (row.clearance.phase === "scout" || row.clearance.phase === "review" || row.clearance.phase === "approve") &&
+    typeof row.clearance.clearedAt === "number" &&
+    row.clearance.clearedBy === "human"
+      ? {
+          clearance: {
+            phase: row.clearance.phase,
+            clearedAt: row.clearance.clearedAt,
+            clearedBy: "human" as const,
+          },
+        }
+      : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
+  };
+}
+
+const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
+
+export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
+  const index = CAMPAIGN_PHASES.indexOf(phase);
+  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
+}
+
+export function campaignGateError(
+  mission: MissionIteration | undefined,
+  desk?: MissionIteration,
+): string | undefined {
+  if (!mission) return "Campaign mission state is missing; human approval is required before a worker can start.";
+  if (mission.phase === "build") {
+    const matchingDesk = desk?.id === mission.id && desk.iteration === mission.iteration;
+    const deskAuthorized = matchingDesk && (
+      desk.phase === "build" ||
+      (desk.clearance?.clearedBy === "human" && desk.clearance.phase === "approve")
+    );
+    return deskAuthorized
+      ? undefined
+      : "Campaign build requires matching desk state or human approve clearance before a worker can start.";
+  }
+  if (mission.clearance?.clearedBy === "human" && mission.clearance.phase === mission.phase) return undefined;
+  return `Campaign phase ${mission.phase} requires human approval in Workhorse before a worker can start.`;
+}
+
+/**
+ * One worker is ordinary delegation and two workers are the smallest useful
+ * split. A third live worker is a wide opening wave: it must become a Campaign
+ * before any more work starts.
+ */
+export const OPENING_WAVE_IMMEDIATE_WORKER_LIMIT = 2;
+
+type OpeningWaveSession = {
+  id?: string;
+  parentId?: string | null;
+  status?: string;
+  agentRun?: { status?: string };
+  lineup?: { rows?: Array<{ childId?: string; status?: string; openingReservationId?: string }> };
+};
+
+export type OpeningWorkerReservation = {
+  id: string;
+  startedAt: number;
+};
+
+export function reconcileOpeningWaveReservations(
+  sessions: OpeningWaveSession[],
+  parentId: string,
+  reservations: readonly OpeningWorkerReservation[],
+): OpeningWorkerReservation[] {
+  const parent = sessions.find((session) => session.id === parentId);
+  const consumed = new Set(
+    (parent?.lineup?.rows ?? [])
+      .map((row) => row.openingReservationId?.trim())
+      .filter((id): id is string => Boolean(id)),
+  );
+  return reservations.filter((reservation) => !consumed.has(reservation.id));
+}
+
+export function openingWaveLiveWorkerIds(sessions: OpeningWaveSession[], parentId: string): string[] {
+  const live = new Set<string>();
+  const parent = sessions.find((session) => session.id === parentId);
+  for (const row of parent?.lineup?.rows ?? []) {
+    if ((row.status === "queued" || row.status === "running") && row.childId?.trim()) {
+      live.add(row.childId.trim());
+    }
+  }
+  for (const session of sessions) {
+    if (session.parentId !== parentId || !session.id?.trim()) continue;
+    if (session.agentRun?.status === "running" || (!session.agentRun && session.status === "running")) {
+      live.add(session.id.trim());
+    }
+  }
+  return [...live];
+}
+
+export function openingWaveMission(input: {
+  sessions: OpeningWaveSession[];
+  parentId: string;
+  objective: string;
+  missionId: string;
+  reservedWorkers?: number;
+}): MissionIteration | undefined {
+  const parentId = input.parentId.trim();
+  const objective = input.objective.trim();
+  const missionId = input.missionId.trim();
+  if (!parentId || !objective || !missionId) return undefined;
+
+  const live = openingWaveLiveWorkerIds(input.sessions, parentId);
+  const reservedWorkers = Math.max(0, Math.floor(input.reservedWorkers ?? 0));
+  if (live.length + reservedWorkers < OPENING_WAVE_IMMEDIATE_WORKER_LIMIT) return undefined;
+  return {
+    id: missionId,
+    mode: "adaptive",
+    objective,
+    acceptanceCriteria: ["The opening wave is bounded and the assigned work is verified."],
+    iteration: 1,
+    maxIterations: 3,
+    previousWorkerIds: live,
+    phase: "scout",
+  };
+}
+
+/** The approval card is the sole caller. Approval of the approve phase enters build. */
+export function clearCampaignPhase(mission: MissionIteration, now = Date.now()): MissionIteration {
+  if (mission.phase === "build") return mission;
+  return {
+    ...mission,
+    phase: mission.phase === "approve" ? "build" : mission.phase,
+    clearance: { phase: mission.phase, clearedAt: now, clearedBy: "human" },
+  };
+}
+
+/** Ignore markers supplied by a caller; only a matching manifest already on the desk can clear a gate. */
+export function missionForDeskSpawn(
+  requested: MissionIteration | undefined,
+  desk: MissionIteration | undefined,
+): MissionIteration | undefined {
+  if (!requested) return undefined;
+  const clean = { ...requested, clearance: undefined };
+  const matchingDesk = desk?.id === requested.id && desk.iteration === requested.iteration;
+  if (requested.phase === "build") {
+    const approveClearance = matchingDesk &&
+      desk.clearance?.clearedBy === "human" &&
+      desk.clearance.phase === "approve"
+        ? desk.clearance
+        : undefined;
+    if (!matchingDesk || (desk.phase !== "build" && !approveClearance)) {
+      return { ...clean, phase: "approve" };
+    }
+    return { ...clean, ...(approveClearance ? { clearance: approveClearance } : {}) };
+  }
+  if (!matchingDesk) return clean;
+  const cleared = desk.clearance;
+  if (!cleared || cleared.clearedBy !== "human") return clean;
+  if (cleared.phase !== requested.phase) return clean;
+  return {
+    ...clean,
+    phase: requested.phase === "approve" ? "build" : requested.phase,
+    clearance: cleared,
   };
 }
 
@@ -1700,6 +1936,8 @@ export function nextMissionIteration(
       ...first,
       iteration: first.iteration + 1,
       previousWorkerIds: ids,
+      phase: nextCampaignPhase(first.phase),
+      clearance: undefined,
     },
   };
 }
@@ -1784,6 +2022,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   const interrupted =
     row.status === "running" || (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
+  const findings = normalizeWorkerFindings(row.findings);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
@@ -1824,7 +2063,9 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(Array.isArray(row.capabilities) ? { capabilities: row.capabilities.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.constraints) ? { constraints: row.constraints.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(Array.isArray(row.paths) ? { paths: normalizePathAllowlist(row.paths) } : {}),
     ...(Array.isArray(row.exclusions) ? { exclusions: row.exclusions.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(findings ? { findings } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
     ...(mission ? { mission } : {}),
   };
@@ -1848,15 +2089,25 @@ export function overlappingAgentFiles(
   return [...conflicts];
 }
 
-export type FileLease = {
-  sessionId: string;
-  path: string;
-  fingerprint: string;
-  claimedAt: number;
-};
-
 export function normalizeLeasePath(file: string): string {
-  return file.replaceAll("\\", "/").replace(/^\.\/+/, "");
+  return file.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/^\/+|\/+$/g, "");
+}
+
+export function normalizePathAllowlist(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => Boolean(item) && !item.startsWith("/") && !item.startsWith("\\\\") && !/^[A-Za-z]:[\\/]/.test(item))
+    .map(normalizeLeasePath)
+    .filter((item) => item !== ".." && !item.startsWith("../")))];
+}
+
+export function leasePathForWrite(file: string, root = ""): string {
+  const clean = normalizeLeasePath(file);
+  const base = normalizeLeasePath(root);
+  if (base && clean.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return clean.slice(base.length + 1);
+  return clean;
 }
 
 export function fileContentsFingerprint(contents: string): string {
@@ -1875,6 +2126,48 @@ export function releaseSessionLeases(leases: FileLease[], sessionId: string): Fi
   return leases.filter((lease) => lease.sessionId !== sessionId);
 }
 
+export function releaseCancelledSessionLeases(
+  leases: FileLease[],
+  sessionId: string,
+  status: AgentRun["status"] | undefined,
+): FileLease[] {
+  return status === "running" || status === "interrupted"
+    ? releaseSessionLeases(leases, sessionId)
+    : leases;
+}
+
+/** Release only owners removed by this deletion; unrelated orphan recovery is explicit. */
+export function releaseDeletedSessionLeases(
+  leases: FileLease[],
+  before: Array<Pick<Session, "id" | "agentRun">>,
+  after: Array<Pick<Session, "id">>,
+): FileLease[] {
+  const kept = new Set(after.map((session) => session.id));
+  const deleted = new Set(before.filter((session) => !kept.has(session.id)).map((session) => session.id));
+  const stillWriting = new Set(
+    before
+      .filter((session) => deleted.has(session.id) && session.agentRun?.status === "running")
+      .map((session) => session.id),
+  );
+  return leases.filter((lease) => !deleted.has(lease.sessionId) || stillWriting.has(lease.sessionId));
+}
+
+export function normalizeFileLeases(raw: unknown): FileLease[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<FileLease>;
+    const path = typeof row.path === "string" ? normalizeLeasePath(row.path) : "";
+    if (!path || typeof row.sessionId !== "string" || !row.sessionId.trim() || typeof row.fingerprint !== "string") return [];
+    return [{
+      sessionId: row.sessionId.trim(),
+      path,
+      fingerprint: row.fingerprint,
+      claimedAt: typeof row.claimedAt === "number" ? row.claimedAt : 0,
+    }];
+  });
+}
+
 export function claimSharedFiles(input: {
   leases: FileLease[];
   sessionId: string;
@@ -1888,17 +2181,6 @@ export function claimSharedFiles(input: {
   }
   const now = input.now ?? Date.now();
   const next = [...input.leases];
-  if (input.isolation === "worktree") {
-    for (const file of input.files) {
-      next.push({
-        sessionId: input.sessionId,
-        path: normalizeLeasePath(file.path),
-        fingerprint: file.fingerprint,
-        claimedAt: now,
-      });
-    }
-    return { ok: true, leases: next };
-  }
   const conflicts: string[] = [];
   for (const file of input.files) {
     const path = normalizeLeasePath(file.path);
@@ -1935,7 +2217,6 @@ export function assertSharedWrite(input: {
   if (!workerMayWrite(input.role)) {
     return { ok: false, error: "Review-only agents cannot write." };
   }
-  if (input.isolation === "worktree") return { ok: true };
   const key = normalizeLeasePath(input.path).toLowerCase();
   const lease = input.leases.find((item) => item.sessionId === input.sessionId && normalizeLeasePath(item.path).toLowerCase() === key);
   if (!lease) return { ok: false, error: `No shared-folder claim for ${input.path}.` };
@@ -1943,6 +2224,29 @@ export function assertSharedWrite(input: {
     return { ok: false, error: `File changed since claim: ${input.path}. Re-read before writing.` };
   }
   return { ok: true };
+}
+
+export function assertAgentPathWrite(input: {
+  leases: FileLease[];
+  sessionId: string;
+  paths: string[];
+  path: string;
+  root?: string;
+  currentFingerprint: string;
+  role?: DeskRole;
+}): { ok: true } | { ok: false; error: string } {
+  const path = leasePathForWrite(input.path, input.root);
+  const allowed = normalizePathAllowlist(input.paths);
+  if (!allowed.some((item) => item.toLowerCase() === path.toLowerCase())) {
+    return { ok: false, error: `Path ownership blocked write: ${path || input.path} is not in this worker's allowlist.` };
+  }
+  return assertSharedWrite({
+    leases: input.leases,
+    sessionId: input.sessionId,
+    role: input.role,
+    path,
+    currentFingerprint: input.currentFingerprint,
+  });
 }
 
 export function subagentTurns(

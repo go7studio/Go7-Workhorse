@@ -7,9 +7,13 @@ import {
   WORKER_REPORT_CHAR_LIMIT,
   boundWorkerReport,
   continueWorkerRun,
+  normalizeAgentRun,
+  parseWorkerFindings,
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
+import { addLineupRow, applyChildIdleSync, emptyLineup, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import type { Session } from "../src/lib/types";
@@ -32,6 +36,103 @@ function worker(overrides: Partial<Session> = {}): Session {
     ...overrides,
   };
 }
+
+const EXPECTED_FINDING = {
+  severity: "high" as const,
+  title: "Status drops structured evidence",
+  file: "src/lib/subagents.ts:668",
+  evidence: "The live finish path clips prose before the parent can rank it.",
+};
+
+const EXACT_FINDING_RECEIPT = [
+  "FINDING: high",
+  `TITLE: ${EXPECTED_FINDING.title}`,
+  `FILE: ${EXPECTED_FINDING.file}`,
+  `EVIDENCE: ${EXPECTED_FINDING.evidence}`,
+].join("\n");
+
+test("worker findings parse the exact four-consecutive-line receipt", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate a blank line after FINDING", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("FINDING: high\n", "FINDING: high\n\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate dash-bullet labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `- ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate asterisk-bullet labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `* ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings ignore an extra OWNER line inside a receipt", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("TITLE:", "OWNER: parser lane\nTITLE:")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate required labels in a different order after FINDING", () => {
+  const receipt = [
+    "FINDING: high",
+    `EVIDENCE: ${EXPECTED_FINDING.evidence}`,
+    `FILE: ${EXPECTED_FINDING.file}`,
+    `TITLE: ${EXPECTED_FINDING.title}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate a trailing severity comment", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("FINDING: high", "FINDING: high (must fix)")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate markdown-bold labels", () => {
+  const receipt = [
+    "**FINDING**: high",
+    `**TITLE:** ${EXPECTED_FINDING.title}`,
+    `**FILE**: ${EXPECTED_FINDING.file}`,
+    `**EVIDENCE:** ${EXPECTED_FINDING.evidence}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate mixed-case labels and keep markdown in values", () => {
+  const receipt = [
+    "Finding: high",
+    "Title: **Status** drops structured evidence",
+    `fIlE: ${EXPECTED_FINDING.file}`,
+    `Evidence: ${EXPECTED_FINDING.evidence}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [{ ...EXPECTED_FINDING, title: "**Status** drops structured evidence" }]);
+});
+
+test("worker findings tolerate heading marks before labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `### ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings parse two receipts separated by a blank line", () => {
+  const second = EXACT_FINDING_RECEIPT
+    .replace("FINDING: high", "FINDING: low")
+    .replace(EXPECTED_FINDING.title, "Secondary issue");
+  assert.deepEqual(parseWorkerFindings(`${EXACT_FINDING_RECEIPT}\n\n${second}`), [
+    EXPECTED_FINDING,
+    { ...EXPECTED_FINDING, severity: "low", title: "Secondary issue" },
+  ]);
+});
+
+test("worker findings drop a receipt missing FILE while preserving its siblings", () => {
+  const missingFile = [
+    "FINDING: medium",
+    "TITLE: Incomplete receipt",
+    "EVIDENCE: This block has no file label.",
+  ].join("\n");
+  const last = EXACT_FINDING_RECEIPT
+    .replace("FINDING: high", "FINDING: low")
+    .replace(EXPECTED_FINDING.title, "Last complete receipt");
+  assert.deepEqual(parseWorkerFindings(`${EXACT_FINDING_RECEIPT}\n${missingFile}\n${last}`), [
+    EXPECTED_FINDING,
+    { ...EXPECTED_FINDING, severity: "low", title: "Last complete receipt" },
+  ]);
+});
 
 test("a running worker snapshot carries progress, not a blank report hole", () => {
   const running = worker({
@@ -58,7 +159,7 @@ test("a running worker snapshot carries progress, not a blank report hole", () =
   assert.equal(checkpoint.lastActivityAt, 30);
 });
 
-test("a finished worker report is bounded and points at the full assistant message", () => {
+test("a finished worker report keeps the 4,000-char contract and points at read_chat by worker id", () => {
   const huge = `${"line\n".repeat(80)}STATUS: complete\n${"x".repeat(WORKER_REPORT_CHAR_LIMIT)}`;
   const done = worker({
     id: "kid_done",
@@ -72,15 +173,64 @@ test("a finished worker report is bounded and points at the full assistant messa
   assert.ok(report.length < huge.length, "the snapshot must not return the raw assistant message whole");
   assert.ok(!report.endsWith("x"), "truncation must not read as a complete report");
   assert.match(report, /report truncated/);
-  assert.match(report, /msg_final/);
-  const ref = snap.reportRef as { messageId: string; chars: number; truncated: boolean; omittedChars: number };
-  assert.equal(ref.messageId, "msg_final");
-  assert.equal(ref.chars, huge.length);
-  assert.equal(ref.truncated, true);
-  assert.ok(ref.omittedChars > 0);
-  const bounded = boundWorkerReport(huge, { messageId: "msg_final" });
+  assert.match(report, /full text lives in workhorse_read_chat/i);
+  assert.match(report, /worker id "kid_done"/);
+  assert.doesNotMatch(report, /msg_final/);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap, "reportRef"), false);
+  const bounded = boundWorkerReport(huge, { workerId: "kid_done" });
   assert.equal(bounded.truncated, true);
-  assert.equal(bounded.reportRef.messageId, "msg_final");
+  assert.equal(bounded.chars, huge.length);
+  assert.ok((bounded.omittedChars ?? 0) > 0);
+  assert.equal(WORKER_REPORT_CHAR_LIMIT, 4_000, "typed findings carry signal without expanding every Link payload and join");
+
+  const transcript = sessionTranscript({ sessions: [done] }, "kid_done");
+  assert.equal(transcript?.messages.at(-1)?.text, huge, "read_chat by worker id returns the full terminal text");
+});
+
+test("typed finding receipts survive terminal sync, restart normalization, status, and the desk join", () => {
+  const receipt = EXACT_FINDING_RECEIPT;
+
+  const child = worker({
+    id: "kid_findings",
+    parentId: "parent",
+    title: "report path",
+    status: "idle",
+    agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+    messages: [{
+      id: "msg_terminal",
+      role: "assistant",
+      text: `${"x".repeat(WORKER_REPORT_CHAR_LIMIT + 50)}\n${receipt}`,
+      createdAt: 2,
+    }],
+  });
+  const parent: Session = {
+    ...worker({ id: "parent", parentId: undefined, title: "Parent", status: "idle", agentRun: undefined, messages: [] }),
+    lineup: addLineupRow(emptyLineup("/repo", 1), {
+      childId: child.id,
+      title: child.title,
+      slice: "report path",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const settled = applyChildIdleSync([parent, child], child.id, "completed", { now: 3 });
+  const settledChild = settled.find((session) => session.id === child.id)!;
+  const settledParent = settled.find((session) => session.id === parent.id)!;
+  assert.equal(settledChild.agentRun?.findings?.[0]?.severity, "high", "terminal output reaches AgentRun");
+  assert.equal(settledParent.lineup?.rows[0]?.findings?.[0]?.file, "src/lib/subagents.ts:668", "AgentRun reaches lineup");
+
+  const restoredRun = normalizeAgentRun(JSON.parse(JSON.stringify(settledChild.agentRun)));
+  const restoredLineup = normalizeLineup(JSON.parse(JSON.stringify(settledParent.lineup)));
+  assert.deepEqual(restoredRun?.findings, settledChild.agentRun?.findings);
+  assert.deepEqual(restoredLineup?.rows[0]?.findings, settledChild.agentRun?.findings);
+
+  const snapshot = workerStatusSnapshot({ ...settledChild, agentRun: restoredRun });
+  assert.deepEqual(snapshot.findings, settledChild.agentRun?.findings, "agent_status exposes typed findings beside report");
+  const join = lineupJoinPrompt(restoredLineup);
+  assert.match(join, /findings: \[{"severity":"high"/);
+  assert.match(join, /Rank the structured findings by severity/);
 });
 
 test("a short finished report stays the existing report key with no silent clip", () => {
@@ -181,6 +331,7 @@ test("a checkpoint on a running worker keeps the original startedAt", () => {
       usedTokens: 50,
       tokenBudget: 1000,
       budgetBaseline: 10,
+      findings: [{ severity: "low", title: "Old slice", file: "src/old.ts:1", evidence: "Prior assignment." }],
     },
     { now: 999 },
   );
@@ -189,6 +340,7 @@ test("a checkpoint on a running worker keeps the original startedAt", () => {
   assert.equal(fresh.usedTokens, undefined);
   assert.equal(fresh.tokenBudget, undefined);
   assert.equal(fresh.budgetBaseline, undefined);
+  assert.equal(fresh.findings, undefined);
 });
 
 test("peer ask of a running worker continues the same run clock", () => {

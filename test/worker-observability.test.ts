@@ -37,6 +37,103 @@ function worker(overrides: Partial<Session> = {}): Session {
   };
 }
 
+const EXPECTED_FINDING = {
+  severity: "high" as const,
+  title: "Status drops structured evidence",
+  file: "src/lib/subagents.ts:668",
+  evidence: "The live finish path clips prose before the parent can rank it.",
+};
+
+const EXACT_FINDING_RECEIPT = [
+  "FINDING: high",
+  `TITLE: ${EXPECTED_FINDING.title}`,
+  `FILE: ${EXPECTED_FINDING.file}`,
+  `EVIDENCE: ${EXPECTED_FINDING.evidence}`,
+].join("\n");
+
+test("worker findings parse the exact four-consecutive-line receipt", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate a blank line after FINDING", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("FINDING: high\n", "FINDING: high\n\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate dash-bullet labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `- ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate asterisk-bullet labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `* ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings ignore an extra OWNER line inside a receipt", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("TITLE:", "OWNER: parser lane\nTITLE:")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate required labels in a different order after FINDING", () => {
+  const receipt = [
+    "FINDING: high",
+    `EVIDENCE: ${EXPECTED_FINDING.evidence}`,
+    `FILE: ${EXPECTED_FINDING.file}`,
+    `TITLE: ${EXPECTED_FINDING.title}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate a trailing severity comment", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.replace("FINDING: high", "FINDING: high (must fix)")), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate markdown-bold labels", () => {
+  const receipt = [
+    "**FINDING**: high",
+    `**TITLE:** ${EXPECTED_FINDING.title}`,
+    `**FILE**: ${EXPECTED_FINDING.file}`,
+    `**EVIDENCE:** ${EXPECTED_FINDING.evidence}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [EXPECTED_FINDING]);
+});
+
+test("worker findings tolerate mixed-case labels and keep markdown in values", () => {
+  const receipt = [
+    "Finding: high",
+    "Title: **Status** drops structured evidence",
+    `fIlE: ${EXPECTED_FINDING.file}`,
+    `Evidence: ${EXPECTED_FINDING.evidence}`,
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [{ ...EXPECTED_FINDING, title: "**Status** drops structured evidence" }]);
+});
+
+test("worker findings tolerate heading marks before labels", () => {
+  assert.deepEqual(parseWorkerFindings(EXACT_FINDING_RECEIPT.split("\n").map((line) => `### ${line}`).join("\n")), [EXPECTED_FINDING]);
+});
+
+test("worker findings parse two receipts separated by a blank line", () => {
+  const second = EXACT_FINDING_RECEIPT
+    .replace("FINDING: high", "FINDING: low")
+    .replace(EXPECTED_FINDING.title, "Secondary issue");
+  assert.deepEqual(parseWorkerFindings(`${EXACT_FINDING_RECEIPT}\n\n${second}`), [
+    EXPECTED_FINDING,
+    { ...EXPECTED_FINDING, severity: "low", title: "Secondary issue" },
+  ]);
+});
+
+test("worker findings drop a receipt missing FILE while preserving its siblings", () => {
+  const missingFile = [
+    "FINDING: medium",
+    "TITLE: Incomplete receipt",
+    "EVIDENCE: This block has no file label.",
+  ].join("\n");
+  const last = EXACT_FINDING_RECEIPT
+    .replace("FINDING: high", "FINDING: low")
+    .replace(EXPECTED_FINDING.title, "Last complete receipt");
+  assert.deepEqual(parseWorkerFindings(`${EXACT_FINDING_RECEIPT}\n${missingFile}\n${last}`), [
+    EXPECTED_FINDING,
+    { ...EXPECTED_FINDING, severity: "low", title: "Last complete receipt" },
+  ]);
+});
+
 test("a running worker snapshot carries progress, not a blank report hole", () => {
   const running = worker({
     messages: [
@@ -91,18 +188,7 @@ test("a finished worker report keeps the 4,000-char contract and points at read_
 });
 
 test("typed finding receipts survive terminal sync, restart normalization, status, and the desk join", () => {
-  const receipt = [
-    "FINDING: high",
-    "TITLE: Status drops structured evidence",
-    "FILE: src/lib/subagents.ts:668",
-    "EVIDENCE: The live finish path clips prose before the parent can rank it.",
-  ].join("\n");
-  assert.deepEqual(parseWorkerFindings(receipt), [{
-    severity: "high",
-    title: "Status drops structured evidence",
-    file: "src/lib/subagents.ts:668",
-    evidence: "The live finish path clips prose before the parent can rank it.",
-  }]);
+  const receipt = EXACT_FINDING_RECEIPT;
 
   const child = worker({
     id: "kid_findings",

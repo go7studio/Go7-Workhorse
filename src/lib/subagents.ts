@@ -712,20 +712,38 @@ export function normalizeWorkerFindings(raw: unknown): WorkerFinding[] | undefin
   return findings.length > 0 ? findings.slice(0, WORKER_FINDING_LIMIT) : undefined;
 }
 
-/** Parse one or more fixed four-line receipts from a worker's ordinary prose report. */
+type WorkerFindingDraft = Partial<Record<"severity" | "title" | "file" | "evidence", string>>;
+
+const WORKER_FINDING_LABEL = /^\s*(?:[-*]\s+)?(?:#{1,6}\s*)?(?:(\*\*|__)(FINDING|TITLE|FILE|EVIDENCE)(?:\1\s*:|:\s*\1)|(FINDING|TITLE|FILE|EVIDENCE)\s*:)\s*(.*?)\s*$/i;
+
+/** Parse one or more labelled receipts from a worker's ordinary prose report. */
 export function parseWorkerFindings(text: string): WorkerFinding[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const receipts: WorkerFinding[] = [];
-  for (let index = 0; index <= lines.length - 4 && receipts.length < WORKER_FINDING_LIMIT; index += 1) {
-    const severity = lines[index]?.match(/^\s*FINDING:\s*(critical|high|medium|low)\s*$/i)?.[1]?.toLowerCase();
-    const title = lines[index + 1]?.match(/^\s*TITLE:\s*(.+?)\s*$/i)?.[1];
-    const file = lines[index + 2]?.match(/^\s*FILE:\s*(.+?)\s*$/i)?.[1];
-    const evidence = lines[index + 3]?.match(/^\s*EVIDENCE:\s*(.+?)\s*$/i)?.[1];
-    if (!severity || !title || !file || !evidence) continue;
-    const normalized = normalizeWorkerFindings([{ severity, title, file, evidence }]);
+
+  let draft: WorkerFindingDraft | undefined;
+  const finishDraft = () => {
+    if (!draft || receipts.length >= WORKER_FINDING_LIMIT) return;
+    const normalized = normalizeWorkerFindings([draft]);
     if (normalized?.[0]) receipts.push(normalized[0]);
-    index += 3;
+  };
+
+  for (const line of lines) {
+    const match = line.match(WORKER_FINDING_LABEL);
+    if (!match) continue;
+    const label = (match[2] ?? match[3])?.toLowerCase();
+    const value = match[4]?.trim();
+    if (label === "finding") {
+      finishDraft();
+      if (receipts.length >= WORKER_FINDING_LIMIT) break;
+      const severity = value?.match(/^(?:\*\*|__)?(critical|high|medium|low)\b/i)?.[1]?.toLowerCase();
+      draft = severity ? { severity } : {};
+      continue;
+    }
+    if (!draft || !value || (label !== "title" && label !== "file" && label !== "evidence")) continue;
+    draft[label] = value;
   }
+  finishDraft();
   return receipts;
 }
 

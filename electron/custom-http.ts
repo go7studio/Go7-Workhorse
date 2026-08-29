@@ -1,5 +1,6 @@
 import { peelAskMarkup, peelThinkTags } from "../src/lib/markdown";
 import type { ChatImage, EffortLevel, ModelInputCapabilities } from "../src/lib/types";
+import { grokBotSessionUser } from "../src/lib/grok-bot-shim";
 import { attachmentPromptBlock, isPicture } from "../src/lib/images";
 import { inferCustomApi, type CustomApiKind } from "./custom-login";
 import { contextFromModelList, knownContextWindow as catalogContextWindow } from "../src/lib/provider-catalog";
@@ -291,6 +292,7 @@ export function buildOpenAiBody(input: {
   tools?: CustomHttpTool[];
   role?: import("../src/lib/workhorse-rules").DeskRole;
   inputs?: Partial<ModelInputCapabilities>;
+  user?: string;
 }): Record<string, unknown> {
   const messages: Record<string, unknown>[] = [];
   if (input.preface?.trim()) messages.push({ role: "system", content: input.preface.trim() });
@@ -356,6 +358,7 @@ export function buildOpenAiBody(input: {
       body.reasoning_effort = ["high", "xhigh", "max", "ultra", "adaptive"].includes(String(input.effort)) ? "max" : "high";
     }
   }
+  if (input.user) body.user = input.user;
   return body;
 }
 
@@ -636,6 +639,7 @@ export async function streamCustomHttp(
     signal?: AbortSignal;
     tools?: CustomHttpTool[];
     role?: import("../src/lib/workhorse-rules").DeskRole;
+    sessionUser?: string;
   },
   handlers: CustomHttpHandlers = {},
   fetchImpl: typeof fetch = fetch,
@@ -648,7 +652,7 @@ export async function streamCustomHttp(
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, baseUrl, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs })
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, baseUrl, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs, user: grokBotSessionUser(baseUrl, input.sessionUser) })
       : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs });
 
   const headers: Record<string, string> = {

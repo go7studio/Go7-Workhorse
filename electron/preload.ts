@@ -102,6 +102,13 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.on("jobs:due", listener);
     return () => ipcRenderer.removeListener("jobs:due", listener);
   },
+  onGrokBotLateAnswer: (handler: (answers: import("./grok-bot-late").GrokBotLateAnswer[]) => void) => {
+    const listener = (_event: IpcRendererEvent, answers: import("./grok-bot-late").GrokBotLateAnswer[]) => handler(answers);
+    ipcRenderer.on("grok-bot:late-answer", listener);
+    return () => ipcRenderer.removeListener("grok-bot:late-answer", listener);
+  },
+  lateGrokBotAnswers: () => ipcRenderer.invoke("grokBot:lateAnswers") as Promise<import("./grok-bot-late").GrokBotLateAnswer[]>,
+  ackGrokBotLateAnswer: (reqId: string) => ipcRenderer.invoke("grokBot:ackLateAnswer", reqId) as Promise<void>,
   quit: () => ipcRenderer.invoke("app:quit"),
   checkAppUpdate: () =>
     ipcRenderer.invoke("app:check-update") as Promise<import("../src/lib/app-update").AppUpdateCheckResult>,

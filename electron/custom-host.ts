@@ -426,6 +426,7 @@ export class CustomSessionHost {
             signal: abort.signal,
             tools: mcpTools,
             role,
+            sessionUser: input.sessionId,
           },
           {
             onChunk: (chunk) => {

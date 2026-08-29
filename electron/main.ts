@@ -64,6 +64,8 @@ import { execFile, spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
 import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot } from "./mcp-install";
 import { ensureGrokBotShim } from "./grok-bot-shim-host";
+import { clearGrokBotLateAnswer, listGrokBotLateAnswers, watchGrokBotLateAnswers } from "./grok-bot-late";
+import { grokBotInboxDir } from "../src/lib/grok-bot-shim";
 import { grokBotWakePath, inspectGrokBotWake, saveGrokBotWake } from "./grok-bot-wake";
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
@@ -741,6 +743,24 @@ app.whenReady().then(async () => {
   // Before any channel is registered, so every one of them is covered — and so
   // is a channel written next month.
   guardIpcSender(ipcMain, process.env.VITE_DEV_SERVER_URL);
+
+  // Grok Bot answers that outlive the shim's wait land here later. Deliver each
+  // one into the chat that asked; the renderer confirms, then the files go.
+  const grokBotInbox = grokBotInboxDir(app.getPath("userData"), path.sep);
+  try {
+    fs.mkdirSync(grokBotInbox, { recursive: true, mode: 0o700 });
+  } catch {
+    /* the shim creates it too */
+  }
+  watchGrokBotLateAnswers(grokBotInbox, (answers) => {
+    // One window holds the state of record; a broadcast would append twice.
+    const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.webContents.isDestroyed());
+    win?.webContents.send("grok-bot:late-answer", answers);
+  });
+  ipcMain.handle("grokBot:lateAnswers", () => listGrokBotLateAnswers(grokBotInbox));
+  ipcMain.handle("grokBot:ackLateAnswer", (_event, reqId: unknown) => {
+    if (typeof reqId === "string") clearGrokBotLateAnswer(grokBotInbox, reqId);
+  });
 
   const detectAgentRuntimes = () => {
     const home = app.getPath("home");

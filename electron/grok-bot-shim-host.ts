@@ -8,6 +8,7 @@ import { request as httpsRequest } from "node:https";
 import { GROK_BOT_SHIM_PORT } from "../src/lib/custom-http-identity";
 import {
   GROK_BOT_SHIM_TIMEOUT_MS,
+  GROK_BOT_STILL_WORKING,
   GROK_BOT_WAKE_TIMEOUT_MS,
   authorizationBearer,
   grokBotChatJson,
@@ -80,9 +81,23 @@ function pokeWake(userData: string, reqId: string): void {
   req.end();
 }
 
+/** Operators can shorten the wait; tests must. The default stands otherwise. */
+function shimTimeoutMs(): number {
+  const raw = Number(process.env.WORKHORSE_GROK_BOT_SHIM_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : GROK_BOT_SHIM_TIMEOUT_MS;
+}
+
+/** Written whole-or-not: a half-written marker must never reach the desk's sweep. */
+function writeLateMarker(inbox: string, reqId: string, sessionId: string): void {
+  const dest = path.join(inbox, `${reqId}.late.json`);
+  const tmp = `${dest}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify({ id: reqId, sessionId, timedOutAt: Date.now() }, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(tmp, dest);
+}
+
 function waitForReply(inbox: string, reqId: string): Promise<{ text?: string; error?: string }> {
   const dest = path.join(inbox, `${reqId}.res.json`);
-  const deadline = Date.now() + GROK_BOT_SHIM_TIMEOUT_MS;
+  const deadline = Date.now() + shimTimeoutMs();
   return new Promise((resolve) => {
     const tick = () => {
       try {
@@ -103,7 +118,7 @@ function waitForReply(inbox: string, reqId: string): Promise<{ text?: string; er
         resolve({ error: "Grok Bot did not answer. Shim timed out." });
         return;
       }
-      setTimeout(tick, 400);
+      setTimeout(tick, Math.max(25, Math.min(400, Math.floor(shimTimeoutMs() / 4))));
     };
     tick();
   });
@@ -183,18 +198,64 @@ export function createGrokBotShimServer(userData: string, token?: string): http.
         }
         const reqId = `gb_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
         const reqPath = path.join(inbox, `${reqId}.req.json`);
+        // The asking chat rides the standard OpenAI `user` field. An answer that
+        // outlives the wait below is delivered into that chat by the desk, so the
+        // id goes into the request now, while the asker is still known.
+        const askedBy = typeof (body as { user?: unknown }).user === "string" ? String((body as { user?: unknown }).user).trim().slice(0, 128) : "";
         fs.writeFileSync(
           reqPath,
-          `${JSON.stringify({ id: reqId, createdAt: Date.now(), model: "grok-bot", text, origin: "workhorse" }, null, 2)}\n`,
+          `${JSON.stringify({ id: reqId, createdAt: Date.now(), model: "grok-bot", text, origin: "workhorse", ...(askedBy ? { sessionId: askedBy } : {}) }, null, 2)}\n`,
           { mode: 0o600 },
         );
         pokeWake(userData, reqId);
         const reply = await waitForReply(inbox, reqId);
         if (reply.error || !String(reply.text || "").trim()) {
+          // Grok Bot builds some answers across several of its own agents, which
+          // takes longer than any caller holds a connection. When the asker is
+          // known, the request stays pending for a late reply and this marker
+          // tells the desk where that reply belongs.
+          if (askedBy) {
+            writeLateMarker(inbox, reqId, askedBy);
+            sendJson(res, 504, { error: { message: GROK_BOT_STILL_WORKING, type: "grok_bot_timeout" } });
+            return;
+          }
           sendJson(res, 504, { error: { message: reply.error || "Grok Bot returned an empty reply.", type: "grok_bot_timeout" } });
           return;
         }
         const answer = String(reply.text).trim();
+        // The pair is spent only when the response actually reaches the caller.
+        // A desk that restarted mid-wait is gone by now; its answer must not be
+        // unlinked into nothing — it takes the late lane home instead.
+        const resPath = path.join(inbox, `${reqId}.res.json`);
+        // A caller that died during the wait emitted its close before these
+        // handlers existed. The answer is in hand; send it down the late lane.
+        if (res.destroyed || res.socket?.destroyed) {
+          if (askedBy) {
+            try {
+              writeLateMarker(inbox, reqId, askedBy);
+            } catch {
+              /* the answer file itself remains */
+            }
+          }
+          return;
+        }
+        res.on("error", () => undefined);
+        res.on("finish", () => {
+          try {
+            fs.unlinkSync(reqPath);
+            fs.unlinkSync(resPath);
+          } catch {
+            /* delivery still stands */
+          }
+        });
+        res.on("close", () => {
+          if (res.writableFinished || !askedBy) return;
+          try {
+            writeLateMarker(inbox, reqId, askedBy);
+          } catch {
+            /* the answer file itself remains */
+          }
+        });
         const stream = Boolean(body && typeof body === "object" && !Array.isArray(body) && (body as { stream?: unknown }).stream);
         if (stream) {
           const raw = Buffer.from(grokBotChatSse(reqId, answer));

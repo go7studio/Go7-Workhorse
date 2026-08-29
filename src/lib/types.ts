@@ -253,7 +253,7 @@ export type DeskLineupRow = {
   startedAt: number;
   finishedAt?: number;
   report?: string;
-  reportRef?: { messageId: string; chars: number; truncated: boolean; omittedChars?: number };
+  findings?: WorkerFinding[];
   planStepId?: string;
   rationale?: string;
   constraints?: string[];
@@ -292,6 +292,16 @@ export type WorkerHandoff = {
   evidence?: string;
   nextSteps?: string;
   blocker?: string;
+};
+
+export type WorkerFindingSeverity = "critical" | "high" | "medium" | "low";
+
+/** A fixed review receipt parsed from a worker's terminal prose. */
+export type WorkerFinding = {
+  severity: WorkerFindingSeverity;
+  title: string;
+  file: string;
+  evidence: string;
 };
 
 export type ExecutionOwner = "workhorse" | "parent";
@@ -351,6 +361,8 @@ export type AgentRun = {
   capabilities?: string[];
   tools?: string[];
   constraints?: string[];
+  /** Structured review receipts parsed from the worker's terminal output. */
+  findings?: WorkerFinding[];
   /** Structured routing policy inherited by every nested worker. */
   exclusions?: string[];
   correlationId?: string;

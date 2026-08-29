@@ -1,8 +1,8 @@
 import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
-import { boundWorkerReport, crewHasParentTakeover, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
-import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session } from "./types";
+import { boundWorkerReport, crewHasParentTakeover, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
+import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session, WorkerFinding } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
@@ -99,6 +99,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
   const status = ROW_STATUSES.includes(record.status as DeskLineupRowStatus)
     ? (record.status as DeskLineupRowStatus)
     : "unknown";
+  const findings = normalizeWorkerFindings(record.findings);
   return {
     childId: record.childId.trim(),
     title: typeof record.title === "string" ? record.title : "Worker",
@@ -109,19 +110,7 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     startedAt: typeof record.startedAt === "number" ? record.startedAt : 0,
     ...(typeof record.finishedAt === "number" ? { finishedAt: record.finishedAt } : {}),
     ...(typeof record.report === "string" && record.report.trim() ? { report: record.report } : {}),
-    ...(record.reportRef &&
-    typeof record.reportRef === "object" &&
-    typeof record.reportRef.messageId === "string" &&
-    typeof record.reportRef.chars === "number"
-      ? {
-          reportRef: {
-            messageId: record.reportRef.messageId,
-            chars: record.reportRef.chars,
-            truncated: Boolean(record.reportRef.truncated),
-            ...(typeof record.reportRef.omittedChars === "number" ? { omittedChars: record.reportRef.omittedChars } : {}),
-          },
-        }
-      : {}),
+    ...(findings ? { findings } : {}),
     ...(typeof record.planStepId === "string" && record.planStepId.trim() ? { planStepId: record.planStepId.trim() } : {}),
     ...(typeof record.rationale === "string" && record.rationale.trim() ? { rationale: record.rationale.trim() } : {}),
     ...(record.kind === "external" || record.kind === "workhorse" ? { kind: record.kind } : {}),
@@ -157,7 +146,7 @@ export function setLineupRowStatus(
   lineup: DeskLineup | undefined,
   childId: string,
   status: DeskLineupRowStatus,
-  extra?: { report?: string; finishedAt?: number; correlationId?: string },
+  extra?: { report?: string; findings?: WorkerFinding[]; finishedAt?: number; correlationId?: string },
 ): DeskLineup | undefined {
   if (!lineup) return undefined;
   return {
@@ -169,6 +158,7 @@ export function setLineupRowStatus(
             status,
             ...(extra?.finishedAt ? { finishedAt: extra.finishedAt } : {}),
             ...(extra?.report !== undefined ? { report: extra.report } : {}),
+            ...(extra?.findings !== undefined ? { findings: extra.findings } : {}),
           }
         : row,
     ),
@@ -184,7 +174,7 @@ export function lineupSnapshot(lineup: DeskLineup | undefined): {
   id?: string;
   folder?: string;
   running: string[];
-  finished: Array<{ title: string; status: string; report: string; childSessionId: string }>;
+  finished: Array<{ title: string; status: string; report: string; childSessionId: string; findings?: WorkerFinding[] }>;
 } {
   if (!lineup) return { running: [], finished: [] };
   return {
@@ -198,6 +188,7 @@ export function lineupSnapshot(lineup: DeskLineup | undefined): {
         status: row.status,
         report: row.report ?? "",
         childSessionId: row.childId,
+        ...(row.findings?.length ? { findings: row.findings } : {}),
       })),
   };
 }
@@ -233,6 +224,7 @@ export function lineupJoinPrompt(
         : "";
     lines.push(`### ${index + 1}. ${row.title}  child=${row.childId}  status=${row.status}${extra}`);
     lines.push((row.report ?? "").trim() || "(no report)");
+    if (row.findings?.length) lines.push(`findings: ${JSON.stringify(row.findings)}`);
     lines.push("");
   });
   if (options?.continuePlan) {
@@ -245,6 +237,7 @@ export function lineupJoinPrompt(
   } else {
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
+      "Rank the structured findings by severity before using the prose reports for context.",
       "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
       "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
     );
@@ -278,6 +271,7 @@ export function formatAwaitAgentsSnapshot(input: {
     exclusions?: string[];
     mission?: import("./types").MissionIteration;
     executionOwner?: import("./types").ExecutionOwner;
+    findings?: WorkerFinding[];
   }>;
   wait?: boolean;
 }): string {
@@ -293,6 +287,7 @@ export function formatAwaitAgentsSnapshot(input: {
         status: row.status,
         text: row.report,
         childSessionId: row.childSessionId,
+        ...(row.findings?.length ? { findings: row.findings } : {}),
       })),
       lineup: snapshot,
       howToUse:
@@ -311,13 +306,24 @@ export function stripSafetyPauseNotice(text: string): string {
   return text.replace(/\n*Workhorse paused[\s\S]*$/i, "").trimEnd();
 }
 
-export function childReportText(session: Pick<Session, "messages"> | undefined): string {
+function childFindings(session: Pick<Session, "messages" | "agentRun"> | undefined): WorkerFinding[] | undefined {
+  const persisted = normalizeWorkerFindings(session?.agentRun?.findings);
+  if (persisted) return persisted;
+  const last = [...(session?.messages ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.text.trim());
+  if (!last) return undefined;
+  const parsed = parseWorkerFindings(stripSafetyPauseNotice(last.text));
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+export function childReportText(session: (Pick<Session, "messages"> & Partial<Pick<Session, "id">>) | undefined): string {
   const last = [...(session?.messages ?? [])]
     .reverse()
     .find((message) => message.role === "assistant" && message.text.trim());
   if (!last) return "";
   const raw = stripSafetyPauseNotice(last.text.trim());
-  return boundWorkerReport(raw, { messageId: last.id }).report;
+  return boundWorkerReport(raw, { workerId: session?.id ?? "(worker id)" }).report;
 }
 
 function agentStatusForRow(
@@ -355,6 +361,7 @@ export function applyChildIdleSync(
   const child = sessions.find((session) => session.id === childId);
   if (extra?.correlationId && child?.agentRun?.correlationId !== extra.correlationId) return sessions;
   const report = (extra?.report ?? childReportText(child)).trim();
+  const findings = childFindings(child);
   const nextStatus = agentStatusForRow(status);
   const next = sessions.map((session) => {
     if (session.id !== childId) return session;
@@ -369,6 +376,7 @@ export function applyChildIdleSync(
             status: alreadyDone ? run.status : nextStatus,
             finishedAt: run.finishedAt ?? now,
             ...(extra?.error && !alreadyDone ? { error: extra.error } : {}),
+            ...(findings ? { findings } : {}),
           }
         : run,
     };
@@ -445,6 +453,7 @@ export function reconcilePersistedLineups(sessions: Session[], now = Date.now())
     const report = childReportText(child);
     const lineup = setLineupRowStatus(parent!.lineup, child.id, rowStatus, {
       report,
+      findings: childFindings(child),
       finishedAt: child.agentRun.finishedAt ?? now,
       correlationId: child.agentRun.correlationId,
     });
@@ -672,7 +681,12 @@ export function applyLineupChildFinish(
   if (!parentId) return sessions;
   return sessions.map((session) => {
     if (session.id !== parentId) return session;
-    const lineup = setLineupRowStatus(session.lineup, childId, status, { report, finishedAt: now, correlationId });
+    const lineup = setLineupRowStatus(session.lineup, childId, status, {
+      report,
+      findings: childFindings(child),
+      finishedAt: now,
+      correlationId,
+    });
     return lineup ? { ...session, lineup } : session;
   });
 }

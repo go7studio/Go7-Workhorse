@@ -7,9 +7,13 @@ import {
   WORKER_REPORT_CHAR_LIMIT,
   boundWorkerReport,
   continueWorkerRun,
+  normalizeAgentRun,
+  parseWorkerFindings,
   workerProgressCheckpoint,
   workerStatusSnapshot,
 } from "../src/lib/subagents";
+import { addLineupRow, applyChildIdleSync, emptyLineup, lineupJoinPrompt, normalizeLineup } from "../src/lib/lineup";
+import { sessionTranscript } from "../src/lib/session-bridge";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 import type { Session } from "../src/lib/types";
@@ -58,7 +62,7 @@ test("a running worker snapshot carries progress, not a blank report hole", () =
   assert.equal(checkpoint.lastActivityAt, 30);
 });
 
-test("a finished worker report is bounded and points at the full assistant message", () => {
+test("a finished worker report keeps the 4,000-char contract and points at read_chat by worker id", () => {
   const huge = `${"line\n".repeat(80)}STATUS: complete\n${"x".repeat(WORKER_REPORT_CHAR_LIMIT)}`;
   const done = worker({
     id: "kid_done",
@@ -72,15 +76,75 @@ test("a finished worker report is bounded and points at the full assistant messa
   assert.ok(report.length < huge.length, "the snapshot must not return the raw assistant message whole");
   assert.ok(!report.endsWith("x"), "truncation must not read as a complete report");
   assert.match(report, /report truncated/);
-  assert.match(report, /msg_final/);
-  const ref = snap.reportRef as { messageId: string; chars: number; truncated: boolean; omittedChars: number };
-  assert.equal(ref.messageId, "msg_final");
-  assert.equal(ref.chars, huge.length);
-  assert.equal(ref.truncated, true);
-  assert.ok(ref.omittedChars > 0);
-  const bounded = boundWorkerReport(huge, { messageId: "msg_final" });
+  assert.match(report, /full text lives in workhorse_read_chat/i);
+  assert.match(report, /worker id "kid_done"/);
+  assert.doesNotMatch(report, /msg_final/);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap, "reportRef"), false);
+  const bounded = boundWorkerReport(huge, { workerId: "kid_done" });
   assert.equal(bounded.truncated, true);
-  assert.equal(bounded.reportRef.messageId, "msg_final");
+  assert.equal(bounded.chars, huge.length);
+  assert.ok((bounded.omittedChars ?? 0) > 0);
+  assert.equal(WORKER_REPORT_CHAR_LIMIT, 4_000, "typed findings carry signal without expanding every Link payload and join");
+
+  const transcript = sessionTranscript({ sessions: [done] }, "kid_done");
+  assert.equal(transcript?.messages.at(-1)?.text, huge, "read_chat by worker id returns the full terminal text");
+});
+
+test("typed finding receipts survive terminal sync, restart normalization, status, and the desk join", () => {
+  const receipt = [
+    "FINDING: high",
+    "TITLE: Status drops structured evidence",
+    "FILE: src/lib/subagents.ts:668",
+    "EVIDENCE: The live finish path clips prose before the parent can rank it.",
+  ].join("\n");
+  assert.deepEqual(parseWorkerFindings(receipt), [{
+    severity: "high",
+    title: "Status drops structured evidence",
+    file: "src/lib/subagents.ts:668",
+    evidence: "The live finish path clips prose before the parent can rank it.",
+  }]);
+
+  const child = worker({
+    id: "kid_findings",
+    parentId: "parent",
+    title: "report path",
+    status: "idle",
+    agentRun: { status: "running", startedAt: 1, isolation: "shared" },
+    messages: [{
+      id: "msg_terminal",
+      role: "assistant",
+      text: `${"x".repeat(WORKER_REPORT_CHAR_LIMIT + 50)}\n${receipt}`,
+      createdAt: 2,
+    }],
+  });
+  const parent: Session = {
+    ...worker({ id: "parent", parentId: undefined, title: "Parent", status: "idle", agentRun: undefined, messages: [] }),
+    lineup: addLineupRow(emptyLineup("/repo", 1), {
+      childId: child.id,
+      title: child.title,
+      slice: "report path",
+      folder: "/repo",
+      vendor: "Codex",
+      status: "running",
+      startedAt: 1,
+    }),
+  };
+  const settled = applyChildIdleSync([parent, child], child.id, "completed", { now: 3 });
+  const settledChild = settled.find((session) => session.id === child.id)!;
+  const settledParent = settled.find((session) => session.id === parent.id)!;
+  assert.equal(settledChild.agentRun?.findings?.[0]?.severity, "high", "terminal output reaches AgentRun");
+  assert.equal(settledParent.lineup?.rows[0]?.findings?.[0]?.file, "src/lib/subagents.ts:668", "AgentRun reaches lineup");
+
+  const restoredRun = normalizeAgentRun(JSON.parse(JSON.stringify(settledChild.agentRun)));
+  const restoredLineup = normalizeLineup(JSON.parse(JSON.stringify(settledParent.lineup)));
+  assert.deepEqual(restoredRun?.findings, settledChild.agentRun?.findings);
+  assert.deepEqual(restoredLineup?.rows[0]?.findings, settledChild.agentRun?.findings);
+
+  const snapshot = workerStatusSnapshot({ ...settledChild, agentRun: restoredRun });
+  assert.deepEqual(snapshot.findings, settledChild.agentRun?.findings, "agent_status exposes typed findings beside report");
+  const join = lineupJoinPrompt(restoredLineup);
+  assert.match(join, /findings: \[{"severity":"high"/);
+  assert.match(join, /Rank the structured findings by severity/);
 });
 
 test("a short finished report stays the existing report key with no silent clip", () => {
@@ -181,6 +245,7 @@ test("a checkpoint on a running worker keeps the original startedAt", () => {
       usedTokens: 50,
       tokenBudget: 1000,
       budgetBaseline: 10,
+      findings: [{ severity: "low", title: "Old slice", file: "src/old.ts:1", evidence: "Prior assignment." }],
     },
     { now: 999 },
   );
@@ -189,6 +254,7 @@ test("a checkpoint on a running worker keeps the original startedAt", () => {
   assert.equal(fresh.usedTokens, undefined);
   assert.equal(fresh.tokenBudget, undefined);
   assert.equal(fresh.budgetBaseline, undefined);
+  assert.equal(fresh.findings, undefined);
 });
 
 test("peer ask of a running worker continues the same run clock", () => {

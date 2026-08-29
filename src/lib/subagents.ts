@@ -15,6 +15,8 @@ import type {
   ProviderId,
   RoutingDecision,
   Session,
+  WorkerFinding,
+  WorkerFindingSeverity,
   WorkerHandoff,
   WorkerSeed,
 } from "./types";
@@ -644,6 +646,7 @@ export function collectChildAgentReports(
   effort: Session["effort"];
   exclusions?: string[];
   mission?: MissionIteration;
+  findings?: WorkerFinding[];
 }> {
   return sessions
     .filter((session) => session.parentId === parentId && (!childIds || childIds.has(session.id)) && isWorkerSession(session))
@@ -651,6 +654,8 @@ export function collectChildAgentReports(
       const reply = [...session.messages]
         .reverse()
         .find((message) => message.role === "assistant" && message.text.trim());
+      const findings = normalizeWorkerFindings(session.agentRun?.findings)
+        ?? (reply ? parseWorkerFindings(reply.text) : undefined);
       return {
         title: session.title,
         status: session.agentRun?.status ?? session.status,
@@ -661,18 +666,12 @@ export function collectChildAgentReports(
         effort: session.effort,
         ...(session.agentRun?.exclusions?.length ? { exclusions: session.agentRun.exclusions } : {}),
         ...(session.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
+        ...(findings?.length ? { findings } : {}),
       };
     });
 }
 
 export const WORKER_REPORT_CHAR_LIMIT = 4_000;
-
-export type WorkerReportRef = {
-  messageId: string;
-  chars: number;
-  truncated: boolean;
-  omittedChars?: number;
-};
 
 export type WorkerProgressCheckpoint = {
   phase: string;
@@ -682,8 +681,50 @@ export type WorkerProgressCheckpoint = {
   checksRun: string[];
   blockers: string[];
   partialReport: string | null;
-  reportRef: WorkerReportRef | null;
 };
+
+const WORKER_FINDING_SEVERITIES: WorkerFindingSeverity[] = ["critical", "high", "medium", "low"];
+const WORKER_FINDING_LIMIT = 20;
+const WORKER_FINDING_TITLE_LIMIT = 240;
+const WORKER_FINDING_FILE_LIMIT = 500;
+const WORKER_FINDING_EVIDENCE_LIMIT = 1_000;
+
+function boundedFindingText(value: unknown, limit: number): string {
+  return typeof value === "string" ? value.trim().slice(0, limit) : "";
+}
+
+/** Normalize persisted findings so restart cannot revive an unbounded or malformed receipt. */
+export function normalizeWorkerFindings(raw: unknown): WorkerFinding[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const findings = raw.flatMap((item): WorkerFinding[] => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<WorkerFinding>;
+    const severity = typeof row.severity === "string" ? row.severity.toLowerCase() as WorkerFindingSeverity : undefined;
+    const title = boundedFindingText(row.title, WORKER_FINDING_TITLE_LIMIT);
+    const file = boundedFindingText(row.file, WORKER_FINDING_FILE_LIMIT);
+    const evidence = boundedFindingText(row.evidence, WORKER_FINDING_EVIDENCE_LIMIT);
+    if (!severity || !WORKER_FINDING_SEVERITIES.includes(severity) || !title || !file || !evidence) return [];
+    return [{ severity, title, file, evidence }];
+  });
+  return findings.length > 0 ? findings.slice(0, WORKER_FINDING_LIMIT) : undefined;
+}
+
+/** Parse one or more fixed four-line receipts from a worker's ordinary prose report. */
+export function parseWorkerFindings(text: string): WorkerFinding[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const receipts: WorkerFinding[] = [];
+  for (let index = 0; index <= lines.length - 4 && receipts.length < WORKER_FINDING_LIMIT; index += 1) {
+    const severity = lines[index]?.match(/^\s*FINDING:\s*(critical|high|medium|low)\s*$/i)?.[1]?.toLowerCase();
+    const title = lines[index + 1]?.match(/^\s*TITLE:\s*(.+?)\s*$/i)?.[1];
+    const file = lines[index + 2]?.match(/^\s*FILE:\s*(.+?)\s*$/i)?.[1];
+    const evidence = lines[index + 3]?.match(/^\s*EVIDENCE:\s*(.+?)\s*$/i)?.[1];
+    if (!severity || !title || !file || !evidence) continue;
+    const normalized = normalizeWorkerFindings([{ severity, title, file, evidence }]);
+    if (normalized?.[0]) receipts.push(normalized[0]);
+    index += 3;
+  }
+  return receipts;
+}
 
 const CHECK_MARKERS: Array<[RegExp, string]> = [
   [/\bnpm test\b/i, "npm test"],
@@ -700,22 +741,23 @@ function lastAssistantReport(messages: ChatMessage[] | undefined): ChatMessage |
 
 export function boundWorkerReport(
   text: string,
-  source: { messageId: string; limit?: number },
-): { report: string; truncated: boolean; reportRef: WorkerReportRef } {
+  source: { workerId: string; limit?: number },
+): { report: string; truncated: boolean; chars: number; omittedChars?: number } {
   const limit = source.limit ?? WORKER_REPORT_CHAR_LIMIT;
   const chars = text.length;
   if (chars <= limit) {
     return {
       report: text,
       truncated: false,
-      reportRef: { messageId: source.messageId, chars, truncated: false },
+      chars,
     };
   }
   const omittedChars = chars - limit;
   return {
-    report: `${text.slice(0, limit).trimEnd()}\n\n[report truncated: ${omittedChars} chars omitted; full text is assistant message ${source.messageId} (${chars} chars)]`,
+    report: `${text.slice(0, limit).trimEnd()}\n\n[report truncated: ${omittedChars} chars omitted. The full text lives in workhorse_read_chat; pass worker id "${source.workerId}" (${chars} chars total).]`,
     truncated: true,
-    reportRef: { messageId: source.messageId, chars, truncated: true, omittedChars },
+    chars,
+    omittedChars,
   };
 }
 
@@ -749,7 +791,7 @@ export function workerReportedBlocked(text: string | undefined): boolean {
 }
 
 export function workerProgressCheckpoint(
-  worker: Pick<Session, "status" | "agentRun" | "messages">,
+  worker: Pick<Session, "id" | "status" | "agentRun" | "messages">,
 ): WorkerProgressCheckpoint {
   const messages = worker.messages ?? [];
   const status = worker.agentRun?.status ?? worker.status;
@@ -764,7 +806,7 @@ export function workerProgressCheckpoint(
   const currentStep = lastTool?.text.trim().split("\n")[0]?.trim()
     || lastNote?.text.trim().split("\n")[0]?.trim()
     || (status === "running" ? "no vendor output" : status);
-  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { messageId: lastNote.id }) : null;
+  const bounded = lastNote ? boundWorkerReport(lastNote.text.trim(), { workerId: worker.id }) : null;
   return {
     phase: status,
     currentStep,
@@ -773,7 +815,6 @@ export function workerProgressCheckpoint(
     checksRun: extractChecks(messages),
     blockers: extractBlockers(lastNote?.text),
     partialReport: bounded?.report ?? null,
-    reportRef: bounded?.truncated ? bounded.reportRef : null,
   };
 }
 
@@ -830,10 +871,11 @@ export function workerStatusSnapshot(
 ): Record<string, unknown> {
   const last = lastAssistantReport(worker.messages);
   const raw = last?.text.trim();
-  const bounded = raw && last ? boundWorkerReport(raw, { messageId: last.id }) : null;
+  const bounded = raw ? boundWorkerReport(raw, { workerId: worker.id }) : null;
   const status = worker.agentRun?.status ?? worker.status;
   const checkpoint = workerProgressCheckpoint(worker);
   const follow = workerFollowThrough(status, { hasReport: Boolean(raw) });
+  const findings = normalizeWorkerFindings(worker.agentRun?.findings) ?? (raw ? parseWorkerFindings(raw) : undefined);
   return {
     id: worker.id,
     title: worker.title,
@@ -856,7 +898,7 @@ export function workerStatusSnapshot(
     ...(typeof worker.agentRun?.usedTokens === "number" ? { usedTokens: worker.agentRun.usedTokens } : {}),
     ...(worker.agentRun?.budgetPhase ? { budgetPhase: worker.agentRun.budgetPhase } : {}),
     ...(status !== "running" && bounded ? { report: bounded.report } : {}),
-    ...(status !== "running" && bounded?.truncated ? { reportRef: bounded.reportRef } : {}),
+    ...(status !== "running" && findings?.length ? { findings } : {}),
     ...(status === "running"
       ? {
           phase: checkpoint.phase,
@@ -865,7 +907,6 @@ export function workerStatusSnapshot(
           ...(checkpoint.checksRun.length ? { checksRun: checkpoint.checksRun } : {}),
           ...(checkpoint.blockers.length ? { blockers: checkpoint.blockers } : {}),
           ...(checkpoint.partialReport ? { partialReport: checkpoint.partialReport } : {}),
-          ...(checkpoint.reportRef ? { reportRef: checkpoint.reportRef } : {}),
         }
       : {}),
     routingMode: worker.routingMode ?? "manual",
@@ -972,6 +1013,11 @@ export function formatFreshHandoffPrompt(handoff: WorkerHandoff): string {
   if (handoff.nextSteps) lines.push(`next: ${handoff.nextSteps}`);
   if (handoff.blocker) lines.push(`blocker: ${handoff.blocker}`);
   lines.push("", "Do this slice only. Quote real files. Return the report as plain text.");
+  lines.push("When you have review findings, append one fixed four-line receipt per finding:");
+  lines.push("FINDING: critical|high|medium|low");
+  lines.push("TITLE: <short finding>");
+  lines.push("FILE: <repo-relative path:line>");
+  lines.push("EVIDENCE: <one-line concrete evidence>");
   return lines.join("\n");
 }
 
@@ -1100,6 +1146,11 @@ export function formatWorkerPrompt(input: WorkerBriefInput): string {
   lines.push("For one independent check, you may spawn one quick-route helper with at most 5,000 tokens, then await it. That helper cannot spawn again.");
   lines.push("Do not list bots or request another vendor. Do not ask the user. Do not review any other tree.");
   lines.push("Return the report as plain text.");
+  lines.push("When you have review findings, append one fixed four-line receipt per finding so the desk can carry it without paraphrase:");
+  lines.push("FINDING: critical|high|medium|low");
+  lines.push("TITLE: <short finding>");
+  lines.push("FILE: <repo-relative path:line>");
+  lines.push("EVIDENCE: <one-line concrete evidence>");
   lines.push("");
   lines.push("TASK:");
   lines.push(task);
@@ -1168,6 +1219,7 @@ export function continueWorkerRun(
           budgetWarnedAt: undefined,
           budgetHandoffAt: undefined,
           missionTokenBudget: undefined,
+          findings: undefined,
         }),
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),
   };
@@ -1784,6 +1836,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
   const interrupted =
     row.status === "running" || (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
+  const findings = normalizeWorkerFindings(row.findings);
   return {
     status: interrupted ? "interrupted" : row.status as AgentRun["status"],
     startedAt: row.startedAt,
@@ -1825,6 +1878,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(Array.isArray(row.tools) ? { tools: row.tools.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.constraints) ? { constraints: row.constraints.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
     ...(Array.isArray(row.exclusions) ? { exclusions: row.exclusions.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) } : {}),
+    ...(findings ? { findings } : {}),
     ...(typeof row.correlationId === "string" && row.correlationId.trim() ? { correlationId: row.correlationId.trim() } : {}),
     ...(mission ? { mission } : {}),
   };

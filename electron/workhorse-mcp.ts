@@ -578,7 +578,7 @@ const TOOLS = [
   {
     name: "workhorse_agent_status",
     description:
-      "Follow through on a worker. Pass the id from delegate. next is wait, done, or failed. When done, report is in the payload. Do not spawn another worker for the same slice.",
+      "Follow through on a worker. Pass the id from delegate. next is wait, done, or failed. When done, report keeps the prose and optional findings carries typed severity, file, and evidence rows. Do not spawn another worker for the same slice.",
     inputSchema: {
       type: "object",
       properties: {

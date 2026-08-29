@@ -410,7 +410,7 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /leftoverUnknownMark/);
   assert.match(pane, /title=\{missing\?\.title\}/);
   assert.doesNotMatch(pane, /allowedPercent \/ 100/);
-  assert.doesNotMatch(pane, /Skip spent bots/);
+  assert.match(pane, /Skip spent bots/);
   assert.match(pane, /aria-pressed/);
   assert.doesNotMatch(pane, /setWatchDayBank/);
   assert.doesNotMatch(pane, /aria-label="Day bank"/);

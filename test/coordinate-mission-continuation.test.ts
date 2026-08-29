@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   campaignGateError,
-  clearCampaignPhase,
   missionForDeskSpawn,
   nextMissionIteration,
   normalizeMissionIteration,
@@ -145,90 +144,78 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.match(decision.error, /do not share one mission contract/);
 });
 
-test("campaign opening and approve phases refuse until the permission inbox clears them", () => {
-  const spoofed = adaptiveMission({
-    phase: "scout",
-    clearance: { phase: "scout", clearedAt: 1, clearedBy: "human" },
-  });
-  assert.ok(spoofed);
-  const opening = missionForDeskSpawn(spoofed, undefined);
-  assert.match(campaignGateError(opening) ?? "", /requires human approval/);
+test("campaign phases run without a human click", () => {
+  // Steve, 2026-08-29: the desk never asks a human to approve a phase.
+  const scout = adaptiveMission({ phase: "scout" });
+  assert.ok(scout);
+  assert.equal(campaignGateError(missionForDeskSpawn(scout, undefined)), undefined);
 
-  const clearedScout = clearCampaignPhase(opening!, 10);
-  const admittedScout = missionForDeskSpawn(spoofed, clearedScout);
-  assert.equal(campaignGateError(admittedScout), undefined);
-  assert.equal(admittedScout?.clearance?.clearedAt, 10);
-
-  const approve = normalizeMissionIteration({ ...spoofed, phase: "approve", iteration: 2, clearance: undefined });
+  const approve = normalizeMissionIteration({ ...scout, phase: "approve", iteration: 2 });
   assert.ok(approve);
-  assert.match(campaignGateError(missionForDeskSpawn(approve, clearedScout)) ?? "", /approve/);
-  const clearedApprove = clearCampaignPhase(approve, 20);
-  const build = missionForDeskSpawn(approve, clearedApprove);
-  assert.equal(build?.phase, "build");
-  assert.equal(build?.clearance?.clearedBy, "human");
-  assert.equal(campaignGateError(build, clearedApprove), undefined);
+  assert.equal(campaignGateError(missionForDeskSpawn(approve, scout)), undefined);
+});
+
+test("a clearance persisted from the gated era buys nothing", () => {
+  const requested = adaptiveMission({ phase: "approve", iteration: 2 });
+  assert.ok(requested);
+  const gatedEraDesk = normalizeMissionIteration({
+    ...requested,
+    clearance: { phase: "approve", clearedAt: 20, clearedBy: "human" },
+  });
+  assert.ok(gatedEraDesk?.clearance);
+  const spawn = missionForDeskSpawn(requested, gatedEraDesk);
+  assert.equal(spawn?.phase, "approve", "an old click must not promote approve to build");
+  assert.equal(spawn?.clearance, undefined, "and the clearance itself is not carried forward");
 });
 
 test("caller-supplied build cannot forge the Campaign gate", () => {
+  // Build is where workers write, so a payload claiming it must match the
+  // desk's own mission state. No human is asked; a forgery is just refused.
   const forged = adaptiveMission({ phase: "build" });
   assert.ok(forged);
-  assert.match(campaignGateError(forged) ?? "", /matching desk state or human approve clearance/);
+  assert.match(campaignGateError(forged) ?? "", /matching desk state/);
 
-  const blocked = campaignSpawnGate({ campaignContext: true, requested: forged, desk: undefined });
-  assert.equal(blocked.mission?.phase, "approve");
-  assert.equal(blocked.phase, "approve");
-  assert.match(blocked.error ?? "", /requires human approval/);
+  const demoted = campaignSpawnGate({ campaignContext: true, requested: forged, desk: undefined });
+  assert.equal(demoted.mission?.phase, "approve", "an unverified build runs one phase back, never as build");
+  assert.equal(demoted.error, undefined);
 
   const deskBuild = adaptiveMission({ phase: "build" });
   assert.ok(deskBuild);
   const admittedFromDeskBuild = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskBuild });
   assert.equal(admittedFromDeskBuild.mission?.phase, "build");
   assert.equal(admittedFromDeskBuild.error, undefined);
-
-  const deskApprove = adaptiveMission({
-    phase: "approve",
-    clearance: { phase: "approve", clearedAt: 20, clearedBy: "human" },
-  });
-  assert.ok(deskApprove);
-  const admittedFromApproval = campaignSpawnGate({ campaignContext: true, requested: forged, desk: deskApprove });
-  assert.equal(admittedFromApproval.mission?.phase, "build");
-  assert.equal(admittedFromApproval.mission?.clearance?.phase, "approve");
-  assert.equal(admittedFromApproval.error, undefined);
 });
 
-test("campaign state fails closed for absent and unknown phases", () => {
-  assert.match(campaignGateError(undefined) ?? "", /mission state is missing/i);
+test("absent mission state is ordinary delegation, and unknown phases normalize to scout", () => {
+  // A parent with no mission is a plain wave. It must never be blocked — a
+  // pending gate once bricked plain delegation from its parent this way.
+  assert.equal(campaignGateError(undefined), undefined);
   const missing = adaptiveMission({ phase: undefined });
   const garbage = adaptiveMission({ phase: "unlimited" });
   assert.equal(missing?.phase, "scout");
   assert.equal(garbage?.phase, "scout");
-  assert.match(campaignGateError(missing) ?? "", /scout/);
-  assert.match(campaignGateError(garbage) ?? "", /scout/);
+  assert.equal(campaignGateError(missing), undefined);
+  assert.equal(campaignGateError(garbage), undefined);
 });
 
-test("review has a distinct gate so scout clearance cannot buy an unlimited review wave", () => {
+test("phases still advance one at a time without any clearance", () => {
   const scout = adaptiveMission({ phase: "scout" });
   assert.ok(scout);
-  const clearedScout = clearCampaignPhase(scout, 10);
   const coordinator = worker("coordinator", "parent", {
-    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: clearedScout },
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: scout },
   });
   const next = nextMissionIteration([coordinator], "parent", ["coordinator"]);
   assert.equal(next.ok, true);
   if (!next.ok) return;
   assert.equal(next.mission.phase, "review");
-  assert.equal(next.mission.clearance, undefined);
-  assert.match(campaignGateError(next.mission) ?? "", /review/);
-  const clearedReview = clearCampaignPhase(next.mission, 20);
-  assert.equal(clearedReview.clearance?.phase, "review");
-  assert.equal(campaignGateError(clearedReview), undefined);
+  assert.equal(campaignGateError(next.mission), undefined);
 });
 
 test("the live store spawn path consults the production campaign gate", () => {
   const mission = adaptiveMission({ id: "mission_store", objective: "Close the opening fan-out" });
   assert.ok(mission);
-  const blocked = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
-  assert.match(blocked.error ?? "", /requires human approval/);
+  const open = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
+  assert.equal(open.error, undefined);
   const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
   assert.equal(ordinary.error, undefined);
 
@@ -256,7 +243,7 @@ test("the live store spawn path consults the production campaign gate", () => {
     desk: undefined,
     openingMission,
   });
-  assert.match(openingGate.error ?? "", /requires human approval/);
+  assert.equal(openingGate.error, undefined, "a wide opening wave becomes a campaign, not a modal");
 
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
@@ -264,6 +251,7 @@ test("the live store spawn path consults the production campaign gate", () => {
   assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
+  assert.doesNotMatch(source, /requires human approval/i, "no spawn path asks a human to approve a phase");
 });
 
 test("the store keeps a different in-flight reservation beside one live opening worker", () => {

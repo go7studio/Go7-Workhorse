@@ -218,8 +218,6 @@ import {
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
-  type OpeningWorkerReservation,
-  openingWaveMission,
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
@@ -233,7 +231,6 @@ import {
   resolveNamedWorker,
   parseWorkerHandoff,
   workerStartMessages,
-  reconcileOpeningWaveReservations,
   reserveWorkerName,
   recordParentTakeover,
   releaseCancelledSessionLeases,
@@ -620,10 +617,9 @@ export function campaignSpawnGate(input: {
   campaignContext: boolean;
   requested: MissionIteration | undefined;
   desk: MissionIteration | undefined;
-  openingMission?: MissionIteration;
 }): { mission: MissionIteration | undefined; error: string | undefined; phase: Exclude<CampaignPhase, "build"> | undefined } {
-  const mission = missionForDeskSpawn(input.requested ?? input.openingMission, input.desk);
-  const error = input.campaignContext || input.openingMission ? campaignGateError(mission, input.desk) : undefined;
+  const mission = missionForDeskSpawn(input.requested, input.desk);
+  const error = input.campaignContext ? campaignGateError(mission, input.desk) : undefined;
   const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
   return { mission, error, phase };
 }
@@ -645,7 +641,7 @@ function sameMissionIteration(left: MissionIteration, right: MissionIteration): 
 /**
  * The Link continuation has already read the live worker wave before it asks the
  * store to spawn the next pass. A debounced store snapshot can still say that
- * those workers are running or interrupted. Reconcile only that lifecycle lag,
+ * those workers are running. Reconcile only that lifecycle lag,
  * and only when the desk's persisted lineup holds the exact prior manifest and
  * the request is the one-phase successor of it.
  */
@@ -653,15 +649,17 @@ function sessionsForDeskMissionDerivation(input: {
   sessions: Session[];
   requested: MissionIteration;
   lineup: MissionIteration | undefined;
-  liveContinuation: { previousWorkerIds: string[]; previousPass: number } | undefined;
+  liveContinuation: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number } | undefined;
 }): Session[] {
   const prior = input.lineup;
   if (!prior || prior.iteration >= prior.maxIterations) return input.sessions;
   const ids = [...new Set(input.requested.previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   const liveIds = [...new Set((input.liveContinuation?.previousWorkerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  const completedIds = [...new Set((input.liveContinuation?.completedWorkerIds ?? []).map((id) => id.trim()).filter(Boolean))];
   if (
     input.liveContinuation?.previousPass !== prior.iteration ||
-    JSON.stringify(liveIds) !== JSON.stringify(ids)
+    JSON.stringify(liveIds) !== JSON.stringify(ids) ||
+    JSON.stringify(completedIds) !== JSON.stringify(ids)
   ) {
     return input.sessions;
   }
@@ -684,7 +682,7 @@ function sessionsForDeskMissionDerivation(input: {
   const workerIds = new Set(ids);
   return input.sessions.map((session) => {
     if (!workerIds.has(session.id) || !session.agentRun) return session;
-    if (session.agentRun.status !== "running" && session.agentRun.status !== "interrupted") return session;
+    if (session.agentRun.status !== "running") return session;
     return { ...session, agentRun: { ...session.agentRun, status: "completed" } };
   });
 }
@@ -700,7 +698,7 @@ export function deskMissionForStoreSpawn(input: {
   requested: MissionIteration | undefined;
   lineup: MissionIteration | undefined;
   agentRun: MissionIteration | undefined;
-  liveContinuation?: { previousWorkerIds: string[]; previousPass: number };
+  liveContinuation?: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number };
 }): MissionIteration | undefined {
   const requested = input.requested;
   if (requested && input.lineup?.id === requested.id && input.lineup.iteration === requested.iteration) {
@@ -722,45 +720,6 @@ export function deskMissionForStoreSpawn(input: {
     if (derived.ok && sameMissionIteration(derived.mission, requested)) return derived.mission;
   }
   return input.agentRun;
-}
-
-export function storeOpeningWaveMission(input: {
-  sessions: Parameters<typeof openingWaveMission>[0]["sessions"];
-  parentId: string;
-  objective: string;
-  missionId: string;
-  ordinaryOpeningReservations: OpeningWorkerReservation[];
-}): { mission: MissionIteration | undefined; reservations: OpeningWorkerReservation[] } {
-  const reservations = reconcileOpeningWaveReservations(
-    input.sessions,
-    input.parentId,
-    input.ordinaryOpeningReservations,
-  );
-  return {
-    mission: openingWaveMission({
-      sessions: input.sessions,
-      parentId: input.parentId,
-      objective: input.objective,
-      missionId: input.missionId,
-      reservedWorkers: reservations.length,
-    }),
-    reservations,
-  };
-}
-
-export function createOpeningReservationReplyAsk(input: {
-  openingReservationCommitted: () => boolean;
-  releaseOpeningReservation: () => void;
-  reply: (result: { text?: string; error?: string }) => Promise<unknown> | undefined;
-}): (result: { text?: string; error?: string }) => Promise<void> {
-  return async function replyAsk(result) {
-    if (result.error || !input.openingReservationCommitted()) input.releaseOpeningReservation();
-    try {
-      await input.reply(result);
-    } catch {
-      /* host waiter may already have settled */
-    }
-  };
 }
 
 function hydrate(value: unknown): AppState {
@@ -1045,7 +1004,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const pathLeasesRef = useRef<FileLease[]>([]);
-  const ordinaryOpeningReservations = useRef(new Map<string, OpeningWorkerReservation[]>());
   const pathPermissionPreflight = useRef(new Set<string>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
@@ -3517,22 +3475,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.onPeerAsk) return;
     return window.workhorse.onPeerAsk((payload) => {
       void (async () => {
-        let openingReservation: { parentId: string; id: string } | undefined;
-        let openingReservationCommitted = false;
-        const releaseOpeningReservation = () => {
-          if (!openingReservation) return;
-          const claimed = openingReservation;
-          const reservations = ordinaryOpeningReservations.current.get(claimed.parentId) ?? [];
-          const remaining = reservations.filter((reservation) => reservation.id !== claimed.id);
-          if (remaining.length > 0) ordinaryOpeningReservations.current.set(claimed.parentId, remaining);
-          else ordinaryOpeningReservations.current.delete(claimed.parentId);
-          openingReservation = undefined;
+        const replyAsk = async (result: { text?: string; error?: string }) => {
+          try {
+            await window.workhorse?.replyPeerAsk({ id: payload.id, ...result });
+          } catch {
+            /* host waiter may already have settled */
+          }
         };
-        const replyAsk = createOpeningReservationReplyAsk({
-          openingReservationCommitted: () => openingReservationCommitted,
-          releaseOpeningReservation,
-          reply: (result) => window.workhorse?.replyPeerAsk({ id: payload.id, ...result }),
-        });
         const promptVendor = async (
           session: Session,
           text: string,
@@ -4876,22 +4825,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
             const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
-            const openingNow = Date.now();
-            const openingReservationId = payload.childSessionId?.trim() || uid("opening");
-            const opening = storeOpeningWaveMission({
-              sessions: latest.sessions,
-              parentId: caller.id,
-              objective: payload.message,
-              missionId: uid("mission"),
-              ordinaryOpeningReservations: ordinaryOpeningReservations.current.get(caller.id) ?? [],
-            });
-            const openingReservations = opening.reservations;
-            if (openingReservations.length > 0) ordinaryOpeningReservations.current.set(caller.id, openingReservations);
-            else ordinaryOpeningReservations.current.delete(caller.id);
-            const openingMission = suppliedMission || caller.lineup?.mission
-              ? undefined
-              : opening.mission;
-            const requestedMission = suppliedMission ?? openingMission;
+            const requestedMission = suppliedMission;
             const lineupMission = caller.lineup?.mission;
             const deskMission = deskMissionForStoreSpawn({
               sessions: latest.sessions,
@@ -4902,10 +4836,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               liveContinuation: payload.missionContinuation,
             });
             const gate = campaignSpawnGate({
-              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission || openingMission),
+              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission),
               requested: requestedMission,
               desk: deskMission,
-              openingMission,
             });
             const spawnMission = gate.mission;
             if (gate.error) {
@@ -4924,13 +4857,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
                 return;
               }
-            }
-            if (!spawnMission) {
-              openingReservation = { parentId: caller.id, id: openingReservationId };
-              ordinaryOpeningReservations.current.set(caller.id, [
-                ...openingReservations,
-                { id: openingReservationId, startedAt: openingNow },
-              ]);
             }
             if (exposure === "external-runtime") {
               const inboundHop = acceptInboundEnvelope({
@@ -4998,7 +4924,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 startRuntime: (request) =>
                   window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
                 onStarted: (running) => {
-                  openingReservationCommitted = Boolean(openingReservation);
                   setState((current) => ({
                     ...current,
                     externalTasks: running.store,
@@ -5006,10 +4931,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       session.id === caller.id
                         ? {
                             ...session,
-                            lineup: addLineupRow(session.lineup, {
-                              ...running.row,
-                              ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                            }, undefined, spawnMission),
+                            lineup: addLineupRow(session.lineup, running.row, undefined, spawnMission),
                             ...(running.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: running.grant } : session.planRun } : {}),
                           }
                         : session,
@@ -5021,7 +4943,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: started.code });
                 return;
               }
-              openingReservationCommitted = Boolean(openingReservation);
               setState((current) => ({
                 ...current,
                 externalTasks: started.store,
@@ -5033,10 +4954,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           report: started.task.result,
                           finishedAt: started.task.finishedAt,
                           correlationId: started.task.envelope.traceId,
-                        }) ?? addLineupRow(session.lineup, {
-                          ...started.row,
-                          ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                        }, undefined, spawnMission),
+                        }) ?? addLineupRow(session.lineup, started.row, undefined, spawnMission),
                         ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
                       }
                     : session,
@@ -5561,7 +5479,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
-            openingReservationCommitted = Boolean(openingReservation);
             setState((current) => {
               const base =
                 inboundHost && !current.sessions.some((item) => item.id === inboundHost.id)
@@ -5591,7 +5508,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 status: "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
-                                ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                                 // The caller is known here and was being dropped, so a
                                 // Link wave could not say who drove it. Only for an
                                 // inbound harness: a desk wave has no caller to name.
@@ -5832,7 +5748,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         vendor: vendorDisplayName(spec.provider),
                         status: "running",
                         startedAt,
-                        ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                         ...(planStepId ? { planStepId } : {}),
                         ...(rationale ? { rationale } : {}),
                         ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),

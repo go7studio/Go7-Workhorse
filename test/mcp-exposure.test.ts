@@ -585,6 +585,7 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
   process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
   process.env.WORKHORSE_STATE_PATH = statePath;
   let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  let liveReportStatus = "completed";
   setWorkhorseDeskAsk(async (ask) => {
     if (ask.action === "await-agents") {
       return {
@@ -593,7 +594,7 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
           running: [],
           reports: [{
             title: "First pass",
-            status: "completed",
+            status: liveReportStatus,
             text: "Implemented the first half.",
             childSessionId: "worker_pass_1",
             provider: "claude",
@@ -644,7 +645,11 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
     assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);
-    assert.deepEqual(spawned?.missionContinuation, { previousWorkerIds: ["worker_pass_1"], previousPass: 1 });
+    assert.deepEqual(spawned?.missionContinuation, {
+      previousWorkerIds: ["worker_pass_1"],
+      completedWorkerIds: ["worker_pass_1"],
+      previousPass: 1,
+    });
     assert.deepEqual(spawned?.constraints, ["Keep changes scoped"]);
     assert.deepEqual(spawned?.capabilities, ["implementation"]);
     assert.deepEqual(spawned?.tools, ["browser"]);
@@ -712,6 +717,41 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
       },
     })) as { error?: { message?: string } };
     assert.match(wrongTrace.error?.message ?? "", /traceId does not match/);
+
+    const wrongPass = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 621,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 2,
+          remainingWork: "Try the wrong pass.",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(wrongPass.error?.message ?? "", /previousPass 2 does not match the selected workers' pass 1/);
+
+    liveReportStatus = "interrupted";
+    spawned = undefined;
+    const interrupted = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 622,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Attempt to continue after restart.",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(interrupted.error?.message ?? "", /resume the interrupted worker before continuing the mission/);
+    assert.equal(spawned, undefined, "an interrupted report cannot mint a continuation spawn");
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
@@ -926,7 +966,7 @@ test("mission folder fallback 3 uses the parent lineup folder", async () => {
   assert.equal(result.actualFolder, result.expectedFolder);
 });
 
-test("ordinary opening work stays immediate until a third live worker mints scout state", async () => {
+test("only explicitly requested Mission or loop state makes an opening worker adaptive", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-gate-"));
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
@@ -990,9 +1030,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
     assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["Opening wave is bounded"]);
 
     assert.equal((await call(74, "wide_parent")).error, undefined);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
-    assert.equal(seen.at(-1)?.missionIteration?.maxIterations, 4);
-    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+    assert.equal(seen.at(-1)?.missionIteration, undefined, "an ordinary wide wave stays ordinary");
 
     const delegate = await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -1004,8 +1042,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
       },
     }) as { error?: { message?: string } };
     assert.equal(delegate.error, undefined);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
-    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+    assert.equal(seen.at(-1)?.missionIteration, undefined, "plain delegate does not invent a mission either");
     const spawnFields = mcpToolInputSchema("workhorse_spawn_agent")?.properties ?? {};
     assert.ok("loop" in spawnFields);
     assert.ok("missionIteration" in spawnFields);
@@ -1019,7 +1056,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
   }
 });
 
-test("simultaneous ordinary opening calls reserve width before persisted workers catch up", async () => {
+test("simultaneous ordinary opening calls all stay ordinary before persisted workers catch up", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-race-"));
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
@@ -1032,14 +1069,14 @@ test("simultaneous ordinary opening calls reserve width before persisted workers
   const seen: Array<{ missionIteration?: { phase?: string } }> = [];
   let releaseOrdinary!: () => void;
   const ordinaryHold = new Promise<void>((resolve) => { releaseOrdinary = resolve; });
-  let twoReserved!: () => void;
-  const twoReservedPromise = new Promise<void>((resolve) => { twoReserved = resolve; });
+  let threeStarted!: () => void;
+  const threeStartedPromise = new Promise<void>((resolve) => { threeStarted = resolve; });
   let ordinaryStarted = 0;
   setWorkhorseDeskAsk(async (payload) => {
     if (payload.mode === "spawn") seen.push(payload);
     if (!payload.missionIteration) {
       ordinaryStarted += 1;
-      if (ordinaryStarted === 2) twoReserved();
+      if (ordinaryStarted === 3) threeStarted();
       await ordinaryHold;
     }
     return { text: JSON.stringify({ childSessionId: `worker_${seen.length}` }) };
@@ -1056,13 +1093,12 @@ test("simultaneous ordinary opening calls reserve width before persisted workers
   try {
     const first = call(76);
     const second = call(77);
-    await twoReservedPromise;
-    const third = await call(78);
-    assert.equal(third.error, undefined);
-    assert.equal(seen.filter((payload) => !payload.missionIteration).length, 2);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    const third = call(78);
+    await threeStartedPromise;
+    assert.equal(seen.length, 3);
+    assert.ok(seen.every((payload) => payload.missionIteration === undefined));
     releaseOrdinary();
-    const settled = await Promise.all([first, second]);
+    const settled = await Promise.all([first, second, third]);
     assert.ok(settled.every((reply) => reply.error === undefined));
   } finally {
     releaseOrdinary();

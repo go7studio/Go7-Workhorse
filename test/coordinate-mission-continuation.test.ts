@@ -9,16 +9,13 @@ import {
   nextCampaignPhase,
   nextMissionIteration,
   normalizeMissionIteration,
-  openingWaveMission,
 } from "../src/lib/subagents";
-import { addLineupRow, emptyLineup, normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, emptyLineup } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import {
   campaignSpawnGate,
-  createOpeningReservationReplyAsk,
   deskMissionForStoreSpawn,
   hydrateInterruptedPathLeases,
-  storeOpeningWaveMission,
 } from "../src/lib/store";
 import type { MissionIteration, Session } from "../src/lib/types";
 
@@ -304,7 +301,11 @@ test("raw desk state walks scout through build with a reused worker and lagging 
       requested,
       lineup: lineup.mission,
       agentRun: undefined,
-      liveContinuation: { previousWorkerIds: requested.previousWorkerIds, previousPass: previous.iteration },
+      liveContinuation: {
+        previousWorkerIds: requested.previousWorkerIds,
+        completedWorkerIds: requested.previousWorkerIds,
+        previousPass: previous.iteration,
+      },
     });
     assert.equal(desk?.phase, requested.phase, `the desk holds ${requested.phase}`);
     assert.equal(desk?.iteration, requested.iteration);
@@ -332,7 +333,7 @@ test("raw desk state walks scout through build with a reused worker and lagging 
   };
   const laggingSessions = [
     rawWorker(workerId, "running", approve),
-    rawWorker("supporting_reviewer", "interrupted"),
+    rawWorker("supporting_reviewer", "running"),
   ];
   const forgedDesk = deskMissionForStoreSpawn({
     sessions: laggingSessions,
@@ -344,163 +345,79 @@ test("raw desk state walks scout through build with a reused worker and lagging 
   assert.equal(forgedDesk, undefined, "a caller cannot turn lifecycle lag into build evidence");
   assert.equal(missionForDeskSpawn(buildRequest, forgedDesk)?.phase, "approve");
 
+  const incompleteProofDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: [workerId],
+      previousPass: approve.iteration,
+    },
+  });
+  assert.equal(incompleteProofDesk, undefined, "proof must name every worker reported completed");
+
+  const wrongPassDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: buildRequest.previousWorkerIds,
+      previousPass: approve.iteration - 1,
+    },
+  });
+  assert.equal(wrongPassDesk, undefined, "proof from a different previousPass cannot unlock build");
+
+  const interruptedDesk = deskMissionForStoreSpawn({
+    sessions: [
+      rawWorker(workerId, "running", approve),
+      rawWorker("supporting_reviewer", "interrupted"),
+    ],
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: buildRequest.previousWorkerIds,
+      previousPass: approve.iteration,
+    },
+  });
+  assert.equal(interruptedDesk, undefined, "an interrupted worker stays interrupted even beside terminal proof");
+  assert.equal(missionForDeskSpawn(buildRequest, interruptedDesk)?.phase, "approve");
+
   const build = advance(approve, buildRequest, laggingSessions);
   assert.equal(build.phase, "build");
   assert.equal(build.maxIterations, 4);
 });
 
-test("the live store spawn path consults the production campaign gate", () => {
+test("ordinary delegation stays missionless while explicit campaigns use the production gate", () => {
   const mission = adaptiveMission({ id: "mission_store", objective: "Close the opening fan-out" });
   assert.ok(mission);
   const open = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
   assert.equal(open.error, undefined);
   const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
   assert.equal(ordinary.error, undefined);
-
-  const openingMission = openingWaveMission({
-    sessions: [
-      {
-        id: "parent",
-        lineup: {
-          rows: [
-            { childId: "worker_one", status: "running" },
-            { childId: "worker_two", status: "queued" },
-          ],
-        },
-      },
-    ],
-    parentId: "parent",
-    objective: "Start another ordinary worker",
-    missionId: "mission_opening_wave",
-  });
-  assert.equal(openingMission?.phase, "scout");
-  assert.equal(openingMission?.maxIterations, 4);
-  assert.deepEqual(openingMission?.previousWorkerIds, ["worker_one", "worker_two"]);
-  const openingGate = campaignSpawnGate({
-    campaignContext: false,
-    requested: undefined,
-    desk: undefined,
-    openingMission,
-  });
-  assert.equal(openingGate.error, undefined, "a wide opening wave becomes a campaign, not a modal");
+  assert.equal(ordinary.mission, undefined, "ordinary delegation never acquires adaptive mission state");
 
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   const subagentSource = readFileSync(path.join(ROOT, "src", "lib", "subagents.ts"), "utf8");
   const mcpSource = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
-  assert.match(source, /openingWaveMission\(\{/);
-  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
+  assert.doesNotMatch(source, /openingWaveMission|storeOpeningWaveMission|ordinaryOpeningReservations/);
+  assert.doesNotMatch(subagentSource, /The opening wave is bounded and the assigned work is verified/);
+  assert.doesNotMatch(mcpSource, /openingWaveMission|ordinaryOpeningReservations/);
+  assert.match(source, /input\.campaignContext \? campaignGateError\(mission, input\.desk\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
   assert.doesNotMatch(source, /requires human approval/i, "no spawn path asks a human to approve a phase");
   assert.doesNotMatch(subagentSource, /approval card is the sole caller/i);
   assert.doesNotMatch(mcpSource, /human clearance is always taken from desk state/i);
-});
-
-test("the store keeps a different in-flight reservation beside one live opening worker", () => {
-  const sessions = [{
-    id: "parent",
-    lineup: {
-      rows: [{
-        childId: "worker_live",
-        status: "running",
-        openingReservationId: "reservation_live",
-      }],
-    },
-  }];
-  const opening = storeOpeningWaveMission({
-    sessions,
-    parentId: "parent",
-    objective: "Start the third concurrent worker",
-    missionId: "mission_reserved_opening",
-    ordinaryOpeningReservations: [{ id: "reservation_in_flight", startedAt: 1 }],
-  });
-  assert.deepEqual(opening.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
-  assert.equal(opening.mission?.phase, "scout");
-  assert.deepEqual(opening.mission?.previousWorkerIds, ["worker_live"]);
-
-  const reconciled = storeOpeningWaveMission({
-    sessions,
-    parentId: "parent",
-    objective: "Start the third concurrent worker",
-    missionId: "mission_reserved_opening",
-    ordinaryOpeningReservations: [
-      { id: "reservation_in_flight", startedAt: 1 },
-      { id: "reservation_live", startedAt: 90_000 },
-    ],
-  });
-  assert.deepEqual(reconciled.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
-
-  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
-  assert.match(source, /openingReservationId: openingReservation\.id/);
-  assert.match(source, /reservedWorkers: reservations\.length/);
-});
-
-test("lineup normalization preserves the opening reservation identity", () => {
-  const restored = normalizeLineup({
-    id: "lineup_persisted",
-    folder: "/repo",
-    startedAt: 1,
-    rows: [{
-      childId: "worker_live",
-      title: "Live worker",
-      slice: "Build",
-      folder: "/repo",
-      vendor: "Codex",
-      status: "running",
-      startedAt: 2,
-      openingReservationId: "reservation_live",
-    }],
-  });
-
-  assert.equal(restored?.rows[0]?.openingReservationId, "reservation_live");
-});
-
-test("the production peer reply releases failed and uncommitted opening reservations", async () => {
-  const parentId = "parent";
-  const sessions = [{
-    id: parentId,
-    lineup: { rows: [{ childId: "worker_live", status: "running" }] },
-  }];
-  const cases = [
-    { branch: "error", committed: true, result: { error: "spawn denied" } },
-    { branch: "not committed", committed: false, result: { text: "spawn not started" } },
-  ] as const;
-
-  for (const scenario of cases) {
-    const reservationId = `reservation_${scenario.branch.replace(" ", "_")}`;
-    const reservations = new Map([[parentId, [{ id: reservationId, startedAt: 1 }]]]);
-    let openingReservation: { parentId: string; id: string } | undefined = { parentId, id: reservationId };
-    const replies: Array<{ text?: string; error?: string }> = [];
-    const replyAsk = createOpeningReservationReplyAsk({
-      openingReservationCommitted: () => scenario.committed,
-      releaseOpeningReservation: () => {
-        if (!openingReservation) return;
-        const remaining = (reservations.get(openingReservation.parentId) ?? [])
-          .filter((reservation) => reservation.id !== openingReservation?.id);
-        if (remaining.length > 0) reservations.set(openingReservation.parentId, remaining);
-        else reservations.delete(openingReservation.parentId);
-        openingReservation = undefined;
-      },
-      reply: async (result) => {
-        replies.push(result);
-      },
-    });
-
-    await replyAsk(scenario.result);
-
-    assert.deepEqual(replies, [scenario.result], `${scenario.branch} still replies to the host`);
-    const opening = storeOpeningWaveMission({
-      sessions,
-      parentId,
-      objective: "Start the second opening worker",
-      missionId: `mission_${scenario.branch.replace(" ", "_")}`,
-      ordinaryOpeningReservations: reservations.get(parentId) ?? [],
-    });
-    assert.deepEqual(opening.reservations, [], `${scenario.branch} releases its reservation`);
-    assert.equal(opening.mission, undefined, `${scenario.branch} does not permanently consume opening capacity`);
-  }
 });
 
 test("restart keeps leases only for interrupted workers that still own those paths", () => {

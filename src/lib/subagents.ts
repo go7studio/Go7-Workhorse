@@ -1563,9 +1563,10 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
 
 const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
 
-export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
-  const index = CAMPAIGN_PHASES.indexOf(phase);
-  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
+export function nextCampaignPhase(phase: unknown): CampaignPhase | undefined {
+  const index = (CAMPAIGN_PHASES as unknown[]).indexOf(phase);
+  if (index < 0) return undefined;
+  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)];
 }
 
 /**
@@ -1939,13 +1940,15 @@ export function nextMissionIteration(
     .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
   if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
   if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
+  const phase = nextCampaignPhase(first.phase);
+  if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   return {
     ok: true,
     mission: {
       ...first,
       iteration: first.iteration + 1,
       previousWorkerIds: ids,
-      phase: nextCampaignPhase(first.phase),
+      phase,
       clearance: undefined,
     },
   };

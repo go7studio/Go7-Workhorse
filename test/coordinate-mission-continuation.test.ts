@@ -6,15 +6,17 @@ import { test } from "node:test";
 import {
   campaignGateError,
   missionForDeskSpawn,
+  nextCampaignPhase,
   nextMissionIteration,
   normalizeMissionIteration,
   openingWaveMission,
 } from "../src/lib/subagents";
-import { normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, emptyLineup, normalizeLineup } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import {
   campaignSpawnGate,
   createOpeningReservationReplyAsk,
+  deskMissionForStoreSpawn,
   hydrateInterruptedPathLeases,
   storeOpeningWaveMission,
 } from "../src/lib/store";
@@ -198,6 +200,37 @@ test("absent mission state is ordinary delegation, and unknown phases normalize 
   assert.equal(campaignGateError(garbage), undefined);
 });
 
+test("phase advancement rejects missing and unknown campaign phases", () => {
+  assert.equal(nextCampaignPhase("scout"), "review");
+  assert.equal(nextCampaignPhase("build"), "build");
+  assert.equal(nextCampaignPhase(undefined), undefined);
+  assert.equal(nextCampaignPhase("handoff"), undefined);
+
+  const rawMission = {
+    id: "mission_raw_phase",
+    mode: "adaptive",
+    objective: "Keep the phase trustworthy",
+    acceptanceCriteria: ["Invalid state cannot restart at scout"],
+    iteration: 1,
+    maxIterations: 3,
+    previousWorkerIds: [],
+  };
+  const coordinator = {
+    ...worker("raw_coordinator", "parent"),
+    agentRun: {
+      status: "completed" as const,
+      startedAt: 1,
+      finishedAt: 2,
+      isolation: "shared" as const,
+      mission: rawMission,
+    },
+  } as unknown as Session;
+  const decision = nextMissionIteration([coordinator], "parent", [coordinator.id]);
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.match(decision.error, /phase is missing or invalid/);
+});
+
 test("phases still advance one at a time without any clearance", () => {
   const scout = adaptiveMission({ phase: "scout" });
   assert.ok(scout);
@@ -209,6 +242,55 @@ test("phases still advance one at a time without any clearance", () => {
   if (!next.ok) return;
   assert.equal(next.mission.phase, "review");
   assert.equal(campaignGateError(next.mission), undefined);
+});
+
+test("the desk derives and holds the next build pass from terminal workers", () => {
+  const approve = adaptiveMission({
+    id: "mission_build_reachable",
+    phase: "approve",
+    iteration: 3,
+    maxIterations: 4,
+  });
+  assert.ok(approve);
+  const coordinator = worker("approve_worker", "parent", {
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: approve },
+  });
+  const requested = {
+    ...approve,
+    iteration: 4,
+    previousWorkerIds: [coordinator.id],
+    phase: "build" as const,
+  };
+  const desk = deskMissionForStoreSpawn({
+    sessions: [coordinator],
+    parentId: "parent",
+    requested,
+    lineup: approve,
+    agentRun: undefined,
+  });
+  assert.equal(desk?.phase, "build");
+  assert.equal(desk?.iteration, 4);
+  assert.equal(missionForDeskSpawn(requested, desk)?.phase, "build");
+});
+
+test("a notified lineup rolls over with the desk-held mission", () => {
+  const approve = adaptiveMission({ phase: "approve", iteration: 3, maxIterations: 4 });
+  assert.ok(approve);
+  const build = { ...approve, phase: "build" as const, iteration: 4 };
+  const folder = path.join("repo", "mission");
+  const previous = { ...emptyLineup(folder, 1), mission: approve, notifiedAt: 10 };
+  const next = addLineupRow(previous, {
+    childId: "builder",
+    title: "Builder",
+    slice: "Build",
+    folder,
+    vendor: "Codex",
+    status: "running",
+    startedAt: 20,
+  }, undefined, build);
+  assert.equal(next.notifiedAt, undefined);
+  assert.equal(next.mission?.phase, "build");
+  assert.equal(next.mission?.iteration, 4);
 });
 
 test("the live store spawn path consults the production campaign gate", () => {

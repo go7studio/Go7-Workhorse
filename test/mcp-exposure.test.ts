@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -504,15 +504,46 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   }
 });
 
-test("adaptive mission continuation preserves criteria and returns routing to Auto", async () => {
+test("adaptive mission continuation reconciles raw phase, inherits its folder, and returns routing to Auto", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-loop-"));
+  const parentFolder = path.join(dir, "parent-project");
+  const missionFolder = path.join(dir, "mission-worktree");
+  mkdirSync(parentFolder);
+  mkdirSync(missionFolder);
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
+    projects: [
+      { id: "parent_project", name: "Parent", folders: [{ path: parentFolder }] },
+      { id: "mission_project", name: "Mission", folders: [{ path: missionFolder }] },
+    ],
     sessions: [
-      { id: "parent_chat", title: "Desk", provider: "grok", model: "grok-4.6", projectId: null, messages: [] },
+      {
+        id: "parent_chat",
+        title: "Desk",
+        provider: "grok",
+        model: "grok-4.6",
+        projectId: "parent_project",
+        messages: [],
+        lineup: {
+          id: "lineup_mission",
+          folder: missionFolder,
+          startedAt: 1,
+          rows: [{
+            childId: "worker_pass_1",
+            title: "First pass",
+            slice: "Review",
+            folder: missionFolder,
+            vendor: "Claude",
+            status: "completed",
+            startedAt: 1,
+            finishedAt: 2,
+          }],
+        },
+      },
       {
         id: "worker_pass_1",
         parentId: "parent_chat",
+        projectId: "mission_project",
         hidden: true,
         title: "Wren · First pass",
         provider: "claude",
@@ -539,6 +570,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
             iteration: 1,
             maxIterations: 3,
             previousWorkerIds: [],
+            phase: "review",
           },
         },
       },
@@ -590,7 +622,6 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
           previousPass: 1,
           remainingWork: "Finish and verify the live path.",
           evidence: ["The first commit exists"],
-          folder: dir,
           fromSessionId: "parent_chat",
         },
       },
@@ -601,7 +632,9 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
     assert.equal(spawned?.model, undefined);
     assert.equal(spawned?.effort, undefined);
     assert.equal(spawned?.worker, "Wren");
+    assert.equal(spawned?.folder, missionFolder);
     assert.equal(spawned?.missionIteration?.iteration, 2);
+    assert.equal(spawned?.missionIteration?.phase, "approve");
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
     assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);

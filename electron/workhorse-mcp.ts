@@ -49,6 +49,7 @@ import {
   workerProgressCheckpoint,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
+import { sessionExecutionCwd } from "../src/lib/session-environment";
 import { uid } from "../src/lib/id";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
@@ -2220,6 +2221,17 @@ type AwaitMissionReport = {
   mission?: MissionIteration;
 };
 
+function reconcileLiveMission(
+  persisted: MissionIteration | undefined,
+  live: unknown,
+): MissionIteration | undefined {
+  const row = live && typeof live === "object" ? live as Record<string, unknown> : {};
+  const phase = row.phase === "scout" || row.phase === "review" || row.phase === "approve" || row.phase === "build"
+    ? row.phase
+    : persisted?.phase;
+  return normalizeMissionIteration({ ...(persisted ?? {}), ...row, ...(phase ? { phase } : {}) }) ?? persisted;
+}
+
 function missionContinuationPrompt(input: {
   mission: MissionIteration;
   remainingWork: string;
@@ -2278,7 +2290,17 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
         live.status === "failed" || live.status === "cancelled" || live.status === "timed-out" || live.status === "budget-exceeded"
         ? live.status
         : "completed";
-      return { ...session, status: "idle" as const, agentRun: { ...session.agentRun, status, mission: live.mission } };
+      const mission = reconcileLiveMission(session.agentRun.mission, live.mission);
+      if (!mission) return session;
+      return {
+        ...session,
+        status: "idle" as const,
+        agentRun: {
+          ...session.agentRun,
+          status,
+          mission,
+        },
+      };
     });
   const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass);
   if (!next.ok) throw new Error(next.error);
@@ -2289,6 +2311,14 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     .map((id) => source.find((session) => session.id === id))
     .find(Boolean);
   const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
+  const parent = sessions.find((session) => session.id === parentId);
+  const inheritedFolder =
+    previousWorkerIds
+      .map((id) => parent?.lineup?.rows.find((row) => row.childId === id)?.folder.trim())
+      .find((folder): folder is string => Boolean(folder)) ||
+    sessionExecutionCwd(source[0]?.environment, callerProjectFolder(source[0])) ||
+    parent?.lineup?.folder.trim() ||
+    undefined;
   const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions" | "paths") =>
     [...new Set(source.flatMap((session) => session.agentRun?.[key] ?? []).filter(Boolean))];
   const evidence = Array.isArray(args.evidence)
@@ -2317,7 +2347,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
       isolation: args.isolation === "worktree" ? "worktree" : args.isolation === "shared" ? "shared" : source[0]?.agentRun?.isolation,
-      folder: typeof args.folder === "string" ? args.folder : undefined,
+      folder: typeof args.folder === "string" ? args.folder : inheritedFolder,
       wait: linkWait(args.wait),
       traceId: next.mission.id,
     },

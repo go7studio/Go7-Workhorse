@@ -223,6 +223,7 @@ import {
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
+  nextMissionIteration,
   rootSpawnError,
   resolveSpawnSpec,
   missionForDeskSpawn,
@@ -624,6 +625,48 @@ export function campaignSpawnGate(input: {
   const error = input.campaignContext || input.openingMission ? campaignGateError(mission, input.desk) : undefined;
   const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
   return { mission, error, phase };
+}
+
+function sameMissionIteration(left: MissionIteration, right: MissionIteration): boolean {
+  return (
+    left.id === right.id &&
+    left.mode === right.mode &&
+    left.objective === right.objective &&
+    JSON.stringify(left.acceptanceCriteria) === JSON.stringify(right.acceptanceCriteria) &&
+    left.iteration === right.iteration &&
+    left.maxIterations === right.maxIterations &&
+    JSON.stringify(left.previousWorkerIds) === JSON.stringify(right.previousWorkerIds) &&
+    left.phase === right.phase &&
+    left.tokenBudget === right.tokenBudget
+  );
+}
+
+/**
+ * A build claim is never trusted. The desk may hold the requested pass because
+ * it already persisted that exact lineup mission, or because it independently
+ * derives the next pass from terminal workers that carry the prior manifest.
+ */
+export function deskMissionForStoreSpawn(input: {
+  sessions: Session[];
+  parentId: string;
+  requested: MissionIteration | undefined;
+  lineup: MissionIteration | undefined;
+  agentRun: MissionIteration | undefined;
+}): MissionIteration | undefined {
+  const requested = input.requested;
+  if (requested && input.lineup?.id === requested.id && input.lineup.iteration === requested.iteration) {
+    return input.lineup;
+  }
+  if (requested && requested.previousWorkerIds.length > 0) {
+    const derived = nextMissionIteration(
+      input.sessions,
+      input.parentId,
+      requested.previousWorkerIds,
+      requested.iteration - 1,
+    );
+    if (derived.ok && sameMissionIteration(derived.mission, requested)) return derived.mission;
+  }
+  return input.agentRun;
 }
 
 export function storeOpeningWaveMission(input: {
@@ -4795,10 +4838,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : opening.mission;
             const requestedMission = suppliedMission ?? openingMission;
             const lineupMission = caller.lineup?.mission;
-            const deskMission =
-              requestedMission && lineupMission?.id === requestedMission.id && lineupMission.iteration === requestedMission.iteration
-                ? lineupMission
-                : caller.agentRun?.mission;
+            const deskMission = deskMissionForStoreSpawn({
+              sessions: latest.sessions,
+              parentId: caller.id,
+              requested: requestedMission,
+              lineup: lineupMission,
+              agentRun: caller.agentRun?.mission,
+            });
             const gate = campaignSpawnGate({
               campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission || openingMission),
               requested: requestedMission,
@@ -4907,7 +4953,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             lineup: addLineupRow(session.lineup, {
                               ...running.row,
                               ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                            }),
+                            }, undefined, spawnMission),
                             ...(running.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: running.grant } : session.planRun } : {}),
                           }
                         : session,
@@ -4934,7 +4980,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         }) ?? addLineupRow(session.lineup, {
                           ...started.row,
                           ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                        }),
+                        }, undefined, spawnMission),
                         ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
                       }
                     : session,
@@ -5505,6 +5551,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
                               },
                               exposure === "external-runtime" ? "external-runtime" : "desk",
+                              spawnMission,
                             ),
                             waveText,
                           ),
@@ -5733,7 +5780,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         ...(planStepId ? { planStepId } : {}),
                         ...(rationale ? { rationale } : {}),
                         ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
-                      }),
+                      }, undefined, spawnMission),
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),

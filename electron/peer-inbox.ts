@@ -75,6 +75,8 @@ export type PeerAsk = {
   mission?: boolean;
   /** Present only for an explicitly enabled adaptive sequential mission. */
   missionIteration?: MissionIteration;
+  /** Internal proof that Link observed the prior mission wave terminal before this spawn. */
+  missionContinuation?: { previousWorkerIds: string[]; previousPass: number };
   /** Restrict await aggregation to these workers instead of the parent's full history. */
   workerIds?: string[];
   route?: "auto" | "quick" | "balanced" | "deep";

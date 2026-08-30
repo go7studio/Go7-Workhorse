@@ -1689,13 +1689,12 @@ export function openingWaveMission(input: {
     objective,
     acceptanceCriteria: ["The opening wave is bounded and the assigned work is verified."],
     iteration: 1,
-    maxIterations: 3,
+    maxIterations: 4,
     previousWorkerIds: live,
     phase: "scout",
   };
 }
 
-/** The approval card is the sole caller. Approval of the approve phase enters build. */
 /** Ignore markers supplied by a caller; only a matching manifest already on the desk can clear a gate. */
 export function missionForDeskSpawn(
   requested: MissionIteration | undefined,

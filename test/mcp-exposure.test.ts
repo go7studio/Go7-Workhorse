@@ -406,6 +406,7 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(untracedLoop.error, undefined, untracedLoop.error?.message);
     assert.match(seenMissionIteration?.id ?? "", /^mission_/);
     assert.equal(seenTrace, seenMissionIteration?.id);
+    assert.equal(seenMissionIteration?.maxIterations, 4);
 
     const awaited = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -508,13 +509,17 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
   const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-loop-"));
   const parentFolder = path.join(dir, "parent-project");
   const missionFolder = path.join(dir, "mission-worktree");
+  const workerFallbackFolder = path.join(dir, "worker-project");
+  const lineupFallbackFolder = path.join(dir, "lineup-fallback");
   mkdirSync(parentFolder);
   mkdirSync(missionFolder);
+  mkdirSync(workerFallbackFolder);
+  mkdirSync(lineupFallbackFolder);
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
     projects: [
       { id: "parent_project", name: "Parent", folders: [{ path: parentFolder }] },
-      { id: "mission_project", name: "Mission", folders: [{ path: missionFolder }] },
+      { id: "mission_project", name: "Mission", folders: [{ path: workerFallbackFolder }] },
     ],
     sessions: [
       {
@@ -526,7 +531,7 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
         messages: [],
         lineup: {
           id: "lineup_mission",
-          folder: missionFolder,
+          folder: lineupFallbackFolder,
           startedAt: 1,
           rows: [{
             childId: "worker_pass_1",
@@ -622,6 +627,7 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
           previousPass: 1,
           remainingWork: "Finish and verify the live path.",
           evidence: ["The first commit exists"],
+          folder: "",
           fromSessionId: "parent_chat",
         },
       },
@@ -638,6 +644,7 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
     assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);
+    assert.deepEqual(spawned?.missionContinuation, { previousWorkerIds: ["worker_pass_1"], previousPass: 1 });
     assert.deepEqual(spawned?.constraints, ["Keep changes scoped"]);
     assert.deepEqual(spawned?.capabilities, ["implementation"]);
     assert.deepEqual(spawned?.tools, ["browser"]);
@@ -671,6 +678,175 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
   }
 });
 
+async function captureInheritedMissionFolder(
+  fixture: (
+    dir: string,
+    mission: Record<string, unknown>,
+  ) => {
+    projects: unknown[];
+    sessions: Array<Record<string, any>>;
+    previousWorkerIds: string[];
+    expectedFolder: string;
+  },
+): Promise<{ actualFolder: string | undefined; expectedFolder: string }> {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-folder-"));
+  const mission = {
+    id: "mission_folder_fallback",
+    mode: "adaptive",
+    objective: "Keep the mission in its original repository",
+    acceptanceCriteria: ["The continuation uses the intended folder"],
+    iteration: 1,
+    maxIterations: 4,
+    previousWorkerIds: [],
+    phase: "scout",
+  };
+  const built = fixture(dir, mission);
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({ projects: built.projects, sessions: built.sessions }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  setWorkhorseDeskAsk(async (ask) => {
+    if (ask.action === "await-agents") {
+      return {
+        text: JSON.stringify({
+          ok: true,
+          running: [],
+          reports: built.previousWorkerIds.map((id) => {
+            const session = built.sessions.find((item) => item.id === id);
+            return {
+              childSessionId: id,
+              title: session?.title ?? id,
+              status: "completed",
+              text: "Pass complete.",
+              ...(session?.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
+            };
+          }),
+        }),
+      };
+    }
+    spawned = ask;
+    return { text: JSON.stringify({ ok: true, workerId: "next_worker" }) };
+  });
+  try {
+    const continued = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 63,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: built.previousWorkerIds,
+          previousPass: 1,
+          remainingWork: "Continue in the inherited folder.",
+          fromSessionId: "folder_parent",
+        },
+      },
+    }) as { error?: { message?: string } };
+    assert.equal(continued.error, undefined, continued.error?.message);
+    return { actualFolder: spawned?.folder, expectedFolder: built.expectedFolder };
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("mission folder fallback 2 uses the coordinator git root in requested worker order", async () => {
+  const result = await captureInheritedMissionFolder((dir, mission) => {
+    const parentFolder = path.join(dir, "parent-lineup");
+    const originalRoot = path.join(dir, "original-git-root");
+    const reviewerRoot = path.join(dir, "supporting-reviewer-root");
+    mkdirSync(parentFolder);
+    mkdirSync(originalRoot);
+    mkdirSync(reviewerRoot);
+    return {
+      projects: [{ id: "reviewer_project", name: "Reviewer", folders: [{ path: reviewerRoot }] }],
+      sessions: [
+        {
+          id: "supporting_reviewer",
+          parentId: "folder_parent",
+          projectId: "reviewer_project",
+          title: "Supporting reviewer",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          status: "idle",
+          messages: [],
+          agentRun: { status: "completed", startedAt: 1, isolation: "shared" },
+        },
+        {
+          id: "folder_parent",
+          title: "Folder parent",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          lineup: { id: "folder_lineup", folder: parentFolder, startedAt: 1, rows: [] },
+        },
+        {
+          id: "mission_coordinator",
+          parentId: "folder_parent",
+          title: "Coordinator",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          environment: {
+            kind: "worktree",
+            path: path.join(dir, "deleted-ephemeral-worktree"),
+            gitRoot: originalRoot,
+            head: "abc123",
+          },
+          agentRun: { status: "completed", startedAt: 1, isolation: "worktree", mission },
+        },
+      ],
+      previousWorkerIds: ["mission_coordinator", "supporting_reviewer"],
+      expectedFolder: originalRoot,
+    };
+  });
+  assert.equal(result.actualFolder, result.expectedFolder);
+});
+
+test("mission folder fallback 3 uses the parent lineup folder", async () => {
+  const result = await captureInheritedMissionFolder((dir, mission) => {
+    const parentFolder = path.join(dir, "parent-lineup");
+    mkdirSync(parentFolder);
+    return {
+      projects: [],
+      sessions: [
+        {
+          id: "folder_parent",
+          title: "Folder parent",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          lineup: { id: "folder_lineup", folder: parentFolder, startedAt: 1, rows: [] },
+        },
+        {
+          id: "mission_coordinator",
+          parentId: "folder_parent",
+          projectId: null,
+          title: "Coordinator",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          environment: { kind: "local" },
+          agentRun: { status: "completed", startedAt: 1, isolation: "shared", mission },
+        },
+      ],
+      previousWorkerIds: ["mission_coordinator"],
+      expectedFolder: parentFolder,
+    };
+  });
+  assert.equal(result.actualFolder, result.expectedFolder);
+});
+
 test("ordinary opening work stays immediate until a third live worker mints scout state", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-gate-"));
   const statePath = path.join(dir, "state.json");
@@ -702,7 +878,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
   process.env.WORKHORSE_STATE_PATH = statePath;
   const seen: Array<{
     fromSessionId?: string;
-    missionIteration?: { phase?: string; acceptanceCriteria?: string[]; previousWorkerIds?: string[] };
+    missionIteration?: { phase?: string; acceptanceCriteria?: string[]; previousWorkerIds?: string[]; maxIterations?: number };
   }> = [];
   setWorkhorseDeskAsk(async (payload) => {
     if (payload.mode === "spawn") seen.push(payload);
@@ -724,6 +900,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
 
     assert.equal((await call(72, "mission_parent")).error, undefined);
     assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.equal(seen.at(-1)?.missionIteration?.maxIterations, 4);
     assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["The assigned task is complete and verified."]);
 
     assert.equal((await call(73, "ordinary_parent", {
@@ -735,6 +912,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
 
     assert.equal((await call(74, "wide_parent")).error, undefined);
     assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.equal(seen.at(-1)?.missionIteration?.maxIterations, 4);
     assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
 
     const delegate = await handleWorkhorseRpc({

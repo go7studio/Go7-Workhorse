@@ -223,6 +223,7 @@ import {
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
+  nextCampaignPhase,
   nextMissionIteration,
   rootSpawnError,
   resolveSpawnSpec,
@@ -642,9 +643,56 @@ function sameMissionIteration(left: MissionIteration, right: MissionIteration): 
 }
 
 /**
+ * The Link continuation has already read the live worker wave before it asks the
+ * store to spawn the next pass. A debounced store snapshot can still say that
+ * those workers are running or interrupted. Reconcile only that lifecycle lag,
+ * and only when the desk's persisted lineup holds the exact prior manifest and
+ * the request is the one-phase successor of it.
+ */
+function sessionsForDeskMissionDerivation(input: {
+  sessions: Session[];
+  requested: MissionIteration;
+  lineup: MissionIteration | undefined;
+  liveContinuation: { previousWorkerIds: string[]; previousPass: number } | undefined;
+}): Session[] {
+  const prior = input.lineup;
+  if (!prior || prior.iteration >= prior.maxIterations) return input.sessions;
+  const ids = [...new Set(input.requested.previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
+  const liveIds = [...new Set((input.liveContinuation?.previousWorkerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (
+    input.liveContinuation?.previousPass !== prior.iteration ||
+    JSON.stringify(liveIds) !== JSON.stringify(ids)
+  ) {
+    return input.sessions;
+  }
+  const coordinator = ids
+    .map((id) => input.sessions.find((session) => session.id === id))
+    .find((session) => session?.agentRun?.mission?.mode === "adaptive");
+  if (!coordinator?.agentRun?.mission || !sameMissionIteration(coordinator.agentRun.mission, prior)) {
+    return input.sessions;
+  }
+  const phase = nextCampaignPhase(prior.phase);
+  if (!phase) return input.sessions;
+  const expected: MissionIteration = {
+    ...prior,
+    iteration: prior.iteration + 1,
+    previousWorkerIds: ids,
+    phase,
+    clearance: undefined,
+  };
+  if (!sameMissionIteration(expected, input.requested)) return input.sessions;
+  const workerIds = new Set(ids);
+  return input.sessions.map((session) => {
+    if (!workerIds.has(session.id) || !session.agentRun) return session;
+    if (session.agentRun.status !== "running" && session.agentRun.status !== "interrupted") return session;
+    return { ...session, agentRun: { ...session.agentRun, status: "completed" } };
+  });
+}
+
+/**
  * A build claim is never trusted. The desk may hold the requested pass because
  * it already persisted that exact lineup mission, or because it independently
- * derives the next pass from terminal workers that carry the prior manifest.
+ * derives the next pass from workers that carry its exact prior manifest.
  */
 export function deskMissionForStoreSpawn(input: {
   sessions: Session[];
@@ -652,14 +700,21 @@ export function deskMissionForStoreSpawn(input: {
   requested: MissionIteration | undefined;
   lineup: MissionIteration | undefined;
   agentRun: MissionIteration | undefined;
+  liveContinuation?: { previousWorkerIds: string[]; previousPass: number };
 }): MissionIteration | undefined {
   const requested = input.requested;
   if (requested && input.lineup?.id === requested.id && input.lineup.iteration === requested.iteration) {
     return input.lineup;
   }
   if (requested && requested.previousWorkerIds.length > 0) {
+    const sessions = sessionsForDeskMissionDerivation({
+      sessions: input.sessions,
+      requested,
+      lineup: input.lineup,
+      liveContinuation: input.liveContinuation,
+    });
     const derived = nextMissionIteration(
-      input.sessions,
+      sessions,
       input.parentId,
       requested.previousWorkerIds,
       requested.iteration - 1,
@@ -4844,6 +4899,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               requested: requestedMission,
               lineup: lineupMission,
               agentRun: caller.agentRun?.mission,
+              liveContinuation: payload.missionContinuation,
             });
             const gate = campaignSpawnGate({
               campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission || openingMission),

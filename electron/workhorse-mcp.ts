@@ -13,7 +13,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -407,7 +407,7 @@ const TOOLS = [
           description: "Opt-in adaptive sequential mission. Omit for one wave.",
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
-            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+            maxIterations: { type: "number", description: "2-8 passes; default 4" },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
@@ -544,14 +544,14 @@ const TOOLS = [
           description: "Opt-in adaptive sequential mission. Its opening worker is gated before dispatch.",
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
-            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+            maxIterations: { type: "number", description: "2-8 passes; default 4" },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
         },
         missionIteration: {
           type: "object",
-          description: "Optional inherited adaptive mission manifest. Human clearance is always taken from desk state.",
+          description: "Optional inherited adaptive mission manifest. Build is honoured only from matching desk state.",
         },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
@@ -1931,6 +1931,7 @@ async function spawnAgent(
     wait?: boolean;
     mission?: boolean;
     missionIteration?: unknown;
+    missionContinuation?: { previousWorkerIds: string[]; previousPass: number };
     loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
     role?: "auditor";
@@ -2004,7 +2005,7 @@ async function spawnAgent(
         objective: input.prompt.trim(),
         acceptanceCriteria: ["The assigned task is complete and verified."],
         iteration: 1,
-        maxIterations: 3,
+        maxIterations: 4,
         previousWorkerIds: [],
         phase: "scout" as const,
       }
@@ -2085,6 +2086,7 @@ async function spawnAgent(
     wait: spawnInput.wait,
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
+    missionContinuation: spawnInput.missionContinuation,
     route: spawnInput.route,
     role: spawnInput.role,
     planStepId: spawnInput.planStepId,
@@ -2122,6 +2124,7 @@ async function spawnAgent(
       wait: spawnInput.wait,
       mission: spawnInput.mission,
       missionIteration: spawnInput.missionIteration,
+      missionContinuation: spawnInput.missionContinuation,
       route: spawnInput.route,
       role: spawnInput.role,
       planStepId: spawnInput.planStepId,
@@ -2195,7 +2198,7 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
     ? loop.acceptanceCriteria.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
   if (acceptanceCriteria.length === 0) throw new Error("adaptive loop needs acceptance criteria");
-  const requestedMax = typeof loop.maxIterations === "number" && Number.isFinite(loop.maxIterations) ? Math.floor(loop.maxIterations) : 3;
+  const requestedMax = typeof loop.maxIterations === "number" && Number.isFinite(loop.maxIterations) ? Math.floor(loop.maxIterations) : 4;
   if (requestedMax < 2 || requestedMax > 8) throw new Error("maxIterations must be between 2 and 8");
   const missionId = traceId?.trim() || uid("mission");
   return {
@@ -2261,6 +2264,12 @@ function missionContinuationPrompt(input: {
   return lines.join("\n");
 }
 
+function missionContinuationSourceFolder(session: Session | undefined): string {
+  if (!session) return "";
+  if (session.environment?.kind === "worktree") return session.environment.gitRoot.trim();
+  return sessionExecutionCwd(session.environment, callerProjectFolder(session));
+}
+
 async function continueMission(args: Record<string, unknown>, from?: string): Promise<string> {
   const parentId = typeof args.fromSessionId === "string" ? args.fromSessionId.trim() : fromSessionId(from);
   if (!parentId) throw new Error("context_required");
@@ -2306,17 +2315,17 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
   if (!next.ok) throw new Error(next.error);
   const requestedTrace = typeof args.traceId === "string" ? args.traceId.trim() : "";
   if (requestedTrace && requestedTrace !== next.mission.id) throw new Error("traceId does not match this mission");
-  const source = sessions.filter((session) => previousWorkerIds.includes(session.id));
-  const coordinator = previousWorkerIds
-    .map((id) => source.find((session) => session.id === id))
-    .find(Boolean);
+  const source = previousWorkerIds
+    .map((id) => sessions.find((session) => session.id === id))
+    .filter((session): session is Session => Boolean(session));
+  const coordinator = source[0];
   const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
   const parent = sessions.find((session) => session.id === parentId);
   const inheritedFolder =
     previousWorkerIds
       .map((id) => parent?.lineup?.rows.find((row) => row.childId === id)?.folder.trim())
       .find((folder): folder is string => Boolean(folder)) ||
-    sessionExecutionCwd(source[0]?.environment, callerProjectFolder(source[0])) ||
+    source.map(missionContinuationSourceFolder).find(Boolean) ||
     parent?.lineup?.folder.trim() ||
     undefined;
   const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions" | "paths") =>
@@ -2337,6 +2346,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       worker: coordinatorName,
       mission: true,
       missionIteration: next.mission,
+      missionContinuation: { previousWorkerIds, previousPass },
       route: "auto",
       constraints: union("constraints"),
       skills: union("skills"),
@@ -2347,7 +2357,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
       isolation: args.isolation === "worktree" ? "worktree" : args.isolation === "shared" ? "shared" : source[0]?.agentRun?.isolation,
-      folder: typeof args.folder === "string" ? args.folder : inheritedFolder,
+      folder: typeof args.folder === "string" && args.folder.trim() ? args.folder.trim() : inheritedFolder,
       wait: linkWait(args.wait),
       traceId: next.mission.id,
     },

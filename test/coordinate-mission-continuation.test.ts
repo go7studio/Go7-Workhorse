@@ -20,7 +20,7 @@ import {
   hydrateInterruptedPathLeases,
   storeOpeningWaveMission,
 } from "../src/lib/store";
-import type { Session } from "../src/lib/types";
+import type { MissionIteration, Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -231,66 +231,108 @@ test("phase advancement rejects missing and unknown campaign phases", () => {
   assert.match(decision.error, /phase is missing or invalid/);
 });
 
-test("phases still advance one at a time without any clearance", () => {
-  const scout = adaptiveMission({ phase: "scout" });
-  assert.ok(scout);
-  const coordinator = worker("coordinator", "parent", {
-    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: scout },
-  });
-  const next = nextMissionIteration([coordinator], "parent", ["coordinator"]);
-  assert.equal(next.ok, true);
-  if (!next.ok) return;
-  assert.equal(next.mission.phase, "review");
-  assert.equal(campaignGateError(next.mission), undefined);
-});
-
-test("the desk derives and holds the next build pass from terminal workers", () => {
-  const approve = adaptiveMission({
-    id: "mission_build_reachable",
-    phase: "approve",
-    iteration: 3,
-    maxIterations: 4,
-  });
-  assert.ok(approve);
-  const coordinator = worker("approve_worker", "parent", {
-    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: approve },
-  });
-  const requested = {
-    ...approve,
-    iteration: 4,
-    previousWorkerIds: [coordinator.id],
-    phase: "build" as const,
-  };
-  const desk = deskMissionForStoreSpawn({
-    sessions: [coordinator],
-    parentId: "parent",
-    requested,
-    lineup: approve,
-    agentRun: undefined,
-  });
-  assert.equal(desk?.phase, "build");
-  assert.equal(desk?.iteration, 4);
-  assert.equal(missionForDeskSpawn(requested, desk)?.phase, "build");
-});
-
-test("a notified lineup rolls over with the desk-held mission", () => {
-  const approve = adaptiveMission({ phase: "approve", iteration: 3, maxIterations: 4 });
-  assert.ok(approve);
-  const build = { ...approve, phase: "build" as const, iteration: 4 };
+test("raw desk state walks scout through build with a reused worker and lagging lifecycle", () => {
+  const parentId = "parent_four_pass";
+  const workerId = "reused_mission_worker";
   const folder = path.join("repo", "mission");
-  const previous = { ...emptyLineup(folder, 1), mission: approve, notifiedAt: 10 };
-  const next = addLineupRow(previous, {
-    childId: "builder",
-    title: "Builder",
-    slice: "Build",
+  const scout = {
+    id: "mission_build_reachable",
+    mode: "adaptive",
+    objective: "Ship the verified feature",
+    acceptanceCriteria: ["Tests pass"],
+    iteration: 1,
+    maxIterations: 4,
+    previousWorkerIds: [],
+    phase: "scout",
+  } satisfies MissionIteration;
+  const row = {
+    childId: workerId,
+    title: "Mission worker",
+    slice: "Mission pass",
     folder,
     vendor: "Codex",
     status: "running",
-    startedAt: 20,
-  }, undefined, build);
-  assert.equal(next.notifiedAt, undefined);
-  assert.equal(next.mission?.phase, "build");
-  assert.equal(next.mission?.iteration, 4);
+    startedAt: 1,
+  } as const;
+  let lineup = addLineupRow(emptyLineup(folder, 1), row, undefined, scout);
+  assert.equal(lineup.mission?.phase, "scout", "the desk holds scout before the first continuation");
+
+  const rawWorker = (
+    id: string,
+    status: "completed" | "running" | "interrupted",
+    mission?: MissionIteration,
+  ) => ({
+    id,
+    parentId,
+    hidden: true,
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    title: `${id} · pass`,
+    status: "idle",
+    messages: [],
+    agentRun: {
+      status,
+      startedAt: 1,
+      isolation: "shared",
+      ...(mission ? { mission } : {}),
+    },
+  }) as unknown as Session;
+
+  const advance = (
+    previous: MissionIteration,
+    requested: MissionIteration,
+    sessions: Session[],
+  ): MissionIteration => {
+    const desk = deskMissionForStoreSpawn({
+      sessions,
+      parentId,
+      requested,
+      lineup: lineup.mission,
+      agentRun: undefined,
+      liveContinuation: { previousWorkerIds: requested.previousWorkerIds, previousPass: previous.iteration },
+    });
+    assert.equal(desk?.phase, requested.phase, `the desk holds ${requested.phase}`);
+    assert.equal(desk?.iteration, requested.iteration);
+    const admitted = missionForDeskSpawn(requested, desk);
+    assert.equal(admitted?.phase, requested.phase);
+    lineup = addLineupRow(lineup, { ...row, startedAt: requested.iteration }, undefined, admitted);
+    assert.equal(lineup.rows.length, 1, "the normal continuation reuses one worker row");
+    assert.equal(lineup.mission?.phase, requested.phase, "duplicate worker reuse still writes the new mission");
+    assert.equal(lineup.mission?.iteration, requested.iteration);
+    assert.equal(previous.iteration + 1, requested.iteration);
+    return admitted!;
+  };
+
+  const review = advance(scout, { ...scout, iteration: 2, previousWorkerIds: [workerId], phase: "review" }, [
+    rawWorker(workerId, "completed", scout),
+  ]);
+  const approve = advance(review, { ...review, iteration: 3, previousWorkerIds: [workerId], phase: "approve" }, [
+    rawWorker(workerId, "completed", review),
+  ]);
+  const buildRequest: MissionIteration = {
+    ...approve,
+    iteration: 4,
+    previousWorkerIds: [workerId, "supporting_reviewer"],
+    phase: "build",
+  };
+  const laggingSessions = [
+    rawWorker(workerId, "running", approve),
+    rawWorker("supporting_reviewer", "interrupted"),
+  ];
+  const forgedDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+  });
+  assert.equal(forgedDesk, undefined, "a caller cannot turn lifecycle lag into build evidence");
+  assert.equal(missionForDeskSpawn(buildRequest, forgedDesk)?.phase, "approve");
+
+  const build = advance(approve, buildRequest, laggingSessions);
+  assert.equal(build.phase, "build");
+  assert.equal(build.maxIterations, 4);
 });
 
 test("the live store spawn path consults the production campaign gate", () => {
@@ -318,6 +360,7 @@ test("the live store spawn path consults the production campaign gate", () => {
     missionId: "mission_opening_wave",
   });
   assert.equal(openingMission?.phase, "scout");
+  assert.equal(openingMission?.maxIterations, 4);
   assert.deepEqual(openingMission?.previousWorkerIds, ["worker_one", "worker_two"]);
   const openingGate = campaignSpawnGate({
     campaignContext: false,
@@ -328,12 +371,16 @@ test("the live store spawn path consults the production campaign gate", () => {
   assert.equal(openingGate.error, undefined, "a wide opening wave becomes a campaign, not a modal");
 
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const subagentSource = readFileSync(path.join(ROOT, "src", "lib", "subagents.ts"), "utf8");
+  const mcpSource = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
   assert.match(source, /openingWaveMission\(\{/);
   assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
   assert.doesNotMatch(source, /requires human approval/i, "no spawn path asks a human to approve a phase");
+  assert.doesNotMatch(subagentSource, /approval card is the sole caller/i);
+  assert.doesNotMatch(mcpSource, /human clearance is always taken from desk state/i);
 });
 
 test("the store keeps a different in-flight reservation beside one live opening worker", () => {

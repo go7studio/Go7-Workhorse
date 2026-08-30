@@ -32,8 +32,8 @@ import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig,
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
 
-test("the Link v2 contract publishes workers and typed local capability execution", () => {
-  assert.equal(LINK_PROTOCOL_VERSION, 2);
+test("the Link v3 contract publishes workers and typed local capability execution", () => {
+  assert.equal(LINK_PROTOCOL_VERSION, 3);
   // Follow-up is continue_mission: delegate publishes no worker field, because
   // which worker runs a task is Workhorse's routing, not the harness's.
   assert.deepEqual([...LINK_TOOLS], [
@@ -78,7 +78,7 @@ test("the Link v2 contract publishes workers and typed local capability executio
   }
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
   const shake = linkHandshake({ deskOnline: true, local: { tools: LINK_LOCAL_TOOLS, hosts: [{ id: "spark", label: "Spark", brokerId: "spark", brokerVersion: "1", capabilities: [] }] } });
-  assert.equal(shake.protocolVersion, 2);
+  assert.equal(shake.protocolVersion, 3);
   assert.equal(shake.desk, "online");
   assert.deepEqual(shake.tools, [...LINK_TOOLS]);
   assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
@@ -144,7 +144,7 @@ test("workhorse_capabilities answers over the external profile, first, with the 
       tools: string[];
       followThrough: { newSlice: string; namedWorker: string; later: string };
     };
-    assert.equal(shake.protocolVersion, 2);
+    assert.equal(shake.protocolVersion, 3);
     assert.ok(shake.desk === "online" || shake.desk === "offline");
     assert.deepEqual(shake.tools, expectedTools);
     assert.deepEqual(shake.followThrough, { ...LINK_FOLLOW_THROUGH });
@@ -528,6 +528,23 @@ test("the CLI is the same handler: each subcommand maps to one tool call", () =>
     name: "workhorse_continue_mission",
     args: { previousWorkerIds: ["w7"], previousPass: 2, remainingWork: "Check the failing test", fromSessionId: "c1", idempotencyKey: "k2" },
   });
+  assert.deepEqual(linkCliCall([
+    "follow-up", "w7", "Run the correction", "--chat", "c1", "--pass", "2",
+    "--provider", "cursor", "--model", "cursor-grok-4.6", "--effort", "high",
+  ]), {
+    name: "workhorse_continue_mission",
+    args: {
+      previousWorkerIds: ["w7"],
+      previousPass: 2,
+      remainingWork: "Run the correction",
+      fromSessionId: "c1",
+      initialBrain: { provider: "cursor", model: "cursor-grok-4.6", effort: "high" },
+    },
+  });
+  assert.deepEqual(linkCliCall(["follow-up", "w7", "Route this", "--chat", "c1", "--route", "auto"]), {
+    name: "workhorse_continue_mission",
+    args: { previousWorkerIds: ["w7"], previousPass: 1, remainingWork: "Route this", fromSessionId: "c1", route: "auto" },
+  });
   assert.deepEqual(linkCliCall(["local-hosts"]), { name: "workhorse_local_hosts", args: {} });
   assert.deepEqual(linkCliCall(["local-upload", "source.png", "--capability", "asset.3d.generate", "--kind", "image", "--role", "source_image", "--media-type", "image/png", "--host", "spark"]), {
     name: "workhorse_local_upload",
@@ -858,7 +875,7 @@ test("the workhorse command: a launcher with this install's paths, linked onto P
       },
     });
     const shake = JSON.parse(out) as { protocolVersion: number; tools: string[] };
-    assert.equal(shake.protocolVersion, 2);
+    assert.equal(shake.protocolVersion, 3);
     for (const tool of LINK_BASE_TOOLS) assert.ok(shake.tools.includes(tool), `packaged helper includes ${tool}`);
     assert.equal(readFileSync(launcher, "utf8").includes(statePath), true);
 

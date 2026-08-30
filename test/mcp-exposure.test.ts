@@ -187,7 +187,7 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     const awaitFields = mcpToolInputSchema("workhorse_await_agents")?.properties ?? {};
     assert.ok("workerIds" in awaitFields, "workhorse_await_agents publishes wave worker ids");
     const continueFields = mcpToolInputSchema("workhorse_continue_mission")?.properties ?? {};
-    for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "fromSessionId", "traceId"]) {
+    for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "initialBrain", "route", "fromSessionId", "traceId"]) {
       assert.ok(field in continueFields, `workhorse_continue_mission publishes ${field}`);
     }
     const deleted = (await handleWorkhorseRpc({
@@ -505,7 +505,7 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   }
 });
 
-test("adaptive mission continuation reconciles raw phase, inherits its folder, and returns routing to Auto", async () => {
+test("adaptive mission continuation reconciles raw phase, inherits its folder and brain, and allows explicit rerouting", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-loop-"));
   const parentFolder = path.join(dir, "parent-project");
   const missionFolder = path.join(dir, "mission-worktree");
@@ -634,9 +634,9 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
     })) as { error?: { message?: string } };
     assert.equal(continued.error, undefined, continued.error?.message);
     assert.equal(spawned?.route, "auto");
-    assert.equal(spawned?.provider, undefined);
-    assert.equal(spawned?.model, undefined);
-    assert.equal(spawned?.effort, undefined);
+    assert.equal(spawned?.provider, "claude");
+    assert.equal(spawned?.model, "claude-sonnet-4-6");
+    assert.equal(spawned?.effort, "medium");
     assert.equal(spawned?.worker, "Wren");
     assert.equal(spawned?.folder, missionFolder);
     assert.equal(spawned?.missionIteration?.iteration, 2);
@@ -652,6 +652,50 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
     assert.match(spawned?.message ?? "", /PRIOR REPORTS/);
     assert.match(spawned?.message ?? "", /Implemented the first half/);
     assert.match(spawned?.message ?? "", /Finish and verify the live path/);
+
+    spawned = undefined;
+    const changedBrain = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 611,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Use the explicitly selected reviewer.",
+          initialBrain: { provider: "cursor", model: "grok-4.6", effort: "high" },
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(changedBrain.error, undefined, changedBrain.error?.message);
+    const changedSpawn = spawned as unknown as import("../electron/peer-inbox").PeerAsk | undefined;
+    assert.equal(changedSpawn?.provider, "cursor");
+    assert.equal(changedSpawn?.model, "grok-4.6");
+    assert.equal(changedSpawn?.effort, "high");
+
+    spawned = undefined;
+    const rerouted = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 612,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Route this pass automatically on purpose.",
+          route: "auto",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(rerouted.error, undefined, rerouted.error?.message);
+    const reroutedSpawn = spawned as unknown as import("../electron/peer-inbox").PeerAsk | undefined;
+    assert.equal(reroutedSpawn?.provider, undefined);
+    assert.equal(reroutedSpawn?.model, undefined);
+    assert.equal(reroutedSpawn?.effort, undefined);
     const wrongTrace = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 62,
@@ -675,6 +719,41 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder, a
     if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
     else process.env.WORKHORSE_STATE_PATH = previous.state;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Link reports all missing continuation fields and rejects a scalar acceptanceCriteria", async () => {
+  const previous = process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  try {
+    const missing = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 613,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: { previousWorkerIds: ["worker_pass_1"], fromSessionId: "parent_chat" },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(missing.error?.message ?? "", /missing required fields: previousPass, remainingWork/);
+
+    const wrongCriteria = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 614,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Run an adaptive check",
+          fromSessionId: "parent_chat",
+          loop: { acceptanceCriteria: "Tests pass" },
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(wrongCriteria.error?.message ?? "", /loop\.acceptanceCriteria must be an array of non-empty strings/);
+  } finally {
+    if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous;
   }
 });
 

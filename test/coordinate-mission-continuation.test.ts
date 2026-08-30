@@ -146,6 +146,20 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.match(decision.error, /do not share one mission contract/);
 });
 
+test("a stale pass label tells a reused-worker caller how to recover without stripping metadata", () => {
+  const mission = adaptiveMission({ iteration: 2, previousWorkerIds: ["coordinator"], phase: "review" });
+  assert.ok(mission);
+  const coordinator = worker("coordinator", "parent", {
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission },
+  });
+  const decision = nextMissionIteration([coordinator], "parent", ["coordinator"], 1);
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.match(decision.error, /previousPass 1 does not match the selected workers' pass 2/);
+  assert.match(decision.error, /workhorse_agent_status/);
+  assert.match(decision.error, /retry with previousPass 2/);
+});
+
 test("campaign phases run without a human click", () => {
   // Steve, 2026-08-29: the desk never asks a human to approve a phase.
   const scout = adaptiveMission({ phase: "scout" });

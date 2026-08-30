@@ -1909,7 +1909,9 @@ export function resolveMissionManifest(
     }
   }
   if (typeof previousIteration === "number" && first.iteration !== Math.floor(previousIteration)) {
-    return { error: "mission pass no longer matches these workers" };
+    return {
+      error: `previousPass ${Math.floor(previousIteration)} does not match the selected workers' pass ${first.iteration}; call workhorse_agent_status for the latest terminal worker ids, then retry with previousPass ${first.iteration}`,
+    };
   }
   return { mission: first, coordinatorId: coordinator.id };
 }

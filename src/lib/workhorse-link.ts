@@ -13,7 +13,7 @@ import type {
   LocalCapabilityInvocationContract,
 } from "./local-capability-contract";
 
-export const LINK_PROTOCOL_VERSION = 2;
+export const LINK_PROTOCOL_VERSION = 3;
 
 /**
  * The contract. A harness may rely on these names across Workhorse versions.

@@ -57,7 +57,7 @@ calling Claude's model through ACP is the other direction and stays separate.
 
 ```json
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "desk": "online",
   "capabilities": [
     "capacity.read", "chats.read", "workers.delegate", "workers.follow_up",
@@ -122,7 +122,7 @@ last saved state, delegation does not.
 | `workhorse_read_chat` | one chat's transcript | no |
 | `workhorse_query_capacity` | leftover and callability per bot; advisory | no |
 | `workhorse_delegate` | run one task through Workhorse as a worker; Workhorse picks the worker | yes |
-| `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse routes the next pass | yes |
+| `workhorse_continue_mission` | follow up: continue the wave a worker finished with only the remaining work; Workhorse keeps that pass's coordinating brain unless `initialBrain` changes it or `route` opts into routing | yes |
 | `workhorse_agent_status` | follow through: `next` is wait, done, or failed; report when done | no |
 | `workhorse_ask_chat` | a message to a live chat | yes |
 | `workhorse_local_hosts` | configured local inference hosts, without credentials | no |
@@ -229,7 +229,10 @@ The same loop for Claude, Codex, Grok, OpenClaw, and Hermes:
    Named worker: `workhorse_ask_chat` with that row's `id`.
 3. Later, `workhorse_agent_status` with the worker id. `next` is `wait`,
    `done`, or `failed`. When `done`, the report is in that payload.
-4. Remaining work: `workhorse_continue_mission`. Read: `workhorse_read_chat`.
+4. Remaining work: `workhorse_continue_mission`. It keeps the prior pass's
+   coordinating vendor, model, and effort. Set `initialBrain` only to change
+   that brain, or set `route` to opt back into automatic routing. Read:
+   `workhorse_read_chat`.
 
 Do not sit in a poll loop in the same turn. Do not spawn a second worker for
 the same slice. Do not pass `wait=true`; Link ignores it so the client is not
@@ -285,6 +288,8 @@ workhorse delegate --chat <sessionId> --task "Ask the Grok Bot reviewer" --provi
 workhorse delegate --chat <sessionId> --task "Ship and certify" --accept "Tests pass" --accept "Marker file exists" --passes 2 --folder <dir>
 workhorse status <workerId>
 workhorse follow-up <workerId> "Check the failing test" --chat <sessionId> --key <idempotencyKey>
+workhorse follow-up <workerId> "Run an independent correction" --chat <sessionId> --provider cursor --model cursor-grok-4.6 --effort high --key <idempotencyKey>
+workhorse follow-up <workerId> "Let Workhorse choose this pass" --chat <sessionId> --route auto --key <idempotencyKey>
 workhorse local-hosts
 workhorse local-capabilities --host dgx-spark
 workhorse local-upload source.png --capability asset.3d.generate --kind image --role source_image --media-type image/png --host dgx-spark
@@ -299,6 +304,10 @@ workhorse local-continue <jobId> <continuationId> --host dgx-spark --chat <sessi
 `delegate --provider grok-bot` selects the custom Grok Bot slot. It is not
 Grok ACP: use `--provider grok --model grok-4.6` for that. Omit provider,
 model, and effort for full Auto routing.
+
+`follow-up` keeps the completed pass's coordinating brain when those flags are
+omitted. Use `--provider`, `--model`, or `--effort` to change it deliberately;
+use `--route auto|quick|balanced|deep` to opt back into Workhorse routing.
 
 `local-upload` accepts one file up to 64 MiB; for larger transfers use the
 broker CLI directly. Every upload names the capability it is intended for;

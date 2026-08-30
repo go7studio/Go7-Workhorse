@@ -1157,7 +1157,10 @@ test("adaptive missions continue one terminal pass at a time", () => {
   assert.deepEqual(next.mission.acceptanceCriteria, ["Tests pass", "Feature is visible"]);
   const stale = nextMissionIteration([worker!], "parent", ["worker_1"], 2);
   assert.equal(stale.ok, false);
-  if (!stale.ok) assert.match(stale.error, /no longer matches/);
+  if (!stale.ok) {
+    assert.match(stale.error, /previousPass 2 does not match the selected workers' pass 1/);
+    assert.match(stale.error, /retry with previousPass 1/);
+  }
 
   const running = normalizeSession({
     ...worker,

@@ -847,6 +847,14 @@ export function claudeWindowTabs(plan: GrokPlanUsage | undefined): { id: string;
   return (plan?.products ?? []).map((item) => ({ id: item.product, label: claudeWindowTab(item) }));
 }
 
+/** Vendor UIs call the burst 5h and the allowance Weekly. Do not print 3hr from rounded seconds. */
+export function chipWindowLabel(item: Pick<GrokPlanProduct, "product" | "label">): string {
+  if (item.product === "five_hour" || item.product === "5h") return "5h";
+  if (/^weekly(_all)?$/i.test(item.product) || /^weekly$/i.test(item.label.trim())) return "Weekly";
+  if (/^\d+\s*hr?s?$/i.test(item.label.trim())) return "5h";
+  return item.label;
+}
+
 export function planWindowChip(
   plan: GrokPlanUsage | undefined,
   options: { local?: boolean; provider?: ProviderId } = {},
@@ -861,10 +869,14 @@ export function planWindowChip(
   const deadGauge = allowance.status === "unmetered" && allowance.why === "dead-gauge";
   return rows
     .map((item) => {
+      const label = chipWindowLabel(item);
       // Once the allowance is judged unmetered, its gauge stops being a
       // number worth printing: "Weekly: 0%" is the fiction we just saw through.
       const uncapped = item.unlimited || (deadGauge && ALLOWANCE_WINDOW.test(item.product));
-      return uncapped ? `${item.label}: ∞` : `${item.label}: ${Math.round(item.usagePercent)}%`;
+      if (uncapped) return `${label}: ∞`;
+      // Same leftover polarity as the ring: 100% is the full allowance still left.
+      const left = clampLeftover(100 - item.usagePercent);
+      return `${label}: ${Math.round(left)}%`;
     })
     .join(" · ");
 }

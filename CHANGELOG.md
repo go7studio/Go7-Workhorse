@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.48](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.47...v0.6.48) (2026-08-31)
+
+
+### Features
+
+* Connect Cursor writes user-global `~/.cursor/mcp.json` without treating other servers' tokens as ours
+* leftover Watch and ring chips use remaining polarity so a spent week reads 0%
+
+
+### Bug Fixes
+
+* the desk enforces a worker's runtime limit ([#209](https://github.com/go7studio/Go7-Workhorse/issues/209)) ([878e66e](https://github.com/go7studio/Go7-Workhorse/commit/878e66ed874e2f1de5a96f74a47d786de4d5df58))
+* refuse a hollow pack that omits `dist/index.html` so Dev is not a blank window
+
 ## [0.6.47](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.46...v0.6.47) (2026-08-31)
 
 

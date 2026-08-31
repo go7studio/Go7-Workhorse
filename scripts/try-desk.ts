@@ -6,10 +6,14 @@
 //
 // Never writes /Applications/Go7 Workhorse.app. That path is ship only.
 import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const afterPack = require("./after-pack.cjs") as { assertRendererPacked: (asarPath: string) => void };
 import {
   WORKHORSE_APP_NAME,
   WORKHORSE_DEV_APP_ID,
@@ -186,12 +190,16 @@ function openWinDevApp(dest: string) {
   const roaming = process.env.APPDATA?.trim() || path.join(os.homedir(), "AppData", "Roaming");
   const userData = path.join(roaming, WORKHORSE_DEV_USER_DATA_DIR);
   fs.mkdirSync(userData, { recursive: true });
+  // Start-Process concatenates ArgumentList without quoting, so
+  // --workhorse-user-data=%APPDATA%\Go7 Workhorse Dev becomes userData
+  // %APPDATA%\Go7. The env var is parsed first and does not split on spaces.
+  const q = (value: string) => value.replace(/'/g, "''");
   const launched = spawnSync(
     "powershell.exe",
     [
       "-NoProfile",
       "-Command",
-      `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -WorkingDirectory '${dest.replace(/'/g, "''")}' -ArgumentList @('--workhorse-user-data=${userData.replace(/'/g, "''")}','--workhorse-volatile-credentials')`,
+      `$env:WORKHORSE_USER_DATA_PATH = '${q(userData)}'; Start-Process -FilePath '${q(exe)}' -WorkingDirectory '${q(dest)}' -ArgumentList @('--workhorse-user-data="${q(userData)}"', '--workhorse-volatile-credentials')`,
     ],
     { windowsHide: true, encoding: "utf8" },
   );
@@ -237,6 +245,7 @@ function main() {
     if (!args.skipPack) packWindowsDir();
     const built = builtWinDir();
     if (!built) die("No packed win-unpacked desk under release/. Run without --skip-pack.");
+    afterPack.assertRendererPacked(path.join(built, "resources", "app.asar"));
     installWinDevApp(built, target.dest);
     say(`Opening ${target.dest}`);
     openWinDevApp(target.dest);
@@ -248,6 +257,7 @@ function main() {
   if (!args.skipPack) packCurrentArch();
   const built = builtAppPath();
   if (!built) die("No packed Go7 Workhorse.app under release/mac*. Run without --skip-pack.");
+  afterPack.assertRendererPacked(path.join(built, "Contents", "Resources", "app.asar"));
   installDevApp(built, target.dest);
   say(`Opening ${target.dest}`);
   const opened = spawnSync("open", ["-na", target.dest], { stdio: "inherit" });

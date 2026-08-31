@@ -11,6 +11,21 @@ export function leftoverUnknownMark(known: boolean): { label: "…"; unknown: bo
     : { label: "…", unknown: false, title: "Loading leftover" };
 }
 
+/** Known 0 leftover paints `0%`. Unknown keeps `…` — never collapse spent into a load mark. */
+export function fuelRingCenterLabel(input: {
+  value?: number;
+  shown: number;
+  label: string;
+  unknown?: boolean;
+}): string {
+  const percentLabel = /^(\d+)\s*%(.*)$/.exec(input.label);
+  // Explicit 0 is spent, even if a caller also marked the fetch unknown.
+  if (input.value === 0) return percentLabel ? `0%${percentLabel[2]}` : "0%";
+  if (input.unknown || input.value === undefined) return input.label;
+  if (!percentLabel) return input.label;
+  return `${Math.round(input.shown * 100)}%${percentLabel[2]}`;
+}
+
 function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
@@ -91,14 +106,15 @@ export function FuelRing({
   const shown = useTween(leftover, delay);
   const overShown = useTween(value === undefined ? undefined : overflow, delay);
   const overDraw = Math.min(overShown, Math.max(0, 1 - shown));
-  const percentLabel = /^(\d+)\s*%(.*)$/.exec(label);
-  const hint = title ?? (unknown ? "Unknown" : undefined);
+  const spent = leftover === 0;
+  const hint = spent ? "0% left" : title ?? (unknown ? "Unknown" : undefined);
   const loading = value === undefined && !unknown;
+  const center = fuelRingCenterLabel({ value: leftover, shown, label, unknown });
   return (
     <div
-      className={`fuel-ring ${tone}${overflow > 0 ? " has-over" : ""}${unknown ? " unknown" : ""}`}
+      className={`fuel-ring ${tone}${overflow > 0 ? " has-over" : ""}${unknown && !spent ? " unknown" : ""}`}
       title={hint}
-      aria-label={unknown ? "Unknown" : hint}
+      aria-label={spent ? "0% left" : unknown ? "Unknown" : hint}
       aria-busy={loading || undefined}
       style={{
         width: size,
@@ -133,7 +149,7 @@ export function FuelRing({
           />
         )}
       </svg>
-      <strong>{percentLabel ? `${Math.round(shown * 100)}%${percentLabel[2]}` : label}</strong>
+      <strong>{center}</strong>
     </div>
   );
 }

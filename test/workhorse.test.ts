@@ -204,6 +204,7 @@ import {
   groupWorkRows,
   isActiveWorkRow,
   lastReplyIndex,
+  liveWorkWord,
   nextTranscriptPaintStart,
   TRANSCRIPT_FIRST_PAINT,
   TRANSCRIPT_LEAD_PX,
@@ -212,6 +213,7 @@ import {
   packWorkRows,
   playWorkEvents,
   transcriptPaintStart,
+  replyHasThought,
   resolveWorkedMs,
   thoughtForReply,
   workStepKinds,
@@ -286,6 +288,20 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(
     workhorseUserDataOverride(["electron", ".", "--workhorse-user-data=/tmp/flag-profile"], {}),
     "/tmp/flag-profile",
+  );
+  assert.equal(
+    workhorseUserDataOverride(
+      ["electron", ".", `--workhorse-user-data=${path.join("C:", "Users", "fixture", "AppData", "Roaming", "Go7 Workhorse Dev")}`],
+      {},
+    ),
+    path.join("C:", "Users", "fixture", "AppData", "Roaming", "Go7 Workhorse Dev"),
+  );
+  assert.equal(
+    workhorseUserDataOverride(
+      ["electron", ".", `--workhorse-user-data="${path.join("C:", "Users", "fixture", "AppData", "Roaming", "Go7 Workhorse Dev")}"`],
+      {},
+    ),
+    path.join("C:", "Users", "fixture", "AppData", "Roaming", "Go7 Workhorse Dev"),
   );
   assert.equal(workhorseUserDataOverride([], {}), undefined);
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
@@ -3499,6 +3515,66 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.products[0]?.label, "Build");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /% left/);
+
+  const spent = parseGrokPlanUsage({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-23T13:53:32.726325+00:00",
+        end: "2026-08-30T13:53:32.726325+00:00",
+      },
+      creditUsagePercent: 100.0,
+      productUsage: [
+        { product: "GrokBuild", usagePercent: 100.0 },
+        { product: "GrokChat" },
+      ],
+      prepaidBalance: { val: 0 },
+    },
+  });
+  assert.equal(spent?.usedPercent, 100);
+  assert.equal(spent?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spent })?.label,
+    "0%",
+  );
+
+  const spentBuildOnly = parseGrokPlanUsage({
+    config: {
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2026-08-23T00:00:00Z", end: "2026-08-30T00:00:00Z" },
+      productUsage: [{ product: "GrokBuild", usagePercent: 100 }],
+    },
+  });
+  assert.equal(spentBuildOnly?.usedPercent, 100);
+  assert.equal(spentBuildOnly?.leftPercent, 0);
+
+  // Live spent SuperGrok often reports leftover polarity (remaining 0) and
+  // omits creditUsagePercent. That is known zero, not a missing meter.
+  const spentRemaining = parseGrokPlanUsage({
+    config: {
+      remainingPercent: 0,
+      productUsage: [{ product: "GrokBuild", remainingPercent: 0 }],
+    },
+  });
+  assert.equal(spentRemaining?.usedPercent, 100);
+  assert.equal(spentRemaining?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentRemaining })?.label,
+    "0%",
+  );
+  const spentVal = parseGrokPlanUsage({ config: { creditRemainingPercent: { val: 0 } } });
+  assert.equal(spentVal?.leftPercent, 0);
+  const spentOnDemand = parseGrokPlanUsage({
+    config: { onDemandUsed: { val: 10 }, onDemandCap: { val: 10 } },
+  });
+  assert.equal(spentOnDemand?.usedPercent, 100);
+  assert.equal(spentOnDemand?.leftPercent, 0);
+  assert.equal(
+    parseGrokPlanUsage({ config: { onDemandUsed: { val: 0 }, onDemandCap: { val: 0 } } }),
+    undefined,
+    "a 0 on-demand cap is not a spent week",
+  );
+  assert.equal(parseGrokPlanUsage({}), undefined, "missing leftover stays unknown");
+  assert.equal(parseGrokPlanUsage({ config: {} }), undefined);
 });
 
 test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () => {
@@ -3537,7 +3613,22 @@ test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () =
   assert.equal(chatgptWeekly?.period, "weekly");
   assert.ok(chatgptWeekly?.resetsAt);
   assert.equal(chatgptWeekly?.products[0]?.product, "five_hour");
+  assert.equal(chatgptWeekly?.products[0]?.label, "5h");
   assert.equal(chatgptWeekly?.products[1]?.product, "weekly");
+  assert.equal(chatgptWeekly?.products[1]?.label, "Weekly");
+  assert.equal(planWindowChip(chatgptWeekly, { provider: "codex" }), "5h: 99% · Weekly: 59%");
+
+  const shortBurst = parseCodexPlanUsage({
+    plan_type: "plus",
+    rate_limit: {
+      primary_window: { used_percent: 72, limit_window_seconds: 10_800, reset_at: 1786680000 },
+      secondary_window: { used_percent: 11, limit_window_seconds: 604_800, reset_at: 1787202379 },
+    },
+  });
+  assert.equal(shortBurst?.products[0]?.product, "five_hour");
+  assert.equal(shortBurst?.products[0]?.label, "5h");
+  assert.equal(shortBurst?.leftPercent, 89);
+  assert.equal(planWindowChip(shortBurst, { provider: "codex" }), "5h: 28% · Weekly: 89%");
 
   const activePlus = parseCodexPlanUsage({
     plan_type: "plus",
@@ -6028,7 +6119,7 @@ test("Usage rings include every desk LLM even with no spend", () => {
       { product: "weekly", label: "Weekly", usagePercent: 0, unlimited: true },
     ],
   };
-  assert.equal(planWindowChip(miniWindows), "5h: 17% · Weekly: ∞");
+  assert.equal(planWindowChip(miniWindows), "5h: 83% · Weekly: ∞");
   assert.equal(weeklyPlanLeftover(miniWindows), undefined);
   assert.equal(pickPlanWindow(miniWindows, undefined, "custom")?.label, "5h");
   // The ring is the allowance, and this one has no cap. It used to show the
@@ -6133,6 +6224,28 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(formatWorked(900), "1s");
   assert.equal(formatWorked(12_000), "12s");
   assert.equal(formatWorked(75_000), "1m 15s");
+  assert.equal(liveWorkWord({ hasThought: false }), "Connecting");
+  assert.equal(liveWorkWord({ hasThought: true }), "Thinking");
+  assert.equal(liveWorkWord({ hasThought: false, hasOtherWork: true }), "Working");
+  assert.equal(liveWorkWord({ hasThought: true, hasOtherWork: true }), "Thinking");
+  assert.equal(
+    replyHasThought({ assistant: { id: "a", role: "assistant", text: "", createdAt: 1 }, thoughts: [] }),
+    false,
+  );
+  assert.equal(
+    replyHasThought(
+      { assistant: { id: "a", role: "assistant", text: "", createdAt: 1 }, thoughts: [] },
+      { thought: "plan the edit" },
+    ),
+    true,
+  );
+  assert.equal(
+    replyHasThought({
+      assistant: { id: "a", role: "assistant", text: "", createdAt: 1 },
+      thoughts: [{ id: "th", role: "assistant", kind: "thought", text: "checking", createdAt: 2 }],
+    }),
+    true,
+  );
   assert.equal(resolveWorkedMs(1_000, 14_000, [2_000, 20_000]), 14_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [2_000, 20_000]), 19_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [1_000]), undefined);
@@ -6189,6 +6302,8 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(pane, /stream-caret/);
   assert.doesNotMatch(pane, /draft=\{live \? body/);
   assert.match(popout, /thought-live/);
+  assert.match(popout, /liveWorkWord/);
+  assert.match(popout, /replyHasThought/);
   assert.doesNotMatch(pane, /className="thinking"/);
   assert.doesNotMatch(pane, /live-pill" aria-live/);
   assert.match(popout, /working ·|Still working|subagent-preview/);
@@ -9685,10 +9800,17 @@ test("normalizeSettings keeps the needs-auth flag on a vendor link", () => {
 test("packages use platform Electron and mac release builds require a stable signature", () => {
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     scripts?: { test?: string };
-    build?: { afterPack?: string; electronDist?: string; mac?: { extendInfo?: Record<string, string> } };
+    build?: {
+      afterPack?: string;
+      electronDist?: string;
+      files?: string[];
+      mac?: { extendInfo?: Record<string, string> };
+    };
   };
   assert.equal(pkg.build?.electronDist, undefined);
   assert.equal(pkg.build?.afterPack, "scripts/after-pack.cjs");
+  assert.ok(pkg.build?.files?.includes("dist/**/*"), "electron-builder must pack dist/ or the window is blank");
+  assert.ok(pkg.build?.files?.includes("dist-electron/**/*"), "electron-builder must pack dist-electron/");
   const hook = readFileSync(path.join(ROOT, "scripts", "after-pack.cjs"), "utf8");
   assert.match(hook, /electronPlatformName !== "darwin"/);
   assert.match(hook, /codesign/);
@@ -9766,6 +9888,8 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /packWindowsDir/);
   assert.match(tryDesk, /installWinDevApp/);
   assert.match(tryDesk, /--workhorse-user-data=/);
+  assert.match(tryDesk, /WORKHORSE_USER_DATA_PATH/);
+  assert.match(tryDesk, /Start-Process concatenates ArgumentList without quoting/);
   assert.match(tryDesk, /Start-Process/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
   assert.doesNotMatch(tryDesk, /taskkill[\s\S]*Go7 Workhorse\.exe/);

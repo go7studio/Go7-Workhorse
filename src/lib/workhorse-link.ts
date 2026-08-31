@@ -1,7 +1,7 @@
 /**
  * Workhorse Link — one way in for every outside harness.
  *
- * Codex, Claude Code, Grok, OpenClaw, Hermes and anything that speaks MCP
+ * Codex, Claude Code, Grok, Cursor, OpenClaw, Hermes and anything that speaks MCP
  * launch the same packaged helper and get the same small toolset. Nothing
  * here knows which harness is calling; the harness learns what it has from
  * `workhorse_capabilities` and never guesses. The internal profile name
@@ -400,6 +400,10 @@ export const LINK_HOST_LABEL: Record<LinkHost, string> = {
   hermes: "Hermes",
 };
 
+/** Hosts whose own CLI has `mcp add`. Cursor, OpenClaw, Hermes and Grok Bot do not. */
+export const LINK_MCP_ADD_HOSTS = ["codex", "claude", "grok"] as const;
+export type LinkMcpAddHost = (typeof LINK_MCP_ADD_HOSTS)[number];
+
 /** Grok Bot has no `mcp add`. Connect copies the charged one-shot instead. */
 export function linkHostConnectsByOneshot(host: LinkHost): boolean {
   return host === "grok-bot";
@@ -411,7 +415,7 @@ export function linkHostConnectsByOneshot(host: LinkHost): boolean {
  * format its business. `-s user` where the host scopes, so the link is
  * there in every project, not the one the desk happened to be in.
  */
-export function linkHostCliArgs(host: Exclude<LinkHost, "cursor" | "openclaw" | "hermes" | "grok-bot">, server: McpServerConfig): { command: string; args: string[] } {
+export function linkHostCliArgs(host: LinkMcpAddHost, server: McpServerConfig): { command: string; args: string[] } {
   const env = Object.entries(server.env ?? {}).map(([key, value]) => `${key}=${value}`);
   if (host === "claude") {
     // claude mcp add [options] <name> <commandOrUrl> [args...]  ·  -e KEY=value  ·  -s user

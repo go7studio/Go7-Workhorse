@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { isLocalEndpoint, leftoverForCard, planAllowance, planRingView, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
+import { chipWindowLabel, isLocalEndpoint, leftoverForCard, planAllowance, planRingView, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
 import { spawnWaitsForReply } from "../src/lib/subagents";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,12 +119,15 @@ test("a dead weekly gauge reads unmetered, and a live one is not hidden by the b
 
   assert.deepEqual(planAllowance(minimax), { status: "unmetered", why: "dead-gauge" });
   assert.equal(planRingView(card("m"), { custom: { m: minimax } })?.label, "∞");
-  // The burst is spent and stays visible: unmetered is not "nothing to see".
-  assert.equal(planWindowChip(minimax), "5h: 100% · Weekly: ∞");
+  // The burst is spent and stays visible as leftover 0%. Unmetered is not "nothing to see".
+  assert.equal(planWindowChip(minimax), "5h: 0% · Weekly: ∞");
 
   assert.equal(planAllowance(kimi).status, "known");
   assert.equal(planRingView(card("k"), { custom: { k: kimi } })?.label, "53%");
-  assert.equal(planWindowChip(kimi), "5h: 0% · Weekly: 47%");
+  assert.equal(planWindowChip(kimi), "5h: 100% · Weekly: 53%");
+  assert.equal(chipWindowLabel({ product: "five_hour", label: "3h" }), "5h");
+  assert.equal(chipWindowLabel({ product: "session", label: "3hr" }), "5h");
+  assert.equal(chipWindowLabel({ product: "weekly", label: "Weekly" }), "Weekly");
 
   // Codex names its weekly `primary`; picking by label would have missed it
   // and moved a ring that was already right.

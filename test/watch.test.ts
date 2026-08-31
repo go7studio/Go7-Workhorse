@@ -409,7 +409,8 @@ test("Watch settings and send hold are wired through the desk", () => {
   assert.match(pane, /leftoverUnknownMark/);
   assert.match(pane, /title=\{missing\?\.title\}/);
   assert.doesNotMatch(pane, /allowedPercent \/ 100/);
-  assert.match(pane, /Skip spent bots/);
+  assert.doesNotMatch(pane, /Skip spent bots/);
+  assert.doesNotMatch(pane, /blockSpentSpawns/);
   assert.match(pane, /aria-pressed/);
   assert.doesNotMatch(pane, /setWatchDayBank/);
   assert.doesNotMatch(pane, /aria-label="Day bank"/);
@@ -598,7 +599,7 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.doesNotMatch(formatDeskRoster(rows), /turned off in Settings/);
   assert.equal(mini?.kind, "custom");
   assert.equal(mini?.name, "MiniMax");
-  // Spent-but-callable is now only reachable with the guard deliberately off.
+  // Skip-spent is always on: an old save with the toggle off still blocks.
   const unlocked = deskCallCatalog({
     settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false } },
     usage: [],
@@ -606,18 +607,28 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
     permits: {},
     now,
   });
-  assert.equal(unlocked.find((row) => row.id === "grok")?.canCall, true);
+  assert.equal(unlocked.find((row) => row.id === "grok")?.canCall, false);
+  assert.equal(unlocked.find((row) => row.id === "grok")?.status, "spent");
   assert.equal(unlocked.find((row) => row.id === "codex")?.canCall, false);
   assert.equal(unlocked.find((row) => row.id === "codex")?.status, "not_connected");
-  const roster = formatDeskRoster(unlocked);
+  const healthy = deskCallCatalog({
+    settings: { ...settings, watch: { ...DEFAULT_WATCH, lockDaily: false } },
+    usage: [],
+    plans: { grok: plan(58, { resetsAt: reset }) },
+    permits: {},
+    now,
+  });
+  assert.equal(healthy.find((row) => row.id === "grok")?.canCall, true);
+  const roster = formatDeskRoster(healthy);
   assert.match(roster, /Desk bots on this Workhorse window/);
   assert.match(roster, /Grok/);
   assert.match(roster, /models:/);
   assert.match(roster, /you can call this/);
   assert.match(formatDeskRoster(rows), /API key is on the desk|MiniMax/);
-  assert.ok(callableDeskRows(unlocked).some((row) => row.id === "grok"));
+  assert.ok(callableDeskRows(healthy).some((row) => row.id === "grok"));
   assert.ok(callableDeskRows(rows).some((row) => row.kind === "custom"));
   assert.equal(callableDeskRows(rows).some((row) => row.id === "grok"), false);
+  assert.equal(callableDeskRows(unlocked).some((row) => row.id === "grok"), false);
   assert.match(roster, /plan total|plan remaining|not this prompt|not this spawn/);
   assert.match(roster, /leftoverMeans/);
   assert.match(roster, /leave provider, model, and effort unset/);
@@ -633,7 +644,8 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   );
   assert.doesNotMatch(roster, /only one bot/);
   assert.match(deskCallBlockFor(rows, { provider: "grok" }) ?? "", /leftover|Watch|bank|Do not wait/);
-  assert.equal(deskCallBlockFor(unlocked, { provider: "grok" }), null);
+  assert.match(deskCallBlockFor(unlocked, { provider: "grok" }) ?? "", /leftover|Watch|bank|Do not wait/);
+  assert.equal(deskCallBlockFor(healthy, { provider: "grok" }), null);
   assert.equal(deskCallBlockFor(rows, { name: "Claude" }), null);
   assert.equal(deskCallPromptable(grok), true);
   assert.equal(deskCallPromptable(claude), false);
@@ -648,11 +660,14 @@ test("deskCallCatalog marks spent and Watch-held vendors as not callable", () =>
   assert.equal(banked.find((row) => row.id === "grok")?.status, "day_bank");
   assert.equal(vendorOverrideNeeded(banked.find((row) => row.id === "grok")), true);
   assert.equal(vendorOverrideNeeded(unlocked.find((row) => row.id === "grok")), false);
+  assert.equal(vendorOverrideNeeded(healthy.find((row) => row.id === "grok")), false);
   assert.equal(vendorOverrideNeeded({ status: "ok" } as (typeof rows)[0]), false);
   assert.match(spawnIsNoGo(banked.find((row) => row.id === "grok")) ?? "", /no-go — daily bank spent/);
-  assert.equal(spawnIsNoGo(unlocked.find((row) => row.id === "grok")), null);
+  assert.match(spawnIsNoGo(unlocked.find((row) => row.id === "grok")) ?? "", /no leftover|Skip it/);
+  assert.equal(spawnIsNoGo(healthy.find((row) => row.id === "grok")), null);
   assert.match(spawnIsNoGo(claude) ?? "", /not on this desk/);
-  assert.equal(spawnAllowed(unlocked.find((row) => row.id === "grok")), true);
+  assert.equal(spawnAllowed(unlocked.find((row) => row.id === "grok")), false);
+  assert.equal(spawnAllowed(healthy.find((row) => row.id === "grok")), true);
   assert.equal(spawnAllowed(banked.find((row) => row.id === "grok")), false);
   assert.equal(spawnAllowed(claude), false);
   const storeSrc = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
@@ -1184,13 +1199,14 @@ test("a bot with no leftover is not a spawn target, daily bank or not", () => {
   // A healthy vendor is untouched, so the orchestrator still has somewhere to go.
   assert.equal(guarded.find((row) => row.id === "claude")?.canCall, true);
 
-  // The escape hatch: overage or prepaid credit may still be worth spending.
-  const allowed = spent({ ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false });
-  assert.equal(allowed.find((row) => row.id === "grok")?.canCall, true);
+  // Skip-spent is always on. An old save with the toggle off still blocks.
+  const stillBlocked = spent({ ...DEFAULT_WATCH, lockDaily: false, blockSpentSpawns: false });
+  assert.equal(stillBlocked.find((row) => row.id === "grok")?.canCall, false);
+  assert.equal(spawnAllowed(stillBlocked.find((row) => row.id === "grok")), false);
 
-  // Older saves predate the flag and still get the guard.
+  // Older saves and an explicit false both keep the guard.
   assert.equal(normalizeWatch({ lockDaily: false }).blockSpentSpawns, true);
-  assert.equal(normalizeWatch({ blockSpentSpawns: false }).blockSpentSpawns, false);
+  assert.equal(normalizeWatch({ blockSpentSpawns: false }).blockSpentSpawns, true);
   assert.equal(normalizeWatch({ spentPercent: 5 }).spentPercent, 5);
 
   // The threshold is adjustable: at 5%, a vendor on 4% left is already out.

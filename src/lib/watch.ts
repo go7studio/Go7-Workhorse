@@ -113,8 +113,8 @@ export function normalizeWatch(raw: unknown): WatchSettings {
     dailyLimitPercent: DAY_SHARE_PERCENT,
     lockDaily: record.lockDaily === true,
     desktopNotify: record.desktopNotify !== false,
-    // Older saves predate the flag and should still get the guard.
-    blockSpentSpawns: record.blockSpentSpawns !== false,
+    // Always on. Older saves that stored false still get the guard.
+    blockSpentSpawns: true,
     spentPercent: Number.isFinite(spent) ? Math.min(50, Math.max(0, spent)) : DEFAULT_SPENT_PERCENT,
     ...(lockKeys ? { lockKeys } : {}),
   };
@@ -795,7 +795,8 @@ export function deskCallCatalog(input: {
 }): DeskCallRow[] {
   const statuses = watchVendorStatuses(input);
   const catalogWatch = input.settings.watch ?? DEFAULT_WATCH;
-  const blockSpent = catalogWatch.blockSpentSpawns !== false;
+  // Always skip spent bots. The persisted flag is kept but never honored as off.
+  const blockSpent = true;
   const spentPercent = Number.isFinite(catalogWatch.spentPercent)
     ? (catalogWatch.spentPercent as number)
     : DEFAULT_SPENT_PERCENT;

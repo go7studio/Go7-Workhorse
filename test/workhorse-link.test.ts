@@ -27,7 +27,7 @@ import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposur
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
-import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, type InstallIo } from "../electron/mcp-install";
+import { installReportMessage, installWorkhorseLink, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot, cursorMcpConfigPath, type InstallIo } from "../electron/mcp-install";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAUNCH = { command: "/Applications/Go7 Workhorse.app/Contents/MacOS/Go7 Workhorse", script: "/app/workhorse-mcp.js", statePath: "/state/workhorse-state.json" };
@@ -90,7 +90,12 @@ test("the Link v2 contract publishes workers and typed local capability executio
   const agents = readFileSync(path.join(ROOT, "AGENTS.md"), "utf8");
   const link = readFileSync(path.join(ROOT, "docs", "LINK.md"), "utf8");
   assert.match(features, /Grok Bot/);
+  assert.match(features, /Connect Cursor/);
+  assert.match(features, /~\/\.cursor\/mcp\.json/);
   assert.match(agents, /Workhorse Link/);
+  assert.match(agents, /Connect Cursor/);
+  assert.match(link, /Connect Cursor/);
+  assert.match(link, /~\/\.cursor\/mcp\.json/);
   assert.match(agents, /Grok Bot preset on 127\.0\.0\.1:8787/);
   assert.doesNotMatch(features, /\bRemote\b/);
   assert.doesNotMatch(agents, /\bRemote\b/);
@@ -664,6 +669,8 @@ test("Grok Bot one-shot is the same charged launch plus durable install instruct
   assert.match(settings, /linkGrokBotOneshot/);
   assert.doesNotMatch(settings, /Copy Grok Bot one-shot/);
   assert.ok(LINK_HOSTS.includes("grok-bot"));
+  assert.ok(LINK_HOSTS.includes("cursor"));
+  assert.equal(LINK_HOST_LABEL.cursor, "Cursor");
   assert.equal(LINK_HOST_LABEL["grok-bot"], "Grok Bot");
 });
 
@@ -702,41 +709,60 @@ test("installWorkhorseLink connects the hosts asked for, reports a missing CLI a
   assert.match(installReportMessage(botOnly), /Paste it into Grok Bot once/);
 });
 
-test("Connect Cursor merges the same launch into ~/.cursor/mcp.json and refuses a bearer", () => {
-  const files = new Map<string, string>([
-    ["/home/u/.cursor/mcp.json", JSON.stringify({ mcpServers: { other: { command: "echo" } } })],
-  ]);
+test("Connect Cursor writes user-global ~/.cursor/mcp.json, the same launch, no token, not the project file", () => {
+  const files = new Map<string, string>();
+  files.set("/home/u/.cursor", "");
+  files.set(
+    "/home/u/.cursor/mcp.json",
+    JSON.stringify({
+      mcpServers: {
+        github: { command: "npx", args: ["-y", "mcp-github"], env: { GITHUB_TOKEN: "github-secret" } },
+      },
+    }),
+  );
+  const calls: Array<{ file: string; args: string[] }> = [];
   const io: InstallIo = {
-    existsSync: (p) => files.has(p) || p === "/home/u/.cursor",
-    readFile: (p) => files.get(p) ?? "",
-    writeFile: (p, text) => {
-      files.set(p, text);
+    existsSync: (file) => files.has(file),
+    readFile: (file) => files.get(file) ?? "",
+    writeFile: (file, text) => {
+      files.set(file, text);
     },
     mkdirp: () => undefined,
+    exec: (file, args) => {
+      calls.push({ file, args });
+      return { status: 127, stdout: "", stderr: "ENOENT" };
+    },
   };
+  assert.equal(cursorMcpConfigPath("/home/u", "darwin"), "/home/u/.cursor/mcp.json");
+  assert.equal(cursorMcpConfigPath("C:\\Users\\ci", "win32"), "C:\\Users\\ci\\.cursor\\mcp.json");
   const report = installWorkhorseLink({ home: "/home/u", platform: "darwin", ...LAUNCH, io, hosts: ["cursor"] });
+  assert.equal(report.ok, true);
   assert.deepEqual(report.written.map((item) => item.target), ["cursor"]);
   assert.equal(report.written[0]?.how, "file");
-  assert.match(report.written[0]?.path ?? "", /\.cursor\/mcp\.json$/);
+  assert.equal(report.written[0]?.path, "/home/u/.cursor/mcp.json");
+  assert.equal(calls.length, 0, "Cursor has no mcp add CLI");
   const written = JSON.parse(files.get("/home/u/.cursor/mcp.json") ?? "{}") as {
-    mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+    mcpServers: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>;
   };
-  assert.deepEqual(Object.keys(written.mcpServers).sort(), ["other", "workhorse"]);
-  assert.equal(written.mcpServers.workhorse.command, LAUNCH.command);
-  assert.deepEqual(written.mcpServers.workhorse.args, [LAUNCH.script]);
-  assert.equal(written.mcpServers.workhorse.env.WORKHORSE_MCP_PROFILE, "external-runtime");
-  assert.equal(written.mcpServers.workhorse.env.WORKHORSE_STATE_PATH, LAUNCH.statePath);
-  assert.doesNotMatch(files.get("/home/u/.cursor/mcp.json") ?? "", /bearer|WORKHORSE_BRIDGE_TOKEN/i);
+  assert.equal(written.mcpServers.workhorse?.command, LAUNCH.command);
+  assert.deepEqual(written.mcpServers.workhorse?.args, [LAUNCH.script]);
+  assert.equal(written.mcpServers.workhorse?.env?.WORKHORSE_MCP_PROFILE, "external-runtime");
+  assert.equal(written.mcpServers.workhorse?.env?.WORKHORSE_STATE_PATH, LAUNCH.statePath);
+  assert.equal(written.mcpServers.github?.env?.GITHUB_TOKEN, "github-secret");
+  assert.equal(JSON.stringify(written.mcpServers.workhorse).includes("BEARER"), false);
+  assert.equal(JSON.stringify(written.mcpServers.workhorse).includes("WORKHORSE_BRIDGE_TOKEN"), false);
+  assert.ok(!files.has("/home/u/project/.cursor/mcp.json"));
+  assert.match(installReportMessage(report), /Connected Cursor to Workhorse Link/);
   assert.equal(LINK_HOST_LABEL.cursor, "Cursor");
   assert.equal(linkHostConnectsByOneshot("cursor"), false);
-
   const missing = installWorkhorseLink({
-    home: "/home/none",
+    home: "/home/nobody",
     platform: "darwin",
     ...LAUNCH,
-    io: { existsSync: () => false, readFile: () => "", writeFile: () => undefined, mkdirp: () => undefined },
+    io: { ...io, existsSync: () => false },
     hosts: ["cursor"],
   });
+  assert.equal(missing.ok, false);
   assert.equal(missing.written.length, 0);
   assert.equal(missing.skipped[0]?.target, "cursor");
   assert.match(missing.skipped[0]?.reason ?? "", /not installed/);

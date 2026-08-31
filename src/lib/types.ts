@@ -829,10 +829,8 @@ export type WatchSettings = {
   /** Bots on the daily bank. Missing means every bot (older saves). */
   lockKeys?: string[];
   /**
-   * Hide a vendor with no plan leftover from spawn targets, whether or not the
-   * daily bank covers it. Running out is the vendor's own fact, not a bank
-   * policy — a worker spawned onto a spent vendor fails at the CLI. Off lets
-   * one through for overage or prepaid credit.
+   * Always on. Kept so older state files still load. normalizeWatch forces
+   * true; a spent bot is never a spawn target.
    */
   blockSpentSpawns?: boolean;
   /** Leftover percent at or below which a vendor counts as spent. */

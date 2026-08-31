@@ -64,7 +64,50 @@ function writeWinBuildMarker(appOutDir, env = process.env) {
   return marker;
 }
 
+function normalizeAsarEntry(entry) {
+  return String(entry ?? "").replace(/\\/g, "/").replace(/^\//, "");
+}
+
+/** electron-builder's default files glob excludes dist/. A gutted files list ships a blank window. */
+function rendererPackGaps(entries) {
+  const list = (entries ?? []).map(normalizeAsarEntry);
+  const gaps = [];
+  if (!list.includes("dist/index.html")) gaps.push("dist/index.html");
+  if (!list.includes("dist-electron/main.js")) gaps.push("dist-electron/main.js");
+  if (!list.some((item) => item.startsWith("dist/assets/") && item.endsWith(".js"))) {
+    gaps.push("dist/assets/*.js");
+  }
+  if (!list.some((item) => item.startsWith("dist/assets/") && item.endsWith(".css"))) {
+    gaps.push("dist/assets/*.css");
+  }
+  return gaps;
+}
+
+function packedAsarPath(appOutDir, electronPlatformName, productFilename) {
+  if (electronPlatformName === "darwin") {
+    return path.join(appOutDir, `${productFilename}.app`, "Contents", "Resources", "app.asar");
+  }
+  return path.join(appOutDir, "resources", "app.asar");
+}
+
+function assertRendererPacked(asarPath) {
+  if (!fs.existsSync(asarPath)) {
+    throw new Error(`Packed app.asar is missing at ${asarPath}`);
+  }
+  const asar = require("@electron/asar");
+  const gaps = rendererPackGaps(asar.listPackage(asarPath));
+  if (gaps.length) {
+    throw new Error(`Packed app.asar is hollow (missing ${gaps.join(", ")}) at ${asarPath}`);
+  }
+}
+
 async function afterPack(context) {
+  const asarPath = packedAsarPath(
+    context.appOutDir,
+    context.electronPlatformName,
+    context.packager.appInfo.productFilename,
+  );
+  assertRendererPacked(asarPath);
   if (context.electronPlatformName !== "darwin") {
     if (context.electronPlatformName === "win32") writeWinBuildMarker(context.appOutDir);
     return;
@@ -91,4 +134,7 @@ module.exports.assertStableReleaseIdentity = assertStableReleaseIdentity;
 module.exports.BUILD_MARKER_FILE = BUILD_MARKER_FILE;
 module.exports.writeBuildMarker = writeBuildMarker;
 module.exports.writeWinBuildMarker = writeWinBuildMarker;
+module.exports.rendererPackGaps = rendererPackGaps;
+module.exports.packedAsarPath = packedAsarPath;
+module.exports.assertRendererPacked = assertRendererPacked;
 module.exports.afterPack = afterPack;

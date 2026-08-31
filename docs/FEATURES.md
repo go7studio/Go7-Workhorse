@@ -29,11 +29,12 @@ ring.
 
 **Workhorse Link** is how any outside app calls this desk — Codex, Claude
 Code, Cursor, Grok, Grok Bot, OpenClaw, Hermes, or any MCP client. Settings → LLMs →
-Workhorse Link connects each with one button. Connect Cursor writes
-`~/.cursor/mcp.json`. Connect Grok Bot copies the same launch plus install
-instructions to paste into Grok Bot once (Mac or Windows), including its
-runtime-owned weekly-usage exporter contract. Copy generic MCP configuration
-covers the rest. Every app gets the same versioned Link contract:
+Workhorse Link connects each with one button. Connect Cursor writes the same
+launch into user-global `~/.cursor/mcp.json` (not a project file); Cursor has
+no `mcp add`, and connecting that app is not the Cursor ACP vendor. Connect Grok Bot copies the same
+launch plus install instructions to paste into Grok Bot once (Mac or Windows),
+including its runtime-owned weekly-usage exporter contract. Copy generic MCP
+configuration covers the rest. Every app gets the same versioned Link contract:
 eight core collaboration tools for capabilities, list/read/ask chats, query leftover and availability,
 delegation, continuation, and worker status, plus typed local
 capability tools when a host is configured. The first call,
@@ -171,7 +172,8 @@ transcript rather than as a path.
   here takes the work's own name instead of the prompt's first few words, so
   long as its workers agree on one.
 - User and assistant turns in the transcript use the same clock.
-- A turn’s work stays on one compact line while it runs. Open it when you
+- A turn’s work stays on one compact line while it runs. That line says
+  Connecting until the first thought arrives, then Thinking. Open it when you
   want the ordered detail: think, tools, think. Consecutive tool calls share
   one fold labelled "3 tools"; expand it to see the calls listed underneath, not
   a row of "1 tool". A single call shows its name. A later thought starts a new
@@ -218,6 +220,9 @@ transcript rather than as a path.
   four characters a token only when ACP sent no count — Composer and API stay
   two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
   Leftover rings, billed tokens, and retained context stay distinct meters.
+  Window chips under each ring use leftover polarity too — 100% is still
+  full, matching Codex's own 5h / Weekly remaining. A spent SuperGrok week
+  reads `0%`, not an ellipsis.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
@@ -354,6 +359,8 @@ transcript rather than as a path.
 ## Settings
 
 Profile, connected LLMs, skills, routing, learning, usage, watch.
+
+Watch spaces daily spend on picked bots. Workers never start on a bot with no leftover.
 
 The profile shows the Workhorse mark as tiny moving blobs of the bots you
 have called. Spend sets how many of each color; blobs merge in space without

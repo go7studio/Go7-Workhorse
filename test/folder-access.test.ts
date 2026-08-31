@@ -22,6 +22,8 @@ const afterPack = require("../scripts/after-pack.cjs") as {
   shouldAdHocSign: (env?: NodeJS.Dict<string>) => boolean;
   assertStableReleaseIdentity: (env?: NodeJS.Dict<string>) => void;
   writeBuildMarker: (appPath: string, env?: NodeJS.Dict<string>) => { channel: string };
+  rendererPackGaps: (entries: string[]) => string[];
+  packedAsarPath: (appOutDir: string, platform: string, productFilename: string) => string;
 };
 const afterSign = require("../scripts/after-sign.cjs") as {
   readAuthorities: (output: string) => string[];
@@ -31,6 +33,31 @@ const afterSign = require("../scripts/after-sign.cjs") as {
     run: () => { stdout?: string; stderr?: string },
   ) => string;
 };
+
+test("a packed asar without dist/index.html is hollow", () => {
+  assert.deepEqual(afterPack.rendererPackGaps(["dist-electron/main.js"]), [
+    "dist/index.html",
+    "dist/assets/*.js",
+    "dist/assets/*.css",
+  ]);
+  assert.deepEqual(
+    afterPack.rendererPackGaps([
+      "\\dist\\index.html",
+      "dist-electron/main.js",
+      "dist/assets/index-abc.js",
+      "dist/assets/index-abc.css",
+    ]),
+    [],
+  );
+  assert.equal(
+    afterPack.packedAsarPath("C:\\out", "win32", "Go7 Workhorse"),
+    path.join("C:\\out", "resources", "app.asar"),
+  );
+  assert.equal(
+    afterPack.packedAsarPath("/out", "darwin", "Go7 Workhorse"),
+    path.join("/out", "Go7 Workhorse.app", "Contents", "Resources", "app.asar"),
+  );
+});
 
 test("ad-hoc mac signature is skipped when a release identity will stamp the app", () => {
   assert.equal(afterPack.shouldAdHocSign({}), true);

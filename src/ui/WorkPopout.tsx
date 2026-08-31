@@ -6,7 +6,7 @@ import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
 import { subagentTurns, workerTaskTitle } from "../lib/subagents";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
-import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
+import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, liveWorkWord, packWorkRows, earlierWorkLabel, replyHasThought, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
 import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
@@ -385,7 +385,7 @@ export const WorkPopout = memo(function WorkPopout({
         [...tools, ...block.compacts, ...threads].map((message) => message.createdAt),
       );
   const label = live
-    ? `Working · ${formatWorked(elapsed ?? 0)}`
+    ? `${liveWorkWord({ hasThought: replyHasThought(block, peeled), hasOtherWork: hasInner })} · ${formatWorked(elapsed ?? 0)}`
     : elapsed != null
     ? `Worked ${formatWorked(elapsed)}`
     : "Work";

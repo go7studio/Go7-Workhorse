@@ -57,6 +57,22 @@ export function resolveWorkedMs(startedAt: number, workedMs: number | undefined,
   return latest > startedAt ? latest - startedAt : undefined;
 }
 
+/** Live work-line word: connecting until the vendor speaks, then thinking once a thought exists. */
+export function liveWorkWord(input: { hasThought: boolean; hasOtherWork?: boolean }): "Connecting" | "Thinking" | "Working" {
+  if (input.hasThought) return "Thinking";
+  if (input.hasOtherWork) return "Working";
+  return "Connecting";
+}
+
+export function replyHasThought(
+  block: Pick<Extract<TranscriptBlock, { type: "reply" }>, "assistant" | "thoughts">,
+  peeled?: { thought: string },
+): boolean {
+  if (peeled?.thought.trim()) return true;
+  if (block.assistant.thought?.trim()) return true;
+  return block.thoughts.some((item) => item.text.trim());
+}
+
 export function isDeskNotice(message: ChatMessage): boolean {
   if (message.role !== "system" || message.kind) return false;
   return /^(Allowed |Elevated |Denied[:\s]|Kept current limits)/i.test(message.text.trim());

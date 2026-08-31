@@ -89,18 +89,28 @@ type CodexWindow = {
   resetsAt?: string;
 };
 
+function classifyCodexWindow(item: CodexWindow): CodexWindow {
+  const weekly = item.windowSeconds >= WEEK_SECONDS;
+  const burst = !weekly && item.windowSeconds > 0;
+  return {
+    ...item,
+    product: weekly ? "weekly" : burst ? "five_hour" : item.product,
+    label: weekly ? "Weekly" : burst ? "5h" : item.label,
+  };
+}
+
 function readWindow(raw: unknown, product: string, fallbackLabel: string): CodexWindow | undefined {
   const row = asRecord(raw);
   const used = usedPercentOf(row);
   if (!Number.isFinite(used)) return undefined;
   const windowSeconds = windowSecondsOf(row);
-  return {
+  return classifyCodexWindow({
     product,
     label: Number.isFinite(windowSeconds) ? windowLabel(windowSeconds, fallbackLabel) : fallbackLabel,
     usedPercent: used,
     windowSeconds: Number.isFinite(windowSeconds) ? windowSeconds : 0,
     resetsAt: resetOf(row),
-  };
+  });
 }
 
 export function parseCodexPlanUsage(raw: unknown): CodexPlanUsage | undefined {
@@ -110,19 +120,7 @@ export function parseCodexPlanUsage(raw: unknown): CodexPlanUsage | undefined {
     readWindow(rate.primary_window ?? rate.primary ?? root.primary_window ?? root.primary, "primary", "5h"),
     readWindow(rate.secondary_window ?? rate.secondary ?? root.secondary_window ?? root.secondary, "weekly", "Weekly"),
   ]
-    .filter((item): item is CodexWindow => Boolean(item))
-    .map((item) => ({
-      ...item,
-      // Codex currently calls the rolling five-hour limit `primary` and the
-      // plan allowance `secondary`. Preserve older one-window responses by
-      // deriving the meaning from the duration instead of the API field name.
-      product:
-        item.windowSeconds >= WEEK_SECONDS
-          ? "weekly"
-          : item.windowSeconds > 0
-            ? "five_hour"
-            : item.product,
-    }));
+    .filter((item): item is CodexWindow => Boolean(item));
   const fallback = readWindow(root, "primary", "5h");
   if (fallback && windows.length === 0) windows.unshift(fallback);
   const weekly = windows.find((item) => item.windowSeconds >= WEEK_SECONDS);

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchChats, searchDisplayTitle } from "../src/lib/search";
-import { leftoverUnknownMark } from "../src/ui/FuelRing";
+import { fuelRingCenterLabel, leftoverUnknownMark } from "../src/ui/FuelRing";
 import { buildSupportReport } from "../electron/diagnostics";
 import type { DeskLineup, Session } from "../src/lib/types";
 
@@ -115,9 +115,16 @@ test("Add a bot Back sits on the full pane, and New project Escape closes from t
 test("unknown leftover stays an ellipsis with an Unknown title, never 0 or 100", () => {
   assert.deepEqual(leftoverUnknownMark(true), { label: "…", unknown: true, title: "Unknown" });
   assert.deepEqual(leftoverUnknownMark(false), { label: "…", unknown: false, title: "Loading leftover" });
+  assert.equal(fuelRingCenterLabel({ value: undefined, shown: 0, label: "…", unknown: true }), "…");
+  assert.equal(fuelRingCenterLabel({ value: undefined, shown: 0, label: "…", unknown: false }), "…");
+  assert.equal(fuelRingCenterLabel({ value: 0, shown: 0, label: "…", unknown: true }), "0%");
+  assert.equal(fuelRingCenterLabel({ value: 0, shown: 0, label: "…", unknown: false }), "0%");
+  assert.equal(fuelRingCenterLabel({ value: 0, shown: 0, label: "0% left" }), "0% left");
+  assert.equal(fuelRingCenterLabel({ value: 0.4, shown: 0.4, label: "40%" }), "40%");
   const ring = fs.readFileSync(path.join(ROOT, "src", "ui", "FuelRing.tsx"), "utf8");
   assert.match(ring, /title=\{hint\}/);
-  assert.match(ring, /aria-label=\{unknown \? "Unknown" : hint\}/);
+  assert.match(ring, /fuelRingCenterLabel/);
+  assert.match(ring, /spent \? "0% left"/);
   assert.doesNotMatch(ring, /label: "0"/);
   const usage = fs.readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8");
   assert.match(usage, /leftoverUnknownMark/);

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
+import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, planRingView, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
 import { CUSTOM_METERS } from "../src/lib/custom-meters";
@@ -41,6 +41,7 @@ test("official Claude MiniMax and Synthetic fixtures invert leftover; missing st
   assert.equal(parseClaudePlanUsage({ error: { status: 404 } }), undefined);
 
   assert.equal(leftoverFromRemainingPercent(54), 54);
+  assert.equal(leftoverFromRemainingPercent(0), 0, "explicit remaining 0 is spent, not unknown");
   const mini = parseCustomPlanUsage({
     model_remains: [{ model_name: "general", current_weekly_remaining_percent: 54, current_interval_remaining_percent: 80 }],
   });
@@ -91,7 +92,7 @@ test("Claude MiniMax and Synthetic leftovers stay on their own rings", () => {
     leftoverForCard({ focus: "cursor:cursor-models", provider: "cursor", key: "cursor:cursor-models" }, plans),
     { provider: "cursor" },
   );
-  assert.match(cursorChip ?? "", /90%/);
+  assert.match(cursorChip ?? "", /10%/);
 });
 
 test("prepaid custom meters fill balance and do not invent leftover percent", () => {
@@ -207,6 +208,14 @@ test("an answered meter that carries a plan still fills its ring", () => {
   assert.equal(leftoverForCard({ focus: "claude", provider: "claude", key: "claude" }, plans)?.leftPercent, 82);
   assert.equal(leftoverForCard({ focus: "grok", provider: "grok", key: "grok" }, plans)?.leftPercent, 40);
   assert.equal(weeklyPlanLeftover(claudePlan), 82);
+  const spentGrok = { usedPercent: 100, leftPercent: 0, period: "weekly" as const, prepaidBalance: 0, products: [] };
+  assert.equal(leftoverForCard({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentGrok })?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentGrok })?.label,
+    "0%",
+  );
+  assert.equal(leftoverForCard({ focus: "grok", provider: "grok", key: "grok" }, {}), undefined);
+  assert.equal(planRingView({ focus: "grok", provider: "grok", key: "grok" }, {}), undefined);
 });
 
 test("custom leftover meters are a closed official list and catalog hosts stay custom bots", () => {

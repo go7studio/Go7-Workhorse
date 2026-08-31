@@ -702,6 +702,46 @@ test("installWorkhorseLink connects the hosts asked for, reports a missing CLI a
   assert.match(installReportMessage(botOnly), /Paste it into Grok Bot once/);
 });
 
+test("Connect Cursor merges the same launch into ~/.cursor/mcp.json and refuses a bearer", () => {
+  const files = new Map<string, string>([
+    ["/home/u/.cursor/mcp.json", JSON.stringify({ mcpServers: { other: { command: "echo" } } })],
+  ]);
+  const io: InstallIo = {
+    existsSync: (p) => files.has(p) || p === "/home/u/.cursor",
+    readFile: (p) => files.get(p) ?? "",
+    writeFile: (p, text) => {
+      files.set(p, text);
+    },
+    mkdirp: () => undefined,
+  };
+  const report = installWorkhorseLink({ home: "/home/u", platform: "darwin", ...LAUNCH, io, hosts: ["cursor"] });
+  assert.deepEqual(report.written.map((item) => item.target), ["cursor"]);
+  assert.equal(report.written[0]?.how, "file");
+  assert.match(report.written[0]?.path ?? "", /\.cursor\/mcp\.json$/);
+  const written = JSON.parse(files.get("/home/u/.cursor/mcp.json") ?? "{}") as {
+    mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
+  };
+  assert.deepEqual(Object.keys(written.mcpServers).sort(), ["other", "workhorse"]);
+  assert.equal(written.mcpServers.workhorse.command, LAUNCH.command);
+  assert.deepEqual(written.mcpServers.workhorse.args, [LAUNCH.script]);
+  assert.equal(written.mcpServers.workhorse.env.WORKHORSE_MCP_PROFILE, "external-runtime");
+  assert.equal(written.mcpServers.workhorse.env.WORKHORSE_STATE_PATH, LAUNCH.statePath);
+  assert.doesNotMatch(files.get("/home/u/.cursor/mcp.json") ?? "", /bearer|WORKHORSE_BRIDGE_TOKEN/i);
+  assert.equal(LINK_HOST_LABEL.cursor, "Cursor");
+  assert.equal(linkHostConnectsByOneshot("cursor"), false);
+
+  const missing = installWorkhorseLink({
+    home: "/home/none",
+    platform: "darwin",
+    ...LAUNCH,
+    io: { existsSync: () => false, readFile: () => "", writeFile: () => undefined, mkdirp: () => undefined },
+    hosts: ["cursor"],
+  });
+  assert.equal(missing.written.length, 0);
+  assert.equal(missing.skipped[0]?.target, "cursor");
+  assert.match(missing.skipped[0]?.reason ?? "", /not installed/);
+});
+
 test("every mutating Link call shares the envelope: a retried ask_chat posts once", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-"));
   const statePath = path.join(dir, "state.json");

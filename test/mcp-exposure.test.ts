@@ -24,6 +24,7 @@ import { WORKHORSE_MCP_INSTRUCTIONS, handleWorkhorseRpc, inlineExclusionTerms, m
 import { LINK_BASE_TOOLS, LINK_TOOLS } from "../src/lib/workhorse-link";
 import { AUDITOR_DESK_TOOLS, WORKER_DESK_TOOLS, isWorkerOmittedTool } from "../src/lib/subagents";
 import {
+  cursorMcpConfigPath,
   hermesConfigPath,
   installWorkhorseExternalMcp,
   mcpConfigContainsBearer,
@@ -832,6 +833,8 @@ test("MCP install writes official OpenClaw and Hermes config, not a sidecar", ()
   assert.equal(report.ok, true);
   assert.equal(openClawConfigPath("/Users/ci", "darwin"), "/Users/ci/.openclaw/openclaw.json");
   assert.equal(hermesConfigPath("/Users/ci", "darwin"), "/Users/ci/.hermes/config.yaml");
+  assert.equal(cursorMcpConfigPath("/Users/ci", "darwin"), "/Users/ci/.cursor/mcp.json");
+  assert.equal(cursorMcpConfigPath("C:\\Users\\ci", "win32"), "C:\\Users\\ci\\.cursor\\mcp.json");
   assert.ok(files.has("/Users/ci/.openclaw/openclaw.json"));
   assert.ok(!files.has("/Users/ci/.hermes/config.yaml"));
   assert.ok(report.skipped.some((item) => item.target === "hermes"));

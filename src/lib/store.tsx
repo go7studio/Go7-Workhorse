@@ -51,11 +51,15 @@ import {
   describeElevation,
   elevationForBlock,
   enqueuePermission,
+  grantedPolicyAnswer,
+  inboundAccess,
   classifyElevationInput,
   parseElevationInput,
   permissionPolicyAnswer,
   permissionResumeStatus,
   securityPolicyAnswer,
+  workerAccess,
+  workerGrant,
 } from "./permissions";
 import {
   applyDeleteCustomBot,
@@ -113,6 +117,7 @@ import {
   DEFAULT_SETTINGS,
   firstAttachedChoice,
   isSettingsSection,
+  keepVendorAccessDefaults,
   normalizeSettings,
   normalizeAgentSystems,
   normalizeRouting,
@@ -335,6 +340,7 @@ import type {
   CampaignPhase,
   CustomBot,
   CustomLlm,
+  DeskAccess,
   EffortLevel,
   GrokPlanUsage,
   LinkedReference,
@@ -434,6 +440,7 @@ export type Store = AppState & {
   clearEditMessage: () => void;
   cancelRun: () => void;
   setMode: (mode: PermissionMode) => void;
+  setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
   setSecurityPolicy: (patch: Partial<SessionSecurityPolicy>) => void;
   setMcpServers: (servers: McpServerConfig[]) => Promise<void>;
@@ -1007,16 +1014,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         void (async () => {
           const grok = window.workhorse?.detectGrokLogin
             ? await window.workhorse.detectGrokLogin()
-            : { connected: false };
+            : { connected: false, accessDefaults: undefined };
           const codex = window.workhorse?.detectCodexLogin
             ? await window.workhorse.detectCodexLogin()
             : { connected: false, accessDefaults: undefined };
           const claude = window.workhorse?.detectClaudeLogin
             ? await window.workhorse.detectClaudeLogin()
-            : { connected: false };
+            : { connected: false, accessDefaults: undefined };
           const cursor = window.workhorse?.detectCursorLogin
             ? await window.workhorse.detectCursorLogin()
-            : { connected: false, binary: null };
+            : { connected: false, binary: null, accessDefaults: undefined };
           const catalog = window.workhorse?.listVendorModels
             ? await window.workhorse.listVendorModels()
             : null;
@@ -1032,21 +1039,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...current.settings,
                 llms: {
                   ...current.settings.llms,
-                  grok: { ...current.settings.llms.grok, available: Boolean(grok.connected) },
+                  // Each vendor's own recorded defaults, read off this machine.
+                  // A detect that came back empty keeps what is already stored:
+                  // a logged-out or mid-upgrade CLI is not the person tightening
+                  // the desk, and writing its silence here used to do exactly
+                  // that to every chat opened afterwards.
+                  grok: {
+                    ...current.settings.llms.grok,
+                    available: Boolean(grok.connected),
+                    accessDefaults: keepVendorAccessDefaults(
+                      current.settings.llms.grok.accessDefaults,
+                      grok.accessDefaults,
+                    ),
+                  },
                   codex: {
                     ...current.settings.llms.codex,
                     available: Boolean(codex.connected),
-                    accessDefaults: codex.accessDefaults,
+                    accessDefaults: keepVendorAccessDefaults(
+                      current.settings.llms.codex.accessDefaults,
+                      codex.accessDefaults,
+                    ),
                   },
                   claude: {
                     ...current.settings.llms.claude,
                     available: Boolean(claude.connected),
                     needsAuth: Boolean((claude as { needsAuth?: boolean }).needsAuth),
+                    accessDefaults: keepVendorAccessDefaults(
+                      current.settings.llms.claude.accessDefaults,
+                      claude.accessDefaults,
+                    ),
                   },
                   cursor: {
                     ...current.settings.llms.cursor,
                     available: Boolean(cursor.binary || cursor.connected),
                     needsAuth: Boolean((cursor as { needsAuth?: boolean }).needsAuth) && !cursor.connected,
+                    accessDefaults: keepVendorAccessDefaults(
+                      current.settings.llms.cursor.accessDefaults,
+                      cursor.accessDefaults,
+                    ),
                   },
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
@@ -1260,12 +1290,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
       const rememberedAccess = remembered?.provider === picked ? remembered : undefined;
       const nativeAccess = picked === "custom" ? undefined : current.settings.llms[picked].accessDefaults;
+      // A new chat seeds from the last chat's access when the vendor matches,
+      // and otherwise from the desk default narrowed by that vendor's own
+      // config. Switching vendor is not a restriction, so it no longer lands
+      // on Ask just because the new vendor has nothing recorded.
+      const seat = inboundAccess({
+        parent: rememberedAccess ? { mode: rememberedAccess.mode, sandbox: rememberedAccess.sandbox } : undefined,
+        desk: current.settings.access,
+        vendor: nativeAccess,
+      });
       const choice = {
         provider: picked,
         model,
         effort: withEffort(picked, model, remembered?.effort ?? null),
-        sandbox: rememberedAccess?.sandbox ?? nativeAccess?.sandbox ?? "off",
-        mode: rememberedAccess?.mode ?? nativeAccess?.mode ?? "ask",
+        sandbox: seat.sandbox,
+        mode: seat.mode,
         customBotId,
       };
       const opened = openDraft(current.sessions, {
@@ -1536,6 +1575,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // The desk default only ever moves because the person moved it here. No
+  // detect, disconnect, or vendor switch writes this.
+  const setDeskAccess = useCallback((patch: Partial<DeskAccess>) => {
+    setState((current) => ({
+      ...current,
+      settings: { ...current.settings, access: { ...current.settings.access, ...patch } },
+    }));
+  }, []);
+
   const setSandbox = useCallback((sandbox: SandboxProfile) => {
     const session = stateRef.current.sessions.find((item) => item.id === stateRef.current.activeSessionId);
     if (session && session.sandbox !== sandbox) {
@@ -1620,14 +1668,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const detected = window.workhorse?.detectGrokLogin
         ? await window.workhorse.detectGrokLogin()
-        : { connected: false };
+        : { connected: false, accessDefaults: undefined };
       setState((current) => ({
         ...current,
         settings: {
           ...current.settings,
           llms: {
             ...current.settings.llms,
-            grok: { ...current.settings.llms.grok, available: Boolean(detected.connected) },
+            grok: {
+              ...current.settings.llms.grok,
+              available: Boolean(detected.connected),
+              accessDefaults: keepVendorAccessDefaults(
+                current.settings.llms.grok.accessDefaults,
+                detected.accessDefaults,
+              ),
+            },
           },
         },
       }));
@@ -1651,7 +1706,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               codex: {
                 ...current.settings.llms.codex,
                 available: Boolean(detected.connected),
-                accessDefaults: detected.accessDefaults,
+                accessDefaults: keepVendorAccessDefaults(
+                  current.settings.llms.codex.accessDefaults,
+                  detected.accessDefaults,
+                ),
               },
             },
           },
@@ -1669,7 +1727,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const detected = window.workhorse?.detectCursorLogin
         ? await window.workhorse.detectCursorLogin()
-        : { connected: false, binary: null };
+        : { connected: false, binary: null, accessDefaults: undefined };
       setState((current) => ({
         ...current,
         settings: {
@@ -1680,6 +1738,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...current.settings.llms.cursor,
               available: Boolean(detected.binary || detected.connected),
               needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth) && !detected.connected,
+              accessDefaults: keepVendorAccessDefaults(
+                current.settings.llms.cursor.accessDefaults,
+                detected.accessDefaults,
+              ),
             },
           },
         },
@@ -1692,7 +1754,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const detected = window.workhorse?.detectClaudeLogin
         ? await window.workhorse.detectClaudeLogin()
-        : { connected: false };
+        : { connected: false, accessDefaults: undefined };
       setState((current) => ({
         ...current,
         settings: {
@@ -1703,6 +1765,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...current.settings.llms.claude,
               available: Boolean(detected.connected),
               needsAuth: Boolean((detected as { needsAuth?: boolean }).needsAuth),
+              accessDefaults: keepVendorAccessDefaults(
+                current.settings.llms.claude.accessDefaults,
+                detected.accessDefaults,
+              ),
             },
           },
         },
@@ -4637,10 +4703,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
           }
-          let caller =
+          // A chat the call named, or the one Settings pins as the inbound
+          // parent. Only these lend their Permission and Sandbox onward.
+          const namedCaller =
             latest.sessions.find((item) => item.id === payload.fromSessionId) ??
-            latest.sessions.find((item) => item.id === inboundSessionId) ??
-            (exposure === "external-runtime" ? undefined : openChat);
+            latest.sessions.find((item) => item.id === inboundSessionId);
+          // The visible chat still receives the work, so one inbox stays. It is
+          // not where the access comes from: a call that named no parent must
+          // not inherit whatever the person happens to have open, which is how
+          // an unrelated tightened chat used to decide an inbound worker.
+          let caller =
+            namedCaller ?? (exposure === "external-runtime" ? undefined : openChat);
+          const deskSeat = inboundAccess({
+            desk: latest.settings.access,
+            vendor:
+              caller && caller.provider !== "custom"
+                ? latest.settings.llms[caller.provider].accessDefaults
+                : undefined,
+          });
+          const inboundSeat: DeskAccess = namedCaller
+            ? { mode: namedCaller.mode, sandbox: namedCaller.sandbox }
+            : deskSeat;
           let inboundHost: Session | undefined;
           if (payload.mode === "spawn" && !caller && exposure === "external-runtime") {
             const remembered = firstAttachedChoice(latest.settings, latest.lastModel);
@@ -4661,8 +4744,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               effort: withEffort(remembered.provider, remembered.model, remembered.effort),
               title,
               titleLocked: false,
-              mode: remembered.mode ?? "ask",
-              sandbox: remembered.sandbox ?? "off",
+              // No chat was named, so this host stands in for the desk and
+              // takes the desk's stored default, narrowed by the vendor app's
+              // own recorded config. Never the visible chat's setting.
+              ...inboundAccess({
+                desk: latest.settings.access,
+                vendor:
+                  remembered.provider === "custom"
+                    ? undefined
+                    : latest.settings.llms[remembered.provider].accessDefaults,
+              }),
               environment: { kind: "local" },
               securityPolicy: { network: "allowed", root: "allowed" },
               status: "idle",
@@ -4674,6 +4765,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             caller = inboundHost;
           }
           const parent = caller;
+          // A chat the call named, and the desk's own inbound host, both lend
+          // their access down. A chat that merely happens to be open does not:
+          // the desk default answers for a call that named no parent.
+          const inheritedAccess: DeskAccess =
+            (namedCaller ?? inboundHost) && parent
+              ? { mode: parent.mode, sandbox: parent.sandbox }
+              : inboundSeat;
           if (payload.mode === "spawn") {
             if (!caller) {
               await replyAsk({ error: exposure === "external-runtime" ? "context_required" : "no parent chat to attach this subagent to" });
@@ -5306,8 +5404,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               effort: spec.effort,
               title: workerTaskTitle(workerName, spec.title),
               titleLocked: true,
-              mode: assignedPaths.length > 0 ? "ask" : parent.mode,
-              sandbox: parent.sandbox,
+              // Two dials. The vendor session is the first: a path-owned worker
+              // launches at Ask so its write events still reach the ownership
+              // preflight, because Always would map to approval_policy="never"
+              // and those events would never arrive. The grant below is the
+              // second — it silences the modal without loosening the launch.
+              // A tightening the person put on this worker chat outranks both.
+              ...workerAccess({
+                inherited: inheritedAccess,
+                owned: assignedPaths.length > 0,
+                prior: priorWorker,
+              }),
               securityPolicy: parent.securityPolicy,
               environment,
               status: "running",
@@ -5329,6 +5436,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
                 ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
+                grantedAccess: workerGrant({ inherited: inheritedAccess, prior: priorWorker }),
                 correlationId: childCorrelationId,
                 ...(childMission ? { mission: childMission } : {}),
               },
@@ -6379,7 +6487,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }));
           return;
         }
-        const allowed = forced ?? autoAllowPermission({
+        // The desk answers from the grant it handed this worker. A path-owned
+        // worker launched at Ask so the preflight above could read its writes;
+        // by here that check has passed, so an in-path write the desk already
+        // decided to allow must not surface as a modal. Out-of-path writes
+        // never reach this line — the preflight denied and returned.
+        const granted = owner
+          ? grantedPolicyAnswer({
+              granted: owner.agentRun?.grantedAccess?.mode,
+              sandbox: owner.sandbox,
+              tool: event.tool,
+              detail: event.detail,
+              path: event.path,
+            })
+          : null;
+        const allowed = forced ?? granted ?? autoAllowPermission({
           tool: event.tool,
           detail: event.detail,
           path: event.path,
@@ -7712,6 +7834,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       clearEditMessage,
       cancelRun,
       setMode,
+      setDeskAccess,
       setSandbox,
       setSecurityPolicy,
       setMcpServers,
@@ -7841,6 +7964,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       clearEditMessage,
       cancelRun,
       setMode,
+      setDeskAccess,
       setSandbox,
       setSecurityPolicy,
       setMcpServers,

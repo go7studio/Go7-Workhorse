@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { detectGrokAccessDefaults } from "./vendor-access";
+import type { BotAccessDefaults } from "../src/lib/types";
 
 const LOGIN_FILES = [
   "auth.json",
@@ -16,6 +18,8 @@ function pathMod(platform: NodeJS.Platform) {
 }
 
 export type GrokLoginDetectInput = {
+  /** Injected so a test never reads this machine's Grok config. */
+  readFile?: (filePath: string) => string;
   env?: NodeJS.Dict<string>;
   homedir?: string;
   platform?: NodeJS.Platform;
@@ -27,6 +31,8 @@ export type GrokLoginDetectResult = {
   connected: boolean;
   binary: string | null;
   grokHome: string;
+  /** What the Grok app itself is set to. Read, never asked for. */
+  accessDefaults?: BotAccessDefaults;
 };
 
 function hasLoginArtifact(
@@ -74,5 +80,7 @@ export function detectGrokLogin(input: GrokLoginDetectInput = {}): GrokLoginDete
   const grokHome = (env.GROK_HOME?.trim() || join(homedir, ".grok")).replace(/[\\/]+$/, "");
   const binary = resolveBinary({ env, homedir, platform, existsSync, pathDirs });
   const connected = Boolean(binary && hasLoginArtifact(grokHome, existsSync, env, join));
-  return { connected, binary, grokHome };
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  const accessDefaults = detectGrokAccessDefaults({ home: grokHome, join, readFile, env });
+  return { connected, binary, grokHome, ...(accessDefaults ? { accessDefaults } : {}) };
 }

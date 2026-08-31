@@ -161,12 +161,12 @@ type WorkhorseBridge = {
     vendorSessionId?: string;
     opened?: "session/new" | "session/load";
   }>;
-  detectGrokLogin: () => Promise<{ connected: boolean; binary: string | null }>;
+  detectGrokLogin: () => Promise<{ connected: boolean; binary: string | null; accessDefaults?: import("./lib/types").BotAccessDefaults }>;
   detectCodexLogin: () => Promise<import("../electron/codex-login").CodexLoginDetectResult>;
   detectCodexRuntime?: () => Promise<import("../electron/codex-app-server").CodexRuntimeInfo>;
   listCodexNativeThreads?: (limit?: number) => Promise<import("../electron/codex-app-server").CodexNativeThread[]>;
   codexCapabilities?: (projectRoot?: string) => Promise<ReturnType<typeof import("../electron/codex-capabilities").codexCapabilitySummary>>;
-  detectClaudeLogin: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null }>;
+  detectClaudeLogin: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null; accessDefaults?: import("./lib/types").BotAccessDefaults }>;
   claudeSetupToken: () => Promise<{ ok: boolean; message?: string }>;
   claudePrompt: (input: GrokPromptBridgeInput) => Promise<{
     text?: string;
@@ -177,7 +177,7 @@ type WorkhorseBridge = {
   claudeAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   claudeCancel: (sessionId: string) => Promise<void>;
   onClaudeEvent: (handler: (event: GrokBridgeEvent) => void) => () => void;
-  detectCursorLogin?: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null }>;
+  detectCursorLogin?: () => Promise<{ connected: boolean; needsAuth?: boolean; binary: string | null; accessDefaults?: import("./lib/types").BotAccessDefaults }>;
   cursorPrompt?: (input: GrokPromptBridgeInput) => Promise<{
     text?: string;
     stopReason?: string;

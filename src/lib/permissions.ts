@@ -2,7 +2,7 @@ import { modeLabel, sandboxLabel } from "./commands";
 import { uid } from "./id";
 import { applySessionElevation } from "./session";
 import { toolNameKey } from "./tool-labels";
-import type { PermissionGrant, PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
+import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, PermissionRequest, SandboxProfile, Session } from "./types";
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
@@ -289,6 +289,129 @@ export function describeElevation(
   if (to.mode) bits.push(`Permission ${modeLabel(from.mode)} → ${modeLabel(to.mode)}`);
   if (to.sandbox) bits.push(`Sandbox ${sandboxLabel(from.sandbox)} → ${sandboxLabel(to.sandbox)}`);
   return bits.join(" and ");
+}
+
+/** The narrower of a desk answer and a vendor app's own recorded defaults. */
+export function tighterAccess(left: DeskAccess, right: BotAccessDefaults | undefined): DeskAccess {
+  if (!right) return left;
+  return {
+    mode: right.mode && MODE_RANK[right.mode] < MODE_RANK[left.mode] ? right.mode : left.mode,
+    sandbox: right.sandbox && SANDBOX_RANK[right.sandbox] < SANDBOX_RANK[left.sandbox] ? right.sandbox : left.sandbox,
+  };
+}
+
+export const DESK_ACCESS_FALLBACK: DeskAccess = { mode: "always-approve", sandbox: "off" };
+
+/**
+ * Access an inbound CLI / MCP / tool call runs under.
+ *
+ * An explicit parent chat is the path: the call takes that chat's Permission
+ * and Sandbox, so a chat the person tightened stays tight and a chat they set
+ * to Always stays Always. With no parent the desk's own stored default answers
+ * — Always / Off as shipped, and only the person may narrow it. The vendor
+ * app's recorded defaults are folded in as a second thing the person set, so
+ * the narrower of the two wins: a Codex on approval_policy="never" keeps the
+ * desk's Always, and a Codex on "on-request" pulls it back to Ask.
+ *
+ * Nothing here reads the caller's live permission state, and nothing asks for
+ * it. A desk cannot see what another vendor's app is allowing right now, so
+ * that handshake is not attempted. Every input is the desk's own record.
+ */
+export function inboundAccess(input: {
+  parent?: BotAccessDefaults;
+  desk?: DeskAccess;
+  vendor?: BotAccessDefaults;
+}): DeskAccess {
+  const seat = tighterAccess(input.desk ?? DESK_ACCESS_FALLBACK, input.vendor);
+  return {
+    mode: input.parent?.mode ?? seat.mode,
+    sandbox: input.parent?.sandbox ?? seat.sandbox,
+  };
+}
+
+/**
+ * The vendor session a path-owned worker launches under, never looser than
+ * Ask. Always maps to approval_policy="never" / bypassPermissions at the
+ * vendor launch (electron/codex-launch.ts:86, electron/claude-launch.ts:120),
+ * and those stop the write events the path preflight reads — a worker that
+ * cannot be preflighted cannot be held to its allowlist. The person still sees
+ * no modal for in-path work: the desk answers those events itself from the
+ * grant the worker carries. The prompt is suppressed at the desk, not at the
+ * vendor. Plan and Ask are already tight enough and pass through unchanged.
+ */
+export function pathOwnerMode(mode: PermissionMode): PermissionMode {
+  return MODE_RANK[mode] > MODE_RANK.ask ? "ask" : mode;
+}
+
+export type WorkerAccessPrior = {
+  mode: PermissionMode;
+  sandbox: SandboxProfile;
+  agentRun?: { paths?: string[]; grantedAccess?: DeskAccess };
+};
+
+/**
+ * A narrowing the person put on a worker chat themselves, told apart from the
+ * desk's own path clamp. The desk records what it granted, so anything tighter
+ * than what it last set is the person's doing and survives the next slice.
+ * Without the record every reuse would read last slice's clamp as a wish.
+ */
+export function workerTightening(prior: WorkerAccessPrior | undefined): BotAccessDefaults | undefined {
+  if (!prior) return undefined;
+  const granted = prior.agentRun?.grantedAccess;
+  if (!granted) return { mode: prior.mode, sandbox: prior.sandbox };
+  const owned = (prior.agentRun?.paths?.length ?? 0) > 0;
+  const deskSet: DeskAccess = { mode: owned ? pathOwnerMode(granted.mode) : granted.mode, sandbox: granted.sandbox };
+  const mode = MODE_RANK[prior.mode] < MODE_RANK[deskSet.mode] ? prior.mode : undefined;
+  const sandbox = SANDBOX_RANK[prior.sandbox] < SANDBOX_RANK[deskSet.sandbox] ? prior.sandbox : undefined;
+  if (!mode && !sandbox) return undefined;
+  return { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}) };
+}
+
+/**
+ * The seat a spawned worker launches under. It inherits the parent path; a
+ * path allowlist clamps the vendor session to Ask so ownership can still be
+ * checked before each write; and a narrowing the person set on this worker
+ * chat outranks both, because reuse must not hand back access they took away.
+ */
+export function workerAccess(input: {
+  inherited: DeskAccess;
+  owned: boolean;
+  prior?: WorkerAccessPrior;
+}): DeskAccess {
+  const seat: DeskAccess = {
+    mode: input.owned ? pathOwnerMode(input.inherited.mode) : input.inherited.mode,
+    sandbox: input.inherited.sandbox,
+  };
+  return tighterAccess(seat, workerTightening(input.prior));
+}
+
+/** What the desk records as granted, so the next reuse can read the clamp apart from a tightening. */
+export function workerGrant(input: { inherited: DeskAccess; prior?: WorkerAccessPrior }): DeskAccess {
+  return tighterAccess(input.inherited, workerTightening(input.prior));
+}
+
+/**
+ * What the desk answers on a worker's behalf from the grant it inherited.
+ * A grant only ever allows: it can silence a prompt the desk already decided
+ * to allow, and it never turns into a fresh denial, so every real block still
+ * comes from the chat's own Permission and Sandbox.
+ */
+export function grantedPolicyAnswer(input: {
+  granted?: PermissionMode;
+  sandbox: SandboxProfile;
+  tool: string;
+  detail: string;
+  path?: string;
+}): PermissionAnswer | null {
+  if (!input.granted) return null;
+  const answer = permissionPolicyAnswer({
+    mode: input.granted,
+    sandbox: input.sandbox,
+    tool: input.tool,
+    detail: input.detail,
+    path: input.path,
+  });
+  return answer === "deny" ? null : answer;
 }
 
 export function permissionPolicyAnswer(input: {

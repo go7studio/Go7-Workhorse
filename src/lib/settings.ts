@@ -3,8 +3,9 @@ import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
+import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";
-import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
+import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   customBots: [],
   mcpServers: [],
+  access: { mode: "always-approve", sandbox: "off" },
   usageBudgets: { grok: 2_000_000 },
   watch: { ...DEFAULT_WATCH },
   routing: {
@@ -109,6 +111,32 @@ function accessDefaults(raw: unknown): BotAccessDefaults | undefined {
   return mode || sandbox ? { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}) } : undefined;
 }
 
+/**
+ * The desk default. A stored value only ever narrows what ships, and a value
+ * this build cannot read falls back to Always / Off rather than to Ask —
+ * unreadable state is not the person restricting the desk.
+ */
+export function normalizeDeskAccess(raw: unknown): DeskAccess {
+  const stored = accessDefaults(raw);
+  return {
+    mode: stored?.mode ?? DEFAULT_SETTINGS.access.mode,
+    sandbox: stored?.sandbox ?? DEFAULT_SETTINGS.access.sandbox,
+  };
+}
+
+/**
+ * Keep a vendor's detected defaults through a detect that came back empty. A
+ * CLI that is logged out, mid-upgrade, or holding an unreadable config reports
+ * nothing; writing that nothing over a stored Always would tighten the desk
+ * without the person asking, which is the one thing only they may do.
+ */
+export function keepVendorAccessDefaults(
+  stored: BotAccessDefaults | undefined,
+  detected: BotAccessDefaults | undefined,
+): BotAccessDefaults | undefined {
+  return detected ?? stored;
+}
+
 function link(raw: unknown): LlmLink {
   if (!raw || typeof raw !== "object") return { connected: false };
   const record = raw as LlmLink;
@@ -170,27 +198,32 @@ export function firstAttachedChoice(settings: Settings, remembered?: ModelChoice
   } else if (remembered && vendorEnabled(settings.llms[remembered.provider])) {
     return remembered;
   }
+  // Falling back is not the person restricting the desk. When the remembered
+  // vendor drops off, the seat comes from the desk default narrowed by that
+  // vendor's own recorded config — never from a bare "ask", which is how a
+  // disconnect used to quietly tighten every chat opened afterwards.
   const stock = attachedStockVendors(settings)[0];
   if (stock) {
     const model = defaultModel(stock).id;
-    const nativeAccess = settings.llms[stock].accessDefaults;
+    const seat = inboundAccess({ desk: settings.access, vendor: settings.llms[stock].accessDefaults });
     return {
       provider: stock,
       model,
       effort: withEffort(stock, model, "medium"),
-      sandbox: nativeAccess?.sandbox ?? "off",
-      mode: nativeAccess?.mode ?? "ask",
+      sandbox: seat.sandbox,
+      mode: seat.mode,
     };
   }
   const bot = attachedCustomBots(settings)[0];
   if (bot) {
+    const seat = inboundAccess({ desk: settings.access });
     return {
       provider: "custom",
       model: bot.model,
       customBotId: bot.id,
       effort: withEffort("custom", bot.model, "medium"),
-      sandbox: "off",
-      mode: "ask",
+      sandbox: seat.sandbox,
+      mode: seat.mode,
     };
   }
   return null;
@@ -340,6 +373,7 @@ export function normalizeSettings(raw: unknown): Settings {
     },
     customBots: normalizeCustomBots(record.customBots, custom(record.llms?.custom)),
     mcpServers: normalizeMcpServers(record.mcpServers),
+    access: normalizeDeskAccess((record as { access?: unknown }).access),
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),
     watch: normalizeWatch(record.watch),
     routing: normalizeRouting(record.routing),

@@ -98,6 +98,7 @@ import {
   subagentTurns,
   toolsForDeskRole,
   UNBOUND_SPAWN_ERROR,
+  assertAgentPathWrite,
   withSubagentStatus,
   workerReportedBlocked,
   workerStatusSnapshot,
@@ -155,11 +156,12 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
 import { applyArchiveProject, applyCreateWorkhorseProject, applyDeleteProject, applyProjectChatFate, applyRenameDeskProject, emptyProject, findProjectByQuery, projectForSpawn, renameTookOnDesk, visibleProjectNames } from "../src/lib/project";
-import { agentSystemsFromInboundSelect, applyUpdateStockBot, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
+import { agentSystemsFromInboundSelect, applyUpdateStockBot, DEFAULT_SETTINGS, deskInk, deskLabel, firstAttachedChoice, hasAttachedLlm, inboundParentSelectValue, keepVendorAccessDefaults, normalizeDeskAccess, normalizeSettings, vendorAttachedForSession, vendorEnabled, vendorLabel, vendorTint } from "../src/lib/settings";
 import { customBotEnabled } from "../src/lib/custom-bots";
 import { COUNT_MS, COUNT_SNAP, countAt, countMotion, countToward, shouldSnapCount } from "../src/lib/count";
 import { buildFileDiff, countLineChanges, formatDiffStat, lineDiff } from "../src/lib/file-diff";
@@ -217,7 +219,7 @@ import {
   workStepKinds,
   type WorkStreamEvent,
 } from "../src/lib/turns";
-import type { ChatMessage, PermissionMode, PermissionRequest, Session } from "../src/lib/types";
+import type { ChatMessage, DeskAccess, PermissionMode, PermissionRequest, Session } from "../src/lib/types";
 import {
   addUsageDraft,
   applyUsageContext,
@@ -465,6 +467,57 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(permissionPolicyAnswer({ mode: "always-approve", sandbox: "read-only", tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), "deny");
   assert.equal(permissionGrantKey("shell", 'cd /tmp/worktree && ls docs && echo "copy"'), 'shell:cd /tmp/worktree && ls docs && echo "copy"');
   assert.equal(permissionGrantKey("Read", "src/app.ts", "src/app.ts"), "read:src/app.ts");
+  // Inbound CLI/MCP takes the desk parent path. Always is the default, so an
+  // inbound call the desk has said nothing about never pops a tool prompt.
+  assert.deepEqual(inboundAccess({}), { mode: "always-approve", sandbox: "off" });
+  assert.deepEqual(
+    inboundAccess({ vendor: { mode: "always-approve", sandbox: "off" } }),
+    { mode: "always-approve", sandbox: "off" },
+  );
+  assert.equal(
+    permissionPolicyAnswer({ ...inboundAccess({}), tool: "Write", detail: "src/app.ts", path: "src/app.ts" }),
+    "session",
+  );
+  // Restriction is the explicit change: a tightened desk still prompts, and an
+  // inbound call never lowers it back.
+  assert.deepEqual(inboundAccess({ parent: { mode: "ask", sandbox: "off" } }), { mode: "ask", sandbox: "off" });
+  assert.equal(
+    permissionPolicyAnswer({
+      ...inboundAccess({ parent: { mode: "ask", sandbox: "off" }, vendor: { mode: "always-approve", sandbox: "off" } }),
+      tool: "Write",
+      detail: "src/app.ts",
+      path: "src/app.ts",
+    }),
+    null,
+  );
+  assert.deepEqual(
+    inboundAccess({ parent: { mode: "plan", sandbox: "read-only" }, vendor: { mode: "always-approve", sandbox: "off" } }),
+    { mode: "plan", sandbox: "read-only" },
+  );
+  assert.equal(
+    permissionPolicyAnswer({
+      ...inboundAccess({ parent: { mode: "plan", sandbox: "read-only" } }),
+      tool: "Write",
+      detail: "src/app.ts",
+      path: "src/app.ts",
+    }),
+    "deny",
+  );
+  // The stored desk default answers when no chat was named, and only the
+  // person moves it. A vendor app set narrower keeps its own limit.
+  assert.deepEqual(DEFAULT_SETTINGS.access, { mode: "always-approve", sandbox: "off" });
+  assert.deepEqual(normalizeDeskAccess(undefined), { mode: "always-approve", sandbox: "off" });
+  assert.deepEqual(normalizeDeskAccess({ mode: "plan" }), { mode: "plan", sandbox: "off" });
+  assert.deepEqual(normalizeDeskAccess({ mode: "nonsense" }), { mode: "always-approve", sandbox: "off" });
+  assert.deepEqual(inboundAccess({ desk: { mode: "ask", sandbox: "off" } }), { mode: "ask", sandbox: "off" });
+  assert.deepEqual(
+    inboundAccess({ desk: { mode: "always-approve", sandbox: "off" }, vendor: { mode: "ask" } }),
+    { mode: "ask", sandbox: "off" },
+  );
+  assert.deepEqual(
+    inboundAccess({ desk: { mode: "always-approve", sandbox: "off" }, vendor: { mode: "always-approve" } }),
+    { mode: "always-approve", sandbox: "off" },
+  );
   assert.deepEqual(
     elevationForBlock({ mode: "ask", sandbox: "read-only", tool: "Write", detail: "notes.md", path: "notes.md" }),
     { sandbox: "off" },
@@ -9894,4 +9947,159 @@ test("hydrate strips gated-era campaign rows and lets their parents run", () => 
   assert.match(source, /gatedParents/, "their needs-input parents are set back to idle");
   assert.doesNotMatch(source, /requires human approval/i, "no path asks a human to approve a phase");
   assert.doesNotMatch(source, /clearCampaignPhase/, "nothing grants campaign clearance");
+});
+
+test("a path-owned worker launches at Ask and the desk answers its in-path writes", () => {
+  const desk: DeskAccess = { mode: "always-approve", sandbox: "off" };
+  // Dial one: the vendor session. Always would launch approval_policy="never"
+  // and no write event would reach the ownership preflight, so a path-owned
+  // worker is clamped to Ask however permissive the desk is.
+  assert.deepEqual(workerAccess({ inherited: desk, owned: true }), { mode: "ask", sandbox: "off" });
+  assert.deepEqual(workerAccess({ inherited: desk, owned: false }), desk);
+  assert.equal(pathOwnerMode("always-approve"), "ask");
+  assert.equal(pathOwnerMode("accept-edits"), "ask");
+  assert.equal(pathOwnerMode("plan"), "plan");
+  assert.equal(pathOwnerMode("ask"), "ask");
+  // A clamped worker still prompts on its own Permission. That is what keeps
+  // the preflight in play.
+  const owned = workerAccess({ inherited: desk, owned: true });
+  assert.equal(permissionPolicyAnswer({ ...owned, tool: "Write", detail: "src/app.ts", path: "src/app.ts" }), null);
+  // Dial two: the carried grant answers that same write with no modal.
+  const grant = workerGrant({ inherited: desk });
+  assert.deepEqual(grant, desk);
+  assert.equal(
+    grantedPolicyAnswer({
+      granted: grant.mode,
+      sandbox: owned.sandbox,
+      tool: "Write",
+      detail: "src/app.ts",
+      path: "src/app.ts",
+    }),
+    "session",
+  );
+  // Out-of-path writes never reach the grant: assertAgentPathWrite refuses
+  // first, and the allowlist decides that, not the Permission.
+  const blocked = assertAgentPathWrite({
+    leases: [],
+    sessionId: "sess_worker",
+    paths: ["src/app.ts"],
+    path: "src/secrets.ts",
+    currentFingerprint: "",
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.ok ? "" : blocked.error, /not in this worker's allowlist/);
+  // In-path and claimed: the write is allowed, so it reaches the grant above
+  // and the person is never asked.
+  assert.equal(
+    assertAgentPathWrite({
+      leases: [{ sessionId: "sess_worker", path: "src/app.ts", fingerprint: "fp", claimedAt: 1 }],
+      sessionId: "sess_worker",
+      paths: ["src/app.ts"],
+      path: "src/app.ts",
+      currentFingerprint: "fp",
+    }).ok,
+    true,
+  );
+  // A grant only ever allows. A read-only box still denies the write.
+  assert.equal(
+    grantedPolicyAnswer({
+      granted: "always-approve",
+      sandbox: "read-only",
+      tool: "Write",
+      detail: "src/app.ts",
+      path: "src/app.ts",
+    }),
+    null,
+  );
+  assert.equal(grantedPolicyAnswer({ sandbox: "off", tool: "Write", detail: "src/app.ts" }), null);
+});
+
+test("reuse keeps a tightening the person set and drops the desk's own path clamp", () => {
+  const desk: DeskAccess = { mode: "always-approve", sandbox: "off" };
+  // Last slice owned paths, so Ask on that worker chat is the desk's clamp and
+  // not the person's wish. The next unowned slice must not inherit it.
+  const clamped = {
+    mode: "ask" as const,
+    sandbox: "off" as const,
+    agentRun: { paths: ["src/app.ts"], grantedAccess: desk },
+  };
+  assert.equal(workerTightening(clamped), undefined);
+  assert.deepEqual(workerAccess({ inherited: desk, owned: false, prior: clamped }), desk);
+  // The person then narrowed that same chat to Plan. That survives the reuse.
+  const narrowed = { ...clamped, mode: "plan" as const };
+  assert.deepEqual(workerTightening(narrowed), { mode: "plan" });
+  assert.deepEqual(workerAccess({ inherited: desk, owned: false, prior: narrowed }), { mode: "plan", sandbox: "off" });
+  assert.deepEqual(workerGrant({ inherited: desk, prior: narrowed }), { mode: "plan", sandbox: "off" });
+  // A tightened sandbox survives too.
+  const boxed = { mode: "always-approve" as const, sandbox: "read-only" as const, agentRun: { grantedAccess: desk } };
+  assert.deepEqual(workerAccess({ inherited: desk, owned: false, prior: boxed }), {
+    mode: "always-approve",
+    sandbox: "read-only",
+  });
+  // Reuse never widens: a worker the desk granted Ask stays at Ask.
+  assert.deepEqual(workerAccess({ inherited: { mode: "ask", sandbox: "off" }, owned: false }), {
+    mode: "ask",
+    sandbox: "off",
+  });
+});
+
+test("a vendor disconnect leaves the desk default and the stored vendor config alone", () => {
+  const stored = { mode: "always-approve" as const, sandbox: "off" as const };
+  // A logged-out or mid-upgrade CLI reports nothing. That is not a restriction.
+  assert.deepEqual(keepVendorAccessDefaults(stored, undefined), stored);
+  assert.deepEqual(keepVendorAccessDefaults(stored, { mode: "ask" }), { mode: "ask" });
+  assert.equal(keepVendorAccessDefaults(undefined, undefined), undefined);
+  // With the remembered vendor gone the seat still comes from the desk default,
+  // never a bare Ask. That fallback used to re-tighten every chat opened after.
+  const settings = normalizeSettings({ llms: { grok: { connected: true, enabled: true } } });
+  const dropped = firstAttachedChoice(settings, {
+    provider: "codex",
+    model: "gpt-5",
+    effort: "medium",
+    sandbox: "off",
+    mode: "always-approve",
+  });
+  assert.equal(dropped?.provider, "grok");
+  assert.equal(dropped?.mode, "always-approve");
+  assert.equal(dropped?.sandbox, "off");
+  const restricted = firstAttachedChoice({ ...settings, access: { mode: "ask", sandbox: "off" } }, null);
+  assert.equal(restricted?.mode, "ask");
+});
+
+test("the desk reads each vendor app's own config and never asks the vendor for it", () => {
+  // Injected readFile: this test never touches the home machine.
+  const files: Record<string, string> = {
+    "/home/.claude/settings.json": JSON.stringify({ permissions: { defaultMode: "bypassPermissions" } }),
+    "/home/.cursor/cli-config.json": JSON.stringify({ permissions: { defaultMode: "ask" } }),
+    "/home/.grok/config.toml": 'permission_mode = "acceptEdits"\nsandbox = "workspace"\n',
+  };
+  const readFile = (filePath: string) => {
+    const text = files[filePath];
+    if (text === undefined) throw new Error(`no such file ${filePath}`);
+    return text;
+  };
+  const join = (...parts: string[]) => parts.join("/");
+  assert.deepEqual(detectClaudeAccessDefaults({ home: "/home/.claude", join, readFile }), { mode: "always-approve" });
+  assert.deepEqual(detectCursorAccessDefaults({ home: "/home/.cursor", join, readFile }), { mode: "ask" });
+  assert.deepEqual(detectGrokAccessDefaults({ home: "/home/.grok", join, readFile }), {
+    mode: "accept-edits",
+    sandbox: "workspace",
+  });
+  // GROK_SANDBOX beats the file, the way the launch flags already assume.
+  assert.deepEqual(
+    detectGrokAccessDefaults({ home: "/home/.grok", join, readFile, env: { GROK_SANDBOX: "read-only" } }),
+    { mode: "accept-edits", sandbox: "read-only" },
+  );
+  // A missing or unreadable config is not a restriction: nothing is reported,
+  // so the desk default stands rather than dropping to Ask.
+  const gone = () => {
+    throw new Error("no config");
+  };
+  assert.equal(detectClaudeAccessDefaults({ home: "/gone", join, readFile: gone }), undefined);
+  assert.equal(detectCursorAccessDefaults({ home: "/gone", join, readFile: gone }), undefined);
+  assert.equal(detectGrokAccessDefaults({ home: "/gone", join, readFile: gone }), undefined);
+  assert.equal(
+    detectClaudeAccessDefaults({ home: "/x", join, readFile: () => JSON.stringify({ permissions: { defaultMode: "wat" } }) }),
+    undefined,
+  );
 });

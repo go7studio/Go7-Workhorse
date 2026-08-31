@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.49](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.48...v0.6.49) (2026-08-31)
+
+
+### Features
+
+* desk access default paths through inbound CLI and MCP ([9635b6d](https://github.com/go7studio/Go7-Workhorse/commit/9635b6d11f08ecfc9bed1064890f737ed321ba26))
+* desk access default paths through inbound CLI and MCP ([dc2f330](https://github.com/go7studio/Go7-Workhorse/commit/dc2f330cb48180ea53b858ae5a6c4a3ab92db18c))
+
 ## [0.6.48](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.47...v0.6.48) (2026-08-31)
 
 

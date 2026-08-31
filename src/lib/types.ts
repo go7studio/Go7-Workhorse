@@ -9,6 +9,18 @@ export type BotAccessDefaults = {
   sandbox?: SandboxProfile;
 };
 
+/**
+ * The desk's own standing answer for inbound work — CLI, MCP, and tool calls
+ * that arrive with no chat of their own. Always / Off unless the person
+ * restricts it in Settings, because restriction is the explicit change. Both
+ * fields are required: this is the desk's answer, not a hint, so nothing
+ * downstream has to guess what silence meant.
+ */
+export type DeskAccess = {
+  mode: PermissionMode;
+  sandbox: SandboxProfile;
+};
+
 export type SessionSecurityPolicy = {
   network: "blocked" | "allowed";
   root: "ask" | "blocked" | "allowed";
@@ -369,6 +381,14 @@ export type AgentRun = {
   constraints?: string[];
   /** Repo-relative files this worker is allowed to change. */
   paths?: string[];
+  /**
+   * The access the desk handed this worker, before any path clamp. A
+   * path-owned worker runs its vendor session at Ask so writes still reach the
+   * ownership preflight; this is what the desk answers those events with, so
+   * the person sees no modal for in-path work. It is also the mark that tells
+   * the desk's own clamp apart from a narrowing the person set by hand.
+   */
+  grantedAccess?: DeskAccess;
   /** Structured review receipts parsed from the worker's terminal output. */
   findings?: WorkerFinding[];
   /** Structured routing policy inherited by every nested worker. */
@@ -866,6 +886,8 @@ export type Settings = {
   };
   customBots: CustomBot[];
   mcpServers: McpServerConfig[];
+  /** Desk default for inbound work. Only the person may tighten it. */
+  access: DeskAccess;
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;

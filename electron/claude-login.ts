@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
+import { detectClaudeAccessDefaults } from "./vendor-access";
+import type { BotAccessDefaults } from "../src/lib/types";
 
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 
@@ -40,6 +42,8 @@ export type ClaudeLoginDetectResult = {
   cliBinary: string | null;
   acpBinary: string | null;
   claudeHome: string;
+  /** What the Claude app itself is set to. Read, never asked for. */
+  accessDefaults?: BotAccessDefaults;
 };
 
 export type ClaudeAcpLaunch = {
@@ -339,6 +343,7 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
     input.keychainHasLogin ?? macKeychainHasClaudeLogin,
   );
   const connected = Boolean(acpBinary && loggedIn);
+  const accessDefaults = detectClaudeAccessDefaults({ home: claudeHome, join: path.join, readFile, env });
   return {
     connected,
     needsAuth: Boolean(acpBinary) && !loggedIn,
@@ -346,6 +351,7 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
     cliBinary,
     acpBinary,
     claudeHome,
+    ...(accessDefaults ? { accessDefaults } : {}),
   };
 }
 

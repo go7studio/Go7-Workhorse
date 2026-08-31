@@ -3,10 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { CURSOR_ACP_NOT_INSTALLED } from "../src/lib/cursor-lane";
+import { detectCursorAccessDefaults } from "./vendor-access";
+import type { BotAccessDefaults } from "../src/lib/types";
 
 export { CURSOR_ACP_NOT_INSTALLED };
 
 export type CursorLoginDetectInput = {
+  /** Injected so a test never reads this machine's Cursor config. */
+  readFile?: (filePath: string) => string;
   env?: NodeJS.Dict<string>;
   homedir?: string;
   platform?: NodeJS.Platform;
@@ -23,6 +27,8 @@ export type CursorLoginDetectResult = {
   binary: string | null;
   prefixArgs: string[];
   cursorHome: string;
+  /** What the Cursor app itself is set to. Read, never asked for. */
+  accessDefaults?: BotAccessDefaults;
 };
 
 /** Official Windows CLI: %LOCALAPPDATA%\cursor-agent\versions\<date-hash>\ */
@@ -208,11 +214,14 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   const envAuth = Boolean(env.CURSOR_API_KEY?.trim() || env.CURSOR_AUTH_TOKEN?.trim());
   const authProbe = envAuth ? true : (input.probeAuth ?? ((file) => probeCursorAuth(file, prefixArgs)))(binary);
   const loggedIn = envAuth || authProbe === true || (authProbe === undefined && hasCursorLoginArtifact(cursorHome, existsSync, env, join));
+  const readFile = input.readFile ?? ((filePath: string) => fs.readFileSync(filePath, "utf8"));
+  const accessDefaults = detectCursorAccessDefaults({ home: cursorHome, join, readFile, env });
   return {
     connected: loggedIn,
     needsAuth: !loggedIn,
     binary,
     prefixArgs,
     cursorHome,
+    ...(accessDefaults ? { accessDefaults } : {}),
   };
 }

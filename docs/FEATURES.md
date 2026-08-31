@@ -186,6 +186,12 @@ transcript rather than as a path.
 
 - **Permission modes** — ask, accept-edits, always-approve, plan.
 - **Sandbox profiles** — off, workspace, read-only, strict.
+- **Desk access default** — Settings › LLMs holds one Permission and Sandbox
+  for work that names no chat: a CLI, MCP, or tool call arriving from outside.
+  It ships as Always allow with the sandbox off, so inbound work does not stop
+  on a prompt, and only you narrow it. A call that names a parent chat takes
+  that chat's setting instead, and a vendor app set narrower than the desk
+  keeps its own limit. Connecting or dropping a vendor never moves it.
 - **One permission inbox.** Every prompt lands in the same place and is
   translated to each vendor's own protocol.
 - **Scoped approvals.** A session grant remembers the exact tool, command, and

@@ -9,7 +9,7 @@ import { agentSystemsFromInboundSelect, inboundParentSelectValue, vendorEnabled,
 import { APP_VERSION } from "../lib/app-info";
 import { useStore } from "../lib/store";
 import { SETTINGS_THEME_CHOICES } from "../lib/theme";
-import type { AgentRuntimeId, DeskExportKind, LlmLink, ProviderId, SettingsSection } from "../lib/types";
+import type { AgentRuntimeId, DeskExportKind, LlmLink, PermissionMode, ProviderId, SandboxProfile, SettingsSection } from "../lib/types";
 import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
@@ -356,6 +356,7 @@ export function Settings() {
             <CustomBotDetail key={llmFocus} botId={llmFocus.slice(4)} onGone={() => setLlmFocus(null)} />
           )}
 
+          <DeskAccessBlock />
           <LocalComputeBlock />
           <AgentSystemsBlock />
         </>
@@ -737,6 +738,85 @@ const EMPTY_RUNTIMES: AgentRuntimeStatus[] = (["openclaw", "hermes"] as const).m
   authenticated: false,
   reachable: false,
 }));
+
+const DESK_PERMISSIONS: { id: PermissionMode; label: string }[] = [
+  { id: "ask", label: "Ask each time" },
+  { id: "accept-edits", label: "Accept edits" },
+  { id: "always-approve", label: "Always allow" },
+  { id: "plan", label: "Plan mode" },
+];
+
+const DESK_SANDBOXES: { id: SandboxProfile; label: string }[] = [
+  { id: "off", label: "Full access" },
+  { id: "workspace", label: "Workspace only" },
+  { id: "read-only", label: "Read-only" },
+  { id: "strict", label: "Strict" },
+];
+
+/** The desk's standing answer for work that arrives with no chat of its own. */
+function DeskAccessBlock() {
+  const store = useStore();
+  const access = store.settings.access;
+  return (
+    <div className="settings-group">
+      <div className="settings-row settings-group-head">
+        <div className="settings-row-copy">
+          <strong>Desk access</strong>
+          <span>
+            What a CLI, MCP or tool call runs under when it names no chat. Always allow so inbound work does not stop
+            on a prompt. Narrow it here when you want inbound work held back.
+          </span>
+          <span>
+            A chat that names itself as the parent lends its own setting instead, and a vendor app set narrower than
+            this keeps its own limit. Nothing else writes this — connecting or dropping a vendor leaves it alone.
+          </span>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Permission</strong>
+        </div>
+        <div className="settings-control">
+          <div className="actions" role="radiogroup" aria-label="Desk permission">
+            {DESK_PERMISSIONS.map((item) => (
+              <button
+                key={item.id}
+                className={access.mode === item.id ? "tiny active-kind" : "tiny"}
+                type="button"
+                role="radio"
+                aria-checked={access.mode === item.id}
+                onClick={() => store.setDeskAccess({ mode: item.id })}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="settings-row">
+        <div className="settings-row-copy">
+          <strong>Sandbox</strong>
+        </div>
+        <div className="settings-control">
+          <div className="actions" role="radiogroup" aria-label="Desk sandbox">
+            {DESK_SANDBOXES.map((item) => (
+              <button
+                key={item.id}
+                className={access.sandbox === item.id ? "tiny active-kind" : "tiny"}
+                type="button"
+                role="radio"
+                aria-checked={access.sandbox === item.id}
+                onClick={() => store.setDeskAccess({ sandbox: item.id })}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AgentSystemsBlock() {
   const store = useStore();

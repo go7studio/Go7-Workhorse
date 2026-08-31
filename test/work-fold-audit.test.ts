@@ -4,12 +4,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { LINEUP_FINISHED_NOTICE } from "../src/lib/lineup";
-import { workerTaskTitle } from "../src/lib/subagents";
+import { subagentTurns, workerTaskTitle } from "../src/lib/subagents";
+import { displayWorkSteps, groupTranscript } from "../src/lib/turns";
 import { crewDoneKind } from "../src/ui/SessionPane";
 import { workerFoldLabel } from "../src/ui/WorkPopout";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
+
+/** One top-level rule. Empty match must fail — adjacent-slice tests can pass on the wrong block. */
+function cssBlock(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{[^}]*\\}`));
+  assert.ok(match, `missing CSS rule ${selector}`);
+  return match[0];
+}
 
 test("work-fold labels use the nested sidebar identity, not a slice fragment", () => {
   assert.equal(
@@ -55,6 +64,86 @@ test("subagent names keep a real min-width and wrap instead of shrinking to an e
   assert.match(subName, /min-width:\s*12ch/);
   assert.match(subName, /white-space:\s*normal/);
   assert.doesNotMatch(subName, /text-overflow:\s*ellipsis/);
+});
+
+test("a closed nested worker fold does not keep padding that leaks the peer bubble", () => {
+  const css = read("src/styles/app.css");
+  const slot = cssBlock(css, ".subagent-thread-slot");
+  assert.match(slot, /grid-template-rows:\s*0fr/);
+  assert.match(slot, /overflow:\s*hidden/);
+  const inner = cssBlock(css, ".subagent-thread-slot > .subagent-thread");
+  assert.match(inner, /min-height:\s*0/);
+  assert.match(inner, /overflow:\s*hidden/);
+  // Same grid item as .subagent-thread — padding here restores the slab and used to miss this rule.
+  assert.doesNotMatch(inner, /padding/);
+  assert.doesNotMatch(inner, /margin/);
+  const thread = cssBlock(css, ".subagent-thread");
+  assert.match(thread, /margin:\s*0/);
+  assert.match(thread, /padding:\s*0/);
+  assert.match(thread, /gap:\s*0/);
+  assert.doesNotMatch(thread, /padding(?:-top|-bottom|-left|-right|-block|-inline)?\s*:[^;]*[1-9]/);
+  assert.doesNotMatch(thread, /margin(?:-top|-bottom|-left|-right|-block|-inline)?\s*:[^;]*[1-9]/);
+  assert.doesNotMatch(thread, /gap:\s*10px/);
+  const openThread = cssBlock(css, ".subagent-preview.open .subagent-thread");
+  assert.match(openThread, /padding:\s*8px 0 2px/);
+  assert.match(openThread, /margin:\s*8px 0 4px/);
+  assert.match(openThread, /gap:\s*10px/);
+  const openSlot = cssBlock(css, ".subagent-preview.open .subagent-thread-slot");
+  assert.match(openSlot, /grid-template-rows:\s*1fr/);
+});
+
+test("nested worker preview skips thoughts and tools; those stay on the worker chat", () => {
+  const turns = subagentTurns(
+    {
+      messages: [
+        { id: "brief", role: "user", kind: "peer", fromTitle: "Grok", text: "Fix the path", createdAt: 1 },
+        { id: "think", role: "assistant", kind: "thought", text: "I should inspect default.ts", createdAt: 2 },
+        { id: "tool", role: "system", kind: "tool", text: "Read · default.ts", createdAt: 3 },
+        { id: "compact", role: "system", kind: "compact", text: "trimmed", createdAt: 4 },
+        { id: "mark", role: "system", kind: "subagent", text: "Marlow", createdAt: 5 },
+        { id: "empty-user", role: "user", kind: "peer", fromTitle: "Grok", text: "  ", createdAt: 6 },
+        { id: "say", role: "assistant", text: "Done.", createdAt: 7 },
+        { id: "draft", role: "assistant", text: "", createdAt: 8 },
+      ],
+    },
+    0,
+  );
+  assert.deepEqual(
+    turns.map((turn) => turn.id),
+    ["brief", "say", "draft"],
+  );
+  assert.equal(turns[0]?.fromTitle, "Grok");
+});
+
+test("empty parent thoughts never become a work row that could look like a bar", () => {
+  const blocks = groupTranscript([
+    { id: "u", role: "user", text: "go", createdAt: 1 },
+    { id: "a", role: "assistant", text: "ok", thought: "   ", createdAt: 2 },
+    { id: "t", role: "assistant", kind: "thought", text: "  ", createdAt: 3 },
+  ]);
+  const reply = blocks.find((block) => block.type === "reply");
+  assert.ok(reply && reply.type === "reply");
+  assert.equal(
+    displayWorkSteps(reply).filter((step) => step.type === "thought").length,
+    0,
+  );
+});
+
+test("nested worker fold starts closed; .open is only the toggle class on the preview", () => {
+  const popout = read("src/ui/WorkPopout.tsx");
+  const start = popout.indexOf("function SubagentRow");
+  const end = popout.indexOf("function isSpawnTool");
+  assert.ok(start >= 0 && end > start, "SubagentRow block not found");
+  const row = popout.slice(start, end);
+  assert.match(row, /const \[open, setOpen\] = useState\(false\)/);
+  assert.match(row, /subagent-preview work-step\$\{failed \? " failed" : ""\}\$\{open \? " open" : ""\}/);
+  assert.match(row, /<div className="subagent-thread-slot" aria-hidden=\{!open\}>/);
+  assert.match(row, /className="turn user chat peer subagent-turn"/);
+  assert.doesNotMatch(row, /ThoughtBlock/);
+  assert.doesNotMatch(row, /useStartOpen/);
+  assert.doesNotMatch(row, /reveal/);
+  const pane = read("src/ui/SessionPane.tsx");
+  assert.match(pane, /onOpenThread=\{desk\.selectSession\}/);
 });
 
 test("wide markdown tables can exceed the wrap so overflow-x actually scrolls", () => {

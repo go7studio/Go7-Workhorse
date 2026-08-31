@@ -386,13 +386,14 @@ ${mcp}
 `;
 }
 
-export type LinkHost = "codex" | "claude" | "grok" | "grok-bot" | "openclaw" | "hermes";
+export type LinkHost = "codex" | "claude" | "cursor" | "grok" | "grok-bot" | "openclaw" | "hermes";
 
-export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "grok", "grok-bot", "openclaw", "hermes"];
+export const LINK_HOSTS: LinkHost[] = ["codex", "claude", "cursor", "grok", "grok-bot", "openclaw", "hermes"];
 
 export const LINK_HOST_LABEL: Record<LinkHost, string> = {
   codex: "Codex",
   claude: "Claude",
+  cursor: "Cursor",
   grok: "Grok",
   "grok-bot": "Grok Bot",
   openclaw: "OpenClaw",
@@ -410,7 +411,7 @@ export function linkHostConnectsByOneshot(host: LinkHost): boolean {
  * format its business. `-s user` where the host scopes, so the link is
  * there in every project, not the one the desk happened to be in.
  */
-export function linkHostCliArgs(host: Exclude<LinkHost, "openclaw" | "hermes" | "grok-bot">, server: McpServerConfig): { command: string; args: string[] } {
+export function linkHostCliArgs(host: Exclude<LinkHost, "cursor" | "openclaw" | "hermes" | "grok-bot">, server: McpServerConfig): { command: string; args: string[] } {
   const env = Object.entries(server.env ?? {}).map(([key, value]) => `${key}=${value}`);
   if (host === "claude") {
     // claude mcp add [options] <name> <commandOrUrl> [args...]  ·  -e KEY=value  ·  -s user

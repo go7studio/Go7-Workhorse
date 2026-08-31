@@ -124,6 +124,12 @@ export function hermesConfigPath(home: string, platform: "darwin" | "win32" | "l
   return `${home.replace(/[\\/]+$/, "")}${slash}.hermes${slash}config.yaml`;
 }
 
+/** Cursor has no `mcp add`; Connect writes the same launch into `~/.cursor/mcp.json`. */
+export function cursorMcpConfigPath(home: string, platform: "darwin" | "win32" | "linux"): string {
+  const slash = platform === "win32" || home.includes("\\") ? "\\" : "/";
+  return `${home.replace(/[\\/]+$/, "")}${slash}.cursor${slash}mcp.json`;
+}
+
 export type InstallIo = {
   existsSync: (path: string) => boolean;
   readFile: (path: string) => string;
@@ -184,7 +190,7 @@ export function workhorseLinkGrokBotOneshot(input: {
  * linkHostCliArgs, verified against each CLI's help.
  */
 function connectViaHostCli(
-  host: Exclude<LinkHost, "openclaw" | "hermes" | "grok-bot">,
+  host: Exclude<LinkHost, "cursor" | "openclaw" | "hermes" | "grok-bot">,
   server: McpServerConfig,
   io: InstallIo,
   written: InstallReport["written"],
@@ -225,7 +231,37 @@ export function installWorkhorseLink(input: InstallLinkInput): InstallReport {
   if (hosts.has("grok-bot")) {
     written.push({ target: "grok-bot", path: "oneshot", how: "oneshot" });
   }
-  if (!hosts.has("openclaw") && !hosts.has("hermes")) return { ok: written.length > 0, written, skipped };
+  if (!hosts.has("openclaw") && !hosts.has("hermes") && !hosts.has("cursor")) {
+    return { ok: written.length > 0, written, skipped };
+  }
+
+  if (hosts.has("cursor")) {
+    const cursorPath = cursorMcpConfigPath(input.home, input.platform);
+    const cursorHome = dirnameOf(cursorPath);
+    if (!input.io.existsSync(cursorPath) && !input.io.existsSync(cursorHome)) {
+      skipped.push({ target: "cursor", reason: "Cursor is not installed (no ~/.cursor)" });
+    } else {
+      try {
+        let existing: unknown = {};
+        if (input.io.existsSync(cursorPath)) {
+          existing = JSON.parse(input.io.readFile(cursorPath));
+        }
+        const next = mergeExternalMcpServer(existing, server);
+        if (mcpConfigContainsBearer(next)) {
+          skipped.push({ target: "cursor", reason: "refused to write a bearer token" });
+        } else {
+          input.io.mkdirp(dirnameOf(cursorPath));
+          input.io.writeFile(cursorPath, `${JSON.stringify(next, null, 2)}\n`);
+          written.push({ target: "cursor", path: cursorPath, how: "file" });
+        }
+      } catch (error) {
+        skipped.push({
+          target: "cursor",
+          reason: error instanceof Error ? error.message : "could not write mcp.json",
+        });
+      }
+    }
+  }
 
   const openclawPath = openClawConfigPath(input.home, input.platform);
   let openclawDone = !hosts.has("openclaw");

@@ -24,6 +24,7 @@ import {
   crewHasParentTakeover,
   normalizeAgentRun,
   recordParentTakeover,
+  expiredWorkerIds,
 } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 
@@ -278,4 +279,49 @@ test("shell and patch tools on the parent are takeover tools; reads are not", ()
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /recordParentTakeover/);
   assert.match(store, /isParentTakeoverTool/);
+});
+
+/**
+ * The runtime limit was advertised for months and enforced by nobody. The caller's
+ * reply promise held the only timer, and on Link the desk answers a delegation
+ * immediately with the worker id — which cleared it. Measured: a pass sent with
+ * timeoutSeconds 30 ran 251 seconds and completed.
+ */
+test("a worker past its runtime limit is expired, and one inside it is not", () => {
+  const now = 1_000_000;
+  const sessions = [
+    { id: "over", agentRun: { status: "running", startedAt: now - 60_000, timeoutMs: 30_000 } },
+    { id: "under", agentRun: { status: "running", startedAt: now - 10_000, timeoutMs: 30_000 } },
+    { id: "exactly-at", agentRun: { status: "running", startedAt: now - 30_000, timeoutMs: 30_000 } },
+    { id: "done", agentRun: { status: "completed", startedAt: now - 60_000, timeoutMs: 30_000 } },
+    { id: "unbounded", agentRun: { status: "running", startedAt: now - 999_000 } },
+    { id: "zero-limit", agentRun: { status: "running", startedAt: now - 999_000, timeoutMs: 0 } },
+    { id: "no-start", agentRun: { status: "running", timeoutMs: 30_000 } },
+    { id: "no-run" },
+  ];
+  assert.deepEqual(expiredWorkerIds(sessions, now), ["over"]);
+  assert.deepEqual(expiredWorkerIds([], now), [], "an empty desk expires nothing");
+});
+
+test("the desk owns the deadline, not the caller's reply promise", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  // Pinned as one shape, not two substrings: a `.slice(0, 0)` or any other filter
+  // between the call and the loop body would leave both halves present and stop
+  // nothing, which is exactly how this survived its first mutation.
+  assert.match(
+    store,
+    /for \(const id of expiredWorkerIds\(stateRef\.current\.sessions, Date\.now\(\)\)\) \{\s*stopWorker\(id, "timed-out"\);/,
+    "every id the sweep finds is stopped, with nothing filtering the list in between",
+  );
+  assert.match(store, /WORKER_DEADLINE_SWEEP_MS/, "the sweep runs on an interval, not once");
+  assert.match(store, /onPeerCancel\(\(\{ childSessionId, reason \}\) => stopWorker\(childSessionId, reason\)\)/,
+    "caller-cancel and deadline share one terminal path");
+
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  assert.doesNotMatch(
+    mcp,
+    /description: "Optional 30-3600 second runtime limit"/,
+    "the bare claim is gone; the description says the desk stops the worker",
+  );
+  assert.match(mcp, /The desk stops the worker when it passes this/);
 });

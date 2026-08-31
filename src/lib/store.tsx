@@ -201,6 +201,8 @@ import {
   admitSpawn,
   assertAgentPathWrite,
   campaignGateError,
+  expiredWorkerIds,
+  WORKER_DEADLINE_SWEEP_MS,
   claimSharedFiles,
   collectChildAgentReports,
   deskRoleOf,
@@ -5951,26 +5953,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  useEffect(() => {
-    if (!window.workhorse?.onPeerCancel) return;
-    return window.workhorse.onPeerCancel(({ childSessionId, reason }) => {
-      const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
-      if (child?.status === "running") cancelVendorSession(child);
-      setState((current) => {
-        const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
-        let sessions = applyChildIdleSync(current.sessions, childSessionId, rowStatus, {
-          error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
-        });
-        const parentId = child?.parentId;
-        if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
-        const admitted = parentId ? joinAdmit(sessions, parentId, current, plansRef.current) : { sessions };
-        queueMicrotask(() => {
-          if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
-        });
-        return { ...current, sessions: admitted.sessions };
+  /** One terminal path, whether the caller cancelled or the desk's own deadline fired. */
+  const stopWorker = useCallback((childSessionId: string, reason: "timed-out" | "cancelled") => {
+    const child = stateRef.current.sessions.find((session) => session.id === childSessionId);
+    if (child?.status === "running") cancelVendorSession(child);
+    setState((current) => {
+      const rowStatus = reason === "timed-out" ? "timed-out" as const : "cancelled" as const;
+      let sessions = applyChildIdleSync(current.sessions, childSessionId, rowStatus, {
+        error: reason === "timed-out" ? "Subagent exceeded its runtime limit." : "Subagent was cancelled.",
       });
+      const parentId = child?.parentId;
+      if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
+      const admitted = parentId ? joinAdmit(sessions, parentId, current, plansRef.current) : { sessions };
+      queueMicrotask(() => {
+        if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
+      });
+      return { ...current, sessions: admitted.sessions };
     });
   }, []);
+
+  useEffect(() => {
+    if (!window.workhorse?.onPeerCancel) return;
+    return window.workhorse.onPeerCancel(({ childSessionId, reason }) => stopWorker(childSessionId, reason));
+  }, [stopWorker]);
+
+  /**
+   * The desk enforces the runtime limit, because the caller's timer cannot: on Link a
+   * delegation is answered immediately with the worker id, and that reply clears it
+   * while the worker runs on. Measured before this: a 30s limit let a pass run 251s.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    const sweep = () => {
+      for (const id of expiredWorkerIds(stateRef.current.sessions, Date.now())) {
+        stopWorker(id, "timed-out");
+      }
+    };
+    sweep();
+    const timer = window.setInterval(sweep, WORKER_DEADLINE_SWEEP_MS);
+    return () => window.clearInterval(timer);
+  }, [ready, stopWorker]);
 
   useEffect(() => {
     const flushStreams = () => {

@@ -163,7 +163,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy" },
         effort: { type: "string", description: "Optional override. Omit to keep a reused worker's thinking level; otherwise derived from quick, balanced, or deep" },
-        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit" },
+        timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
         tokenBudget: {
           type: "number",
           description:

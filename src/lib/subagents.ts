@@ -1574,6 +1574,39 @@ export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
  * claiming the build phase must match the desk's own mission state, because
  * build is where workers write.
  */
+/**
+ * Workers whose runtime limit has passed.
+ *
+ * The caller's reply promise cannot enforce this. On Link the desk answers a
+ * delegation immediately with the worker id, and that reply clears the caller-side
+ * timer while the worker runs on — so a `timeoutSeconds` of 30 bounded nothing and a
+ * pass measured at 251s ran to completion. The deadline belongs to the desk, which
+ * is the only party still watching once the caller has its id.
+ */
+export function expiredWorkerIds(
+  sessions: Array<{
+    id?: unknown;
+    agentRun?: { status?: unknown; startedAt?: unknown; timeoutMs?: unknown } | undefined;
+  }>,
+  now: number,
+): string[] {
+  const expired: string[] = [];
+  for (const session of sessions) {
+    const id = typeof session.id === "string" ? session.id : "";
+    const run = session.agentRun;
+    if (!id || !run || run.status !== "running") continue;
+    const timeoutMs = typeof run.timeoutMs === "number" ? run.timeoutMs : 0;
+    const startedAt = typeof run.startedAt === "number" ? run.startedAt : 0;
+    if (timeoutMs <= 0 || startedAt <= 0) continue;
+    if (now - startedAt <= timeoutMs) continue;
+    expired.push(id);
+  }
+  return expired;
+}
+
+/** How often the desk checks. Short enough to be honest about the limit, cheap enough to ignore. */
+export const WORKER_DEADLINE_SWEEP_MS = 15_000;
+
 export function campaignGateError(
   mission: MissionIteration | undefined,
   desk?: MissionIteration,

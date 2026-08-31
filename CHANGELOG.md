@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.47](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.46...v0.6.47) (2026-08-31)
+
+
+### Features
+
+* Connect Cursor writes Workhorse Link into mcp.json ([c42ab04](https://github.com/go7studio/Go7-Workhorse/commit/c42ab0479d592dbb2d9e00cced58a1ffb59a892b))
+* Connect Cursor writes Workhorse Link into mcp.json ([e8b5230](https://github.com/go7studio/Go7-Workhorse/commit/e8b523001530a64f5a61bc99feb327ab82a1c761))
+
 ## [0.6.46](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.45...v0.6.46) (2026-08-29)
 
 

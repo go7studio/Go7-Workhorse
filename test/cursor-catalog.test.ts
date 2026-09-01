@@ -234,7 +234,7 @@ test("chat picker is a short subset of the same catalog Auto ranks", () => {
   assert.ok(chips.some((row) => row.id === "auto"));
 });
 
-test("collapsed family ranking is smaller and not slower than ranking the 204-id fixture", () => {
+test("collapsing the 204-id fixture cuts the ranking job to one row per family", () => {
   const rawRows = fixtureRows();
   assert.equal(rawRows.length, 204);
   const bases = collapseCursorCatalog(rawRows);
@@ -262,22 +262,28 @@ test("collapsed family ranking is smaller and not slower than ranking the 204-id
   assert.ok(rawPick);
   assert.equal(isCursorAutoModel(rawPick.model), false);
 
+  // The size of the ranking job is what this guards, so count it rather than
+  // time it. rankRoutingCandidates pushes exactly one row per candidate it
+  // scores, so the length of its result is its loop's trip count — the work
+  // itself, not a proxy for it, and nothing a stolen scheduler slice can move.
+  // docs/PERFORMANCE.md asks for a tripwire on a complexity class; the class
+  // here is "the desk ranks one row per family, not one per effort variant".
+  // The old assertion compared a ~0.8 ms measurement to a ~7 ms one with no
+  // slack and failed at 25.6 ms on a loaded runner, blocking PRs that had
+  // changed nothing about this path.
   const rankOnce = (candidates: typeof rawPool) => rankRoutingCandidates(candidates, request, routingSettings);
-  rankOnce(rawPool);
-  rankOnce(collapsedPool);
-
-  const rounds = 40;
-  const timeMs = (candidates: typeof rawPool) => {
-    const start = process.hrtime.bigint();
-    for (let i = 0; i < rounds; i += 1) rankOnce(candidates);
-    return Number(process.hrtime.bigint() - start) / 1e6;
-  };
-  const rawMs = timeMs(rawPool) + timeMs(rawPool);
-  const collapsedMs = timeMs(collapsedPool) + timeMs(collapsedPool);
+  const rawRanked = rankOnce(rawPool);
+  const collapsedRanked = rankOnce(collapsedPool);
+  assert.equal(rawRanked.length, rawPool.length, "every uncollapsed candidate is scored");
+  assert.equal(collapsedRanked.length, collapsedPool.length, "every collapsed candidate is scored");
   assert.ok(
-    collapsedMs <= rawMs,
-    `collapsed ${collapsedMs.toFixed(2)}ms must not exceed 204-id ${rawMs.toFixed(2)}ms over ${rounds * 2} ranks (pool ${collapsedPool.length} vs ${rawPool.length})`,
+    collapsedRanked.length * 3 <= rawRanked.length,
+    `collapsing must cut the ranking job by at least two thirds: ${collapsedRanked.length} scored rows against ${rawRanked.length}`,
   );
+  // And the job is linear in the pool: the same pool listed twice costs twice,
+  // not four times. A cross product would fail here and pass every duration
+  // budget on a fast enough machine.
+  assert.equal(rankOnce([...collapsedPool, ...collapsedPool]).length, collapsedRanked.length * 2);
 });
 
 test("desk Auto and spawn score modelsFor; compiler pick is documented as a separate ephemeral scorer", () => {

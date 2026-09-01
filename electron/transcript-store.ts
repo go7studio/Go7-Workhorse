@@ -190,14 +190,45 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
 }
 
 /** Move every terminal worker's step rows out. Anything unreadable is left alone. */
+/**
+ * How many sidecars one save may write.
+ *
+ * `atomicWriteJson` flushes, on purpose — the inline rows are cleared on the
+ * strength of that file being there. But the offload runs inside the save's
+ * protect callback, which is on the main loop before the first await, so the
+ * first save on a desk with 624 finished workers would have been 624
+ * synchronous fsyncs in a row: several seconds of held loop, in the name of
+ * fixing a stall. Twenty-five a save clears that backlog over a few minutes of
+ * ordinary use and is invisible in any one of them. Steady state is nought,
+ * because the memo answers for everything already written.
+ */
+export const TRANSCRIPT_OFFLOAD_PER_SAVE = 25;
+
 export function offloadStateTranscripts<T>(state: T, userData: string, io: TranscriptIo = diskIo): T {
   if (!state || typeof state !== "object") return state;
   const next = state as T & { sessions?: unknown };
   if (!Array.isArray(next.sessions) || !userData.trim()) return state;
+  let budget = TRANSCRIPT_OFFLOAD_PER_SAVE;
   return {
     ...next,
-    sessions: next.sessions.map((session) => offloadSessionTranscript(session, userData, io)),
+    sessions: next.sessions.map((session) => {
+      // A chat whose sidecar is already written costs nothing and is never
+      // charged for, so a settled desk keeps offloading every one of them.
+      const free = alreadyVerified(session, userData, io);
+      if (!free && budget <= 0) return session;
+      const result = offloadSessionTranscript(session, userData, io);
+      if (!free && result !== session) budget -= 1;
+      return result;
+    }),
   };
+}
+
+/** Is this chat's sidecar one this process has already written and can still see? */
+function alreadyVerified(session: unknown, userData: string, io: TranscriptIo): boolean {
+  const row = record(session);
+  const sessionId = typeof row?.id === "string" ? row.id.trim() : "";
+  if (!sessionId || !verifiedSidecars.has(transcriptSidecarPath(userData, sessionId))) return false;
+  return io.exists(transcriptSidecarPath(userData, sessionId));
 }
 
 /**

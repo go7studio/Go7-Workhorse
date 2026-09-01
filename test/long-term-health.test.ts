@@ -34,6 +34,7 @@ import {
   sweepStaleUserData,
 } from "../electron/user-data-hygiene";
 import {
+  TRANSCRIPT_OFFLOAD_PER_SAVE,
   isTerminalWorker,
   offloadSessionTranscript,
   offloadStateTranscripts,
@@ -283,6 +284,52 @@ test("a sidecar written to a different chat's name is refused", () => {
     const original = finishedWorker("sess_w5");
     const result = offloadSessionTranscript(original, dir, swapped) as Record<string, unknown>;
     assert.equal((result.messages as unknown[]).length, 4);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("one save writes a bounded number of sidecars, and a settled desk writes none", () => {
+  const dir = scratch("transcript-budget");
+  try {
+    let writes = 0;
+    const store = new Map<string, string>();
+    const counting: TranscriptIo = {
+      write: (file, sidecar) => {
+        writes += 1;
+        store.set(file, JSON.stringify(sidecar));
+      },
+      read: (file) => store.get(file) ?? "",
+      exists: (file) => store.has(file),
+    };
+
+    // The shape of the live desk on the launch after this ships. Every write
+    // flushes, and the offload runs on the main loop before the save's first
+    // await, so an unbounded first pass is seconds of held loop.
+    const backlog = () => ({
+      sessions: Array.from({ length: 200 }, (_, index) => finishedWorker(`sess_backlog_${index}`)),
+    });
+
+    const first = offloadStateTranscripts(backlog(), dir, counting) as { sessions: Array<Record<string, unknown>> };
+    assert.equal(writes, TRANSCRIPT_OFFLOAD_PER_SAVE, "one save may not flush the whole backlog");
+    assert.equal(
+      first.sessions.filter((row) => "transcriptSidecar" in row).length,
+      TRANSCRIPT_OFFLOAD_PER_SAVE,
+      "the ones it could not write keep every row",
+    );
+    assert.equal((first.sessions[TRANSCRIPT_OFFLOAD_PER_SAVE].messages as unknown[]).length, 4);
+
+    // Saves keep chipping at it, and each one is the same bounded size.
+    offloadStateTranscripts(backlog(), dir, counting);
+    assert.equal(writes, TRANSCRIPT_OFFLOAD_PER_SAVE * 2);
+
+    // Once everything is written, a save writes nothing and still offloads
+    // everything — the budget only ever charges for a write.
+    for (let save = 0; save < 20; save += 1) offloadStateTranscripts(backlog(), dir, counting);
+    assert.equal(writes, 200, "the backlog clears exactly once, then stops");
+    const settled = offloadStateTranscripts(backlog(), dir, counting) as { sessions: Array<Record<string, unknown>> };
+    assert.equal(writes, 200, "a settled desk pays nothing");
+    assert.equal(settled.sessions.filter((row) => "transcriptSidecar" in row).length, 200);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

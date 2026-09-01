@@ -3,8 +3,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CLAUDE_CLI_NOT_ON_PATH, detectClaudeLogin } from "../electron/claude-login";
 import {
+  CLAUDE_ACP_NOT_ON_PATH,
+  CLAUDE_CLI_NOT_ON_PATH,
+  detectClaudeLogin,
+  resolveClaudeAcpLaunch,
+} from "../electron/claude-login";
+import {
+  CODEX_ACP_NOT_ON_PATH,
   CODEX_CLI_NOT_ON_PATH,
   detectCodexLogin,
   resolveCodexCliBinary,
@@ -327,6 +333,72 @@ test("Claude reports the same split: an ACP server and a login, no CLI", () => {
   assert.equal(whole.cliBinary, `${BREW_BIN}/claude`);
   assert.equal(whole.launchable, true);
   assert.equal(whole.launchBlocker, undefined);
+});
+
+/**
+ * The test above hands Claude its ACP server through CLAUDE_ACP_BIN, which is
+ * an override and skips the search entirely. This is the search. The CLI lookup
+ * has read the desk's installer directories since the Finder-PATH bug; the ACP
+ * lookup beside it had not, so the same desk reported the server missing
+ * instead of the CLI — the right shape of complaint about the wrong half.
+ */
+test("a Finder-launched desk finds the Claude ACP server outside the bare PATH", () => {
+  const acp = `${BREW_BIN}/claude-agent-acp`;
+  const launch = resolveClaudeAcpLaunch({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH },
+    existsSync: onlyOnDisk(acp),
+  });
+  assert.equal(launch?.acpFile, acp, "the ACP server must be found off the desk's installer directories");
+  assert.equal(launch?.command, acp);
+
+  // And the whole detect agrees: both halves found, so Claude can start.
+  const detected = detectClaudeLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH, ANTHROPIC_API_KEY: "sk-test" },
+    existsSync: onlyOnDisk(acp, `${BREW_BIN}/claude`),
+    readFile: () => "",
+    keychainHasLogin: () => false,
+  });
+  assert.equal(detected.acpBinary, acp);
+  assert.equal(detected.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(detected.connected, true);
+  assert.equal(detected.launchable, true);
+  assert.equal(detected.launchBlocker, undefined);
+});
+
+test("a missing ACP server is its own blocker, named apart from the CLI", () => {
+  const claude = detectClaudeLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH, ANTHROPIC_API_KEY: "sk-test" },
+    // The CLI is installed; the stdio server the desk speaks to is not.
+    existsSync: onlyOnDisk(`${BREW_BIN}/claude`),
+    readFile: () => "",
+    keychainHasLogin: () => false,
+    moduleDirs: [],
+  });
+  assert.equal(claude.acpBinary, null);
+  assert.equal(claude.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(claude.connected, false, "no server to speak to is not a connection");
+  assert.equal(claude.launchable, false);
+  assert.equal(claude.launchBlocker, CLAUDE_ACP_NOT_ON_PATH);
+  assert.notEqual(claude.launchBlocker, CLAUDE_CLI_NOT_ON_PATH, "the two halves get different reasons");
+
+  const codex = detectCodexLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH },
+    existsSync: onlyOnDisk(`${BREW_BIN}/codex`, `${HOME}/.codex/auth.json`),
+    readFile: () => "",
+    moduleDirs: [],
+  });
+  assert.equal(codex.acpBinary, null);
+  assert.equal(codex.cliBinary, `${BREW_BIN}/codex`);
+  assert.equal(codex.launchable, false);
+  assert.equal(codex.launchBlocker, CODEX_ACP_NOT_ON_PATH);
 });
 
 /**

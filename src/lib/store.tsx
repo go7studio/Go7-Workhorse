@@ -215,23 +215,25 @@ import {
   vendorTextForSpawn,
   isHiddenSession,
   nestedSpawnError,
+  nestedWorkerPolicy,
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
-  type OpeningWorkerReservation,
-  openingWaveMission,
   overlappingAgentFiles,
   parentHasRunningChildren,
   maxRootWorkers,
+  nextCampaignPhase,
+  nextMissionIteration,
   rootSpawnError,
   resolveSpawnSpec,
   missionForDeskSpawn,
   findReusableWorker,
   fileContentsFingerprint,
+  leasePathForWrite,
+  refreshSharedFileFingerprint,
   resolveNamedWorker,
   parseWorkerHandoff,
   workerStartMessages,
-  reconcileOpeningWaveReservations,
   reserveWorkerName,
   recordParentTakeover,
   releaseCancelledSessionLeases,
@@ -618,51 +620,109 @@ export function campaignSpawnGate(input: {
   campaignContext: boolean;
   requested: MissionIteration | undefined;
   desk: MissionIteration | undefined;
-  openingMission?: MissionIteration;
 }): { mission: MissionIteration | undefined; error: string | undefined; phase: Exclude<CampaignPhase, "build"> | undefined } {
-  const mission = missionForDeskSpawn(input.requested ?? input.openingMission, input.desk);
-  const error = input.campaignContext || input.openingMission ? campaignGateError(mission, input.desk) : undefined;
+  const mission = missionForDeskSpawn(input.requested, input.desk);
+  const error = input.campaignContext ? campaignGateError(mission, input.desk) : undefined;
   const phase = mission && mission.phase !== "build" ? mission.phase : undefined;
   return { mission, error, phase };
 }
 
-export function storeOpeningWaveMission(input: {
-  sessions: Parameters<typeof openingWaveMission>[0]["sessions"];
-  parentId: string;
-  objective: string;
-  missionId: string;
-  ordinaryOpeningReservations: OpeningWorkerReservation[];
-}): { mission: MissionIteration | undefined; reservations: OpeningWorkerReservation[] } {
-  const reservations = reconcileOpeningWaveReservations(
-    input.sessions,
-    input.parentId,
-    input.ordinaryOpeningReservations,
+function sameMissionIteration(left: MissionIteration, right: MissionIteration): boolean {
+  return (
+    left.id === right.id &&
+    left.mode === right.mode &&
+    left.objective === right.objective &&
+    JSON.stringify(left.acceptanceCriteria) === JSON.stringify(right.acceptanceCriteria) &&
+    left.iteration === right.iteration &&
+    left.maxIterations === right.maxIterations &&
+    JSON.stringify(left.previousWorkerIds) === JSON.stringify(right.previousWorkerIds) &&
+    left.phase === right.phase &&
+    left.tokenBudget === right.tokenBudget
   );
-  return {
-    mission: openingWaveMission({
-      sessions: input.sessions,
-      parentId: input.parentId,
-      objective: input.objective,
-      missionId: input.missionId,
-      reservedWorkers: reservations.length,
-    }),
-    reservations,
-  };
 }
 
-export function createOpeningReservationReplyAsk(input: {
-  openingReservationCommitted: () => boolean;
-  releaseOpeningReservation: () => void;
-  reply: (result: { text?: string; error?: string }) => Promise<unknown> | undefined;
-}): (result: { text?: string; error?: string }) => Promise<void> {
-  return async function replyAsk(result) {
-    if (result.error || !input.openingReservationCommitted()) input.releaseOpeningReservation();
-    try {
-      await input.reply(result);
-    } catch {
-      /* host waiter may already have settled */
-    }
+/**
+ * The Link continuation has already read the live worker wave before it asks the
+ * store to spawn the next pass. A debounced store snapshot can still say that
+ * those workers are running. Reconcile only that lifecycle lag,
+ * and only when the desk's persisted lineup holds the exact prior manifest and
+ * the request is the one-phase successor of it.
+ */
+function sessionsForDeskMissionDerivation(input: {
+  sessions: Session[];
+  requested: MissionIteration;
+  lineup: MissionIteration | undefined;
+  liveContinuation: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number } | undefined;
+}): Session[] {
+  const prior = input.lineup;
+  if (!prior || prior.iteration >= prior.maxIterations) return input.sessions;
+  const ids = [...new Set(input.requested.previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
+  const liveIds = [...new Set((input.liveContinuation?.previousWorkerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  const completedIds = [...new Set((input.liveContinuation?.completedWorkerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (
+    input.liveContinuation?.previousPass !== prior.iteration ||
+    JSON.stringify(liveIds) !== JSON.stringify(ids) ||
+    JSON.stringify(completedIds) !== JSON.stringify(ids)
+  ) {
+    return input.sessions;
+  }
+  const coordinator = ids
+    .map((id) => input.sessions.find((session) => session.id === id))
+    .find((session) => session?.agentRun?.mission?.mode === "adaptive");
+  if (!coordinator?.agentRun?.mission || !sameMissionIteration(coordinator.agentRun.mission, prior)) {
+    return input.sessions;
+  }
+  const phase = nextCampaignPhase(prior.phase);
+  if (!phase) return input.sessions;
+  const expected: MissionIteration = {
+    ...prior,
+    iteration: prior.iteration + 1,
+    previousWorkerIds: ids,
+    phase,
+    clearance: undefined,
   };
+  if (!sameMissionIteration(expected, input.requested)) return input.sessions;
+  const workerIds = new Set(ids);
+  return input.sessions.map((session) => {
+    if (!workerIds.has(session.id) || !session.agentRun) return session;
+    if (session.agentRun.status !== "running") return session;
+    return { ...session, agentRun: { ...session.agentRun, status: "completed" } };
+  });
+}
+
+/**
+ * A build claim is never trusted. The desk may hold the requested pass because
+ * it already persisted that exact lineup mission, or because it independently
+ * derives the next pass from workers that carry its exact prior manifest.
+ */
+export function deskMissionForStoreSpawn(input: {
+  sessions: Session[];
+  parentId: string;
+  requested: MissionIteration | undefined;
+  lineup: MissionIteration | undefined;
+  agentRun: MissionIteration | undefined;
+  liveContinuation?: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number };
+}): MissionIteration | undefined {
+  const requested = input.requested;
+  if (requested && input.lineup?.id === requested.id && input.lineup.iteration === requested.iteration) {
+    return input.lineup;
+  }
+  if (requested && requested.previousWorkerIds.length > 0) {
+    const sessions = sessionsForDeskMissionDerivation({
+      sessions: input.sessions,
+      requested,
+      lineup: input.lineup,
+      liveContinuation: input.liveContinuation,
+    });
+    const derived = nextMissionIteration(
+      sessions,
+      input.parentId,
+      requested.previousWorkerIds,
+      requested.iteration - 1,
+    );
+    if (derived.ok && sameMissionIteration(derived.mission, requested)) return derived.mission;
+  }
+  return input.agentRun;
 }
 
 function hydrate(value: unknown): AppState {
@@ -947,8 +1007,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
   const pathLeasesRef = useRef<FileLease[]>([]);
-  const ordinaryOpeningReservations = useRef(new Map<string, OpeningWorkerReservation[]>());
   const pathPermissionPreflight = useRef(new Set<string>());
+  const approvedPathWrites = useRef(new Map<string, Array<{ path: string; root: string }>>());
+  const pathFingerprintRefreshes = useRef(new Map<string, Promise<void>>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
@@ -3419,22 +3480,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!window.workhorse?.onPeerAsk) return;
     return window.workhorse.onPeerAsk((payload) => {
       void (async () => {
-        let openingReservation: { parentId: string; id: string } | undefined;
-        let openingReservationCommitted = false;
-        const releaseOpeningReservation = () => {
-          if (!openingReservation) return;
-          const claimed = openingReservation;
-          const reservations = ordinaryOpeningReservations.current.get(claimed.parentId) ?? [];
-          const remaining = reservations.filter((reservation) => reservation.id !== claimed.id);
-          if (remaining.length > 0) ordinaryOpeningReservations.current.set(claimed.parentId, remaining);
-          else ordinaryOpeningReservations.current.delete(claimed.parentId);
-          openingReservation = undefined;
+        const replyAsk = async (result: { text?: string; error?: string }) => {
+          try {
+            await window.workhorse?.replyPeerAsk({ id: payload.id, ...result });
+          } catch {
+            /* host waiter may already have settled */
+          }
         };
-        const replyAsk = createOpeningReservationReplyAsk({
-          openingReservationCommitted: () => openingReservationCommitted,
-          releaseOpeningReservation,
-          reply: (result) => window.workhorse?.replyPeerAsk({ id: payload.id, ...result }),
-        });
         const promptVendor = async (
           session: Session,
           text: string,
@@ -4778,32 +4830,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return;
             }
             const suppliedMission = normalizeMissionIteration(payload.missionIteration ?? caller.agentRun?.mission);
-            const openingNow = Date.now();
-            const openingReservationId = payload.childSessionId?.trim() || uid("opening");
-            const opening = storeOpeningWaveMission({
+            const requestedMission = suppliedMission;
+            const lineupMission = caller.lineup?.mission;
+            const deskMission = deskMissionForStoreSpawn({
               sessions: latest.sessions,
               parentId: caller.id,
-              objective: payload.message,
-              missionId: uid("mission"),
-              ordinaryOpeningReservations: ordinaryOpeningReservations.current.get(caller.id) ?? [],
+              requested: requestedMission,
+              lineup: lineupMission,
+              agentRun: caller.agentRun?.mission,
+              liveContinuation: payload.missionContinuation,
             });
-            const openingReservations = opening.reservations;
-            if (openingReservations.length > 0) ordinaryOpeningReservations.current.set(caller.id, openingReservations);
-            else ordinaryOpeningReservations.current.delete(caller.id);
-            const openingMission = suppliedMission || caller.lineup?.mission
-              ? undefined
-              : opening.mission;
-            const requestedMission = suppliedMission ?? openingMission;
-            const lineupMission = caller.lineup?.mission;
-            const deskMission =
-              requestedMission && lineupMission?.id === requestedMission.id && lineupMission.iteration === requestedMission.iteration
-                ? lineupMission
-                : caller.agentRun?.mission;
             const gate = campaignSpawnGate({
-              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission || openingMission),
+              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission),
               requested: requestedMission,
               desk: deskMission,
-              openingMission,
             });
             const spawnMission = gate.mission;
             if (gate.error) {
@@ -4822,13 +4862,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
                 return;
               }
-            }
-            if (!spawnMission) {
-              openingReservation = { parentId: caller.id, id: openingReservationId };
-              ordinaryOpeningReservations.current.set(caller.id, [
-                ...openingReservations,
-                { id: openingReservationId, startedAt: openingNow },
-              ]);
             }
             if (exposure === "external-runtime") {
               const inboundHop = acceptInboundEnvelope({
@@ -4896,7 +4929,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 startRuntime: (request) =>
                   window.workhorse?.startExternalRuntimeTask?.(request) ?? Promise.resolve(null),
                 onStarted: (running) => {
-                  openingReservationCommitted = Boolean(openingReservation);
                   setState((current) => ({
                     ...current,
                     externalTasks: running.store,
@@ -4904,10 +4936,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       session.id === caller.id
                         ? {
                             ...session,
-                            lineup: addLineupRow(session.lineup, {
-                              ...running.row,
-                              ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                            }),
+                            lineup: addLineupRow(session.lineup, running.row, undefined, spawnMission),
                             ...(running.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: running.grant } : session.planRun } : {}),
                           }
                         : session,
@@ -4919,7 +4948,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: started.code });
                 return;
               }
-              openingReservationCommitted = Boolean(openingReservation);
               setState((current) => ({
                 ...current,
                 externalTasks: started.store,
@@ -4931,10 +4959,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                           report: started.task.result,
                           finishedAt: started.task.finishedAt,
                           correlationId: started.task.envelope.traceId,
-                        }) ?? addLineupRow(session.lineup, {
-                          ...started.row,
-                          ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
-                        }),
+                        }) ?? addLineupRow(session.lineup, started.row, undefined, spawnMission),
                         ...(started.grant ? { planRun: session.planRun ? { ...session.planRun, externalGrant: started.grant } : session.planRun } : {}),
                       }
                     : session,
@@ -4986,13 +5011,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
-            const spawnRole =
-              payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined;
+            const projectFolder = primaryFolder(boundProject, folderExists)?.path ?? "";
+            const nestedPolicy = nestedWorkerPolicy({
+              nested: isNested,
+              parentEnvironment: caller.environment,
+              projectFolder,
+            });
+            const spawnRole = nestedPolicy.role ??
+              (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
+            const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
               tier: routeTier ?? (isNested ? "quick" as const : undefined),
-              role: spawnRole,
+              role: routingRole,
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
             };
@@ -5017,7 +5049,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               routeDecision?.taskTier ??
               routeTier ??
               inferRoutingTier(payload.message, payload.attachments, {
-                role: spawnRole,
+                role: routingRole,
               });
             const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested
@@ -5026,10 +5058,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnTokenBudget = isNested
               ? Math.min(5_000, Math.max(1, payload.tokenBudget ?? 5_000))
               : payload.tokenBudget;
-            const spawnIsolation = isNested ? "shared" : payload.isolation ?? "worktree";
+            const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
-              projectFolder: primaryFolder(boundProject, folderExists)?.path ?? "",
+              projectFolder: nestedPolicy.projectFolder,
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
@@ -5098,7 +5130,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // Now it takes a decision: name the worker, or ask for inherit. A
             // bare spawn gets somebody with a clear head.
             const wantsIdleReuse = !askedWorkerName && payload.seed === "inherit";
-            const reusedWorker = namedResolution?.worker
+            const reusedWorker = nestedPolicy.mayReuse ? namedResolution?.worker
               ?? (wantsIdleReuse
                 ? findReusableWorker(
                     {
@@ -5119,7 +5151,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       waveChildIds: parent.lineup?.rows.map((row) => row.childId),
                     },
                   )
-                : null);
+                : null) : null;
             const spec = {
               ...resolvedSpec,
               effort: spawnEffortFor({
@@ -5215,7 +5247,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const assignedCapabilities = Array.isArray(payload.capabilities) ? payload.capabilities.filter(Boolean) : [];
             const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
             const assignedConstraints = Array.isArray(payload.constraints) ? payload.constraints.filter(Boolean) : [];
-            const assignedPaths = normalizePathAllowlist((payload as unknown as { paths?: unknown }).paths);
+            const assignedPaths = nestedPolicy.mayOwnPaths
+              ? normalizePathAllowlist((payload as unknown as { paths?: unknown }).paths)
+              : [];
             if (planStepId) {
               if (!assignedPlan) {
                 await replyAsk({ error: "this chat has no executable plan" });
@@ -5413,6 +5447,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...workerAccess({
                 inherited: inheritedAccess,
                 owned: assignedPaths.length > 0,
+                readOnly: nestedPolicy.readOnly,
                 prior: priorWorker,
               }),
               securityPolicy: parent.securityPolicy,
@@ -5459,7 +5494,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             };
             const waveText = lastUserMessage(parent)?.text ?? "";
-            openingReservationCommitted = Boolean(openingReservation);
             setState((current) => {
               const base =
                 inboundHost && !current.sessions.some((item) => item.id === inboundHost.id)
@@ -5489,7 +5523,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 status: "running",
                                 startedAt,
                                 correlationId: childCorrelationId,
-                                ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                                 // The caller is known here and was being dropped, so a
                                 // Link wave could not say who drove it. Only for an
                                 // inbound harness: a desk wave has no caller to name.
@@ -5505,6 +5538,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                                 ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
                               },
                               exposure === "external-runtime" ? "external-runtime" : "desk",
+                              spawnMission,
                             ),
                             waveText,
                           ),
@@ -5729,11 +5763,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                         vendor: vendorDisplayName(spec.provider),
                         status: "running",
                         startedAt,
-                        ...(openingReservation ? { openingReservationId: openingReservation.id } : {}),
                         ...(planStepId ? { planStepId } : {}),
                         ...(rationale ? { rationale } : {}),
                         ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
-                      }),
+                      }, undefined, spawnMission),
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
@@ -6278,8 +6311,62 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ),
         }));
         const status = (event.status ?? "").toLowerCase().replaceAll("_", " ");
+        if (toolIsFinished(event.status) && status !== "completed" && status !== "complete" && isWriteToolTitle(event.title)) {
+          const pending = approvedPathWrites.current.get(event.sessionId) ?? [];
+          const reportedPath = writePathFromToolEvent(event.title, event.detail, event.toolCallId);
+          const pendingIndex = reportedPath
+            ? pending.findIndex((item) =>
+                leasePathForWrite(item.path, item.root).toLowerCase() ===
+                leasePathForWrite(reportedPath, item.root).toLowerCase())
+            : pending.length === 1 ? 0 : -1;
+          if (pendingIndex >= 0) {
+            const remaining = pending.filter((_, index) => index !== pendingIndex);
+            if (remaining.length > 0) approvedPathWrites.current.set(event.sessionId, remaining);
+            else approvedPathWrites.current.delete(event.sessionId);
+          }
+        }
         if ((status === "completed" || status === "complete") && toolIsFinished(event.status)) {
           snapshotWriteInstance(stateRef.current, event.sessionId, event.title, event.detail, event.toolCallId);
+          const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+          const pending = approvedPathWrites.current.get(event.sessionId) ?? [];
+          if (owner && pending.length > 0 && isWriteToolTitle(event.title)) {
+            const reportedPath = writePathFromToolEvent(event.title, event.detail, event.toolCallId);
+            const pendingIndex = reportedPath
+              ? pending.findIndex((item) =>
+                  leasePathForWrite(item.path, item.root).toLowerCase() ===
+                  leasePathForWrite(reportedPath, item.root).toLowerCase())
+              : pending.length === 1 ? 0 : -1;
+            if (pendingIndex >= 0) {
+              const approved = pending[pendingIndex]!;
+              const remaining = pending.filter((_, index) => index !== pendingIndex);
+              if (remaining.length > 0) approvedPathWrites.current.set(event.sessionId, remaining);
+              else approvedPathWrites.current.delete(event.sessionId);
+              if (window.workhorse?.readSourceFile) {
+                const refreshKey = `${event.sessionId}:${leasePathForWrite(approved.path, approved.root).toLowerCase()}`;
+                const priorRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
+                const refresh = priorRefresh.catch(() => undefined).then(async () => {
+                  const source = await window.workhorse!.readSourceFile!(approved.path, approved.root ? [approved.root] : []);
+                  if (!source || source.directory || source.unreadable) return;
+                  const leases = refreshSharedFileFingerprint({
+                    leases: pathLeasesRef.current,
+                    sessionId: event.sessionId,
+                    path: approved.path,
+                    root: approved.root,
+                    fingerprint: fileContentsFingerprint(source.text),
+                  });
+                  if (leases === pathLeasesRef.current) return;
+                  pathLeasesRef.current = leases;
+                  setState((current) => ({ ...current, leases }));
+                }).catch(() => undefined);
+                pathFingerprintRefreshes.current.set(refreshKey, refresh);
+                void refresh.finally(() => {
+                  if (pathFingerprintRefreshes.current.get(refreshKey) === refresh) {
+                    pathFingerprintRefreshes.current.delete(refreshKey);
+                  }
+                });
+              }
+            }
+          }
           if (isParentTakeoverTool(event.title)) {
             setState((current) => {
               const sessions = recordParentTakeover(
@@ -6361,9 +6448,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               owner.environment,
               project ? primaryFolder(project, folderExists)?.path ?? "" : "",
             );
-            void window.workhorse.readSourceFile(writePath, root ? [root] : []).then((source) => {
+            const refreshKey = `${owner.id}:${leasePathForWrite(writePath, root).toLowerCase()}`;
+            const pendingRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
+            void pendingRefresh.then(() => window.workhorse!.readSourceFile!(writePath, root ? [root] : [])).then((source) => {
               const decision = assertAgentPathWrite({
-                leases: stateRef.current.leases ?? [],
+                leases: pathLeasesRef.current,
                 sessionId: owner.id,
                 paths: ownedPaths,
                 path: writePath,
@@ -6375,6 +6464,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 deny(decision.error);
                 return;
               }
+              const pending = approvedPathWrites.current.get(owner.id) ?? [];
+              approvedPathWrites.current.set(owner.id, [...pending, { path: writePath, root }]);
               pathPermissionPreflight.current.add(event.requestId);
               apply(event);
             }).catch(() => deny(`Path ownership could not verify ${writePath}.`));

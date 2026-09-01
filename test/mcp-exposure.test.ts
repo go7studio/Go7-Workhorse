@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +47,67 @@ test("Link lists the versioned contract tools; older names still dispatch", () =
     assert.equal(isMcpToolAdvertised("external-runtime", tool), false, tool);
   }
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
+});
+
+test("spawn paths describe scope evidence instead of containment", () => {
+  const paths = mcpToolInputSchema("workhorse_spawn_agent")?.properties?.paths as { description?: string } | undefined;
+  assert.match(paths?.description ?? "", /Expected repo-relative paths used for scope checks and changed-file reporting/);
+  assert.doesNotMatch(paths?.description ?? "", /files this worker may change/i);
+});
+
+test("a nested helper defaults to its parent worktree and remains local, shared, and read-only", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-nested-cwd-"));
+  const linked = path.join(dir, "linked");
+  const workerTree = path.join(dir, "worker-tree");
+  mkdirSync(linked);
+  mkdirSync(workerTree);
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    projects: [{ id: "project", folders: [{ path: linked }] }],
+    sessions: [
+      { id: "root", title: "Root", provider: "codex", projectId: "project", messages: [] },
+      {
+        id: "worker",
+        title: "Wren · review",
+        provider: "codex",
+        projectId: "project",
+        parentId: "root",
+        hidden: true,
+        environment: { kind: "worktree", path: workerTree, gitRoot: linked, head: "abc" },
+        agentRun: { status: "running", startedAt: 1, isolation: "worktree", paths: ["src/app.ts"] },
+        messages: [],
+      },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  delete process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let seen: Record<string, unknown> | undefined;
+  setWorkhorseDeskAsk(async (payload) => {
+    seen = payload as unknown as Record<string, unknown>;
+    return { text: JSON.stringify({ childSessionId: "helper" }) };
+  });
+  try {
+    const result = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_spawn_agent", arguments: { prompt: "Independently check the result", fromSessionId: "worker" } },
+    }) as { error?: { message?: string } };
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(seen?.folder, workerTree);
+    assert.equal(seen?.isolation, "shared");
+    assert.equal(seen?.role, "helper");
+    assert.equal(seen?.paths, undefined);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("generic local invoke is discoverable only when a typed invocation contract exists", () => {
@@ -187,7 +248,7 @@ test("handleWorkhorseRpc rejects forbidden tools and parentless spawn on externa
     const awaitFields = mcpToolInputSchema("workhorse_await_agents")?.properties ?? {};
     assert.ok("workerIds" in awaitFields, "workhorse_await_agents publishes wave worker ids");
     const continueFields = mcpToolInputSchema("workhorse_continue_mission")?.properties ?? {};
-    for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "fromSessionId", "traceId"]) {
+    for (const field of ["previousWorkerIds", "previousPass", "remainingWork", "evidence", "initialBrain", "route", "fromSessionId", "traceId"]) {
       assert.ok(field in continueFields, `workhorse_continue_mission publishes ${field}`);
     }
     const deleted = (await handleWorkhorseRpc({
@@ -406,6 +467,7 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
     assert.equal(untracedLoop.error, undefined, untracedLoop.error?.message);
     assert.match(seenMissionIteration?.id ?? "", /^mission_/);
     assert.equal(seenTrace, seenMissionIteration?.id);
+    assert.equal(seenMissionIteration?.maxIterations, 4);
 
     const awaited = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -504,15 +566,50 @@ test("external-runtime spawn uses Settings inbound parent when MCP passes no fro
   }
 });
 
-test("adaptive mission continuation preserves criteria and returns routing to Auto", async () => {
+test("adaptive mission continuation reconciles raw phase, inherits its folder and brain, and allows explicit rerouting", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-loop-"));
+  const parentFolder = path.join(dir, "parent-project");
+  const missionFolder = path.join(dir, "mission-worktree");
+  const workerFallbackFolder = path.join(dir, "worker-project");
+  const lineupFallbackFolder = path.join(dir, "lineup-fallback");
+  mkdirSync(parentFolder);
+  mkdirSync(missionFolder);
+  mkdirSync(workerFallbackFolder);
+  mkdirSync(lineupFallbackFolder);
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
+    projects: [
+      { id: "parent_project", name: "Parent", folders: [{ path: parentFolder }] },
+      { id: "mission_project", name: "Mission", folders: [{ path: workerFallbackFolder }] },
+    ],
     sessions: [
-      { id: "parent_chat", title: "Desk", provider: "grok", model: "grok-4.6", projectId: null, messages: [] },
+      {
+        id: "parent_chat",
+        title: "Desk",
+        provider: "grok",
+        model: "grok-4.6",
+        projectId: "parent_project",
+        messages: [],
+        lineup: {
+          id: "lineup_mission",
+          folder: lineupFallbackFolder,
+          startedAt: 1,
+          rows: [{
+            childId: "worker_pass_1",
+            title: "First pass",
+            slice: "Review",
+            folder: missionFolder,
+            vendor: "Claude",
+            status: "completed",
+            startedAt: 1,
+            finishedAt: 2,
+          }],
+        },
+      },
       {
         id: "worker_pass_1",
         parentId: "parent_chat",
+        projectId: "mission_project",
         hidden: true,
         title: "Wren · First pass",
         provider: "claude",
@@ -539,6 +636,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
             iteration: 1,
             maxIterations: 3,
             previousWorkerIds: [],
+            phase: "review",
           },
         },
       },
@@ -548,6 +646,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
   process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
   process.env.WORKHORSE_STATE_PATH = statePath;
   let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  let liveReportStatus = "completed";
   setWorkhorseDeskAsk(async (ask) => {
     if (ask.action === "await-agents") {
       return {
@@ -556,7 +655,7 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
           running: [],
           reports: [{
             title: "First pass",
-            status: "completed",
+            status: liveReportStatus,
             text: "Implemented the first half.",
             childSessionId: "worker_pass_1",
             provider: "claude",
@@ -590,21 +689,28 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
           previousPass: 1,
           remainingWork: "Finish and verify the live path.",
           evidence: ["The first commit exists"],
-          folder: dir,
+          folder: "",
           fromSessionId: "parent_chat",
         },
       },
     })) as { error?: { message?: string } };
     assert.equal(continued.error, undefined, continued.error?.message);
     assert.equal(spawned?.route, "auto");
-    assert.equal(spawned?.provider, undefined);
-    assert.equal(spawned?.model, undefined);
-    assert.equal(spawned?.effort, undefined);
+    assert.equal(spawned?.provider, "claude");
+    assert.equal(spawned?.model, "claude-sonnet-4-6");
+    assert.equal(spawned?.effort, "medium");
     assert.equal(spawned?.worker, "Wren");
+    assert.equal(spawned?.folder, missionFolder);
     assert.equal(spawned?.missionIteration?.iteration, 2);
+    assert.equal(spawned?.missionIteration?.phase, "approve");
     assert.equal(spawned?.missionIteration?.maxIterations, 3);
     assert.deepEqual(spawned?.missionIteration?.acceptanceCriteria, ["Tests pass", "Live check passes"]);
     assert.deepEqual(spawned?.missionIteration?.previousWorkerIds, ["worker_pass_1"]);
+    assert.deepEqual(spawned?.missionContinuation, {
+      previousWorkerIds: ["worker_pass_1"],
+      completedWorkerIds: ["worker_pass_1"],
+      previousPass: 1,
+    });
     assert.deepEqual(spawned?.constraints, ["Keep changes scoped"]);
     assert.deepEqual(spawned?.capabilities, ["implementation"]);
     assert.deepEqual(spawned?.tools, ["browser"]);
@@ -612,6 +718,50 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
     assert.match(spawned?.message ?? "", /PRIOR REPORTS/);
     assert.match(spawned?.message ?? "", /Implemented the first half/);
     assert.match(spawned?.message ?? "", /Finish and verify the live path/);
+
+    spawned = undefined;
+    const changedBrain = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 611,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Use the explicitly selected reviewer.",
+          initialBrain: { provider: "cursor", model: "grok-4.6", effort: "high" },
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(changedBrain.error, undefined, changedBrain.error?.message);
+    const changedSpawn = spawned as unknown as import("../electron/peer-inbox").PeerAsk | undefined;
+    assert.equal(changedSpawn?.provider, "cursor");
+    assert.equal(changedSpawn?.model, "grok-4.6");
+    assert.equal(changedSpawn?.effort, "high");
+
+    spawned = undefined;
+    const rerouted = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 612,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Route this pass automatically on purpose.",
+          route: "auto",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.equal(rerouted.error, undefined, rerouted.error?.message);
+    const reroutedSpawn = spawned as unknown as import("../electron/peer-inbox").PeerAsk | undefined;
+    assert.equal(reroutedSpawn?.provider, undefined);
+    assert.equal(reroutedSpawn?.model, undefined);
+    assert.equal(reroutedSpawn?.effort, undefined);
     const wrongTrace = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
       id: 62,
@@ -628,6 +778,41 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
       },
     })) as { error?: { message?: string } };
     assert.match(wrongTrace.error?.message ?? "", /traceId does not match/);
+
+    const wrongPass = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 621,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 2,
+          remainingWork: "Try the wrong pass.",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(wrongPass.error?.message ?? "", /previousPass 2 does not match the selected workers' pass 1/);
+
+    liveReportStatus = "interrupted";
+    spawned = undefined;
+    const interrupted = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 622,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: ["worker_pass_1"],
+          previousPass: 1,
+          remainingWork: "Attempt to continue after restart.",
+          fromSessionId: "parent_chat",
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(interrupted.error?.message ?? "", /resume the interrupted worker before continuing the mission/);
+    assert.equal(spawned, undefined, "an interrupted report cannot mint a continuation spawn");
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
@@ -638,7 +823,211 @@ test("adaptive mission continuation preserves criteria and returns routing to Au
   }
 });
 
-test("ordinary opening work stays immediate until a third live worker mints scout state", async () => {
+test("Link reports all missing continuation fields and rejects a scalar acceptanceCriteria", async () => {
+  const previous = process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  try {
+    const missing = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 613,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: { previousWorkerIds: ["worker_pass_1"], fromSessionId: "parent_chat" },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(missing.error?.message ?? "", /missing required fields: previousPass, remainingWork/);
+
+    const wrongCriteria = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 614,
+      method: "tools/call",
+      params: {
+        name: "workhorse_delegate",
+        arguments: {
+          task: "Run an adaptive check",
+          fromSessionId: "parent_chat",
+          loop: { acceptanceCriteria: "Tests pass" },
+        },
+      },
+    })) as { error?: { message?: string } };
+    assert.match(wrongCriteria.error?.message ?? "", /loop\.acceptanceCriteria must be an array of non-empty strings/);
+  } finally {
+    if (previous === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous;
+  }
+});
+
+async function captureInheritedMissionFolder(
+  fixture: (
+    dir: string,
+    mission: Record<string, unknown>,
+  ) => {
+    projects: unknown[];
+    sessions: Array<Record<string, any>>;
+    previousWorkerIds: string[];
+    expectedFolder: string;
+  },
+): Promise<{ actualFolder: string | undefined; expectedFolder: string }> {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-folder-"));
+  const mission = {
+    id: "mission_folder_fallback",
+    mode: "adaptive",
+    objective: "Keep the mission in its original repository",
+    acceptanceCriteria: ["The continuation uses the intended folder"],
+    iteration: 1,
+    maxIterations: 4,
+    previousWorkerIds: [],
+    phase: "scout",
+  };
+  const built = fixture(dir, mission);
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({ projects: built.projects, sessions: built.sessions }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "external-runtime";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let spawned: import("../electron/peer-inbox").PeerAsk | undefined;
+  setWorkhorseDeskAsk(async (ask) => {
+    if (ask.action === "await-agents") {
+      return {
+        text: JSON.stringify({
+          ok: true,
+          running: [],
+          reports: built.previousWorkerIds.map((id) => {
+            const session = built.sessions.find((item) => item.id === id);
+            return {
+              childSessionId: id,
+              title: session?.title ?? id,
+              status: "completed",
+              text: "Pass complete.",
+              ...(session?.agentRun?.mission ? { mission: session.agentRun.mission } : {}),
+            };
+          }),
+        }),
+      };
+    }
+    spawned = ask;
+    return { text: JSON.stringify({ ok: true, workerId: "next_worker" }) };
+  });
+  try {
+    const continued = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 63,
+      method: "tools/call",
+      params: {
+        name: "workhorse_continue_mission",
+        arguments: {
+          previousWorkerIds: built.previousWorkerIds,
+          previousPass: 1,
+          remainingWork: "Continue in the inherited folder.",
+          fromSessionId: "folder_parent",
+        },
+      },
+    }) as { error?: { message?: string } };
+    assert.equal(continued.error, undefined, continued.error?.message);
+    return { actualFolder: spawned?.folder, expectedFolder: built.expectedFolder };
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("mission folder fallback 2 uses the coordinator git root in requested worker order", async () => {
+  const result = await captureInheritedMissionFolder((dir, mission) => {
+    const parentFolder = path.join(dir, "parent-lineup");
+    const originalRoot = path.join(dir, "original-git-root");
+    const reviewerRoot = path.join(dir, "supporting-reviewer-root");
+    mkdirSync(parentFolder);
+    mkdirSync(originalRoot);
+    mkdirSync(reviewerRoot);
+    return {
+      projects: [{ id: "reviewer_project", name: "Reviewer", folders: [{ path: reviewerRoot }] }],
+      sessions: [
+        {
+          id: "supporting_reviewer",
+          parentId: "folder_parent",
+          projectId: "reviewer_project",
+          title: "Supporting reviewer",
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          status: "idle",
+          messages: [],
+          agentRun: { status: "completed", startedAt: 1, isolation: "shared" },
+        },
+        {
+          id: "folder_parent",
+          title: "Folder parent",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          lineup: { id: "folder_lineup", folder: parentFolder, startedAt: 1, rows: [] },
+        },
+        {
+          id: "mission_coordinator",
+          parentId: "folder_parent",
+          title: "Coordinator",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          environment: {
+            kind: "worktree",
+            path: path.join(dir, "deleted-ephemeral-worktree"),
+            gitRoot: originalRoot,
+            head: "abc123",
+          },
+          agentRun: { status: "completed", startedAt: 1, isolation: "worktree", mission },
+        },
+      ],
+      previousWorkerIds: ["mission_coordinator", "supporting_reviewer"],
+      expectedFolder: originalRoot,
+    };
+  });
+  assert.equal(result.actualFolder, result.expectedFolder);
+});
+
+test("mission folder fallback 3 uses the parent lineup folder", async () => {
+  const result = await captureInheritedMissionFolder((dir, mission) => {
+    const parentFolder = path.join(dir, "parent-lineup");
+    mkdirSync(parentFolder);
+    return {
+      projects: [],
+      sessions: [
+        {
+          id: "folder_parent",
+          title: "Folder parent",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          lineup: { id: "folder_lineup", folder: parentFolder, startedAt: 1, rows: [] },
+        },
+        {
+          id: "mission_coordinator",
+          parentId: "folder_parent",
+          projectId: null,
+          title: "Coordinator",
+          provider: "codex",
+          model: "gpt-5.6-terra",
+          status: "idle",
+          messages: [],
+          environment: { kind: "local" },
+          agentRun: { status: "completed", startedAt: 1, isolation: "shared", mission },
+        },
+      ],
+      previousWorkerIds: ["mission_coordinator"],
+      expectedFolder: parentFolder,
+    };
+  });
+  assert.equal(result.actualFolder, result.expectedFolder);
+});
+
+test("only explicitly requested Mission or loop state makes an opening worker adaptive", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-gate-"));
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
@@ -669,7 +1058,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
   process.env.WORKHORSE_STATE_PATH = statePath;
   const seen: Array<{
     fromSessionId?: string;
-    missionIteration?: { phase?: string; acceptanceCriteria?: string[]; previousWorkerIds?: string[] };
+    missionIteration?: { phase?: string; acceptanceCriteria?: string[]; previousWorkerIds?: string[]; maxIterations?: number };
   }> = [];
   setWorkhorseDeskAsk(async (payload) => {
     if (payload.mode === "spawn") seen.push(payload);
@@ -691,6 +1080,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
 
     assert.equal((await call(72, "mission_parent")).error, undefined);
     assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    assert.equal(seen.at(-1)?.missionIteration?.maxIterations, 4);
     assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["The assigned task is complete and verified."]);
 
     assert.equal((await call(73, "ordinary_parent", {
@@ -701,8 +1091,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
     assert.deepEqual(seen.at(-1)?.missionIteration?.acceptanceCriteria, ["Opening wave is bounded"]);
 
     assert.equal((await call(74, "wide_parent")).error, undefined);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
-    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+    assert.equal(seen.at(-1)?.missionIteration, undefined, "an ordinary wide wave stays ordinary");
 
     const delegate = await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -714,8 +1103,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
       },
     }) as { error?: { message?: string } };
     assert.equal(delegate.error, undefined);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
-    assert.deepEqual(seen.at(-1)?.missionIteration?.previousWorkerIds, ["wide_one", "wide_two"]);
+    assert.equal(seen.at(-1)?.missionIteration, undefined, "plain delegate does not invent a mission either");
     const spawnFields = mcpToolInputSchema("workhorse_spawn_agent")?.properties ?? {};
     assert.ok("loop" in spawnFields);
     assert.ok("missionIteration" in spawnFields);
@@ -729,7 +1117,7 @@ test("ordinary opening work stays immediate until a third live worker mints scou
   }
 });
 
-test("simultaneous ordinary opening calls reserve width before persisted workers catch up", async () => {
+test("simultaneous ordinary opening calls all stay ordinary before persisted workers catch up", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-opening-race-"));
   const statePath = path.join(dir, "state.json");
   writeFileSync(statePath, JSON.stringify({
@@ -742,14 +1130,14 @@ test("simultaneous ordinary opening calls reserve width before persisted workers
   const seen: Array<{ missionIteration?: { phase?: string } }> = [];
   let releaseOrdinary!: () => void;
   const ordinaryHold = new Promise<void>((resolve) => { releaseOrdinary = resolve; });
-  let twoReserved!: () => void;
-  const twoReservedPromise = new Promise<void>((resolve) => { twoReserved = resolve; });
+  let threeStarted!: () => void;
+  const threeStartedPromise = new Promise<void>((resolve) => { threeStarted = resolve; });
   let ordinaryStarted = 0;
   setWorkhorseDeskAsk(async (payload) => {
     if (payload.mode === "spawn") seen.push(payload);
     if (!payload.missionIteration) {
       ordinaryStarted += 1;
-      if (ordinaryStarted === 2) twoReserved();
+      if (ordinaryStarted === 3) threeStarted();
       await ordinaryHold;
     }
     return { text: JSON.stringify({ childSessionId: `worker_${seen.length}` }) };
@@ -766,13 +1154,12 @@ test("simultaneous ordinary opening calls reserve width before persisted workers
   try {
     const first = call(76);
     const second = call(77);
-    await twoReservedPromise;
-    const third = await call(78);
-    assert.equal(third.error, undefined);
-    assert.equal(seen.filter((payload) => !payload.missionIteration).length, 2);
-    assert.equal(seen.at(-1)?.missionIteration?.phase, "scout");
+    const third = call(78);
+    await threeStartedPromise;
+    assert.equal(seen.length, 3);
+    assert.ok(seen.every((payload) => payload.missionIteration === undefined));
     releaseOrdinary();
-    const settled = await Promise.all([first, second]);
+    const settled = await Promise.all([first, second, third]);
     assert.ok(settled.every((reply) => reply.error === undefined));
   } finally {
     releaseOrdinary();

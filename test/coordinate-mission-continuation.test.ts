@@ -6,19 +6,18 @@ import { test } from "node:test";
 import {
   campaignGateError,
   missionForDeskSpawn,
+  nextCampaignPhase,
   nextMissionIteration,
   normalizeMissionIteration,
-  openingWaveMission,
 } from "../src/lib/subagents";
-import { normalizeLineup } from "../src/lib/lineup";
+import { addLineupRow, emptyLineup } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import {
   campaignSpawnGate,
-  createOpeningReservationReplyAsk,
+  deskMissionForStoreSpawn,
   hydrateInterruptedPathLeases,
-  storeOpeningWaveMission,
 } from "../src/lib/store";
-import type { Session } from "../src/lib/types";
+import type { MissionIteration, Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -144,6 +143,20 @@ test("continuation still rejects an implementer that disagrees with the coordina
   assert.match(decision.error, /do not share one mission contract/);
 });
 
+test("a stale pass label tells a reused-worker caller how to recover without stripping metadata", () => {
+  const mission = adaptiveMission({ iteration: 2, previousWorkerIds: ["coordinator"], phase: "review" });
+  assert.ok(mission);
+  const coordinator = worker("coordinator", "parent", {
+    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission },
+  });
+  const decision = nextMissionIteration([coordinator], "parent", ["coordinator"], 1);
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.match(decision.error, /previousPass 1 does not match the selected workers' pass 2/);
+  assert.match(decision.error, /workhorse_agent_status/);
+  assert.match(decision.error, /retry with previousPass 2/);
+});
+
 test("campaign phases run without a human click", () => {
   // Steve, 2026-08-29: the desk never asks a human to approve a phase.
   const scout = adaptiveMission({ phase: "scout" });
@@ -198,166 +211,213 @@ test("absent mission state is ordinary delegation, and unknown phases normalize 
   assert.equal(campaignGateError(garbage), undefined);
 });
 
-test("phases still advance one at a time without any clearance", () => {
-  const scout = adaptiveMission({ phase: "scout" });
-  assert.ok(scout);
-  const coordinator = worker("coordinator", "parent", {
-    agentRun: { status: "completed", startedAt: 1, finishedAt: 2, isolation: "shared", mission: scout },
-  });
-  const next = nextMissionIteration([coordinator], "parent", ["coordinator"]);
-  assert.equal(next.ok, true);
-  if (!next.ok) return;
-  assert.equal(next.mission.phase, "review");
-  assert.equal(campaignGateError(next.mission), undefined);
+test("phase advancement rejects missing and unknown campaign phases", () => {
+  assert.equal(nextCampaignPhase("scout"), "review");
+  assert.equal(nextCampaignPhase("build"), "build");
+  assert.equal(nextCampaignPhase(undefined), undefined);
+  assert.equal(nextCampaignPhase("handoff"), undefined);
+
+  const rawMission = {
+    id: "mission_raw_phase",
+    mode: "adaptive",
+    objective: "Keep the phase trustworthy",
+    acceptanceCriteria: ["Invalid state cannot restart at scout"],
+    iteration: 1,
+    maxIterations: 3,
+    previousWorkerIds: [],
+  };
+  const coordinator = {
+    ...worker("raw_coordinator", "parent"),
+    agentRun: {
+      status: "completed" as const,
+      startedAt: 1,
+      finishedAt: 2,
+      isolation: "shared" as const,
+      mission: rawMission,
+    },
+  } as unknown as Session;
+  const decision = nextMissionIteration([coordinator], "parent", [coordinator.id]);
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.match(decision.error, /phase is missing or invalid/);
 });
 
-test("the live store spawn path consults the production campaign gate", () => {
+test("raw desk state walks scout through build with a reused worker and lagging lifecycle", () => {
+  const parentId = "parent_four_pass";
+  const workerId = "reused_mission_worker";
+  const folder = path.join("repo", "mission");
+  const scout = {
+    id: "mission_build_reachable",
+    mode: "adaptive",
+    objective: "Ship the verified feature",
+    acceptanceCriteria: ["Tests pass"],
+    iteration: 1,
+    maxIterations: 4,
+    previousWorkerIds: [],
+    phase: "scout",
+  } satisfies MissionIteration;
+  const row = {
+    childId: workerId,
+    title: "Mission worker",
+    slice: "Mission pass",
+    folder,
+    vendor: "Codex",
+    status: "running",
+    startedAt: 1,
+  } as const;
+  let lineup = addLineupRow(emptyLineup(folder, 1), row, undefined, scout);
+  assert.equal(lineup.mission?.phase, "scout", "the desk holds scout before the first continuation");
+
+  const rawWorker = (
+    id: string,
+    status: "completed" | "running" | "interrupted",
+    mission?: MissionIteration,
+  ) => ({
+    id,
+    parentId,
+    hidden: true,
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    title: `${id} · pass`,
+    status: "idle",
+    messages: [],
+    agentRun: {
+      status,
+      startedAt: 1,
+      isolation: "shared",
+      ...(mission ? { mission } : {}),
+    },
+  }) as unknown as Session;
+
+  const advance = (
+    previous: MissionIteration,
+    requested: MissionIteration,
+    sessions: Session[],
+  ): MissionIteration => {
+    const desk = deskMissionForStoreSpawn({
+      sessions,
+      parentId,
+      requested,
+      lineup: lineup.mission,
+      agentRun: undefined,
+      liveContinuation: {
+        previousWorkerIds: requested.previousWorkerIds,
+        completedWorkerIds: requested.previousWorkerIds,
+        previousPass: previous.iteration,
+      },
+    });
+    assert.equal(desk?.phase, requested.phase, `the desk holds ${requested.phase}`);
+    assert.equal(desk?.iteration, requested.iteration);
+    const admitted = missionForDeskSpawn(requested, desk);
+    assert.equal(admitted?.phase, requested.phase);
+    lineup = addLineupRow(lineup, { ...row, startedAt: requested.iteration }, undefined, admitted);
+    assert.equal(lineup.rows.length, 1, "the normal continuation reuses one worker row");
+    assert.equal(lineup.mission?.phase, requested.phase, "duplicate worker reuse still writes the new mission");
+    assert.equal(lineup.mission?.iteration, requested.iteration);
+    assert.equal(previous.iteration + 1, requested.iteration);
+    return admitted!;
+  };
+
+  const review = advance(scout, { ...scout, iteration: 2, previousWorkerIds: [workerId], phase: "review" }, [
+    rawWorker(workerId, "completed", scout),
+  ]);
+  const approve = advance(review, { ...review, iteration: 3, previousWorkerIds: [workerId], phase: "approve" }, [
+    rawWorker(workerId, "completed", review),
+  ]);
+  const buildRequest: MissionIteration = {
+    ...approve,
+    iteration: 4,
+    previousWorkerIds: [workerId, "supporting_reviewer"],
+    phase: "build",
+  };
+  const laggingSessions = [
+    rawWorker(workerId, "running", approve),
+    rawWorker("supporting_reviewer", "running"),
+  ];
+  const forgedDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+  });
+  assert.equal(forgedDesk, undefined, "a caller cannot turn lifecycle lag into build evidence");
+  assert.equal(missionForDeskSpawn(buildRequest, forgedDesk)?.phase, "approve");
+
+  const incompleteProofDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: [workerId],
+      previousPass: approve.iteration,
+    },
+  });
+  assert.equal(incompleteProofDesk, undefined, "proof must name every worker reported completed");
+
+  const wrongPassDesk = deskMissionForStoreSpawn({
+    sessions: laggingSessions,
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: buildRequest.previousWorkerIds,
+      previousPass: approve.iteration - 1,
+    },
+  });
+  assert.equal(wrongPassDesk, undefined, "proof from a different previousPass cannot unlock build");
+
+  const interruptedDesk = deskMissionForStoreSpawn({
+    sessions: [
+      rawWorker(workerId, "running", approve),
+      rawWorker("supporting_reviewer", "interrupted"),
+    ],
+    parentId,
+    requested: buildRequest,
+    lineup: lineup.mission,
+    agentRun: undefined,
+    liveContinuation: {
+      previousWorkerIds: buildRequest.previousWorkerIds,
+      completedWorkerIds: buildRequest.previousWorkerIds,
+      previousPass: approve.iteration,
+    },
+  });
+  assert.equal(interruptedDesk, undefined, "an interrupted worker stays interrupted even beside terminal proof");
+  assert.equal(missionForDeskSpawn(buildRequest, interruptedDesk)?.phase, "approve");
+
+  const build = advance(approve, buildRequest, laggingSessions);
+  assert.equal(build.phase, "build");
+  assert.equal(build.maxIterations, 4);
+});
+
+test("ordinary delegation stays missionless while explicit campaigns use the production gate", () => {
   const mission = adaptiveMission({ id: "mission_store", objective: "Close the opening fan-out" });
   assert.ok(mission);
   const open = campaignSpawnGate({ campaignContext: true, requested: mission, desk: undefined });
   assert.equal(open.error, undefined);
   const ordinary = campaignSpawnGate({ campaignContext: false, requested: undefined, desk: undefined });
   assert.equal(ordinary.error, undefined);
-
-  const openingMission = openingWaveMission({
-    sessions: [
-      {
-        id: "parent",
-        lineup: {
-          rows: [
-            { childId: "worker_one", status: "running" },
-            { childId: "worker_two", status: "queued" },
-          ],
-        },
-      },
-    ],
-    parentId: "parent",
-    objective: "Start another ordinary worker",
-    missionId: "mission_opening_wave",
-  });
-  assert.equal(openingMission?.phase, "scout");
-  assert.deepEqual(openingMission?.previousWorkerIds, ["worker_one", "worker_two"]);
-  const openingGate = campaignSpawnGate({
-    campaignContext: false,
-    requested: undefined,
-    desk: undefined,
-    openingMission,
-  });
-  assert.equal(openingGate.error, undefined, "a wide opening wave becomes a campaign, not a modal");
+  assert.equal(ordinary.mission, undefined, "ordinary delegation never acquires adaptive mission state");
 
   const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const subagentSource = readFileSync(path.join(ROOT, "src", "lib", "subagents.ts"), "utf8");
+  const mcpSource = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(source, /const gate = campaignSpawnGate\(\{/);
-  assert.match(source, /openingWaveMission\(\{/);
-  assert.match(source, /input\.campaignContext \|\| input\.openingMission \? campaignGateError\(mission, input\.desk\) : undefined/);
+  assert.doesNotMatch(source, /openingWaveMission|storeOpeningWaveMission|ordinaryOpeningReservations/);
+  assert.doesNotMatch(subagentSource, /The opening wave is bounded and the assigned work is verified/);
+  assert.doesNotMatch(mcpSource, /openingWaveMission|ordinaryOpeningReservations/);
+  assert.match(source, /input\.campaignContext \? campaignGateError\(mission, input\.desk\) : undefined/);
   assert.match(source, /listGitChanges\(childCwd, spawnHead \|\| undefined\)/);
   assert.doesNotMatch(source, /beforeChanges/);
   assert.doesNotMatch(source, /requires human approval/i, "no spawn path asks a human to approve a phase");
-});
-
-test("the store keeps a different in-flight reservation beside one live opening worker", () => {
-  const sessions = [{
-    id: "parent",
-    lineup: {
-      rows: [{
-        childId: "worker_live",
-        status: "running",
-        openingReservationId: "reservation_live",
-      }],
-    },
-  }];
-  const opening = storeOpeningWaveMission({
-    sessions,
-    parentId: "parent",
-    objective: "Start the third concurrent worker",
-    missionId: "mission_reserved_opening",
-    ordinaryOpeningReservations: [{ id: "reservation_in_flight", startedAt: 1 }],
-  });
-  assert.deepEqual(opening.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
-  assert.equal(opening.mission?.phase, "scout");
-  assert.deepEqual(opening.mission?.previousWorkerIds, ["worker_live"]);
-
-  const reconciled = storeOpeningWaveMission({
-    sessions,
-    parentId: "parent",
-    objective: "Start the third concurrent worker",
-    missionId: "mission_reserved_opening",
-    ordinaryOpeningReservations: [
-      { id: "reservation_in_flight", startedAt: 1 },
-      { id: "reservation_live", startedAt: 90_000 },
-    ],
-  });
-  assert.deepEqual(reconciled.reservations.map((reservation) => reservation.id), ["reservation_in_flight"]);
-
-  const source = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(source, /ordinaryOpeningReservations: ordinaryOpeningReservations\.current\.get\(caller\.id\)/);
-  assert.match(source, /openingReservationId: openingReservation\.id/);
-  assert.match(source, /reservedWorkers: reservations\.length/);
-});
-
-test("lineup normalization preserves the opening reservation identity", () => {
-  const restored = normalizeLineup({
-    id: "lineup_persisted",
-    folder: "/repo",
-    startedAt: 1,
-    rows: [{
-      childId: "worker_live",
-      title: "Live worker",
-      slice: "Build",
-      folder: "/repo",
-      vendor: "Codex",
-      status: "running",
-      startedAt: 2,
-      openingReservationId: "reservation_live",
-    }],
-  });
-
-  assert.equal(restored?.rows[0]?.openingReservationId, "reservation_live");
-});
-
-test("the production peer reply releases failed and uncommitted opening reservations", async () => {
-  const parentId = "parent";
-  const sessions = [{
-    id: parentId,
-    lineup: { rows: [{ childId: "worker_live", status: "running" }] },
-  }];
-  const cases = [
-    { branch: "error", committed: true, result: { error: "spawn denied" } },
-    { branch: "not committed", committed: false, result: { text: "spawn not started" } },
-  ] as const;
-
-  for (const scenario of cases) {
-    const reservationId = `reservation_${scenario.branch.replace(" ", "_")}`;
-    const reservations = new Map([[parentId, [{ id: reservationId, startedAt: 1 }]]]);
-    let openingReservation: { parentId: string; id: string } | undefined = { parentId, id: reservationId };
-    const replies: Array<{ text?: string; error?: string }> = [];
-    const replyAsk = createOpeningReservationReplyAsk({
-      openingReservationCommitted: () => scenario.committed,
-      releaseOpeningReservation: () => {
-        if (!openingReservation) return;
-        const remaining = (reservations.get(openingReservation.parentId) ?? [])
-          .filter((reservation) => reservation.id !== openingReservation?.id);
-        if (remaining.length > 0) reservations.set(openingReservation.parentId, remaining);
-        else reservations.delete(openingReservation.parentId);
-        openingReservation = undefined;
-      },
-      reply: async (result) => {
-        replies.push(result);
-      },
-    });
-
-    await replyAsk(scenario.result);
-
-    assert.deepEqual(replies, [scenario.result], `${scenario.branch} still replies to the host`);
-    const opening = storeOpeningWaveMission({
-      sessions,
-      parentId,
-      objective: "Start the second opening worker",
-      missionId: `mission_${scenario.branch.replace(" ", "_")}`,
-      ordinaryOpeningReservations: reservations.get(parentId) ?? [],
-    });
-    assert.deepEqual(opening.reservations, [], `${scenario.branch} releases its reservation`);
-    assert.equal(opening.mission, undefined, `${scenario.branch} does not permanently consume opening capacity`);
-  }
+  assert.doesNotMatch(subagentSource, /approval card is the sole caller/i);
+  assert.doesNotMatch(mcpSource, /human clearance is always taken from desk state/i);
 });
 
 test("restart keeps leases only for interrupted workers that still own those paths", () => {
@@ -389,4 +449,17 @@ test("restart keeps leases only for interrupted workers that still own those pat
     { sessionId: "missing", path: "src/lib/store.tsx", fingerprint: "c", claimedAt: 1 },
   ], [interrupted]);
   assert.deepEqual(leases.map((lease) => lease.path), ["src/lib/store.tsx"]);
+});
+
+test("the Mission hint and the Link instructions agree: a continuation keeps the coordinating brain", () => {
+  const rules = readFileSync(path.join(ROOT, "src", "lib", "workhorse-rules.ts"), "utf8");
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  // The desk-side hint once said "each new pass returns to independent Workhorse routing" and
+  // invited the coordinator to pass route, which clears the pinned brain in continueMission.
+  assert.doesNotMatch(rules, /returns to independent Workhorse routing/);
+  assert.match(rules, /each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route/);
+  assert.match(mcp, /A continuation keeps that pass's coordinating vendor, model, and effort by default/);
+  // The width bound must stay on the live spawn path; a source scan is the death-test the reviewer asked for.
+  assert.match(store, /rootSpawnError\(latest\.sessions, caller\.id, maxRootWorkers\(catalog\.length\)\)/);
 });

@@ -282,8 +282,6 @@ export type DeskLineupRow = {
   agentId?: string;
   workspace?: string;
   correlationId?: string;
-  /** Identity of the opening-wave reservation this row consumed. */
-  openingReservationId?: string;
   missionId?: string;
   iteration?: number;
 };
@@ -367,8 +365,8 @@ export type AgentRun = {
   isolation: "worktree" | "shared";
   /** inherit keeps prior conversation. fresh starts cold with only a handoff. */
   seed?: WorkerSeed;
-  /** Sibling that admits a plan step. Not a builder and not a grandchild. */
-  role?: "auditor";
+  /** Review-only workers: plan auditor siblings and bounded nested helpers. */
+  role?: "auditor" | "helper";
   changedFiles?: string[];
   conflictFiles?: string[];
   error?: string;

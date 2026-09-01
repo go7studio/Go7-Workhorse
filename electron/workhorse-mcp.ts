@@ -13,7 +13,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -37,9 +37,9 @@ import {
   deskRoleOf,
   isSpawnOnlyPrompt,
   nestedSpawnError,
+  nestedWorkerPolicy,
   nextMissionIteration,
   normalizeMissionIteration,
-  openingWaveMission,
   resolveWorkerIsolation,
   shouldSpawnInsteadOfAsk,
   SPAWN_ONLY_PROMPT_ERROR,
@@ -49,6 +49,7 @@ import {
   workerProgressCheckpoint,
 } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
+import { sessionExecutionCwd } from "../src/lib/session-environment";
 import { uid } from "../src/lib/id";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
@@ -108,7 +109,7 @@ type JsonRpc = {
 };
 
 export const WORKHORSE_MCP_INSTRUCTIONS =
-  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.6 is ACP Grok, not Grok Bot. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
+  "Workhorse is an execution desk. When the user asks to work with Workhorse or says set a goal, first use workhorse_list_chats to choose an explicit parent, then use workhorse_delegate before doing the task directly. fromSessionId is that parent id, never a worker. Give the desk the objective, constraints, exclusions, and working folder. Leave initialBrain unset for full Auto; set it only when the user or harness chooses the first coordinating brain. That choice does not pin descendants, which still route independently unless a slice is explicitly assigned. Workhorse auto-routes from task fit and current capacity and returns its decision. Grok 4.6 is ACP Grok, not Grok Bot. Auto does not allocate grok-bot as an orchestration or builder worker. Set initialBrain to grok-bot only when the user chose Grok Bot as the calling, analyzing, or dispatch brain. Ordinary delegation is one wave. Enable loop only when the user asks for adaptive sequential work; then call workhorse_continue_mission with the returned worker ids when work remains. A continuation keeps that pass's coordinating vendor, model, and effort by default; set initialBrain to change it or route to opt back into automatic routing. Delegation returns a worker id promptly. Stop this turn. The desk journals the terminal report and joins it into the parent chat. Do not sit in a poll loop. Do not pass wait=true. Later, workhorse_agent_status on that worker id is how you follow through: next is wait, done, or failed. When done, the report is in that payload. Named worker such as Marlow: workhorse_ask_chat with that row's id. If several rows share a worker name, pass id. Do not spawn a second worker for the same slice. If delegation fails, report the exact Workhorse error before any direct fallback.";
 
 export type McpFraming = "content-length" | "ndjson";
 
@@ -406,7 +407,7 @@ const TOOLS = [
           description: "Opt-in adaptive sequential mission. Omit for one wave.",
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
-            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+            maxIterations: { type: "number", description: "2-8 passes; default 4" },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
@@ -435,7 +436,7 @@ const TOOLS = [
   {
     name: "workhorse_continue_mission",
     description:
-      "Continue an opt-in adaptive mission after one terminal worker wave. Pass that wave's worker ids and only the remaining work. Workhorse preserves the mission criteria and exclusions, attaches prior evidence, and independently routes the next pass.",
+      "Continue an opt-in adaptive mission after one terminal worker wave. Pass that wave's worker ids and only the remaining work. Workhorse preserves the mission criteria, exclusions, and coordinating brain. Set initialBrain to change the brain or route to opt back into automatic routing.",
     inputSchema: {
       type: "object",
       properties: {
@@ -444,6 +445,17 @@ const TOOLS = [
         remainingWork: { type: "string", description: "What remains after assessing the prior evidence" },
         evidence: { type: "array", items: { type: "string" }, description: "Optional verified facts from the harness or user" },
         description: { type: "string", description: "Short 3-5 word label" },
+        initialBrain: {
+          type: "object",
+          description: "Optional replacement for the prior pass's coordinating brain. Omit to keep its vendor, model, and effort.",
+          properties: {
+            provider: { type: "string", description: "Replacement vendor: grok, claude, codex, cursor, custom, or grok-bot shorthand" },
+            model: { type: "string", description: "Replacement model" },
+            effort: { type: "string", description: "Replacement thinking effort" },
+          },
+          additionalProperties: false,
+        },
+        route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
         isolation: { type: "string", description: "worktree or shared" },
@@ -523,7 +535,7 @@ const TOOLS = [
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
-        paths: { type: "array", items: { type: "string" }, description: "Repo-relative files this worker may change. Separate from attached files." },
+        paths: { type: "array", items: { type: "string" }, description: "Expected repo-relative paths used for scope checks and changed-file reporting. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
@@ -543,14 +555,14 @@ const TOOLS = [
           description: "Opt-in adaptive sequential mission. Its opening worker is gated before dispatch.",
           properties: {
             acceptanceCriteria: { type: "array", items: { type: "string" }, description: "Concrete completion checks" },
-            maxIterations: { type: "number", description: "2-8 passes; default 3" },
+            maxIterations: { type: "number", description: "2-8 passes; default 4" },
           },
           required: ["acceptanceCriteria"],
           additionalProperties: false,
         },
         missionIteration: {
           type: "object",
-          description: "Optional inherited adaptive mission manifest. Human clearance is always taken from desk state.",
+          description: "Optional inherited adaptive mission manifest. Build is honoured only from matching desk state.",
         },
         folder: { type: "string", description: "Optional absolute folder the worker must use as cwd" },
         wait: {
@@ -897,7 +909,6 @@ export function mcpToolInputSchema(name: string): { properties?: Record<string, 
 
 type DeskAsk = (ask: PeerAsk) => Promise<{ text?: string; error?: string }>;
 let deskAsk: DeskAsk | null = null;
-const ordinaryOpeningReservations = new Map<string, number>();
 let localCapabilityHostOverride: LocalCapabilityHostClient | null | undefined;
 let localCapabilityHostMemo: { signature: string; client: LocalCapabilityHostClient } | null = null;
 
@@ -930,7 +941,6 @@ type LocalRuntimeDiscovery = {
 /** When MiniMax tools run inside Electron main, skip HTTP-to-self and hit the live desk. */
 export function setWorkhorseDeskAsk(handler: DeskAsk | null): void {
   deskAsk = handler;
-  if (!handler) ordinaryOpeningReservations.clear();
 }
 
 /** Test seam and Electron-main injection point; undefined restores environment discovery. */
@@ -1808,6 +1818,7 @@ type SpawnCaller = {
   crewModes?: string[];
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[] };
+  environment?: SessionEnvironment;
 };
 
 function callerSession(from?: string): SpawnCaller | undefined {
@@ -1930,6 +1941,7 @@ async function spawnAgent(
     wait?: boolean;
     mission?: boolean;
     missionIteration?: unknown;
+    missionContinuation?: { previousWorkerIds: string[]; completedWorkerIds: string[]; previousPass: number };
     loop?: unknown;
     route?: "auto" | "quick" | "balanced" | "deep";
     role?: "auditor";
@@ -1977,49 +1989,38 @@ async function spawnAgent(
     caller?.crewModes?.includes("mission") ||
     deskMission,
   );
-  const stateSessions = (readState().sessions ?? [])
-    .filter((session): session is {
-      id?: string;
-      parentId?: string | null;
-      status?: string;
-      agentRun?: { status?: string };
-      lineup?: { rows?: Array<{ childId?: string; status?: string }> };
-    } => Boolean(session) && typeof session === "object");
-  const reservedOpenings = caller?.id ? ordinaryOpeningReservations.get(caller.id) ?? 0 : 0;
-  const openingMission = !explicitCampaignContext && caller?.id
-    ? openingWaveMission({
-        sessions: stateSessions,
-        parentId: caller.id,
-        objective: input.prompt,
-        missionId: input.traceId?.trim() || uid("mission"),
-        reservedWorkers: reservedOpenings,
-      })
-    : undefined;
-  const campaignContext = explicitCampaignContext || Boolean(openingMission);
+  const campaignContext = explicitCampaignContext;
   const missionIteration = campaignContext
-    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? openingMission ?? {
+    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? {
         id: input.traceId?.trim() || uid("mission"),
         mode: "adaptive" as const,
         objective: input.prompt.trim(),
         acceptanceCriteria: ["The assigned task is complete and verified."],
         iteration: 1,
-        maxIterations: 3,
+        maxIterations: 4,
         previousWorkerIds: [],
         phase: "scout" as const,
       }
     : undefined;
+  const projectFolder = callerProjectFolder(caller);
+  const nestedPolicy = nestedWorkerPolicy({
+    nested: isNested,
+    parentEnvironment: caller?.environment,
+    projectFolder,
+  });
   const inheritedInput = {
     ...input,
     missionIteration,
-    paths: input.paths ?? caller?.agentRun?.paths,
+    paths: nestedPolicy.mayOwnPaths ? input.paths ?? caller?.agentRun?.paths : undefined,
   };
   const spawnInput = isNested
     ? {
         ...inheritedInput,
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
-        isolation: "shared" as const,
+        isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
+        role: nestedPolicy.role,
       }
     : {
         ...inheritedInput,
@@ -2037,11 +2038,10 @@ async function spawnAgent(
   }
   const resolvedSkills = requestedSkills.resolved.map((skill) => `${skill.origin}:${skill.name}`);
   const skillFiles = requestedSkills.resolved.map((skill) => skill.skillFile);
-  const projectFolder = callerProjectFolder(caller);
   const admitted = caller
     ? admitSpawn({
         parent: caller,
-        projectFolder,
+        projectFolder: nestedPolicy.projectFolder,
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
         allowNested: isNested,
@@ -2058,12 +2058,7 @@ async function spawnAgent(
       : { ok: true as const, cwd: "" };
   if (!admitted.ok) throw new Error(admitted.error);
   const attachments = spawnAttachments(spawnInput.files, admitted.cwd);
-  const reservedParentId = !campaignContext ? caller?.id?.trim() : "";
-  if (reservedParentId) {
-    ordinaryOpeningReservations.set(reservedParentId, (ordinaryOpeningReservations.get(reservedParentId) ?? 0) + 1);
-  }
-  try {
-    const first = await postBridge("/spawn", {
+  const first = await postBridge("/spawn", {
     toSessionId: "",
     fromSessionId: fromId,
     exposureProfile: currentMcpProfile(),
@@ -2084,6 +2079,7 @@ async function spawnAgent(
     wait: spawnInput.wait,
     mission: spawnInput.mission,
     missionIteration: spawnInput.missionIteration,
+    missionContinuation: spawnInput.missionContinuation,
     route: spawnInput.route,
     role: spawnInput.role,
     planStepId: spawnInput.planStepId,
@@ -2121,6 +2117,7 @@ async function spawnAgent(
       wait: spawnInput.wait,
       mission: spawnInput.mission,
       missionIteration: spawnInput.missionIteration,
+      missionContinuation: spawnInput.missionContinuation,
       route: spawnInput.route,
       role: spawnInput.role,
       planStepId: spawnInput.planStepId,
@@ -2137,14 +2134,7 @@ async function spawnAgent(
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
     } as PeerAsk);
   }
-    return first;
-  } finally {
-    if (reservedParentId) {
-      const remaining = (ordinaryOpeningReservations.get(reservedParentId) ?? 1) - 1;
-      if (remaining > 0) ordinaryOpeningReservations.set(reservedParentId, remaining);
-      else ordinaryOpeningReservations.delete(reservedParentId);
-    }
-  }
+  return first;
 }
 
 /**
@@ -2190,11 +2180,14 @@ function missionIterationFromArgs(args: Record<string, unknown>, task: string, t
   if (args.loop === undefined) return undefined;
   if (!args.loop || typeof args.loop !== "object" || Array.isArray(args.loop)) throw new Error("loop must be an object");
   const loop = args.loop as Record<string, unknown>;
-  const acceptanceCriteria = Array.isArray(loop.acceptanceCriteria)
-    ? loop.acceptanceCriteria.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
-    : [];
-  if (acceptanceCriteria.length === 0) throw new Error("adaptive loop needs acceptance criteria");
-  const requestedMax = typeof loop.maxIterations === "number" && Number.isFinite(loop.maxIterations) ? Math.floor(loop.maxIterations) : 3;
+  if (!Array.isArray(loop.acceptanceCriteria)) {
+    throw new Error("loop.acceptanceCriteria must be an array of non-empty strings");
+  }
+  const acceptanceCriteria = loop.acceptanceCriteria
+    .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    .map((item) => item.trim());
+  if (acceptanceCriteria.length === 0) throw new Error("loop.acceptanceCriteria must contain at least one non-empty string");
+  const requestedMax = typeof loop.maxIterations === "number" && Number.isFinite(loop.maxIterations) ? Math.floor(loop.maxIterations) : 4;
   if (requestedMax < 2 || requestedMax > 8) throw new Error("maxIterations must be between 2 and 8");
   const missionId = traceId?.trim() || uid("mission");
   return {
@@ -2219,6 +2212,17 @@ type AwaitMissionReport = {
   effort?: string;
   mission?: MissionIteration;
 };
+
+function reconcileLiveMission(
+  persisted: MissionIteration | undefined,
+  live: unknown,
+): MissionIteration | undefined {
+  const row = live && typeof live === "object" ? live as Record<string, unknown> : {};
+  const phase = row.phase === "scout" || row.phase === "review" || row.phase === "approve" || row.phase === "build"
+    ? row.phase
+    : persisted?.phase;
+  return normalizeMissionIteration({ ...(persisted ?? {}), ...row, ...(phase ? { phase } : {}) }) ?? persisted;
+}
 
 function missionContinuationPrompt(input: {
   mission: MissionIteration;
@@ -2249,16 +2253,29 @@ function missionContinuationPrompt(input: {
   return lines.join("\n");
 }
 
+function missionContinuationSourceFolder(session: Session | undefined): string {
+  if (!session) return "";
+  if (session.environment?.kind === "worktree") return session.environment.gitRoot.trim();
+  return sessionExecutionCwd(session.environment, callerProjectFolder(session));
+}
+
 async function continueMission(args: Record<string, unknown>, from?: string): Promise<string> {
   const parentId = typeof args.fromSessionId === "string" ? args.fromSessionId.trim() : fromSessionId(from);
-  if (!parentId) throw new Error("context_required");
   const previousWorkerIds = Array.isArray(args.previousWorkerIds)
     ? [...new Set(args.previousWorkerIds.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))]
     : [];
   const remainingWork = typeof args.remainingWork === "string" ? args.remainingWork.trim() : "";
-  if (!remainingWork) throw new Error("remainingWork is required");
-  const previousPass = typeof args.previousPass === "number" ? Math.floor(args.previousPass) : 0;
-  if (previousPass < 1) throw new Error("previousPass is required");
+  const missing = [
+    ...(previousWorkerIds.length === 0 ? ["previousWorkerIds"] : []),
+    ...(args.previousPass === undefined || args.previousPass === null ? ["previousPass"] : []),
+    ...(!remainingWork ? ["remainingWork"] : []),
+    ...(!parentId ? ["fromSessionId"] : []),
+  ];
+  if (missing.length > 0) throw new Error(`missing required fields: ${missing.join(", ")}`);
+  const previousPass = typeof args.previousPass === "number" && Number.isFinite(args.previousPass)
+    ? Math.floor(args.previousPass)
+    : 0;
+  if (previousPass < 1) throw new Error("previousPass must be a positive number");
   const snapshotText = await awaitAgents(parentId, undefined, false, undefined, previousWorkerIds);
   let snapshot: { running?: string[]; reports?: AwaitMissionReport[] };
   try {
@@ -2268,32 +2285,77 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
   }
   if ((snapshot.running ?? []).length > 0) throw new Error("previous mission pass is still running");
   const liveReports = new Map((snapshot.reports ?? []).map((report) => [report.childSessionId, report]));
+  const completedWorkerIds = previousWorkerIds.filter((id) => liveReports.get(id)?.status === "completed");
+  if (completedWorkerIds.length !== previousWorkerIds.length) {
+    const interrupted = previousWorkerIds.some((id) => liveReports.get(id)?.status === "interrupted");
+    throw new Error(interrupted
+      ? "resume the interrupted worker before continuing the mission"
+      : "previous mission pass is not completed");
+  }
   const sessions = (readState().sessions ?? [])
     .map(normalizeSession)
     .filter((session): session is NonNullable<typeof session> => session !== null)
     .map((session) => {
       const live = liveReports.get(session.id);
-      if (!live?.mission || !session.agentRun) return session;
-      const status: "completed" | "failed" | "cancelled" | "timed-out" | "budget-exceeded" =
-        live.status === "failed" || live.status === "cancelled" || live.status === "timed-out" || live.status === "budget-exceeded"
-        ? live.status
-        : "completed";
-      return { ...session, status: "idle" as const, agentRun: { ...session.agentRun, status, mission: live.mission } };
+      if (live?.status !== "completed" || !live.mission || !session.agentRun) return session;
+      const mission = reconcileLiveMission(session.agentRun.mission, live.mission);
+      if (!mission) return session;
+      return {
+        ...session,
+        status: "idle" as const,
+        agentRun: {
+          ...session.agentRun,
+          status: "completed" as const,
+          mission,
+        },
+      };
     });
   const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass);
   if (!next.ok) throw new Error(next.error);
   const requestedTrace = typeof args.traceId === "string" ? args.traceId.trim() : "";
   if (requestedTrace && requestedTrace !== next.mission.id) throw new Error("traceId does not match this mission");
-  const source = sessions.filter((session) => previousWorkerIds.includes(session.id));
-  const coordinator = previousWorkerIds
-    .map((id) => source.find((session) => session.id === id))
-    .find(Boolean);
+  const source = previousWorkerIds
+    .map((id) => sessions.find((session) => session.id === id))
+    .filter((session): session is Session => Boolean(session));
+  const coordinator = source.find((session) => session.agentRun?.mission?.id === next.mission.id) ?? source[0];
   const coordinatorName = coordinator?.workerName ?? workerNameFromTitle(coordinator?.title ?? "");
+  const parent = sessions.find((session) => session.id === parentId);
+  const inheritedFolder =
+    previousWorkerIds
+      .map((id) => parent?.lineup?.rows.find((row) => row.childId === id)?.folder.trim())
+      .find((folder): folder is string => Boolean(folder)) ||
+    source.map(missionContinuationSourceFolder).find(Boolean) ||
+    parent?.lineup?.folder.trim() ||
+    undefined;
   const union = (key: "constraints" | "skills" | "capabilities" | "tools" | "exclusions" | "paths") =>
     [...new Set(source.flatMap((session) => session.agentRun?.[key] ?? []).filter(Boolean))];
   const evidence = Array.isArray(args.evidence)
     ? args.evidence.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
+  if (args.initialBrain !== undefined && (!args.initialBrain || typeof args.initialBrain !== "object" || Array.isArray(args.initialBrain))) {
+    throw new Error("initialBrain must be an object with provider, model, or effort");
+  }
+  const requestedBrain = args.initialBrain === undefined ? undefined : normalizeDelegateInitialBrain(args.initialBrain);
+  if (requestedBrain && !requestedBrain.provider && !requestedBrain.model && !requestedBrain.effort) {
+    throw new Error("initialBrain must include provider, model, or effort");
+  }
+  const reroute = args.route === "auto" || args.route === "quick" || args.route === "balanced" || args.route === "deep";
+  const inheritedBrain = {
+    provider: coordinator?.provider,
+    model: coordinator?.model,
+    effort: coordinator?.effort ?? undefined,
+  };
+  const continuationBrain: { provider?: string; model?: string; effort?: string } = reroute && !requestedBrain
+    ? {}
+    : requestedBrain
+      ? {
+          ...(!requestedBrain.provider && !requestedBrain.model
+            ? { provider: inheritedBrain.provider, model: inheritedBrain.model }
+            : {}),
+          ...requestedBrain,
+          effort: requestedBrain.effort ?? inheritedBrain.effort,
+        }
+      : inheritedBrain;
   return spawnAgent(
     {
       prompt: missionContinuationPrompt({ mission: next.mission, remainingWork, evidence, reports: snapshot.reports ?? [] }),
@@ -2307,7 +2369,11 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       worker: coordinatorName,
       mission: true,
       missionIteration: next.mission,
-      route: "auto",
+      missionContinuation: { previousWorkerIds, completedWorkerIds, previousPass },
+      provider: continuationBrain.provider,
+      model: continuationBrain.model,
+      effort: continuationBrain.effort,
+      route: reroute ? args.route as "auto" | "quick" | "balanced" | "deep" : "auto",
       constraints: union("constraints"),
       skills: union("skills"),
       capabilities: union("capabilities"),
@@ -2317,7 +2383,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
       tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
       isolation: args.isolation === "worktree" ? "worktree" : args.isolation === "shared" ? "shared" : source[0]?.agentRun?.isolation,
-      folder: typeof args.folder === "string" ? args.folder : undefined,
+      folder: typeof args.folder === "string" && args.folder.trim() ? args.folder.trim() : inheritedFolder,
       wait: linkWait(args.wait),
       traceId: next.mission.id,
     },
@@ -3475,7 +3541,7 @@ function isMcpEntry(): boolean {
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
- *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--key <idempotencyKey>]
+ *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--key <idempotencyKey>]
  *   <helper> link grok-pending
  *   <helper> link grok-reply <requestId> --text "<answer>"
  *
@@ -3486,7 +3552,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   const [sub, ...rest] = argv.filter((item) => item !== "--json");
   // Flags that take a value; anything else starting with -- is a switch.
   const VALUE_FLAGS = new Set([
-    "--provider", "--model", "--effort", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
+    "--provider", "--model", "--effort", "--route", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
     "--host", "--capability", "--kind", "--role", "--media-type", "--origin", "--system",
     "--max-tokens", "--temperature", "--mode", "--seed", "--max-faces",
     "--target-engine", "--folder",
@@ -3510,7 +3576,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3566,11 +3632,17 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
     return { name: "workhorse_agent_status", args: { id: positional[0] } };
   }
   if (sub === "follow-up") {
-    // Continue the wave that worker finished; Workhorse routes the next pass.
+    // Continue the wave that worker finished; the handler keeps its brain
+    // unless these flags deliberately change it or opt back into routing.
     const [worker, ...text] = positional;
     const chat = flag("chat");
     if (!worker || text.length === 0 || !chat) return { usage };
     const pass = Number(flag("pass") ?? "1");
+    const initialBrain = {
+      ...(flag("provider") ? { provider: flag("provider") } : {}),
+      ...(flag("model") ? { model: flag("model") } : {}),
+      ...(flag("effort") ? { effort: flag("effort") } : {}),
+    };
     return {
       name: "workhorse_continue_mission",
       args: {
@@ -3578,6 +3650,8 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
         previousPass: Number.isFinite(pass) ? pass : 1,
         remainingWork: text.join(" "),
         fromSessionId: chat,
+        ...(Object.keys(initialBrain).length > 0 ? { initialBrain } : {}),
+        ...(flag("route") ? { route: flag("route") } : {}),
         ...(flag("trace") ? { traceId: flag("trace") } : {}),
         ...(flag("key") ? { idempotencyKey: flag("key") } : {}),
       },

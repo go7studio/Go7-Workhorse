@@ -4,6 +4,7 @@ import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
+import { sessionExecutionCwd } from "./session-environment";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -156,8 +157,9 @@ export function deskRoleOf(
   session?: Pick<Session, "hidden" | "parentId" | "agentRun"> | { hidden?: boolean; parentId?: string | null; agentRun?: unknown } | null,
 ): DeskRole {
   if (!session) return "orchestrator";
-  if (session.agentRun && typeof session.agentRun === "object" && (session.agentRun as { role?: string }).role === "auditor") {
-    return "auditor";
+  if (session.agentRun && typeof session.agentRun === "object") {
+    const role = (session.agentRun as { role?: string }).role;
+    if (role === "auditor" || role === "helper") return role;
   }
   return isWorkerSession(session) ? "worker" : "orchestrator";
 }
@@ -947,7 +949,7 @@ export function workerOmittedToolError(name: string): string {
 }
 
 export function toolsForDeskRole<T extends { name: string }>(tools: T[], role: DeskRole = "orchestrator"): T[] {
-  if (role === "auditor") {
+  if (role === "auditor" || role === "helper") {
     return tools.filter((tool) => (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool.name));
   }
   if (role !== "worker") return tools;
@@ -1195,6 +1197,7 @@ export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: str
 export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   const parentRole = deskRoleOf(input.parent);
   if (parentRole === "auditor") return { ok: false, error: "Auditors cannot spawn." };
+  if (parentRole === "helper") return { ok: false, error: WORKER_SPAWN_ERROR };
   if (parentRole === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
@@ -1563,9 +1566,10 @@ export function normalizeMissionIteration(raw: unknown): MissionIteration | unde
 
 const CAMPAIGN_PHASES: CampaignPhase[] = ["scout", "review", "approve", "build"];
 
-export function nextCampaignPhase(phase: CampaignPhase): CampaignPhase {
-  const index = CAMPAIGN_PHASES.indexOf(phase);
-  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)] ?? "build";
+export function nextCampaignPhase(phase: unknown): CampaignPhase | undefined {
+  const index = (CAMPAIGN_PHASES as unknown[]).indexOf(phase);
+  if (index < 0) return undefined;
+  return CAMPAIGN_PHASES[Math.min(index + 1, CAMPAIGN_PHASES.length - 1)];
 }
 
 /**
@@ -1616,85 +1620,6 @@ export function campaignGateError(
   return matchingDesk ? undefined : "Campaign build requires matching desk state before a worker can start.";
 }
 
-/**
- * One worker is ordinary delegation and two workers are the smallest useful
- * split. A third live worker is a wide opening wave: it must become a Campaign
- * before any more work starts.
- */
-export const OPENING_WAVE_IMMEDIATE_WORKER_LIMIT = 2;
-
-type OpeningWaveSession = {
-  id?: string;
-  parentId?: string | null;
-  status?: string;
-  agentRun?: { status?: string };
-  lineup?: { rows?: Array<{ childId?: string; status?: string; openingReservationId?: string }> };
-};
-
-export type OpeningWorkerReservation = {
-  id: string;
-  startedAt: number;
-};
-
-export function reconcileOpeningWaveReservations(
-  sessions: OpeningWaveSession[],
-  parentId: string,
-  reservations: readonly OpeningWorkerReservation[],
-): OpeningWorkerReservation[] {
-  const parent = sessions.find((session) => session.id === parentId);
-  const consumed = new Set(
-    (parent?.lineup?.rows ?? [])
-      .map((row) => row.openingReservationId?.trim())
-      .filter((id): id is string => Boolean(id)),
-  );
-  return reservations.filter((reservation) => !consumed.has(reservation.id));
-}
-
-export function openingWaveLiveWorkerIds(sessions: OpeningWaveSession[], parentId: string): string[] {
-  const live = new Set<string>();
-  const parent = sessions.find((session) => session.id === parentId);
-  for (const row of parent?.lineup?.rows ?? []) {
-    if ((row.status === "queued" || row.status === "running") && row.childId?.trim()) {
-      live.add(row.childId.trim());
-    }
-  }
-  for (const session of sessions) {
-    if (session.parentId !== parentId || !session.id?.trim()) continue;
-    if (session.agentRun?.status === "running" || (!session.agentRun && session.status === "running")) {
-      live.add(session.id.trim());
-    }
-  }
-  return [...live];
-}
-
-export function openingWaveMission(input: {
-  sessions: OpeningWaveSession[];
-  parentId: string;
-  objective: string;
-  missionId: string;
-  reservedWorkers?: number;
-}): MissionIteration | undefined {
-  const parentId = input.parentId.trim();
-  const objective = input.objective.trim();
-  const missionId = input.missionId.trim();
-  if (!parentId || !objective || !missionId) return undefined;
-
-  const live = openingWaveLiveWorkerIds(input.sessions, parentId);
-  const reservedWorkers = Math.max(0, Math.floor(input.reservedWorkers ?? 0));
-  if (live.length + reservedWorkers < OPENING_WAVE_IMMEDIATE_WORKER_LIMIT) return undefined;
-  return {
-    id: missionId,
-    mode: "adaptive",
-    objective,
-    acceptanceCriteria: ["The opening wave is bounded and the assigned work is verified."],
-    iteration: 1,
-    maxIterations: 3,
-    previousWorkerIds: live,
-    phase: "scout",
-  };
-}
-
-/** The approval card is the sole caller. Approval of the approve phase enters build. */
 /** Ignore markers supplied by a caller; only a matching manifest already on the desk can clear a gate. */
 export function missionForDeskSpawn(
   requested: MissionIteration | undefined,
@@ -1909,7 +1834,9 @@ export function resolveMissionManifest(
     }
   }
   if (typeof previousIteration === "number" && first.iteration !== Math.floor(previousIteration)) {
-    return { error: "mission pass no longer matches these workers" };
+    return {
+      error: `previousPass ${Math.floor(previousIteration)} does not match the selected workers' pass ${first.iteration}; call workhorse_agent_status for the latest terminal worker ids, then retry with previousPass ${first.iteration}`,
+    };
   }
   return { mission: first, coordinatorId: coordinator.id };
 }
@@ -1939,13 +1866,15 @@ export function nextMissionIteration(
     .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
   if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
   if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
+  const phase = nextCampaignPhase(first.phase);
+  if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   return {
     ok: true,
     mission: {
       ...first,
       iteration: first.iteration + 1,
       previousWorkerIds: ids,
-      phase: nextCampaignPhase(first.phase),
+      phase,
       clearance: undefined,
     },
   };
@@ -1965,8 +1894,38 @@ export function resolveWorkerIsolation(input: {
   return "worktree";
 }
 
+export function nestedWorkerPolicy(input: {
+  nested: boolean;
+  parentEnvironment?: Session["environment"];
+  projectFolder: string;
+}): {
+  projectFolder: string;
+  isolation?: "shared";
+  role?: "helper";
+  readOnly: boolean;
+  mayReuse: boolean;
+  mayOwnPaths: boolean;
+} {
+  if (!input.nested) {
+    return {
+      projectFolder: input.projectFolder,
+      readOnly: false,
+      mayReuse: true,
+      mayOwnPaths: true,
+    };
+  }
+  return {
+    projectFolder: sessionExecutionCwd(input.parentEnvironment, input.projectFolder),
+    isolation: "shared",
+    role: "helper",
+    readOnly: true,
+    mayReuse: false,
+    mayOwnPaths: false,
+  };
+}
+
 export function workerMayWrite(role?: DeskRole): boolean {
-  return role !== "auditor";
+  return role !== "auditor" && role !== "helper";
 }
 
 export type CancelWorkerResult = {
@@ -2037,7 +1996,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     startedAt: row.startedAt,
     isolation: resolveWorkerIsolation({ isolation: row.isolation }),
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
-    ...(row.role === "auditor" ? { role: "auditor" as const } : {}),
+    ...(row.role === "auditor" || row.role === "helper" ? { role: row.role } : {}),
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
@@ -2233,6 +2192,23 @@ export function assertSharedWrite(input: {
     return { ok: false, error: `File changed since claim: ${input.path}. Re-read before writing.` };
   }
   return { ok: true };
+}
+
+export function refreshSharedFileFingerprint(input: {
+  leases: FileLease[];
+  sessionId: string;
+  path: string;
+  root?: string;
+  fingerprint: string;
+}): FileLease[] {
+  const key = leasePathForWrite(input.path, input.root).toLowerCase();
+  const index = input.leases.findIndex(
+    (lease) => lease.sessionId === input.sessionId && normalizeLeasePath(lease.path).toLowerCase() === key,
+  );
+  if (index < 0 || input.leases[index]?.fingerprint === input.fingerprint) return input.leases;
+  return input.leases.map((lease, leaseIndex) =>
+    leaseIndex === index ? { ...lease, fingerprint: input.fingerprint } : lease,
+  );
 }
 
 export function assertAgentPathWrite(input: {

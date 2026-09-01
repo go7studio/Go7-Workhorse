@@ -1157,7 +1157,10 @@ test("adaptive missions continue one terminal pass at a time", () => {
   assert.deepEqual(next.mission.acceptanceCriteria, ["Tests pass", "Feature is visible"]);
   const stale = nextMissionIteration([worker!], "parent", ["worker_1"], 2);
   assert.equal(stale.ok, false);
-  if (!stale.ok) assert.match(stale.error, /no longer matches/);
+  if (!stale.ok) {
+    assert.match(stale.error, /previousPass 2 does not match the selected workers' pass 1/);
+    assert.match(stale.error, /retry with previousPass 1/);
+  }
 
   const running = normalizeSession({
     ...worker,
@@ -9955,6 +9958,10 @@ test("a path-owned worker launches at Ask and the desk answers its in-path write
   // and no write event would reach the ownership preflight, so a path-owned
   // worker is clamped to Ask however permissive the desk is.
   assert.deepEqual(workerAccess({ inherited: desk, owned: true }), { mode: "ask", sandbox: "off" });
+  assert.deepEqual(workerAccess({ inherited: desk, owned: false, readOnly: true }), {
+    mode: "always-approve",
+    sandbox: "read-only",
+  });
   assert.deepEqual(workerAccess({ inherited: desk, owned: false }), desk);
   assert.equal(pathOwnerMode("always-approve"), "ask");
   assert.equal(pathOwnerMode("accept-edits"), "ask");
@@ -10012,6 +10019,16 @@ test("a path-owned worker launches at Ask and the desk answers its in-path write
     null,
   );
   assert.equal(grantedPolicyAnswer({ sandbox: "off", tool: "Write", detail: "src/app.ts" }), null);
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(features, /Worker path scope/);
+  assert.match(features, /review evidence, not containment/);
+  assert.match(features, /Sandbox controls where the runtime may write/);
+  assert.doesNotMatch(features, /stale writes stay blocked/);
+  const storeSource = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(storeSource, /refreshSharedFileFingerprint\(\{/);
+  assert.match(storeSource, /readOnly: nestedPolicy\.readOnly/);
+  assert.match(storeSource, /nestedPolicy\.mayReuse/);
+  assert.match(storeSource, /nestedPolicy\.mayOwnPaths/);
 });
 
 test("reuse keeps a tightening the person set and drops the desk's own path clamp", () => {

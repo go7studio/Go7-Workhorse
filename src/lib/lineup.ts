@@ -2,7 +2,7 @@ import { OBJECTIVE_ASK_RULE } from "./ask-default";
 import { enqueuePrompt } from "./chats";
 import { uid } from "./id";
 import { boundWorkerReport, crewHasParentTakeover, normalizeMissionIteration, normalizePathAllowlist, normalizeWorkerFindings, parseWorkerFindings, withSubagentStatus, workerNameFromTitle, workerTaskTitle } from "./subagents";
-import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, Session, WorkerFinding } from "./types";
+import type { AgentRun, ChatMessage, DeskLineup, DeskLineupRow, DeskLineupRowStatus, MissionIteration, Session, WorkerFinding } from "./types";
 import { isVendorRateLimitError } from "./vendor-bridge";
 
 export const LINEUP_FINISHED_NOTICE = "All workers finished.";
@@ -122,9 +122,6 @@ function normalizeLineupRow(raw: unknown): DeskLineupRow | null {
     ...(typeof record.agentId === "string" && record.agentId.trim() ? { agentId: record.agentId.trim() } : {}),
     ...(typeof record.workspace === "string" && record.workspace.trim() ? { workspace: record.workspace.trim() } : {}),
     ...(typeof record.correlationId === "string" && record.correlationId.trim() ? { correlationId: record.correlationId.trim() } : {}),
-    ...(typeof record.openingReservationId === "string" && record.openingReservationId.trim()
-      ? { openingReservationId: record.openingReservationId.trim() }
-      : {}),
     ...(typeof record.missionId === "string" && record.missionId.trim() ? { missionId: record.missionId.trim() } : {}),
     ...(typeof record.iteration === "number" && record.iteration > 0 ? { iteration: Math.floor(record.iteration) } : {}),
   };
@@ -134,16 +131,24 @@ export function addLineupRow(
   lineup: DeskLineup | undefined,
   row: DeskLineupRow,
   joinOwner?: DeskLineup["joinOwner"],
+  mission?: MissionIteration,
 ): DeskLineup {
   const base = lineup ?? emptyLineup(row.folder, row.startedAt, undefined, joinOwner);
   if (base.notifiedAt) {
-    return { ...emptyLineup(row.folder || base.folder, row.startedAt, undefined, joinOwner), rows: [row] };
+    return {
+      ...emptyLineup(row.folder || base.folder, row.startedAt, undefined, joinOwner),
+      rows: [row],
+      ...(mission ? { mission } : {}),
+    };
   }
-  if (base.rows.some((item) => item.childId === row.childId)) return base;
+  if (base.rows.some((item) => item.childId === row.childId)) {
+    return mission ? { ...base, mission } : base;
+  }
   const { notifiedAt: _previousNotification, ...openWave } = base;
   return {
     ...openWave,
     ...(joinOwner ? { joinOwner } : {}),
+    ...(mission ? { mission } : {}),
     folder: row.folder || base.folder,
     rows: [...base.rows, row],
   };

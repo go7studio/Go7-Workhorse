@@ -130,7 +130,7 @@ export function isMcpToolAdvertised(profile: McpExposureProfile, tool: string): 
  */
 export function profileForCaller(envProfile: McpExposureProfile, callerRole: DeskRole | undefined): McpExposureProfile {
   if (envProfile === "external-runtime") return envProfile;
-  if (callerRole === "auditor") return "auditor";
+  if (callerRole === "auditor" || callerRole === "helper") return "auditor";
   if (callerRole === "worker") return "worker";
   return envProfile;
 }

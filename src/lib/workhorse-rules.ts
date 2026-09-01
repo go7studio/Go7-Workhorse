@@ -67,6 +67,9 @@ export const WORKER_SESSION_RULES =
 export const AUDITOR_SESSION_RULES =
   "You are an auditor on the Workhorse desk. Re-run the named gate in the bound folder. Do not write files. Do not spawn. Do not ask the user. Do not review any other tree. Reply with HEAD (git rev-parse HEAD, 40 hex), GATE (the command), LAST (the gate’s literal last line), and STATUS pass or fail.";
 
+export const HELPER_SESSION_RULES =
+  "You are a read-only helper on the Workhorse desk. Perform the assigned independent check in the bound folder. Do not write files. Do not spawn. Do not ask the user. Do not review any other tree. Return the report as plain text.";
+
 export const CUSTOM_HTTP_WORKER_RULES =
   "You are a worker on the Workhorse desk. You are not the root orchestrator. Do the assigned slice in the bound folder. Workspace: list_dir, read_file (and write_file / run_command only if this turn allows writes). list_dir with no path lists the bound folder. Only if your slice explicitly requires a second independent check, you may call workhorse_spawn_agent once; Workhorse uses a capacity-aware quick route with at most 5,000 tokens and depth two unless the assignment names a model. You may await that helper. Do not list bots or request another vendor. Do not ask the user. Do not review any other tree. Return the report as plain text.";
 
@@ -78,7 +81,7 @@ export const SPAWN_TURN_HINT =
   GROK_BOT_SPAWN_LAW +
   "Spawn only a canCall row. Fan-out only when they asked for every vendor, all bots, multiple independent reviews, or a named list — then spawn one worker per named slice on a canCall row, including this chat’s own custom bot (provider custom, chat this bot’s name; wait=false when more than one). The API key is already on the desk. Do not spawn several of one vendor with split tasks to fill a crew. After they start, stop. One short line of who is out is enough. Do not sit on workhorse_await_agents. Do not ask the user to pick 1/2/3 (re-await / scrape yourself / tighten). Workers fill their own chats. The desk joins their reports later as a new turn. Call workhorse_await_agents (default, no wait) only for a status snapshot. If a vendor is not on that list, skip it and do not name it. Do not ask which vendor. Do not call workhorse_request_vendor. Do not ask the user to do the review themselves. Only say nothing to spawn if canCall is empty. canCall is Workhorse vendors only — OpenClaw and Hermes are harnesses; do not spawn them from that list. Each spawn prompt is the slice — never a request to summon more agents.";
 
-export type DeskRole = "orchestrator" | "worker" | "auditor";
+export type DeskRole = "orchestrator" | "worker" | "auditor" | "helper";
 
 /**
  * The rules a vendor CLI is launched with, by role. Every launcher used to
@@ -92,6 +95,7 @@ export type DeskRole = "orchestrator" | "worker" | "auditor";
  */
 export function sessionRulesFor(role: DeskRole | undefined, provider: "grok" | "claude" | "codex" | "cursor" = "grok"): string {
   if (role === "auditor") return AUDITOR_SESSION_RULES;
+  if (role === "helper") return HELPER_SESSION_RULES;
   if (role === "worker") return WORKER_SESSION_RULES;
   return provider === "cursor" ? CURSOR_SESSION_RULES : WORKHORSE_SESSION_RULES;
 }
@@ -152,7 +156,7 @@ export function looksLikeSpawnRequest(text: string): boolean {
 }
 
 export function withSpawnHint(text: string, role?: DeskRole): string {
-  if (role === "worker" || role === "auditor" || looksLikeWorkerBrief(text)) return text;
+  if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text)) return text;
   if (!looksLikeSpawnRequest(text)) return text;
   return `${SPAWN_TURN_HINT}\n\n${text}`;
 }
@@ -161,7 +165,7 @@ export const ORCHESTRATE_MODE_HINT =
   "The user selected Orchestrate on this chat. You are the orchestrator this turn. Do not do the assigned work yourself. Spawn desk workers for it.";
 
 export const MISSION_MODE_HINT =
-  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass returns to independent Workhorse routing. Do not sit on workhorse_await_agents. The desk joins reports later.";
+  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route. Do not sit on workhorse_await_agents. The desk joins reports later.";
 
 export function crewModeLabel(mode: CrewMode): string {
   return mode === "mission" ? "Mission" : "Orchestrate";
@@ -197,7 +201,7 @@ function withSpawnBible(text: string): string {
 /** Pinned Orchestrate and/or Mission chips always inject the bible, even without spawn verbs. */
 export function withCrewModeHint(text: string, crewMode?: CrewMode | CrewMode[], role?: DeskRole): string {
   const modes = normalizeCrewModes(crewMode);
-  if (role === "worker" || role === "auditor" || looksLikeWorkerBrief(text) || modes.length === 0) return text;
+  if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text) || modes.length === 0) return text;
   let next = withSpawnBible(text);
   if (modes.includes("mission") && !next.startsWith(MISSION_MODE_HINT)) {
     next = `${MISSION_MODE_HINT}\n\n${next}`;
@@ -221,7 +225,7 @@ export function looksLikeLooseDeleteRequest(text: string): boolean {
 }
 
 export function withLooseDeleteHint(text: string, role?: DeskRole): string {
-  if (role === "worker") return text;
+  if (role === "worker" || role === "auditor" || role === "helper") return text;
   if (!looksLikeLooseDeleteRequest(text)) return text;
   return `${LOOSE_DELETE_HINT}\n\n${text}`;
 }
@@ -236,7 +240,7 @@ export function looksLikeCrewImpatience(text: string): boolean {
 }
 
 export function withCrewStatusHint(text: string, role?: DeskRole): string {
-  if (role === "worker") return text;
+  if (role === "worker" || role === "auditor" || role === "helper") return text;
   if (!looksLikeCrewImpatience(text)) return text;
   return `${CREW_STATUS_HINT}\n\n${text}`;
 }
@@ -259,7 +263,7 @@ export function looksLikePeerRequest(text: string): boolean {
 }
 
 export function withCustomPeerHint(text: string, role?: DeskRole): string {
-  if (role === "worker" || looksLikeWorkerBrief(text)) return text;
+  if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text)) return text;
   if (!looksLikePeerRequest(text)) return text;
   return `${CUSTOM_HTTP_PEER_HINT}\n\n${text}`;
 }
@@ -303,7 +307,7 @@ export function looksLikePermissionQuestion(text: string): boolean {
 }
 
 export function withPermissionHint(text: string, role?: DeskRole): string {
-  if (role === "worker" || looksLikeWorkerBrief(text)) return text;
+  if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text)) return text;
   if (!looksLikePermissionQuestion(text)) return text;
   return `${PERMISSION_TURN_HINT}\n\n${text}`;
 }

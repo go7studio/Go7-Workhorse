@@ -161,7 +161,9 @@ export function grokBotShimSecretsFile(token: string, port = Number(GROK_BOT_SHI
 }
 
 export function grokBotLoopbackApiKey(baseUrl: string, fallback: string, secrets: GrokBotShimSecrets | undefined): string {
-  if (!isGrokBotUrl(baseUrl) || !secrets?.token) return fallback;
+  // The row names the port this install's shim listens on. Without it a shim
+  // moved off 8787 failed the identity check and never got its own token.
+  if (!isGrokBotUrl(baseUrl, secrets?.port) || !secrets?.token) return fallback;
   return secrets.token;
 }
 
@@ -201,9 +203,17 @@ export function parseGrokBotLateMarker(raw: unknown): GrokBotLateMarker | undefi
   return { id, sessionId, timedOutAt };
 }
 
-/** The chat id rides the standard OpenAI `user` field, and only to the loopback shim. */
-export function grokBotSessionUser(baseUrl: string, sessionId: string | undefined): string | undefined {
+/**
+ * The chat id rides the standard OpenAI `user` field, and only to the loopback
+ * shim. This is what arms the late-answer lane, so a shim on its install's own
+ * port has to be recognised here or every slow answer comes back a shim 504.
+ */
+export function grokBotSessionUser(
+  baseUrl: string,
+  sessionId: string | undefined,
+  shimPort?: number,
+): string | undefined {
   const trimmed = (sessionId || "").trim();
-  if (!trimmed || trimmed.length > 128 || !isGrokBotUrl(baseUrl)) return undefined;
+  if (!trimmed || trimmed.length > 128 || !isGrokBotUrl(baseUrl, shimPort)) return undefined;
   return trimmed;
 }

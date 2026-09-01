@@ -17,10 +17,12 @@ import {
   GROK_BOT_STILL_WORKING,
   grokBotInboxDir,
   grokBotLatePath,
+  grokBotLoopbackApiKey,
   grokBotSessionUser,
   mintGrokBotShimToken,
   parseGrokBotLateMarker,
 } from "../src/lib/grok-bot-shim";
+import { GROK_BOT_SHIM_PORT } from "../src/lib/custom-http-identity";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -326,4 +328,44 @@ test("the desk wires the late lane end to end", () => {
   assert.match(store, /msg_late_\$\{answer\.reqId\}/, "delivery is idempotent by request id");
   assert.match(store, /lateGrokBotAnswers/, "the renderer pulls on ready");
   assert.match(store, /lateAckPending/, "an appended answer is acknowledged only after a successful save");
+});
+
+test("a shim on its install's own port still arms the late-answer lane", () => {
+  /*
+   * grok-bot-shim.json carries the port the shim listens on, and the desk
+   * honours it — parseGrokBotShimSecrets accepts 1024-65535. The identity check
+   * hard-coded 8787, so a shim moved off the default failed it: no chat id in
+   * the `user` field, so no late-answer lane, so every slow answer came back a
+   * shim 504. Same failure localhost had, one field along.
+   */
+  const token = mintGrokBotShimToken();
+  const moved = { token, port: 9001 };
+  const standard = { token, port: Number(GROK_BOT_SHIM_PORT) };
+
+  // The chat id reaches a shim on its own port.
+  assert.equal(grokBotSessionUser("http://localhost:9001/v1", "sess_x", 9001), "sess_x");
+  assert.equal(grokBotSessionUser("http://127.0.0.1:9001/v1", "sess_x", 9001), "sess_x");
+  // And the loopback token does too.
+  assert.equal(grokBotLoopbackApiKey("http://localhost:9001/v1", "sk-fallback", moved), token);
+
+  // Loopback is not enough on its own. Ollama, the desk bridge and any local
+  // dev server share these host names; handing one of them the per-install
+  // token or the chat id is exactly what the port match prevents.
+  assert.equal(grokBotSessionUser("https://grok-bot.example.com:9001/v1", "sess_x", 9001), undefined);
+  assert.equal(grokBotLoopbackApiKey("https://grok-bot.example.com:9001/v1", "sk-fallback", moved), "sk-fallback");
+  assert.equal(grokBotLoopbackApiKey("http://localhost:11434/v1", "sk-fallback", moved), "sk-fallback");
+  // A row that names one port does not also answer on another.
+  assert.equal(grokBotLoopbackApiKey("http://localhost:9001/v1", "sk-fallback", standard), "sk-fallback");
+  assert.equal(grokBotSessionUser("http://localhost:9001/v1", "sess_x"), undefined, "no row means the default port");
+  // The default install is untouched.
+  assert.equal(grokBotSessionUser("http://localhost:8787/v1", "sess_x"), "sess_x");
+  assert.equal(grokBotLoopbackApiKey("http://127.0.0.1:8787/v1", "sk-fallback", standard), token);
+
+  // The port has to travel with the token: both answers come from the same
+  // row, read once, or the key check and the lane disagree about which door
+  // is the shim.
+  const customHttp = readFileSync(path.join(ROOT, "electron", "custom-http.ts"), "utf8");
+  assert.match(customHttp, /const shim = grokBotDeskShim\(\);/, "the shim row is read once per call");
+  assert.match(customHttp, /grokBotDeskApiKey\(baseUrl, config\.apiKey\.trim\(\), shim\)/, "the key check gets the row");
+  assert.match(customHttp, /grokBotSessionUser\(baseUrl, input\.sessionUser, shim\?\.port\)/, "the lane gets its port");
 });

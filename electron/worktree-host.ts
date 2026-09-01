@@ -97,9 +97,23 @@ export type WorktreePruneResult = {
   kept: Array<{ name: string; reason: string }>;
 };
 
-/** The sweep runs on the main process during startup, so it may never become the reason the app is slow to open. */
 const PRUNE_GIT_TIMEOUT_MS = 3_000;
-const PRUNE_BUDGET_MS = 2_000;
+
+/**
+ * How long the sweep may spend before giving up until next launch.
+ *
+ * Two seconds was the right number while this ran inside `state:load`, where
+ * every millisecond was a millisecond before first paint. It is the wrong number
+ * now that main.ts defers the sweep past the window: each tree costs three or
+ * four `git` calls, so two seconds bought perhaps ten trees a launch against a
+ * backlog of 137 — the sweep would have taken a fortnight of launches to catch
+ * up with a folder that grows every day.
+ *
+ * Off the paint path there is nothing to protect but the desk's own
+ * responsiveness, and the budget is still a hard stop: a wedged repository
+ * cannot hold the sweep open, and whatever is left is simply tried next launch.
+ */
+export const PRUNE_BUDGET_MS = 20_000;
 
 function gitSync(args: string[], cwd?: string): { ok: boolean; out: string } {
   try {

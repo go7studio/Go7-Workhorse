@@ -79,11 +79,19 @@ test("state:load routes the sweep through that decision and logs the skip", () =
     /if \(!decision\.prune\) \{[\s\S]{0,240}?mainLog\.record\("prune:skip"/,
     "a refused sweep must be recorded, or the next dead launch explains nothing",
   );
+  // Lane 2b moved the sweep itself off the boot path onto a timer, so the else
+  // now schedules rather than prunes. The invariant is unchanged and is the
+  // whole point of the guard: nothing reaches `pruneOrphanWorktrees` unless
+  // this decision said yes.
   assert.match(
     main,
-    /\} else \{\s*\n\s*const pruned = pruneOrphanWorktrees\(/,
+    /\} else \{\s*\n\s*scheduleHousekeeping\(/,
     "the sweep must sit inside the else, not beside it",
   );
+  const scheduled = main.indexOf("function scheduleHousekeeping");
+  const pruneCall = main.indexOf("pruneOrphanWorktrees(root, keep)");
+  assert.ok(scheduled > 0 && pruneCall > scheduled, "the only prune call must be the one the timer reaches");
+  assert.equal(main.split("pruneOrphanWorktrees(").length - 1, 1, "exactly one call site, and the timer owns it");
   assert.match(main, /const load = readStateWithSource\(\)/, "the handler must read the source, not just the state");
 });
 
@@ -234,7 +242,11 @@ test("saves flush on rotation, on growth, and never on size alone", () => {
   const main = mainSource();
   assert.match(main, /const STATE_FSYNC_GROWTH_BYTES = 4 \* 1024 \* 1024/);
   assert.match(main, /const grew = sizeBefore - stateBytesAtLastFsync >= STATE_FSYNC_GROWTH_BYTES/);
-  assert.match(main, /const fsync = rotateBackups \|\| grew/);
+  // Lane 2b slowed rotation to ten minutes and gave the flush its own minute
+  // clock, so a save no longer inherits durability from the backup schedule.
+  // Growth stays a reason in its own right, which is what this line pins.
+  assert.match(main, /const fsync = rotateBackups \|\| dueForFlush \|\| grew/);
+  assert.match(main, /const dueForFlush = dueByInterval\(lastStateFsyncAt, now, STATE_FSYNC_INTERVAL_MS\)/);
   assert.match(main, /\{ rotateBackups, fsync \}/, "the write has to be told, not just the variable set");
   assert.match(main, /stateBytesAtLastFsync = stateFileSize\(file\)/, "or growth is measured from the wrong mark");
 });
@@ -316,7 +328,11 @@ test("the desk opens the log before anything can go wrong, and names why it clos
   const opened = main.indexOf("openMainLog(app.getPath(\"userData\"))");
   const lock = main.indexOf("app.requestSingleInstanceLock()");
   assert.ok(opened > 0 && opened < lock, "a launch that dies before the lock must still leave a line");
-  assert.match(main, /mainLog\.record\("startup", `version=\$\{APP_VERSION\}/);
+  // Lane 2b widened the startup line — userData, state bytes, chat and worktree
+  // counts, rss and the resolved PATH — so the version now arrives through
+  // `bootDetail`. It is still the first thing the line says.
+  assert.match(main, /mainLog\.record\("startup", isMcpHelper \? .* : bootDetail\(\)\)/);
+  assert.match(main, /function bootDetail\(\): string \{[\s\S]*?`version=\$\{APP_VERSION\}`/);
   assert.match(main, /mainLog\.record\("shutdown", "reason=second-instance"\)/);
   assert.match(main, /isMcpHelper \? nullMainLog\(\) : openMainLog/, "two writers would race the rotation");
 });

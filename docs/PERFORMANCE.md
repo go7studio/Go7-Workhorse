@@ -23,6 +23,8 @@ a nested loop, or a per-turn cost became a per-token cost.
 | **Scroll pin** | Following a stream reads and writes the scroller once per frame, not once per token, and leaving a chat drops the pending pin. | `test/performance.test.ts` — "a stream pins the transcript once a frame, not once a token" |
 | **Persist** | Selecting a chat is not persist work. A selection-only change must compare equal, so typing and clicking do not journal the desk. | `test/performance.test.ts` — "selection-only desk updates do not look like persist work", "selecting a chat keeps the same sessions array when there is no draft" |
 | **Project changes** | Reading a folder 400 times in one turn still resolves to the files that were written, within the first-click budget. | `test/performance.test.ts` — "project changes skip read tools and still see the write in a long scrape turn" |
+| **Boot rewrite decision** | Deciding whether a launch must rewrite the state costs a walk that stops at the first difference, not two serialisations of the whole desk. The old compare was 155 ms on a 46 MB file, on the main process, before first paint, to answer "nothing changed". | `test/long-term-health.test.ts` — "the JSON walk answers exactly what the two stringify calls answered", "the walk stops at the first difference…" |
+| **Backup rotation** | Copying the whole state file is a ten-minute job, not a one-minute one; the fsync keeps its own minute clock so durability does not ride on it. | `test/long-term-health.test.ts` — "two saves inside the cadence rotate once", "slowing the rotation did not slow the flush…" |
 
 ## How to keep it
 
@@ -56,16 +58,53 @@ Three habits cover the rest:
   built yet — deleting a shared blob wrongly loses a picture, so it waits for
   a reference count, and until then the store grows with distinct pictures
   only.
+  The same rule now covers the other thing that grew without a plan. A
+  finished worker's thinking and tool rows write once to
+  `userData/transcripts/<sessionId>.json` and the chat keeps a path; the prose
+  and the final report stay inline, because that is what a person opens the
+  chat to read. Measured on a year-old desk: 45.72 MB of state, 39.64 MB of it
+  belonging to 624 workers whose runs had ended, thinking 16.37 MB and tool
+  output 11.52 MB — 61% of a file that is parsed at every launch and serialised
+  at every save. The sidecar is read back and counted before the inline rows are
+  cleared, an unwritable one keeps them, and nothing is ever deleted: no cap, no
+  trim, no collection, for the same reason blobs are not collected — that waits
+  for a reference count. Only workers whose `agentRun.status` is terminal are
+  touched, and `interrupted` is not terminal, because that is the desk stopping
+  rather than the worker finishing. Enforced by `test/long-term-health.test.ts`.
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
+- **A folder the desk creates needs someone who deletes it.** Managed worktrees
+  had a sweep from the start, and the sweep was handed every session id as its
+  live set. Hidden workers are sessions, so every tree named a chat that still
+  existed and none was ever a candidate: 626 hidden rows, 624 of them finished,
+  137 trees, 59 GB — 98% of `userData` — and a prune that had removed nothing in
+  a year. Two things keep that from recurring. The live set is now finished
+  workers minus an age floor (`worktreeKeepSet`), not the whole desk. And the
+  folder has a stated ceiling in `user-data-hygiene.ts` that the boot line
+  reports against, so its size is a number in the log rather than something
+  found with `du` after a disk fills. Being a candidate still grants nothing:
+  every refusal in `worktree-host.ts` runs on the tree itself.
+- **Keep destructive work off the paint path.** The prune ran inside
+  `state:load`, between the read and the reply, so every `git` call it made was
+  a call the first frame waited on — and its two-second budget, sized for that
+  position, cleared about ten trees a launch against a backlog of 137. It now
+  runs on a timer well after the window, where the budget can be twenty seconds
+  because there is nothing left to protect but the desk's own responsiveness.
+  The thirty-day sweep of hand-named state backups sits there too.
 
 ## Measuring the running app
 
-The budgets above are tripwires in Node. The desk can also watch itself run:
-launch with `WORKHORSE_PERF_TRACE=1` (or `--workhorse-perf-trace`) and the main
-process records every event-loop stall over 80ms to
-`userData/perf/heartbeat.jsonl` — a timestamp, the gap, and a one-word cause
-(`state:save`, `state:read`), never content. The file rotates at 1 MB. The
+The budgets above are tripwires in Node. The desk also watches itself run, on
+every launch: the main process records every event-loop stall over 250ms to
+`userData/perf/heartbeat.jsonl` — a timestamp, the gap, a one-word cause
+(`state:save`, `state:read`) and, where the work has a size, the bytes it was
+moving. Never content. Launch with `WORKHORSE_PERF_TRACE=1` (or
+`--workhorse-perf-trace`) to drop the threshold to 80ms when you are hunting
+something specific. The flag used to decide whether to record at all, and a
+person opening the app from Finder sets neither gate, so `userData/perf` had
+never existed on a desk that had been running for a year — the one instrument
+built to explain felt jank had measured nothing. Deciding the *threshold* keeps
+the shipped build honest without filling the file. It rotates at 1 MB. The
 instrument exists because the main process brokers every IPC message, so a
 block there is felt on every surface at once and no renderer tooling can see
 it. Two independent reviews traced the felt stall to the save pipeline and

@@ -8,6 +8,17 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.50](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.49...v0.6.50) (2026-09-01)
+
+
+### Bug Fixes
+
+* default missions reach build in their original folder ([909414b](https://github.com/go7studio/Go7-Workhorse/commit/909414bb7b526db70905157761b74b981bee5105))
+* keep mission state explicit across restarts ([ba87edf](https://github.com/go7studio/Go7-Workhorse/commit/ba87edf03975b59900e83594021cffbc660c3fe4))
+* mission continuations reach build in their original folder ([9fbaf21](https://github.com/go7studio/Go7-Workhorse/commit/9fbaf21f01ce6b978edd5c13c67c359ea3d217da))
+* mission follow-ups keep their coordinating brain ([cc0f837](https://github.com/go7studio/Go7-Workhorse/commit/cc0f837f54e96fc0442ea39884099d2192f2130d))
+* repair worker path ownership ([86fb3c4](https://github.com/go7studio/Go7-Workhorse/commit/86fb3c45abd37e9c89818bb8efc2b64d6eb83308))
+
 ## [0.6.49](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.48...v0.6.49) (2026-08-31)
 
 

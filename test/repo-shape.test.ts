@@ -167,6 +167,50 @@ test("every suite on disk is the suite `npm test` runs", () => {
   assert.deepEqual([...new Set(listed)], listed, "a suite is named twice in the \"test\" script");
 });
 
+/**
+ * The sibling of the rule above: a suite can run and still cover nothing. Eight
+ * adversarial reviews found tests that passed with the feature deleted, because
+ * they only ever touched their own fixtures. Importing from `src/` or
+ * `electron/` is the cheapest proof a suite is wired to the code it names — it
+ * does not prove the test is good, only that removing the product breaks it.
+ *
+ * Five suites read the tree as text on purpose and import nothing: they assert
+ * about the repository itself, not about a function in it. They are named here
+ * so a sixth is a decision somebody makes, not a suite that quietly slipped
+ * through.
+ */
+const READS_THE_TREE_AS_TEXT = [
+  "test/dead-ui.test.ts",
+  "test/detect-release.test.ts",
+  "test/eval-kit.test.ts",
+  "test/repo-shape.test.ts",
+  "test/third-party-notices.test.ts",
+];
+
+/** A string literal that resolves into the product: `"../src/…"` or `"../electron/…"`. */
+const IMPORTS_THE_PRODUCT = /["'](\.\.\/(?:src|electron)\/[^"']+)["']/;
+
+test("every suite imports the code it tests", () => {
+  const suites = readdirSync(path.join(ROOT, "test"))
+    .filter((name) => name.endsWith(".test.ts"))
+    .map((name) => `test/${name}`)
+    .sort();
+
+  const stale = READS_THE_TREE_AS_TEXT.filter((file) => !suites.includes(file));
+  assert.deepEqual(stale, [], `allowed to import nothing but no longer on disk: ${stale.join(", ")}`);
+
+  const adrift = suites.filter(
+    (file) =>
+      !READS_THE_TREE_AS_TEXT.includes(file) &&
+      !IMPORTS_THE_PRODUCT.test(readFileSync(path.join(ROOT, file), "utf8")),
+  );
+  assert.deepEqual(
+    adrift,
+    [],
+    `these suites import nothing from src/ or electron/, so they pass with the feature deleted:\n  ${adrift.join("\n  ")}\nEither test the code, or add the file to READS_THE_TREE_AS_TEXT and say why.`,
+  );
+});
+
 test("the public tree does not ship operator product law", () => {
   assert.match(readFileSync(path.join(ROOT, "AGENTS.md"), "utf8"), /This repository is public/);
   assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /does not live in this public repository/);

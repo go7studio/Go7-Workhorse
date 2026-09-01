@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { spawn } from "node:child_process";
 import { spawnCwd } from "../electron/spawn-cwd";
 import { primaryFolder } from "../src/lib/project";
+import { volatileFolderPath } from "../src/lib/store";
 import type { Project } from "../src/lib/types";
 
 const project = (...paths: string[]): Project =>
@@ -103,4 +104,68 @@ test("Node really does blame the command for a missing directory", async () => {
   });
   assert.match(code, /^ENOENT/);
   assert.match(code, /spawn .*node/i, "the message names the binary, never the directory");
+});
+
+/**
+ * The second half of the same failure. A linked folder can be gone because it
+ * moved — or because the operating system took it. `/private/tmp` is swept by a
+ * daily launchd job on this platform (`com.apple.tmp_cleaner`, midnight) and
+ * `/var/folders` is per-boot scratch, so a project pointed at either is a
+ * project on a timer nobody set.
+ */
+test("a folder the system empties is recognised, and an ordinary one is not", () => {
+  for (const volatile of [
+    "/tmp",
+    "/tmp/scratch",
+    "/private/tmp",
+    "/private/tmp/build-42",
+    "/var/folders/kf/abc123/T/render",
+    "/private/var/folders/kf/abc123/T",
+    "/private/tmp/",
+  ]) {
+    assert.equal(volatileFolderPath(volatile), true, `${volatile} is cleared by the system`);
+  }
+  for (const durable of [
+    "/nowhere/workspace/repos/game",
+    "/Volumes/work/tmp-notes",
+    "/nowhere/tmpfiles",
+    "/private/tmpfoo",
+    "/var/foldersomething",
+    "",
+    "   ",
+  ]) {
+    assert.equal(volatileFolderPath(durable), false, `${durable} is an ordinary folder`);
+  }
+});
+
+test("linking a temporary folder warns instead of refusing", () => {
+  // A project is a name and its folders are optional links, so someone pointing
+  // a throwaway project at scratch space means it. They are told, not stopped.
+  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
+  const linkFolder = store.slice(store.indexOf("const linkFolder = useCallback"));
+  const body = linkFolder.slice(0, linkFolder.indexOf("const unlinkFolder"));
+  assert.match(body, /if \(volatileFolderPath\(folderPath\)\)/, "the warning has to be at the moment of choosing");
+  assert.match(body, /notifyDesktop/, "and it has to reach the person, not the console");
+  assert.doesNotMatch(body, /volatileFolderPath\(folderPath\)\)\s*return/, "linking must never be refused");
+  assert.match(body, /folders: \[\.\.\.project\.folders, folderFromPath\(folderPath/, "the folder is still linked");
+});
+
+test("the missing-folder answer is something React can redraw on", () => {
+  // It was a ref mutated inside a promise. Nothing re-rendered, so Project Home
+  // drew a deleted folder as a live one until something unrelated forced a pass.
+  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
+  assert.match(store, /const \[missingFolderPaths, setMissingFolderPaths\] = useState<ReadonlySet<string>>/);
+  assert.match(store, /missingFolders\.current = next;\s*\n\s*setMissingFolderPaths\(next\);/, "the ref and the state must move together");
+  assert.match(store, /if \(live\) applyMissingFolders\(new Set\(gone\)\)/, "the probe's answer must go through it");
+  // And the memo has to depend on it, or the new value never leaves the provider.
+  const deps = store.slice(store.indexOf("    }),\n    [\n      state,"));
+  assert.match(deps.slice(0, 600), /\n      missingFolderPaths,\n/);
+});
+
+test("Project Home shows a linked folder that is not there", () => {
+  const home = readFileSync(new URL("../src/ui/ProjectHome.tsx", import.meta.url), "utf8");
+  assert.match(home, /const gone = store\.missingFolderPaths\.has\(folder\.path\)/);
+  assert.match(home, /Not on disk\./, "a person cannot fix what they are not shown");
+  assert.match(home, /const temporary = !gone && volatileFolderPath\(folder\.path\)/);
+  assert.match(home, /Temporary folder\./);
 });

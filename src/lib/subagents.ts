@@ -18,6 +18,7 @@ import type {
   ProviderId,
   RoutingDecision,
   Session,
+  SessionEnvironment,
   WorkerFinding,
   WorkerFindingSeverity,
   WorkerHandoff,
@@ -1974,7 +1975,26 @@ export function applyCancelWorker(sessions: Session[], workerId: string, now = D
   };
 }
 
-export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
+/**
+ * What an interrupted worker's chat says, and where its work is.
+ *
+ * "Its brief and its work are kept" was true and useless: it named no place. A
+ * worker in its own worktree has a folder on disk holding everything it wrote,
+ * and the person is the one who has to go and look at it. Quote the path when
+ * the session carries one; say the shape of the answer when it does not.
+ */
+export function interruptedWorkerError(environment?: SessionEnvironment): string {
+  const opening = "Workhorse exited while this worker was running.";
+  if (environment?.kind === "worktree" && environment.path) {
+    return `${opening} Its brief and its work are kept in ${environment.path} — resume it from the chat.`;
+  }
+  if (environment?.kind === "cloud") {
+    return `${opening} Its brief and its work are kept in its cloud environment — resume it from the chat.`;
+  }
+  return `${opening} Its brief and its work are kept in the chat's own folder — resume it from the chat.`;
+}
+
+export function normalizeAgentRun(raw: unknown, environment?: SessionEnvironment): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;
   const statuses: AgentRun["status"][] = ["running", "completed", "failed", "cancelled", "timed-out", "budget-exceeded", "interrupted"];
@@ -2022,7 +2042,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     ...(typeof row.error === "string" && row.error.trim()
       ? { error: row.error.trim() }
       : interrupted
-        ? { error: "Workhorse exited while this worker was running. Its brief and its work are kept — resume it from the chat." }
+        ? { error: interruptedWorkerError(environment) }
         : {}),
     ...(typeof row.planStepId === "string" && row.planStepId.trim() ? { planStepId: row.planStepId.trim() } : {}),
     ...(typeof row.rationale === "string" && row.rationale.trim() ? { rationale: row.rationale.trim() } : {}),

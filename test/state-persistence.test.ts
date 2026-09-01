@@ -48,10 +48,38 @@ test("state reader falls back through backups after corruption", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("hot state saves skip fsync so an 11MB desk does not stall the UI", () => {
+test("hot state saves skip fsync so an 11MB desk does not stall the UI", async () => {
+  // Was a regex over the source. It is now the behaviour: a save that does not
+  // rotate does not flush, measured by counting the flushes. The default still
+  // follows rotation — `fsync` only overrides it when a caller asks, which is
+  // what lets quit make its last save durable without making every save durable.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-hot-fsync-"));
+  const file = path.join(dir, "state.json");
+  try {
+    const realOpen = fs.promises.open;
+    let syncs = 0;
+    (fs.promises as { open: typeof realOpen }).open = (async (...args: Parameters<typeof realOpen>) => {
+      const handle = await realOpen(...args);
+      const realSync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        syncs += 1;
+        await realSync();
+      };
+      return handle;
+    }) as typeof realOpen;
+    try {
+      await writeVersionedStateAsync(file, { sessions: [{ id: "a" }] }, scrub, { rotateBackups: false });
+      assert.equal(syncs, 0, "a hot save must not flush");
+      await writeVersionedStateAsync(file, { sessions: [{ id: "b" }] }, scrub);
+      assert.ok(syncs > 0, "and a rotating save must");
+    } finally {
+      (fs.promises as { open: typeof realOpen }).open = realOpen;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const persist = fs.readFileSync(path.join(root, "electron", "state-persistence.ts"), "utf8");
-  assert.match(persist, /fsync: options\.rotateBackups !== false/);
   const main = fs.readFileSync(path.join(root, "electron", "main.ts"), "utf8");
   assert.match(main, /sweepStaleUserData/);
   assert.match(main, /offloadStateAttachments/);

@@ -71,9 +71,10 @@ import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { sweepStaleUserData } from "./user-data-hygiene";
+import { nullMainLog, openMainLog } from "./main-log";
 import { clearPerfCause, perfTraceEnabled, setPerfCause, startPerfHeartbeat } from "./perf-heartbeat";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readStringMapFile, readVersionedState, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { readComposerDraftFile, readStringMapFile, readVersionedState, syncFileInPlace, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -201,17 +202,22 @@ function pinUserData() {
 }
 pinUserData();
 if (perfTraceEnabled()) startPerfHeartbeat(app.getPath("userData"));
+
+const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
+
+/**
+ * The desk died during an audit and left nothing to read: no crash report, no
+ * main-process log, no way to tell a wedged save from a killed process. This is
+ * that log. The helper process writes nothing — one writer keeps rotation from
+ * racing itself.
+ */
+const mainLog = isMcpHelper ? nullMainLog() : openMainLog(app.getPath("userData"));
+mainLog.record("startup", `version=${APP_VERSION} platform=${process.platform} pid=${process.pid}`);
+
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
-  const swept = sweepStaleUserData(app.getPath("userData"), {
-    appVersion: APP_VERSION,
-    tmpDir: os.tmpdir(),
-  });
-  if (swept.removed.length) {
-    console.info(`Cleared leftover desk cache (${swept.removed.join(", ")}).`);
-  }
 } catch {
-  /* Chromium cache may already be open */
+  /* Chromium may already have taken its switches */
 }
 
 // Custom schemes must be registered before the ready event.
@@ -222,9 +228,9 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
 const isPrimaryInstance = isMcpHelper || app.requestSingleInstanceLock();
 if (!isPrimaryInstance) {
+  mainLog.record("shutdown", "reason=second-instance");
   app.quit();
 } else if (!isMcpHelper) {
   app.on("second-instance", () => {
@@ -234,6 +240,27 @@ if (!isPrimaryInstance) {
     win.show();
     win.focus();
   });
+}
+
+/*
+ * Hygiene deletes files out of the same folder a running desk saves into, so it
+ * may only run once this process owns the lock. Sweeping first meant a second
+ * launch could reach in and delete the first desk's in-flight replacement file
+ * — the one standing in for the live state while a save was mid-rename.
+ */
+if (isPrimaryInstance && !isMcpHelper) {
+  try {
+    const swept = sweepStaleUserData(app.getPath("userData"), {
+      appVersion: APP_VERSION,
+      tmpDir: os.tmpdir(),
+    });
+    if (swept.removed.length) {
+      console.info(`Cleared leftover desk cache (${swept.removed.join(", ")}).`);
+      mainLog.record("hygiene", `removed=${swept.removed.length} bytes=${swept.bytes}`);
+    }
+  } catch {
+    /* Chromium cache may already be open */
+  }
 }
 
 function appIconPath() {
@@ -343,7 +370,31 @@ function pickLinkedFolder(title: string, buttonLabel: string, extra: Array<"crea
     });
 }
 
+/**
+ * What the read found, not just what it returned.
+ *
+ * `readVersionedState` already knows whether the live file answered, whether a
+ * backup stood in for it, or whether nothing parsed at all — and the last case
+ * is the dangerous one, because it reports `recovered: false` while handing
+ * back an empty desk. Dropping that on the way out left the load handler unable
+ * to tell an empty desk from a desk it failed to read, and it pruned worktrees
+ * on the strength of the difference.
+ */
+type StateLoad = {
+  state: Persistable;
+  /** The file that actually parsed, or null when every candidate failed. */
+  source: string | null;
+  /** True when a backup stood in for the live file. */
+  recovered: boolean;
+  /** True only when the live state file itself parsed. */
+  primary: boolean;
+};
+
 function readState(): Persistable {
+  return readStateWithSource().state;
+}
+
+function readStateWithSource(): StateLoad {
   setPerfCause("state:read");
   try {
     return readStateInner();
@@ -352,9 +403,16 @@ function readState(): Persistable {
   }
 }
 
-function readStateInner(): Persistable {
+function readStateInner(): StateLoad {
   const result = readVersionedState(statePath());
   const { state } = result;
+  const origin = { source: result.source, recovered: result.recovered, primary: result.source === statePath() };
+  if (!origin.primary) {
+    mainLog.record(
+      "state:read",
+      origin.source ? `recovered from ${path.basename(origin.source)}` : "no candidate parsed; empty desk in memory",
+    );
+  }
   let migrated: Persistable = state;
   try {
     const protectedState = offloadStateAttachments(
@@ -362,8 +420,20 @@ function readStateInner(): Persistable {
       app.getPath("userData"),
     );
     if (result.recovered || JSON.stringify(protectedState) !== JSON.stringify(state)) {
-      writeVersionedState(statePath(), protectedState, (snapshot) =>
-        offloadStateAttachments(protectStateCredentials(snapshot, credentialStore()), app.getPath("userData")),
+      /*
+       * A recovery write must not rotate. Rotation copies the live file onto
+       * `.bak` — and on a recovery the live file is the torn one we just
+       * refused to read, so the good snapshot is demoted a rung. Two bad
+       * launches in a row walked it off the end of `.bak.2` and the desk was
+       * gone. Keep the backups exactly as they are and flush the repair,
+       * because a repair that does not survive the next power cut is not one.
+       */
+      writeVersionedState(
+        statePath(),
+        protectedState,
+        (snapshot) =>
+          offloadStateAttachments(protectStateCredentials(snapshot, credentialStore()), app.getPath("userData")),
+        result.recovered ? { rotateBackups: false, fsync: true } : {},
       );
     }
     // Hand back the offloaded copy, not the one we read. Returning the original
@@ -384,9 +454,9 @@ function readStateInner(): Persistable {
   claimLinkedFolders(ready);
   const drafts = readComposerDraftFile(statePath()) as Record<string, ComposerDraftSnap>;
   if (Array.isArray(ready.sessions) && Object.keys(drafts).length > 0) {
-    return { ...ready, sessions: applyComposerDrafts(ready.sessions, drafts) };
+    return { ...origin, state: { ...ready, sessions: applyComposerDrafts(ready.sessions, drafts) } };
   }
-  return ready;
+  return { ...origin, state: ready };
 }
 
 function readMediaSrc(href: string, cwd?: string, vendorSessionId?: string): string | null {
@@ -412,6 +482,34 @@ let lastStateBackupAt = 0;
  * without holding the IPC handler.
  */
 let stateSaveChain: Promise<void> = Promise.resolve();
+
+/*
+ * Hot saves skip fsync on purpose — flushing a 46MB file sixty times a minute
+ * would stall the window, and the whole reason the save moved off the main
+ * thread was to stop doing that. The cost of skipping is a window, up to the
+ * OS flush interval, where the rename is durable and the bytes are not.
+ *
+ * Three things close that window without paying for it every save:
+ *
+ *  - the rotate save, at most once a minute, still flushes;
+ *  - growth flushes. A desk that has put on `STATE_FSYNC_GROWTH_BYTES` since
+ *    the last flush is holding that much new work in the window, so it pays
+ *    once. A desk that is merely being rewritten at the same size pays nothing;
+ *  - quit flushes, because there is no next save to catch it.
+ *
+ * The rotation itself now flushes the live file before copying it to `.bak`,
+ * so an unflushed write can never become the backup either.
+ */
+const STATE_FSYNC_GROWTH_BYTES = 4 * 1024 * 1024;
+let stateBytesAtLastFsync = 0;
+
+function stateFileSize(file: string): number {
+  try {
+    return fs.statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
 
 async function writeState(state: Persistable) {
   try {
@@ -445,12 +543,15 @@ async function writeState(state: Persistable) {
     }
     const now = Date.now();
     const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
+    const sizeBefore = stateFileSize(file);
+    const grew = sizeBefore - stateBytesAtLastFsync >= STATE_FSYNC_GROWTH_BYTES;
+    const fsync = rotateBackups || grew;
     const pending = writeVersionedStateAsync(
       file,
       state,
       (snapshot) =>
         offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
-      { rotateBackups },
+      { rotateBackups, fsync },
     );
     queueMicrotask(clearPerfCause);
     await pending;
@@ -459,6 +560,10 @@ async function writeState(state: Persistable) {
     // the instrument grows a blind spot exactly where it used to over-blame.
     setPerfCause("state:save");
     if (rotateBackups) lastStateBackupAt = now;
+    if (fsync) {
+      stateBytesAtLastFsync = stateFileSize(file);
+      if (grew) mainLog.record("state:save", `flushed on growth bytes=${stateBytesAtLastFsync}`);
+    }
     const io = folderAccessIo();
     for (const [folder, bookmark] of Object.entries(bookmarksFromProjects(state))) {
       rememberFolderBookmark(folder, bookmark, io);
@@ -1112,14 +1217,56 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("state:load", () => {
-    const loaded = readState();
+    const load = readStateWithSource();
+    const loaded = load.state;
     const sessions = Array.isArray(loaded.sessions) ? loaded.sessions : [];
-    const pruned = pruneOrphanWorktrees(
-      path.join(app.getPath("userData"), "worktrees"),
-      sessions.map((session) => (session && typeof session === "object" && typeof (session as { id?: unknown }).id === "string" ? (session as { id: string }).id : "")).filter(Boolean),
-    );
-    for (const held of pruned.kept) {
-      console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
+    const liveSessionIds = sessions
+      .map((session) =>
+        session && typeof session === "object" && typeof (session as { id?: unknown }).id === "string"
+          ? (session as { id: string }).id
+          : "",
+      )
+      .filter(Boolean);
+
+    /*
+     * The prune deletes folders on the strength of this list, so the list has to
+     * be the truth and not a guess. Two ways it was not:
+     *
+     * A backup answered instead of the live file, so every chat started since
+     * that snapshot is missing from the list and its worktree reads as an
+     * orphan. And when nothing parsed at all, `readVersionedState` hands back an
+     * empty desk while reporting `recovered: false` — every worktree on disk is
+     * then an orphan, and a sweep that trusted it would take all of them.
+     *
+     * The save path has refused an empty overwrite for a while. The prune,
+     * which destroys more than a save ever could, had no such guard. It runs
+     * only when the live file itself parsed and named at least one chat.
+     */
+    const decision = worktreePruneDecision(load, statePath(), liveSessionIds);
+    if (!decision.prune) {
+      console.info(`Workhorse skipped the worktree sweep: ${decision.reason}.`);
+      mainLog.record("prune:skip", decision.reason);
+    } else {
+      const pruned = pruneOrphanWorktrees(path.join(app.getPath("userData"), "worktrees"), liveSessionIds);
+      mainLog.record("prune:run", `live=${liveSessionIds.length} removed=${pruned.removed.length} kept=${pruned.kept.length}`);
+      for (const held of pruned.kept) {
+        console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
+        mainLog.record("prune:kept", `${held.name}: ${held.reason}`);
+      }
+    }
+
+    /*
+     * A silent recovery is how someone loses a day without knowing it: the desk
+     * opens on last week's snapshot, they carry on, and the newer chats are
+     * simply not there. Say it out loud on the surface the desk already has.
+     */
+    if (!load.primary) {
+      showDesktopNotice({
+        title: load.source ? "Workhorse opened an earlier save" : "Workhorse could not read your saved desk",
+        body: load.source
+          ? "The main save file could not be read, so a backup was used. Anything added after that backup is not here — check before you carry on."
+          : "No save file could be read, so this desk started empty. Your chats may still be on disk — quit without saving over them and ask for help.",
+      });
     }
     return loaded;
   });
@@ -1467,13 +1614,59 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
+/**
+ * How long quit will wait for the save chain. Long enough for a 46MB write on a
+ * slow disk, short enough that a wedged one cannot hold the app open.
+ */
+const QUIT_DRAIN_MS = 5_000;
+let quitDrained = false;
+
+/**
+ * `state:save` returns as soon as the write is *queued*, not written. Quitting
+ * without waiting threw away every save still on the chain — accepted by the
+ * desk, acknowledged to the person, never on disk. Wait for it, then flush the
+ * file, because the last save before a quit is a hot save and hot saves skip
+ * the flush by design: nothing comes after it to catch the bytes.
+ *
+ * Bounded on purpose. A save that will not finish must not become a desk that
+ * will not close.
+ */
+async function drainStateForQuit(): Promise<void> {
+  const started = Date.now();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      stateSaveChain.catch(() => {}),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, QUIT_DRAIN_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  const drained = Date.now() - started;
+  try {
+    await syncFileInPlace(statePath());
+  } catch {
+    /* nothing left to do about it at quit */
+  }
+  mainLog.record("shutdown", `reason=quit drained_ms=${drained} timed_out=${drained >= QUIT_DRAIN_MS}`);
+}
+
+app.on("before-quit", (event) => {
+  // The drain calls `app.quit()` again, so this handler runs twice. Everything
+  // below it disposes something once; the second pass has to fall straight
+  // through, and so does a second Cmd-Q while the first drain is still going.
+  if (quitDrained) return;
+  quitDrained = true;
   learningCloser?.pause();
   learningCloser?.close();
   grokHost.disposeAll();
   codexHost.disposeAll();
   terminalHost.disposeAll();
   jobEngine?.dispose();
+  event.preventDefault();
+  void drainStateForQuit().finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

@@ -11,7 +11,7 @@ import {
   startEditStatsHarvest,
   type ProjectEdit,
 } from "../lib/project-edits";
-import { useActiveProject, useStore } from "../lib/store";
+import { useActiveProject, useStore, volatileFolderPath } from "../lib/store";
 import { EditedList } from "./EditedList";
 import { FileViewer } from "./FileViewer";
 import { SplitHandle } from "./SplitHandle";
@@ -184,17 +184,33 @@ export function ProjectHome() {
             <p className="row-meta">No folders.</p>
           ) : (
             <ul className="chip-list">
-              {project.folders.map((folder) => (
-                <li key={folder.id} className="chip">
-                  <span>
-                    <strong>{folder.label}</strong>
-                    <span className="path">{folder.path}</span>
-                  </span>
-                  <button className="tiny" type="button" onClick={() => unlinkFolder(folder.id)}>
-                    Remove
-                  </button>
-                </li>
-              ))}
+              {project.folders.map((folder) => {
+                /*
+                 * The desk already worked out which linked folders are gone — it
+                 * just never said so here, and every screen that picks a folder
+                 * for an agent quietly skipped the dead ones while this one drew
+                 * them as if they were fine. A person cannot fix what they are
+                 * not shown.
+                 */
+                const gone = store.missingFolderPaths.has(folder.path);
+                const temporary = !gone && volatileFolderPath(folder.path);
+                return (
+                  <li key={folder.id} className="chip">
+                    <span>
+                      <strong>{folder.label}</strong>
+                      <span className="path">{folder.path}</span>
+                      {gone ? (
+                        <span className="row-meta">Not on disk. Agents skip it — relink it or remove it.</span>
+                      ) : temporary ? (
+                        <span className="row-meta">Temporary folder. The system clears it, so work here can vanish.</span>
+                      ) : null}
+                    </span>
+                    <button className="tiny" type="button" onClick={() => unlinkFolder(folder.id)}>
+                      Remove
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

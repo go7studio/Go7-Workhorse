@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,7 +117,10 @@ test("DeepSeek thinking tool loops replay reasoning and meter cache provenance",
     text: "inspect",
     model: "deepseek-v4-pro",
     effort: "high",
-    cwd: path.resolve("fixture-workspace"),
+    // A real folder: this host now checks its cwd the way the ACP hosts do, so
+    // a chat pointed at a folder that is not there fails on the folder. This
+    // test is about the thinking replay, not about a missing project.
+    cwd: os.tmpdir(),
     mode: "always-approve",
     sandbox: "off",
     history: [],
@@ -599,7 +602,9 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
       text: "Please do a deep scrape of this project with subagents",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\Godot\\Projects\\demo-game",
+      // The Godot path stays in the spawn result above, where it is data. The
+      // chat's own cwd has to exist now, because the host checks it.
+      cwd: os.tmpdir(),
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -2486,5 +2491,46 @@ test("the sandbox contains the real path, not the spelling of it", () => {
     () => resolveWorkspacePath(path.join(path.sep, "Work", "repo", "file.ts"), path.join(path.sep, "work", "repo"), [], "workspace", { ...cased, platform: "linux" }),
     /outside the workspace/,
     "case folding must not leak onto a case-sensitive platform",
+  );
+});
+
+test("a custom chat whose folder has moved names the folder, not the tool", async () => {
+  /*
+   * Every vendor host runs its work through spawnCwd so a folder that is gone
+   * says which one. This host passed the raw path, so the same missing folder
+   * came back as an ENOENT naming the command — whoever read it went hunting
+   * for a CLI that was sitting right there.
+   */
+  const gone = path.join(os.tmpdir(), "workhorse-folder-that-is-not-there");
+  assert.equal(existsSync(gone), false, "the fixture folder must really be absent");
+  const host = new CustomSessionHost(
+    async () => ({
+      text: "listing",
+      toolUses: [{ id: "t-1", name: "read_file", input: { path: "README.md" } }],
+    }),
+    { executeTool: async (use) => ({ id: use.id, name: use.name, content: "README.md" }) },
+  );
+  await assert.rejects(
+    () =>
+      host.prompt(
+        {
+          sessionId: "s-missing-folder",
+          text: "inspect",
+          model: "MiniMax-M3",
+          effort: "medium",
+          cwd: gone,
+          mode: "always-approve",
+          sandbox: "off",
+          history: [],
+          config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
+        },
+        () => undefined,
+      ),
+    (error: Error) => {
+      assert.match(error.message, /The project folder is missing/);
+      assert.ok(error.message.includes(gone), "the message names the folder that is gone");
+      assert.match(error.message, /relink it in the project/);
+      return true;
+    },
   );
 });

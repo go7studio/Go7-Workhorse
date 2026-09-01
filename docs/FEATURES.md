@@ -268,10 +268,6 @@ transcript rather than as a path.
   time on their own results, with no approval prompt. A caller cannot claim the
   build phase; build is honoured only when the desk itself holds that mission at
   build.
-- **Campaigns** — one worker and a two-way split start immediately. A wider
-  opening wave becomes a Campaign: passes advance one phase at a time on their
-  own results, with no approval prompt. A caller cannot claim the build phase;
-  build is honoured only when the desk itself holds that mission at build.
 - **Worker path scope** — assigned repo-relative paths appear with the worker.
   Workhorse checks supported edit events and reports Git-visible changes outside
   that scope when the run ends. This is review evidence, not containment:

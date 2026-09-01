@@ -4,6 +4,7 @@ import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
+import { sessionExecutionCwd } from "./session-environment";
 import type {
   AgentRun,
   AgentRunEvent,
@@ -156,8 +157,9 @@ export function deskRoleOf(
   session?: Pick<Session, "hidden" | "parentId" | "agentRun"> | { hidden?: boolean; parentId?: string | null; agentRun?: unknown } | null,
 ): DeskRole {
   if (!session) return "orchestrator";
-  if (session.agentRun && typeof session.agentRun === "object" && (session.agentRun as { role?: string }).role === "auditor") {
-    return "auditor";
+  if (session.agentRun && typeof session.agentRun === "object") {
+    const role = (session.agentRun as { role?: string }).role;
+    if (role === "auditor" || role === "helper") return role;
   }
   return isWorkerSession(session) ? "worker" : "orchestrator";
 }
@@ -947,7 +949,7 @@ export function workerOmittedToolError(name: string): string {
 }
 
 export function toolsForDeskRole<T extends { name: string }>(tools: T[], role: DeskRole = "orchestrator"): T[] {
-  if (role === "auditor") {
+  if (role === "auditor" || role === "helper") {
     return tools.filter((tool) => (AUDITOR_DESK_TOOLS as readonly string[]).includes(tool.name));
   }
   if (role !== "worker") return tools;
@@ -1195,6 +1197,7 @@ export type SpawnAdmission = { ok: true; cwd: string } | { ok: false; error: str
 export function admitSpawn(input: SpawnAdmissionInput): SpawnAdmission {
   const parentRole = deskRoleOf(input.parent);
   if (parentRole === "auditor") return { ok: false, error: "Auditors cannot spawn." };
+  if (parentRole === "helper") return { ok: false, error: WORKER_SPAWN_ERROR };
   if (parentRole === "worker" && !input.allowNested) return { ok: false, error: WORKER_SPAWN_ERROR };
   if (isSpawnOnlyPrompt(input.prompt)) return { ok: false, error: SPAWN_ONLY_PROMPT_ERROR };
   const cwd = (input.folder ?? "").trim() || (input.projectFolder ?? "").trim();
@@ -1965,8 +1968,38 @@ export function resolveWorkerIsolation(input: {
   return "worktree";
 }
 
+export function nestedWorkerPolicy(input: {
+  nested: boolean;
+  parentEnvironment?: Session["environment"];
+  projectFolder: string;
+}): {
+  projectFolder: string;
+  isolation?: "shared";
+  role?: "helper";
+  readOnly: boolean;
+  mayReuse: boolean;
+  mayOwnPaths: boolean;
+} {
+  if (!input.nested) {
+    return {
+      projectFolder: input.projectFolder,
+      readOnly: false,
+      mayReuse: true,
+      mayOwnPaths: true,
+    };
+  }
+  return {
+    projectFolder: sessionExecutionCwd(input.parentEnvironment, input.projectFolder),
+    isolation: "shared",
+    role: "helper",
+    readOnly: true,
+    mayReuse: false,
+    mayOwnPaths: false,
+  };
+}
+
 export function workerMayWrite(role?: DeskRole): boolean {
-  return role !== "auditor";
+  return role !== "auditor" && role !== "helper";
 }
 
 export type CancelWorkerResult = {
@@ -2037,7 +2070,7 @@ export function normalizeAgentRun(raw: unknown): AgentRun | undefined {
     startedAt: row.startedAt,
     isolation: resolveWorkerIsolation({ isolation: row.isolation }),
     ...(row.seed === "fresh" ? { seed: "fresh" as const } : {}),
-    ...(row.role === "auditor" ? { role: "auditor" as const } : {}),
+    ...(row.role === "auditor" || row.role === "helper" ? { role: row.role } : {}),
     ...(typeof row.finishedAt === "number" ? { finishedAt: row.finishedAt } : interrupted ? { finishedAt: Date.now() } : {}),
     ...(typeof row.timeoutMs === "number" && row.timeoutMs > 0 ? { timeoutMs: row.timeoutMs } : {}),
     ...(typeof row.tokenBudget === "number" && row.tokenBudget > 0 ? { tokenBudget: Math.floor(row.tokenBudget) } : {}),
@@ -2233,6 +2266,23 @@ export function assertSharedWrite(input: {
     return { ok: false, error: `File changed since claim: ${input.path}. Re-read before writing.` };
   }
   return { ok: true };
+}
+
+export function refreshSharedFileFingerprint(input: {
+  leases: FileLease[];
+  sessionId: string;
+  path: string;
+  root?: string;
+  fingerprint: string;
+}): FileLease[] {
+  const key = leasePathForWrite(input.path, input.root).toLowerCase();
+  const index = input.leases.findIndex(
+    (lease) => lease.sessionId === input.sessionId && normalizeLeasePath(lease.path).toLowerCase() === key,
+  );
+  if (index < 0 || input.leases[index]?.fingerprint === input.fingerprint) return input.leases;
+  return input.leases.map((lease, leaseIndex) =>
+    leaseIndex === index ? { ...lease, fingerprint: input.fingerprint } : lease,
+  );
 }
 
 export function assertAgentPathWrite(input: {

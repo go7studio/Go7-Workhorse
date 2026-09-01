@@ -4,6 +4,7 @@ import {
   CURSOR_SESSION_RULES,
   CUSTOM_HTTP_SESSION_RULES,
   CUSTOM_HTTP_WORKER_RULES,
+  HELPER_SESSION_RULES,
   WORKHORSE_SESSION_RULES,
   WORKER_SESSION_RULES,
   type DeskRole,
@@ -161,6 +162,8 @@ export function buildSessionPreface(input: PrefaceInput): string {
   const worker = input.role === "worker";
   const rules = input.role === "auditor"
     ? AUDITOR_SESSION_RULES
+    : input.role === "helper"
+    ? HELPER_SESSION_RULES
     : worker
     ? input.surface === "http"
       ? CUSTOM_HTTP_WORKER_RULES
@@ -189,7 +192,7 @@ export function composeVendorPrompt(
   limits?: { mode?: PermissionMode; sandbox?: SandboxProfile; role?: DeskRole; crewMode?: CrewMode | CrewMode[] },
   visibleText?: string,
 ): string {
-  const hinted = withWriteLimitHint(
+  const roleHinted =
     withCrewStatusHint(
       withLooseDeleteHint(
         withCrewModeHint(
@@ -200,10 +203,10 @@ export function composeVendorPrompt(
         limits?.role,
       ),
       limits?.role,
-    ),
-    limits?.mode,
-    limits?.sandbox,
-  );
+    );
+  const hinted = limits?.role === "auditor" || limits?.role === "helper"
+    ? roleHinted
+    : withWriteLimitHint(roleHinted, limits?.mode, limits?.sandbox);
   const live = limits
     ? buildPolicyContext(limits)
     : capabilityFromPreface(preface);

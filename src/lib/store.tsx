@@ -215,6 +215,7 @@ import {
   vendorTextForSpawn,
   isHiddenSession,
   nestedSpawnError,
+  nestedWorkerPolicy,
   normalizeMissionIteration,
   normalizeFileLeases,
   normalizePathAllowlist,
@@ -228,6 +229,8 @@ import {
   missionForDeskSpawn,
   findReusableWorker,
   fileContentsFingerprint,
+  leasePathForWrite,
+  refreshSharedFileFingerprint,
   resolveNamedWorker,
   parseWorkerHandoff,
   workerStartMessages,
@@ -949,6 +952,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pathLeasesRef = useRef<FileLease[]>([]);
   const ordinaryOpeningReservations = useRef(new Map<string, OpeningWorkerReservation[]>());
   const pathPermissionPreflight = useRef(new Set<string>());
+  const approvedPathWrites = useRef(new Map<string, Array<{ path: string; root: string }>>());
+  const pathFingerprintRefreshes = useRef(new Map<string, Promise<void>>());
   const forkFromRef = useRef<(messageId: string, sessionId?: string) => void>(() => undefined);
   const stateRef = useRef<AppState>(EMPTY);
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
@@ -4986,13 +4991,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   dayMarks: latest.watchDayMarks,
                 })
               : [];
-            const spawnRole =
-              payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined;
+            const projectFolder = primaryFolder(boundProject, folderExists)?.path ?? "";
+            const nestedPolicy = nestedWorkerPolicy({
+              nested: isNested,
+              parentEnvironment: caller.environment,
+              projectFolder,
+            });
+            const spawnRole = nestedPolicy.role ??
+              (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
+            const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
             const routeRequest = {
               prompt: payload.message,
               attachments: payload.attachments,
               tier: routeTier ?? (isNested ? "quick" as const : undefined),
-              role: spawnRole,
+              role: routingRole,
               outcomes: outcomesFromLearningEvents(learningOutcomeEvents),
               exclude: effectiveExclusions,
             };
@@ -5017,7 +5029,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               routeDecision?.taskTier ??
               routeTier ??
               inferRoutingTier(payload.message, payload.attachments, {
-                role: spawnRole,
+                role: routingRole,
               });
             const requestedEffort = parseEffort(String(payload.effort ?? ""));
             const spawnTimeoutSeconds = isNested
@@ -5026,10 +5038,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnTokenBudget = isNested
               ? Math.min(5_000, Math.max(1, payload.tokenBudget ?? 5_000))
               : payload.tokenBudget;
-            const spawnIsolation = isNested ? "shared" : payload.isolation ?? "worktree";
+            const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
-              projectFolder: primaryFolder(boundProject, folderExists)?.path ?? "",
+              projectFolder: nestedPolicy.projectFolder,
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
@@ -5098,7 +5110,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             // Now it takes a decision: name the worker, or ask for inherit. A
             // bare spawn gets somebody with a clear head.
             const wantsIdleReuse = !askedWorkerName && payload.seed === "inherit";
-            const reusedWorker = namedResolution?.worker
+            const reusedWorker = nestedPolicy.mayReuse ? namedResolution?.worker
               ?? (wantsIdleReuse
                 ? findReusableWorker(
                     {
@@ -5119,7 +5131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       waveChildIds: parent.lineup?.rows.map((row) => row.childId),
                     },
                   )
-                : null);
+                : null) : null;
             const spec = {
               ...resolvedSpec,
               effort: spawnEffortFor({
@@ -5215,7 +5227,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const assignedCapabilities = Array.isArray(payload.capabilities) ? payload.capabilities.filter(Boolean) : [];
             const assignedTools = Array.isArray(payload.tools) ? payload.tools.filter(Boolean) : [];
             const assignedConstraints = Array.isArray(payload.constraints) ? payload.constraints.filter(Boolean) : [];
-            const assignedPaths = normalizePathAllowlist((payload as unknown as { paths?: unknown }).paths);
+            const assignedPaths = nestedPolicy.mayOwnPaths
+              ? normalizePathAllowlist((payload as unknown as { paths?: unknown }).paths)
+              : [];
             if (planStepId) {
               if (!assignedPlan) {
                 await replyAsk({ error: "this chat has no executable plan" });
@@ -5413,6 +5427,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...workerAccess({
                 inherited: inheritedAccess,
                 owned: assignedPaths.length > 0,
+                readOnly: nestedPolicy.readOnly,
                 prior: priorWorker,
               }),
               securityPolicy: parent.securityPolicy,
@@ -6278,8 +6293,62 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ),
         }));
         const status = (event.status ?? "").toLowerCase().replaceAll("_", " ");
+        if (toolIsFinished(event.status) && status !== "completed" && status !== "complete" && isWriteToolTitle(event.title)) {
+          const pending = approvedPathWrites.current.get(event.sessionId) ?? [];
+          const reportedPath = writePathFromToolEvent(event.title, event.detail, event.toolCallId);
+          const pendingIndex = reportedPath
+            ? pending.findIndex((item) =>
+                leasePathForWrite(item.path, item.root).toLowerCase() ===
+                leasePathForWrite(reportedPath, item.root).toLowerCase())
+            : pending.length === 1 ? 0 : -1;
+          if (pendingIndex >= 0) {
+            const remaining = pending.filter((_, index) => index !== pendingIndex);
+            if (remaining.length > 0) approvedPathWrites.current.set(event.sessionId, remaining);
+            else approvedPathWrites.current.delete(event.sessionId);
+          }
+        }
         if ((status === "completed" || status === "complete") && toolIsFinished(event.status)) {
           snapshotWriteInstance(stateRef.current, event.sessionId, event.title, event.detail, event.toolCallId);
+          const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
+          const pending = approvedPathWrites.current.get(event.sessionId) ?? [];
+          if (owner && pending.length > 0 && isWriteToolTitle(event.title)) {
+            const reportedPath = writePathFromToolEvent(event.title, event.detail, event.toolCallId);
+            const pendingIndex = reportedPath
+              ? pending.findIndex((item) =>
+                  leasePathForWrite(item.path, item.root).toLowerCase() ===
+                  leasePathForWrite(reportedPath, item.root).toLowerCase())
+              : pending.length === 1 ? 0 : -1;
+            if (pendingIndex >= 0) {
+              const approved = pending[pendingIndex]!;
+              const remaining = pending.filter((_, index) => index !== pendingIndex);
+              if (remaining.length > 0) approvedPathWrites.current.set(event.sessionId, remaining);
+              else approvedPathWrites.current.delete(event.sessionId);
+              if (window.workhorse?.readSourceFile) {
+                const refreshKey = `${event.sessionId}:${leasePathForWrite(approved.path, approved.root).toLowerCase()}`;
+                const priorRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
+                const refresh = priorRefresh.catch(() => undefined).then(async () => {
+                  const source = await window.workhorse!.readSourceFile!(approved.path, approved.root ? [approved.root] : []);
+                  if (!source || source.directory || source.unreadable) return;
+                  const leases = refreshSharedFileFingerprint({
+                    leases: pathLeasesRef.current,
+                    sessionId: event.sessionId,
+                    path: approved.path,
+                    root: approved.root,
+                    fingerprint: fileContentsFingerprint(source.text),
+                  });
+                  if (leases === pathLeasesRef.current) return;
+                  pathLeasesRef.current = leases;
+                  setState((current) => ({ ...current, leases }));
+                }).catch(() => undefined);
+                pathFingerprintRefreshes.current.set(refreshKey, refresh);
+                void refresh.finally(() => {
+                  if (pathFingerprintRefreshes.current.get(refreshKey) === refresh) {
+                    pathFingerprintRefreshes.current.delete(refreshKey);
+                  }
+                });
+              }
+            }
+          }
           if (isParentTakeoverTool(event.title)) {
             setState((current) => {
               const sessions = recordParentTakeover(
@@ -6361,9 +6430,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               owner.environment,
               project ? primaryFolder(project, folderExists)?.path ?? "" : "",
             );
-            void window.workhorse.readSourceFile(writePath, root ? [root] : []).then((source) => {
+            const refreshKey = `${owner.id}:${leasePathForWrite(writePath, root).toLowerCase()}`;
+            const pendingRefresh = pathFingerprintRefreshes.current.get(refreshKey) ?? Promise.resolve();
+            void pendingRefresh.then(() => window.workhorse!.readSourceFile!(writePath, root ? [root] : [])).then((source) => {
               const decision = assertAgentPathWrite({
-                leases: stateRef.current.leases ?? [],
+                leases: pathLeasesRef.current,
                 sessionId: owner.id,
                 paths: ownedPaths,
                 path: writePath,
@@ -6375,6 +6446,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 deny(decision.error);
                 return;
               }
+              const pending = approvedPathWrites.current.get(owner.id) ?? [];
+              approvedPathWrites.current.set(owner.id, [...pending, { path: writePath, root }]);
               pathPermissionPreflight.current.add(event.requestId);
               apply(event);
             }).catch(() => deny(`Path ownership could not verify ${writePath}.`));

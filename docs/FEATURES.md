@@ -266,10 +266,11 @@ transcript rather than as a path.
   opening wave becomes a Campaign: passes advance one phase at a time on their
   own results, with no approval prompt. A caller cannot claim the build phase;
   build is honoured only when the desk itself holds that mission at build.
-- **Path ownership** — assigned repo-relative paths are leased across shared
-  folders and worktrees. Conflicting spawns and stale writes stay blocked until
-  the owner finishes or is explicitly cancelled. Deleting a running owner's
-  chat keeps its lease until that worker stops.
+- **Worker path scope** — assigned repo-relative paths appear with the worker.
+  Workhorse checks supported edit events and reports Git-visible changes outside
+  that scope when the run ends. This is review evidence, not containment:
+  Sandbox controls where the runtime may write, and managed worktrees keep
+  worker changes out of the linked folder.
 - **Plans** — multi-step work that continues after a worker joins. A checklist
   plan you tick yourself still completes on ordinary evidence. When workers run
   the plan, a step finishes when another vendor re-runs the named test at that

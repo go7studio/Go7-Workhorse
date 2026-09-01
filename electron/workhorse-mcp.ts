@@ -13,7 +13,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -37,6 +37,7 @@ import {
   deskRoleOf,
   isSpawnOnlyPrompt,
   nestedSpawnError,
+  nestedWorkerPolicy,
   nextMissionIteration,
   normalizeMissionIteration,
   openingWaveMission,
@@ -523,7 +524,7 @@ const TOOLS = [
         capabilities: { type: "array", items: { type: "string" }, description: "Desired expertise; free-form" },
         tools: { type: "array", items: { type: "string" }, description: "Required tools" },
         constraints: { type: "array", items: { type: "string" }, description: "Assignment boundaries" },
-        paths: { type: "array", items: { type: "string" }, description: "Repo-relative files this worker may change. Separate from attached files." },
+        paths: { type: "array", items: { type: "string" }, description: "Expected repo-relative paths used for scope checks and changed-file reporting. Separate from attached files." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
@@ -1808,6 +1809,7 @@ type SpawnCaller = {
   crewModes?: string[];
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
   agentRun?: { mission?: MissionIteration; paths?: string[] };
+  environment?: SessionEnvironment;
 };
 
 function callerSession(from?: string): SpawnCaller | undefined {
@@ -2008,18 +2010,25 @@ async function spawnAgent(
         phase: "scout" as const,
       }
     : undefined;
+  const projectFolder = callerProjectFolder(caller);
+  const nestedPolicy = nestedWorkerPolicy({
+    nested: isNested,
+    parentEnvironment: caller?.environment,
+    projectFolder,
+  });
   const inheritedInput = {
     ...input,
     missionIteration,
-    paths: input.paths ?? caller?.agentRun?.paths,
+    paths: nestedPolicy.mayOwnPaths ? input.paths ?? caller?.agentRun?.paths : undefined,
   };
   const spawnInput = isNested
     ? {
         ...inheritedInput,
         timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
         tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
-        isolation: "shared" as const,
+        isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
+        role: nestedPolicy.role,
       }
     : {
         ...inheritedInput,
@@ -2037,11 +2046,10 @@ async function spawnAgent(
   }
   const resolvedSkills = requestedSkills.resolved.map((skill) => `${skill.origin}:${skill.name}`);
   const skillFiles = requestedSkills.resolved.map((skill) => skill.skillFile);
-  const projectFolder = callerProjectFolder(caller);
   const admitted = caller
     ? admitSpawn({
         parent: caller,
-        projectFolder,
+        projectFolder: nestedPolicy.projectFolder,
         folder: spawnInput.folder,
         prompt: spawnInput.prompt,
         allowNested: isNested,

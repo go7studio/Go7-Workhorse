@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   PROC_KILL_GRACE_MS,
@@ -15,10 +15,13 @@ import {
   procRecordFile,
   procRegistryDir,
   readProcRecord,
+  descendantPids,
   reapOrphanProcessGroups,
   resetProcRegistry,
+  runInProcessGroup,
   sessionIdFromSpec,
   stopProcessGroup,
+  stopProcessTree,
   stopTrackedProcessGroups,
   trackProcessGroup,
   trackedProcessGroupCount,
@@ -27,8 +30,10 @@ import {
 import { spawnClaudeProcess } from "../electron/claude-host";
 import { spawnCodexProcess } from "../electron/codex-host";
 import { spawnCursorProcess } from "../electron/cursor-host";
+import { CodexAppServerClient } from "../electron/codex-app-server";
 import { GrokSessionHost } from "../electron/grok-host";
 import { spawnGrokProcess } from "../electron/grok-agent";
+import { TerminalHost } from "../electron/terminal-host";
 import { executeCustomTool } from "../electron/custom-tools";
 import { WORKER_LOAD_RULE, sessionRulesFor } from "../src/lib/workhorse-rules";
 import {
@@ -129,6 +134,15 @@ function stubSpec(stub: Stub): Record<string, unknown> {
     },
     sessionParams: { cwd: ROOT, mcpServers: [] },
   };
+}
+
+/** One number about one process. Enough to say which group a job ended up in. */
+function psField(pid: number, field: "pgid" | "ppid"): number {
+  try {
+    return Number(execFileSync("ps", ["-o", `${field}=`, "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 function alive(pid: number): boolean {
@@ -356,6 +370,310 @@ test("Custom: cancelling run_command kills the shell's children too", { skip: !P
   }
 });
 
+/* ------------------- follow-up: every other path a process outlives its owner */
+
+/*
+ * Why the terminal takes a tree and not a group. `detached` gives an
+ * interactive shell a session of its own, and a shell with its own session has
+ * job control — which puts every background job in a NEW group. Making the
+ * terminal a group leader and stopping only that group would have left the
+ * jobs behind, so this pins the shape rather than trusting it.
+ */
+test("descendantPids walks the tree a job-controlled shell scatters", () => {
+  //  shell(10) ── sleeper(11), which job control moved into its own group
+  //             └ child(12) in the shell's group ── grandchild(13)
+  //  desk(1) is not in the tree and must never be touched.
+  const rows = [
+    { pid: 1, ppid: 0, pgid: 1 },
+    { pid: 10, ppid: 1, pgid: 10 },
+    { pid: 11, ppid: 10, pgid: 11 },
+    { pid: 12, ppid: 10, pgid: 10 },
+    { pid: 13, ppid: 12, pgid: 10 },
+    { pid: 20, ppid: 1, pgid: 1 },
+  ];
+  assert.deepEqual([...descendantPids(10, rows)].sort((a, b) => a - b), [10, 11, 12, 13]);
+
+  const groups: number[] = [];
+  const pids: number[] = [];
+  stopProcessTree(10, {
+    platform: "darwin",
+    snapshot: () => rows,
+    kill: (pid, signal) => {
+      if (signal === 0) return;
+      if (pid < 0) groups.push(-pid);
+      else pids.push(pid);
+    },
+    schedule: () => {},
+  });
+  assert.deepEqual(groups.sort((a, b) => a - b), [10, 11], "both of the shell's groups, and only those");
+  assert.deepEqual(pids, [], "nothing needed killing by pid — every job's leader was in the tree");
+  assert.ok(!groups.includes(1), "the desk's own group is never signalled");
+});
+
+test("stopProcessTree takes a stray by pid rather than killing a group it does not own", () => {
+  // A shell that was not detached: its pgid is the desk's, so the desk's group
+  // is off limits and its children have to go one at a time.
+  const rows = [
+    { pid: 1, ppid: 0, pgid: 1 },
+    { pid: 10, ppid: 1, pgid: 1 },
+    { pid: 11, ppid: 10, pgid: 1 },
+  ];
+  const groups: number[] = [];
+  const pids: number[] = [];
+  stopProcessTree(10, {
+    platform: "linux",
+    snapshot: () => rows,
+    kill: (pid, signal) => {
+      if (signal === 0) return;
+      if (pid < 0) groups.push(-pid);
+      else pids.push(pid);
+    },
+    schedule: () => {},
+  });
+  assert.deepEqual(groups, [10], "only the child's own pid is tried as a group");
+  assert.deepEqual(pids.sort((a, b) => a - b), [11], "the descendant in the desk's group goes by pid");
+  assert.ok(!groups.includes(1) && !pids.includes(1), "the desk is never in the blast");
+});
+
+test("Windows lets taskkill walk the tree, which is why it never had this bug", () => {
+  const trees: number[] = [];
+  assert.equal(stopProcessTree(77, { platform: "win32", taskkill: (pid) => trees.push(pid) }), true);
+  assert.deepEqual(trees, [77]);
+});
+
+/*
+ * The desk's own terminal is the shortest route to a runaway: whatever the
+ * person types starts under that shell. Closing the terminal used to kill the
+ * shell and leave all of it running.
+ */
+test("Terminal: stopping the desk terminal stops what the person started in it", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-terminal");
+  const report = path.join(dir, "sleeper.pid");
+  const shell = process.env.SHELL;
+  const host = new TerminalHost();
+  let sleeper = 0;
+  try {
+    // Pin the shell so the test says the same thing on every machine.
+    process.env.SHELL = "/bin/sh";
+    assert.deepEqual(host.start("term-1", dir, () => {}), { ok: true });
+    assert.equal(host.write("term-1", `sleep 5 & echo $! > ${report}`).ok, true);
+    const found = await until(() => fs.existsSync(report) && fs.readFileSync(report, "utf8").trim().length > 0, 5_000);
+    assert.ok(found, "the terminal never reported its background sleeper");
+    sleeper = Number(fs.readFileSync(report, "utf8").trim());
+    assert.ok(sleeper > 0 && alive(sleeper), "the sleeper was not running to begin with");
+    // The heart of it: job control has already moved the job out of the shell's
+    // group, so a stop that signals only that group would miss it here.
+    const shellPid = psField(sleeper, "ppid");
+    assert.ok(shellPid > 0, "could not find the shell that started the sleeper");
+    assert.notEqual(
+      psField(sleeper, "pgid"),
+      psField(shellPid, "pgid"),
+      "job control did not re-group the job — this machine cannot prove the terminal case",
+    );
+    const at = Date.now();
+    host.stop("term-1");
+    const gone = await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000);
+    const waited = Date.now() - at;
+    assert.ok(gone, "closing the terminal left what the person started in it running");
+    assert.ok(waited < PROC_KILL_GRACE_MS + 1_000, `the sleeper outlived the grace by ${waited}ms — it timed out, it was not killed`);
+  } finally {
+    host.disposeAll();
+    trap(sleeper || undefined);
+    if (shell === undefined) delete process.env.SHELL;
+    else process.env.SHELL = shell;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/*
+ * The harness/Link cancel path. It ran through execFile, which forwards a fixed
+ * list of options to spawn and drops `detached`, so Windows took the tree and
+ * POSIX took one pid.
+ */
+test("runInProcessGroup reports what a command did, the way execFile did", { skip: !POSIX, timeout: 20_000 }, async () => {
+  const clean = await runInProcessGroup("/bin/sh", ["-c", "echo out; echo err 1>&2; exit 0"]).done;
+  assert.equal(clean.status, 0);
+  assert.equal(clean.stdout.trim(), "out");
+  assert.equal(clean.stderr.trim(), "err");
+  assert.equal(clean.stopped, false);
+  assert.equal(clean.timedOut, false);
+
+  const failed = await runInProcessGroup("/bin/sh", ["-c", "exit 3"]).done;
+  assert.equal(failed.status, 3, "a non-zero exit is reported as itself");
+
+  // A command that is not there is status 1 with an error, as execFile gave.
+  const missing = await runInProcessGroup(path.join(scratch("proc-missing"), "nope"), []).done;
+  assert.equal(missing.status, 1);
+  assert.ok(missing.error, "a failed spawn must carry its error");
+
+  const capped = await runInProcessGroup("/bin/sh", ["-c", "printf 'aaaaaaaaaa'"], { maxOutputBytes: 4 }).done;
+  assert.equal(capped.stdout, "aaaa", "a run keeps a bounded amount of its own output");
+});
+
+test("a cancelled harness task takes its whole group with it", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-harness");
+  const report = path.join(dir, "sleeper.pid");
+  let sleeper = 0;
+  let child: ChildProcess | undefined;
+  try {
+    const run = runInProcessGroup("/bin/sh", ["-c", `sleep 5 & echo $! > ${report}; wait`], { sessionId: "task-1" });
+    child = run.child;
+    const found = await until(() => fs.existsSync(report) && fs.readFileSync(report, "utf8").trim().length > 0, 5_000);
+    assert.ok(found, "the task never reported its background sleeper");
+    sleeper = Number(fs.readFileSync(report, "utf8").trim());
+    assert.ok(sleeper > 0 && alive(sleeper), "the sleeper was not running to begin with");
+    const at = Date.now();
+    // Exactly what cancelExternalRuntimeProcess does, on both platforms.
+    stopProcessGroup(child);
+    const gone = await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000);
+    const waited = Date.now() - at;
+    assert.ok(gone, "Stop killed the harness CLI and left what it started running");
+    assert.ok(waited < PROC_KILL_GRACE_MS + 1_000, `the sleeper outlived the grace by ${waited}ms — it timed out, it was not killed`);
+    assert.equal((await run.done).stopped, true, "a stopped run must not report itself as finished");
+  } finally {
+    trap(child?.pid);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a harness task that runs past its timeout is stopped as a group", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-timeout");
+  const report = path.join(dir, "sleeper.pid");
+  let sleeper = 0;
+  let child: ChildProcess | undefined;
+  try {
+    const run = runInProcessGroup("/bin/sh", ["-c", `sleep 5 & echo $! > ${report}; wait`], { timeoutMs: 400 });
+    child = run.child;
+    const result = await run.done;
+    assert.equal(result.timedOut, true);
+    assert.equal(result.stopped, true);
+    sleeper = Number(fs.readFileSync(report, "utf8").trim());
+    const gone = await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000);
+    assert.ok(gone, "the timeout stopped the command and left what it started running");
+  } finally {
+    trap(child?.pid);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the harness cancel path is one stop for both platforms", () => {
+  const main = source("electron", "main.ts");
+  assert.match(main, /const \{ child, done \} = runInProcessGroup\(file, args, \{/);
+  const cancel = main.indexOf("function cancelExternalRuntimeProcess");
+  const stop = main.indexOf("stopProcessGroup(child);", cancel);
+  assert.ok(cancel > 0 && stop > cancel, "cancelExternalRuntimeProcess must stop the group");
+  assert.doesNotMatch(
+    main.slice(cancel, cancel + 600),
+    /spawnSync\("taskkill"|child\.kill\(/,
+    "the platform branch is the registry's job now, not this function's",
+  );
+  // execFile can never lead a group, so it must not come back here.
+  assert.doesNotMatch(main, /import \{[^}]*\bexecFile\b/);
+});
+
+/*
+ * The Codex app server runs the same tools the ACP path does, from a child that
+ * was spawned ungrouped and closed by pid.
+ */
+test("Codex app server: closing it stops what it started", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-appserver");
+  const stub = writeStub(dir);
+  let child: ChildProcessWithoutNullStreams | undefined;
+  let asked: Record<string, unknown> | undefined;
+  try {
+    const client = new CodexAppServerClient({
+      command: process.execPath,
+      argsPrefix: [stub.script, stub.report, "--"],
+      requestTimeoutMs: 10_000,
+      spawnProcess: ((command: string, args: string[], options: Record<string, unknown>) => {
+        asked = options;
+        child = spawn(command, args.slice(0, 2), options) as ChildProcessWithoutNullStreams;
+        return child;
+      }) as never,
+    });
+    await client.start();
+    assert.equal(asked?.detached, true, "the app server must be asked for its own group");
+    const pids = await readPids(stub.report);
+    assert.ok(alive(pids.grandchild), "the sleeper was not running to begin with");
+    const at = Date.now();
+    client.close();
+    const gone = await until(() => !alive(pids.grandchild), PROC_KILL_GRACE_MS + 1_000);
+    const waited = Date.now() - at;
+    assert.ok(gone, "closing the app server left what it started running");
+    assert.ok(waited < PROC_KILL_GRACE_MS + 1_000, `the sleeper outlived the grace by ${waited}ms`);
+  } finally {
+    trap(child?.pid);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/*
+ * Quit. Which mechanism actually reaches Claude, Cursor and the custom bots?
+ * The disposer list closes every host that has a disposeAll to register; the
+ * custom host has none — its children are shells no host holds — so the
+ * registry sweep is what covers those. This proves the sweep, on both shapes.
+ */
+test("the quit sweep stops a vendor CLI and a custom shell alike", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-quit");
+  const userData = scratch("proc-quit-data");
+  const report = path.join(dir, "shell.pid");
+  let vendor: ChildProcessWithoutNullStreams | undefined;
+  let shell: ChildProcessWithoutNullStreams | undefined;
+  let sleeper = 0;
+  try {
+    configureProcRegistry(userData, process.pid);
+    const stub = writeStub(dir);
+    // A Claude CLI, tracked the way GrokAgent.start tracks one.
+    vendor = spawnClaudeProcess(stubSpec(stub) as never);
+    vendor.stdout.resume();
+    vendor.stderr.resume();
+    trackProcessGroup(vendor, "claude-1");
+    // A custom bot's shell, which no host holds a handle to.
+    shell = spawn("/bin/sh", ["-c", `sleep 5 & echo $! > ${report}; wait`], {
+      stdio: "ignore",
+      ...groupSpawnOptions(),
+    }) as ChildProcessWithoutNullStreams;
+    trackProcessGroup(shell, "custom-1");
+
+    const pids = await readPids(stub.report);
+    const found = await until(() => fs.existsSync(report) && fs.readFileSync(report, "utf8").trim().length > 0, 5_000);
+    assert.ok(found, "the custom shell never reported its background sleeper");
+    sleeper = Number(fs.readFileSync(report, "utf8").trim());
+    assert.equal(trackedProcessGroupCount(), 2);
+
+    assert.equal(stopTrackedProcessGroups(), 2, "the quit sweep must reach both groups");
+    const vendorGone = await until(() => !alive(pids.grandchild), PROC_KILL_GRACE_MS + 1_000);
+    const shellGone = await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000);
+    assert.ok(vendorGone, "quit left the Claude CLI's shell running");
+    assert.ok(shellGone, "quit left the custom bot's shell running");
+    assert.equal(trackedProcessGroupCount(), 0);
+  } finally {
+    trap(vendor?.pid);
+    trap(shell?.pid);
+    trap(sleeper || undefined);
+    resetProcRegistry();
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+test("quit closes every host on one list, then sweeps what no host held", () => {
+  const main = source("electron", "main.ts");
+  for (const host of ["grok", "codex", "terminal", "claude", "cursor"]) {
+    assert.match(
+      main,
+      new RegExp(`disposeAtQuit\\("${host}"`),
+      `${host} must register itself for quit — naming three hosts by hand missed three`,
+    );
+  }
+  const quit = main.indexOf('app.on("before-quit"');
+  assert.ok(quit > 0);
+  const loop = main.indexOf("for (const disposer of quitDisposers)", quit);
+  const sweep = main.indexOf("stopTrackedProcessGroups()", quit);
+  assert.ok(loop > quit, "before-quit must close the registered hosts");
+  assert.ok(sweep > loop, "the registry sweep is the backstop, so it runs after the disposals");
+});
+
 /* ---------------------------------------- item 2: reaping across a desk death */
 
 test("a launch writes one small record, and its stop takes it away", { skip: !POSIX, timeout: 20_000 }, async () => {
@@ -399,8 +717,10 @@ test("the boot reap kills a dead desk's group and leaves everyone else's alone",
     "running.json": { pgid: 104, sessionId: "s-running", deskPid: 900, startedAt: now - 60_000 },
     "recycled.json": { pgid: 105, sessionId: "s-recycled", deskPid: 900, startedAt: now - 600_000 },
     "gone.json": { pgid: 106, sessionId: "s-gone", deskPid: 900, startedAt: now - 60_000 },
+    "terminal.json": { pgid: 107, sessionId: "s-term", deskPid: 900, startedAt: now - 60_000, stopWith: "tree" },
   };
   const killed: number[] = [];
+  const shapes: [number, string][] = [];
   const removed: string[] = [];
   const decisions = reapOrphanProcessGroups("/procs", {
     now: () => now,
@@ -410,14 +730,22 @@ test("the boot reap kills a dead desk's group and leaves everyone else's alone",
     // 105 is a pid the operating system has handed to somebody else since.
     leaderStartedAt: (pgid) => (pgid === 105 ? now - 1_000 : now - 60_000 + 500),
     sessionRunning: (sessionId) => sessionId === "s-running",
-    kill: (pgid) => killed.push(pgid),
+    kill: (pgid, stopWith) => {
+      killed.push(pgid);
+      shapes.push([pgid, stopWith]);
+    },
     list: () => Object.keys(records).map((name) => `/procs/${name}`),
     read: (file) => records[file.slice("/procs/".length)] ?? null,
     remove: (file) => removed.push(file.slice("/procs/".length)),
   });
 
-  assert.deepEqual(killed, [101], "only the group whose desk is gone and whose session is not running is killed");
-  assert.deepEqual([...removed].sort(), ["gone.json", "orphan.json", "recycled.json"]);
+  assert.deepEqual(killed.sort((a, b) => a - b), [101, 107], "only groups whose desk is gone and whose session is idle");
+  // A terminal's record carries its shape, so the reap walks its tree too.
+  assert.deepEqual([...shapes].sort(), [
+    [101, "group"],
+    [107, "tree"],
+  ]);
+  assert.deepEqual([...removed].sort(), ["gone.json", "orphan.json", "recycled.json", "terminal.json"]);
   const by = (pgid: number) => decisions.find((decision) => decision.record.pgid === pgid);
   assert.equal(by(101)?.action, "reaped");
   assert.equal(by(102)?.action, "kept");

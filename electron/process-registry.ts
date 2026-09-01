@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ChildProcess } from "node:child_process";
@@ -37,12 +37,20 @@ export const PROC_RECORD_GRACE_MS = 5_000;
  */
 export const PROC_START_SKEW_MS = 60_000;
 
+/**
+ * How a launch has to be stopped. A vendor CLI runs its tools inside its own
+ * group, so the group is the whole of it. An interactive shell has job control
+ * and scatters its jobs across new groups, so that one takes a tree walk.
+ */
+export type StopShape = "group" | "tree";
+
 /** One launch: the group, whose chat it belongs to, and which desk started it. */
 export type ProcRecord = {
   pgid: number;
   sessionId: string;
   deskPid: number;
   startedAt: number;
+  stopWith?: StopShape;
 };
 
 /**
@@ -144,7 +152,7 @@ export function killProcessGroup(target: number | ChildProcess | null | undefine
 
 let registryDir: string | null = null;
 let registryDeskPid = process.pid;
-const tracked = new Map<number, { child: ChildProcess; sessionId: string }>();
+const tracked = new Map<number, { child: ChildProcess; sessionId: string; stopWith: StopShape }>();
 
 export function procRegistryDir(userData: string): string {
   return path.join(userData, "procs");
@@ -195,6 +203,8 @@ export function readProcRecord(file: string): ProcRecord | null {
       sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
       deskPid: raw.deskPid,
       startedAt: raw.startedAt,
+      // Records written before the terminal joined the registry have no shape.
+      ...(raw.stopWith === "tree" ? { stopWith: "tree" as const } : {}),
     };
   } catch {
     return null;
@@ -218,12 +228,23 @@ export function sessionIdFromSpec(spec: {
 }
 
 /** Write the group down and forget it again when it exits on its own. */
-export function trackProcessGroup<T extends ChildProcess>(child: T, sessionId = "", now = Date.now): T {
+export function trackProcessGroup<T extends ChildProcess>(
+  child: T,
+  sessionId = "",
+  now = Date.now,
+  stopWith: StopShape = "group",
+): T {
   const pgid = child.pid;
   if (!pgid) return child;
-  tracked.set(pgid, { child, sessionId });
+  tracked.set(pgid, { child, sessionId, stopWith });
   if (registryDir) {
-    writeProcRecord(registryDir, { pgid, sessionId, deskPid: registryDeskPid, startedAt: now() });
+    writeProcRecord(registryDir, {
+      pgid,
+      sessionId,
+      deskPid: registryDeskPid,
+      startedAt: now(),
+      ...(stopWith === "tree" ? { stopWith } : {}),
+    });
   }
   child.once("exit", () => forgetProcessGroup(pgid));
   return child;
@@ -255,14 +276,222 @@ export function stopProcessGroup(target: number | ChildProcess | null | undefine
  */
 export function stopTrackedProcessGroups(io: Partial<KillIo> = {}): number {
   let stopped = 0;
-  for (const pgid of [...tracked.keys()]) {
-    if (stopProcessGroup(pgid, io)) stopped += 1;
+  for (const [pgid, entry] of [...tracked.entries()]) {
+    // A terminal's jobs sit in groups of their own; everything else is one group.
+    const took = entry.stopWith === "tree" ? stopProcessTree(pgid, io) : stopProcessGroup(pgid, io);
+    if (took) stopped += 1;
   }
   return stopped;
 }
 
 export function trackedProcessGroupCount(): number {
   return tracked.size;
+}
+
+/* ------------------------------------ a shell that puts its jobs in new groups */
+
+export type ProcRow = { pid: number; ppid: number; pgid: number };
+
+/**
+ * Every process on this machine, as pid, parent and group. One call, three
+ * numbers each — never a command line, which would carry someone's prompt into
+ * this module.
+ */
+export function procTreeSnapshot(platform: NodeJS.Platform = process.platform): ProcRow[] {
+  if (platform === "win32") return [];
+  try {
+    return execFileSync("ps", ["-axo", "pid=,ppid=,pgid="], {
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split("\n")
+      .map((row) => row.trim().split(/\s+/).map(Number))
+      .filter((cells) => cells.length === 3 && cells.every((cell) => Number.isFinite(cell)))
+      .map(([pid, ppid, pgid]) => ({ pid, ppid, pgid }));
+  } catch {
+    return [];
+  }
+}
+
+/** A root and everything descended from it, by parent. */
+export function descendantPids(root: number, rows: ProcRow[]): Set<number> {
+  const children = new Map<number, number[]>();
+  for (const row of rows) {
+    const list = children.get(row.ppid);
+    if (list) list.push(row.pid);
+    else children.set(row.ppid, [row.pid]);
+  }
+  const found = new Set<number>([root]);
+  const queue = [root];
+  while (queue.length) {
+    for (const child of children.get(queue.pop() as number) ?? []) {
+      if (found.has(child)) continue;
+      found.add(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+
+/**
+ * Stop a process and everything under it, however it has arranged itself.
+ *
+ * The group kill is enough for a vendor CLI, whose tools run non-interactively
+ * inside its own group. It is not enough for the desk's terminal: `detached`
+ * gives an interactive shell a session of its own, which turns job control ON,
+ * and a shell with job control puts every background job in a NEW group. So
+ * `sleep 5 &` in the terminal is a group the shell's group kill never reaches.
+ *
+ * This walks the tree once, then kills each group whose leader is in the tree —
+ * and only those. A group led by someone outside the tree is somebody else's,
+ * very possibly the desk's own, so its members are taken one pid at a time.
+ */
+export function stopProcessTree(
+  target: number | ChildProcess | null | undefined,
+  io: Partial<KillIo> & { snapshot?: () => ProcRow[] } = {},
+): boolean {
+  const pid = typeof target === "number" ? target : target?.pid;
+  if (!pid || pid <= 0) return false;
+  const resolved = killIo(io);
+  if (resolved.platform === "win32") {
+    // taskkill /T already walks the tree, which is why Windows never had this.
+    resolved.taskkill(pid);
+    forgetProcessGroup(pid);
+    return true;
+  }
+  const rows = (io.snapshot ?? (() => procTreeSnapshot(resolved.platform)))();
+  const mine = descendantPids(pid, rows);
+  const groups = new Set<number>();
+  for (const row of rows) {
+    if (mine.has(row.pid) && mine.has(row.pgid)) groups.add(row.pgid);
+  }
+  // The child's own group, even when `ps` told us nothing at all.
+  groups.add(pid);
+  let signalled = false;
+  for (const group of groups) {
+    if (killProcessGroup(group, resolved)) signalled = true;
+  }
+  for (const one of mine) {
+    if (groups.has(one)) continue;
+    const row = rows.find((candidate) => candidate.pid === one);
+    if (row && groups.has(row.pgid)) continue;
+    try {
+      resolved.kill(one, "SIGTERM");
+      signalled = true;
+    } catch {
+      /* it went while we were reading */
+    }
+  }
+  forgetProcessGroup(pid);
+  return signalled;
+}
+
+/* ------------------------------------------- run one command, and stop it all */
+
+/** What a run keeps of its own output before it stops reading. */
+export const GROUP_RUN_MAX_OUTPUT = 16 * 1024 * 1024;
+
+export type GroupRunOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  shell?: boolean;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  sessionId?: string;
+  signal?: AbortSignal;
+};
+
+export type GroupRunResult = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  /** The desk stopped it — cancelled or timed out. It did not finish. */
+  stopped: boolean;
+  timedOut: boolean;
+  error?: Error;
+};
+
+/**
+ * A command run to completion, in its own group, stoppable as one.
+ *
+ * `exec` and `execFile` cannot do this: execFile forwards a fixed list of
+ * options to spawn and drops `detached` on the floor, so a child started
+ * through either can never lead a group however politely it is asked — and
+ * their `timeout` and `signal` then stop the one pid that is not the problem.
+ *
+ * The caller gets the child as well as the result, because a cancel arrives
+ * from somewhere else entirely and needs a handle to stop.
+ */
+export function runInProcessGroup(
+  file: string,
+  args: string[],
+  options: GroupRunOptions = {},
+): { child: ChildProcess; done: Promise<GroupRunResult> } {
+  const cap = options.maxOutputBytes ?? GROUP_RUN_MAX_OUTPUT;
+  const child = spawn(file, args, {
+    cwd: options.cwd,
+    env: options.env,
+    shell: options.shell ?? false,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    ...groupSpawnOptions(),
+  });
+  trackProcessGroup(child, options.sessionId ?? "");
+
+  let stdout = "";
+  let stderr = "";
+  let stopped = false;
+  let timedOut = false;
+  let settled = false;
+  const keep = (current: string, chunk: Buffer | string): string =>
+    current.length >= cap ? current : `${current}${String(chunk)}`.slice(0, cap);
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    stdout = keep(stdout, chunk);
+  });
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    stderr = keep(stderr, chunk);
+  });
+
+  const stop = (why: "cancel" | "timeout") => {
+    stopped = true;
+    if (why === "timeout") timedOut = true;
+    stopProcessGroup(child);
+  };
+  const onAbort = () => stop("cancel");
+  let timer: NodeJS.Timeout | undefined;
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timer = setTimeout(() => stop("timeout"), options.timeoutMs);
+    // A run that will not end must not be the reason the desk will not close.
+    timer.unref?.();
+  }
+  if (options.signal?.aborted) stop("cancel");
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
+
+  const done = new Promise<GroupRunResult>((resolve) => {
+    const finish = (code: number | null, signal: NodeJS.Signals | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      resolve({
+        // A signalled or failed run reports 1, the way execFile always did.
+        status: error ? 1 : typeof code === "number" ? code : 1,
+        stdout,
+        stderr,
+        // A signal means somebody stopped this — the abort above, the timeout,
+        // or a cancel that reached the group from outside this call entirely.
+        stopped: stopped || Boolean(signal) || Boolean(options.signal?.aborted),
+        timedOut,
+        ...(error ? { error } : {}),
+      });
+    };
+    child.once("error", (error) => finish(null, null, error));
+    child.once("close", (code, signal) => finish(code, signal));
+  });
+
+  return { child, done };
 }
 
 /* ------------------------------------------------------------- the reaper */
@@ -282,7 +511,7 @@ export type ReapIo = {
   groupAlive: (pgid: number) => boolean;
   leaderStartedAt: (pgid: number) => number | null;
   sessionRunning: (sessionId: string) => boolean;
-  kill: (pgid: number) => void;
+  kill: (pgid: number, stopWith: StopShape) => void;
   list: (dir: string) => string[];
   read: (file: string) => ProcRecord | null;
   remove: (file: string) => void;
@@ -334,7 +563,7 @@ function reapIo(io: Partial<ReapIo>): ReapIo {
     groupAlive: io.groupAlive ?? ((pgid) => groupIsAlive(pgid)),
     leaderStartedAt: io.leaderStartedAt ?? ((pgid) => leaderStartedAt(pgid)),
     sessionRunning: io.sessionRunning ?? (() => false),
-    kill: io.kill ?? ((pgid) => void killProcessGroup(pgid)),
+    kill: io.kill ?? ((pgid, stopWith) => void (stopWith === "tree" ? stopProcessTree(pgid) : killProcessGroup(pgid))),
     list:
       io.list ??
       ((dir) => {
@@ -403,7 +632,7 @@ export function reapOrphanProcessGroups(dir: string, options: Partial<ReapIo> = 
       decisions.push({ record, action: "dropped", why: "pid_reused" });
       continue;
     }
-    io.kill(record.pgid);
+    io.kill(record.pgid, record.stopWith ?? "group");
     io.remove(file);
     decisions.push({ record, action: "reaped", why: `orphan desk_pid=${record.deskPid}` });
   }

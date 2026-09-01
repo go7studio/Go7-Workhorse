@@ -268,10 +268,6 @@ transcript rather than as a path.
   time on their own results, with no approval prompt. A caller cannot claim the
   build phase; build is honoured only when the desk itself holds that mission at
   build.
-- **Path ownership** — assigned repo-relative paths are leased across shared
-  folders and worktrees. Conflicting spawns and stale writes stay blocked until
-  the owner finishes or is explicitly cancelled. Deleting a running owner's
-  chat keeps its lease until that worker stops.
 - **Campaigns** — one worker and a two-way split start immediately. A wider
   opening wave becomes a Campaign: passes advance one phase at a time on their
   own results, with no approval prompt. A caller cannot claim the build phase;

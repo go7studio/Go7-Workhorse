@@ -450,3 +450,16 @@ test("restart keeps leases only for interrupted workers that still own those pat
   ], [interrupted]);
   assert.deepEqual(leases.map((lease) => lease.path), ["src/lib/store.tsx"]);
 });
+
+test("the Mission hint and the Link instructions agree: a continuation keeps the coordinating brain", () => {
+  const rules = readFileSync(path.join(ROOT, "src", "lib", "workhorse-rules.ts"), "utf8");
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  // The desk-side hint once said "each new pass returns to independent Workhorse routing" and
+  // invited the coordinator to pass route, which clears the pinned brain in continueMission.
+  assert.doesNotMatch(rules, /returns to independent Workhorse routing/);
+  assert.match(rules, /each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route/);
+  assert.match(mcp, /A continuation keeps that pass's coordinating vendor, model, and effort by default/);
+  // The width bound must stay on the live spawn path; a source scan is the death-test the reviewer asked for.
+  assert.match(store, /rootSpawnError\(latest\.sessions, caller\.id, maxRootWorkers\(catalog\.length\)\)/);
+});

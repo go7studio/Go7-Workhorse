@@ -165,7 +165,7 @@ export const ORCHESTRATE_MODE_HINT =
   "The user selected Orchestrate on this chat. You are the orchestrator this turn. Do not do the assigned work yourself. Spawn desk workers for it.";
 
 export const MISSION_MODE_HINT =
-  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass returns to independent Workhorse routing. Do not sit on workhorse_await_agents. The desk joins reports later.";
+  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route. Do not sit on workhorse_await_agents. The desk joins reports later.";
 
 export function crewModeLabel(mode: CrewMode): string {
   return mode === "mission" ? "Mission" : "Orchestrate";

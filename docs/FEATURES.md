@@ -263,7 +263,9 @@ transcript rather than as a path.
   cannot create, rename, move or delete anything on the desk, and is not shown
   those tools.
 - **Campaigns** — ordinary delegation stays ordinary at every permitted width;
-  the normal root-worker capacity still bounds the wave. A Campaign begins only
+  the normal root-worker capacity still bounds the wave. That bound is
+  checked per admission: a volley of simultaneous spawns from one parent can
+  land more workers than the bound before any of them is running. A Campaign begins only
   when Mission or an adaptive loop is requested: passes advance one phase at a
   time on their own results, with no approval prompt. A caller cannot claim the
   build phase; build is honoured only when the desk itself holds that mission at
@@ -272,7 +274,9 @@ transcript rather than as a path.
   Workhorse checks supported edit events and reports Git-visible changes outside
   that scope when the run ends. This is review evidence, not containment:
   Sandbox controls where the runtime may write, and managed worktrees keep
-  worker changes out of the linked folder.
+  worker changes out of the linked folder. The owner's lease is refreshed
+  from the file on disk when its write completes, so an edit by someone else in
+  that window becomes the owner's next baseline.
 - **Plans** — multi-step work that continues after a worker joins. A checklist
   plan you tick yourself still completes on ordinary evidence. When workers run
   the plan, a step finishes when another vendor re-runs the named test at that

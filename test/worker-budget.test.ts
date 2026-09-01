@@ -387,7 +387,7 @@ test("the budget ceiling says when it is read", () => {
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
   assert.match(
     features,
-    /read when the vendor reports usage[\s\S]{0,160}not part-way through a turn/,
+    /reads the ceiling when the vendor reports usage[\s\S]{0,160}not part-way through a turn/,
     "FEATURES.md says the ceiling is checked at the meter, not inside a turn",
   );
 });

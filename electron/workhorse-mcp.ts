@@ -1825,9 +1825,28 @@ export function nestedTimeoutNote(requested: number | undefined, ceiling = NESTE
   return `Note: nested helpers run at most ${ceiling} s; this one was set to ${ceiling} s, not the ${Math.floor(requested)} s asked for.`;
 }
 
-/** Carry the clamp note back with the spawn result without disturbing the report itself. */
+/**
+ * Carry the clamp note back with the spawn result without disturbing it.
+ *
+ * A `wait: false` spawn answers with JSON — `{ started: true, childSessionId,
+ * … }` — so a line pasted on the end would leave the caller holding something
+ * that no longer parses. The note goes inside the object there, and only a
+ * prose result gets a line appended.
+ */
 export function withSpawnNote(result: string, note: string): string {
   if (!note) return result;
+  const trimmed = result.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (parsed.note === note) return result;
+        return JSON.stringify({ ...parsed, note }, null, 2);
+      }
+    } catch {
+      // Not JSON after all. Fall through and treat it as prose.
+    }
+  }
   return result.includes(note) ? result : `${result}\n${note}`;
 }
 

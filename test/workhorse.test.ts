@@ -59,6 +59,7 @@ import {
   workhorseMcpServer,
   isElectronAppCommand,
 } from "../electron/grok-launch";
+import { spawnDispatchStarted } from "../electron/custom-host";
 import {
   handleWorkhorseRpc,
   nestedTimeoutNote,
@@ -10168,4 +10169,26 @@ test("a nested helper's clamped runtime is said out loud, not swallowed", () => 
     /timeoutSeconds: Math\.min\(NESTED_HELPER_TIMEOUT_SECONDS, Math\.max\(30, input\.timeoutSeconds \?\? NESTED_HELPER_TIMEOUT_SECONDS\)\)/,
     "the clamp itself is kept, and reads from the one named ceiling",
   );
+});
+
+test("the clamp note does not break a spawn result a caller has to parse", () => {
+  /*
+   * A wait=false spawn answers with JSON: { started: true, childSessionId, … }.
+   * Pasting a line on the end of that would hand the caller something that no
+   * longer parses, so the note goes inside the object instead.
+   */
+  const note = nestedTimeoutNote(600);
+  assert.ok(note);
+  const started = JSON.stringify({ started: true, childSessionId: "sess_worker", folder: "/repo" }, null, 2);
+  const carried = withSpawnNote(started, note);
+  const parsed = JSON.parse(carried) as { started?: boolean; childSessionId?: string; note?: string };
+  assert.equal(parsed.started, true, "the payload still parses and still says it started");
+  assert.equal(parsed.childSessionId, "sess_worker", "nothing the caller reads is lost");
+  assert.equal(parsed.note, note, "the note rides inside the object");
+  assert.equal(spawnDispatchStarted({ name: "workhorse_spawn_agent", content: carried }), true);
+  assert.equal(withSpawnNote(carried, note), carried, "a retried spawn does not add the note twice");
+
+  // Something that only looks like JSON is treated as prose rather than lost.
+  const broken = "{ this is not JSON";
+  assert.equal(withSpawnNote(broken, note), `${broken}\n${note}`);
 });

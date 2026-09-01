@@ -60,7 +60,7 @@ import {
   protectStateCredentialsForSave,
 } from "./credential-store";
 import { DurableJobEngine } from "./job-engine";
-import { execFile, spawnSync, type ChildProcess } from "node:child_process";
+import { spawnSync, type ChildProcess } from "node:child_process";
 import { detectRuntimesOnHost, startRuntimeTask } from "./agent-runtime-host";
 import { installLinkCommand, installReportMessage, installWorkhorseLink, workhorseExternalMcpLaunch, workhorseLinkGenericConfig, workhorseLinkGrokBotOneshot } from "./mcp-install";
 import { ensureGrokBotShim } from "./grok-bot-shim-host";
@@ -72,6 +72,14 @@ import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData } from "./user-data-hygiene";
 import { faultDetail, memoryDetail, nullMainLog, openMainLog, startMemoryLog } from "./main-log";
+import {
+  configureProcRegistry,
+  procReapDetail,
+  reapOrphanProcessGroups,
+  runInProcessGroup,
+  stopProcessGroup,
+  stopTrackedProcessGroups,
+} from "./process-registry";
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
@@ -129,24 +137,24 @@ function runExternalRuntimeProcess(taskId: string, file: string, args: string[])
    * what was actually launched — never the arguments, which are the prompt.
    */
   mainLog.record("vendor:spawn", `command=${file} argc=${args.length}`);
-  return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
-    const child = execFile(
-      file,
-      args,
-      { encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-      (error, stdout, stderr) => {
-        if (externalRuntimeProcesses.get(taskId) === child) externalRuntimeProcesses.delete(taskId);
-        const rawCode = (error as { code?: string | number } | null)?.code;
-        const code = typeof rawCode === "number"
-          ? rawCode
-          : error
-            ? 1
-            : 0;
-        if (error) mainLog.record("vendor:spawn", `failed command=${file} ${faultDetail(error, 1)}`);
-        resolve({ status: code, stdout: stdout ?? "", stderr: stderr ?? "" });
-      },
-    );
-    externalRuntimeProcesses.set(taskId, child);
+  /*
+   * A harness CLI runs the same kind of work a vendor does, and Stop has to
+   * reach what it started. `execFile` could never do that: it forwards a fixed
+   * list of options to spawn and drops `detached`, so the child was never a
+   * group leader, and its `timeout` then killed the one pid that was not the
+   * problem. Windows already took the tree here; POSIX took the pid alone.
+   */
+  const { child, done } = runInProcessGroup(file, args, {
+    timeoutMs: 120_000,
+    maxOutputBytes: 16 * 1024 * 1024,
+    sessionId: taskId,
+  });
+  externalRuntimeProcesses.set(taskId, child);
+  return done.then((result) => {
+    if (externalRuntimeProcesses.get(taskId) === child) externalRuntimeProcesses.delete(taskId);
+    if (result.error) mainLog.record("vendor:spawn", `failed command=${file} ${faultDetail(result.error, 1)}`);
+    else if (result.timedOut) mainLog.record("vendor:spawn", `timed out command=${file}`);
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   });
 }
 
@@ -154,11 +162,8 @@ function cancelExternalRuntimeProcess(taskId: string): boolean {
   const child = externalRuntimeProcesses.get(taskId);
   if (!child) return false;
   externalRuntimeProcesses.delete(taskId);
-  if (process.platform === "win32" && child.pid) {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
-  } else {
-    child.kill("SIGTERM");
-  }
+  // One stop for both platforms: the group on POSIX, taskkill /T /F on Windows.
+  stopProcessGroup(child);
   return true;
 }
 
@@ -317,6 +322,27 @@ if (!isPrimaryInstance) {
     win.show();
     win.focus();
   });
+}
+
+/*
+ * A desk that dies without stopping its vendors leaves their process groups
+ * running, and nothing has ever gone looking for them: 28 shell spinners once
+ * outlived their worker by 71 minutes, through the worker's end, through the
+ * interrupt marking at the next launch, through a quit. Every launch writes
+ * its group down; this is where the next boot collects the ones nobody closed.
+ *
+ * After the lock, for the same reason hygiene is: a second launch must not
+ * reach in and kill the running desk's vendors.
+ */
+if (isPrimaryInstance && !isMcpHelper) {
+  try {
+    const procs = configureProcRegistry(app.getPath("userData"));
+    for (const decision of reapOrphanProcessGroups(procs)) {
+      mainLog.record(decision.action === "reaped" ? "proc:reaped" : "proc:kept", procReapDetail(decision));
+    }
+  } catch (error) {
+    mainLog.record("proc:kept", `reap failed ${faultDetail(error, 1)}`);
+  }
 }
 
 /*
@@ -834,6 +860,23 @@ function createWindow() {
 const grokHost = new GrokSessionHost();
 const codexHost = new CodexSessionHost();
 const terminalHost = new TerminalHost();
+
+/*
+ * Quit used to name three hosts and miss three. Claude, Cursor and the custom
+ * bots are built inside the IPC scope below, so `before-quit` could not see
+ * them: their CLIs got no orderly shutdown, only whatever the registry sweep
+ * caught afterwards. A host that wants to be closed at quit says so here, and
+ * the hook closes whatever is on the list.
+ */
+const quitDisposers: { name: string; close: () => void }[] = [];
+
+function disposeAtQuit(name: string, close: () => void): void {
+  quitDisposers.push({ name, close });
+}
+
+disposeAtQuit("grok", () => grokHost.disposeAll());
+disposeAtQuit("codex", () => codexHost.disposeAll());
+disposeAtQuit("terminal", () => terminalHost.disposeAll());
 const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
 process.on("uncaughtException", (error) => {
@@ -1681,6 +1724,7 @@ app.whenReady().then(async () => {
   });
 
   const claudeHost = new ClaudeSessionHost();
+  disposeAtQuit("claude", () => claudeHost.disposeAll());
   ipcMain.handle("claude:prompt", async (event, raw: ClaudePromptInput) => {
     const input: ClaudePromptInput = {
       ...raw,
@@ -1704,6 +1748,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("cursor:detect-login", () => detectCursorLogin());
   const cursorHost = new CursorSessionHost();
+  disposeAtQuit("cursor", () => cursorHost.disposeAll());
   ipcMain.handle("cursor:prompt", async (event, raw: CursorPromptInput) => {
     const input: CursorPromptInput = {
       ...raw,
@@ -1880,10 +1925,24 @@ app.on("before-quit", (event) => {
   quitDrained = true;
   learningCloser?.pause();
   learningCloser?.close();
-  grokHost.disposeAll();
-  codexHost.disposeAll();
-  terminalHost.disposeAll();
+  // Every host that registered itself, in the order it was built. One that
+  // throws must not keep the rest of them open.
+  for (const disposer of quitDisposers) {
+    try {
+      disposer.close();
+    } catch (error) {
+      mainLog.record("before-quit", `dispose failed host=${disposer.name} ${faultDetail(error, 1)}`);
+    }
+  }
   jobEngine?.dispose();
+  /*
+   * Then the backstop, and it is not decoration: the custom bots have no
+   * disposeAll to register — their children are shells, held by no host at all —
+   * and neither does any vendor's shell. Every launch is on the registry, so
+   * whatever the disposals left running is taken here by its group.
+   */
+  const stopped = stopTrackedProcessGroups();
+  if (stopped) mainLog.record("proc:reaped", `quit groups=${stopped}`);
   // After the disposals, so Lane 0's guard keeps every one of them behind the
   // second-pass return, and once per quit rather than once per handler run.
   mainLog.record("before-quit", memoryDetail());

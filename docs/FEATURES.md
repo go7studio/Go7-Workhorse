@@ -263,7 +263,11 @@ transcript rather than as a path.
   short worker rules and only the desk tools it may call — read and ask chats,
   one bounded helper, ask to raise a block, read skills and references. It
   cannot create, rename, move or delete anything on the desk, and is not shown
-  those tools.
+  those tools. Every vendor CLI leads its own process group, so ending a
+  worker, quitting the desk, or the next launch after a crash stops what that
+  worker started as well as the worker. Known limit: a CLI that double-forks —
+  `nohup`, `setsid`, a launchd or systemd job — leaves that group, and the desk
+  cannot reach it.
 - **Campaigns** — ordinary delegation stays ordinary at every permitted width;
   the normal root-worker capacity still bounds the wave. That bound is
   checked per admission: a volley of simultaneous spawns from one parent can

@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { groupSpawnOptions, stopProcessTree, trackProcessGroup } from "./process-registry";
 
 export type TerminalEvent =
   | { type: "output"; sessionId: string; data: string }
@@ -38,7 +39,11 @@ export class TerminalHost {
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
+        // An interactive shell is the shortest route to a runaway on this desk:
+        // whatever the person types starts under it. It leads its own group.
+        ...groupSpawnOptions(),
       });
+      trackProcessGroup(child, id, Date.now, "tree");
       this.slots.set(id, { cwd, child });
       const output = (data: Buffer | string) => emit({ type: "output", sessionId: id, data: data.toString() });
       child.stdout.on("data", output);
@@ -64,7 +69,14 @@ export class TerminalHost {
   stop(sessionId: string): void {
     const slot = this.slots.get(sessionId);
     this.slots.delete(sessionId);
-    if (slot && !slot.child.killed) slot.child.kill();
+    /*
+     * The tree, not the shell, and not only the shell's group. `child.kill()`
+     * closed the terminal and left everything the person had started in it
+     * running. The group alone is not enough either: a shell with its own
+     * session has job control, and job control puts `sleep 5 &` in a group of
+     * its own that the shell's group kill never reaches.
+     */
+    if (slot) stopProcessTree(slot.child);
   }
 
   disposeAll(): void {

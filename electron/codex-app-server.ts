@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
+import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { detectCodexLogin, type CodexLoginDetectInput } from "./codex-login";
 import { APP_VERSION } from "../src/lib/app-info";
 
@@ -70,7 +71,11 @@ export class CodexAppServerClient {
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      // The app server runs the same tools the ACP path does, so it leads its
+      // own group and closing it reaches what it started.
+      ...groupSpawnOptions(),
     });
+    trackProcessGroup(child);
     this.child = child;
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
@@ -130,7 +135,7 @@ export class CodexAppServerClient {
     this.child = null;
     this.lineReader?.close();
     this.lineReader = null;
-    if (child && !child.killed) child.kill();
+    if (child) stopProcessGroup(child);
     this.failAll(new Error("Codex App Server closed."));
   }
 

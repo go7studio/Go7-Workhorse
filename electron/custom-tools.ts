@@ -1,6 +1,7 @@
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
 import {
   deskRoleOf,
@@ -42,6 +43,10 @@ export function limitCustomToolResult(
     content: `${result.content.slice(0, head)}${marker}${tail > 0 ? result.content.slice(-tail) : ""}`,
   };
 }
+
+/** What `run_command` keeps and how long it may run. Both were `exec` defaults. */
+const RUN_COMMAND_MAX_OUTPUT = 1024 * 1024;
+const RUN_COMMAND_TIMEOUT_MS = 30_000;
 
 export type CustomToolPolicy = {
   mode?: PermissionMode;
@@ -667,28 +672,54 @@ export async function executeCustomTool(
       if (!command.trim()) throw new Error("command is required");
       const runCwd = resolveWorkspacePath(typeof use.input.cwd === "string" ? use.input.cwd : cwd, cwd, folders, sandbox);
       return await new Promise<CustomToolResult>((resolve) => {
-        exec(
-          command,
-          {
-            cwd: runCwd,
-            encoding: "utf8",
-            timeout: 30_000,
-            maxBuffer: 1024 * 1024,
-            windowsHide: true,
-            signal: policy.signal,
-          },
-          (error, stdout, stderr) => {
-            const out = `${stdout ?? ""}${stderr ?? ""}`.trim();
-            const code = error && "code" in error && typeof error.code === "number" ? error.code : 0;
-            const failure = error instanceof Error ? error.message.slice(0, 1_000) : "Command failed";
-            resolve({
-              id: use.id,
-              name,
-              content: out || (policy.signal?.aborted ? "Command cancelled" : error ? failure : `(exit ${code})`),
-              ...(error ? { isError: true } : {}),
-            });
-          },
-        );
+        /*
+         * `exec` used to run this, and its `timeout` and `signal` both stop the
+         * shell by pid — the one process a runaway command is not. The shell
+         * exits, the loop it started is reparented to init, and it runs on.
+         * `exec` also drops `detached` on the floor (execFile forwards only a
+         * fixed set of options), so the shell could never lead a group. `spawn`
+         * with a shell does honour it: cancel and timeout take the group.
+         */
+        let timer: NodeJS.Timeout | undefined;
+        let stopped = false;
+        let out = "";
+        const child = spawn(command, {
+          cwd: runCwd,
+          shell: true,
+          windowsHide: true,
+          stdio: ["ignore", "pipe", "pipe"],
+          ...groupSpawnOptions(),
+        });
+        const collect = (chunk: Buffer | string) => {
+          if (out.length >= RUN_COMMAND_MAX_OUTPUT) return;
+          out += String(chunk);
+          if (out.length > RUN_COMMAND_MAX_OUTPUT) out = out.slice(0, RUN_COMMAND_MAX_OUTPUT);
+        };
+        child.stdout?.on("data", collect);
+        child.stderr?.on("data", collect);
+        function stop() {
+          stopped = true;
+          stopProcessGroup(child);
+        }
+        function finish(code: number | null, signal: NodeJS.Signals | null, error?: Error) {
+          if (timer) clearTimeout(timer);
+          policy.signal?.removeEventListener("abort", stop);
+          const cancelled = Boolean(policy.signal?.aborted) || stopped;
+          const text = out.trim();
+          const failed = Boolean(error) || cancelled || (code ?? 0) !== 0;
+          const why = error
+            ? error.message.slice(0, 1_000)
+            : cancelled
+              ? "Command cancelled"
+              : `(exit ${code ?? signal ?? 0})`;
+          resolve({ id: use.id, name, content: text || why, ...(failed ? { isError: true } : {}) });
+        }
+        child.on("error", (error) => finish(null, null, error));
+        child.on("close", (code, signal) => finish(code, signal));
+        trackProcessGroup(child, policy.sessionId ?? "");
+        if (policy.signal?.aborted) stop();
+        else policy.signal?.addEventListener("abort", stop, { once: true });
+        timer = setTimeout(stop, RUN_COMMAND_TIMEOUT_MS);
       });
     }
     throw new Error(`Unknown tool ${name}`);

@@ -1976,6 +1976,19 @@ export function applyCancelWorker(sessions: Session[], workerId: string, now = D
 }
 
 /**
+ * What the desk did about the processes an interrupted worker left behind.
+ *
+ * The one question this message never answered is the one that cost an owner
+ * an hour: is it still running? A worker's shells outlive the desk that
+ * started them, so the boot after an interrupt reaps their groups — and says
+ * so here, or says it could not, rather than leaving the person to guess from
+ * a load average.
+ */
+export const WORKER_PROCESSES_REAPED = "Its processes were stopped at the next launch.";
+export const WORKER_PROCESSES_NOT_REAPED =
+  "Its processes could not be stopped — check for work it left running on this machine.";
+
+/**
  * What an interrupted worker's chat says, and where its work is.
  *
  * "Its brief and its work are kept" was true and useless: it named no place. A
@@ -1983,15 +1996,16 @@ export function applyCancelWorker(sessions: Session[], workerId: string, now = D
  * and the person is the one who has to go and look at it. Quote the path when
  * the session carries one; say the shape of the answer when it does not.
  */
-export function interruptedWorkerError(environment?: SessionEnvironment): string {
+export function interruptedWorkerError(environment?: SessionEnvironment, processesReaped = true): string {
   const opening = "Workhorse exited while this worker was running.";
+  const processes = processesReaped ? WORKER_PROCESSES_REAPED : WORKER_PROCESSES_NOT_REAPED;
   if (environment?.kind === "worktree" && environment.path) {
-    return `${opening} Its brief and its work are kept in ${environment.path} — resume it from the chat.`;
+    return `${opening} Its brief and its work are kept in ${environment.path} — resume it from the chat. ${processes}`;
   }
   if (environment?.kind === "cloud") {
-    return `${opening} Its brief and its work are kept in its cloud environment — resume it from the chat.`;
+    return `${opening} Its brief and its work are kept in its cloud environment — resume it from the chat. ${processes}`;
   }
-  return `${opening} Its brief and its work are kept in the chat's own folder — resume it from the chat.`;
+  return `${opening} Its brief and its work are kept in the chat's own folder — resume it from the chat. ${processes}`;
 }
 
 export function normalizeAgentRun(raw: unknown, environment?: SessionEnvironment): AgentRun | undefined {

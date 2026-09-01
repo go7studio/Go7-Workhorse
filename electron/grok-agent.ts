@@ -1,5 +1,6 @@
 import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { groupSpawnOptions, sessionIdFromSpec, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -118,6 +119,8 @@ export function spawnGrokProcess(spec: GrokLaunchSpec): ChildProcessWithoutNullS
     env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    // The CLI leads its own group, so a stop reaches what the CLI started too.
+    ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;
 }
 
@@ -752,7 +755,10 @@ export class GrokAgent {
   }
 
   async start(options?: { vendorSessionId?: string }): Promise<GrokStartResult> {
-    const child = this.spawn(this.spec);
+    // Written down here rather than in each host's spawn function, so the four
+    // ACP vendors record a launch the same way and a desk that dies without
+    // stopping this group can still find it at the next boot.
+    const child = trackProcessGroup(this.spawn(this.spec), sessionIdFromSpec(this.spec));
     this.child = child;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -1069,9 +1075,10 @@ export class GrokAgent {
       this.permissionWaiters.delete(id);
     }
     this.failAll(new Error(`${this.who} agent disposed`));
-    if (this.child && !this.child.killed) {
-      this.child.kill();
-    }
+    // The group, never the pid. `child.kill()` stopped the CLI and left every
+    // shell the CLI had started running — that is how 28 spinners outlived
+    // their worker by 71 minutes.
+    if (this.child) stopProcessGroup(this.child);
     this.child = null;
   }
 

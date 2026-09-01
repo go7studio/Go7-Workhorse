@@ -279,7 +279,9 @@ export function normalizeSession(raw: unknown): Session | null {
       record.status === "needs-input"
         ? normalizeGoal(record.goal)
         : grokGoalAfterTurnIdle(provider, normalizeGoal(record.goal)),
-    agentRun: normalizeAgentRun(record.agentRun),
+    // The environment goes with it: an interrupted worker's message names the
+    // folder its work is sitting in, and only the session knows that folder.
+    agentRun: normalizeAgentRun(record.agentRun, normalizeSessionEnvironment(record.environment)),
     lineup: normalizeLineup(record.lineup),
     planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",

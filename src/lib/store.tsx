@@ -464,6 +464,11 @@ export type Store = AppState & {
   setSettingsSection: (section: SettingsSection) => void;
   /** False for a linked folder that has been moved or deleted. */
   folderExists: (path: string) => boolean;
+  /**
+   * The same answer, as a value that changes identity when it changes — so a
+   * screen showing linked folders redraws when one of them dies.
+   */
+  missingFolderPaths: ReadonlySet<string>;
   deskSkills: DeskSkill[];
   listDeskSkills: () => Promise<DeskSkill[]>;
   refreshDeskSkills: () => Promise<DeskSkill[]>;
@@ -980,6 +985,24 @@ function snapshotWriteInstance(
   void window.workhorse.recordFileWrite(filePath, roots);
 }
 
+/** Stable identity for "nothing is missing", so a redraw needs a real change. */
+const NO_MISSING_FOLDERS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Folders the operating system empties on its own. `/private/tmp` is swept on a
+ * schedule and `/var/folders` is per-boot scratch, so a project linked to either
+ * is a project whose files are on a timer nobody set. `/tmp` is the same place
+ * as `/private/tmp` under a symlink and has to be named separately, because the
+ * picker hands back whichever one the person walked through.
+ */
+const VOLATILE_FOLDER_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"];
+
+export function volatileFolderPath(folder: string): boolean {
+  const normalized = folder.trim().replace(/\/+$/, "");
+  if (!normalized) return false;
+  return VOLATILE_FOLDER_ROOTS.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+}
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(EMPTY);
   const [ready, setReady] = useState(false);
@@ -1029,8 +1052,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * Refreshed from the main process; empty until the first answer, which only
    * costs the old behaviour for a moment.
    */
-  const missingFolders = useRef(new Set<string>());
+  const missingFolders = useRef<ReadonlySet<string>>(NO_MISSING_FOLDERS);
+  /*
+   * The answer also has to be drawable. It stays in a ref because every caller
+   * of folderExists needs the current one — a stale closure there sends an agent
+   * to a folder that is gone — and it is mirrored into state because a ref
+   * mutated inside a promise tells React nothing: Project Home went on drawing a
+   * deleted folder as a live one until something unrelated forced a redraw.
+   */
+  const [missingFolderPaths, setMissingFolderPaths] = useState<ReadonlySet<string>>(NO_MISSING_FOLDERS);
   const folderExists = useCallback((path: string) => !missingFolders.current.has(path), []);
+  const applyMissingFolders = useCallback((next: ReadonlySet<string>) => {
+    const current = missingFolders.current;
+    if (current.size === next.size && [...next].every((path) => current.has(path))) return;
+    missingFolders.current = next;
+    setMissingFolderPaths(next);
+  }, []);
 
   const goalHaltedSessions = useRef(new Set<string>());
   const goalForwardAfterHalt = useRef<Record<string, { text: string; images: import("./types").ChatImage[]; hideUser: boolean }>>({});
@@ -1251,6 +1288,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         : null;
     const folderPath = picked?.path;
     if (!folderPath) return;
+    /*
+     * Not a refusal. A project is a name and its folders are optional links, and
+     * someone pointing a throwaway project at a scratch folder means it. But the
+     * folder is emptied by the operating system, not by them, and a person who
+     * links one without knowing that loses the work rather than the link. So:
+     * said out loud once, at the moment of choosing, and marked on Project Home
+     * for as long as the link is there.
+     */
+    if (volatileFolderPath(folderPath)) {
+      void window.workhorse?.notifyDesktop?.({
+        title: "That folder is temporary",
+        body: `${folderPath} is cleared by the system, so work saved there can be gone after a restart. Link a folder you keep if the work matters.`,
+      });
+    }
     setState((current) => {
       const projectId = current.activeProjectId;
       if (!projectId) return current;
@@ -7070,12 +7121,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const refresh = async () => {
       const paths = projectFolders();
       if (paths.length === 0) {
-        missingFolders.current = new Set();
+        applyMissingFolders(NO_MISSING_FOLDERS);
         return;
       }
       try {
         const gone = await window.workhorse!.missingFolders!(paths);
-        if (live) missingFolders.current = new Set(gone);
+        if (live) applyMissingFolders(new Set(gone));
       } catch {
         // A probe that cannot answer must not strand every chat: leaving the
         // set as it was keeps the previous, working choice.
@@ -7087,7 +7138,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       live = false;
       window.removeEventListener("focus", refresh);
     };
-  }, [linkedFolderKey, projectFolders]);
+  }, [linkedFolderKey, projectFolders, applyMissingFolders]);
 
   const listDeskSkills = useCallback(async () => {
     if (!window.workhorse?.listDeskSkills) return deskSkillsRef.current;
@@ -7946,6 +7997,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       closeAddBot,
       setSettingsSection,
       folderExists,
+      missingFolderPaths,
       listDeskSkills,
       refreshDeskSkills,
       massSendVendor,
@@ -8012,6 +8064,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ready,
       catalogRev,
       deskSkills,
+      // A folder dying is a redraw: without this the memo holds the old set and
+      // Project Home never hears about it.
+      missingFolderPaths,
       createProject,
       openSheet,
       closeSheet,

@@ -6,6 +6,15 @@ const CODE_CACHE = "Code Cache";
 const CACHE_VERSION_FILE = ".workhorse-cache-version";
 const PENDING_UPDATE = /^pending-update-.*\.(exe|vbs|dmg)$/i;
 const STATE_TEMP = /^workhorse-state\.json(\.bak)?\.(tmp|replace)-/;
+/**
+ * A `.replace-` file is not litter while a save is mid-rename: it *is* the live
+ * state, parked for the instant it takes the new file to land. A second launch
+ * sweeping the folder used to delete another desk's, and a `.tmp-` the same way.
+ * Ordering the sweep behind the single-instance lock closes most of that; an age
+ * gate closes the rest, including a helper process that holds no lock. A save
+ * takes under a second, so an hour is generous by three thousand times over.
+ */
+const STATE_TEMP_MIN_AGE_MS = 60 * 60 * 1000;
 const TMP_UPDATE = /^workhorse-update-/;
 const OLD_IMPORT = /^pre-import-from-dev-/;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -156,7 +165,11 @@ export function sweepStaleUserData(root: string, options: SweepOptions = {}): Us
   }
   for (const name of names) {
     const full = path.join(root, name);
-    if (PENDING_UPDATE.test(name) || STATE_TEMP.test(name) || (OLD_IMPORT.test(name) && now - entryMtime(full) > 14 * DAY_MS)) {
+    if (
+      PENDING_UPDATE.test(name) ||
+      (STATE_TEMP.test(name) && now - entryMtime(full) > STATE_TEMP_MIN_AGE_MS) ||
+      (OLD_IMPORT.test(name) && now - entryMtime(full) > 14 * DAY_MS)
+    ) {
       const size = entryStats(full).bytes;
       if (removeEntry(full)) {
         removed.push(name);

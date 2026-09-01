@@ -142,6 +142,96 @@ function owningRepo(target: string): string | null {
 }
 
 /**
+ * Caches a project rebuilds from itself. `__pycache__` is bytecode for the `.py`
+ * beside it; the rest are tool caches keyed on files already in the tree. None
+ * of them can be the only copy of anything.
+ */
+const REBUILDABLE_CACHES = new Set([
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".gradle",
+  ".turbo",
+  ".parcel-cache",
+]);
+
+/**
+ * Installed dependencies — restorable, but only when the manifest that restores
+ * them is still in the tree. A `node_modules` next to no `package.json` is not a
+ * dependency tree any more; it is just a folder full of somebody's files.
+ */
+const PYTHON_MANIFESTS = ["pyproject.toml", "requirements.txt", "Pipfile"];
+const REBUILDABLE_FROM_MANIFEST: Array<{ segment: string; manifests: string[] }> = [
+  { segment: "node_modules", manifests: ["package.json"] },
+  { segment: ".venv", manifests: PYTHON_MANIFESTS },
+  { segment: "venv", manifests: PYTHON_MANIFESTS },
+  { segment: "Pods", manifests: ["Podfile"] },
+];
+
+function rebuildable(target: string, listed: string): boolean {
+  const segments = listed.split("/").filter(Boolean);
+  if (segments.some((segment) => REBUILDABLE_CACHES.has(segment))) return true;
+  return REBUILDABLE_FROM_MANIFEST.some(
+    (rule) =>
+      segments.includes(rule.segment) &&
+      rule.manifests.some((manifest) => fs.existsSync(path.join(target, manifest))),
+  );
+}
+
+/**
+ * Ignored files `git worktree remove` would delete without saying so.
+ *
+ * This is the hole the old comment declared and lived with. `git status` reports
+ * an ignored file as nothing at all, so the tree reads clean, the removal is
+ * allowed, and Git deletes the lot — measured on this repo: a `.blend1` autosave
+ * and an ignored folder both vanished from a tree `git status --porcelain`
+ * called empty.
+ *
+ * There is no exact rule for "the project would regenerate this". A `dist/` can
+ * hold the only build of something; a Blender autosave can be the only surviving
+ * version of an afternoon. So the rule is narrow and stated: dependency
+ * directories restorable from a manifest still present in the tree, and caches
+ * derived from files in the tree, are ignorable. Everything else stops the
+ * removal, `dist/` and `build/` included. That keeps more trees than a perfect
+ * rule would, and disk is cheaper than a lost afternoon.
+ *
+ * `--directory` collapses a wholly-ignored folder to one entry, so a
+ * `node_modules` costs one line and not a hundred thousand.
+ */
+function ignoredWorkAtRisk(target: string): { paths: string[]; unknown: boolean } {
+  const listed = gitSync(["-C", target, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"]);
+  if (!listed.ok) return { paths: [], unknown: true };
+  const rows = listed.out.split("\n").map((row) => row.trim()).filter(Boolean);
+  return { paths: rows.filter((row) => !rebuildable(target, row)), unknown: false };
+}
+
+function namedSample(paths: string[]): string {
+  const shown = paths.slice(0, 3).join(", ");
+  return paths.length > 3 ? `${shown} and ${paths.length - 3} more` : shown;
+}
+
+/** True when the directory holds no file at all — only, at most, empty directories. */
+function holdsNoFiles(target: string): boolean {
+  const stack = [target];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false; // cannot see inside it, so cannot promise it is empty
+    }
+    for (const entry of entries) {
+      // isDirectory() is false for a symlink, so a link falls through and stops us.
+      if (entry.isDirectory()) stack.push(path.join(dir, entry.name));
+      else return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Drop one managed worktree, but only when Git agrees it holds nothing.
  *
  * `git worktree remove` without `--force` refuses a tree that still has modified
@@ -149,17 +239,22 @@ function owningRepo(target: string): string | null {
  * art is untracked, exists in no commit, and no diff would carry it. Removing the
  * directory ourselves with `fs.rmSync` destroyed that work and left a stale
  * registration behind in the owning repository.
- *
- * Known limit, deliberate: a file the project's own `.gitignore` covers is invisible
- * to this check, and Git deletes it. We follow Git rather than second-guess it — a
- * repository that ignores a path has declared it disposable, and the alternative is
- * keeping every tree that ever built a `node_modules`.
  */
 function dropManagedWorktree(target: string): { dropped: boolean; reason: string } {
   const repo = owningRepo(target);
   if (repo) {
     if (!headIsReachable(repo, target)) {
       return { dropped: false, reason: "it holds a commit no branch or tag can reach" };
+    }
+    const ignored = ignoredWorkAtRisk(target);
+    if (ignored.unknown) {
+      return { dropped: false, reason: "git could not list what it ignores there, so nothing can vouch for its contents" };
+    }
+    if (ignored.paths.length > 0) {
+      return {
+        dropped: false,
+        reason: `git would delete ignored files it holds (${namedSample(ignored.paths)}) — open it, move anything you need, then remove it yourself`,
+      };
     }
     const result = gitSync(["-C", repo, "worktree", "remove", target]);
     if (result.ok && !fs.existsSync(target)) return { dropped: true, reason: "" };
@@ -183,10 +278,25 @@ function dropManagedWorktree(target: string): { dropped: boolean; reason: string
   if (hasGitLink) {
     return { dropped: false, reason: "its repository is gone, so its contents cannot be recovered" };
   }
+  /*
+   * No `.git` at all, and this was the one place in the desk that deleted a
+   * person's files with nothing vouching for them: a recursive forced remove of
+   * whatever the folder held. "Never a checkout" is a guess about how the folder
+   * got here, not a fact about what is inside it — a worktree whose `.git` file
+   * was lost still holds every byte it ever held. Only an empty shell is swept;
+   * anything with a file in it is reported and left for a person to decide.
+   */
+  if (!holdsNoFiles(target)) {
+    return {
+      dropped: false,
+      reason: "it is no longer a Git worktree and still holds files — open it, move anything you need, then remove it yourself",
+    };
+  }
   try {
-    fs.rmSync(target, { recursive: true, force: true });
+    fs.rmSync(target, { recursive: true });
     return { dropped: true, reason: "" };
   } catch {
+    if (!fs.existsSync(target)) return { dropped: true, reason: "" };
     return { dropped: false, reason: "in use" };
   }
 }

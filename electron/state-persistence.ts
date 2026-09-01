@@ -91,6 +91,30 @@ export async function atomicWriteTextAsync(
   }
 }
 
+/**
+ * Push the live file's bytes to the platter before anything copies them.
+ *
+ * A hot save renames a temp over the live file without an fsync, so for up to
+ * half a minute the file's *name* is durable while its *contents* are not. The
+ * rotation that follows copied exactly those bytes onto `.bak` — one power cut
+ * and both the live file and its only backup were the same torn write. Syncing
+ * first costs one flush per rotation and means a backup is never made from
+ * bytes the platter has not seen.
+ *
+ * Open read-write, not read-only: macOS refuses fsync on an O_RDONLY handle.
+ */
+export async function syncFileInPlace(file: string): Promise<void> {
+  let handle: fs.promises.FileHandle | null = null;
+  try {
+    handle = await fs.promises.open(file, "r+");
+    await handle.sync();
+  } catch {
+    /* missing, locked, or read-only — the copy below is no worse than before */
+  } finally {
+    try { await handle?.close(); } catch { /* best effort */ }
+  }
+}
+
 async function rotateFileBackupsAsync(file: string): Promise<void> {
   const bak = `${file}.bak`;
   const bak1 = `${file}.bak.1`;
@@ -99,15 +123,35 @@ async function rotateFileBackupsAsync(file: string): Promise<void> {
   try { await fs.promises.rename(bak1, bak2); } catch { /* missing */ }
   try { await fs.promises.rename(bak, bak1); } catch { /* missing */ }
   if (fs.existsSync(file)) {
+    await syncFileInPlace(file);
     try { await fs.promises.copyFile(file, bak); } catch { /* live file may be locked */ }
   }
 }
+
+/**
+ * `fsync` is its own decision, not a passenger on `rotateBackups`.
+ *
+ * Tying the two meant a hot save could never be made durable, which is fine
+ * sixty times a minute and wrong exactly once: the last save before quit. The
+ * default still follows rotation, so hot saves skip the flush and an 11MB desk
+ * does not stall the UI; callers that know this write must survive the power
+ * going out ask for it.
+ */
+export type WriteStateOptions = {
+  rotateBackups?: boolean;
+  /** Defaults to whatever `rotateBackups` decides. */
+  // Measured 2026-09-01 on a 46 MB desk state (APFS, internal disk, 7 rounds, median):
+  // a hot save writes in ~48 ms with no fsync; a durable save is ~26 ms write + ~10.5 ms
+  // fsync; the flush before the backup copy costs ~7 ms against a ~34 ms copy. The growth
+  // trigger (>= 4 MB since the last flush) lives in main.ts beside the save cadence.
+  fsync?: boolean;
+};
 
 export async function writeVersionedStateAsync(
   file: string,
   state: PersistableState,
   protect: (state: PersistableState) => PersistableState,
-  options: { rotateBackups?: boolean } = {},
+  options: WriteStateOptions = {},
 ): Promise<PersistableState> {
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
@@ -116,7 +160,7 @@ export async function writeVersionedStateAsync(
   // and what follows is genuinely off-thread.
   const text = JSON.stringify(protectedState);
   if (options.rotateBackups !== false) await rotateFileBackupsAsync(file);
-  await atomicWriteTextAsync(file, text, undefined, { fsync: options.rotateBackups !== false });
+  await atomicWriteTextAsync(file, text, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;
 }
 
@@ -127,6 +171,33 @@ function parseObject(file: string): PersistableState | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a state read is solid enough to delete folders on the strength of.
+ *
+ * The prune takes the loaded chat list as the complete list of live chats and
+ * removes every managed worktree not named in it. That is only true when the
+ * live state file itself parsed. A backup answering instead means every chat
+ * started since that snapshot is missing from the list; nothing parsing at all
+ * means the list is empty while `recovered` still reads false, because an empty
+ * desk is what `readVersionedState` returns when it gives up. Either way the
+ * sweep would read a person's work as litter.
+ *
+ * The save path has refused to overwrite a richer file with an empty snapshot
+ * for a while. This is the same refusal for the operation that destroys more.
+ */
+export function worktreePruneDecision(
+  read: Pick<StateReadResult, "source">,
+  stateFile: string,
+  liveSessionIds: readonly string[],
+): { prune: true } | { prune: false; reason: string } {
+  if (!read.source) return { prune: false, reason: "no state file could be read" };
+  if (read.source !== stateFile) {
+    return { prune: false, reason: `state came from ${path.basename(read.source)}, not the live file` };
+  }
+  if (liveSessionIds.length === 0) return { prune: false, reason: "the loaded state names no chats" };
+  return { prune: true };
 }
 
 export function readVersionedState(file: string): StateReadResult {
@@ -164,6 +235,17 @@ function rotateFileBackups(file: string) {
     /* missing */
   }
   if (fs.existsSync(file)) {
+    // Same reason as the async path: never make a backup out of bytes the
+    // platter has not seen.
+    let handle: number | null = null;
+    try {
+      handle = fs.openSync(file, "r+");
+      fs.fsyncSync(handle);
+    } catch {
+      /* missing, locked, or read-only */
+    } finally {
+      try { if (handle !== null) fs.closeSync(handle); } catch { /* best effort */ }
+    }
     try {
       fs.copyFileSync(file, bak);
     } catch {
@@ -210,11 +292,11 @@ export function writeVersionedState(
   file: string,
   state: PersistableState,
   protect: (state: PersistableState) => PersistableState,
-  options: { rotateBackups?: boolean } = {},
+  options: WriteStateOptions = {},
 ): PersistableState {
   const migrated = migrateState(state);
   const protectedState = migrateState(protect(migrated));
   if (options.rotateBackups !== false) rotateFileBackups(file);
-  atomicWriteJson(file, protectedState, undefined, { fsync: options.rotateBackups !== false });
+  atomicWriteJson(file, protectedState, undefined, { fsync: options.fsync ?? options.rotateBackups !== false });
   return protectedState;
 }

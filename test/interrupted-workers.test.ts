@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { LEGACY_INTERRUPTED_ERROR, normalizeAgentRun } from "../src/lib/subagents";
+import { LEGACY_INTERRUPTED_ERROR, interruptedWorkerError, normalizeAgentRun } from "../src/lib/subagents";
 import { applyChildIdleSync, lineupIsTerminal, reconcilePersistedLineups } from "../src/lib/lineup";
 import { normalizeSession } from "../src/lib/session";
 import type { Session } from "../src/lib/types";
@@ -263,4 +263,39 @@ test("worker-heavy restart reconciliation stays linear at ten thousand chats", (
   assert.equal(healed[0]?.lineup?.rows[0]?.status, "interrupted");
   assert.equal(healed.at(-2)?.lineup?.rows[0]?.status, "interrupted");
   assert.ok(elapsed < 1_500, `worker-heavy restart took ${elapsed.toFixed(1)}ms`);
+});
+
+test("an interrupted worker's message names the folder its work is sitting in", () => {
+  // "Its brief and its work are kept" was true and useless: it named no place,
+  // and the place is the whole point — the person has to go and look at it.
+  const wt = "/nowhere/Library/Application Support/Workhorse/worktrees/sess_a";
+  assert.equal(
+    interruptedWorkerError({ kind: "worktree", path: wt, gitRoot: "/nowhere/repo" }),
+    `Workhorse exited while this worker was running. Its brief and its work are kept in ${wt} — resume it from the chat.`,
+  );
+  assert.match(interruptedWorkerError({ kind: "local" }), /kept in the chat's own folder/);
+  assert.match(interruptedWorkerError({ kind: "cloud", environmentId: "env_1" }), /cloud environment/);
+  assert.match(interruptedWorkerError(), /kept in the chat's own folder/);
+
+  // And it arrives through the run, not just the helper.
+  const run = normalizeAgentRun({ status: "running", startedAt: 1, isolation: "worktree" }, {
+    kind: "worktree",
+    path: wt,
+    gitRoot: "/nowhere/repo",
+  })!;
+  assert.equal(run.status, "interrupted");
+  assert.ok(run.error?.includes(wt), `the path must be quoted, got: ${run.error}`);
+});
+
+test("restoring a worker in its own worktree carries that path into the message", () => {
+  // End to end: the session normalizer is where the environment and the run meet,
+  // and it is the only place that knows both.
+  const wt = "/nowhere/Library/Application Support/Workhorse/worktrees/sess_b";
+  const restored = normalizeSession({
+    ...worker("sess_b", "Render pass"),
+    environment: { kind: "worktree", path: wt, gitRoot: "/nowhere/repo", head: "abc123" },
+    agentRun: { status: "running", startedAt: 1, isolation: "worktree" },
+  } as Session)!;
+  assert.equal(restored.agentRun?.status, "interrupted");
+  assert.ok(restored.agentRun?.error?.includes(wt), `the path must survive the restart, got: ${restored.agentRun?.error}`);
 });

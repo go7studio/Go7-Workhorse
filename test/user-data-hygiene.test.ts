@@ -69,16 +69,35 @@ test("sweepStaleUserData drops Code Cache when the app version changes", () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps live chats and drops the rest", () => {
+test("pruneOrphanWorktrees clears an empty shell and keeps a live chat's folder", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-worktrees-"));
   fs.mkdirSync(path.join(root, "sess_live"));
   fs.writeFileSync(path.join(root, "sess_live", "keep.txt"), "ok");
-  fs.mkdirSync(path.join(root, "sess_gone"));
-  fs.writeFileSync(path.join(root, "sess_gone", "drop.txt"), "gone");
+  // Nothing inside but empty folders: sweeping this destroys nothing.
+  fs.mkdirSync(path.join(root, "sess_gone", "build", "cache"), { recursive: true });
   const pruned = pruneOrphanWorktrees(root, ["sess_live"]);
   assert.deepEqual(pruned.removed, ["sess_gone"]);
   assert.ok(fs.existsSync(path.join(root, "sess_live", "keep.txt")));
   assert.ok(!fs.existsSync(path.join(root, "sess_gone")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees refuses to force-remove a folder that lost its .git but kept its files", () => {
+  // This was `fs.rmSync(target, { recursive: true, force: true })` — the one
+  // place in the desk that deleted a person's files with nothing vouching for
+  // them. "Never a checkout" is a guess about how the folder got here, not a
+  // fact about what is inside it.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-worktrees-unlinked-"));
+  const orphan = path.join(root, "sess_gone");
+  fs.mkdirSync(path.join(orphan, "art"), { recursive: true });
+  fs.writeFileSync(path.join(orphan, "art", "hero.blend"), "the only copy");
+
+  const pruned = pruneOrphanWorktrees(root, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.equal(fs.readFileSync(path.join(orphan, "art", "hero.blend"), "utf8"), "the only copy");
+  assert.match(pruned.kept[0].reason, /still holds files/);
+  assert.match(pruned.kept[0].reason, /remove it yourself/, "a refusal has to say what a person should do");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -87,7 +106,11 @@ test("pruneOrphanWorktrees keeps live chats and drops the rest", () => {
  * untracked: it belongs to no commit, and no diff would carry it. Sweeping the
  * directory with `fs.rmSync` destroyed it. These pin the refusal instead.
  */
-function repoWithWorktree(label: string): { root: string; repo: string; managed: string; wt: string } {
+function repoWithWorktree(
+  label: string,
+  /** Committed in the repository before the worktree exists, so HEAD stays reachable. */
+  tracked: Record<string, string> = {},
+): { root: string; repo: string; managed: string; wt: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `workhorse-prune-${label}-`));
   const repo = path.join(root, "repo");
   const managed = path.join(root, "worktrees");
@@ -97,6 +120,9 @@ function repoWithWorktree(label: string): { root: string; repo: string; managed:
     execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   git(["init", "-q", "."]);
   fs.writeFileSync(path.join(repo, "tracked.txt"), "original\n");
+  for (const [name, body] of Object.entries(tracked)) {
+    fs.writeFileSync(path.join(repo, name), body);
+  }
   git(["add", "-A"]);
   git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"]);
   const wt = path.join(managed, "sess_gone");
@@ -141,6 +167,83 @@ test("pruneOrphanWorktrees drops a clean worktree and leaves no stale registrati
   assert.ok(!fs.existsSync(wt));
   const listed = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" });
   assert.ok(!listed.includes("sess_gone"), "git must forget the worktree it removed");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+/**
+ * Measured on this repository: a worktree holding a `.blend1` autosave and a
+ * wholly-ignored folder reads clean to `git status --porcelain`, `git worktree
+ * remove` allows it without `--force`, and Git deletes both. The old comment
+ * declared this limit and lived with it. These pin the refusal.
+ */
+test("pruneOrphanWorktrees keeps a worktree holding ignored files git would delete", () => {
+  const { root, managed, wt } = repoWithWorktree("ignored", { ".gitignore": "*.blend1\nrendered/\n" });
+  fs.writeFileSync(path.join(wt, "hero.blend1"), "an afternoon of work, autosaved");
+  fs.mkdirSync(path.join(wt, "rendered"));
+  fs.writeFileSync(path.join(wt, "rendered", "frame001.png"), "the only render");
+  assert.equal(
+    execFileSync("git", ["status", "--porcelain"], { cwd: wt, encoding: "utf8" }).trim(),
+    "",
+    "the tree must read clean, or this test proves nothing",
+  );
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.ok(fs.existsSync(path.join(wt, "hero.blend1")), "the autosave must survive");
+  assert.ok(fs.existsSync(path.join(wt, "rendered", "frame001.png")), "and so must the render");
+  assert.match(pruned.kept[0].reason, /ignored files/);
+  assert.match(pruned.kept[0].reason, /hero\.blend1|rendered/, "the refusal must name what it is protecting");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees still drops a tree whose only ignored output is restorable", () => {
+  // The reason this is not simply "refuse on any ignored file": a `node_modules`
+  // beside the `package.json` that rebuilds it is not anyone's work, and keeping
+  // every tree that ever ran an install defeats the sweep.
+  const { root, managed, wt } = repoWithWorktree("restorable", {
+    ".gitignore": "node_modules/\n__pycache__/\n",
+    "package.json": JSON.stringify({ name: "app", version: "1.0.0" }),
+  });
+  fs.mkdirSync(path.join(wt, "node_modules", "left-pad"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "node_modules", "left-pad", "index.js"), "module.exports = 1;");
+  fs.mkdirSync(path.join(wt, "__pycache__"));
+  fs.writeFileSync(path.join(wt, "__pycache__", "mod.pyc"), "bytecode");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, ["sess_gone"], "installed dependencies are not a reason to keep a tree forever");
+  assert.ok(!fs.existsSync(wt));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps a node_modules with no manifest left to rebuild it", () => {
+  // Without the manifest the folder is not a dependency tree any more. It is
+  // just a folder full of somebody's files that happens to carry that name.
+  const { root, managed, wt } = repoWithWorktree("nomanifest", { ".gitignore": "node_modules/\n" });
+  fs.mkdirSync(path.join(wt, "node_modules"), { recursive: true });
+  fs.writeFileSync(path.join(wt, "node_modules", "notes.txt"), "not a package");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.ok(fs.existsSync(path.join(wt, "node_modules", "notes.txt")));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("pruneOrphanWorktrees keeps an ignored build folder, deliberately", () => {
+  // The conservative half of the rule, stated as a test so it cannot be relaxed
+  // by accident: `dist/` is an output, and an output can be the only copy of
+  // something. No rule can tell "the project would rebuild this" from "this is
+  // the only build anyone has", so this side keeps more trees than it must.
+  const { root, managed, wt } = repoWithWorktree("dist", { ".gitignore": "dist/\n" });
+  fs.mkdirSync(path.join(wt, "dist"));
+  fs.writeFileSync(path.join(wt, "dist", "app.wasm"), "shipped build");
+
+  const pruned = pruneOrphanWorktrees(managed, []);
+
+  assert.deepEqual(pruned.removed, []);
+  assert.match(pruned.kept[0].reason, /ignored files/);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -234,6 +337,34 @@ test("pruneOrphanWorktrees destroys nothing when git cannot be run", () => {
     else process.env.GIT = realGit;
   }
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("a state replacement file still being written is never swept", () => {
+  // `workhorse-state.json.replace-<pid>` is not litter while a save is mid-
+  // rename: it *is* the live state, parked for the instant the new file takes to
+  // land. Sweeping it — which a second launch used to do, before the sweep moved
+  // behind the single-instance lock — deletes the desk.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-hygiene-replace-"));
+  try {
+    const live = path.join(root, "workhorse-state.json.replace-8123");
+    const stale = path.join(root, "workhorse-state.json.replace-404");
+    const staleTemp = path.join(root, "workhorse-state.json.tmp-404-1-abc");
+    fs.writeFileSync(live, "{\"sessions\":[{\"id\":\"sess_a\"}]}");
+    fs.writeFileSync(stale, "{}");
+    fs.writeFileSync(staleTemp, "{}");
+    const old = Date.now() - 3 * 60 * 60 * 1000;
+    fs.utimesSync(stale, old / 1000, old / 1000);
+    fs.utimesSync(staleTemp, old / 1000, old / 1000);
+
+    const swept = sweepStaleUserData(root, { now: Date.now() });
+
+    assert.ok(fs.existsSync(live), "a replacement file written seconds ago may be another desk's live state");
+    assert.ok(!swept.removed.includes(path.basename(live)));
+    assert.ok(swept.removed.includes(path.basename(stale)), "an hours-old one is litter");
+    assert.ok(swept.removed.includes(path.basename(staleTemp)));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("attachment write temps older than a day are swept; fresh ones and blobs are not", () => {

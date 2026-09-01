@@ -114,6 +114,35 @@ export function mergeCustomUsageSnapshot(
 
 export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base URL, model, and API key.";
 
+/**
+ * What a failed custom call actually means, in the words of the thing that
+ * needs fixing.
+ *
+ * Every non-2xx used to be rethrown as one blob — the status number and
+ * whatever the host put in the body. A plan-exhausted Grok answered with
+ * "Internal error" and that is all anyone saw for a week, while the fix was to
+ * top up an account. The status already says which door closed; this says it
+ * out loud and keeps the host's own words after it, because the host is still
+ * the authority on its own failure.
+ */
+export function customHttpErrorMessage(status: number, detail = ""): string {
+  const said = detail.trim().replace(/\s+/g, " ").slice(0, 180);
+  const cause =
+    status === 401 || status === 403
+      ? "the endpoint rejected the API key"
+      : status === 404
+        ? "the model or the path was not found"
+        : status === 413
+          ? "the request was too large"
+          : status === 429
+            ? "rate limited, and it was still limited after the retries"
+            : status === 503 || status === 504
+              ? "the endpoint is busy or gone"
+              : "";
+  const head = cause ? `Custom model HTTP ${status}: ${cause}` : `Custom model HTTP ${status}`;
+  return said ? `${head} — ${said}` : head;
+}
+
 const KNOWN_WINDOWS: Record<string, number> = {
   "minimax-m2.1": 204_800,
 };
@@ -696,7 +725,7 @@ export async function streamCustomHttp(
     }
     if (!response.ok) {
       const detail = (await response.text().catch(() => "")).slice(0, 400);
-      throw new Error(`Custom model HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+      throw new Error(customHttpErrorMessage(response.status, detail));
     }
     if (!response.body) throw new Error("Custom model returned no body");
     const reader = response.body.getReader();

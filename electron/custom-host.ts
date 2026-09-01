@@ -11,6 +11,7 @@ import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import { hydrateChatImages, hydrateHistoryMessage } from "./attachment-store";
+import { spawnCwd } from "./spawn-cwd";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
@@ -353,6 +354,14 @@ export class CustomSessionHost {
     const baseMessageCount = messages.length;
     const preface = customPrefaceForLimits(input.preface, input.mode, input.sandbox);
     const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: input.cwd });
+    /*
+     * The folder a tool runs in, checked the way every other vendor host checks
+     * it. Claude and Codex route their cwd through spawnCwd so a folder that has
+     * moved names itself; this host passed the raw path, so the same missing
+     * folder came back as an ENOENT naming the command instead. Read at each
+     * call, not once, so the timing of the failure does not move.
+     */
+    const toolCwd = () => spawnCwd(input.cwd) ?? input.cwd;
     const mcpTools = await mcp.tools();
     let text = "";
     const startedAt = this.now();
@@ -481,7 +490,7 @@ export class CustomSessionHost {
             await this.executeTool(use, {
               mode,
               sandbox,
-              cwd: input.cwd,
+              cwd: toolCwd(),
               sessionId: input.sessionId,
               folders: input.folders,
               parentId: input.parentId,
@@ -676,7 +685,7 @@ export class CustomSessionHost {
                 mode,
                 sandbox,
                 grants: input.permissionGrants,
-                cwd: input.cwd,
+                cwd: toolCwd(),
                 sessionId: input.sessionId,
                 folders: input.folders,
               });
@@ -738,7 +747,7 @@ export class CustomSessionHost {
             : await this.executeTool(use, {
                 mode,
                 sandbox,
-                cwd: input.cwd,
+                cwd: toolCwd(),
                 sessionId: input.sessionId,
                 folders: input.folders,
                 parentId: input.parentId,

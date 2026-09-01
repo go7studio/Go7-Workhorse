@@ -29,7 +29,7 @@ import {
   grokBotShimWindowsCmd,
   installGrokBotShimKeepalive,
 } from "../electron/grok-bot-shim-keepalive";
-import { createGrokBotShimServer } from "../electron/grok-bot-shim-host";
+import { createGrokBotShimServer, probeGrokBotShim } from "../electron/grok-bot-shim-host";
 import {
   grokBotInboxFromStatePath,
   listGrokBotPending,
@@ -455,4 +455,77 @@ test("the desk decides it from the profile it was pinned to", () => {
   // and no unit test would notice.
   const main = readFileSync(new URL("../electron/main.ts", import.meta.url), "utf8");
   assert.match(main, /manageKeepalive: !workhorseUserDataOverride\(\)/, "main must not manage the agent on an isolated profile");
+});
+
+test("the liveness probe finds the shim on the port its own row names", async () => {
+  /*
+   * The probe dialled 8787 and nothing else, so a shim on the port its own row
+   * names was invisible: it passed the identity check, took calls, and still
+   * read as dead — the desk went on relaunching a shim that was already up.
+   *
+   * Nothing here depends on what is or is not listening on 8787 on the machine
+   * running the test. The fake counts what reaches it, which is the honest way
+   * to ask whether the probe went to the right door.
+   */
+  let port = 0;
+  let hits = 0;
+  const shim = http.createServer((_req, res) => {
+    hits += 1;
+    const raw = Buffer.from(JSON.stringify(grokBotPublicHealth(port)));
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Length": raw.length });
+    res.end(raw);
+  });
+  // A server that answers /health but is not our shim: it names another port.
+  let strangerPort = 0;
+  const stranger = http.createServer((_req, res) => {
+    const raw = Buffer.from(JSON.stringify({ ok: true, port: 11434 }));
+    res.writeHead(200, { "Content-Type": "application/json", "Content-Length": raw.length });
+    res.end(raw);
+  });
+  try {
+    await new Promise<void>((resolve) => shim.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => stranger.listen(0, "127.0.0.1", resolve));
+    port = (shim.address() as { port: number }).port;
+    strangerPort = (stranger.address() as { port: number }).port;
+    assert.notEqual(port, Number(GROK_BOT_SHIM_PORT), "the fixture must not sit on the default port");
+
+    // Given the row's port, the probe finds it.
+    assert.equal(await probeGrokBotShim(400, port), true);
+    assert.equal(hits, 1, "the probe went to the port the row named");
+
+    // Without it, the probe never reaches this shim at all. Whatever is or is
+    // not on 8787 on this machine, it is not this listener.
+    await probeGrokBotShim(400);
+    assert.equal(hits, 1, "a probe with no row port never knocks on the row's port");
+
+    // A local server that answers /health is not the shim unless it agrees
+    // about which port it is on.
+    assert.equal(await probeGrokBotShim(400, strangerPort), false);
+    // And a closed port is dead, not alive.
+    const closed = http.createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const deadPort = (closed.address() as { port: number }).port;
+    await new Promise<void>((resolve) => closed.close(() => resolve()));
+    assert.equal(await probeGrokBotShim(400, deadPort), false);
+  } finally {
+    await new Promise<void>((resolve) => shim.close(() => resolve()));
+    await new Promise<void>((resolve) => stranger.close(() => resolve()));
+  }
+
+  // The health reply only counts when it names the port that was dialled.
+  assert.equal(isGrokBotShimHealth({ ok: true, port: 9001 }, 9001), true);
+  assert.equal(isGrokBotShimHealth({ ok: true, port: 9001 }), false, "no port means the default");
+  assert.equal(isGrokBotShimHealth({ ok: true, port: Number(GROK_BOT_SHIM_PORT) }, 9001), false);
+  assert.equal(isGrokBotShimHealth({ ok: false, port: 9001 }, 9001), false);
+
+  // The caller holds the row: ensureGrokBotShim already reads it to mint the
+  // token, and every probe below that read now uses its port.
+  const host = readFileSync(path.join(ROOT, "electron", "grok-bot-shim-host.ts"), "utf8");
+  assert.match(host, /const shim = readOrMintShimSecrets\(input\.userData\);/, "the row is kept, not discarded");
+  assert.equal(
+    (host.match(/probeGrokBotShim\(undefined, shim\.port\)/g) ?? []).length,
+    3,
+    "all three liveness checks — already running, after the agent, after the spawn — use the row's port",
+  );
+  assert.doesNotMatch(host, /await probeGrokBotShim\(\)/, "no probe still assumes the default port");
 });

@@ -119,10 +119,20 @@ export function grokBotHealthPayload(inbox: string, wake: boolean, port = Number
   return { ok: true, inbox, port, wake };
 }
 
-export function isGrokBotShimHealth(payload: unknown): boolean {
+/**
+ * Is the thing that answered actually our shim?
+ *
+ * The port is half the answer: anything on this machine can serve `/health`, so
+ * a reply only counts when it names the port we dialled. That port is the one
+ * the install's own row gives, not always 8787 — a shim on its row's port read
+ * as dead here while passing the identity check, so the desk relaunched a shim
+ * that was already up.
+ */
+export function isGrokBotShimHealth(payload: unknown, shimPort?: number): boolean {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
   const row = payload as { ok?: unknown; port?: unknown };
-  return row.ok === true && Number(row.port) === Number(GROK_BOT_SHIM_PORT);
+  const expected = Number(shimPort ?? GROK_BOT_SHIM_PORT);
+  return row.ok === true && Number(row.port) === expected;
 }
 
 export function grokBotChatSse(reqId: string, answer: string, now = Math.floor(Date.now() / 1000)): string {

@@ -93,7 +93,7 @@ test("a bare PATH with nothing installed still resolves to nothing", () => {
     existsSync: () => false,
     readFile: () => "",
   });
-  assert.equal(grok.binary, null);
+  assert.equal(posix(grok.binary), null);
   assert.equal(grok.launchable, false);
   assert.equal(grok.launchBlocker, GROK_CLI_NOT_ON_PATH);
 });
@@ -109,8 +109,8 @@ test("Codex with an ACP server, a login and no CLI is connected and not launchab
     readFile: () => "",
   });
   assert.equal(detected.connected, true, "the login artifact is on disk");
-  assert.equal(detected.acpBinary, acp);
-  assert.equal(detected.cliBinary, null, "no codex binary anywhere the desk can see");
+  assert.equal(posix(detected.acpBinary), posix(acp));
+  assert.equal(posix(detected.cliBinary), null, "no codex binary anywhere the desk can see");
   // codex-launch.ts reads cliBinary as CODEX_PATH and throws CODEX_CLI_NOT_INSTALLED
   // without it. Before this field, that throw was the first anyone heard of it —
   // a second after Auto had already assigned the slice.
@@ -212,7 +212,7 @@ test("Cursor is not launchable when the only thing found is the editor", () => {
     readFile: () => "",
     probeAuth: () => undefined,
   });
-  assert.equal(detected.binary, null, "the editor is not a spawnable ACP command");
+  assert.equal(posix(detected.binary), null, "the editor is not a spawnable ACP command");
   assert.equal(detected.launchable, false);
   assert.equal(detected.launchBlocker, CURSOR_CLI_NOT_ON_PATH);
 
@@ -225,7 +225,7 @@ test("Cursor is not launchable when the only thing found is the editor", () => {
     readFile: () => "",
     probeAuth: () => true,
   });
-  assert.equal(working.binary, agent);
+  assert.equal(posix(working.binary), agent);
   assert.equal(working.launchable, true);
   assert.equal(working.launchBlocker, undefined);
 });
@@ -323,7 +323,7 @@ test("Claude reports the same split: an ACP server and a login, no CLI", () => {
     keychainHasLogin: () => false,
   });
   assert.equal(blocked.connected, true, "the API key is a login");
-  assert.equal(blocked.cliBinary, null);
+  assert.equal(posix(blocked.cliBinary), null);
   assert.equal(blocked.launchable, false);
   assert.equal(blocked.launchBlocker, CLAUDE_CLI_NOT_ON_PATH);
 
@@ -355,7 +355,7 @@ test("a Finder-launched desk finds the Claude ACP server outside the bare PATH",
     env: { PATH: FINDER_PATH },
     existsSync: onlyOnDisk(acp),
   });
-  assert.equal(launch?.acpFile, acp, "the ACP server must be found off the desk's installer directories");
+  assert.equal(posix(launch?.acpFile), acp, "the ACP server must be found off the desk's installer directories");
   assert.equal(launch?.command, acp);
 
   // And the whole detect agrees: both halves found, so Claude can start.
@@ -367,7 +367,7 @@ test("a Finder-launched desk finds the Claude ACP server outside the bare PATH",
     readFile: () => "",
     keychainHasLogin: () => false,
   });
-  assert.equal(detected.acpBinary, acp);
+  assert.equal(posix(detected.acpBinary), posix(acp));
   assert.equal(posix(detected.cliBinary), `${BREW_BIN}/claude`);
   assert.equal(detected.connected, true);
   assert.equal(detected.launchable, true);
@@ -385,7 +385,7 @@ test("a missing ACP server is its own blocker, named apart from the CLI", () => 
     keychainHasLogin: () => false,
     moduleDirs: [],
   });
-  assert.equal(claude.acpBinary, null);
+  assert.equal(posix(claude.acpBinary), null);
   assert.equal(posix(claude.cliBinary), `${BREW_BIN}/claude`);
   assert.equal(claude.connected, false, "no server to speak to is not a connection");
   assert.equal(claude.launchable, false);
@@ -400,7 +400,7 @@ test("a missing ACP server is its own blocker, named apart from the CLI", () => 
     readFile: () => "",
     moduleDirs: [],
   });
-  assert.equal(codex.acpBinary, null);
+  assert.equal(posix(codex.acpBinary), null);
   assert.equal(posix(codex.cliBinary), `${BREW_BIN}/codex`);
   assert.equal(codex.launchable, false);
   assert.equal(codex.launchBlocker, CODEX_ACP_NOT_ON_PATH);

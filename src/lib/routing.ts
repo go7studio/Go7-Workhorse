@@ -25,7 +25,21 @@ export type RoutingCapacity = {
   period?: "weekly" | "monthly" | "unknown";
 };
 
-export type RoutingCandidate = {
+/**
+ * A vendor can be linked and still unable to start. Codex is the case that
+ * proved it: the login artifact is on disk, so the link says connected, while
+ * the CLI its launch shells out to is not on the desk's PATH — Auto assigned a
+ * slice to a vendor that threw "Codex CLI not found" a second later. The
+ * detectors (electron/*-login.ts) decide this; routing only reads it.
+ */
+export type VendorLaunchState = {
+  /** Absent means unknown, which routing treats as launchable. Only `false` blocks. */
+  launchable?: boolean;
+  /** One line naming what is missing, for the routing miss text. */
+  launchBlocker?: string;
+};
+
+export type RoutingCandidate = VendorLaunchState & {
   provider: ProviderId;
   model: string;
   label: string;
@@ -181,6 +195,15 @@ export function routingCandidatesForDesk(
   for (const provider of ["grok", "codex", "claude", "cursor"] as const) {
     const link = settings.llms[provider];
     if (!link.connected || link.enabled === false) continue;
+    // A blocked vendor still produces candidates: dropping it here would leave
+    // describeRoutingMiss with nothing to name, and "no connected vendors" is
+    // the wrong answer for a vendor that is connected and cannot start.
+    // rankRoutingCandidates is what refuses to pick these.
+    const gate = link as VendorLaunchState;
+    const launchGate: VendorLaunchState =
+      gate.launchable === false
+        ? { launchable: false, launchBlocker: gate.launchBlocker?.trim() || `${provider} cannot start on this desk` }
+        : {};
     const capacity = status.get(provider === "cursor" ? "cursor:cursor-models" : provider);
     const plan = plans[provider];
     for (const model of modelsFor(provider)) {
@@ -203,6 +226,7 @@ export function routingCandidatesForDesk(
         provider,
         model: model.id,
         label: model.name,
+        ...launchGate,
         connected: !capacity?.holding,
         contextWindow: contextWindowFor(provider, model.id),
         profile: routingProfileForModel(provider, model.id),
@@ -464,22 +488,38 @@ export function describeRoutingMiss(
   if (candidates.length === 0) return "no connected vendors";
   const connected = candidates.filter((candidate) => candidate.connected);
   if (connected.length === 0) return "no connected vendors";
-  const allowed = connected.filter((candidate) => settings.allowLocal || !candidate.profile.local);
-  if (allowed.length === 0) return "local models are off";
+  // A vendor that is connected and cannot start is the one miss the old text
+  // could not describe: it read "no capable route" while the reason — a CLI
+  // missing from the desk's PATH — was known and one line long.
+  const blockers = [
+    ...new Set(
+      connected
+        .filter((candidate) => candidate.launchable === false)
+        .map((candidate) => candidate.launchBlocker)
+        .filter((reason): reason is string => Boolean(reason)),
+    ),
+  ];
+  const launchable = connected.filter((candidate) => candidate.launchable !== false);
+  if (launchable.length === 0) {
+    return blockers.length ? `no vendor can start: ${blockers.join("; ")}` : "no vendor can start";
+  }
+  const skipped = blockers.length ? ` (skipped: ${blockers.join("; ")})` : "";
+  const allowed = launchable.filter((candidate) => settings.allowLocal || !candidate.profile.local);
+  if (allowed.length === 0) return `local models are off${skipped}`;
   const notExcluded = allowed.filter((candidate) => !routingIdentityExcluded(candidate, request.exclude));
-  if (notExcluded.length === 0) return "all candidates are excluded";
+  if (notExcluded.length === 0) return `all candidates are excluded${skipped}`;
   const roleOk = notExcluded.filter((candidate) => !isGrokBotCandidate(candidate) || grokBotAllowedOnRoute(request));
-  if (roleOk.length === 0) return "all candidates are excluded";
+  if (roleOk.length === 0) return `all candidates are excluded${skipped}`;
   const capable = roleOk.filter((candidate) => supports(candidate.profile, required));
   if (capable.length === 0) {
     const need = INPUT_KEYS.filter((key) => required[key]);
-    return `no vendor accepts ${need.join(", ") || "the required inputs"}`;
+    return `no vendor accepts ${need.join(", ") || "the required inputs"}${skipped}`;
   }
   if (request.contextNeed) {
     const roomy = capable.filter((candidate) => !candidate.contextWindow || candidate.contextWindow >= request.contextNeed!);
-    if (roomy.length === 0) return "no vendor window holds this conversation";
+    if (roomy.length === 0) return `no vendor window holds this conversation${skipped}`;
   }
-  return "no capable route";
+  return `no capable route${skipped}`;
 }
 
 /**
@@ -871,6 +911,7 @@ export function rankRoutingCandidates(
   const eligible = candidates.filter(
     (candidate) =>
       candidate.connected &&
+      candidate.launchable !== false &&
       (settings.allowLocal || !candidate.profile.local) &&
       candidate.profile.intelligence >= minimum,
   );
@@ -879,6 +920,9 @@ export function rankRoutingCandidates(
     : 0;
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
+    // Connected is not launchable. A vendor whose CLI is missing cannot be
+    // assigned work, however well it scores.
+    if (candidate.launchable === false) continue;
     if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
     if (routingIdentityExcluded(candidate, request.exclude)) continue;
     if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) continue;

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BotAccessDefaults, PermissionMode, SandboxProfile } from "../src/lib/types";
-import { isInsideAsar, localAppDataRoot, runningInElectron, workhorseToolBin } from "./desk-path";
+import { extraDeskDirs, isInsideAsar, localAppDataRoot, runningInElectron, workhorseToolBin } from "./desk-path";
 
 const LOGIN_FILES = ["auth.json", "auth.json.bak", "credentials.json"];
 const PACKAGE_NAME = "@agentclientprotocol/codex-acp";
@@ -14,6 +14,10 @@ export const CODEX_ACP_NOT_INSTALLED =
 export const CODEX_CLI_NOT_INSTALLED =
   "Codex CLI not found. Install Codex, or set CODEX_PATH to the codex binary.";
 
+/** One line, for the vendor status row and the routing miss text. */
+export const CODEX_CLI_NOT_ON_PATH = "Codex CLI not on the desk's PATH";
+export const CODEX_ACP_NOT_ON_PATH = "Codex ACP not on the desk's PATH";
+
 export type CodexLoginDetectInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;
@@ -21,6 +25,8 @@ export type CodexLoginDetectInput = {
   existsSync?: (filePath: string) => boolean;
   listDir?: (dirPath: string) => string[];
   pathDirs?: string[];
+  /** Where installers put binaries. Injected so tests never read this machine. */
+  extraDirs?: string[];
   readFile?: (filePath: string) => string;
   moduleDirs?: string[];
   nodeBinary?: string;
@@ -30,6 +36,14 @@ export type CodexLoginDetectInput = {
 
 export type CodexLoginDetectResult = {
   connected: boolean;
+  /**
+   * Connected says a login exists. Launchable says the desk can actually start
+   * the vendor: the ACP server and the CLI it shells out to are both on disk
+   * where this process can see them. Routing needs the second, not the first.
+   */
+  launchable: boolean;
+  /** Why not, in one line. Empty when launchable. */
+  launchBlocker?: string;
   binary: string | null;
   cliBinary: string | null;
   acpBinary: string | null;
@@ -115,6 +129,22 @@ function lookOnPath(
     }
   }
   return null;
+}
+
+/**
+ * A desk launched from Finder or launchd inherits PATH=/usr/bin:/bin:/usr/sbin:/sbin,
+ * so /opt/homebrew/bin — where the Codex installer puts the binary — is not on
+ * it. Resolving from that PATH alone reported Codex as never installed and the
+ * launch died a second later with "Codex CLI not found". claude-login has read
+ * these directories since the same bug hit Claude.
+ */
+function deskDirsFor(
+  input: CodexLoginDetectInput,
+  homedir: string,
+  env: NodeJS.Dict<string>,
+  platform: NodeJS.Platform,
+): string[] {
+  return input.extraDirs ?? extraDeskDirs(homedir, env, platform);
 }
 
 function listNames(dirPath: string, listDir?: (dirPath: string) => string[]): string[] {
@@ -246,6 +276,7 @@ function launchForFile(
 /** ACP stdio server: override, exe on disk, then node + package bin. Never a phantom name. */
 export function resolveCodexAcpLaunch(input: CodexLoginDetectInput = {}): CodexAcpLaunch | null {
   const env = input.env ?? process.env;
+  const homedir = input.homedir ?? os.homedir();
   const platform = input.platform ?? process.platform;
   const existsSync = input.existsSync ?? ((filePath: string) => fs.existsSync(filePath));
   const pathDirs = input.pathDirs ?? (env.PATH ?? env.Path ?? "").split(path.delimiter);
@@ -255,6 +286,9 @@ export function resolveCodexAcpLaunch(input: CodexLoginDetectInput = {}): CodexA
   const exeNames = platform === "win32" ? ["codex-acp.exe"] : ["codex-acp"];
   const onPath = lookOnPath(exeNames, pathDirs, existsSync);
   if (onPath) return launchForFile(onPath, input, existsSync, pathDirs);
+
+  const onDesk = lookOnPath(exeNames, deskDirsFor(input, homedir, env, platform), existsSync);
+  if (onDesk) return launchForFile(onDesk, input, existsSync, pathDirs);
 
   const owned = workhorseAcpExe(input, existsSync);
   if (owned) return launchForFile(owned, input, existsSync, pathDirs);
@@ -307,8 +341,11 @@ export function resolveCodexCliBinary(input: CodexLoginDetectInput = {}): string
   const exeNames = platform === "win32" ? ["codex.exe"] : ["codex"];
   const onPathExe = lookOnPath(exeNames, pathDirs, existsSync);
   if (onPathExe) return onPathExe;
+  const deskDirs = deskDirsFor(input, homedir, env, platform);
+  const onDeskExe = lookOnPath(exeNames, deskDirs, existsSync);
+  if (onDeskExe) return onDeskExe;
   if (platform === "win32") {
-    const cmd = lookOnPath(["codex.cmd", "codex"], pathDirs, existsSync);
+    const cmd = lookOnPath(["codex.cmd", "codex"], [...pathDirs, ...deskDirs], existsSync);
     if (cmd) return cmd;
   }
   return null;
@@ -325,8 +362,21 @@ export function detectCodexLogin(input: CodexLoginDetectInput = {}): CodexLoginD
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveCodexCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
   const connected = Boolean(acpBinary && hasLoginArtifact(codexHome, existsSync, env));
+  // A login is not a launch. codex-launch reads cliBinary as CODEX_PATH, so a
+  // desk that found the ACP server but not the CLI reported Codex connected and
+  // then threw a second into the slice. Say so here instead.
+  const launchBlocker = !acpBinary ? CODEX_ACP_NOT_ON_PATH : !cliBinary ? CODEX_CLI_NOT_ON_PATH : undefined;
   const accessDefaults = detectCodexAccessDefaults({ ...input, env, homedir, platform, existsSync, pathDirs });
-  return { connected, binary: acpBinary, cliBinary, acpBinary, codexHome, ...(accessDefaults ? { accessDefaults } : {}) };
+  return {
+    connected,
+    launchable: !launchBlocker,
+    ...(launchBlocker ? { launchBlocker } : {}),
+    binary: acpBinary,
+    cliBinary,
+    acpBinary,
+    codexHome,
+    ...(accessDefaults ? { accessDefaults } : {}),
+  };
 }
 
 export function isElectronAcpCommand(

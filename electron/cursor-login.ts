@@ -3,10 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { CURSOR_ACP_NOT_INSTALLED } from "../src/lib/cursor-lane";
+import { extraDeskDirs } from "./desk-path";
 import { detectCursorAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
 
 export { CURSOR_ACP_NOT_INSTALLED };
+
+/** One line, for the vendor status row and the routing miss text. */
+export const CURSOR_CLI_NOT_ON_PATH = "Cursor CLI not on the desk's PATH";
 
 export type CursorLoginDetectInput = {
   /** Injected so a test never reads this machine's Cursor config. */
@@ -17,12 +21,22 @@ export type CursorLoginDetectInput = {
   existsSync?: (filePath: string) => boolean;
   readdir?: (dirPath: string) => string[];
   pathDirs?: string[];
+  /** Where installers put binaries. Injected so tests never read this machine. */
+  extraDirs?: string[];
   probeBinary?: (filePath: string, prefixArgs?: string[]) => boolean;
   probeAuth?: (filePath: string, prefixArgs?: string[]) => boolean | undefined;
 };
 
 export type CursorLoginDetectResult = {
   connected: boolean;
+  /**
+   * Connected says a login exists. Launchable says the desk can actually start
+   * the vendor — the cursor-agent binary is on disk where this process can see
+   * it. Routing needs the second, not the first.
+   */
+  launchable: boolean;
+  /** Why not, in one line. Empty when launchable. */
+  launchBlocker?: string;
   needsAuth: boolean;
   binary: string | null;
   prefixArgs: string[];
@@ -155,6 +169,19 @@ export function resolveCursorBinary(input: CursorLoginDetectInput = {}): string 
   const homeBin = join(homedir, ".local", "bin", ambiguousAgent);
   if (existsSync(homeBin) && probeBinary(homeBin)) return homeBin;
 
+  // A desk launched from Finder or launchd inherits PATH=/usr/bin:/bin:/usr/sbin:/sbin,
+  // so a cursor-agent installed under /opt/homebrew/bin is invisible above and
+  // Cursor reports itself as never installed. Only the unambiguous name is
+  // looked up here: probing a bare `agent` found in an installer directory
+  // would spawn whatever happens to carry that name.
+  const onDesk = lookOnPath(
+    [cursorAgent],
+    input.extraDirs ?? extraDeskDirs(homedir, env, platform),
+    existsSync,
+    join,
+  );
+  if (onDesk) return onDesk;
+
   // Official Windows CLI: node.exe + index.js under %LOCALAPPDATA%\cursor-agent\versions.
   // The editor (Cursor.exe) and the .cmd wrappers are not spawnable ACP commands.
   const winPack = resolveCursorWindowsPackage({ ...input, env, platform, existsSync });
@@ -209,7 +236,15 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   const binary = resolveCursorBinary(resolved);
   const prefixArgs = resolveCursorPrefixArgs(resolved);
   if (!binary || isCursorAppCommand(binary) || isGrokCommand(binary)) {
-    return { connected: false, needsAuth: false, binary: null, prefixArgs: [], cursorHome };
+    return {
+      connected: false,
+      launchable: false,
+      launchBlocker: CURSOR_CLI_NOT_ON_PATH,
+      needsAuth: false,
+      binary: null,
+      prefixArgs: [],
+      cursorHome,
+    };
   }
   const envAuth = Boolean(env.CURSOR_API_KEY?.trim() || env.CURSOR_AUTH_TOKEN?.trim());
   const authProbe = envAuth ? true : (input.probeAuth ?? ((file) => probeCursorAuth(file, prefixArgs)))(binary);
@@ -218,6 +253,9 @@ export function detectCursorLogin(input: CursorLoginDetectInput = {}): CursorLog
   const accessDefaults = detectCursorAccessDefaults({ home: cursorHome, join, readFile, env });
   return {
     connected: loggedIn,
+    // The binary resolved and passed the app/grok rejection above, so a launch
+    // has a command to spawn. Whether the login behind it is good is `connected`.
+    launchable: true,
     needsAuth: !loggedIn,
     binary,
     prefixArgs,

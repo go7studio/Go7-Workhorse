@@ -376,11 +376,12 @@ export function workerTightening(prior: WorkerAccessPrior | undefined): BotAcces
 export function workerAccess(input: {
   inherited: DeskAccess;
   owned: boolean;
+  readOnly?: boolean;
   prior?: WorkerAccessPrior;
 }): DeskAccess {
   const seat: DeskAccess = {
     mode: input.owned ? pathOwnerMode(input.inherited.mode) : input.inherited.mode,
-    sandbox: input.inherited.sandbox,
+    sandbox: input.readOnly ? "read-only" : input.inherited.sandbox,
   };
   return tighterAccess(seat, workerTightening(input.prior));
 }

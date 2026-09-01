@@ -5,11 +5,13 @@ import {
   assertSharedWrite,
   claimSharedFiles,
   fileContentsFingerprint,
+  nestedWorkerPolicy,
   normalizeAgentRun,
   overlappingAgentFiles,
   releaseCancelledSessionLeases,
   releaseDeletedSessionLeases,
   releaseSessionLeases,
+  refreshSharedFileFingerprint,
   resolveWorkerIsolation,
   workerMayWrite,
 } from "../src/lib/subagents";
@@ -29,6 +31,25 @@ test("omitted isolation for an independent writer is worktree, matching the docu
 
 test("nested helpers stay shared even when a caller asks for a worktree", () => {
   assert.equal(resolveWorkerIsolation({ isolation: "worktree", nested: true }), "shared");
+  const policy = nestedWorkerPolicy({
+    nested: true,
+    parentEnvironment: { kind: "worktree", path: "/managed/worker", gitRoot: "/repo", head: "abc" },
+    projectFolder: "/repo",
+  });
+  assert.deepEqual(policy, {
+    projectFolder: "/managed/worker",
+    isolation: "shared",
+    role: "helper",
+    readOnly: true,
+    mayReuse: false,
+    mayOwnPaths: false,
+  });
+  assert.equal(workerMayWrite(policy.role), false);
+  assert.equal(nestedWorkerPolicy({
+    nested: true,
+    parentEnvironment: { kind: "local" },
+    projectFolder: "/repo",
+  }).projectFolder, "/repo");
 });
 
 test("review-only auditors cannot take a write lease", () => {
@@ -83,6 +104,41 @@ test("two shared writers cannot claim the same path, and a fingerprint change bl
     currentFingerprint: fileContentsFingerprint("v1"),
   });
   assert.equal(fresh.ok, true);
+});
+
+test("a completed owner write advances only that owner's fingerprint", () => {
+  const first = claimSharedFiles({
+    leases: [],
+    sessionId: "wren",
+    files: [{ path: "src/lib/store.tsx", fingerprint: fileContentsFingerprint("v1") }],
+  });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const refreshed = refreshSharedFileFingerprint({
+    leases: first.leases,
+    sessionId: "wren",
+    path: "/repo/src/lib/store.tsx",
+    root: "/repo",
+    fingerprint: fileContentsFingerprint("v2-owner-write"),
+  });
+  assert.equal(assertSharedWrite({
+    leases: refreshed,
+    sessionId: "wren",
+    path: "src/lib/store.tsx",
+    currentFingerprint: fileContentsFingerprint("v2-owner-write"),
+  }).ok, true, "the owner's next edit sees its completed write");
+  assert.equal(assertSharedWrite({
+    leases: refreshed,
+    sessionId: "wren",
+    path: "src/lib/store.tsx",
+    currentFingerprint: fileContentsFingerprint("v3-someone-else-wrote"),
+  }).ok, false, "a disk change without the owner's completion event stays stale");
+  assert.equal(refreshSharedFileFingerprint({
+    leases: refreshed,
+    sessionId: "dexter",
+    path: "src/lib/store.tsx",
+    fingerprint: fileContentsFingerprint("forged"),
+  }), refreshed, "another session cannot advance the owner's lease");
 });
 
 test("path leases prevent the same file being assigned across separate worktrees", () => {

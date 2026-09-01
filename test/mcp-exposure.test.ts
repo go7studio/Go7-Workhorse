@@ -49,6 +49,67 @@ test("Link lists the versioned contract tools; older names still dispatch", () =
   assert.deepEqual([...EXTERNAL_RUNTIME_ALLOW].slice().sort(), [...LINK_TOOLS, ...LINK_COMPAT_TOOLS].sort());
 });
 
+test("spawn paths describe scope evidence instead of containment", () => {
+  const paths = mcpToolInputSchema("workhorse_spawn_agent")?.properties?.paths as { description?: string } | undefined;
+  assert.match(paths?.description ?? "", /Expected repo-relative paths used for scope checks and changed-file reporting/);
+  assert.doesNotMatch(paths?.description ?? "", /files this worker may change/i);
+});
+
+test("a nested helper defaults to its parent worktree and remains local, shared, and read-only", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-nested-cwd-"));
+  const linked = path.join(dir, "linked");
+  const workerTree = path.join(dir, "worker-tree");
+  mkdirSync(linked);
+  mkdirSync(workerTree);
+  const statePath = path.join(dir, "state.json");
+  writeFileSync(statePath, JSON.stringify({
+    settings: {},
+    projects: [{ id: "project", folders: [{ path: linked }] }],
+    sessions: [
+      { id: "root", title: "Root", provider: "codex", projectId: "project", messages: [] },
+      {
+        id: "worker",
+        title: "Wren · review",
+        provider: "codex",
+        projectId: "project",
+        parentId: "root",
+        hidden: true,
+        environment: { kind: "worktree", path: workerTree, gitRoot: linked, head: "abc" },
+        agentRun: { status: "running", startedAt: 1, isolation: "worktree", paths: ["src/app.ts"] },
+        messages: [],
+      },
+    ],
+  }));
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  delete process.env.WORKHORSE_MCP_PROFILE;
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  let seen: Record<string, unknown> | undefined;
+  setWorkhorseDeskAsk(async (payload) => {
+    seen = payload as unknown as Record<string, unknown>;
+    return { text: JSON.stringify({ childSessionId: "helper" }) };
+  });
+  try {
+    const result = await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_spawn_agent", arguments: { prompt: "Independently check the result", fromSessionId: "worker" } },
+    }) as { error?: { message?: string } };
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(seen?.folder, workerTree);
+    assert.equal(seen?.isolation, "shared");
+    assert.equal(seen?.role, "helper");
+    assert.equal(seen?.paths, undefined);
+  } finally {
+    setWorkhorseDeskAsk(null);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("generic local invoke is discoverable only when a typed invocation contract exists", () => {
   const ids = new Set(["image.generate"]);
   assert.equal(isLocalMcpToolCallable("workhorse_local_upload", ids), true);

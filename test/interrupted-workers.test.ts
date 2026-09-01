@@ -269,9 +269,10 @@ test("an interrupted worker's message names the folder its work is sitting in", 
   // "Its brief and its work are kept" was true and useless: it named no place,
   // and the place is the whole point — the person has to go and look at it.
   const wt = "/nowhere/Library/Application Support/Workhorse/worktrees/sess_a";
+  // Lane 3 added the second half: whether the worker's processes were reaped.
   assert.equal(
     interruptedWorkerError({ kind: "worktree", path: wt, gitRoot: "/nowhere/repo" }),
-    `Workhorse exited while this worker was running. Its brief and its work are kept in ${wt} — resume it from the chat.`,
+    `Workhorse exited while this worker was running. Its brief and its work are kept in ${wt} — resume it from the chat. Its processes were stopped at the next launch.`,
   );
   assert.match(interruptedWorkerError({ kind: "local" }), /kept in the chat's own folder/);
   assert.match(interruptedWorkerError({ kind: "cloud", environmentId: "env_1" }), /cloud environment/);

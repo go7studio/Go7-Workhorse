@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, safeStorage, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -70,11 +70,12 @@ import { grokBotWakePath, inspectGrokBotWake, saveGrokBotWake } from "./grok-bot
 import { LINK_HOSTS, type LinkHost } from "../src/lib/workhorse-link";
 import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
-import { sweepStaleUserData } from "./user-data-hygiene";
-import { nullMainLog, openMainLog } from "./main-log";
-import { clearPerfCause, perfTraceEnabled, setPerfCause, startPerfHeartbeat } from "./perf-heartbeat";
+import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData } from "./user-data-hygiene";
+import { faultDetail, memoryDetail, nullMainLog, openMainLog, startMemoryLog } from "./main-log";
+import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
+import { offloadStateTranscripts, readTranscriptSidecar, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
-import { readComposerDraftFile, readStringMapFile, readVersionedState, syncFileInPlace, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
+import { dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
 import {
   bookmarksFromProjects,
@@ -121,6 +122,13 @@ let fileInstances = new Map<string, string>();
 const externalRuntimeProcesses = new Map<string, ChildProcess>();
 
 function runExternalRuntimeProcess(taskId: string, file: string, args: string[]) {
+  /*
+   * The resolved command, and only the resolved command. "Workhorse cannot run
+   * Codex" and "Workhorse ran a Codex that is not the one on your PATH" look
+   * identical from the surface and are fixed differently, so the log carries
+   * what was actually launched — never the arguments, which are the prompt.
+   */
+  mainLog.record("vendor:spawn", `command=${file} argc=${args.length}`);
   return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) => {
     const child = execFile(
       file,
@@ -134,6 +142,7 @@ function runExternalRuntimeProcess(taskId: string, file: string, args: string[])
           : error
             ? 1
             : 0;
+        if (error) mainLog.record("vendor:spawn", `failed command=${file} ${faultDetail(error, 1)}`);
         resolve({ status: code, stdout: stdout ?? "", stderr: stderr ?? "" });
       },
     );
@@ -201,9 +210,19 @@ function pinUserData() {
   }
 }
 pinUserData();
-if (perfTraceEnabled()) startPerfHeartbeat(app.getPath("userData"));
 
 const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
+
+/*
+ * The stall recorder runs on every launch now, not only when someone remembers
+ * a flag. `userData/perf` had never once existed on the live desk: the gate was
+ * an environment variable and a command-line switch, and a person opening the
+ * app from Finder sets neither, so the instrument built to explain felt jank had
+ * measured nothing at all. The flag now moves the threshold (250ms by default,
+ * 80ms when hunting) rather than deciding whether to look. The helper process
+ * stays out — one writer per file.
+ */
+if (!isMcpHelper) startPerfHeartbeat(app.getPath("userData"), { thresholdMs: stallThresholdMs() });
 
 /**
  * The desk died during an audit and left nothing to read: no crash report, no
@@ -212,7 +231,65 @@ const isMcpHelper = Boolean(process.env.ELECTRON_RUN_AS_NODE);
  * racing itself.
  */
 const mainLog = isMcpHelper ? nullMainLog() : openMainLog(app.getPath("userData"));
-mainLog.record("startup", `version=${APP_VERSION} platform=${process.platform} pid=${process.pid}`);
+
+/*
+ * Keep the operating system's own crash record.
+ *
+ * `uploadToServer: false` is the whole point: nothing leaves the machine, and
+ * macOS writes a DiagnosticReports entry for a native crash the way it does for
+ * every other app. A JavaScript throw reaches the handlers below; a segfault in
+ * the renderer or in a native module reaches neither, and that was the shape of
+ * the death this log was built after.
+ */
+if (!isMcpHelper) {
+  try {
+    crashReporter.start({ uploadToServer: false });
+  } catch {
+    /* a desk that cannot register a crash handler still has to run */
+  }
+}
+
+/**
+ * The one line worth having when a launch goes wrong.
+ *
+ * Everything here is a timing, a count, a size or an identifier. The resolved
+ * PATH is in because "the vendor binary is not there" and "the vendor binary is
+ * not on the PATH this process inherited" look identical from the outside and
+ * are fixed differently — a Finder launch and a terminal launch do not get the
+ * same PATH, and that has cost real hours. Never content, never titles, never a
+ * person's project paths.
+ */
+function bootDetail(): string {
+  const stateFile = path.join(app.getPath("userData"), "workhorse-state.json");
+  let stateBytes = 0;
+  let sessions = -1;
+  try {
+    stateBytes = fs.statSync(stateFile).size;
+  } catch {
+    /* first launch */
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8")) as { sessions?: unknown };
+    sessions = Array.isArray(parsed.sessions) ? parsed.sessions.length : -1;
+  } catch {
+    /* unreadable or absent; -1 says "could not tell", which is itself the news */
+  }
+  const worktrees = measureWorktreeStore(path.join(app.getPath("userData"), "worktrees"));
+  return [
+    `version=${APP_VERSION}`,
+    `platform=${process.platform}`,
+    `pid=${process.pid}`,
+    `electron=${process.versions.electron ?? "none"}`,
+    `userData=${app.getPath("userData")}`,
+    `state_bytes=${stateBytes}`,
+    `sessions=${sessions}`,
+    `worktrees=${worktrees.trees}`,
+    memoryDetail(),
+    `path=${process.env.PATH ?? ""}`,
+  ].join(" ");
+}
+
+mainLog.record("startup", isMcpHelper ? `version=${APP_VERSION} pid=${process.pid} role=mcp-helper` : bootDetail());
 
 try {
   app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
@@ -419,7 +496,16 @@ function readStateInner(): StateLoad {
       protectStateCredentials(state, credentialStore()),
       app.getPath("userData"),
     );
-    if (result.recovered || JSON.stringify(protectedState) !== JSON.stringify(state)) {
+    /*
+     * `sameJsonValue`, not two `JSON.stringify` calls. The old compare
+     * serialised the whole desk twice to decide whether anything needed
+     * writing — 155 ms on the live 46 MB file, on the main process, before
+     * first paint, and the answer is almost always "nothing did". The walk
+     * stops at the first difference and allocates nothing, so the launch that
+     * has no work to do pays a traversal instead of two 46 MB strings, and the
+     * launch that does have work pays a few nodes.
+     */
+    if (result.recovered || !sameJsonValue(protectedState, state)) {
       /*
        * A recovery write must not rotate. Rotation copies the live file onto
        * `.bak` — and on a recovery the live file is the torn one we just
@@ -475,6 +561,16 @@ function handleMediaProtocol(request: Request): Promise<Response> | Response {
 }
 
 let lastStateBackupAt = 0;
+/*
+ * The flush keeps its own clock now that rotation runs on a slower one.
+ *
+ * Rotation used to be what forced the periodic fsync, so stretching the backup
+ * cadence from one minute to ten would have quietly stretched the durability
+ * window with it — a disk-traffic saving paid for out of somebody else's
+ * unflushed work. The two decisions are separate: backups every ten minutes,
+ * bytes on the platter every minute, exactly as before.
+ */
+let lastStateFsyncAt = 0;
 
 /*
  * Saves are serialized: an overlapping save must not let an older snapshot's
@@ -535,6 +631,7 @@ async function writeState(state: Persistable) {
         const prevUsage = Array.isArray(previous.usage) ? previous.usage.length : 0;
         if (prevSessions > 0 || prevUsage > 0) {
           console.error("workhorse refused to overwrite saved chats with an empty state");
+          mainLog.record("state:save", `refused empty overwrite prev_sessions=${prevSessions} prev_usage=${prevUsage}`);
           return;
         }
       } catch {
@@ -542,15 +639,32 @@ async function writeState(state: Persistable) {
       }
     }
     const now = Date.now();
-    const rotateBackups = lastStateBackupAt === 0 || now - lastStateBackupAt >= 60_000;
     const sizeBefore = stateFileSize(file);
+    // The size the trace carries. It is the file going in, not the payload
+    // going out — free to read, and within a save's own growth of the truth. A
+    // gap and a cause say the save held the loop; the size is what tells you
+    // whether it held it because the desk is big or because something else went
+    // wrong, which is the difference between a fix and a guess.
+    setPerfCause("state:save", sizeBefore);
+    /*
+     * Rotation on its own, slower clock. Copying the whole live file every
+     * minute was 60 copies an hour of a 46 MB file — 2.7 GB of writes an hour
+     * to hold three snapshots minutes apart. Ten minutes keeps the same three
+     * generations for a tenth of the traffic; the flush below still runs every
+     * minute, so nothing about durability moves.
+     */
+    const rotateBackups = dueByInterval(lastStateBackupAt, now, STATE_BACKUP_INTERVAL_MS);
+    const dueForFlush = dueByInterval(lastStateFsyncAt, now, STATE_FSYNC_INTERVAL_MS);
     const grew = sizeBefore - stateBytesAtLastFsync >= STATE_FSYNC_GROWTH_BYTES;
-    const fsync = rotateBackups || grew;
+    const fsync = rotateBackups || dueForFlush || grew;
     const pending = writeVersionedStateAsync(
       file,
       state,
       (snapshot) =>
-        offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
+        offloadStateTranscripts(
+          offloadStateAttachments(protectStateCredentialsForSave(snapshot, credentialStore()), app.getPath("userData")),
+          app.getPath("userData"),
+        ),
       { rotateBackups, fsync },
     );
     queueMicrotask(clearPerfCause);
@@ -558,9 +672,10 @@ async function writeState(state: Persistable) {
     // The tail is save work too — the bookmark walk and jobEngine.sync run on
     // the loop over every session. Untagged, a stall here reads "unknown" and
     // the instrument grows a blind spot exactly where it used to over-blame.
-    setPerfCause("state:save");
+    setPerfCause("state:save", sizeBefore);
     if (rotateBackups) lastStateBackupAt = now;
     if (fsync) {
+      lastStateFsyncAt = now;
       stateBytesAtLastFsync = stateFileSize(file);
       if (grew) mainLog.record("state:save", `flushed on growth bytes=${stateBytesAtLastFsync}`);
     }
@@ -571,8 +686,76 @@ async function writeState(state: Persistable) {
     jobEngine?.sync(state.sessions);
   } catch (error) {
     console.error("workhorse state save failed", error);
+    mainLog.record("state:save", `failed ${faultDetail(error)}`);
   } finally {
     clearPerfCause();
+  }
+}
+
+/**
+ * How long the sweeps wait after the desk has loaded.
+ *
+ * The prune used to run inside `state:load`, between the read and the reply, so
+ * every `git` call it made was a call the window waited on before it could
+ * paint. Nothing about it needs to happen then. Half a minute puts it well clear
+ * of the first frames and still well inside a session anybody would call short.
+ */
+const HOUSEKEEPING_DELAY_MS = 30_000;
+let housekeepingScheduled = false;
+
+/**
+ * The slow, destructive half of launch, off the path a person is watching.
+ *
+ * Two sweeps run here. The worktree prune, which the `state:load` guard has
+ * already agreed is safe to run at all, and the aged hand-named state backups —
+ * files that can be hundreds of megabytes and are being judged on a month of
+ * age, which is not a question that needs answering before somebody sees their
+ * chats.
+ */
+function scheduleHousekeeping(sessions: readonly unknown[]) {
+  if (housekeepingScheduled) return;
+  housekeepingScheduled = true;
+  const timer = setTimeout(() => {
+    try {
+      runHousekeeping(sessions);
+    } catch (error) {
+      mainLog.record("housekeeping", `failed ${faultDetail(error)}`);
+    }
+  }, HOUSEKEEPING_DELAY_MS);
+  timer.unref?.();
+}
+
+function runHousekeeping(sessions: readonly unknown[]) {
+  const userData = app.getPath("userData");
+  const root = path.join(userData, "worktrees");
+
+  /*
+   * The live set, and the reason the reaper collected nothing.
+   *
+   * `state:load` handed the sweep every session id in the desk. Hidden workers
+   * are sessions, so every worker's tree named a chat that still existed and
+   * the sweep skipped all of them: 626 hidden rows, 624 of them finished, 137
+   * trees, 59 GB — 98% of userData — and a prune that had never removed
+   * anything. `worktreeKeepSet` is the same list minus the finished workers
+   * whose age floor has passed; every one of `worktree-host`'s refusals still
+   * has to agree before a single folder goes.
+   */
+  const keep = worktreeKeepSet(sessions);
+  const before = measureWorktreeStore(root);
+  const pruned = pruneOrphanWorktrees(root, keep);
+  const after = measureWorktreeStore(root);
+  mainLog.record(
+    "prune:run",
+    `sessions=${sessions.length} keep=${keep.length} trees_before=${before.trees} removed=${pruned.removed.length} kept=${pruned.kept.length} trees_after=${after.trees} over_ceiling=${after.overTrees}`,
+  );
+  for (const held of pruned.kept) {
+    console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
+    mainLog.record("prune:kept", `${held.name}: ${held.reason}`);
+  }
+
+  const backups = sweepAgedStateBackups(userData);
+  if (backups.removed.length) {
+    mainLog.record("hygiene", `aged state backups removed=${backups.removed.length} bytes=${backups.bytes}`);
   }
 }
 
@@ -626,6 +809,20 @@ function createWindow() {
     win.show();
   });
 
+  /*
+   * A renderer or a helper dying takes the desk's surface with it and leaves
+   * nothing behind — no throw reaches this process, so neither handler below
+   * fires. These two lines are the only record that it happened, and the reason
+   * plus the exit code is what separates "killed for memory" from "crashed".
+   */
+  win.webContents.on("render-process-gone", (_event, details) => {
+    mainLog.record("render-process-gone", `reason=${details.reason} exit_code=${details.exitCode ?? "none"}`);
+  });
+  win.on("closed", () => {
+    mainLog.record("window", "destroyed");
+  });
+  mainLog.record("window", `created id=${win.id}`);
+
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
@@ -641,14 +838,27 @@ const peerWaiters = new Map<string, (result: PeerAskResult) => void>();
 
 process.on("uncaughtException", (error) => {
   console.error("workhorse uncaughtException", error);
+  mainLog.record("uncaughtException", faultDetail(error));
 });
 process.on("unhandledRejection", (error) => {
   console.error("workhorse unhandledRejection", error);
+  mainLog.record("unhandledRejection", faultDetail(error));
+});
+process.on("exit", (code) => {
+  mainLog.record("exit", `code=${code}`);
 });
 
 app.whenReady().then(async () => {
   debugStartup(`ready primary=${isPrimaryInstance}`);
+  mainLog.record("ready", `primary=${isPrimaryInstance} uptime_ms=${Math.round(process.uptime() * 1000)}`);
   if (!isPrimaryInstance) return;
+  app.on("child-process-gone", (_event, details) => {
+    mainLog.record(
+      "child-process-gone",
+      `type=${details.type} reason=${details.reason} exit_code=${details.exitCode ?? "none"}`,
+    );
+  });
+  startMemoryLog(mainLog);
   protocol.handle("workhorse-media", handleMediaProtocol);
   claimLinkedFolders();
   fileInstances = readStringMapFile(fileInstancesPath());
@@ -1216,6 +1426,20 @@ app.whenReady().then(async () => {
     );
   });
 
+  /*
+   * One finished worker's steps, read back when somebody opens its chat.
+   *
+   * The sidecar's name is the chat's id, so this reads one small file and never
+   * touches the desk state — parsing 46 MB because a person clicked a chat is
+   * the cost this whole change exists to remove. Only the offloaded rows go
+   * back; the chat already holds its prose, and the renderer merges the two
+   * halves with the same function this process does.
+   */
+  ipcMain.handle("transcript:load", (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string" || !sessionId.trim()) return null;
+    return readTranscriptSidecar(transcriptSidecarPath(app.getPath("userData"), sessionId));
+  });
+
   ipcMain.handle("state:load", () => {
     const load = readStateWithSource();
     const loaded = load.state;
@@ -1247,12 +1471,7 @@ app.whenReady().then(async () => {
       console.info(`Workhorse skipped the worktree sweep: ${decision.reason}.`);
       mainLog.record("prune:skip", decision.reason);
     } else {
-      const pruned = pruneOrphanWorktrees(path.join(app.getPath("userData"), "worktrees"), liveSessionIds);
-      mainLog.record("prune:run", `live=${liveSessionIds.length} removed=${pruned.removed.length} kept=${pruned.kept.length}`);
-      for (const held of pruned.kept) {
-        console.info(`Kept the worktree for ${held.name}: ${held.reason}.`);
-        mainLog.record("prune:kept", `${held.name}: ${held.reason}`);
-      }
+      scheduleHousekeeping(sessions);
     }
 
     /*
@@ -1665,8 +1884,15 @@ app.on("before-quit", (event) => {
   codexHost.disposeAll();
   terminalHost.disposeAll();
   jobEngine?.dispose();
+  // After the disposals, so Lane 0's guard keeps every one of them behind the
+  // second-pass return, and once per quit rather than once per handler run.
+  mainLog.record("before-quit", memoryDetail());
   event.preventDefault();
   void drainStateForQuit().finally(() => app.quit());
+});
+
+app.on("will-quit", () => {
+  mainLog.record("will-quit", `uptime_ms=${Math.round(process.uptime() * 1000)}`);
 });
 
 app.on("window-all-closed", () => {

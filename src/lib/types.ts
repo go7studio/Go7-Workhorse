@@ -603,6 +603,15 @@ export type Session = {
   };
   /** Reconstructable turn/step log. Model history projects from this when present. */
   ledger?: import("./session-ledger").SessionLedger;
+  /**
+   * Where this finished worker's thinking and tool rows were moved, and how
+   * many went. The pair is the only thing linking the chat to that file, so it
+   * has to survive every load: a chat that arrives without it holds the prose,
+   * saves the prose back, and orphans its own steps on disk with nothing left
+   * pointing at them. Cleared the moment the rows are merged back in.
+   */
+  transcriptSidecar?: string;
+  transcriptOffloaded?: number;
   /** Workhorse-owned lifecycle and review record for hidden cross-provider children. */
   agentRun?: AgentRun;
   /** Active worker crew for this orchestrator chat. */

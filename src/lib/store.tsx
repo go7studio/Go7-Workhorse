@@ -44,6 +44,7 @@ import {
 } from "./chats";
 import { workerJustSettled } from "./worker-settled";
 import { deskPersistBodyEqual } from "./desk-persist";
+import { mergeTranscriptRows, transcriptFetchPlan } from "./transcript-sidecar";
 import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAcceptsVendor, titleFromIntent } from "./titles";
 import {
   applyPermissionAnswer,
@@ -149,7 +150,7 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import type { AgentRun, AgentSystemsSettings, ExternalTask, FileLease } from "./types";
+import type { AgentRun, AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -612,6 +613,40 @@ function emitLearningEvent(draft: {
   });
 }
 
+/** Stable, so a second failed open replaces the note rather than stacking another. */
+function missingTranscriptId(sessionId: string): string {
+  return `msg_transcript_missing_${sessionId}`;
+}
+
+/**
+ * Say it in the chat when a worker's steps will not load.
+ *
+ * Silence here reads as "this worker did no thinking", which is a lie about
+ * what happened. One line, at the end, saying where the rest is. It costs a row
+ * in the saved chat and it is worth that: the alternative is somebody deciding
+ * a worker was lazy on the strength of a file that failed to open.
+ *
+ * The note is appended, and `mergeTranscriptRows` tolerates appended rows, so a
+ * later launch that does find the sidecar still puts everything back in order.
+ */
+function noteMissingTranscript(state: AppState, sessionId: string, offloaded: number): AppState {
+  const id = missingTranscriptId(sessionId);
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session || session.messages.some((message) => message.id === id)) return state;
+  const note: ChatMessage = {
+    id,
+    role: "system",
+    text: `${offloaded} ${offloaded === 1 ? "step is" : "steps are"} on disk and could not be loaded.`,
+    createdAt: Date.now(),
+  };
+  return {
+    ...state,
+    sessions: state.sessions.map((item) =>
+      item.id === sessionId ? { ...item, messages: [...item.messages, note] } : item,
+    ),
+  };
+}
+
 export function hydrateInterruptedPathLeases(raw: unknown, sessions: Session[]): FileLease[] {
   return normalizeFileLeases(raw).filter((lease) =>
     sessions.some((session) => {
@@ -1029,6 +1064,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const settledPending = useRef(false);
   const lateAckPending = useRef<Map<string, string>>(new Map());
   const persistBody = useRef<AppState | null>(null);
+  /** Chats whose sidecar this desk has already asked for. One ask per chat per launch, hit or miss. */
+  const transcriptAsked = useRef<Set<string>>(new Set());
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
@@ -1257,6 +1294,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined);
     }, settledPending.current ? 0 : busy ? 2_000 : 400);
   }, [ready, state]);
+
+  /*
+   * A finished worker's steps come back when somebody opens its chat, and only
+   * then.
+   *
+   * The save path moves thinking and tool rows to `userData/transcripts/` and
+   * leaves the chat a pointer, so a worker chat loads holding its prose and
+   * nothing else until this runs. It watches the ACTIVE chat alone: a desk with
+   * 624 finished workers must not turn a launch, or a scroll of the worker
+   * board, into 624 file reads. One ask per chat per launch, whether it worked
+   * or not — a sidecar that is missing now will still be missing in a second,
+   * and retrying on every render is how a miss becomes a spin.
+   *
+   * A miss never blocks the chat. The prose stays exactly as it is, the pointer
+   * stays with it so a later launch can try again, and the chat says plainly
+   * that some of it is on disk and did not load.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    const plan = transcriptFetchPlan({
+      activeSessionId: state.activeSessionId,
+      sessions: state.sessions,
+      asked: transcriptAsked.current,
+    });
+    if (!plan) return;
+    const bridge = window.workhorse?.loadTranscript;
+    if (!bridge) return;
+    const { sessionId, offloaded } = plan;
+    transcriptAsked.current.add(sessionId);
+    void bridge(sessionId)
+      .then((sidecar) => {
+        setState((current) => {
+          const live = current.sessions.find((item) => item.id === sessionId);
+          if (!live?.transcriptSidecar) return current;
+          const merged = sidecar ? mergeTranscriptRows(live.messages, sidecar) : null;
+          if (!merged) return noteMissingTranscript(current, sessionId, offloaded);
+          return {
+            ...current,
+            sessions: current.sessions.map((item) =>
+              item.id === sessionId
+                ? {
+                    ...item,
+                    messages: merged.filter((message) => message.id !== missingTranscriptId(sessionId)),
+                    // Dropped together, and only now. The pointer is what the
+                    // rows are found by, so it may not go before they are back.
+                    transcriptSidecar: undefined,
+                    transcriptOffloaded: undefined,
+                  }
+                : item,
+            ),
+          };
+        });
+      })
+      .catch(() => {
+        setState((current) => noteMissingTranscript(current, sessionId, offloaded));
+      });
+  }, [ready, state.activeSessionId, state.sessions]);
 
   const createProject = useCallback((name: string, folderPaths: string[] = []) => {
     const project = emptyProject(name, folderPaths);

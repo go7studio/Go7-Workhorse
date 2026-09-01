@@ -179,7 +179,21 @@ test("the custom host checks its folder the way every other host does", () => {
   assert.doesNotMatch(host, /^\s+cwd: input\.cwd,$/m, "no tool call still passes the raw path");
   assert.equal(
     (host.match(/cwd: toolCwd\(\)/g) ?? []).length,
-    3,
-    "all three tool sites — the fan-out spawn, the policy check, and the plain call — use it",
+    4,
+    "the MCP bridge and all three tool sites — the fan-out spawn, the policy check, and the plain call — use it",
+  );
+  assert.match(
+    host,
+    /new McpToolBridge\(input\.mcpServers \?\? \[\], \{ cwd: toolCwd\(\) \}\)/,
+    "the bridge launches its servers in a folder that was checked first",
+  );
+  assert.match(host, /roots: \[toolCwd\(\), \.\.\.\(input\.folders \?\? \[\]\)\]/, "the security roots are checked too");
+  // The one invariant that survives a refactor: after the guard is defined,
+  // nothing in this file reads the raw path again. A new call site added later
+  // cannot quietly reintroduce the gap.
+  assert.equal(
+    (host.match(/input\.cwd/g) ?? []).length,
+    2,
+    "the only remaining reads of input.cwd are the two inside the guard itself",
   );
 });

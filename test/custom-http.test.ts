@@ -488,7 +488,10 @@ test("custom host preface names workspace and live limits", async () => {
       text: "Write SHOULD-NOT.txt please",
       model: "MiniMax-M3",
       effort: "low",
-      cwd: "C:\\proj\\app",
+      // The preface above keeps its Windows path — that is the text under test.
+      // A chat the host actually runs needs a folder that is there, because the
+      // host now checks its cwd before it builds the MCP bridge.
+      cwd: ROOT,
       mode: "ask",
       sandbox: "read-only",
       preface,
@@ -537,7 +540,7 @@ test("custom host keeps going when MiniMax says it will search more", async () =
       text: "Can you find the godot folder with the space battles game in it please",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "C:\\Users\\someone",
+      cwd: ROOT,
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -630,7 +633,7 @@ test("custom host ends the parent turn after wait=false spawn and does not conti
       text: "Please do a deep scrape of this project with subagents",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\Godot\\Projects\\demo-game",
+      cwd: ROOT,
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -657,7 +660,7 @@ test("custom host does not keep going when MiniMax asks the user to pick", async
       text: "List the scene tree so I can map the codebase",
       model: "MiniMax-M3",
       effort: "medium",
-      cwd: "D:\\godot\\Projects\\demo-game",
+      cwd: ROOT,
       mode: "always-approve",
       sandbox: "off",
       history: [],
@@ -1375,7 +1378,7 @@ test("MiniMax Anthropic request and stream usage parse", async () => {
       text: "hi",
       model: "MiniMax-M3",
       effort: "low",
-      cwd: "C:\\proj\\app",
+      cwd: ROOT,
       history: [],
       config: { baseUrl: "https://api.minimax.io/anthropic", apiKey: "sk", model: "MiniMax-M3" },
     },
@@ -2503,11 +2506,15 @@ test("a custom chat whose folder has moved names the folder, not the tool", asyn
    */
   const gone = path.join(os.tmpdir(), "workhorse-folder-that-is-not-there");
   assert.equal(existsSync(gone), false, "the fixture folder must really be absent");
+  let modelCalls = 0;
   const host = new CustomSessionHost(
-    async () => ({
-      text: "listing",
-      toolUses: [{ id: "t-1", name: "read_file", input: { path: "README.md" } }],
-    }),
+    async () => {
+      modelCalls += 1;
+      return {
+        text: "listing",
+        toolUses: [{ id: "t-1", name: "read_file", input: { path: "README.md" } }],
+      };
+    },
     { executeTool: async (use) => ({ id: use.id, name: use.name, content: "README.md" }) },
   );
   await assert.rejects(
@@ -2519,6 +2526,9 @@ test("a custom chat whose folder has moved names the folder, not the tool", asyn
           model: "MiniMax-M3",
           effort: "medium",
           cwd: gone,
+          // An MCP server the bridge would otherwise be told to launch in that
+          // folder. The guard has to fire before the bridge is built.
+          mcpServers: [{ name: "fixture", command: "node", args: ["-e", "process.exit(1)"] }],
           mode: "always-approve",
           sandbox: "off",
           history: [],
@@ -2533,4 +2543,8 @@ test("a custom chat whose folder has moved names the folder, not the tool", asyn
       return true;
     },
   );
+  // The bridge is built before the first model call, so a turn that never
+  // reached the model never reached the bridge either. A dead folder cannot be
+  // handed to an MCP server that would then run in it.
+  assert.equal(modelCalls, 0, "the folder is checked before anything is launched or asked");
 });

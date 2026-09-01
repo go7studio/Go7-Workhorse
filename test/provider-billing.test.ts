@@ -318,8 +318,21 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
   );
   assert.equal(isGrokBotUrl(grokBot!.baseUrl), true);
   assert.equal(isGrokBotUrl("http://127.0.0.1:8787/v1/"), true);
-  assert.equal(isGrokBotUrl("http://localhost:8787/v1"), false);
+  /*
+   * All three names for this machine are the same door. Only 127.0.0.1 was
+   * accepted, so a bot saved as http://localhost:8787 — same shim, same port —
+   * failed this test and never armed the late-answer lane; every slow answer
+   * came back as a shim 504 instead. The port still decides, and a host that is
+   * not this machine still fails.
+   */
+  assert.equal(isGrokBotUrl("http://localhost:8787/v1"), true);
+  assert.equal(isGrokBotUrl("http://[::1]:8787/v1"), true);
+  assert.equal(isGrokBotUrl("localhost:8787"), true, "a base URL saved without a scheme is still the shim");
+  assert.equal(isGrokBotUrl("http://LocalHost:8787/v1"), true, "the host name is not case sensitive");
   assert.equal(isGrokBotUrl("http://0.0.0.0:8787/v1"), false);
+  assert.equal(isGrokBotUrl("http://localhost.example.com:8787/v1"), false, "a name that merely starts with localhost is not this machine");
+  assert.equal(isGrokBotUrl("http://localhost:11434/v1"), false, "Ollama on loopback is not this door");
+  assert.equal(isGrokBotUrl("http://[::1]:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), false);
   assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);

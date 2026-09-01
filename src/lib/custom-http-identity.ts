@@ -40,12 +40,23 @@ export function isGrokBotName(name: string): boolean {
   return name.trim().toLowerCase() === "grok bot";
 }
 
+/**
+ * The three ways this machine names itself. Only 127.0.0.1 was accepted, so a
+ * bot saved as http://localhost:8787 — the same shim, the same port — failed
+ * this test and never armed the late-answer lane. WHATWG URL keeps IPv6 hosts
+ * in brackets, so `[::1]` is the hostname the parser hands back.
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]" || host === "::1";
+}
+
 export function isGrokBotUrl(baseUrl: string): boolean {
   const trimmed = baseUrl.trim();
   if (!trimmed) return false;
   try {
     const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`);
-    if (url.hostname.toLowerCase() !== "127.0.0.1") return false;
+    if (!isLoopbackHostname(url.hostname)) return false;
     const port = url.port || (url.protocol === "https:" ? "443" : "80");
     return port === GROK_BOT_SHIM_PORT;
   } catch {

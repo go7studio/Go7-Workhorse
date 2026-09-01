@@ -255,6 +255,8 @@ transcript rather than as a path.
   mission. The last fifth is for verifying and handing off, not more producing.
   The run is warned before it stops, and the stop report says what was left
   unfinished. No ceiling means no limit. A reused worker starts a new count.
+  The ceiling is read when the vendor reports usage, so a run is stopped at its
+  next meter, not part-way through a turn: one long turn can pass it.
   If the parent then does the work itself, the run records that the parent took
   over instead of a fully Workhorse-owned completion.
   A worker gets a worker's context: the

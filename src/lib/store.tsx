@@ -292,7 +292,9 @@ import {
   BUDGET_HANDOFF_PROMPT,
   missionUsedTokens,
   needsBudgetHandoffTurn,
+  nestedHelperBudget,
   nextBudgetRunState,
+  parentBudgetRemaining,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
@@ -5107,7 +5109,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;
             const spawnTokenBudget = isNested
-              ? Math.min(5_000, Math.max(1, payload.tokenBudget ?? 5_000))
+              ? nestedHelperBudget({
+                  requested: payload.tokenBudget,
+                  parentRemaining: parentBudgetRemaining(caller.agentRun),
+                })
               : payload.tokenBudget;
             const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
@@ -5116,6 +5121,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               folder: typeof payload.folder === "string" ? payload.folder : undefined,
               prompt: payload.message,
               allowNested: isNested,
+              // The MCP door has always checked this. Without it here, the store
+              // admitted a spawn onto a folder that is no longer on disk and the
+              // worker died on its cwd instead of being turned away.
+              folderExists,
             });
             if (!admitted.ok) {
               await replyAsk({ error: admitted.error });

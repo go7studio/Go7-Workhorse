@@ -59,7 +59,15 @@ import {
   workhorseMcpServer,
   isElectronAppCommand,
 } from "../electron/grok-launch";
-import { handleWorkhorseRpc, parseCreateProjectLive, parseRenameProjectLive, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import {
+  handleWorkhorseRpc,
+  nestedTimeoutNote,
+  NESTED_HELPER_TIMEOUT_SECONDS,
+  parseCreateProjectLive,
+  parseRenameProjectLive,
+  setWorkhorseDeskAsk,
+  withSpawnNote,
+} from "../electron/workhorse-mcp";
 import { startWorkhorseBridge } from "../electron/workhorse-bridge";
 import { mediaFileCandidates } from "../electron/media-src";
 import { estimateChatContext, parseSessionContext } from "../src/lib/context-stats";
@@ -10118,5 +10126,46 @@ test("the desk reads each vendor app's own config and never asks the vendor for 
   assert.equal(
     detectClaudeAccessDefaults({ home: "/x", join, readFile: () => JSON.stringify({ permissions: { defaultMode: "wat" } }) }),
     undefined,
+  );
+});
+
+test("a nested helper's clamped runtime is said out loud, not swallowed", () => {
+  /*
+   * The tool schema offers 30-3600 seconds. The nested path silently cut every
+   * request down to two minutes, so a caller could ask for an hour, get two
+   * minutes, and read the early stop as a crash rather than as the limit it is.
+   * The clamp stays — a helper is a bounded check — but it now says so.
+   */
+  assert.equal(NESTED_HELPER_TIMEOUT_SECONDS, 120);
+  const note = nestedTimeoutNote(3600);
+  assert.match(note, /nested helpers run at most 120 s/);
+  assert.match(note, /3600 s asked for/, "the note says which number was overridden");
+
+  // Only a request that actually exceeded the ceiling earns a note. Anything at
+  // or under it was honoured, so saying so would be noise.
+  assert.equal(nestedTimeoutNote(120), "");
+  assert.equal(nestedTimeoutNote(30), "");
+  assert.equal(nestedTimeoutNote(undefined), "");
+  assert.equal(nestedTimeoutNote(Number.NaN), "");
+
+  // The note rides back with the spawn result and does not disturb the report.
+  const report = "Mission status: complete. Checked the two call sites.";
+  assert.equal(withSpawnNote(report, ""), report);
+  const carried = withSpawnNote(report, note);
+  assert.ok(carried.startsWith(report), "the worker's own report comes first, unaltered");
+  assert.match(carried, /nested helpers run at most 120 s/);
+  assert.equal(withSpawnNote(carried, note), carried, "a retried spawn does not stack the note twice");
+
+  // Both spawn return paths carry it: the first answer and the one after a
+  // vendor grant. A note on only one of them is a note that goes missing
+  // exactly when a vendor had to be asked twice.
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  assert.match(mcp, /const clampNote = isNested \? nestedTimeoutNote\(input\.timeoutSeconds\) : "";/);
+  assert.match(mcp, /return withSpawnNote\(first, clampNote\);/, "the plain spawn result carries the note");
+  assert.match(mcp, /return withSpawnNote\(await postBridge\("\/spawn"/, "the granted retry carries it too");
+  assert.match(
+    mcp,
+    /timeoutSeconds: Math\.min\(NESTED_HELPER_TIMEOUT_SECONDS, Math\.max\(30, input\.timeoutSeconds \?\? NESTED_HELPER_TIMEOUT_SECONDS\)\)/,
+    "the clamp itself is kept, and reads from the one named ceiling",
   );
 });

@@ -55,6 +55,7 @@ import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
 import { isGrokBotUrl } from "../src/lib/custom-http-identity";
+import { nestedHelperBudget, parentBudgetRemaining } from "../src/lib/worker-budget";
 import {
   askViaInbox,
   interpretPeerAskHttp,
@@ -1810,6 +1811,26 @@ async function askChat(chat: string, message: string, from?: string, traceId?: s
   return first;
 }
 
+/** A nested helper is a bounded check, not a second pass. Two minutes is the ceiling. */
+export const NESTED_HELPER_TIMEOUT_SECONDS = 120;
+
+/**
+ * The one line a caller gets when its asked-for runtime was cut down. Silence
+ * here is what made a clamped helper look like a fault: the tool schema says
+ * 30-3600, the nested path gives at most two minutes, and nothing said which
+ * number won.
+ */
+export function nestedTimeoutNote(requested: number | undefined, ceiling = NESTED_HELPER_TIMEOUT_SECONDS): string {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= ceiling) return "";
+  return `Note: nested helpers run at most ${ceiling} s; this one was set to ${ceiling} s, not the ${Math.floor(requested)} s asked for.`;
+}
+
+/** Carry the clamp note back with the spawn result without disturbing the report itself. */
+export function withSpawnNote(result: string, note: string): string {
+  if (!note) return result;
+  return result.includes(note) ? result : `${result}\n${note}`;
+}
+
 type SpawnCaller = {
   id?: string;
   parentId?: string | null;
@@ -1817,7 +1838,7 @@ type SpawnCaller = {
   projectId?: string | null;
   crewModes?: string[];
   lineup?: { mission?: MissionIteration; rows?: Array<{ childId?: string; status?: string }> };
-  agentRun?: { mission?: MissionIteration; paths?: string[] };
+  agentRun?: { mission?: MissionIteration; paths?: string[]; tokenBudget?: number; usedTokens?: number };
   environment?: SessionEnvironment;
 };
 
@@ -2016,8 +2037,11 @@ async function spawnAgent(
   const spawnInput = isNested
     ? {
         ...inheritedInput,
-        timeoutSeconds: Math.min(120, Math.max(30, input.timeoutSeconds ?? 120)),
-        tokenBudget: Math.min(5_000, Math.max(1, input.tokenBudget ?? 5_000)),
+        timeoutSeconds: Math.min(NESTED_HELPER_TIMEOUT_SECONDS, Math.max(30, input.timeoutSeconds ?? NESTED_HELPER_TIMEOUT_SECONDS)),
+        tokenBudget: nestedHelperBudget({
+          requested: input.tokenBudget,
+          parentRemaining: parentBudgetRemaining(caller?.agentRun),
+        }),
         isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
         role: nestedPolicy.role,
@@ -2026,6 +2050,10 @@ async function spawnAgent(
         ...inheritedInput,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };
+  // The schema offers 30-3600 s; a nested helper is held to a two-minute
+  // check. Clamping in silence let a caller ask for an hour, get two minutes,
+  // and read the early stop as a crash. Say so in the result instead.
+  const clampNote = isNested ? nestedTimeoutNote(input.timeoutSeconds) : "";
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
   const requestedSkills = skillQueries.length > 0
     ? resolveRequestedSkills(listDeskSkills(projectFoldersFromState()), skillQueries)
@@ -2098,7 +2126,7 @@ async function spawnAgent(
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
   if (grant?.retrySpawn || grant?.allowed) {
-    return postBridge("/spawn", {
+    return withSpawnNote(await postBridge("/spawn", {
       toSessionId: "",
       fromSessionId: fromId,
       exposureProfile: currentMcpProfile(),
@@ -2132,9 +2160,9 @@ async function spawnAgent(
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-    } as PeerAsk);
+    } as PeerAsk), clampNote);
   }
-  return first;
+  return withSpawnNote(first, clampNote);
 }
 
 /**

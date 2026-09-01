@@ -335,3 +335,39 @@ test("full objective: builder wave then auditor receipt completes the step", () 
   assert.equal(done?.steps[0]?.evidence.some((row) => row.role === "auditor" && row.head === HEAD), true);
   assert.equal(completePlanRun(done!, 23).ok, true);
 });
+
+test("a spawn onto a folder that is gone is refused at both doors", () => {
+  /*
+   * The MCP tool has always stat'ed the folder before admitting a spawn. The
+   * store did not pass folderExists at all, so a project still linked to a repo
+   * that had moved admitted the worker and the worker died on its cwd — a
+   * missing-binary ENOENT, not a folder that says its own name.
+   */
+  const gone = admitSpawn({
+    parent: { projectId: "p1" },
+    projectFolder: "/repo/moved-away",
+    prompt: "audit the store",
+    folderExists: (value) => value !== "/repo/moved-away",
+  });
+  assert.equal(gone.ok, false);
+  assert.match((gone as { error: string }).error, /Folder does not exist: \/repo\/moved-away/);
+
+  // A folder that is there still admits, and the explicit folder still wins
+  // over the project's own.
+  const live = admitSpawn({
+    parent: { projectId: "p1" },
+    projectFolder: "/repo/moved-away",
+    folder: "/repo/here",
+    prompt: "audit the store",
+    folderExists: (value) => value === "/repo/here",
+  });
+  assert.equal(live.ok, true);
+  assert.equal((live as { cwd: string }).cwd, "/repo/here");
+
+  // The store's spawn block asks the same question the MCP door asks.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  const block = store.match(/const admitted = admitSpawn\(\{[\s\S]*?\n\s*\}\);/);
+  assert.ok(block, "the store still admits spawns through admitSpawn");
+  assert.match(block![0], /allowNested: isNested,/);
+  assert.match(block![0], /\bfolderExists,/, "the store passes its own folderExists to admitSpawn");
+});

@@ -356,7 +356,7 @@ test("a Finder-launched desk finds the Claude ACP server outside the bare PATH",
     existsSync: onlyOnDisk(acp),
   });
   assert.equal(posix(launch?.acpFile), acp, "the ACP server must be found off the desk's installer directories");
-  assert.equal(launch?.command, acp);
+  assert.equal(posix(launch?.command), posix(acp));
 
   // And the whole detect agrees: both halves found, so Claude can start.
   const detected = detectClaudeLogin({

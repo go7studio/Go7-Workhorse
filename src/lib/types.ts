@@ -685,6 +685,16 @@ export type LlmLink = {
   available?: boolean;
   /** Installed, but the login is missing or expired. */
   needsAuth?: boolean;
+  /**
+   * Whether the desk can start this vendor. Connected says a login artifact is
+   * on disk; launchable says the binary the launch shells out to is somewhere
+   * this process can see. Absent means launchable — stored state written before
+   * this field says nothing, and a vendor whose launch needs no binary never
+   * sets it. Only `false` stops routing.
+   */
+  launchable?: boolean;
+  /** Why it cannot start, in one line. Absent when it can. */
+  launchBlocker?: string;
   name?: string;
   color?: string;
   /** Native vendor defaults used only when seeding a new chat. */

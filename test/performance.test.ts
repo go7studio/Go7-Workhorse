@@ -578,12 +578,19 @@ test("peeling a restated report stays off the first-click budget", () => {
   const started = performance.now();
   const peeled = peelPlanningPreamble(report);
   const uncached = performance.now() - started;
-  const cachedStart = performance.now();
-  peelPlanningPreamble(report);
-  const cached = performance.now() - cachedStart;
+  const again = peelPlanningPreamble(report);
   assert.match(peeled.body, /Scene 24/);
+  // Per docs/PERFORMANCE.md this budget is the tripwire for a complexity class:
+  // it catches the peel becoming quadratic in a 25-unit report, and it is loose
+  // enough to survive a slow runner.
   assert.ok(uncached < 8, `uncached peel took ${uncached}ms`);
-  assert.ok(cached < 1, `cached peel took ${cached}ms`);
+  // The invariant here is a cache hit, not a duration. `peelPlanningPreamble`
+  // returns the stored object on a hit (src/lib/markdown.ts), so identity states
+  // it exactly and cannot be told a lie by the scheduler. This used to assert
+  // the second call took under 1 ms — a sub-millisecond wall-clock floor on a
+  // measurement of 0.001-0.006 ms, which is a coin toss on a shared runner
+  // rather than a statement about the code.
+  assert.equal(again, peeled, "a repeated peel must return the cached object, not an equal one");
 });
 
 /**

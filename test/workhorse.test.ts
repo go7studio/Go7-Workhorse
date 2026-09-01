@@ -7746,7 +7746,13 @@ test("Grok login detection runs in Electron main over IPC, not sandboxed preload
   assert.match(main, /ipcMain\.handle\("grok:detect-login"/);
   assert.match(main, /detectGrokLogin\(\)/);
   assert.match(preload, /ipcRenderer\.invoke\("grok:detect-login"/);
-  assert.doesNotMatch(preload, /grok-login/);
+  // What the sandbox cannot afford is grok-login running here: it reads the
+  // filesystem. A type-only `import("./grok-login")` inside a cast is erased
+  // before the preload is bundled and costs it nothing, which is how codex and
+  // claude are already typed. Forbidding the name outright instead of the value
+  // import is what left Grok's bridge type a hand-copied literal, and the two
+  // copies drifted.
+  assert.doesNotMatch(preload, /^import[^(]*grok-login/m);
   assert.doesNotMatch(preload, /detectGrokLogin\(\)/);
   assert.doesNotMatch(preload, /node:fs|node:os|node:path/);
 });

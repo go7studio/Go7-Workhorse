@@ -452,6 +452,7 @@ test("Terminal: stopping the desk terminal stops what the person started in it",
   const shell = process.env.SHELL;
   const host = new TerminalHost();
   let sleeper = 0;
+  let shellPid = 0;
   try {
     // Pin the shell so the test says the same thing on every machine.
     process.env.SHELL = "/bin/sh";
@@ -463,7 +464,7 @@ test("Terminal: stopping the desk terminal stops what the person started in it",
     assert.ok(sleeper > 0 && alive(sleeper), "the sleeper was not running to begin with");
     // The heart of it: job control has already moved the job out of the shell's
     // group, so a stop that signals only that group would miss it here.
-    const shellPid = psField(sleeper, "ppid");
+    shellPid = psField(sleeper, "ppid");
     assert.ok(shellPid > 0, "could not find the shell that started the sleeper");
     assert.notEqual(
       psField(sleeper, "pgid"),
@@ -476,8 +477,18 @@ test("Terminal: stopping the desk terminal stops what the person started in it",
     const waited = Date.now() - at;
     assert.ok(gone, "closing the terminal left what the person started in it running");
     assert.ok(waited < PROC_KILL_GRACE_MS + 1_000, `the sleeper outlived the grace by ${waited}ms — it timed out, it was not killed`);
+    // And the shell itself. It ignores SIGTERM, so only the SIGKILL after the
+    // grace ends it — a stop that sends one signal and hopes leaves it running.
+    assert.ok(await until(() => !alive(shellPid), PROC_KILL_GRACE_MS + 1_000), "the terminal shell itself survived the stop");
   } finally {
+    /*
+     * This trap cannot lean on the code under test. An interactive shell
+     * IGNORES SIGTERM — which is why the old `child.kill()` never closed the
+     * terminal at all — so a failing assertion would otherwise leave a shell
+     * and its jobs on the machine, holding this runner's pipes open.
+     */
     host.disposeAll();
+    trap(shellPid || undefined);
     trap(sleeper || undefined);
     if (shell === undefined) delete process.env.SHELL;
     else process.env.SHELL = shell;
@@ -536,25 +547,50 @@ test("a cancelled harness task takes its whole group with it", { skip: !POSIX, t
   }
 });
 
-test("a harness task that runs past its timeout is stopped as a group", { skip: !POSIX, timeout: 25_000 }, async () => {
-  const dir = scratch("proc-timeout");
-  const report = path.join(dir, "sleeper.pid");
-  let sleeper = 0;
-  let child: ChildProcess | undefined;
-  try {
-    const run = runInProcessGroup("/bin/sh", ["-c", `sleep 5 & echo $! > ${report}; wait`], { timeoutMs: 400 });
-    child = run.child;
-    const result = await run.done;
-    assert.equal(result.timedOut, true);
-    assert.equal(result.stopped, true);
-    sleeper = Number(fs.readFileSync(report, "utf8").trim());
-    const gone = await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000);
-    assert.ok(gone, "the timeout stopped the command and left what it started running");
-  } finally {
-    trap(child?.pid);
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+/*
+ * Timeout and cancel are the two ways a run is stopped from inside. Both are
+ * checked against the clock, never by awaiting the run first: the sleeper holds
+ * the pipes it inherited, so `close` does not fire until the sleeper is gone —
+ * and a test that waits for `close` would watch a pid-only kill time out and
+ * call that a pass.
+ */
+const TIMEOUT_MS = 400;
+
+for (const shape of ["timeout", "cancel"] as const) {
+  test(`a harness task stopped by ${shape} takes its whole group`, { skip: !POSIX, timeout: 25_000 }, async () => {
+    const dir = scratch(`proc-${shape}`);
+    const report = path.join(dir, "sleeper.pid");
+    const abort = new AbortController();
+    let sleeper = 0;
+    let child: ChildProcess | undefined;
+    try {
+      const run = runInProcessGroup("/bin/sh", ["-c", `sleep 5 & echo $! > ${report}; wait`], {
+        ...(shape === "timeout" ? { timeoutMs: TIMEOUT_MS } : { signal: abort.signal }),
+      });
+      child = run.child;
+      const found = await until(() => fs.existsSync(report) && fs.readFileSync(report, "utf8").trim().length > 0, 5_000);
+      assert.ok(found, "the task never reported its background sleeper");
+      sleeper = Number(fs.readFileSync(report, "utf8").trim());
+      assert.ok(sleeper > 0 && alive(sleeper), "the sleeper was not running to begin with");
+
+      const at = Date.now();
+      const budget = (shape === "timeout" ? TIMEOUT_MS : 0) + PROC_KILL_GRACE_MS + 1_000;
+      if (shape === "cancel") abort.abort();
+      const gone = await until(() => !alive(sleeper), budget);
+      const waited = Date.now() - at;
+      assert.ok(gone, `${shape} stopped the command and left what it started running`);
+      assert.ok(waited < budget, `the sleeper outlived the grace by ${waited}ms — it ran out, it was not killed`);
+
+      const result = await run.done;
+      assert.equal(result.stopped, true, "a stopped run must not report itself as finished");
+      assert.equal(result.timedOut, shape === "timeout");
+    } finally {
+      trap(child?.pid);
+      trap(sleeper || undefined);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("the harness cancel path is one stop for both platforms", () => {
   const main = source("electron", "main.ts");
@@ -654,6 +690,44 @@ test("the quit sweep stops a vendor CLI and a custom shell alike", { skip: !POSI
     resetProcRegistry();
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+/*
+ * And the sweep has to stop each thing the way that thing needs stopping. A
+ * terminal on the tracked list is not one group: quitting the desk with a
+ * terminal open has to reach the jobs job control moved out of it.
+ */
+test("the quit sweep walks a terminal's tree, not only its group", { skip: !POSIX, timeout: 25_000 }, async () => {
+  const dir = scratch("proc-quit-terminal");
+  const report = path.join(dir, "sleeper.pid");
+  const shell = process.env.SHELL;
+  const host = new TerminalHost();
+  let sleeper = 0;
+  let shellPid = 0;
+  try {
+    resetProcRegistry();
+    process.env.SHELL = "/bin/sh";
+    assert.deepEqual(host.start("term-quit", dir, () => {}), { ok: true });
+    assert.equal(host.write("term-quit", `sleep 5 & echo $! > ${report}`).ok, true);
+    const found = await until(() => fs.existsSync(report) && fs.readFileSync(report, "utf8").trim().length > 0, 5_000);
+    assert.ok(found, "the terminal never reported its background sleeper");
+    sleeper = Number(fs.readFileSync(report, "utf8").trim());
+    shellPid = psField(sleeper, "ppid");
+    assert.notEqual(psField(sleeper, "pgid"), psField(shellPid, "pgid"), "job control did not re-group the job");
+    assert.equal(trackedProcessGroupCount(), 1, "the terminal must be on the quit list like any other launch");
+
+    assert.equal(stopTrackedProcessGroups(), 1);
+    assert.ok(await until(() => !alive(sleeper), PROC_KILL_GRACE_MS + 1_000), "quit left the terminal's job running");
+    assert.ok(await until(() => !alive(shellPid), PROC_KILL_GRACE_MS + 1_000), "quit left the terminal shell running");
+  } finally {
+    host.disposeAll();
+    trap(shellPid || undefined);
+    trap(sleeper || undefined);
+    resetProcRegistry();
+    if (shell === undefined) delete process.env.SHELL;
+    else process.env.SHELL = shell;
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

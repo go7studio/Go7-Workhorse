@@ -1,5 +1,6 @@
 import { spawnCwd } from "./spawn-cwd";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { groupSpawnOptions } from "./process-registry";
 import { deskRoleOf } from "../src/lib/subagents";
 import fs from "node:fs";
 import path from "node:path";
@@ -108,6 +109,8 @@ export function spawnCodexProcess(spec: ReturnType<typeof buildCodexLaunchSpec>)
     env,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    // The CLI leads its own group, so a stop reaches what the CLI started too.
+    ...groupSpawnOptions(),
   }) as ChildProcessWithoutNullStreams;
 }
 

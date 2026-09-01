@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { CLAUDE_CLI_NOT_ON_PATH, detectClaudeLogin } from "../electron/claude-login";
 import {
   CODEX_CLI_NOT_ON_PATH,
   detectCodexLogin,
@@ -7,15 +11,16 @@ import {
 } from "../electron/codex-login";
 import { CURSOR_CLI_NOT_ON_PATH, detectCursorLogin, resolveCursorBinary } from "../electron/cursor-login";
 import { GROK_CLI_NOT_ON_PATH, detectGrokLogin } from "../electron/grok-login";
-import { normalizeSettings } from "../src/lib/settings";
+import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
 import {
   chooseRoutingDecision,
   describeRoutingMiss,
   rankRoutingCandidates,
   routingCandidatesForDesk,
-  type VendorLaunchState,
 } from "../src/lib/routing";
 import type { Settings } from "../src/lib/types";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * What a desk started from Finder or launchd actually inherits. Not a fixture
@@ -114,18 +119,17 @@ test("Codex with an ACP server, a login and no CLI is connected and not launchab
 });
 
 /**
- * `launchable` is not on LlmLink yet — src/lib/types.ts and the link normalizer
- * in src/lib/settings.ts belong to another lane, and normalizeSettings drops
- * keys it does not know. The gate is spread on afterwards so this test measures
- * routing's half of the contract, which is the half that ships here.
+ * A desk whose Codex link came back from a detect that said it cannot start,
+ * built the way the store builds it: through vendorLaunchGate and then through
+ * the normalizer that used to drop both fields.
  */
 function deskWithBlockedCodex(blocker = CODEX_CLI_NOT_ON_PATH): Settings {
-  const desk = normalizeSettings({
-    llms: { codex: { connected: true }, claude: { connected: true } },
+  return normalizeSettings({
+    llms: {
+      codex: { connected: true, ...vendorLaunchGate({ launchable: false, launchBlocker: blocker }) },
+      claude: { connected: true },
+    },
   });
-  const gate: VendorLaunchState = { launchable: false, launchBlocker: blocker };
-  const blocked = { ...desk.llms.codex, ...gate };
-  return { ...desk, llms: { ...desk.llms, codex: blocked } };
 }
 
 const REQUEST = { prompt: "Refactor the launch adapter", tier: "balanced" as const };
@@ -213,4 +217,178 @@ test("Cursor is not launchable when the only thing found is the editor", () => {
   assert.equal(working.binary, agent);
   assert.equal(working.launchable, true);
   assert.equal(working.launchBlocker, undefined);
+});
+
+/**
+ * Everything below follows the field across the desk, not around it. The tests
+ * above build a link by hand; these start at a real detect result and go
+ * through the two places the field used to be dropped — the store's read and
+ * the settings normalizer — before asking routing what it does.
+ */
+
+test("vendorLaunchGate carries a detect's launch half and nothing else", () => {
+  assert.deepEqual(
+    vendorLaunchGate({ connected: true, binary: "/x", launchable: false, launchBlocker: CODEX_CLI_NOT_ON_PATH }),
+    { launchable: false, launchBlocker: CODEX_CLI_NOT_ON_PATH },
+  );
+  // Launchable again clears the stored reason, or the row keeps naming a
+  // binary the person has just installed.
+  assert.deepEqual(vendorLaunchGate({ launchable: true, launchBlocker: "stale" }), {
+    launchable: true,
+    launchBlocker: undefined,
+  });
+  // A bridge that is not there says nothing, and the stored answer stands. A
+  // missing preload must never read as "this vendor is broken".
+  assert.deepEqual(vendorLaunchGate({ connected: false }), {});
+  assert.deepEqual(vendorLaunchGate(undefined), {});
+  assert.deepEqual(vendorLaunchGate(null), {});
+});
+
+test("a blocked detect result crosses link() and routing refuses the vendor", () => {
+  const acp = `${HOME}/.local/bin/codex-acp`;
+  const auth = `${HOME}/.codex/auth.json`;
+  const detected = detectCodexLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH },
+    existsSync: onlyOnDisk(acp, auth),
+    readFile: () => "",
+  });
+  assert.equal(detected.connected, true);
+  assert.equal(detected.launchable, false);
+
+  // The store's read, then the normalizer that used to drop what it read.
+  const desk = normalizeSettings({
+    llms: {
+      codex: { connected: true, ...vendorLaunchGate(detected) },
+      claude: { connected: true },
+    },
+  });
+  assert.equal(desk.llms.codex.launchable, false, "link() must carry launchable");
+  assert.equal(desk.llms.codex.launchBlocker, CODEX_CLI_NOT_ON_PATH, "link() must carry the reason");
+
+  const pool = routingCandidatesForDesk(desk);
+  assert.equal(
+    rankRoutingCandidates(pool, REQUEST, desk.routing).some((row) => row.provider === "codex"),
+    false,
+    "a link that says it cannot start must not rank",
+  );
+  const decision = chooseRoutingDecision(pool, REQUEST, desk.routing);
+  assert.ok(decision);
+  assert.notEqual(decision.provider, "codex");
+
+  const onlyCodex = pool.filter((row) => row.provider === "codex");
+  assert.equal(chooseRoutingDecision(onlyCodex, REQUEST, desk.routing), null);
+  assert.match(describeRoutingMiss(onlyCodex, REQUEST, desk.routing), /Codex CLI not on the desk's PATH/);
+});
+
+test("a vendor that can start again loses its blocker through link()", () => {
+  const desk = normalizeSettings({
+    llms: { codex: { connected: true, ...vendorLaunchGate({ launchable: true, launchBlocker: "stale" }) } },
+  });
+  assert.equal(desk.llms.codex.launchable, true);
+  assert.equal(desk.llms.codex.launchBlocker, undefined);
+  assert.equal(
+    routingCandidatesForDesk(desk).some((row) => row.launchable === false),
+    false,
+  );
+});
+
+test("a stored link that never heard of launchable still routes", () => {
+  const desk = normalizeSettings({ llms: { codex: { connected: true } } });
+  assert.equal(desk.llms.codex.launchable, undefined, "absent means launchable, for state written before the field");
+  assert.equal(desk.llms.codex.launchBlocker, undefined);
+  assert.ok(chooseRoutingDecision(routingCandidatesForDesk(desk), REQUEST, desk.routing));
+});
+
+test("Claude reports the same split: an ACP server and a login, no CLI", () => {
+  const acp = `${BREW_BIN}/claude-agent-acp`;
+  const blocked = detectClaudeLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH, CLAUDE_ACP_BIN: acp, ANTHROPIC_API_KEY: "sk-test" },
+    existsSync: onlyOnDisk(acp),
+    readFile: () => "",
+    keychainHasLogin: () => false,
+  });
+  assert.equal(blocked.connected, true, "the API key is a login");
+  assert.equal(blocked.cliBinary, null);
+  assert.equal(blocked.launchable, false);
+  assert.equal(blocked.launchBlocker, CLAUDE_CLI_NOT_ON_PATH);
+
+  const whole = detectClaudeLogin({
+    homedir: HOME,
+    platform: "darwin",
+    env: { PATH: FINDER_PATH, CLAUDE_ACP_BIN: acp, ANTHROPIC_API_KEY: "sk-test" },
+    existsSync: onlyOnDisk(acp, `${BREW_BIN}/claude`),
+    readFile: () => "",
+    keychainHasLogin: () => false,
+  });
+  assert.equal(whole.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(whole.launchable, true);
+  assert.equal(whole.launchBlocker, undefined);
+});
+
+/**
+ * The crossing itself lives inside a React effect, which no node test can call.
+ * The suite reads the source for it the way test/codex-adapter.test.ts reads
+ * preload for its detect calls. Dropping the read is the mutation this catches;
+ * `vendorLaunchGate` above is what proves the read does the right thing.
+ */
+test("the store carries the launch gate onto every vendor link", () => {
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  for (const vendor of ["grok", "codex", "claude", "cursor"]) {
+    assert.match(
+      store,
+      new RegExp(`\\.\\.\\.vendorLaunchGate\\(${vendor}\\)`),
+      `the detect effect must carry ${vendor}'s launch gate onto its link`,
+    );
+  }
+  // Recheck is the button the blocker sends the person to, so all four of those
+  // paths have to be able to clear it too.
+  const rechecks = store.match(/\.\.\.vendorLaunchGate\(detected\)/g) ?? [];
+  assert.equal(rechecks.length, 4, `Recheck carries the gate for ${rechecks.length} vendors, not 4`);
+});
+
+/**
+ * The vendor row itself. Settings.tsx cannot be loaded here — it reaches an
+ * image import that tsx has no loader for — so this reads it, the way
+ * test/codex-adapter.test.ts already reads the same file for "Codex not found".
+ * The row is the existing `row-meta` line, taking one more short string; no
+ * component was added.
+ */
+test("the vendor row says the blocker instead of reporting the vendor ready", () => {
+  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  assert.match(
+    settings,
+    /if \(link\.launchable === false && link\.launchBlocker\) return/,
+    "the detail row must answer with the blocker before it answers 'ready'",
+  );
+  const detail = settings.slice(settings.indexOf("function llmDetailCopy"));
+  const blockerLine = detail.indexOf("link.launchable === false");
+  const readyLine = detail.indexOf("Local Codex ready.");
+  assert.ok(blockerLine > 0 && readyLine > blockerLine, "the blocker has to be reached before 'Local Codex ready.'");
+  assert.match(settings, /Local Codex ready\./, "the ready copy still exists for a vendor that can start");
+  assert.doesNotMatch(settings, /className="launch-blocker"/, "no new component for one string");
+});
+
+/**
+ * The renderer's view of the bridge is src/vite-env.d.ts, so a hand-copied
+ * shape there is what silently drops a new field. Grok and Claude were the two
+ * written out by hand; Codex and Cursor already named their result types.
+ */
+test("the bridge types every vendor detect by its real result type", () => {
+  const bridge = readFileSync(path.join(ROOT, "src", "vite-env.d.ts"), "utf8");
+  assert.match(bridge, /detectGrokLogin: \(\) => Promise<import\("\.\.\/electron\/grok-login"\)\.GrokLoginDetectResult>/);
+  assert.match(
+    bridge,
+    /detectClaudeLogin: \(\) => Promise<import\("\.\.\/electron\/claude-login"\)\.ClaudeLoginDetectResult>/,
+  );
+  for (const vendor of ["detectGrokLogin", "detectClaudeLogin", "detectCodexLogin", "detectCursorLogin"]) {
+    assert.doesNotMatch(
+      bridge,
+      new RegExp(`${vendor}: \\(\\) => Promise<\\{`),
+      `${vendor} must name its result type, not restate its shape`,
+    );
+  }
 });

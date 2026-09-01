@@ -137,17 +137,43 @@ export function keepVendorAccessDefaults(
   return detected ?? stored;
 }
 
+/**
+ * The launch half of a vendor detect, on its way to the link. Connected says a
+ * login artifact is on disk; launchable says the binary the launch shells out
+ * to is somewhere this process can see. Routing refuses a candidate that cannot
+ * start, so this is the crossing that makes that gate real.
+ *
+ * A detect that reports nothing returns nothing, and the stored answer stands:
+ * a bridge that is not there yet must not be read as "this vendor is broken".
+ * A detect that says launchable clears any stored reason with it.
+ */
+export function vendorLaunchGate(detected: unknown): Pick<LlmLink, "launchable" | "launchBlocker"> {
+  const record = (detected ?? {}) as { launchable?: unknown; launchBlocker?: unknown };
+  if (typeof record.launchable !== "boolean") return {};
+  // A vendor that can start has no reason it cannot. Carrying one anyway left
+  // the row naming a binary the person had just installed.
+  if (record.launchable) return { launchable: true, launchBlocker: undefined };
+  const blocker = typeof record.launchBlocker === "string" ? record.launchBlocker.trim() : "";
+  return { launchable: false, launchBlocker: blocker || undefined };
+}
+
 function link(raw: unknown): LlmLink {
   if (!raw || typeof raw !== "object") return { connected: false };
   const record = raw as LlmLink;
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const color = linkColor(record.color);
   const nativeAccess = accessDefaults(record.accessDefaults);
+  // A vendor that cannot start has to survive this function. Dropping the two
+  // fields here left routing's launch gate reading an undefined it could never
+  // be given, so a connected-but-unlaunchable vendor kept taking work.
+  const blocker = typeof record.launchBlocker === "string" ? record.launchBlocker.trim() : "";
   return {
     connected: Boolean(record.connected),
     enabled: record.enabled !== false,
     ...(typeof record.available === "boolean" ? { available: record.available } : {}),
     ...(typeof record.needsAuth === "boolean" ? { needsAuth: record.needsAuth } : {}),
+    ...(typeof record.launchable === "boolean" ? { launchable: record.launchable } : {}),
+    ...(blocker ? { launchBlocker: blocker } : {}),
     ...(name ? { name } : {}),
     ...(color ? { color } : {}),
     ...(nativeAccess ? { accessDefaults: nativeAccess } : {}),

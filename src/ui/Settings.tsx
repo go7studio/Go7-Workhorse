@@ -50,6 +50,10 @@ function llmDetailCopy(id: Exclude<ProviderId, "custom">, link: LlmLink): string
   if (link.connected && link.enabled === false) {
     return "Disabled for new chats.";
   }
+  // A vendor that is signed in and cannot start reads as ready everywhere else
+  // on this row. The reason is one line the detector already wrote, so the meta
+  // line says that instead of promising a launch that will throw.
+  if (link.launchable === false && link.launchBlocker) return `${link.launchBlocker}. Install it, then Recheck.`;
   const found = link.available ?? link.connected;
   if (id === "grok") {
     return found ? "Local Grok ready." : "Grok not found.";

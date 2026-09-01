@@ -193,7 +193,7 @@ contextBridge.exposeInMainWorld("workhorse", {
   grokRewind: (input: GrokPromptInput & { keepUserIndex: number }) => ipcRenderer.invoke("grok:rewind", input),
   grokFork: (input: GrokPromptInput) => ipcRenderer.invoke("grok:fork", input),
   detectGrokLogin: () =>
-    ipcRenderer.invoke("grok:detect-login") as Promise<{ connected: boolean; binary: string | null }>,
+    ipcRenderer.invoke("grok:detect-login") as Promise<import("./grok-login").GrokLoginDetectResult>,
   grokPlanUsage: () => ipcRenderer.invoke("grok:plan-usage"),
   codexPlanUsage: () => ipcRenderer.invoke("codex:plan-usage"),
   claudePlanUsage: () => ipcRenderer.invoke("claude:plan-usage"),

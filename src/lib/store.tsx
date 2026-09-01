@@ -122,6 +122,7 @@ import {
   normalizeAgentSystems,
   normalizeRouting,
   vendorAttachedForSession,
+  vendorLaunchGate,
 } from "./settings";
 import { acceptInboundEnvelope, allowedExternalCandidates, formatExternalAgentRef, parseExternalAgentRef } from "./agent-runtime";
 import { decideDispatch } from "./dispatch";
@@ -1142,6 +1143,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   // a logged-out or mid-upgrade CLI is not the person tightening
                   // the desk, and writing its silence here used to do exactly
                   // that to every chat opened afterwards.
+                  //
+                  // vendorLaunchGate carries the other half of each detect: a
+                  // vendor whose CLI is missing from the desk's PATH is
+                  // connected and cannot start, and routing refuses it only if
+                  // that reaches the link from here.
                   grok: {
                     ...current.settings.llms.grok,
                     available: Boolean(grok.connected),
@@ -1149,6 +1155,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       current.settings.llms.grok.accessDefaults,
                       grok.accessDefaults,
                     ),
+                    ...vendorLaunchGate(grok),
                   },
                   codex: {
                     ...current.settings.llms.codex,
@@ -1157,6 +1164,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       current.settings.llms.codex.accessDefaults,
                       codex.accessDefaults,
                     ),
+                    ...vendorLaunchGate(codex),
                   },
                   claude: {
                     ...current.settings.llms.claude,
@@ -1166,6 +1174,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       current.settings.llms.claude.accessDefaults,
                       claude.accessDefaults,
                     ),
+                    ...vendorLaunchGate(claude),
                   },
                   cursor: {
                     ...current.settings.llms.cursor,
@@ -1175,6 +1184,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       current.settings.llms.cursor.accessDefaults,
                       cursor.accessDefaults,
                     ),
+                    ...vendorLaunchGate(cursor),
                   },
                   custom: { ...current.settings.llms.custom, connected: false },
                 },
@@ -1794,6 +1804,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 current.settings.llms.grok.accessDefaults,
                 detected.accessDefaults,
               ),
+              // Recheck is the button the blocker tells the person to press, so
+              // it has to be able to clear the blocker.
+              ...vendorLaunchGate(detected),
             },
           },
         },
@@ -1822,6 +1835,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   current.settings.llms.codex.accessDefaults,
                   detected.accessDefaults,
                 ),
+                ...vendorLaunchGate(detected),
               },
             },
           },
@@ -1854,6 +1868,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 current.settings.llms.cursor.accessDefaults,
                 detected.accessDefaults,
               ),
+              ...vendorLaunchGate(detected),
             },
           },
         },
@@ -1881,6 +1896,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 current.settings.llms.claude.accessDefaults,
                 detected.accessDefaults,
               ),
+              ...vendorLaunchGate(detected),
             },
           },
         },

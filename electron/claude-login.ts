@@ -16,6 +16,10 @@ export const CLAUDE_ACP_NOT_INSTALLED =
 export const CLAUDE_CLI_NOT_INSTALLED =
   "Claude Code CLI not found. Install Claude Code, or set CLAUDE_CODE_EXECUTABLE to the claude binary.";
 
+/** One line, for the vendor status row and the routing miss text. */
+export const CLAUDE_CLI_NOT_ON_PATH = "Claude Code CLI not on the desk's PATH";
+export const CLAUDE_ACP_NOT_ON_PATH = "Claude ACP not on the desk's PATH";
+
 export type ClaudeLoginDetectInput = {
   env?: NodeJS.Dict<string>;
   homedir?: string;
@@ -38,6 +42,14 @@ export type ClaudeLoginDetectResult = {
   connected: boolean;
   /** ACP is installed but no usable login. A different problem from "not found". */
   needsAuth: boolean;
+  /**
+   * Connected says a login exists. Launchable says the desk can actually start
+   * the vendor: the ACP server and the CLI it shells out to are both on disk
+   * where this process can see them. Routing needs the second, not the first.
+   */
+  launchable: boolean;
+  /** Why not, in one line. Empty when launchable. */
+  launchBlocker?: string;
   binary: string | null;
   cliBinary: string | null;
   acpBinary: string | null;
@@ -343,10 +355,17 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
     input.keychainHasLogin ?? macKeychainHasClaudeLogin,
   );
   const connected = Boolean(acpBinary && loggedIn);
+  // Same split as Codex: claude-launch.ts reads cliBinary as
+  // CLAUDE_CODE_EXECUTABLE and throws CLAUDE_CLI_NOT_INSTALLED without it, so a
+  // desk that found the ACP server and the login but not the CLI reported
+  // Claude ready and then threw a second into the slice.
+  const launchBlocker = !acpBinary ? CLAUDE_ACP_NOT_ON_PATH : !cliBinary ? CLAUDE_CLI_NOT_ON_PATH : undefined;
   const accessDefaults = detectClaudeAccessDefaults({ home: claudeHome, join: path.join, readFile, env });
   return {
     connected,
     needsAuth: Boolean(acpBinary) && !loggedIn,
+    launchable: !launchBlocker,
+    ...(launchBlocker ? { launchBlocker } : {}),
     binary: acpBinary,
     cliBinary,
     acpBinary,

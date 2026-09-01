@@ -39,9 +39,14 @@ const HOME = "/Users/someone";
 const BREW_BIN = "/opt/homebrew/bin";
 
 /** Only these files exist. Everything else — including this machine — does not. */
+// Node's path module joins with the runner's separator, so a resolver running on a
+// Windows CI box builds `\\opt\\homebrew\\bin\\codex` for the same darwin fixture.
+// Compare and assert through a posix view so the test says one thing on every runner.
+const posix = (value: string | null | undefined): string | null =>
+  typeof value === "string" ? value.replace(/\\/g, "/") : null;
 function onlyOnDisk(...files: string[]): (filePath: string) => boolean {
-  const present = new Set(files);
-  return (filePath) => present.has(filePath);
+  const present = new Set(files.map((file) => posix(file)));
+  return (filePath) => present.has(posix(filePath));
 }
 
 test("a Finder-launched desk finds Codex, Cursor and Grok outside the bare PATH", () => {
@@ -51,7 +56,7 @@ test("a Finder-launched desk finds Codex, Cursor and Grok outside the bare PATH"
     env: { PATH: FINDER_PATH },
     existsSync: onlyOnDisk(`${BREW_BIN}/codex`),
   });
-  assert.equal(codex, `${BREW_BIN}/codex`, "Codex CLI must be found off the desk's installer directories");
+  assert.equal(posix(codex), `${BREW_BIN}/codex`, "Codex CLI must be found off the desk's installer directories");
 
   const cursor = resolveCursorBinary({
     homedir: HOME,
@@ -59,7 +64,7 @@ test("a Finder-launched desk finds Codex, Cursor and Grok outside the bare PATH"
     env: { PATH: FINDER_PATH },
     existsSync: onlyOnDisk(`${BREW_BIN}/cursor-agent`),
   });
-  assert.equal(cursor, `${BREW_BIN}/cursor-agent`, "Cursor CLI must be found off the desk's installer directories");
+  assert.equal(posix(cursor), `${BREW_BIN}/cursor-agent`, "Cursor CLI must be found off the desk's installer directories");
 
   const grok = detectGrokLogin({
     homedir: HOME,
@@ -68,7 +73,7 @@ test("a Finder-launched desk finds Codex, Cursor and Grok outside the bare PATH"
     existsSync: onlyOnDisk(`${BREW_BIN}/grok`),
     readFile: () => "",
   });
-  assert.equal(grok.binary, `${BREW_BIN}/grok`, "Grok CLI must be found off the desk's installer directories");
+  assert.equal(posix(grok.binary), `${BREW_BIN}/grok`, "Grok CLI must be found off the desk's installer directories");
   assert.equal(grok.launchable, true);
   assert.equal(grok.connected, false, "a binary with no login artifact is launchable, not connected");
 });
@@ -330,7 +335,7 @@ test("Claude reports the same split: an ACP server and a login, no CLI", () => {
     readFile: () => "",
     keychainHasLogin: () => false,
   });
-  assert.equal(whole.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(posix(whole.cliBinary), `${BREW_BIN}/claude`);
   assert.equal(whole.launchable, true);
   assert.equal(whole.launchBlocker, undefined);
 });
@@ -363,7 +368,7 @@ test("a Finder-launched desk finds the Claude ACP server outside the bare PATH",
     keychainHasLogin: () => false,
   });
   assert.equal(detected.acpBinary, acp);
-  assert.equal(detected.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(posix(detected.cliBinary), `${BREW_BIN}/claude`);
   assert.equal(detected.connected, true);
   assert.equal(detected.launchable, true);
   assert.equal(detected.launchBlocker, undefined);
@@ -381,7 +386,7 @@ test("a missing ACP server is its own blocker, named apart from the CLI", () => 
     moduleDirs: [],
   });
   assert.equal(claude.acpBinary, null);
-  assert.equal(claude.cliBinary, `${BREW_BIN}/claude`);
+  assert.equal(posix(claude.cliBinary), `${BREW_BIN}/claude`);
   assert.equal(claude.connected, false, "no server to speak to is not a connection");
   assert.equal(claude.launchable, false);
   assert.equal(claude.launchBlocker, CLAUDE_ACP_NOT_ON_PATH);
@@ -396,7 +401,7 @@ test("a missing ACP server is its own blocker, named apart from the CLI", () => 
     moduleDirs: [],
   });
   assert.equal(codex.acpBinary, null);
-  assert.equal(codex.cliBinary, `${BREW_BIN}/codex`);
+  assert.equal(posix(codex.cliBinary), `${BREW_BIN}/codex`);
   assert.equal(codex.launchable, false);
   assert.equal(codex.launchBlocker, CODEX_ACP_NOT_ON_PATH);
 });

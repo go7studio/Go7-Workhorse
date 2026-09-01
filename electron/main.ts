@@ -72,6 +72,7 @@ import { buildSupportReport } from "./diagnostics";
 import { APP_VERSION } from "../src/lib/app-info";
 import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData } from "./user-data-hygiene";
 import { faultDetail, memoryDetail, nullMainLog, openMainLog, startMemoryLog } from "./main-log";
+import { configureProcRegistry, procReapDetail, reapOrphanProcessGroups, stopTrackedProcessGroups } from "./process-registry";
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
 import { offloadStateTranscripts, readTranscriptSidecar, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
@@ -317,6 +318,27 @@ if (!isPrimaryInstance) {
     win.show();
     win.focus();
   });
+}
+
+/*
+ * A desk that dies without stopping its vendors leaves their process groups
+ * running, and nothing has ever gone looking for them: 28 shell spinners once
+ * outlived their worker by 71 minutes, through the worker's end, through the
+ * interrupt marking at the next launch, through a quit. Every launch writes
+ * its group down; this is where the next boot collects the ones nobody closed.
+ *
+ * After the lock, for the same reason hygiene is: a second launch must not
+ * reach in and kill the running desk's vendors.
+ */
+if (isPrimaryInstance && !isMcpHelper) {
+  try {
+    const procs = configureProcRegistry(app.getPath("userData"));
+    for (const decision of reapOrphanProcessGroups(procs)) {
+      mainLog.record(decision.action === "reaped" ? "proc:reaped" : "proc:kept", procReapDetail(decision));
+    }
+  } catch (error) {
+    mainLog.record("proc:kept", `reap failed ${faultDetail(error, 1)}`);
+  }
 }
 
 /*
@@ -1884,6 +1906,12 @@ app.on("before-quit", (event) => {
   codexHost.disposeAll();
   terminalHost.disposeAll();
   jobEngine?.dispose();
+  // Claude, Cursor and the custom bots own their hosts inside the IPC scope, so
+  // the quit hook cannot dispose them by name. Every launch is on the registry,
+  // so take whatever is still running by its group — including the shells a
+  // vendor started, which no host has ever held a handle to.
+  const stopped = stopTrackedProcessGroups();
+  if (stopped) mainLog.record("proc:reaped", `quit groups=${stopped}`);
   // After the disposals, so Lane 0's guard keeps every one of them behind the
   // second-pass return, and once per quit rather than once per handler run.
   mainLog.record("before-quit", memoryDetail());

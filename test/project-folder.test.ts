@@ -153,7 +153,7 @@ test("linking a temporary folder warns instead of refusing", () => {
 test("the missing-folder answer is something React can redraw on", () => {
   // It was a ref mutated inside a promise. Nothing re-rendered, so Project Home
   // drew a deleted folder as a live one until something unrelated forced a pass.
-  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
+  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(store, /const \[missingFolderPaths, setMissingFolderPaths\] = useState<ReadonlySet<string>>/);
   assert.match(store, /missingFolders\.current = next;\s*\n\s*setMissingFolderPaths\(next\);/, "the ref and the state must move together");
   assert.match(store, /if \(live\) applyMissingFolders\(new Set\(gone\)\)/, "the probe's answer must go through it");

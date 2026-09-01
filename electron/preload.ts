@@ -78,6 +78,11 @@ contextBridge.exposeInMainWorld("workhorse", {
   },
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
+  /** A finished worker's offloaded thinking and tool rows, each with the seat it held. */
+  loadTranscript: (sessionId: string) =>
+    ipcRenderer.invoke("transcript:load", sessionId) as Promise<
+      import("../src/lib/transcript-sidecar").TranscriptSidecar | null
+    >,
   saveComposerDrafts: (drafts: Record<string, { text?: string; images?: import("../src/lib/types").ChatImage[] }>) =>
     ipcRenderer.invoke("state:save-drafts", drafts),
   probeLocalCompute: (hosts: import("../src/lib/types").LocalComputeHostSettings[]) =>

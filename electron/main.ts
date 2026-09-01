@@ -73,7 +73,7 @@ import { APP_VERSION } from "../src/lib/app-info";
 import { measureWorktreeStore, sweepAgedStateBackups, sweepStaleUserData } from "./user-data-hygiene";
 import { faultDetail, memoryDetail, nullMainLog, openMainLog, startMemoryLog } from "./main-log";
 import { clearPerfCause, setPerfCause, stallThresholdMs, startPerfHeartbeat } from "./perf-heartbeat";
-import { offloadStateTranscripts, rehydrateSessionTranscript } from "./transcript-store";
+import { offloadStateTranscripts, readTranscriptSidecar, transcriptSidecarPath } from "./transcript-store";
 import { applyComposerDrafts, type ComposerDraftSnap } from "../src/lib/chats";
 import { dueByInterval, readComposerDraftFile, readStringMapFile, readVersionedState, sameJsonValue, STATE_BACKUP_INTERVAL_MS, STATE_FSYNC_INTERVAL_MS, syncFileInPlace, worktreeKeepSet, worktreePruneDecision, writeComposerDraftFile, writeStringMapFile, writeVersionedState, writeVersionedStateAsync } from "./state-persistence";
 import { workhorseUserDataOverride, workhorseVolatileCredentials } from "../src/lib/user-data";
@@ -1429,21 +1429,15 @@ app.whenReady().then(async () => {
   /*
    * One finished worker's steps, read back when somebody opens its chat.
    *
-   * `readVersionedState`, not `readStateWithSource`: that one protects,
-   * offloads and can rewrite the file, which is launch work and has no business
-   * running because a person clicked a chat. Only the messages go back — the
-   * chat the renderer already holds is not being replaced, only filled in.
+   * The sidecar's name is the chat's id, so this reads one small file and never
+   * touches the desk state — parsing 46 MB because a person clicked a chat is
+   * the cost this whole change exists to remove. Only the offloaded rows go
+   * back; the chat already holds its prose, and the renderer merges the two
+   * halves with the same function this process does.
    */
   ipcMain.handle("transcript:load", (_event, sessionId: unknown) => {
     if (typeof sessionId !== "string" || !sessionId.trim()) return null;
-    const { state } = readVersionedState(statePath());
-    const sessions = Array.isArray(state.sessions) ? state.sessions : [];
-    const session = sessions.find(
-      (row) => row && typeof row === "object" && (row as { id?: unknown }).id === sessionId,
-    );
-    if (!session) return null;
-    const filled = rehydrateSessionTranscript(session) as { messages?: unknown };
-    return { id: sessionId, messages: Array.isArray(filled.messages) ? filled.messages : [] };
+    return readTranscriptSidecar(transcriptSidecarPath(app.getPath("userData"), sessionId));
   });
 
   ipcMain.handle("state:load", () => {

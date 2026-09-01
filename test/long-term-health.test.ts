@@ -38,10 +38,18 @@ import {
   isTerminalWorker,
   offloadSessionTranscript,
   offloadStateTranscripts,
-  rehydrateSessionTranscript,
+  readTranscriptSidecar,
   transcriptSidecarPath,
   type TranscriptIo,
 } from "../electron/transcript-store";
+import {
+  mergeTranscriptRows,
+  normalizeTranscriptSidecar,
+  transcriptFetchPlan,
+  type TranscriptSidecar,
+} from "../src/lib/transcript-sidecar";
+import { normalizeSession } from "../src/lib/session";
+import type { ChatMessage } from "../src/lib/types";
 
 /*
  * Lane 2b: the desk's long-term health. Every test here stands for a number
@@ -214,10 +222,10 @@ test("a finished worker's steps go to a sidecar and come back exactly", () => {
     assert.equal(offloaded.transcriptSidecar, transcriptSidecarPath(dir, "sess_w1"));
     assert.ok(fs.existsSync(offloaded.transcriptSidecar as string));
 
-    const back = rehydrateSessionTranscript(offloaded) as Record<string, unknown>;
-    assert.deepEqual(back.messages, original.messages);
-    assert.equal("transcriptSidecar" in back, false);
-    assert.equal("transcriptOffloaded" in back, false);
+    // The read path both callers use: one small file, then the shared merge.
+    const sidecar = readTranscriptSidecar(offloaded.transcriptSidecar as string)!;
+    assert.equal(sidecar.sessionId, "sess_w1");
+    assert.deepEqual(mergeTranscriptRows(inline as ChatMessage[], sidecar), original.messages);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -399,19 +407,21 @@ test("a missing or damaged sidecar costs the steps, never the chat", () => {
   try {
     const offloaded = offloadSessionTranscript(finishedWorker("sess_w4"), dir) as Record<string, unknown>;
     const file = offloaded.transcriptSidecar as string;
+    const inline = offloaded.messages as ChatMessage[];
 
     fs.rmSync(file);
-    const gone = rehydrateSessionTranscript(offloaded) as Record<string, unknown>;
-    assert.deepEqual((gone.messages as Array<{ id: string }>).map((row) => row.id), ["m1", "m4"]);
+    assert.equal(readTranscriptSidecar(file), null, "a sidecar that is gone reads as nothing, not as empty");
 
     fs.writeFileSync(file, "{ not json");
-    const torn = rehydrateSessionTranscript(offloaded) as Record<string, unknown>;
-    assert.equal((torn.messages as unknown[]).length, 2);
+    assert.equal(readTranscriptSidecar(file), null);
 
     // A sidecar whose arithmetic does not add up is not spliced back in.
     fs.writeFileSync(file, JSON.stringify({ version: 1, sessionId: "sess_w4", total: 99, rows: [] }));
-    const wrong = rehydrateSessionTranscript(offloaded) as Record<string, unknown>;
-    assert.equal((wrong.messages as unknown[]).length, 2);
+    const wrong = readTranscriptSidecar(file)!;
+    assert.equal(mergeTranscriptRows(inline, wrong), null);
+
+    // Every refusal above leaves the chat holding exactly what it had.
+    assert.deepEqual(inline.map((row) => row.id), ["m1", "m4"]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -421,7 +431,262 @@ test("the save path offloads transcripts and the desk can read one back", () => 
   const main = source("electron", "main.ts");
   assert.match(main, /offloadStateTranscripts\(/);
   assert.match(main, /ipcMain\.handle\("transcript:load"/);
-  assert.match(main, /rehydrateSessionTranscript\(/);
+  assert.match(main, /readTranscriptSidecar\(/);
+});
+
+/* --------------------------- item 2b: the chat-open path that reads it back */
+
+/**
+ * The desk's open path, driven without React.
+ *
+ * `transcriptFetchPlan` is the rule the store's effect actually runs on, so
+ * this drives the shipped decision rather than a copy of it. The bridge is
+ * counted, because "does not refetch" and "never fetches" are claims about how
+ * many times the disk was touched and nothing else can check them.
+ */
+function openDesk(sessions: Array<Record<string, unknown>>, sidecars: Record<string, TranscriptSidecar | null>) {
+  const asked = new Set<string>();
+  let calls = 0;
+  let live = sessions;
+  return {
+    get sessions() {
+      return live;
+    },
+    get calls() {
+      return calls;
+    },
+    open(sessionId: string | null) {
+      const plan = transcriptFetchPlan({ activeSessionId: sessionId, sessions: live as never, asked });
+      if (!plan) return;
+      asked.add(plan.sessionId);
+      calls += 1;
+      const sidecar = sidecars[plan.sessionId] ?? null;
+      const session = live.find((row) => row.id === plan.sessionId)!;
+      const merged = sidecar ? mergeTranscriptRows(session.messages as ChatMessage[], sidecar) : null;
+      const noteId = `msg_transcript_missing_${plan.sessionId}`;
+      live = live.map((row) =>
+        row.id === plan.sessionId
+          ? merged
+            ? {
+                ...row,
+                // The store drops its own note once the real rows are back.
+                messages: merged.filter((message) => message.id !== noteId),
+                transcriptSidecar: undefined,
+                transcriptOffloaded: undefined,
+              }
+            : {
+                ...row,
+                messages: [
+                  ...(row.messages as ChatMessage[]),
+                  { id: noteId, role: "system", text: `${plan.offloaded} steps are on disk and could not be loaded.`, createdAt: 0 },
+                ],
+              }
+          : row,
+      );
+    },
+  };
+}
+
+test("opening a stripped chat asks once and gets every row back in order", () => {
+  const dir = scratch("open-round-trip");
+  try {
+    const original = finishedWorker("sess_open");
+    const offloaded = offloadSessionTranscript(original, dir) as Record<string, unknown>;
+    const sidecar = readTranscriptSidecar(offloaded.transcriptSidecar as string)!;
+    assert.equal(sidecar.total, 4);
+    assert.equal(sidecar.rows.length, 2);
+
+    const desk = openDesk([offloaded, finishedWorker("sess_other")], { sess_open: sidecar });
+    desk.open("sess_open");
+
+    assert.equal(desk.calls, 1, "one open, one ask");
+    const opened = desk.sessions.find((row) => row.id === "sess_open")!;
+    const rows = opened.messages as ChatMessage[];
+    assert.equal(rows.length, sidecar.total, "the row count equals the sidecar's total");
+    assert.deepEqual(rows.map((row) => row.id), ["m1", "m2", "m3", "m4"], "and each row is back in its own seat");
+    assert.deepEqual(rows, original.messages);
+
+    // The pointer goes only once the rows are back, and both halves go together.
+    assert.equal(opened.transcriptSidecar, undefined);
+    assert.equal(opened.transcriptOffloaded, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a second open does not ask again, and a chat nobody opened never asks", () => {
+  const dir = scratch("open-once");
+  try {
+    const a = offloadSessionTranscript(finishedWorker("sess_a"), dir) as Record<string, unknown>;
+    const b = offloadSessionTranscript(finishedWorker("sess_b"), dir) as Record<string, unknown>;
+    const sidecars = {
+      sess_a: readTranscriptSidecar(a.transcriptSidecar as string),
+      sess_b: readTranscriptSidecar(b.transcriptSidecar as string),
+    };
+
+    const desk = openDesk([a, b], sidecars);
+    desk.open("sess_a");
+    desk.open("sess_a");
+    desk.open("sess_a");
+    assert.equal(desk.calls, 1, "the rows are already here; asking again is a wasted read");
+
+    // The worker board lists both. Only the one somebody opened was ever read.
+    const untouched = desk.sessions.find((row) => row.id === "sess_b")!;
+    assert.equal((untouched.messages as unknown[]).length, 2, "sess_b is still stripped");
+    assert.equal(untouched.transcriptSidecar, b.transcriptSidecar, "and still knows where its rows are");
+
+    desk.open(null);
+    assert.equal(desk.calls, 1, "no active chat, no read");
+
+    desk.open("sess_b");
+    assert.equal(desk.calls, 2);
+    assert.equal((desk.sessions.find((row) => row.id === "sess_b")!.messages as unknown[]).length, 4);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the plan names the open chat and no other, however many are stripped", () => {
+  const stripped = (id: string) => ({ id, transcriptSidecar: `/t/${id}.json`, transcriptOffloaded: 3 });
+  // The shape of the live desk: 624 finished workers, all of them stripped,
+  // all of them on the worker board.
+  const sessions = Array.from({ length: 624 }, (_, index) => stripped(`sess_${index}`));
+
+  const plan = transcriptFetchPlan({ activeSessionId: "sess_400", sessions, asked: new Set() });
+  assert.deepEqual(plan, { sessionId: "sess_400", offloaded: 3 }, "the open chat, not the first one it can find");
+
+  // Nothing open, nothing read — this is the boot case, and the reason the
+  // rule is written against the active id rather than the list.
+  assert.equal(transcriptFetchPlan({ activeSessionId: null, sessions, asked: new Set() }), null);
+  assert.equal(transcriptFetchPlan({ activeSessionId: undefined, sessions, asked: new Set() }), null);
+  // Already asked this launch: hit or miss, that is the one ask it gets.
+  assert.equal(transcriptFetchPlan({ activeSessionId: "sess_400", sessions, asked: new Set(["sess_400"]) }), null);
+  // A chat that is open but holds everything already.
+  assert.equal(transcriptFetchPlan({ activeSessionId: "plain", sessions: [{ id: "plain" }], asked: new Set() }), null);
+  // Half a link is a filename guess waiting to happen.
+  assert.equal(
+    transcriptFetchPlan({ activeSessionId: "half", sessions: [{ id: "half", transcriptSidecar: "/t/half.json" }], asked: new Set() }),
+    null,
+  );
+  assert.equal(
+    transcriptFetchPlan({ activeSessionId: "half", sessions: [{ id: "half", transcriptOffloaded: 3 }], asked: new Set() }),
+    null,
+  );
+  // An id the desk does not have.
+  assert.equal(transcriptFetchPlan({ activeSessionId: "sess_gone", sessions, asked: new Set() }), null);
+});
+
+test("a sidecar that will not load costs the steps and one line, never the chat", () => {
+  const dir = scratch("open-miss");
+  try {
+    const stripped = offloadSessionTranscript(finishedWorker("sess_miss"), dir) as Record<string, unknown>;
+    const desk = openDesk([stripped], { sess_miss: null });
+    // Every render of the open chat re-enters the effect. The pointer is still
+    // there after a miss, so without the one-ask rule this spins on the disk
+    // for as long as the chat is open.
+    for (let render = 0; render < 6; render += 1) desk.open("sess_miss");
+
+    const opened = desk.sessions.find((row) => row.id === "sess_miss")!;
+    const rows = opened.messages as ChatMessage[];
+    assert.deepEqual(rows.slice(0, 2).map((row) => row.id), ["m1", "m4"], "the prose is untouched");
+    assert.match(rows[2].text, /2 steps are on disk and could not be loaded\./);
+    assert.equal(rows.length, 3, "and the note is written once, not once a render");
+    // The pointer stays, so a later launch can try again rather than orphaning
+    // the file for good.
+    assert.equal(opened.transcriptSidecar, stripped.transcriptSidecar);
+    assert.equal(opened.transcriptOffloaded, 2);
+    assert.equal(desk.calls, 1, "a miss is not retried on the next render");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a later open still restores order once the note has been appended", () => {
+  const dir = scratch("open-after-note");
+  try {
+    const original = finishedWorker("sess_late");
+    const stripped = offloadSessionTranscript(original, dir) as Record<string, unknown>;
+    const sidecar = readTranscriptSidecar(stripped.transcriptSidecar as string)!;
+
+    // First launch missed and left a note. The note is appended, so a stricter
+    // merge would refuse from here on and the chat would never recover.
+    const missed = openDesk([stripped], { sess_late: null });
+    missed.open("sess_late");
+    const withNote = missed.sessions[0];
+    assert.equal((withNote.messages as unknown[]).length, 3);
+
+    const retry = openDesk([withNote], { sess_late: sidecar });
+    retry.open("sess_late");
+    const rows = retry.sessions[0].messages as ChatMessage[];
+    assert.deepEqual(rows.map((row) => row.id), ["m1", "m2", "m3", "m4"], "order restored, note dropped by the store");
+    assert.equal(retry.sessions[0].transcriptSidecar, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the pointer survives a load, or the chat orphans its own steps", () => {
+  // normalizeSession builds an allowlist. Before this pair was added to it the
+  // desk read a stripped chat, dropped the pointer, saved the prose back, and
+  // nothing on disk pointed at the thinking and tool rows again.
+  const saved = {
+    id: "sess_norm",
+    provider: "codex",
+    model: "gpt-5.6-sol",
+    title: "worker",
+    mode: "ask",
+    messages: [{ id: "m1", role: "user", text: "brief", createdAt: 1 }],
+    transcriptSidecar: "/tmp/x/transcripts/sess_norm.json",
+    transcriptOffloaded: 12,
+  };
+  const loaded = normalizeSession(saved)!;
+  assert.equal(loaded.transcriptSidecar, "/tmp/x/transcripts/sess_norm.json");
+  assert.equal(loaded.transcriptOffloaded, 12);
+
+  // Both halves or neither: half a link is a filename guess waiting to happen.
+  assert.equal(normalizeSession({ ...saved, transcriptOffloaded: 0 })!.transcriptSidecar, undefined);
+  assert.equal(normalizeSession({ ...saved, transcriptSidecar: "  " })!.transcriptOffloaded, undefined);
+  assert.equal(normalizeSession({ ...saved, transcriptSidecar: undefined })!.transcriptOffloaded, undefined);
+});
+
+test("the merge refuses anything that is not one array in two halves", () => {
+  const row = (id: string): ChatMessage => ({ id, role: "assistant", text: id, createdAt: 0 });
+  const sidecar: TranscriptSidecar = {
+    version: 1,
+    sessionId: "s",
+    total: 4,
+    rows: [{ index: 1, message: row("b") }, { index: 2, message: row("c") }],
+  };
+  assert.deepEqual(mergeTranscriptRows([row("a"), row("d")], sidecar)?.map((m) => m.id), ["a", "b", "c", "d"]);
+  // Fewer inline rows than the sidecar was taken from: something is missing, so
+  // nothing plausible is assembled out of it.
+  assert.equal(mergeTranscriptRows([row("a")], sidecar), null);
+  // Two rows claiming one seat.
+  assert.equal(
+    mergeTranscriptRows([row("a"), row("d")], { ...sidecar, rows: [{ index: 1, message: row("b") }, { index: 1, message: row("c") }] }),
+    null,
+  );
+  // A seat that does not exist.
+  assert.equal(normalizeTranscriptSidecar({ ...sidecar, rows: [{ index: 9, message: row("b") }] }), null);
+  assert.equal(normalizeTranscriptSidecar({ sessionId: "", total: 1, rows: [] }), null);
+  assert.equal(normalizeTranscriptSidecar(null), null);
+  assert.equal(normalizeTranscriptSidecar({ sessionId: "s", total: -1, rows: [] }), null);
+});
+
+test("the bridge reads one small file and never the desk state", () => {
+  const preload = source("electron", "preload.ts");
+  assert.match(preload, /loadTranscript: \(sessionId: string\) =>\s*\n\s*ipcRenderer\.invoke\("transcript:load", sessionId\)/);
+  assert.match(source("src", "vite-env.d.ts"), /loadTranscript\?: \(sessionId: string\) => Promise</);
+
+  const main = source("electron", "main.ts");
+  const handler = main.slice(main.indexOf('ipcMain.handle("transcript:load"'), main.indexOf('ipcMain.handle("state:load"'));
+  assert.match(handler, /readTranscriptSidecar\(transcriptSidecarPath\(app\.getPath\("userData"\), sessionId\)\)/);
+  assert.doesNotMatch(handler, /readVersionedState|readStateWithSource/, "opening a chat must not parse 46 MB");
+
+  const store = source("src", "lib", "store.tsx");
+  assert.match(store, /transcriptFetchPlan\(\{/, "the effect runs the rule the tests drive");
+  assert.match(store, /mergeTranscriptRows\(live\.messages, sidecar\)/);
+  assert.match(store, /\}, \[ready, state\.activeSessionId, state\.sessions\]\)/, "the ACTIVE chat only");
 });
 
 /* ------------------------------------ item 3: boot stops serialising twice */

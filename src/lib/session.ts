@@ -258,6 +258,20 @@ export function normalizeSession(raw: unknown): Session | null {
           .map(normalizeMessage)
           .filter((item): item is ChatMessage => item !== null && !isSessionIntro(item))
       : [],
+    // The link to this chat's offloaded steps. `normalizeSession` builds an
+    // allowlist, so a field left out here is a field the desk silently throws
+    // away — and throwing this one away orphans the sidecar: the chat would
+    // load the prose, save the prose back, and nothing on disk would point at
+    // the thinking and tool rows again. Kept as a pair, or not at all.
+    ...(typeof record.transcriptSidecar === "string" &&
+    record.transcriptSidecar.trim() &&
+    typeof record.transcriptOffloaded === "number" &&
+    record.transcriptOffloaded > 0
+      ? {
+          transcriptSidecar: record.transcriptSidecar.trim(),
+          transcriptOffloaded: Math.round(record.transcriptOffloaded),
+        }
+      : {}),
     contextUsed: typeof record.contextUsed === "number" ? Math.max(0, record.contextUsed) : 0,
     archivedAt: typeof record.archivedAt === "number" ? record.archivedAt : null,
     permissionGrants: normalizePermissionGrants(record.permissionGrants),

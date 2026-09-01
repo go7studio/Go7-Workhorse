@@ -70,7 +70,14 @@ Three habits cover the rest:
   trim, no collection, for the same reason blobs are not collected — that waits
   for a reference count. Only workers whose `agentRun.status` is terminal are
   touched, and `interrupted` is not terminal, because that is the desk stopping
-  rather than the worker finishing. Enforced by `test/long-term-health.test.ts`.
+  rather than the worker finishing. One save may write at most 25 sidecars
+  (`TRANSCRIPT_OFFLOAD_PER_SAVE`), because each write flushes and the offload
+  runs on the main loop before the save's first await — an unbounded first pass
+  on a 624-worker desk is seconds of held loop spent fixing a stall. Opening a
+  worker chat reads that one file and merges it back through
+  `mergeTranscriptRows`; the chat carries `transcriptSidecar` and
+  `transcriptOffloaded` until the rows are back, and dropping that pair early
+  orphans the file. Enforced by `test/long-term-health.test.ts`.
 - **Add the budget with the fix.** When a slow path is repaired, leave a test
   that fails if the old shape returns, with a comment saying what it cost.
 - **A folder the desk creates needs someone who deletes it.** Managed worktrees

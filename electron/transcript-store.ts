@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWriteJson } from "./state-persistence";
+import {
+  TRANSCRIPT_SIDECAR_VERSION,
+  normalizeTranscriptSidecar,
+  type TranscriptSidecar,
+} from "../src/lib/transcript-sidecar";
+import type { ChatMessage } from "../src/lib/types";
 
 /**
  * Finished workers' step-by-step transcripts, moved out of the desk state file.
@@ -31,21 +37,13 @@ import { atomicWriteJson } from "./state-persistence";
  *   reference nobody counted is how the last copy of something goes.
  */
 
-export const TRANSCRIPT_SIDECAR_VERSION = 1;
-
 /** Statuses that mean the run is over. `interrupted` is the desk stopping, and its worker can be resumed. */
 const FINISHED_WORKER_STATUS = new Set(["completed", "failed", "cancelled", "timed-out", "budget-exceeded"]);
 
 /** The rows worth moving. Thinking and tool output are the bulk; prose is what a person opens the chat for. */
 const OFFLOADABLE_KIND = new Set(["thought", "tool"]);
 
-export type TranscriptSidecar = {
-  version: number;
-  sessionId: string;
-  /** Total length of the original array, so a rehydrate can tell a partial sidecar from a whole one. */
-  total: number;
-  rows: Array<{ index: number; message: unknown }>;
-};
+export type { TranscriptSidecar };
 
 export function transcriptsDir(userData: string): string {
   return path.join(userData, "transcripts");
@@ -156,7 +154,7 @@ export function offloadSessionTranscript(session: unknown, userData: string, io:
   const rows: TranscriptSidecar["rows"] = [];
   messages.forEach((message, index) => {
     const kind = record(message)?.kind;
-    if (typeof kind === "string" && OFFLOADABLE_KIND.has(kind)) rows.push({ index, message });
+    if (typeof kind === "string" && OFFLOADABLE_KIND.has(kind)) rows.push({ index, message: message as ChatMessage });
     else inline.push(message);
   });
   if (rows.length === 0) return session;
@@ -232,44 +230,17 @@ function alreadyVerified(session: unknown, userData: string, io: TranscriptIo): 
 }
 
 /**
- * Put a worker's steps back, on demand, when somebody opens the chat.
+ * One sidecar off disk, shape-checked, or null.
  *
- * A sidecar that is missing or unreadable gives back the prose the chat still
- * holds rather than throwing. History behaves the same way for pictures and for
- * the same reason: one dead file must cost a row, never the chat.
+ * The bridge hands this straight to the renderer rather than a merged message
+ * array: the chat already holds its prose, so sending it back would be paying
+ * twice for the half that never left. The renderer merges with the same
+ * function this file does.
  */
-export function rehydrateSessionTranscript(session: unknown, io: TranscriptIo = diskIo): unknown {
-  const row = record(session);
-  if (!row) return session;
-  const file = typeof row.transcriptSidecar === "string" ? row.transcriptSidecar.trim() : "";
-  if (!file) return session;
-  const inline = Array.isArray(row.messages) ? row.messages : [];
-  let sidecar: Partial<TranscriptSidecar> | null = null;
+export function readTranscriptSidecar(file: string, io: TranscriptIo = diskIo): TranscriptSidecar | null {
   try {
-    sidecar = JSON.parse(io.read(file)) as Partial<TranscriptSidecar>;
+    return normalizeTranscriptSidecar(JSON.parse(io.read(file)));
   } catch {
-    return session;
+    return null;
   }
-  if (!sidecar || !Array.isArray(sidecar.rows) || typeof sidecar.total !== "number") return session;
-  if (sidecar.rows.length + inline.length !== sidecar.total) return session;
-
-  const merged: unknown[] = new Array(sidecar.total);
-  for (const entry of sidecar.rows) {
-    const at = record(entry)?.index;
-    if (typeof at !== "number" || at < 0 || at >= sidecar.total) return session;
-    merged[at] = (entry as { message: unknown }).message;
-  }
-  let cursor = 0;
-  for (let index = 0; index < merged.length; index += 1) {
-    if (merged[index] === undefined) {
-      merged[index] = inline[cursor];
-      cursor += 1;
-    }
-  }
-  if (cursor !== inline.length) return session;
-
-  const next: Record<string, unknown> = { ...row, messages: merged };
-  delete next.transcriptSidecar;
-  delete next.transcriptOffloaded;
-  return next;
 }

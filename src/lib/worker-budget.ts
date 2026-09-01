@@ -69,6 +69,40 @@ export const CACHE_BILLED_RATIO = 0.3;
  */
 export const DEFAULT_WORKER_TOKEN_BUDGET = 8_000_000;
 
+/**
+ * The ceiling a nested helper carries. It used to be 5,000, set when the meter
+ * counted only fresh input growth plus the last turn's output. The rewrite
+ * above made the same work measure a median 27x larger, so 5,000 stopped being
+ * a brake and became a wall: a helper crossed it on its first meter and died
+ * before it read a file. 60,000 is roughly what 5,000 bought under the old
+ * count, so a helper gets the pass it was always meant to get.
+ */
+export const NESTED_HELPER_TOKEN_BUDGET = 60_000;
+
+/**
+ * What is left of the parent's pass. A helper spends the parent's ceiling, so
+ * it can never be handed more than the parent still has. A parent with no
+ * ceiling of its own is treated as carrying the default one, because an
+ * unbounded parent must not hand its helper an unbounded budget.
+ */
+export function parentBudgetRemaining(parent?: { tokenBudget?: number; usedTokens?: number }): number {
+  const budget = positive(parent?.tokenBudget) ?? DEFAULT_WORKER_TOKEN_BUDGET;
+  return Math.max(0, budget - nonNeg(parent?.usedTokens));
+}
+
+/**
+ * The ceiling for one nested helper: never below NESTED_HELPER_TOKEN_BUDGET,
+ * never above what the parent has left. Both spawn paths — the MCP tool and
+ * the store — call this so a helper cannot get two different ceilings
+ * depending on which door it came through.
+ */
+export function nestedHelperBudget(input: { requested?: number; parentRemaining?: number }): number {
+  const asked = positive(input.requested) ?? NESTED_HELPER_TOKEN_BUDGET;
+  const floor = Math.max(NESTED_HELPER_TOKEN_BUDGET, asked);
+  const remaining = positive(input.parentRemaining) ?? DEFAULT_WORKER_TOKEN_BUDGET;
+  return Math.max(1, Math.min(remaining, floor));
+}
+
 export const BUDGET_HANDOFF_PROMPT =
   "TOKEN BUDGET: stop producing. Verify what is already on disk and return a bounded handoff. Say what exists, what was verified, and what remains. Example: patches present; verification incomplete.";
 

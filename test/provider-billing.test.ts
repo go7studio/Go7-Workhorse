@@ -318,11 +318,50 @@ test("Grok Bot is a local Custom HTTP preset, not a stock vendor", () => {
   );
   assert.equal(isGrokBotUrl(grokBot!.baseUrl), true);
   assert.equal(isGrokBotUrl("http://127.0.0.1:8787/v1/"), true);
-  assert.equal(isGrokBotUrl("http://localhost:8787/v1"), false);
+  /*
+   * All three names for this machine are the same door. Only 127.0.0.1 was
+   * accepted, so a bot saved as http://localhost:8787 — same shim, same port —
+   * failed this test and never armed the late-answer lane; every slow answer
+   * came back as a shim 504 instead. The port still decides, and a host that is
+   * not this machine still fails.
+   */
+  assert.equal(isGrokBotUrl("http://localhost:8787/v1"), true);
+  assert.equal(isGrokBotUrl("http://[::1]:8787/v1"), true);
+  assert.equal(isGrokBotUrl("localhost:8787"), true, "a base URL saved without a scheme is still the shim");
+  assert.equal(isGrokBotUrl("http://LocalHost:8787/v1"), true, "the host name is not case sensitive");
   assert.equal(isGrokBotUrl("http://0.0.0.0:8787/v1"), false);
+  assert.equal(isGrokBotUrl("http://localhost.example.com:8787/v1"), false, "a name that merely starts with localhost is not this machine");
+  assert.equal(isGrokBotUrl("http://localhost:11434/v1"), false, "Ollama on loopback is not this door");
+  assert.equal(isGrokBotUrl("http://[::1]:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:11434/v1"), false);
   assert.equal(isGrokBotUrl("http://127.0.0.1:9999/v1"), false);
   assert.equal(isGrokBotUrl("https://api.minimax.io/v1"), false);
+
+  /*
+   * grok-bot-shim.json carries its own port and the desk honours it
+   * (parseGrokBotShimSecrets takes 1024-65535), so 8787 is the default, not the
+   * only answer. A shim moved off 8787 failed this check and never armed the
+   * late-answer lane — the same failure localhost had.
+   *
+   * Loopback alone still is not enough. Ollama, the desk bridge and any local
+   * dev server share these host names, and calling one of them the shim would
+   * hand it the per-install loopback token and put the chat id in its requests.
+   * So the port is still matched exactly; it is only no longer hard-coded.
+   */
+  assert.equal(isGrokBotUrl("http://localhost:9001/v1", 9001), true);
+  assert.equal(isGrokBotUrl("http://127.0.0.1:9001/v1", 9001), true);
+  assert.equal(isGrokBotUrl("http://[::1]:9001/v1", 9001), true);
+  assert.equal(isGrokBotUrl("http://localhost:9001/v1", "9001"), true, "the port may arrive as a string");
+  assert.equal(isGrokBotUrl("https://grok-bot.example.com:9001/v1", 9001), false, "an outside host is never the shim");
+  assert.equal(isGrokBotUrl("http://0.0.0.0:9001/v1", 9001), false);
+  assert.equal(isGrokBotUrl("http://localhost:11434/v1", 9001), false, "Ollama is still not this door");
+  assert.equal(isGrokBotUrl("http://localhost:8787/v1", 9001), false, "a configured shim does not also answer on the default");
+  // A port the shim file would have rejected cannot widen the check: it falls
+  // back to the default rather than matching whatever was asked for.
+  for (const bad of [0, 80, 443, 1023, 65536, -1, 1.5, Number.NaN]) {
+    assert.equal(isGrokBotUrl("http://localhost:8787/v1", bad), true, `${bad} falls back to the default port`);
+    assert.equal(isGrokBotUrl(`http://localhost:${bad}/v1`, bad), false, `${bad} is not accepted as a shim port`);
+  }
   assert.equal(
     grokBotShimDownMessage(grokBot!.baseUrl, new Error("ECONNREFUSED")),
     "Grok Bot shim is down. Do not guess another host.",

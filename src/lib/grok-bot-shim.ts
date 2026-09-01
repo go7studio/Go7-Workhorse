@@ -119,10 +119,20 @@ export function grokBotHealthPayload(inbox: string, wake: boolean, port = Number
   return { ok: true, inbox, port, wake };
 }
 
-export function isGrokBotShimHealth(payload: unknown): boolean {
+/**
+ * Is the thing that answered actually our shim?
+ *
+ * The port is half the answer: anything on this machine can serve `/health`, so
+ * a reply only counts when it names the port we dialled. That port is the one
+ * the install's own row gives, not always 8787 — a shim on its row's port read
+ * as dead here while passing the identity check, so the desk relaunched a shim
+ * that was already up.
+ */
+export function isGrokBotShimHealth(payload: unknown, shimPort?: number): boolean {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
   const row = payload as { ok?: unknown; port?: unknown };
-  return row.ok === true && Number(row.port) === Number(GROK_BOT_SHIM_PORT);
+  const expected = Number(shimPort ?? GROK_BOT_SHIM_PORT);
+  return row.ok === true && Number(row.port) === expected;
 }
 
 export function grokBotChatSse(reqId: string, answer: string, now = Math.floor(Date.now() / 1000)): string {
@@ -161,7 +171,9 @@ export function grokBotShimSecretsFile(token: string, port = Number(GROK_BOT_SHI
 }
 
 export function grokBotLoopbackApiKey(baseUrl: string, fallback: string, secrets: GrokBotShimSecrets | undefined): string {
-  if (!isGrokBotUrl(baseUrl) || !secrets?.token) return fallback;
+  // The row names the port this install's shim listens on. Without it a shim
+  // moved off 8787 failed the identity check and never got its own token.
+  if (!isGrokBotUrl(baseUrl, secrets?.port) || !secrets?.token) return fallback;
   return secrets.token;
 }
 
@@ -201,9 +213,17 @@ export function parseGrokBotLateMarker(raw: unknown): GrokBotLateMarker | undefi
   return { id, sessionId, timedOutAt };
 }
 
-/** The chat id rides the standard OpenAI `user` field, and only to the loopback shim. */
-export function grokBotSessionUser(baseUrl: string, sessionId: string | undefined): string | undefined {
+/**
+ * The chat id rides the standard OpenAI `user` field, and only to the loopback
+ * shim. This is what arms the late-answer lane, so a shim on its install's own
+ * port has to be recognised here or every slow answer comes back a shim 504.
+ */
+export function grokBotSessionUser(
+  baseUrl: string,
+  sessionId: string | undefined,
+  shimPort?: number,
+): string | undefined {
   const trimmed = (sessionId || "").trim();
-  if (!trimmed || trimmed.length > 128 || !isGrokBotUrl(baseUrl)) return undefined;
+  if (!trimmed || trimmed.length > 128 || !isGrokBotUrl(baseUrl, shimPort)) return undefined;
   return trimmed;
 }

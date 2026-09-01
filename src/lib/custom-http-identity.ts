@@ -40,14 +40,48 @@ export function isGrokBotName(name: string): boolean {
   return name.trim().toLowerCase() === "grok bot";
 }
 
-export function isGrokBotUrl(baseUrl: string): boolean {
+/**
+ * The three ways this machine names itself. Only 127.0.0.1 was accepted, so a
+ * bot saved as http://localhost:8787 — the same shim, the same port — failed
+ * this test and never armed the late-answer lane. WHATWG URL keeps IPv6 hosts
+ * in brackets, so `[::1]` is the hostname the parser hands back.
+ */
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]" || host === "::1";
+}
+
+/**
+ * The port this install's shim actually listens on. `grok-bot-shim.json`
+ * carries its own port and the desk honours it, so 8787 is the default, not
+ * the only answer. Anything outside the range that file accepts is not a port
+ * this desk would have written, so it falls back to the default rather than
+ * widening what counts as the shim.
+ */
+function shimPortOf(shimPort: string | number | undefined): string {
+  const value = Number(shimPort);
+  if (!Number.isInteger(value) || value < 1024 || value > 65535) return GROK_BOT_SHIM_PORT;
+  return String(value);
+}
+
+/**
+ * The Grok Bot shim, and nothing else on this machine.
+ *
+ * Both halves matter. Loopback alone is not enough: Ollama, the desk bridge
+ * and any local dev server share these host names, and treating one of them as
+ * the shim would hand it the per-install loopback token and put the chat id in
+ * its requests. So the port still has to match exactly — it is only no longer
+ * hard-coded, because a shim moved off 8787 is still the shim. Callers that
+ * hold the shim row pass its port; everyone else gets the default.
+ */
+export function isGrokBotUrl(baseUrl: string, shimPort?: string | number): boolean {
   const trimmed = baseUrl.trim();
   if (!trimmed) return false;
   try {
     const url = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`);
-    if (url.hostname.toLowerCase() !== "127.0.0.1") return false;
+    if (!isLoopbackHostname(url.hostname)) return false;
     const port = url.port || (url.protocol === "https:" ? "443" : "80");
-    return port === GROK_BOT_SHIM_PORT;
+    return port === shimPortOf(shimPort);
   } catch {
     return false;
   }

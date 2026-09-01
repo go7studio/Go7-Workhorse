@@ -12,7 +12,10 @@ import {
   BUDGET_HANDOFF_PROMPT,
   missionUsedTokens,
   needsBudgetHandoffTurn,
+  nestedHelperBudget,
+  NESTED_HELPER_TOKEN_BUDGET,
   nextBudgetRunState,
+  parentBudgetRemaining,
   splitPassBudget,
   VERIFY_RESERVE_RATIO,
   CACHE_BILLED_RATIO,
@@ -324,4 +327,67 @@ test("the desk owns the deadline, not the caller's reply promise", () => {
     "the bare claim is gone; the description says the desk stops the worker",
   );
   assert.match(mcp, /The desk stops the worker when it passes this/);
+});
+
+test("a nested helper gets a ceiling it can survive its first meter with", () => {
+  // 5,000 was set when the meter counted a fraction of the work. After the
+  // rewrite the same pass measures a median 27x larger, so the old cap killed
+  // a helper before it read a file.
+  assert.equal(nestedHelperBudget({}), NESTED_HELPER_TOKEN_BUDGET);
+  assert.equal(NESTED_HELPER_TOKEN_BUDGET, 60_000);
+  assert.ok(NESTED_HELPER_TOKEN_BUDGET > 5_000, "the old 5,000 cap is not the answer any more");
+
+  // A request below the floor is raised to it: a caller asking for 5,000 is
+  // asking with the old number in mind.
+  assert.equal(nestedHelperBudget({ requested: 5_000 }), NESTED_HELPER_TOKEN_BUDGET);
+  assert.equal(nestedHelperBudget({ requested: 1 }), NESTED_HELPER_TOKEN_BUDGET);
+  // A larger request is honoured.
+  assert.equal(nestedHelperBudget({ requested: 250_000 }), 250_000);
+  // Junk falls back to the floor rather than to zero.
+  assert.equal(nestedHelperBudget({ requested: 0 }), NESTED_HELPER_TOKEN_BUDGET);
+  assert.equal(nestedHelperBudget({ requested: Number.NaN }), NESTED_HELPER_TOKEN_BUDGET);
+  assert.equal(nestedHelperBudget({ requested: -10 }), NESTED_HELPER_TOKEN_BUDGET);
+});
+
+test("a helper can never be handed more than its parent has left", () => {
+  // The helper spends the parent's pass, so the parent's remainder is the cap.
+  assert.equal(nestedHelperBudget({ requested: 250_000, parentRemaining: 90_000 }), 90_000);
+  assert.equal(nestedHelperBudget({ parentRemaining: 12_000 }), 12_000);
+  // Never zero: a spent parent still yields a positive ceiling, because an
+  // undefined or zero budget makes every stop a no-op.
+  assert.equal(nestedHelperBudget({ parentRemaining: 0 }), NESTED_HELPER_TOKEN_BUDGET);
+  assert.ok(nestedHelperBudget({ parentRemaining: 1 }) >= 1);
+
+  // parentRemaining is the parent's ceiling minus what it has spent.
+  assert.equal(parentBudgetRemaining({ tokenBudget: 100_000, usedTokens: 40_000 }), 60_000);
+  assert.equal(parentBudgetRemaining({ tokenBudget: 100_000, usedTokens: 400_000 }), 0);
+  // A parent with no ceiling of its own is read as carrying the default one,
+  // so an unbounded parent cannot hand out an unbounded helper.
+  assert.equal(parentBudgetRemaining(undefined), DEFAULT_WORKER_TOKEN_BUDGET);
+  assert.equal(parentBudgetRemaining({}), DEFAULT_WORKER_TOKEN_BUDGET);
+  assert.equal(parentBudgetRemaining({ usedTokens: 1_000 }), DEFAULT_WORKER_TOKEN_BUDGET - 1_000);
+});
+
+test("both spawn doors read the same nested ceiling", () => {
+  // Two doors spawn a helper — the MCP tool and the store. They disagreed on
+  // nothing while both said 5,000; the risk is that only one of them is fixed
+  // and a helper's ceiling then depends on which door it came through.
+  const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  for (const [name, source] of [["electron/workhorse-mcp.ts", mcp], ["src/lib/store.tsx", store]] as const) {
+    assert.doesNotMatch(source, /Math\.min\(5_000/, `${name} no longer carries the old 5,000 cap`);
+    assert.match(source, /nestedHelperBudget\(\{/, `${name} asks the shared helper for the ceiling`);
+    assert.match(source, /parentRemaining: parentBudgetRemaining\(/, `${name} caps the helper at what the parent has left`);
+  }
+});
+
+test("the budget ceiling says when it is read", () => {
+  // The ceiling is compared at meter time, so a single long turn can pass it
+  // without being stopped. That is a stated limit, not a second meter.
+  const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
+  assert.match(
+    features,
+    /reads the ceiling when the vendor reports usage[\s\S]{0,160}not part-way through a turn/,
+    "FEATURES.md says the ceiling is checked at the meter, not inside a turn",
+  );
 });

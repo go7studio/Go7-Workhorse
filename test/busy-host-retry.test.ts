@@ -9,8 +9,14 @@
  * count; it only waits when told to, for a bounded while.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
-import { retryAfterMs, streamCustomHttp } from "../electron/custom-http";
+import { fileURLToPath } from "node:url";
+import { customHttpErrorMessage, retryAfterMs, streamCustomHttp } from "../electron/custom-http";
+import { isVendorRateLimitError } from "../src/lib/vendor-bridge";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const OK = () =>
   new Response('data: {"choices":[{"delta":{"content":"done"}}]}\n\n', {
@@ -99,4 +105,95 @@ test("Retry-After is honoured in both forms, and never unboundedly", () => {
   assert.equal(retryAfterMs("soon", now), undefined);
   assert.equal(retryAfterMs(null, now), undefined);
   assert.equal(retryAfterMs("", now), undefined);
+});
+
+test("a non-2xx says which door closed, not just a number and a blob", async () => {
+  /*
+   * Every failure that was not a 429 came back as the status plus whatever the
+   * host wrote. A plan-exhausted Grok answered "Internal error" and that is all
+   * anyone read for a week, while the fix was to top up an account. The status
+   * already carries the answer; this is it said out loud.
+   */
+  const cases: Array<[number, RegExp]> = [
+    [401, /rejected the API key/i],
+    [403, /rejected the API key/i],
+    [404, /model or the path was not found/i],
+    [413, /request was too large/i],
+    [503, /endpoint is busy or gone/i],
+    [504, /endpoint is busy or gone/i],
+  ];
+  for (const [status, meaning] of cases) {
+    const message = customHttpErrorMessage(status, "Internal error");
+    assert.match(message, new RegExp(`\\b${status}\\b`), `HTTP ${status} keeps its status number`);
+    assert.match(message, meaning, `HTTP ${status} says what it means`);
+    assert.match(message, /Internal error/, `HTTP ${status} keeps the host's own words`);
+  }
+
+  // 429 is the retried one. It only reaches this message after the waits, so it
+  // says that, and it must still read as a rate limit downstream.
+  const limited = customHttpErrorMessage(429, "slow down");
+  assert.match(limited, /\b429\b/);
+  assert.match(limited, /rate limited/i);
+  assert.match(limited, /after the retries/i);
+  assert.equal(isVendorRateLimitError(limited), true, "the desk must still see a rate limit here");
+
+  // A status with no known meaning is not given one it does not have.
+  const unknown = customHttpErrorMessage(418, "teapot");
+  assert.match(unknown, /Custom model HTTP 418/);
+  assert.match(unknown, /teapot/);
+
+  // Detail is bounded and the host's noise is flattened, but the meaning
+  // survives ahead of it — the old blob put 400 characters of JSON first.
+  const long = customHttpErrorMessage(401, `${"x".repeat(400)}`);
+  assert.match(long, /rejected the API key/);
+  assert.ok(long.length < 260, `the detail is trimmed, got ${long.length} characters`);
+  assert.equal((long.match(/x/g) ?? []).length, 180, "the first 180 characters of detail are kept");
+  assert.equal(customHttpErrorMessage(500), "Custom model HTTP 500", "no detail means no dangling separator");
+  assert.equal(customHttpErrorMessage(500, "   "), "Custom model HTTP 500");
+});
+
+test("the mapped message is what a failed call actually throws", async () => {
+  // Not just the pure function: the throw site has to use it.
+  for (const [status, meaning] of [[401, /rejected the API key/i], [404, /not found/i], [413, /too large/i], [503, /busy or gone/i]] as const) {
+    await assert.rejects(
+      () => send(async () => new Response("Internal error", { status })),
+      (error: Error) => {
+        assert.match(error.message, meaning, `a real HTTP ${status} carries its meaning`);
+        assert.match(error.message, new RegExp(`\\b${status}\\b`));
+        return true;
+      },
+    );
+  }
+});
+
+test("the custom host checks its folder the way every other host does", () => {
+  /*
+   * Claude and Codex route their cwd through spawnCwd, so a project folder that
+   * has moved names itself. This host passed the raw path and the same missing
+   * folder surfaced as an ENOENT naming the command instead, sending whoever
+   * read it hunting for a CLI that was sitting right there.
+   */
+  const host = readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8");
+  assert.match(host, /import \{ spawnCwd \} from "\.\/spawn-cwd"/, "the shared guard is imported");
+  assert.match(host, /const toolCwd = \(\) => spawnCwd\(input\.cwd\) \?\? input\.cwd;/, "the tool cwd goes through it");
+  assert.doesNotMatch(host, /^\s+cwd: input\.cwd,$/m, "no tool call still passes the raw path");
+  assert.equal(
+    (host.match(/cwd: toolCwd\(\)/g) ?? []).length,
+    4,
+    "the MCP bridge and all three tool sites — the fan-out spawn, the policy check, and the plain call — use it",
+  );
+  assert.match(
+    host,
+    /new McpToolBridge\(input\.mcpServers \?\? \[\], \{ cwd: toolCwd\(\) \}\)/,
+    "the bridge launches its servers in a folder that was checked first",
+  );
+  assert.match(host, /roots: \[toolCwd\(\), \.\.\.\(input\.folders \?\? \[\]\)\]/, "the security roots are checked too");
+  // The one invariant that survives a refactor: after the guard is defined,
+  // nothing in this file reads the raw path again. A new call site added later
+  // cannot quietly reintroduce the gap.
+  assert.equal(
+    (host.match(/input\.cwd/g) ?? []).length,
+    2,
+    "the only remaining reads of input.cwd are the two inside the guard itself",
+  );
 });

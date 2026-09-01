@@ -11,6 +11,7 @@ import { deskRoleOf, parseProviderId } from "../src/lib/subagents";
 import { vendorDeclinedForBot } from "../src/lib/vendor-decline";
 import { withCrewModeHint, withCustomPeerHint, withLooseDeleteHint, withPermissionHint, withSpawnHint, withWriteLimitHint } from "../src/lib/workhorse-rules";
 import { hydrateChatImages, hydrateHistoryMessage } from "./attachment-store";
+import { spawnCwd } from "./spawn-cwd";
 import type { GrokPromptResult } from "./grok-agent";
 import type { GrokEventSink } from "./grok-host";
 import { CUSTOM_NOT_CONFIGURED, streamCustomHttp, type CustomChatMessage, type CustomHttpConfig, type CustomHttpUsage } from "./custom-http";
@@ -352,7 +353,21 @@ export class CustomSessionHost {
     ];
     const baseMessageCount = messages.length;
     const preface = customPrefaceForLimits(input.preface, input.mode, input.sandbox);
-    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: input.cwd });
+    /*
+     * The folder this turn works in, checked the way every other vendor host
+     * checks it. Claude and Codex route their cwd through spawnCwd so a folder
+     * that has moved names itself; this host passed the raw path, so the same
+     * missing folder came back as an ENOENT naming the command instead.
+     *
+     * Every place the folder leaves this function goes through here: the MCP
+     * bridge, the roots the security policy measures a path against, and each
+     * tool call. A dead folder reaching the bridge was the gap — the bridge
+     * launches its own servers in that directory, so it must not be handed one
+     * that is not there. Read at each use, not once, so a folder deleted
+     * part-way through a turn is caught on the next call rather than never.
+     */
+    const toolCwd = () => spawnCwd(input.cwd) ?? input.cwd;
+    const mcp = new McpToolBridge(input.mcpServers ?? [], { cwd: toolCwd() });
     const mcpTools = await mcp.tools();
     let text = "";
     const startedAt = this.now();
@@ -481,7 +496,7 @@ export class CustomSessionHost {
             await this.executeTool(use, {
               mode,
               sandbox,
-              cwd: input.cwd,
+              cwd: toolCwd(),
               sessionId: input.sessionId,
               folders: input.folders,
               parentId: input.parentId,
@@ -662,7 +677,7 @@ export class CustomSessionHost {
             tool: use.name,
             detail: detail.detail,
             path: detail.path,
-            roots: [input.cwd, ...(input.folders ?? [])],
+            roots: [toolCwd(), ...(input.folders ?? [])],
           });
           const decision = security.answer === "deny"
             ? "deny"
@@ -676,7 +691,7 @@ export class CustomSessionHost {
                 mode,
                 sandbox,
                 grants: input.permissionGrants,
-                cwd: input.cwd,
+                cwd: toolCwd(),
                 sessionId: input.sessionId,
                 folders: input.folders,
               });
@@ -738,7 +753,7 @@ export class CustomSessionHost {
             : await this.executeTool(use, {
                 mode,
                 sandbox,
-                cwd: input.cwd,
+                cwd: toolCwd(),
                 sessionId: input.sessionId,
                 folders: input.folders,
                 parentId: input.parentId,

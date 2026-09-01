@@ -269,16 +269,26 @@ export function createGrokBotShimServer(userData: string, token?: string): http.
   });
 }
 
-export function probeGrokBotShim(timeoutMs = 400): Promise<boolean> {
+/**
+ * Is this install's shim up?
+ *
+ * It used to dial 8787 and nothing else, so a shim on the port its own row
+ * names was invisible: it passed the identity check, took calls, and still read
+ * as dead here — the desk went on relaunching a shim that was already running.
+ * The row is the authority on the port, and the same port is checked against
+ * what the reply claims, so another local server answering `/health` cannot
+ * pass for the shim.
+ */
+export function probeGrokBotShim(timeoutMs = 400, shimPort = Number(GROK_BOT_SHIM_PORT)): Promise<boolean> {
   return new Promise((resolve) => {
     const req = undiciRequest(
-      { host: "127.0.0.1", port: Number(GROK_BOT_SHIM_PORT), path: "/health", method: "GET", timeout: timeoutMs },
+      { host: "127.0.0.1", port: shimPort, path: "/health", method: "GET", timeout: timeoutMs },
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk) => chunks.push(chunk as Buffer));
         res.on("end", () => {
           try {
-            resolve(isGrokBotShimHealth(JSON.parse(Buffer.concat(chunks).toString("utf8"))));
+            resolve(isGrokBotShimHealth(JSON.parse(Buffer.concat(chunks).toString("utf8")), shimPort));
           } catch {
             resolve(false);
           }
@@ -311,7 +321,10 @@ export async function ensureGrokBotShim(input: {
    */
   manageKeepalive?: boolean;
 }): Promise<{ ok: boolean; mode: "running" | "spawned" | "failed"; dest: string }> {
-  readOrMintShimSecrets(input.userData);
+  // This install's row already gets read here to mint the token on first run.
+  // Its port is the one every probe below dials; the result used to be thrown
+  // away and 8787 assumed.
+  const shim = readOrMintShimSecrets(input.userData);
   const platform: LinkDeskPlatform = input.platform === "win32" ? "win32" : input.platform === "linux" ? "linux" : "darwin";
   const manage = input.manageKeepalive !== false;
   const keepalive = manage
@@ -332,13 +345,13 @@ export async function ensureGrokBotShim(input: {
     },
       })
     : { ok: true, dest: grokBotShimKeepalivePaths(platform, input.home, input.userData).dest };
-  if (await probeGrokBotShim()) {
+  if (await probeGrokBotShim(undefined, shim.port)) {
     return { ok: keepalive.ok, mode: keepalive.ok ? "running" : "failed", dest: keepalive.dest };
   }
   if (platform === "darwin") {
     for (let i = 0; i < 12; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 200));
-      if (await probeGrokBotShim()) {
+      if (await probeGrokBotShim(undefined, shim.port)) {
         return { ok: keepalive.ok, mode: keepalive.ok ? "spawned" : "failed", dest: keepalive.dest };
       }
     }
@@ -352,7 +365,7 @@ export async function ensureGrokBotShim(input: {
   child.unref();
   for (let i = 0; i < 10; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 150));
-    if (await probeGrokBotShim()) {
+    if (await probeGrokBotShim(undefined, shim.port)) {
       return { ok: keepalive.ok, mode: keepalive.ok ? "spawned" : "failed", dest: keepalive.dest };
     }
   }

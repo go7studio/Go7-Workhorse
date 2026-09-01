@@ -7,7 +7,7 @@ import { contextFromModelList, knownContextWindow as catalogContextWindow } from
 import fs from "node:fs";
 import path from "node:path";
 import { customHttpIdentityHeaders, grokBotShimDownMessage } from "../src/lib/custom-http-identity";
-import { grokBotLoopbackApiKey, grokBotShimSecretsPath, parseGrokBotShimSecrets } from "../src/lib/grok-bot-shim";
+import { grokBotLoopbackApiKey, grokBotShimSecretsPath, parseGrokBotShimSecrets, type GrokBotShimSecrets } from "../src/lib/grok-bot-shim";
 import {
   customHttpTools,
   customHttpToolsOpenAi,
@@ -20,16 +20,25 @@ import {
 
 export type { CustomToolResult, CustomToolUse };
 
-function grokBotDeskApiKey(baseUrl: string, apiKey: string): string {
+/**
+ * This install's shim row: its loopback token and the port it listens on. Both
+ * answers come from the same file, so read it once and let the port travel with
+ * the token — the token check and the late-answer lane have to agree on which
+ * door is the shim.
+ */
+function grokBotDeskShim(): GrokBotShimSecrets | undefined {
   const userData = process.env.WORKHORSE_USER_DATA || (process.env.WORKHORSE_STATE_PATH ? path.dirname(process.env.WORKHORSE_STATE_PATH) : "");
-  if (!userData) return apiKey;
+  if (!userData) return undefined;
   try {
     const sep = userData.includes("\\") && !userData.includes("/") ? "\\" : "/";
-    const parsed = parseGrokBotShimSecrets(JSON.parse(fs.readFileSync(grokBotShimSecretsPath(userData, sep), "utf8")));
-    return grokBotLoopbackApiKey(baseUrl, apiKey, parsed);
+    return parseGrokBotShimSecrets(JSON.parse(fs.readFileSync(grokBotShimSecretsPath(userData, sep), "utf8")));
   } catch {
-    return apiKey;
+    return undefined;
   }
+}
+
+function grokBotDeskApiKey(baseUrl: string, apiKey: string, shim = grokBotDeskShim()): string {
+  return grokBotLoopbackApiKey(baseUrl, apiKey, shim);
 }
 
 export type CustomHttpConfig = {
@@ -113,6 +122,35 @@ export function mergeCustomUsageSnapshot(
 }
 
 export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base URL, model, and API key.";
+
+/**
+ * What a failed custom call actually means, in the words of the thing that
+ * needs fixing.
+ *
+ * Every non-2xx used to be rethrown as one blob — the status number and
+ * whatever the host put in the body. A plan-exhausted Grok answered with
+ * "Internal error" and that is all anyone saw for a week, while the fix was to
+ * top up an account. The status already says which door closed; this says it
+ * out loud and keeps the host's own words after it, because the host is still
+ * the authority on its own failure.
+ */
+export function customHttpErrorMessage(status: number, detail = ""): string {
+  const said = detail.trim().replace(/\s+/g, " ").slice(0, 180);
+  const cause =
+    status === 401 || status === 403
+      ? "the endpoint rejected the API key"
+      : status === 404
+        ? "the model or the path was not found"
+        : status === 413
+          ? "the request was too large"
+          : status === 429
+            ? "rate limited, and it was still limited after the retries"
+            : status === 503 || status === 504
+              ? "the endpoint is busy or gone"
+              : "";
+  const head = cause ? `Custom model HTTP ${status}: ${cause}` : `Custom model HTTP ${status}`;
+  return said ? `${head} — ${said}` : head;
+}
 
 const KNOWN_WINDOWS: Record<string, number> = {
   "minimax-m2.1": 204_800,
@@ -646,13 +684,14 @@ export async function streamCustomHttp(
 ): Promise<{ text: string; thought?: string; usage?: CustomHttpUsage; toolUses?: CustomToolUse[]; stopReason?: string }> {
   const model = config.model.trim();
   const baseUrl = config.baseUrl.trim();
-  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim());
+  const shim = grokBotDeskShim();
+  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim(), shim);
   if (!apiKey || !model || !baseUrl) throw new Error(CUSTOM_NOT_CONFIGURED);
   const api = resolveCustomApi(config);
   const url = customMessagesUrl(baseUrl, api);
   const body =
     api === "openai-completions"
-      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, baseUrl, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs, user: grokBotSessionUser(baseUrl, input.sessionUser) })
+      ? buildOpenAiBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, baseUrl, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs, user: grokBotSessionUser(baseUrl, input.sessionUser, shim?.port) })
       : buildAnthropicBody({ model, messages: input.messages, preface: input.preface, effort: input.effort, maxTokens: input.maxTokens, tools: input.tools, role: input.role, inputs: config.inputs });
 
   const headers: Record<string, string> = {
@@ -696,7 +735,7 @@ export async function streamCustomHttp(
     }
     if (!response.ok) {
       const detail = (await response.text().catch(() => "")).slice(0, 400);
-      throw new Error(`Custom model HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+      throw new Error(customHttpErrorMessage(response.status, detail));
     }
     if (!response.body) throw new Error("Custom model returned no body");
     const reader = response.body.getReader();

@@ -12,6 +12,7 @@ import {
   compileAttemptsSpent,
   compileBackoffMs,
   compileFailureIsTransient,
+  abandonMarkerFor,
   compileFailureSpendsBudget,
   compilerInputHash,
   compilerPrompt,
@@ -448,4 +449,65 @@ test("the abandon marker is its own row and never eats a spent attempt", async (
   assert.equal(runs.filter((run) => /HTTP 400/.test(run.errorClass ?? "")).length, DEFAULT_COMPILER_POLICY.maxAttempts, "the spent rows survive");
   assert.equal(runs.some((run) => run.status === "interrupted"), false, "nothing is left for recover to resume");
   assert.equal(calls.n, DEFAULT_COMPILER_POLICY.maxAttempts);
+});
+
+// --- round four: a desk fault is not the batch's fault ---
+
+test("a bad key, an unpaid bill, a wrong path or a conflict never abandon a batch", () => {
+  for (const status of ["401", "402", "403", "404", "405", "407", "408", "409", "425", "429", "500", "503"]) {
+    assert.equal(
+      compileFailureSpendsBudget(`Custom model HTTP ${status}: nope`),
+      false,
+      `HTTP ${status} is the desk's or the endpoint's problem, not the input's`,
+    );
+  }
+  for (const status of ["400", "413", "414", "422", "431"]) {
+    assert.equal(compileFailureSpendsBudget(`Custom model HTTP ${status}: nope`), true, `HTTP ${status} refuses the request itself`);
+  }
+});
+
+test("no status is both transient and budget-spending", () => {
+  for (let status = 400; status < 600; status += 1) {
+    const line = `Custom model HTTP ${status}: x`;
+    assert.equal(
+      compileFailureIsTransient(line) && compileFailureSpendsBudget(line),
+      false,
+      `HTTP ${status} cannot be both worth retrying and proof the input is bad`,
+    );
+  }
+});
+
+test("a stale key does not cost the evidence behind it", async () => {
+  const store = new InMemoryStore(":memory:");
+  const calls = { n: 0 };
+  const locked = failingService(store, () => new Error("Custom model HTTP 401: invalid api key"), calls);
+  locked.record(agentEvent("lev_key", "a run finished"));
+  for (let round = 0; round < 4; round += 1) await locked.compile().catch(() => undefined);
+  assert.ok(calls.n > DEFAULT_COMPILER_POLICY.maxAttempts, "a key the person can fix keeps its place in the queue");
+  assert.notEqual(store.lastSettledRun(AGENT_INTELLIGENCE_LANE)?.errorClass, ABANDONED_INPUT);
+  let good = 0;
+  const fixed = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [{ provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 }],
+    caller: async () => {
+      good += 1;
+      return { text: GOOD_BRIEF.replace("lev_wait", "lev_key"), createdWorkhorseChat: false, leftoverVendorThread: false };
+    },
+  });
+  const result = await fixed.compile();
+  assert.equal(good, 1, "the evidence was still there once the key was fixed");
+  assert.equal(result.ran, true);
+});
+
+test("the abandon marker is written once, by the rule and not by luck", () => {
+  const lane = AGENT_INTELLIGENCE_LANE;
+  const row = (patch: Record<string, unknown>) =>
+    ({ id: "r1", intelligenceLane: lane, status: "failed", attempt: 1, inputHash: "h", ...patch }) as never;
+  assert.equal(abandonMarkerFor([]), undefined);
+  assert.equal(abandonMarkerFor([row({ errorClass: "Custom model HTTP 400" })]), undefined);
+  assert.equal(abandonMarkerFor([row({ id: "r2", errorClass: ABANDONED_INPUT })])?.id, "r2", "an existing marker is found, so a second is never written");
+  const service = fs.readFileSync(path.join(ROOT, "electron", "learning-service.ts"), "utf8");
+  assert.match(service, /const already = abandonMarkerFor\(priorRuns\);/, "the service asks the rule rather than re-deriving it");
 });

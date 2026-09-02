@@ -674,16 +674,32 @@ export function compileFailureIsTransient(errorClass?: string): boolean {
 }
 
 /**
- * Only the model saying no to the request itself spends the budget: a 4xx
- * that is not a rate limit or a timeout. No bot connected yet, a reply that
- * was not JSON, a network fault, or an unknown throw say nothing about the
- * input, so they are retried with a widening gap and never abandon the batch.
+ * The statuses that mean "this request, as sent, is not acceptable": too
+ * large, malformed, unprocessable. Only these say something about the input.
+ *
+ * Named one by one on purpose. Reading it as "any 4xx but a few" abandoned
+ * evidence over a stale key (401), an unpaid bill (402), a wrong base URL
+ * (404) and a conflict (409) — all desk faults that a person fixes, after
+ * which the same batch would compile.
+ */
+const INPUT_REFUSED_STATUS = new Set(["400", "413", "414", "422", "431"]);
+
+/**
+ * Only the model refusing the request itself spends the budget. No bot
+ * connected yet, a bad key, a wrong path, a reply that was not JSON, a
+ * network fault, or an unknown throw say nothing about the input, so they are
+ * retried with a widening gap and never abandon the batch.
  */
 export function compileFailureSpendsBudget(errorClass?: string): boolean {
   if (!errorClass) return false;
   const status = /HTTP (\d{3})\b/.exec(errorClass);
   if (!status) return false;
-  return /^4\d\d$/.test(status[1]) && !/^(408|425|429)$/.test(status[1]);
+  return INPUT_REFUSED_STATUS.has(status[1]);
+}
+
+/** The marker already written for this input, if the desk has given up on it. */
+export function abandonMarkerFor(runs: CompilerRun[]): CompilerRun | undefined {
+  return runs.find((run) => run.errorClass === ABANDONED_INPUT);
 }
 
 /** The error class on the terminal marker for an input the desk has stopped sending. */

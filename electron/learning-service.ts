@@ -2,6 +2,7 @@ import { stubCompile, stubCompileAgent, stubReconcile } from "../src/lib/learnin
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import {
   ABANDONED_INPUT,
+  abandonMarkerFor,
   boundedCompilerBatch,
   boundedCompilerMemories,
   compileAttemptsSpent,
@@ -300,7 +301,7 @@ export class LearningService {
     // The marker is a row of its own. Overwriting the last failed row erased
     // the attempt it had spent, and an input that recurs then earned another
     // model call on every second tick.
-    const already = priorRuns.find((run) => run.errorClass === ABANDONED_INPUT);
+    const already = abandonMarkerFor(priorRuns);
     if (already) return { ran: false, skipped: "attempts-exhausted", runId: already.id };
     const last = priorRuns.at(-1);
     for (const run of priorRuns) {

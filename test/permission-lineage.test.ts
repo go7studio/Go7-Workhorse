@@ -576,8 +576,18 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
     /reason: payload\.message,\n\s*\},\n\s*from,\n\s*\)/,
     "the seat must not come back as the comparison",
   );
-  assert.match(store, /Helpers are read-only by design; the parent owns writes\./);
-  assert.match(store, /Your writes are answered from the grant this chat carries; keep going\./);
+  // The guard has to reach the reply. Pinning the sentence alone let a mutation
+  // dead-code the branch — the words stayed in the file and the pin held.
+  assert.match(
+    store,
+    /if \(!downgrade && from\.agentRun\?\.role === "helper"\) \{[\s\S]{0,260}?reason: "Helpers are read-only by design; the parent owns writes\.",/,
+    "a helper's ask is answered from its own branch",
+  );
+  assert.match(
+    store,
+    /if \(!downgrade && \(from\.agentRun\?\.paths\?\.length \?\? 0\) > 0\) \{[\s\S]{0,320}?howToUse: "Your writes are answered from the grant this chat carries; keep going\.",/,
+    "and a path-owned worker from its own",
+  );
 });
 
 test("the desk's read-only clamp on a nested helper is still the desk's alone", () => {

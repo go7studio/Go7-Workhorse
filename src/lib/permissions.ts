@@ -642,11 +642,31 @@ export function sandboxSourceNote(input: {
 }): string {
   const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
   const sandbox = input.session?.sandbox ?? desk.sandbox;
-  return `Sandbox ${sandboxLabel(sandbox)} comes from ${sandboxOrigin(input)}; ask for sandbox: off in the call, or raise that chat's Sandbox.`;
+  return `Sandbox ${sandboxLabel(sandbox)} comes from ${accessOrigin(input)}; ask for sandbox: off in the call, or raise that chat's Sandbox.`;
 }
 
-/** The thing that decided this worker's sandbox, named the way a person reads it. */
-function sandboxOrigin(input: { session?: LineageChat; sessions?: readonly LineageChat[] }): string {
+/**
+ * The other dial, for the other door.
+ *
+ * A sandbox block arrives as a refusal, so it comes out of the policy as a
+ * deny and takes the elevate path. Permission does not: a seat on Ask simply
+ * declines to answer, and the request falls through to the ordinary prompt.
+ * For a subagent that prompt is nobody's — so the desk answers, and this is
+ * the line it answers with. It names Permission, because Permission is the
+ * only dial that can bring a request that far.
+ */
+export function permissionSourceNote(input: {
+  session?: LineageChat;
+  sessions?: readonly LineageChat[];
+  deskAccess?: DeskAccess;
+}): string {
+  const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
+  const mode = input.session?.mode ?? desk.mode;
+  return `Permission ${modeLabel(mode)} comes from ${accessOrigin(input)}; ask for permission: always-approve in the call, or raise that chat's Permission.`;
+}
+
+/** The thing that decided this worker's seat, named the way a person reads it. */
+function accessOrigin(input: { session?: LineageChat; sessions?: readonly LineageChat[] }): string {
   if (!input.session) return "the desk default";
   if (input.session.agentRun?.grantedAccess?.source === "call") return "this delegation's own call";
   const rows = input.sessions ?? [];

@@ -63,6 +63,7 @@ import {
   parseSandboxValue,
   permissionPolicyAnswer,
   permissionResumeStatus,
+  permissionSourceNote,
   promptOwner,
   releasedHelper,
   requestedWorkerAccess,
@@ -6889,7 +6890,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // the desk denies and names its own clamp. Falling through to the
         // prompt below would put the desk's narrowing in front of the person
         // again, which is the whole thing this lane removes.
-        const allowed =
+        const answered =
           forced ??
           granted ??
           autoAllowPermission({
@@ -6899,6 +6900,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             grants: owner?.permissionGrants,
           }) ??
           (deskClamp ? ("deny" as const) : null);
+        // The elevate card was only one of the two doors into the person's
+        // inbox. A worker seated at Ask is refused by nothing above — Ask does
+        // not deny, it declines to answer — so its request fell through to the
+        // ordinary prompt below and carded the person from a chat they are not
+        // in. A subagent's request is answered here instead: by its grant if
+        // that allows it, and otherwise denied with the seat that stopped it
+        // named, so the coordinator can ask for it in the next call.
+        const hiddenDeny = !answered && owner?.hidden === true;
+        const allowed = answered ?? (hiddenDeny ? ("deny" as const) : null);
+        const deskNote =
+          deskClamp ??
+          (hiddenDeny
+            ? permissionSourceNote({
+                session: owner,
+                sessions: stateRef.current.sessions,
+                deskAccess: stateRef.current.settings.access,
+              })
+            : null);
         const deniedBy =
           security.boundary ??
           (forced === "deny"
@@ -6932,7 +6951,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             {
                               id: uid("msg"),
                               role: "system" as const,
-                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
+                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskNote ? ` · ${deskNote}` : ""}`,
                               createdAt: Date.now(),
                             },
                           ]

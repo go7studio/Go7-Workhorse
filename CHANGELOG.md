@@ -8,6 +8,28 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.51](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.50...v0.6.51) (2026-09-02)
+
+
+### Features
+
+* reap the process groups a dead desk left running ([510c1e8](https://github.com/go7studio/Go7-Workhorse/commit/510c1e8f0a9793e6e62d75eb8cf047fe7592417c))
+
+
+### Bug Fixes
+
+* a prompt reaches a person only when a person's own setting blocks the work ([6b83934](https://github.com/go7studio/Go7-Workhorse/commit/6b839341ba1531cde37e1e54f87358ea84af8f52))
+* carry a vendor's launch state onto its link, so routing can refuse a vendor that cannot start ([d8e8f00](https://github.com/go7studio/Go7-Workhorse/commit/d8e8f00c74fb252f283f648d5b9edb7b614cfa5f))
+* close the chain by which the desk destroys a person's work ([a8b4d16](https://github.com/go7studio/Go7-Workhorse/commit/a8b4d1662e93e1d6ff8203d13dcdb4b1b72b8c77))
+* find vendor CLIs off the desk PATH and stop routing to a vendor that cannot start ([e0373d6](https://github.com/go7studio/Go7-Workhorse/commit/e0373d678a83a0284ac161fb36cb2fdc61efcff9))
+* give a finished worker's steps a way back into the chat ([21702f7](https://github.com/go7studio/Go7-Workhorse/commit/21702f72ba4d2568ef51cb60b9c81f5e56f3546c))
+* judge a permission by the tool's name, not by the words it was handed ([a858478](https://github.com/go7studio/Go7-Workhorse/commit/a858478f2abdc7bd6774da46c28092eea6e20085))
+* kill a vendor's process group, not just its pid ([860a8bc](https://github.com/go7studio/Go7-Workhorse/commit/860a8bc686beba065054044f98affecb24a09102))
+* resolve the Claude ACP server off the desk directories too, not just the CLI ([c15ee09](https://github.com/go7studio/Go7-Workhorse/commit/c15ee09bcf207070ff81ae0505856bafbd216aa2))
+* say what happened to an interrupted worker's processes ([5c8dfc6](https://github.com/go7studio/Go7-Workhorse/commit/5c8dfc64c40be4d12e07f175b38ff7862899c645))
+* stop every process the desk owns with its owner ([be6ac60](https://github.com/go7studio/Go7-Workhorse/commit/be6ac60cbcfda5e289e8272791850850f477c85e))
+* the liveness probe knocks on the port the shim's own row names ([f3665e5](https://github.com/go7studio/Go7-Workhorse/commit/f3665e50bce724996b59fd44c8ef8c8341af1217))
+
 ## [0.6.50](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.49...v0.6.50) (2026-09-01)
 
 

@@ -607,7 +607,7 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   const spawnRoleAt = store.indexOf("const spawnRole =");
   assert.ok(spawnRoleAt >= 0);
   const spawnRole = store.slice(spawnRoleAt, spawnRoleAt + 220);
-  assert.match(spawnRole, /routeSpawn \? "worker"/);
+  assert.match(spawnRole, /routeSpawn \|\| helperReleased \? "worker"/);
   assert.doesNotMatch(spawnRole, /!isNested/);
   assert.match(settingsUi, /id: "routing"/);
   assert.doesNotMatch(settingsUi, /id: "models"/);

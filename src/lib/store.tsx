@@ -49,15 +49,18 @@ import { autoTitleForSend, firstUserText, suggestedTitleForSession, titleAccepts
 import {
   applyPermissionAnswer,
   autoAllowPermission,
+  deskClampNote,
   describeElevation,
   elevationForBlock,
   enqueuePermission,
   grantedPolicyAnswer,
   inboundAccess,
   classifyElevationInput,
+  lineageGrant,
   parseElevationInput,
   permissionPolicyAnswer,
   permissionResumeStatus,
+  promptOwner,
   securityPolicyAnswer,
   workerAccess,
   workerGrant,
@@ -4303,6 +4306,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 await replyAsk({ error: "No chat is selected to elevate." });
                 return;
               }
+              // Measured against what this chat's lineage grants, not the seat
+              // it launched under. A helper's read-only and a path-owned Ask
+              // are clamps the desk applied; an ask inside the lineage grant
+              // must not become a prompt the person has to answer.
+              const lineage = lineageGrant({
+                session: from,
+                sessions: latest.sessions,
+                deskAccess: latest.settings.access,
+              });
               const classified = classifyElevationInput(
                 {
                   permission: payload.name,
@@ -4310,10 +4322,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   sandbox: payload.folder,
                   reason: payload.message,
                 },
-                from,
+                lineage,
               );
               if (classified.kind !== "raise" || !classified.need) {
                 const downgrade = classified.kind === "downgrade";
+                if (!downgrade && from.agentRun?.role === "helper") {
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: false,
+                      reason: "Helpers are read-only by design; the parent owns writes.",
+                    }),
+                  });
+                  return;
+                }
+                if (!downgrade && (from.agentRun?.paths?.length ?? 0) > 0) {
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: true,
+                      alreadyGranted: true,
+                      howToUse: "Your writes are answered from the grant this chat carries; keep going.",
+                    }),
+                  });
+                  return;
+                }
                 await replyAsk({
                   text: JSON.stringify({
                     ok: true,
@@ -6717,7 +6748,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               path: event.path,
             })
           : null);
-        const need =
+        const blocked =
           eventElevate && owner
             ? parseElevationInput(eventElevate as Record<string, unknown>, owner)
             : owner && forced === "deny" && !security.boundary
@@ -6729,6 +6760,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   path: event.path,
                 })
               : null;
+        // A prompt reaches the person only when a setting they made is what
+        // blocks the work. A read-only helper or a path-owned launch under a
+        // lineage that already grants the write is the desk's own clamp, so the
+        // desk answers it and the denial says which clamp did it. Asking here
+        // would be the desk asking the person to approve the desk.
+        const lineage = lineageGrant({
+          session: owner,
+          sessions: stateRef.current.sessions,
+          deskAccess: stateRef.current.settings.access,
+        });
+        const deskClamp =
+          blocked && owner && promptOwner(blocked, lineage) === "desk" ? deskClampNote(owner.agentRun) : null;
+        const need = deskClamp ? null : blocked;
         if (need && owner) {
           setState((current) => ({
             ...current,
@@ -6762,12 +6806,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               path: event.path,
             })
           : null;
-        const allowed = forced ?? granted ?? autoAllowPermission({
-          tool: event.tool,
-          detail: event.detail,
-          path: event.path,
-          grants: owner?.permissionGrants,
-        });
+        // A block the desk owns is answered here whatever the policy said. The
+        // grant it recorded may allow the work outright; if nothing allows it,
+        // the desk denies and names its own clamp. Falling through to the
+        // prompt below would put the desk's narrowing in front of the person
+        // again, which is the whole thing this lane removes.
+        const allowed =
+          forced ??
+          granted ??
+          autoAllowPermission({
+            tool: event.tool,
+            detail: event.detail,
+            path: event.path,
+            grants: owner?.permissionGrants,
+          }) ??
+          (deskClamp ? ("deny" as const) : null);
+        const deniedBy =
+          security.boundary ??
+          (forced === "deny"
+            ? owner?.sandbox === "read-only" || owner?.sandbox === "strict"
+              ? "sandbox"
+              : "plan"
+            : "the desk");
         if (allowed) {
           if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, allowed);
           else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, allowed);
@@ -6794,7 +6854,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             {
                               id: uid("msg"),
                               role: "system" as const,
-                              text: `Denied by ${security.boundary ?? (owner?.sandbox === "read-only" || owner?.sandbox === "strict" ? "sandbox" : "plan")}: ${event.tool} — ${event.detail}`,
+                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
                               createdAt: Date.now(),
                             },
                           ]

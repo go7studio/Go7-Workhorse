@@ -6,15 +6,91 @@ import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, Pe
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
-export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
-  const hay = `${tool} ${detail} ${filePath ?? ""}`.toLowerCase();
-  if (
-    /\b(read_file|list_dir|grep|search|web_search|web_fetch|todo_write|ripgrep|rg(?:\.exe)?)\b/.test(hay) &&
-    !/\b(write|edit|replace|delete)\b/.test(hay)
-  ) {
-    return false;
+const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
+
+/**
+ * A sub-agent launch carries the whole assignment as its detail, so the words
+ * inside it — "write the test", "create the file" — are the helper's brief,
+ * not this call's target. Reading them as a target turned every launch into a
+ * write and asked the person to drop the sandbox for it. A delegation is
+ * judged at spawn admission; the write heuristic stays out of it.
+ */
+export function looksLikeDelegationTool(tool: string, detail: string): boolean {
+  if (DELEGATION_TOOLS.test(toolNameKey(tool))) return true;
+  const text = detail.trim();
+  if (!text.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(text) as { variant?: unknown };
+    return typeof parsed.variant === "string" && /^(?:task|agent)$/i.test(parsed.variant.trim());
+  } catch {
+    // A long brief can reach the desk clipped. The variant is the first key
+    // the vendors send, so it survives a cut that the closing brace does not.
+    return /^\{\s*"variant"\s*:\s*"(?:task|agent)"/i.test(text);
   }
-  return /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/.test(hay);
+}
+
+/**
+ * Tool names that only ever read. The exemption keys on the NAME, never on the
+ * detail or the path: a query, a filename, or a brief is the payload a tool was
+ * handed, not the thing the tool does. Matching words instead let
+ * `rm -rf ~/search` out through the read exemption, and denied a plain read of
+ * `src/delete-me.ts` as if it were a write.
+ */
+const READ_TOOL_KEYS: ReadonlySet<string> = new Set([
+  "read",
+  "read_file",
+  "readfile",
+  "view",
+  "list",
+  "list_dir",
+  "listdir",
+  "glob",
+  "grep",
+  "ripgrep",
+  "rg",
+  "rg_exe",
+  "search",
+  "codebase_search",
+  "file_search",
+  "web_search",
+  "web_fetch",
+  "todo_write",
+]);
+
+/** The search programs, by name. Narrower than a read: this one auto-allows. */
+const SEARCH_TOOL_KEYS: ReadonlySet<string> = new Set([
+  "grep",
+  "ripgrep",
+  "rg",
+  "rg_exe",
+  "search",
+  "codebase_search",
+  "file_search",
+]);
+
+/** A vendor namespace rides in front of the name: mcp__fs__read_file -> fs_read_file. */
+function toolKeyIn(tool: string, names: ReadonlySet<string>): boolean {
+  const key = toolNameKey(tool);
+  if (names.has(key)) return true;
+  const parts = key.split("_");
+  for (let index = 1; index < parts.length; index += 1) {
+    if (names.has(parts.slice(index).join("_"))) return true;
+  }
+  return false;
+}
+
+const WRITE_WORDS =
+  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/;
+
+export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
+  if (looksLikeDelegationTool(tool, detail)) return false;
+  const shell = looksLikeShellTool(tool, detail);
+  // A tool that is not a shell is what its name says it is.
+  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return false;
+  // A shell's name says nothing about what it runs, so it is judged by the
+  // program it invokes. Everything else a shell does counts as a write.
+  if (shell && looksLikeSearchOnly(tool, detail, filePath)) return false;
+  return WRITE_WORDS.test(`${tool} ${detail} ${filePath ?? ""}`.toLowerCase());
 }
 
 export function looksLikeShellTool(tool: string, detail: string): boolean {
@@ -66,11 +142,12 @@ export function securityPolicyAnswer(input: {
 export function looksLikeSearchOnly(tool: string, detail: string, filePath?: string): boolean {
   const command = `${detail} ${filePath ?? ""}`.trim();
   const hay = `${tool} ${command}`.toLowerCase();
-  if (!/\b(rg(?:\.exe)?|ripgrep|grep)\b/.test(hay)) return false;
   if (/\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/.test(hay)) {
     return false;
   }
-  if (!looksLikeShellTool(tool, detail)) return !looksLikeWriteTool(tool, detail, filePath);
+  // A tool that is not a shell is judged by its name. "run a grep over the
+  // tree" sitting inside a brief is the brief talking, not the program.
+  if (!looksLikeShellTool(tool, detail)) return toolKeyIn(tool, SEARCH_TOOL_KEYS);
   const stripped = command
     .replace(/^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i, "")
     .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")
@@ -389,6 +466,67 @@ export function workerAccess(input: {
 /** What the desk records as granted, so the next reuse can read the clamp apart from a tightening. */
 export function workerGrant(input: { inherited: DeskAccess; prior?: WorkerAccessPrior }): DeskAccess {
   return tighterAccess(input.inherited, workerTightening(input.prior));
+}
+
+export type LineageChat = {
+  id: string;
+  parentId?: string;
+  hidden?: boolean;
+  mode: PermissionMode;
+  sandbox: SandboxProfile;
+  agentRun?: { role?: string; paths?: string[]; grantedAccess?: DeskAccess };
+};
+
+/**
+ * What this chat's lineage actually grants, told apart from the seat it runs
+ * under. A seat can be tighter for reasons the person never chose: a nested
+ * helper is read-only by design, a path-owned worker launches at Ask so its
+ * writes still reach the ownership preflight. Those are the desk's own clamps.
+ *
+ * The worker's recorded grant answers first — the desk wrote it at spawn from
+ * the parent path, before any clamp. With no record the walk climbs parentId
+ * to the first chat the person can see and takes its Permission and Sandbox; a
+ * parent calling through Link sits on that walk. Above that there is only the
+ * desk's Settings default, which is the last thing the person set.
+ */
+export function lineageGrant(input: {
+  session?: LineageChat;
+  sessions?: readonly LineageChat[];
+  deskAccess?: DeskAccess;
+}): DeskAccess {
+  const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
+  if (!input.session) return desk;
+  const granted = input.session.agentRun?.grantedAccess;
+  if (granted) return { mode: granted.mode, sandbox: granted.sandbox };
+  const rows = input.sessions ?? [];
+  const seen = new Set<string>();
+  let chat: LineageChat | undefined = input.session;
+  while (chat && !seen.has(chat.id)) {
+    seen.add(chat.id);
+    if (!chat.hidden) return { mode: chat.mode, sandbox: chat.sandbox };
+    const parentId: string | undefined = chat.parentId;
+    chat = parentId ? rows.find((item) => item.id === parentId) : undefined;
+  }
+  return desk;
+}
+
+/**
+ * Who owns a block. "person" only when the need climbs past what the lineage
+ * already grants — someone tightened the root chat, the parent, or this chat.
+ * Otherwise the seat that refused is a clamp the desk applied, and the desk
+ * answers it from the access the person did grant.
+ */
+export function promptOwner(need: ElevationNeed, lineage: DeskAccess): "person" | "desk" {
+  return elevationStillNeeded(lineage, need) ? "person" : "desk";
+}
+
+/** The clamp, named, so a denial says what actually stopped the work. */
+export function deskClampNote(run: { role?: string; paths?: string[] } | undefined): string {
+  if (run?.role === "helper") return "Helpers are read-only by design; hand this write to your parent.";
+  if ((run?.paths?.length ?? 0) > 0) {
+    return "This launch is path-owned; the desk answers its in-path writes from the access you granted.";
+  }
+  return "The desk narrowed this launch itself; the access you granted still stands.";
 }
 
 /**

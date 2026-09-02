@@ -664,10 +664,26 @@ export function boundedCompilerMemories(memories: MemoryItem[], maxMemoryChars: 
  */
 export function compileFailureIsTransient(errorClass?: string): boolean {
   if (!errorClass) return false;
-  if (/HTTP (408|409|425|429|5\d\d)\b/.test(errorClass)) return true;
+  // A status code decides on its own. A 400 whose body mentions a timeout is
+  // still a 400: the words only speak when no status was recorded.
+  const status = /HTTP (\d{3})\b/.exec(errorClass);
+  if (status) return /^(408|409|425|429|5\d\d)$/.test(status[1]);
   return /\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|timed? ?out|overloaded|aborted)\b/i.test(
     errorClass,
   );
+}
+
+/**
+ * Only the model saying no to the request itself spends the budget: a 4xx
+ * that is not a rate limit or a timeout. No bot connected yet, a reply that
+ * was not JSON, a network fault, or an unknown throw say nothing about the
+ * input, so they are retried with a widening gap and never abandon the batch.
+ */
+export function compileFailureSpendsBudget(errorClass?: string): boolean {
+  if (!errorClass) return false;
+  const status = /HTTP (\d{3})\b/.exec(errorClass);
+  if (!status) return false;
+  return /^4\d\d$/.test(status[1]) && !/^(408|425|429)$/.test(status[1]);
 }
 
 /** The error class on the terminal marker for an input the desk has stopped sending. */
@@ -677,7 +693,7 @@ export const ABANDONED_INPUT = "attempts-exhausted";
 export function compileAttemptsSpent(runs: CompilerRun[]): number {
   return runs
     .filter((run) => run.status === "failed" || run.status === "interrupted")
-    .filter((run) => !compileFailureIsTransient(run.errorClass))
+    .filter((run) => compileFailureSpendsBudget(run.errorClass))
     .reduce((total, run) => total + Math.max(1, run.attempt ?? 1), 0);
 }
 

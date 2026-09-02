@@ -116,6 +116,8 @@ export interface MemoryStore {
   listCompletedRuns(lane: IntelligenceLane): CompilerRun[];
   /** The newest run that settled a batch: compiled, or abandoned after its attempts. */
   lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined;
+  /** Every run that settled a batch in one lane, oldest first. */
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[];
   unfinishedCompilerRun(): CompilerRun | undefined;
   putRetrievalAudit(audit: RetrievalAudit): void;
   listAudits(): RetrievalAudit[];
@@ -347,14 +349,16 @@ export class InMemoryStore implements MemoryStore {
     return this.listCompilerRuns().filter((run) => run.intelligenceLane === lane && run.status === "completed");
   }
 
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[] {
+    return this.listCompilerRuns().filter(
+      (run) =>
+        run.intelligenceLane === lane &&
+        (run.status === "completed" || (run.status === "failed" && run.errorClass === ABANDONED_INPUT)),
+    );
+  }
+
   lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
-    return this.listCompilerRuns()
-      .filter(
-        (run) =>
-          run.intelligenceLane === lane &&
-          (run.status === "completed" || (run.status === "failed" && run.errorClass === ABANDONED_INPUT)),
-      )
-      .at(-1);
+    return this.listSettledRuns(lane).at(-1);
   }
 
   unfinishedCompilerRun(): CompilerRun | undefined {

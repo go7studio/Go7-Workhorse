@@ -12,6 +12,7 @@ import {
   compileAttemptsSpent,
   compileBackoffMs,
   compileFailureIsTransient,
+  compileFailureSpendsBudget,
   compilerInputHash,
   compilerPrompt,
   DEFAULT_COMPILER_POLICY,
@@ -258,7 +259,9 @@ test("recover cannot spend a model call the budget has already refused", async (
   const calls = { n: 0 };
   const service = failingService(store, () => new Error("Custom model HTTP 400: too large"), calls);
   service.record(agentEvent("lev_recover", "a run finished"));
-  for (let round = 0; round < 4; round += 1) await service.compile().catch(() => undefined);
+  // Exactly the budget, then straight to recover: no third scheduled compile
+  // may empty the batch first, or the probe proves nothing about resume.
+  for (let round = 0; round < DEFAULT_COMPILER_POLICY.maxAttempts; round += 1) await service.compile().catch(() => undefined);
   const spent = calls.n;
   assert.equal(spent, DEFAULT_COMPILER_POLICY.maxAttempts);
   await service.recover().catch(() => undefined);
@@ -304,19 +307,25 @@ test("attempts are counted from the rows, resumed rows included", () => {
   assert.equal(compileAttemptsSpent([row({ attempt: 2, errorClass: "Custom model HTTP 400" })]), 2);
   assert.equal(compileAttemptsSpent([row({ errorClass: "Custom model HTTP 429" })]), 0);
   assert.equal(compileAttemptsSpent([row({ status: "completed", errorClass: undefined })]), 0);
+  assert.equal(compileAttemptsSpent([row({ errorClass: "no-ephemeral-provider" })]), 0, "no bot yet says nothing about the input");
+  assert.equal(compileAttemptsSpent([row({ errorClass: "invalid-brief" })]), 0, "a reply that was not JSON says nothing about the input");
+  assert.equal(compileAttemptsSpent([row({ errorClass: undefined })]), 0, "an unknown failure does not abandon evidence");
 });
 
-test("the mismatch lane spends the same budget", async () => {
+test("the mismatch lane spends the same budget and stops calling", async () => {
   const store = new InMemoryStore(":memory:");
   const lane = "intent-performance-mismatch" as const;
-  store.putCompilerRun({ id: "run_m1", intelligenceLane: lane, status: "interrupted", attempt: 2, inputHash: "mm", errorClass: "Custom model HTTP 400", startedAt: 1 });
-  assert.equal(compileAttemptsSpent(store.runsForInput(lane, "mm")), 2);
-  const service = new LearningService({
-    store,
-    settings: () => ({ mode: "automatic", autoRetrieve: false }),
-    allowStub: true,
-  });
-  assert.ok(service, "the mismatch budget reads from the same counter as the event lanes");
+  // A human record and an agent record on one project, tied by one
+  // correlation id, is exactly the pair mismatchInputs() offers the compiler.
+  store.putMemory(memory("mem_human", { intelligenceLane: HUMAN_INTELLIGENCE_LANE, memoryClass: "intent", status: "active", correlationIds: ["corr_x"], statement: "always run the tests before a release" }));
+  store.putMemory(memory("mem_agent", { intelligenceLane: AGENT_INTELLIGENCE_LANE, status: "active", correlationIds: ["corr_x"], statement: "release went out with failing tests" }));
+  const calls = { n: 0 };
+  const service = failingService(store, () => new Error("Custom model HTTP 400: too large"), calls);
+  for (let round = 0; round < 5; round += 1) await service.compile().catch(() => undefined);
+  assert.equal(calls.n, DEFAULT_COMPILER_POLICY.maxAttempts, `the mismatch compiler was called ${calls.n} times for one input`);
+  assert.equal(store.lastSettledRun(lane)?.errorClass, ABANDONED_INPUT, "the mismatch input is abandoned like any other");
+  await service.recover().catch(() => undefined);
+  assert.equal(calls.n, DEFAULT_COMPILER_POLICY.maxAttempts, "recover obeys it too");
 });
 
 test("the memory block keeps room for the proposals a brief is checked against", () => {
@@ -339,4 +348,104 @@ test("recover seeks its unfinished row instead of loading every run", () => {
   const body = service.slice(service.indexOf("  async recover("), service.indexOf("  async compileIfDue("));
   assert.match(body, /unfinishedCompilerRun\(\)/);
   assert.doesNotMatch(body, /listCompilerRuns/);
+});
+
+// --- round three: only the model refusing the request may abandon a batch ---
+
+const GOOD_BRIEF = JSON.stringify({
+  intent: [],
+  operations: [{ action: "add", memoryClass: "operations", scope: "project", statement: "a run finished cleanly", sourceEventIds: ["lev_wait"] }],
+});
+
+test("a status decides on its own; a 400 that mentions a timeout still spends the budget", () => {
+  assert.equal(compileFailureIsTransient("Custom model HTTP 400: request timeout while reading body"), false);
+  assert.equal(compileFailureSpendsBudget("Custom model HTTP 400: request timeout while reading body"), true);
+  assert.equal(compileFailureSpendsBudget("Custom model HTTP 413: too large"), true);
+  assert.equal(compileFailureSpendsBudget("Custom model HTTP 429: rate limited"), false);
+  assert.equal(compileFailureSpendsBudget("Custom model HTTP 503"), false);
+  assert.equal(compileFailureSpendsBudget("no-ephemeral-provider"), false);
+  assert.equal(compileFailureSpendsBudget("invalid-brief"), false);
+  assert.equal(compileFailureSpendsBudget("socket hang up"), false);
+  assert.equal(compileFailureSpendsBudget(undefined), false);
+});
+
+test("a batch that waited for a compiler still compiles once one is connected", async () => {
+  const store = new InMemoryStore(":memory:");
+  const waiting = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [{ provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 }],
+  });
+  waiting.record(agentEvent("lev_wait", "a run finished"));
+  for (let round = 0; round < 3; round += 1) {
+    const result = await waiting.compile();
+    assert.equal(result.skipped, "no-ephemeral-provider");
+  }
+  assert.notEqual(store.lastSettledRun(AGENT_INTELLIGENCE_LANE)?.errorClass, ABANDONED_INPUT, "waiting is not failing");
+  let calls = 0;
+  const connected = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [{ provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 }],
+    caller: async () => {
+      calls += 1;
+      return { text: GOOD_BRIEF, createdWorkhorseChat: false, leftoverVendorThread: false };
+    },
+  });
+  const result = await connected.compile();
+  assert.equal(calls, 1, "the evidence was still there for the first real compiler");
+  assert.equal(result.ran, true);
+  assert.ok((result.memories ?? 0) > 0, "and it compiled");
+});
+
+test("two replies that were not JSON do not abandon evidence a good reply would compile", async () => {
+  const store = new InMemoryStore(":memory:");
+  const junk = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [{ provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 }],
+    caller: async () => ({ text: "sorry, not json today", createdWorkhorseChat: false, leftoverVendorThread: false }),
+  });
+  junk.record(agentEvent("lev_wait", "a run finished"));
+  for (let round = 0; round < 3; round += 1) assert.equal((await junk.compile()).skipped, "invalid-brief");
+  assert.notEqual(store.lastSettledRun(AGENT_INTELLIGENCE_LANE)?.errorClass, ABANDONED_INPUT);
+  let calls = 0;
+  const good = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [{ provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 }],
+    caller: async () => {
+      calls += 1;
+      return { text: GOOD_BRIEF, createdWorkhorseChat: false, leftoverVendorThread: false };
+    },
+  });
+  const result = await good.compile();
+  assert.equal(calls, 1);
+  assert.equal(result.ran, true);
+});
+
+test("a returned failure still widens the gap before the next try", () => {
+  const src = fs.readFileSync(path.join(ROOT, "electron", "learning-service.ts"), "utf8");
+  for (const cls of ["no-ephemeral-provider", "invalid-brief"]) {
+    const at = src.indexOf(`return { ran: false, skipped: "${cls}"`);
+    assert.ok(at > 0, cls);
+    assert.ok(src.slice(Math.max(0, at - 80), at).includes("this.noteFailure();"), `${cls} must note the failure so schedule() backs off`);
+  }
+});
+
+test("the abandon marker is its own row and never eats a spent attempt", async () => {
+  const store = new InMemoryStore(":memory:");
+  const calls = { n: 0 };
+  const service = failingService(store, () => new Error("Custom model HTTP 400: too large"), calls);
+  service.record(agentEvent("lev_row", "a run finished"));
+  for (let round = 0; round < 6; round += 1) await service.compile().catch(() => undefined);
+  const runs = store.runsForInput(AGENT_INTELLIGENCE_LANE, store.lastSettledRun(AGENT_INTELLIGENCE_LANE)!.inputHash);
+  assert.equal(runs.filter((run) => run.errorClass === ABANDONED_INPUT).length, 1, "one marker, written once");
+  assert.equal(runs.filter((run) => /HTTP 400/.test(run.errorClass ?? "")).length, DEFAULT_COMPILER_POLICY.maxAttempts, "the spent rows survive");
+  assert.equal(runs.some((run) => run.status === "interrupted"), false, "nothing is left for recover to resume");
+  assert.equal(calls.n, DEFAULT_COMPILER_POLICY.maxAttempts);
 });

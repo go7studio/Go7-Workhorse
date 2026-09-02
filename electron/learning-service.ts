@@ -73,6 +73,11 @@ export class LearningService {
   private compiling = false;
   /** Consecutive failed compiles, used only to widen the gap before the next try. */
   private consecutiveFailures = 0;
+
+  /** A compile that ended without a memory, whether it threw or returned. */
+  private noteFailure(): void {
+    this.consecutiveFailures += 1;
+  }
   private idleTimer: unknown = null;
   private sleeping = false;
   readonly createdChats: string[] = [];
@@ -272,7 +277,7 @@ export class LearningService {
     this.idleTimer = idle.setTimeout(
       () => {
         void this.compileIfDue().catch((error) => {
-          this.consecutiveFailures += 1;
+          this.noteFailure();
           this.options.onCompileError?.(error instanceof Error ? error : new Error(String(error)));
         });
       },
@@ -290,18 +295,29 @@ export class LearningService {
     inputHash: string,
     priorRuns: CompilerRun[],
     events: LearningEvent[],
+    inputMemoryIds: string[] = [],
   ): CompileResult {
+    // The marker is a row of its own. Overwriting the last failed row erased
+    // the attempt it had spent, and an input that recurs then earned another
+    // model call on every second tick.
+    const already = priorRuns.find((run) => run.errorClass === ABANDONED_INPUT);
+    if (already) return { ran: false, skipped: "attempts-exhausted", runId: already.id };
     const last = priorRuns.at(-1);
-    const runId = last?.id ?? newRunId();
+    for (const run of priorRuns) {
+      if (run.status === "interrupted") this.options.store.putCompilerRun({ ...run, status: "failed", endedAt: run.endedAt ?? this.now() });
+    }
+    const runId = newRunId();
     this.options.store.putCompilerRun({
-      ...(last ?? { id: runId, intelligenceLane: lane, attempt: this.policy().maxAttempts, inputHash }),
       id: runId,
       intelligenceLane: lane,
       inputHash,
+      attempt: this.policy().maxAttempts,
       status: "failed",
       errorClass: ABANDONED_INPUT,
+      startedAt: this.now(),
       endedAt: this.now(),
       eventWatermark: events.at(-1)?.id ?? last?.eventWatermark,
+      ...(inputMemoryIds.length > 0 ? { inputMemoryIds, memoryWatermark: inputMemoryIds.at(-1) } : {}),
     });
     return { ran: false, skipped: "attempts-exhausted", runId };
   }
@@ -346,8 +362,10 @@ export class LearningService {
     const statuses: MemoryItem["status"][] = ["active", "approved", "proposed"];
     const humans = this.options.store.listMemories({ intelligenceLane: HUMAN_INTELLIGENCE_LANE, statuses });
     const agents = this.options.store.listMemories({ intelligenceLane: AGENT_INTELLIGENCE_LANE, statuses });
+    // A pair the compiler reconciled, or one the desk gave up on, is not
+    // offered again; otherwise an abandoned pair would recur on every tick.
     const reconciled = new Set(
-      this.options.store.listCompletedRuns(MISMATCH_INTELLIGENCE_LANE).flatMap((run) => run.inputMemoryIds ?? []),
+      this.options.store.listSettledRuns(MISMATCH_INTELLIGENCE_LANE).flatMap((run) => run.inputMemoryIds ?? []),
     );
     const humanIds = new Set<string>();
     const agentIds = new Set<string>();
@@ -486,7 +504,8 @@ export class LearningService {
             outputTokens: result.outputTokens,
             costUsd: result.costUsd,
           });
-          return { ran: false, skipped: "invalid-brief", runId, ...route };
+          this.noteFailure();
+        return { ran: false, skipped: "invalid-brief", runId, ...route };
         }
         if (
           parsed.intent.length + parsed.operations.length === 0 &&
@@ -501,7 +520,8 @@ export class LearningService {
             outputTokens: result.outputTokens,
             costUsd: result.costUsd,
           });
-          return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
+          this.noteFailure();
+        return { ran: false, skipped: "empty-explicit-brief", runId, ...route };
         }
         if (lane === AGENT_INTELLIGENCE_LANE && parsed.intent.length > 0) {
           this.options.store.putCompilerRun({
@@ -510,7 +530,8 @@ export class LearningService {
             errorClass: "cross-lane-output",
             endedAt: this.now(),
           });
-          return { ran: false, skipped: "cross-lane-output", runId, ...route };
+          this.noteFailure();
+        return { ran: false, skipped: "cross-lane-output", runId, ...route };
         }
         const inputEventIds = new Set(events.map((event) => event.id));
         const hasInvalidEvidence = [...parsed.intent, ...parsed.operations].some(
@@ -527,7 +548,8 @@ export class LearningService {
             outputTokens: result.outputTokens,
             costUsd: result.costUsd,
           });
-          return { ran: false, skipped: "invalid-source-evidence", runId, ...route };
+          this.noteFailure();
+        return { ran: false, skipped: "invalid-source-evidence", runId, ...route };
         }
         brief = parsed;
       } else if (!this.options.allowStub && selection.provider) {
@@ -537,6 +559,7 @@ export class LearningService {
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
         });
+        this.noteFailure();
         return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
       } else if (!this.options.allowStub && !selection.provider) {
         this.options.store.putCompilerRun({
@@ -545,6 +568,7 @@ export class LearningService {
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
         });
+        this.noteFailure();
         return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
       }
       if (!brief) {
@@ -554,6 +578,7 @@ export class LearningService {
           errorClass: "invalid-brief",
           endedAt: this.now(),
         });
+        this.noteFailure();
         return { ran: false, skipped: "invalid-brief", runId, ...route };
       }
       const outputIds: string[] = [];
@@ -640,7 +665,7 @@ export class LearningService {
     }
     const spent = compileAttemptsSpent(priorRuns);
     if (spent >= this.policy().maxAttempts) {
-      return { ...this.abandonInput(lane, inputHash, priorRuns, []), intelligenceLane: lane };
+      return { ...this.abandonInput(lane, inputHash, priorRuns, [], memories.map((item) => item.id)), intelligenceLane: lane };
     }
     const resumed = resumeRun?.intelligenceLane === lane ? resumeRun : undefined;
     if (resumed && resumed.attempt >= this.policy().maxAttempts) {
@@ -709,7 +734,8 @@ export class LearningService {
             errorClass: "invalid-brief",
             endedAt: this.now(),
           });
-          return { ran: false, skipped: "invalid-brief", runId, ...route };
+          this.noteFailure();
+        return { ran: false, skipped: "invalid-brief", runId, ...route };
         }
       } else if (!this.options.allowStub) {
         this.options.store.putCompilerRun({
@@ -718,6 +744,7 @@ export class LearningService {
           errorClass: "no-ephemeral-provider",
           endedAt: this.now(),
         });
+        this.noteFailure();
         return { ran: false, skipped: "no-ephemeral-provider", runId, ...route };
       }
       if (!brief || brief.intent.length > 0) {
@@ -754,6 +781,7 @@ export class LearningService {
           errorClass: "invalid-source-evidence",
           endedAt: this.now(),
         });
+        this.noteFailure();
         return { ran: false, skipped: "invalid-source-evidence", runId, ...route };
       }
       const outputIds: string[] = [];

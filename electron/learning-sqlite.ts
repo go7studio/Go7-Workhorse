@@ -704,6 +704,16 @@ export class SqliteMemoryStore implements MemoryStore {
     ).map(rowRun);
   }
 
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[] {
+    return (
+      this.conn()
+        .prepare(
+          "SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND (status = 'completed' OR (status = 'failed' AND error_class = ?)) ORDER BY started_at ASC",
+        )
+        .all(lane, ABANDONED_INPUT) as Record<string, unknown>[]
+    ).map(rowRun);
+  }
+
   lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
     const row = this.conn()
       .prepare(

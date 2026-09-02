@@ -15,6 +15,7 @@ import {
   looksLikeWriteTool,
   parseElevationInput,
   permissionPolicyAnswer,
+  permissionSourceNote,
   promptOwner,
   sandboxSourceNote,
   securityPolicyAnswer,
@@ -193,11 +194,19 @@ function siteOne(input: {
     detail: event.detail,
     path: event.path,
   });
-  const allowed =
+  const answered =
     forced ??
     granted ??
     autoAllowPermission({ tool: event.tool, detail: event.detail, path: event.path }) ??
     (deskClamp ? ("deny" as const) : null);
+  // The ordinary prompt is the other door a subagent used to reach the person.
+  const hiddenDeny = !answered && owner.hidden === true;
+  const allowed = answered ?? (hiddenDeny ? ("deny" as const) : null);
+  const deskNote =
+    deskClamp ??
+    (hiddenDeny
+      ? permissionSourceNote({ session: owner, sessions: input.sessions, deskAccess: input.deskAccess })
+      : null);
   const deniedBy =
     security.boundary ??
     (forced === "deny" ? (owner.sandbox === "read-only" || owner.sandbox === "strict" ? "sandbox" : "plan") : "the desk");
@@ -206,7 +215,7 @@ function siteOne(input: {
       answer: allowed,
       pending: pending.filter((item) => item.id !== event.requestId),
       ...(allowed === "deny"
-        ? { line: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}` }
+        ? { line: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskNote ? ` · ${deskNote}` : ""}` }
         : {}),
     };
   }
@@ -585,13 +594,19 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
   );
   assert.match(
     store,
-    /\$\{event\.detail\}\$\{deskClamp \? ` · \$\{deskClamp\}` : ""\}/,
+    /\$\{event\.detail\}\$\{deskNote \? ` · \$\{deskNote\}` : ""\}/,
     "the denial has to name the clamp or the person cannot tell who stopped them",
   );
   assert.match(
     store,
     /\}\) \?\?\n\s*\(deskClamp \? \("deny" as const\) : null\);/,
     "a block the desk owns is answered here; it must never reach the plain enqueue",
+  );
+  // And neither must an ordinary request from a chat the person is not in.
+  assert.match(
+    store,
+    /const hiddenDeny = !answered && owner\?\.hidden === true;\n\s*const allowed = answered \?\? \(hiddenDeny \? \("deny" as const\) : null\);/,
+    "the ordinary prompt is the second door, and a subagent must not walk through it",
   );
   assert.match(
     store,

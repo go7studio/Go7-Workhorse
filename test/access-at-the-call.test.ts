@@ -4,8 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  autoAllowPermission,
   grantedAccessLine,
+  grantedPolicyAnswer,
   inboundAccess,
+  permissionGrantKey,
+  permissionPolicyAnswer,
+  permissionSourceNote,
   parseCallPermission,
   parseSandboxValue,
   releasedHelper,
@@ -14,9 +19,11 @@ import {
   spawnAccessLogDetail,
   workerAccess,
   workerGrant,
+  workerTightening,
   type LineageChat,
+  type PermissionAnswer,
 } from "../src/lib/permissions";
-import type { DeskAccess } from "../src/lib/types";
+import type { DeskAccess, PermissionGrant } from "../src/lib/types";
 
 /**
  * A delegation's access is decided at the call, never by a card mid-run.
@@ -457,4 +464,256 @@ test("LINK.md states the two fields and the ceiling rule", () => {
   assert.match(link, /\| `sandbox` \| `off`, `workspace`, `read-only`, `strict` \|/);
   assert.match(link, /capped by the \*\*desk default\*\* in Settings › LLMs — the app's own\nceiling, not your seat/);
   assert.match(link, /Send neither field\nand the worker inherits your own seat/);
+});
+
+// ---------------------------------------------------------------------------
+// The second door: the ordinary permission prompt.
+// ---------------------------------------------------------------------------
+
+/**
+ * The elevate card was the door everyone looked at. The plain prompt is the
+ * other one, and a seat on Ask walks straight through it: Ask does not refuse
+ * a write, it declines to answer, so nothing upstream produces a deny and the
+ * request lands in the queue as an ordinary question. For a chat the person
+ * cannot see, that question has no one to answer it.
+ *
+ * This is site 1's tail, in the order store.tsx runs it.
+ */
+function ordinaryPath(input: {
+  owner: LineageChat;
+  sessions: readonly LineageChat[];
+  deskAccess: DeskAccess;
+  event: { tool: string; detail: string; path?: string };
+  grants?: PermissionGrant[];
+}): { answer: PermissionAnswer | null; enqueued: boolean; line?: string } {
+  const { owner, event } = input;
+  const forced = permissionPolicyAnswer({
+    mode: owner.mode,
+    sandbox: owner.sandbox,
+    tool: event.tool,
+    detail: event.detail,
+    path: event.path,
+  });
+  const granted = grantedPolicyAnswer({
+    granted: owner.agentRun?.grantedAccess?.mode,
+    sandbox: owner.sandbox,
+    tool: event.tool,
+    detail: event.detail,
+    path: event.path,
+  });
+  const answered =
+    forced ??
+    granted ??
+    autoAllowPermission({ tool: event.tool, detail: event.detail, path: event.path, grants: input.grants }) ??
+    null;
+  const hiddenDeny = !answered && owner.hidden === true;
+  const allowed = answered ?? (hiddenDeny ? ("deny" as const) : null);
+  const note = hiddenDeny
+    ? permissionSourceNote({ session: owner, sessions: input.sessions, deskAccess: input.deskAccess })
+    : null;
+  return {
+    answer: allowed,
+    enqueued: !allowed,
+    ...(allowed === "deny" && note ? { line: `Denied by the desk: ${event.tool} — ${event.detail} · ${note}` } : {}),
+  };
+}
+
+/** The person's own chat, set to Ask. Visible, so its prompts are theirs to answer. */
+const askChat: LineageChat = { id: "sess_ask", title: "Nightly cleanup", mode: "ask", sandbox: "off" };
+
+/** A subagent under it, inheriting Ask because the call named no seat. */
+const askWorker: LineageChat = {
+  id: "sess_worker",
+  parentId: askChat.id,
+  hidden: true,
+  title: "Wren · tidy the fixtures",
+  mode: "ask",
+  sandbox: "off",
+  agentRun: { grantedAccess: { mode: "ask", sandbox: "off", source: "inherited" } },
+};
+
+const WRITE = { tool: "Write", detail: "src/app.ts", path: "src/app.ts" };
+
+test("an Ask-mode subagent's write is answered by the desk, never queued", () => {
+  // Nothing above this refuses: the sandbox is off and Ask is not a deny. The
+  // request used to reach the plain enqueue and card the person from a chat
+  // they are not in — the same surprise the elevate path already stopped.
+  const outcome = ordinaryPath({
+    owner: askWorker,
+    sessions: [askChat, askWorker],
+    deskAccess: DESK_DEFAULT,
+    event: WRITE,
+  });
+  assert.equal(outcome.enqueued, false, "a subagent never asks the person, by either door");
+  assert.equal(outcome.answer, "deny");
+  assert.equal(
+    outcome.line,
+    "Denied by the desk: Write — src/app.ts · Permission Ask comes from chat “Nightly cleanup”; " +
+      "ask for permission: always-approve in the call, or raise that chat's Permission.",
+    "and the denial names the seat that stopped it and the two ways to change it",
+  );
+});
+
+test("the same chat's own write still reaches the person", () => {
+  // The one prompt that survives: the person's own visible chat, set to Ask by
+  // them, asking them. Deny that and the desk answers for someone who is right
+  // there — which is the opposite mistake.
+  const outcome = ordinaryPath({
+    owner: askChat,
+    sessions: [askChat],
+    deskAccess: DESK_DEFAULT,
+    event: WRITE,
+  });
+  assert.equal(outcome.enqueued, true, "a visible chat's Ask is a question for the person");
+  assert.equal(outcome.answer, null);
+});
+
+test("the desk answers a subagent from its own seat before it ever denies", () => {
+  // Deny is the last resort, not the rule. Anything the worker's grant, its
+  // session grants, or a quiet desk tool already allows is allowed.
+  const always: LineageChat = {
+    ...askWorker,
+    agentRun: { grantedAccess: { mode: "always-approve", sandbox: "off", source: "call" } },
+  };
+  assert.equal(
+    ordinaryPath({ owner: always, sessions: [askChat, always], deskAccess: DESK_DEFAULT, event: WRITE }).answer,
+    "session",
+    "a call that asked for always-approve gets its writes answered, not refused",
+  );
+  // A search runs under Ask on its own merits, hidden or not.
+  const search = { tool: "grep", detail: "grep -rn leftover src" };
+  assert.equal(
+    ordinaryPath({ owner: askWorker, sessions: [askChat, askWorker], deskAccess: DESK_DEFAULT, event: search }).answer,
+    "once",
+  );
+  // A quiet desk tool is answered the same way it always was.
+  assert.equal(
+    ordinaryPath({
+      owner: askWorker,
+      sessions: [askChat, askWorker],
+      deskAccess: DESK_DEFAULT,
+      event: { tool: "workhorse_list_chats", detail: "" },
+    }).answer,
+    "once",
+  );
+  // And a live session grant still covers the exact tool and target.
+  const grants: PermissionGrant[] = [
+    {
+      id: "g1",
+      key: permissionGrantKey(WRITE.tool, WRITE.detail, WRITE.path),
+      tool: WRITE.tool,
+      detail: WRITE.detail,
+      createdAt: 1,
+      expiresAt: Date.now() + 60_000,
+    },
+  ];
+  assert.equal(
+    ordinaryPath({ owner: askWorker, sessions: [askChat, askWorker], deskAccess: DESK_DEFAULT, event: WRITE, grants })
+      .answer,
+    "session",
+  );
+});
+
+test("permissionSourceNote names the Permission dial, not the sandbox", () => {
+  // Only Permission can carry a request as far as the ordinary prompt: a
+  // sandbox refusal already came out as a deny and took the elevate path. A
+  // note about the sandbox here would send the coordinator to the wrong dial.
+  const note = permissionSourceNote({ session: askWorker, sessions: [askChat, askWorker], deskAccess: DESK_DEFAULT });
+  assert.match(note, /^Permission Ask comes from chat “Nightly cleanup”;/);
+  assert.match(note, /ask for permission: always-approve in the call, or raise that chat's Permission\.$/);
+  assert.doesNotMatch(note, /Sandbox/);
+  // Same walk as the sandbox note: past every hidden row, to the chat the
+  // person can open — and to the call when the call is what set the seat.
+  const deeper: LineageChat = { ...askWorker, id: "deep", parentId: askWorker.id, title: "helper" };
+  assert.match(
+    permissionSourceNote({ session: deeper, sessions: [askChat, askWorker, deeper] }),
+    /chat “Nightly cleanup”/,
+  );
+  const byCall: LineageChat = {
+    ...askWorker,
+    agentRun: { grantedAccess: { mode: "ask", sandbox: "off", source: "call" } },
+  };
+  assert.match(permissionSourceNote({ session: byCall, sessions: [askChat, byCall] }), /this delegation's own call/);
+  assert.match(permissionSourceNote({ deskAccess: { mode: "ask", sandbox: "off" } }), /^Permission Ask comes from the desk default;/);
+});
+
+test("store.tsx shuts the ordinary door on a hidden worker", () => {
+  const store = source("src", "lib", "store.tsx");
+  // The guard, not the sentence: `if (false)` around the branch, or dropping
+  // the `owner?.hidden` term, has to fail here rather than leave the words in.
+  assert.match(
+    store,
+    /const hiddenDeny = !answered && owner\?\.hidden === true;\n\s*const allowed = answered \?\? \(hiddenDeny \? \("deny" as const\) : null\);/,
+    "a subagent's ordinary request is answered, never enqueued",
+  );
+  // The note has to reach the transcript, or the worker learns nothing.
+  assert.match(
+    store,
+    /const deskNote =\n\s*deskClamp \?\?\n\s*\(hiddenDeny\n\s*\? permissionSourceNote\(\{/,
+    "and the denial carries the seat that stopped it",
+  );
+  assert.match(store, /\$\{event\.detail\}\$\{deskNote \? ` · \$\{deskNote\}` : ""\}/);
+  // The plain enqueue must still exist below, for the visible chat that owns it.
+  assert.match(
+    store,
+    /pending: enqueuePermission\(current\.pending, \{\n\s*id: event\.requestId,\n\s*sessionId: event\.sessionId,\n\s*provider,\n\s*tool: event\.tool,\n\s*detail: event\.detail,\n\s*path: event\.path,\n\s*\}\),/,
+    "a visible chat's own Ask is still a question for the person",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// A call-set clamp is not a person's tightening.
+// ---------------------------------------------------------------------------
+
+test("a worker whose call set read-only widens back on a silent reuse", () => {
+  // The desk records what it granted, so only a seat TIGHTER than that record
+  // reads as something the person did by hand. A call-set clamp equals its own
+  // record, so it leaves no tightening behind and the next slice re-derives.
+  const call = requestedWorkerAccess({ requested: { sandbox: "read-only" }, inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
+  const seat = workerAccess({ inherited: call.granted, owned: false });
+  const grant = { ...workerGrant({ inherited: call.granted }), source: call.source };
+  assert.deepEqual(seat, { mode: "always-approve", sandbox: "read-only" });
+  assert.equal(grant.source, "call");
+
+  const prior = { mode: seat.mode, sandbox: seat.sandbox, agentRun: { grantedAccess: grant } };
+  assert.equal(workerTightening(prior), undefined, "the desk's own record is not a wish the worker made");
+  const reuse = requestedWorkerAccess({ inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
+  assert.deepEqual(
+    workerAccess({ inherited: reuse.granted, owned: false, prior }),
+    DESK_DEFAULT,
+    "a silent reuse under an always/off lineage widens back to off",
+  );
+});
+
+test("a narrowing the person made by hand still survives the next slice", () => {
+  // The other half, and the reason a blanket "a call-set grant never clamps"
+  // rule would be wrong: it would drop this too, and hand back access the
+  // person took away.
+  const call = requestedWorkerAccess({ requested: { sandbox: "read-only" }, inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
+  const grant = { ...workerGrant({ inherited: call.granted }), source: call.source };
+  // The person then set this worker's chat to Strict themselves.
+  const prior = { mode: "always-approve" as const, sandbox: "strict" as const, agentRun: { grantedAccess: grant } };
+  assert.deepEqual(workerTightening(prior), { sandbox: "strict" });
+  const reuse = requestedWorkerAccess({ inherited: DESK_DEFAULT, ceiling: DESK_DEFAULT });
+  assert.deepEqual(workerAccess({ inherited: reuse.granted, owned: false, prior }), {
+    mode: "always-approve",
+    sandbox: "strict",
+  });
+});
+
+test("the one seat that would read a desk clamp as a wish is unreachable", () => {
+  // A nested helper is the single case where the recorded grant is WIDER than
+  // the seat: workerGrant deliberately records the unclamped access. Reusing
+  // one would read that gap as a tightening — so nestedWorkerPolicy refuses to
+  // reuse a helper at all, and the store honours that. The two have to stay a
+  // matched pair, which is what this pins.
+  const helperSeat = workerAccess({ inherited: DESK_DEFAULT, owned: false, readOnly: true });
+  const helperGrant = { ...workerGrant({ inherited: DESK_DEFAULT }), source: "inherited" as const };
+  assert.deepEqual(
+    workerTightening({ mode: helperSeat.mode, sandbox: helperSeat.sandbox, agentRun: { grantedAccess: helperGrant } }),
+    { sandbox: "read-only" },
+    "the gap is real, which is why the reuse door has to stay shut",
+  );
+  assert.match(source("src", "lib", "subagents.ts"), /readOnly: true,\n\s*mayReuse: false,/);
+  assert.match(source("src", "lib", "store.tsx"), /const reusedWorker = nestedPolicy\.mayReuse \?/);
 });

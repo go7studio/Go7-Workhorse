@@ -19,7 +19,7 @@ import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
-import { listVendorModels } from "./vendor-models";
+import { listVendorModels, rememberVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
@@ -1653,7 +1653,7 @@ app.whenReady().then(async () => {
     if (!saved) return { ok: false, message: "Save this MCP server before testing it.", tools: [] };
     return probeMcpServer(saved);
   });
-  ipcMain.handle("models:list", () => listVendorModels());
+  ipcMain.handle("models:list", () => listVendorModels({ userData: app.getPath("userData") }));
   ipcMain.removeHandler("grok:plan-usage");
   ipcMain.handle("grok:plan-usage", async () => {
     try {
@@ -1750,12 +1750,16 @@ app.whenReady().then(async () => {
       cwd: requireSessionCwd(raw.cwd),
     };
     const result = await claudeHost.prompt(input, (payload) => {
+      if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
       try {
         sendToDesk(event.sender, "claude:event", payload);
       } catch (error) {
         console.error("workhorse claude event send failed", error);
       }
     });
+    // A turn that finished on this id is the vendor accepting it. Keep an id
+    // the seed never listed, so it is offered next time without a release.
+    if (result.text && input.model) rememberVendorModels(app.getPath("userData"), "claude", [input.model]);
     return result;
   });
   ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {

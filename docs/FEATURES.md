@@ -19,7 +19,12 @@ never pooled.
 The client and model are separate. For Grok, **Grok Build CLI** is the local
 client; **Grok 4.6** and **Grok 4.5** are model IDs it can run. The CLI's live
 catalog is authoritative as models change. Workhorse records, routes, and
-displays the model identity, never the client name as a model.
+displays the model identity, never the client name as a model. Claude tells the
+desk which models it offers at every session start, and the desk keeps that
+list, so a model Claude Code can run appears in the picker the day it exists
+rather than after a release. An id you type that no list knows is still a
+choice when it names a vendor's family; the vendor answers at the first turn,
+and an id that finished a turn is kept.
 
 OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
 whether each runtime is installed and lets you select its callable agents. A

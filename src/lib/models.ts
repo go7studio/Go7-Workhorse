@@ -24,6 +24,8 @@ export type ModelChoice = {
   sandbox: SandboxProfile;
   mode?: import("./types").PermissionMode;
   customBotId?: string;
+  /** Typed by the person, not on any list; the vendor decides at the first turn. */
+  unlisted?: boolean;
 };
 
 export const EFFORTS: ReasoningLevel[] = [
@@ -355,6 +357,28 @@ export function parseEffort(value: string): EffortLevel | null {
   return null;
 }
 
+/**
+ * A model the desk has never heard of is still a choice when its id names a
+ * vendor's family. A release should not be the gate on a model the vendor
+ * already serves; the vendor's own refusal at the first turn is.
+ */
+export function unlistedChoice(query: string): ModelChoice | null {
+  const id = query.trim();
+  const slug = id.toLowerCase();
+  if (!slug || /\s/.test(slug)) return null;
+  const provider: ProviderId | null = slug.startsWith("claude-")
+    ? "claude"
+    : slug.startsWith("gpt-") || slug.startsWith("codex") || /^o[1-9]/.test(slug)
+      ? "codex"
+      : slug.startsWith("grok-")
+        ? "grok"
+        : slug.startsWith("composer") || slug.startsWith("cursor-")
+          ? "cursor"
+          : null;
+  if (!provider) return null;
+  return { provider, model: id, effort: "medium", sandbox: "off", unlisted: true };
+}
+
 export function findChoice(query: string): ModelChoice | null {
   const q = query.trim().toLowerCase();
   if (!q) return null;
@@ -373,7 +397,7 @@ export function findChoice(query: string): ModelChoice | null {
       }
     }
   }
-  return null;
+  return unlistedChoice(query);
 }
 
 export function effortLabel(effort: EffortLevel | null): string {

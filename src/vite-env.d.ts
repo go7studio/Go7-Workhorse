@@ -62,6 +62,7 @@ type GrokBridgeEvent =
       vendorSessionId: string;
       opened: "session/new" | "session/load";
     }
+  | { type: "vendor-models"; sessionId: string; provider: import("./lib/types").ProviderId; models: string[] }
   | { type: "title"; sessionId: string; title: string }
   | { type: "commands"; sessionId: string; commands: import("./lib/types").Command[] };
 

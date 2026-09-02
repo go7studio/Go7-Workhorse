@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { customBotEnabled, customBotModels } from "../lib/custom-bots";
 import { makerLabel, modelChipLabel, parseModelId } from "../lib/model-groups";
 import { cursorFamilyId } from "../lib/cursor-catalog";
-import { defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, findModel, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
+import { contextWindowFor, defaultModel, effortLabel, effortStopAt, effortStopPos, effortsFor, formatWindow, modelName, modelsForPicker, withEffort } from "../lib/models";
 import { hasAttachedLlm, vendorEnabled, vendorLabel, vendorTint } from "../lib/settings";
 import { sessionEnvironmentKind } from "../lib/session-environment";
 import { useActiveSession, useStore } from "../lib/store";
@@ -171,7 +171,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div>
             <strong>Model</strong>
           </div>
-          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(findModel(session.provider, session.model)?.contextWindow ?? 0)} context</span>
+          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(contextWindowFor(session.provider, session.model))} context</span>
         </div>
 
         <div className="setup-subgroup">

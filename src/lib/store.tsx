@@ -6562,6 +6562,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         return;
       }
+      if (event.type === "vendor-models") {
+        refreshVendorModels();
+        return;
+      }
       if (event.type === "vendor-session") {
         setState((current) => ({
           ...current,

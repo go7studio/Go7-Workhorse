@@ -81,7 +81,9 @@ export type GrokIpcEvent =
       opened: "session/new" | "session/load";
     }
   | { type: "title"; sessionId: string; title: string }
-  | { type: "commands"; sessionId: string; commands: import("../src/lib/types").Command[] };
+  | { type: "commands"; sessionId: string; commands: import("../src/lib/types").Command[] }
+  /** The vendor's own list of models it offers, as it said at session start. */
+  | { type: "vendor-models"; sessionId: string; provider: import("../src/lib/types").ProviderId; models: string[] };
 
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 

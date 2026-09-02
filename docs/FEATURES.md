@@ -193,10 +193,12 @@ transcript rather than as a path.
   that chat's setting instead, and a vendor app set narrower than the desk
   keeps its own limit. Connecting or dropping a vendor never moves it.
 - **One permission inbox.** Every prompt lands in the same place and is
-  translated to each vendor's own protocol. A prompt reaches you only when a
-  setting you made is what blocks the work; clamps the desk applies on its own
-  — read-only helpers, path-owned launches — are answered by the desk from the
-  access you granted.
+  translated to each vendor's own protocol. A delegation's access is decided at
+  the call: `permission` and `sandbox` on the spawn or delegate call are
+  honoured up to the desk default, and a silent call gives the worker the
+  caller's own seat. A subagent never asks you — the desk answers it and names
+  the chat its sandbox came from — so the only card you see is your own chat
+  asking to lift a Permission or Sandbox you set on that chat.
 - **Scoped approvals.** A session grant remembers the exact tool, command, and
   path for 24 hours. Changed or expired requests ask again.
 - **Execution directory** — a chat starts in a linked folder or managed git

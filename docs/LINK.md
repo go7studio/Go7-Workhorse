@@ -137,6 +137,27 @@ last saved state, delegation does not.
 | `workhorse_local_materialize` | byte-range download into Workhorse's SHA-verified cache | yes |
 | `workhorse_local_continue` | dispatch one approved, allowlisted continuation as a visible worker | yes |
 
+### The seat a delegation asks for
+
+`workhorse_delegate` takes two more fields, and they decide what the worker may
+do before it starts:
+
+| Field | Values | Rule |
+| --- | --- | --- |
+| `permission` | `ask`, `accept-edits`, `always-approve` | the seat the worker runs under. `plan` is not offered: a worker that cannot write cannot report |
+| `sandbox` | `off`, `workspace`, `read-only`, `strict` | the sandbox the worker runs under |
+
+Both are capped by the **desk default** in Settings › LLMs — the app's own
+ceiling, not your seat. So a chat you tightened for reviews can still hand a
+worker the access the work needs, and a call can never take a worker past what
+the app allows. Ask above the ceiling and you get the capped seat plus one line
+saying what was refused; the reply's `access` field always states the granted
+seat, so you learn it from the result and never from a card. Send neither field
+and the worker inherits your own seat, which is what every call did before.
+
+A worker cannot ask a person for access afterwards — that card is only ever
+raised by a chat about its own setting — so ask for the sandbox in the call.
+
 Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and
 a call is refused.

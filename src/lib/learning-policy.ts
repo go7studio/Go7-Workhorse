@@ -30,7 +30,9 @@ export const DEFAULT_COMPILER_POLICY: CompilerPolicy = {
   quietMs: 15_000,
   maxEventsPerRun: 40,
   maxPayloadChars: 8_000,
+  maxMemoryChars: 24_000,
   maxAttempts: 2,
+  maxBackoffMs: 15 * 60_000,
 };
 
 export const DEFAULT_ITEM_CAP = 8;
@@ -618,6 +620,56 @@ export function boundedCompilerBatch(
     if (promptFor(selected, memories).length >= maxPayloadChars) break;
   }
   return selected;
+}
+
+/**
+ * The memory block a compile prompt carries. Every prompt used to embed the
+ * whole lane, so a corpus that only ever grows eventually made every request
+ * larger than the model would accept, and the same input then failed forever.
+ * Durable records come first, then the newest, and the block stops at its
+ * ceiling.
+ */
+export function boundedCompilerMemories(memories: MemoryItem[], maxMemoryChars: number): MemoryItem[] {
+  const rank = (item: MemoryItem) => (item.status === "active" ? 0 : item.status === "approved" ? 1 : 2);
+  const ordered = [...memories].sort((a, b) => {
+    const byRank = rank(a) - rank(b);
+    return byRank !== 0 ? byRank : (b.lastConfirmedAt ?? b.createdAt ?? 0) - (a.lastConfirmedAt ?? a.createdAt ?? 0);
+  });
+  const kept: MemoryItem[] = [];
+  let used = 0;
+  for (const item of ordered) {
+    const cost = (item.statement ?? "").length + (item.id ?? "").length + 64;
+    if (kept.length > 0 && used + cost > maxMemoryChars) break;
+    kept.push(item);
+    used += cost;
+    if (used >= maxMemoryChars) break;
+  }
+  return kept;
+}
+
+/** How long to wait before attempt n at one input: the quiet gap, doubled, capped. */
+export function compileBackoffMs(failures: number, quietMs: number, maxBackoffMs: number): number {
+  if (failures <= 0) return quietMs;
+  return Math.min(maxBackoffMs, quietMs * 2 ** Math.min(failures, 20));
+}
+
+/**
+ * One event may be larger than the whole budget. The old batch let the first
+ * event through whatever its size, which is how a single 27 kB payload became
+ * a request no model would take. Trim the payload instead of dropping the
+ * event, so the run still carries its evidence and its id.
+ */
+export function trimmedCompilerEvent(event: LearningEvent, maxPayloadChars: number): LearningEvent {
+  const encoded = JSON.stringify(event.payload ?? {});
+  if (encoded.length <= maxPayloadChars) return event;
+  const summary = typeof event.payload?.summary === "string" ? event.payload.summary : "";
+  return {
+    ...event,
+    payload: {
+      ...(summary ? { summary: summary.slice(0, Math.max(0, maxPayloadChars - 256)) } : {}),
+      trimmed: `payload trimmed from ${encoded.length} to fit the compile budget`,
+    },
+  };
 }
 
 export function lexicalScore(statement: string, query: string): number {

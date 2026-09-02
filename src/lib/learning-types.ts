@@ -284,7 +284,11 @@ export type CompilerPolicy = {
   quietMs: number;
   maxEventsPerRun: number;
   maxPayloadChars: number;
+  /** Ceiling on the existing-memory block a compile prompt may carry. */
+  maxMemoryChars: number;
   maxAttempts: number;
+  /** Ceiling on the backoff between attempts at one input. */
+  maxBackoffMs: number;
 };
 
 export type EventFilter = {

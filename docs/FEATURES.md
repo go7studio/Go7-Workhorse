@@ -350,6 +350,8 @@ transcript rather than as a path.
 - A private learning store on your own disk, in SQLite.
 - The compiler is a custom bot. Settings → Learning can backfill the last day of human prompts from saved chats.
 - Human intent, agent performance, and mismatches between them compile as separate private lanes. Agent evidence includes model outcomes, terminal tools, retries, tests, artifacts, usage, errors, and inbound Workhorse Link calls from a harness (tool, envelope, and outcome — not keys or chat text). Delivery and task quality stay separate: a provider reaching a terminal event is not a verified success, and network or transport failures do not lower a model’s task-quality record.
+- A compile carries a bounded prompt: the memory block has a ceiling, and one event too large for the budget is trimmed rather than sent whole. A store that only grows never makes the next request too large for the model.
+- An input that fails gets a fixed number of attempts, counted against the input rather than the run. Once they are spent the desk stops asking, waits longer between tries while failures repeat, and records one line per failure instead of a stack. Fresh evidence is a fresh input and gets its own attempts.
 - Settings shows index counts and inferred memories, not raw prompt text or internal provenance ids.
 - Export it, or wipe it, from Settings.
 - Nothing is sent anywhere to hold it.

@@ -963,6 +963,10 @@ app.whenReady().then(async () => {
     settings: () => liveSettings.learning,
     drainInbound: () => drainInboundJsonl(inboundFile, inboundIo),
     allowStub: false,
+    // One line per failure, and only from the scheduled path. Before this the
+    // rejection escaped to unhandledRejection and a stuck compile could fill
+    // the log with its own stack.
+    onCompileError: (error) => mainLog.record("learn:compile", `failed ${faultDetail(error, 1)}`),
     candidates: () => {
       const rows: AdaptiveCandidate[] = [];
       for (const provider of ["grok", "codex", "claude", "cursor"] as const) {

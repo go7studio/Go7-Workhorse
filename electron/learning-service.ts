@@ -2,6 +2,9 @@ import { stubCompile, stubCompileAgent, stubReconcile } from "../src/lib/learnin
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import {
   boundedCompilerBatch,
+  boundedCompilerMemories,
+  compileBackoffMs,
+  trimmedCompilerEvent,
   AGENT_INTELLIGENCE_LANE,
   agentCompilerPrompt,
   compilerInputHash,
@@ -59,11 +62,15 @@ export type LearningServiceOptions = {
   };
   /** Inbound Workhorse Link drafts waiting on disk or in a test sink. */
   drainInbound?: () => unknown[];
+  /** Where a caught compile failure is reported. Without it the failure is swallowed on purpose. */
+  onCompileError?: (error: Error) => void;
 };
 
 export class LearningService {
   private paused = false;
   private compiling = false;
+  /** Consecutive failed compiles, used only to widen the gap before the next try. */
+  private consecutiveFailures = 0;
   private idleTimer: unknown = null;
   private sleeping = false;
   readonly createdChats: string[] = [];
@@ -255,9 +262,20 @@ export class LearningService {
     const idle = this.options.idle;
     if (!idle) return;
     this.clearIdle();
-    this.idleTimer = idle.setTimeout(() => {
-      void this.compileIfDue();
-    }, this.policy().quietMs);
+    const policy = this.policy();
+    // A compile that keeps failing used to come straight back on the quiet gap,
+    // which is how one input was sent 14,807 times. Back off, and never let the
+    // rejection escape: an uncaught one reaches the main process as an
+    // unhandledRejection and buries every other line in the log.
+    this.idleTimer = idle.setTimeout(
+      () => {
+        void this.compileIfDue().catch((error) => {
+          this.consecutiveFailures += 1;
+          this.options.onCompileError?.(error instanceof Error ? error : new Error(String(error)));
+        });
+      },
+      compileBackoffMs(this.consecutiveFailures, policy.quietMs, policy.maxBackoffMs),
+    );
   }
 
   private clearIdle() {
@@ -294,10 +312,7 @@ export class LearningService {
   }
 
   private eligibleEvents(lane: EventIntelligenceLane): LearningEvent[] {
-    const last = this.options.store
-      .listCompilerRuns()
-      .filter((run) => run.intelligenceLane === lane && run.status === "completed")
-      .at(-1);
+    const last = this.options.store.lastCompletedRun(lane);
     return this.options.store.listEvents({
       afterWatermark: last?.eventWatermark,
       actorClass: lane === HUMAN_INTELLIGENCE_LANE ? "human" : "agent",
@@ -310,10 +325,7 @@ export class LearningService {
     const humans = this.options.store.listMemories({ intelligenceLane: HUMAN_INTELLIGENCE_LANE, statuses });
     const agents = this.options.store.listMemories({ intelligenceLane: AGENT_INTELLIGENCE_LANE, statuses });
     const reconciled = new Set(
-      this.options.store
-        .listCompilerRuns()
-        .filter((run) => run.intelligenceLane === MISMATCH_INTELLIGENCE_LANE && run.status === "completed")
-        .flatMap((run) => run.inputMemoryIds ?? []),
+      this.options.store.listCompletedRuns(MISMATCH_INTELLIGENCE_LANE).flatMap((run) => run.inputMemoryIds ?? []),
     );
     const humanIds = new Set<string>();
     const agentIds = new Set<string>();
@@ -351,19 +363,28 @@ export class LearningService {
           : AGENT_INTELLIGENCE_LANE;
     const pendingEvents = lane === HUMAN_INTELLIGENCE_LANE ? humanEvents : agentEvents;
     if (pendingEvents.length === 0) return this.compileMismatch(input);
-    const memories = this.options.store.listMemories({
-      intelligenceLane: lane,
-      statuses: ["active", "approved", "proposed"],
-    });
-    const events = boundedCompilerBatch(pendingEvents, memories, this.policy().maxPayloadChars, lane);
+    const policy = this.policy();
+    const memories = boundedCompilerMemories(
+      this.options.store.listMemories({
+        intelligenceLane: lane,
+        statuses: ["active", "approved", "proposed"],
+      }),
+      policy.maxMemoryChars,
+    );
+    const events = boundedCompilerBatch(pendingEvents, memories, policy.maxPayloadChars, lane).map((event) =>
+      trimmedCompilerEvent(event, policy.maxPayloadChars),
+    );
     const inputHash = compilerInputHash(events, memories, lane);
-    const existing = this.options.store
-      .listCompilerRuns()
-      .find(
-        (run) =>
-          run.intelligenceLane === lane && run.inputHash === inputHash && run.status === "completed",
-      );
+    const priorRuns = this.options.store.runsForInput(lane, inputHash);
+    const existing = priorRuns.find((run) => run.status === "completed");
     if (existing && !input.resume) return { ran: false, skipped: "duplicate", runId: existing.id };
+    // Attempts belong to the input, not to a run id. Every tick used to mint a
+    // fresh run at attempt 1, so the two-attempt budget never bound and one
+    // input could be sent to a model forever.
+    const spent = priorRuns.filter((run) => run.status === "failed" || run.status === "interrupted").length;
+    if (!input.resume && spent >= policy.maxAttempts) {
+      return { ran: false, skipped: "attempts-exhausted", runId: priorRuns.at(-1)?.id };
+    }
 
     const resumed = resumable?.intelligenceLane === lane ? resumable : undefined;
     if (resumed && resumed.attempt >= this.policy().maxAttempts) {
@@ -563,6 +584,7 @@ export class LearningService {
         outputMemoryIds: outputIds,
         eventWatermark: events.at(-1)?.id,
       });
+      this.consecutiveFailures = 0;
       return { ran: true, runId, memories: outputIds.length, ...route };
     } catch (error) {
       const current = this.options.store.getCompilerRun(runId);
@@ -585,11 +607,14 @@ export class LearningService {
     const memories = this.mismatchInputs();
     if (memories.length === 0) return { ran: false, skipped: "empty", intelligenceLane: lane };
     const inputHash = compilerInputHash([], memories, lane);
-    const existing = this.options.store
-      .listCompilerRuns()
-      .find((run) => run.intelligenceLane === lane && run.inputHash === inputHash && run.status === "completed");
+    const priorRuns = this.options.store.runsForInput(lane, inputHash);
+    const existing = priorRuns.find((run) => run.status === "completed");
     if (existing && !input.resume) {
       return { ran: false, skipped: "duplicate", runId: existing.id, intelligenceLane: lane };
+    }
+    const spent = priorRuns.filter((run) => run.status === "failed" || run.status === "interrupted").length;
+    if (!input.resume && spent >= this.policy().maxAttempts) {
+      return { ran: false, skipped: "attempts-exhausted", runId: priorRuns.at(-1)?.id, intelligenceLane: lane };
     }
     const resumed = resumeRun?.intelligenceLane === lane ? resumeRun : undefined;
     if (resumed && resumed.attempt >= this.policy().maxAttempts) {
@@ -741,6 +766,7 @@ export class LearningService {
         inputMemoryIds: memories.map((item) => item.id),
         memoryWatermark: memories.at(-1)?.id,
       });
+      this.consecutiveFailures = 0;
       return { ran: true, runId, memories: outputIds.length, ...route };
     } catch (error) {
       const current = this.options.store.getCompilerRun(runId);

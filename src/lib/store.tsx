@@ -5077,8 +5077,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   session.agentRun?.mission?.id === mission.id &&
                   session.agentRun?.mission?.iteration === mission.iteration,
               );
-              if (existingPass) {
-                await replyAsk({ text: JSON.stringify(workerStatusSnapshot(existingPass), null, 2) });
+              // Only a pass that is still going is a duplicate. A finished one
+              // is last wave's work, and answering a new call with it hands the
+              // caller a report it did not ask for while nothing gets spawned.
+              // Say so either way, so a caller can tell this was not a spawn.
+              const passRun = existingPass?.agentRun?.status;
+              if (existingPass && passRun === "running") {
+                await replyAsk({
+                  text: JSON.stringify(
+                    {
+                      ...workerStatusSnapshot(existingPass),
+                      spawned: false,
+                      note: `Pass ${mission.iteration} of this mission is already running as ${existingPass.id}. Nothing new was spawned.`,
+                    },
+                    null,
+                    2,
+                  ),
+                });
                 return;
               }
             }

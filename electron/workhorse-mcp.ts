@@ -2063,15 +2063,24 @@ async function spawnAgent(
     JSON.stringify(deskMission.acceptanceCriteria) === JSON.stringify(loopMission.acceptanceCriteria)
       ? deskMission
       : undefined;
+  // A chat keeps its last mission on its lineup for good. Treating that as
+  // campaign context meant every later delegate from that chat was adopted
+  // into the finished mission, and the store then answered with the pass's
+  // worker instead of spawning: the caller was told about someone else's work
+  // and no worker was ever created. The lineup only counts when this caller is
+  // actually in the mission — running as its worker, or set to Mission mode.
+  const insideDeskMission = Boolean(
+    caller?.agentRun?.mission || (deskMission && caller?.crewModes?.includes("mission")),
+  );
   const explicitCampaignContext = Boolean(
     input.missionIteration !== undefined ||
     input.loop !== undefined ||
     caller?.crewModes?.includes("mission") ||
-    deskMission,
+    insideDeskMission,
   );
   const campaignContext = explicitCampaignContext;
   const missionIteration = campaignContext
-    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined ? deskMission : undefined) ?? loopMission ?? {
+    ? suppliedMission ?? matchingDeskLoop ?? (input.loop === undefined && insideDeskMission ? deskMission : undefined) ?? loopMission ?? {
         id: input.traceId?.trim() || uid("mission"),
         mode: "adaptive" as const,
         objective: input.prompt.trim(),

@@ -8,6 +8,19 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.52](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.51...v0.6.52) (2026-09-02)
+
+
+### Features
+
+* decide a delegation's access at the call, not on a card ([43499b7](https://github.com/go7studio/Go7-Workhorse/commit/43499b7e833f7a854cc4669f5d32d81d6881fa17))
+
+
+### Bug Fixes
+
+* answer a subagent's ordinary permission request too, not just its elevate ([baafce2](https://github.com/go7studio/Go7-Workhorse/commit/baafce2843262bccbc8c7f73b41d5cd6fb35e426))
+* carry a mission's seat into the passes that continue it ([e2b6036](https://github.com/go7studio/Go7-Workhorse/commit/e2b6036a2ba532535e4f9e26f503f4d9157a2d6e))
+
 ## [0.6.51](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.50...v0.6.51) (2026-09-02)
 
 

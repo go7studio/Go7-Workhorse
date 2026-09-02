@@ -56,6 +56,31 @@ export function buildSidebarChatIndex(sessions: Session[]): SidebarChatIndex {
   return { liveByProject, archivedByProject: archived, linksBySession, parentsById };
 }
 
+export type ProjectLiveLine = { label: string; count: number };
+
+/**
+ * What a project folder says while a chat inside it is in a call. A chat row
+ * in that state gets the peer bar and the linked line ("Answering …"); the
+ * folder above it gets the same, so a collapsed project still shows the work
+ * that is live inside it. One linked chat lends its own line; several are
+ * counted. Workers count through their parent.
+ */
+export function projectLiveLine(
+  chats: ReadonlyArray<{ id: string; workers: ReadonlyArray<{ id: string }> }>,
+  links: ReadonlyMap<string, ChatLink>,
+): ProjectLiveLine | undefined {
+  const linked: ChatLink[] = [];
+  for (const chat of chats) {
+    for (const id of [chat.id, ...chat.workers.map((worker) => worker.id)]) {
+      const link = links.get(id);
+      if (link) linked.push(link);
+    }
+  }
+  if (linked.length === 0) return undefined;
+  if (linked.length === 1) return { label: linked[0].label, count: 1 };
+  return { label: `${linked.length} live chats`, count: linked.length };
+}
+
 function lastUser(messages: Session["messages"]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === "user") return messages[index];

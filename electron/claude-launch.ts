@@ -33,6 +33,8 @@ export type ClaudeLaunchInput = {
   detect?: ClaudeLoginDetectInput;
   /** Which rules the CLI is launched with. A worker gets worker rules. */
   role?: DeskRole;
+  /** The model is on no list the desk holds; the vendor must accept it or the session fails. */
+  unlistedModel?: boolean;
 };
 
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan";
@@ -175,6 +177,7 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
     agentLabel: "Claude",
     fastMode: input.fastMode === true,
     agentName: input.agentName ?? null,
+    unlistedModel: input.unlistedModel === true,
     command,
     argv: launch.argv,
     cwd: input.cwd,

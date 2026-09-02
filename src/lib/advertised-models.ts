@@ -29,9 +29,14 @@ export function advertisedModelIds(sessionNew: unknown): string[] {
 /** On-disk shape of the desk's own vendor cache: the codex cache shape, so one parser reads both. */
 export type VendorModelCache = { models: { slug: string; display_name?: string }[] };
 
-export function mergeVendorModelCache(existing: VendorModelCache | undefined, ids: string[]): VendorModelCache {
-  const rows = [...(existing?.models ?? [])];
-  const seen = new Set(rows.map((row) => row.slug));
+/**
+ * The cache is the vendor's latest word, not a pile. Each session start
+ * replaces it, so a model the vendor stops offering leaves the picker at the
+ * next start instead of staying listed for good.
+ */
+export function vendorModelCacheFrom(ids: string[]): VendorModelCache {
+  const rows: VendorModelCache["models"] = [];
+  const seen = new Set<string>();
   for (const id of ids) {
     const slug = id.trim();
     if (!slug || seen.has(slug)) continue;
@@ -39,6 +44,12 @@ export function mergeVendorModelCache(existing: VendorModelCache | undefined, id
     rows.push({ slug, display_name: claudeModelDisplayName(slug) });
   }
   return { models: rows };
+}
+
+export function sameVendorModelCache(left: VendorModelCache | undefined, right: VendorModelCache): boolean {
+  const a = left?.models.map((row) => row.slug) ?? [];
+  const b = right.models.map((row) => row.slug);
+  return a.length === b.length && a.every((slug, index) => slug === b[index]);
 }
 
 const CLAUDE_FAMILIES = ["fable", "mythos", "opus", "sonnet", "haiku"] as const;
@@ -74,8 +85,12 @@ export function claudeAdvertisedRows(seed: ModelInfo[], advertised: string[]): M
     const slug = id.trim();
     const lower = slug.toLowerCase();
     if (!lower || known.has(lower)) continue;
-    const isAlias = !lower.startsWith("claude-");
-    if (isAlias) continue;
+    // A bare family word, with or without [1m], is Claude Code's alias for
+    // whatever that family's latest is; the seed already lists the family.
+    // Anything else that names a family is a model id and earns a row,
+    // whether or not it starts with "claude-".
+    if (/^(fable|mythos|opus|sonnet|haiku)(\[1m\])?$/.test(lower)) continue;
+    if (!claudeFamily(lower)) continue;
     known.add(lower);
     const family = claudeFamily(slug);
     const sibling = family ? seed.find((row) => claudeFamily(row.id) === family) : undefined;

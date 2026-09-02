@@ -1654,6 +1654,14 @@ app.whenReady().then(async () => {
     return probeMcpServer(saved);
   });
   ipcMain.handle("models:list", () => listVendorModels({ userData: app.getPath("userData") }));
+  /** Seed rows plus what Claude last advertised. Anything else was typed. */
+  const claudeModelListed = (model: string): boolean => {
+    const id = model.trim().toLowerCase();
+    if (!id) return true;
+    return listVendorModels({ userData: app.getPath("userData") }).claude.some(
+      (row) => row.id.toLowerCase() === id || row.aliases?.some((alias) => alias.toLowerCase() === id) === true,
+    );
+  };
   ipcMain.removeHandler("grok:plan-usage");
   ipcMain.handle("grok:plan-usage", async () => {
     try {
@@ -1748,6 +1756,7 @@ app.whenReady().then(async () => {
     const input: ClaudePromptInput = {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
+      unlistedModel: !claudeModelListed(raw.model),
     };
     const result = await claudeHost.prompt(input, (payload) => {
       if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
@@ -1757,9 +1766,6 @@ app.whenReady().then(async () => {
         console.error("workhorse claude event send failed", error);
       }
     });
-    // A turn that finished on this id is the vendor accepting it. Keep an id
-    // the seed never listed, so it is offered next time without a release.
-    if (result.text && input.model) rememberVendorModels(app.getPath("userData"), "claude", [input.model]);
     return result;
   });
   ipcMain.handle("claude:answer-permission", (_event, payload: { requestId: string; answer: PermissionAnswer }) => {

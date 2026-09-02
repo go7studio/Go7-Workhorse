@@ -14,7 +14,7 @@ import {
   type ReasoningLevel,
 } from "../src/lib/models";
 import type { ProviderId } from "../src/lib/types";
-import { claudeAdvertisedRows, mergeVendorModelCache, type VendorModelCache } from "../src/lib/advertised-models";
+import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
 
@@ -55,8 +55,9 @@ function readDeskVendorCache(
 }
 
 /**
- * Keep what a vendor said it offers, or what it just ran, so the next boot
- * lists it without a release. Never throws: a list is not worth a launch.
+ * Keep what a vendor said it offers, so the next boot lists it without a
+ * release. The list replaces the last one. Never throws: a list is not worth
+ * a launch.
  */
 export function rememberVendorModels(userData: string, provider: ProviderId, ids: string[]): boolean {
   if (!userData || ids.length === 0) return false;
@@ -64,8 +65,8 @@ export function rememberVendorModels(userData: string, provider: ProviderId, ids
   const existsSync = (filePath: string) => fs.existsSync(filePath);
   const readFile = (filePath: string) => fs.readFileSync(filePath, "utf8");
   const before = readDeskVendorCache(userData, provider, existsSync, readFile);
-  const next = mergeVendorModelCache(before, ids);
-  if (before && next.models.length === before.models.length) return false;
+  const next = vendorModelCacheFrom(ids);
+  if (sameVendorModelCache(before, next)) return false;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(next, null, 2));

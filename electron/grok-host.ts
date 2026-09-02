@@ -28,6 +28,12 @@ export type GrokSessionOpenInput = {
   role?: import("../src/lib/workhorse-rules").DeskRole;
   /** Reopen the vendor runtime while loading the same native session. */
   restartRuntime?: boolean;
+  /**
+   * The model was typed, not picked from any list the desk holds. The vendor
+   * is asked to take it before the turn runs, and a refusal is an error with
+   * the model's name rather than a turn on whatever the vendor fell back to.
+   */
+  unlistedModel?: boolean;
 };
 
 export type GrokPromptInput = GrokSessionOpenInput & {

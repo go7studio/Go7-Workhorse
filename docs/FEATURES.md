@@ -23,8 +23,9 @@ displays the model identity, never the client name as a model. Claude tells the
 desk which models it offers at every session start, and the desk keeps that
 list, so a model Claude Code can run appears in the picker the day it exists
 rather than after a release. An id you type that no list knows is still a
-choice when it names a vendor's family; the vendor answers at the first turn,
-and an id that finished a turn is kept.
+choice when it names a vendor's family. Claude is asked to take it before the
+turn runs, and an id Claude does not offer is refused with its name, not run
+on some other model.
 
 OpenClaw and Hermes are **harnesses**, not vendors. Settings → LLMs shows
 whether each runtime is installed and lets you select its callable agents. A

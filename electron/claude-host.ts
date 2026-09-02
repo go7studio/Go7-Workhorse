@@ -192,6 +192,7 @@ export class ClaudeSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       mcpServers: input.mcpServers,
+      unlistedModel: input.unlistedModel,
     });
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
     try {

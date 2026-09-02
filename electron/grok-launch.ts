@@ -164,6 +164,8 @@ export type GrokLaunchSpec = {
   fastMode?: boolean;
   /** Claude Code agent persona, sent the same way. */
   agentName?: string | null;
+  /** The model is on no list the desk holds; the vendor must accept it or the session fails. */
+  unlistedModel?: boolean;
   alwaysApprove: boolean;
   sandbox: SandboxProfile;
   initializeParams: {

@@ -661,5 +661,5 @@ test("the desk's read-only clamp on a nested helper is still the desk's alone", 
 test("the permission inbox promise is written down where a person can read it", () => {
   const features = source("docs", "FEATURES.md");
   assert.match(features, /A delegation's access is decided at\n\s*the call/);
-  assert.match(features, /A subagent never asks you/);
+  assert.match(features, /A subagent never asks\n\s*you/);
 });

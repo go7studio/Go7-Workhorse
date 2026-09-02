@@ -196,7 +196,9 @@ transcript rather than as a path.
   translated to each vendor's own protocol. A delegation's access is decided at
   the call: `permission` and `sandbox` on the spawn or delegate call are
   honoured up to the desk default, and a silent call gives the worker the
-  caller's own seat. A subagent never asks you — the desk answers it and names
+  caller's own seat — or, for a mission's later pass, the seat the pass before
+  it ran under, so a job does not lose access halfway. A subagent never asks
+  you — the desk answers it and names
   the chat its sandbox came from — so the only card you see is your own chat
   asking to lift a Permission or Sandbox you set on that chat.
 - **Scoped approvals.** A session grant remembers the exact tool, command, and

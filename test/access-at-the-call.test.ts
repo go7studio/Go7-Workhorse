@@ -220,7 +220,7 @@ test("a silent call under the same caller yields read-only, source inherited", (
     spawned.log,
     /requested=none granted=always-approve\/read-only cap=always-approve\/off source=inherited$/,
   );
-  assert.equal(spawned.line, "Permission Always approve, Sandbox Read-only (from the inherited).");
+  assert.equal(spawned.line, "Permission Always approve, Sandbox Read-only (inherited from the caller).");
 });
 
 test("a nested helper keeps its read-only clamp until the call asks for a sandbox", () => {
@@ -393,7 +393,7 @@ test("the call's seat reaches the /spawn payload and comes back as a decision", 
   // The spawn result states the seat on both replies — started and completed.
   const store = source("src", "lib", "store.tsx");
   assert.equal((store.match(/access: accessReceipt,/g) ?? []).length, 2);
-  assert.match(store, /summary: grantedAccessLine\(callAccess\),/);
+  assert.match(store, /summary: grantedAccessLine\(callAccess, continuedAccess\?\.pass\),/);
   // And the desk's own main log gets one line per delegation.
   assert.match(mcp, /openMainLog\(userData\)\.record\("spawn:access", detail\);/);
   assert.equal((mcp.match(/recordSpawnAccess\(/g) ?? []).length, 3, "declared once, called on both spawn replies");
@@ -410,8 +410,8 @@ test("the CLI can hand a delegation its seat", () => {
   // Usage says so in both places a person reads it.
   assert.equal(
     (mcp.match(/\[--permission <seat>\] \[--sandbox <profile>\]/g) ?? []).length,
-    2,
-    "the doc comment and the runtime usage line",
+    4,
+    "delegate and follow-up, each in the doc comment and the runtime usage line",
   );
 });
 
@@ -419,7 +419,7 @@ test("the store decides the seat at the call and records who decided it", () => 
   const store = source("src", "lib", "store.tsx");
   assert.match(
     store,
-    /const callAccess = requestedWorkerAccess\(\{\n\s*requested: requestedAccess,\n\s*inherited: inheritedAccess,\n\s*ceiling: latest\.settings\.access,\n\s*\}\);/,
+    /const callAccess = requestedWorkerAccess\(\{\n\s*requested: requestedAccess,\n\s*inherited: callerAccess,\n\s*ceiling: latest\.settings\.access,\n\s*\}\);/,
     "the ceiling is the desk default, never the caller's seat",
   );
   // The seat and the recorded grant both come off the decision, or the child

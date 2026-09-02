@@ -158,6 +158,14 @@ and the worker inherits your own seat, which is what every call did before.
 A worker cannot ask a person for access afterwards — that card is only ever
 raised by a chat about its own setting — so ask for the sandbox in the call.
 
+`workhorse_continue_mission` takes the same two fields, under the same ceiling.
+Omit them and the next pass keeps the seat the pass before it ran under, not
+the seat of the chat you called from: a mission delegated with `sandbox: off`
+out of a chat someone tightened writes in pass 1 and goes on writing in pass 2.
+Where that wave's workers held different seats the tightest one carries forward.
+Pass the fields to change the seat mid-mission, and the reply's `access` field
+says which pass the seat came from.
+
 Not available through Link: credentials, permissions, deletes, renames,
 custom-bot setup, Watch permits, project mutation. They are not listed and
 a call is refused.

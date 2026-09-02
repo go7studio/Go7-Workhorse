@@ -58,7 +58,9 @@ import {
   inboundAccess,
   classifyElevationInput,
   lineageGrant,
+  continuedInheritedAccess,
   parseCallPermission,
+  parseContinuedAccess,
   parseElevationInput,
   parseSandboxValue,
   permissionPolicyAnswer,
@@ -5242,9 +5244,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ...(parseCallPermission(payload.permission) ? { mode: parseCallPermission(payload.permission)! } : {}),
               ...(parseSandboxValue(payload.sandbox) ? { sandbox: parseSandboxValue(payload.sandbox)! } : {}),
             };
+            // A continuation is seated by the mission it continues, not by the
+            // chat it was called from. Reading the caller here is what made a
+            // mission delegated with sandbox: off out of a tightened chat write
+            // in pass 1 and get refused in pass 2 — same work, same call, and
+            // nothing said why. An explicit seat on this call still outranks it.
+            const continuedAccess = parseContinuedAccess(payload.continuedAccess);
+            const callerAccess = continuedInheritedAccess({
+              continued: continuedAccess,
+              caller: inheritedAccess,
+              ceiling: latest.settings.access,
+            });
             const callAccess = requestedWorkerAccess({
               requested: requestedAccess,
-              inherited: inheritedAccess,
+              inherited: callerAccess,
               ceiling: latest.settings.access,
             });
             // A helper the call made writable is not a helper any more, so it
@@ -5483,7 +5496,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               granted: callAccess.granted,
               source: callAccess.source,
               ...(callAccess.refused ? { refused: callAccess.refused } : {}),
-              summary: grantedAccessLine(callAccess),
+              summary: grantedAccessLine(callAccess, continuedAccess?.pass),
               log: spawnAccessLogDetail({
                 child: childId,
                 parent: parent.id,
@@ -5491,6 +5504,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 granted: callAccess.granted,
                 ceiling: latest.settings.access,
                 source: callAccess.source,
+                ...(continuedAccess?.pass ? { pass: continuedAccess.pass } : {}),
               }),
             };
             let spawnImages: import("./types").ChatImage[] = [];

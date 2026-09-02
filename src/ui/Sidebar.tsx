@@ -18,7 +18,7 @@ import { ChatRow, type ChatRowDesk } from "./ChatRow";
 import { SplitHandle } from "./SplitHandle";
 import { SIDEBAR_PANE } from "../lib/pane";
 import { searchChats } from "../lib/search";
-import { buildSidebarChatIndex, sameSidebarSessions, type NestedSidebarSession, type SidebarChatIndex } from "../lib/sidebar-index";
+import { buildSidebarChatIndex, projectLiveLine, sameSidebarSessions, type NestedSidebarSession, type SidebarChatIndex } from "../lib/sidebar-index";
 
 type SidebarStore = Pick<
   Store,
@@ -200,13 +200,14 @@ function ProjectFolder({
   const hidden = hiddenProjectChatCount(chats.length, showMore);
   const held = activeProjectChat(chats, store.activeSessionId);
   const pinned = pinnedCollapsedChat(chats, open, store.activeSessionId);
+  const live = projectLiveLine(chats, index.linksBySession);
   const toggleFolder = () => {
     if (open) setOpenCrew({});
     onToggle();
   };
 
   return (
-    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${dropOver ? " drop-over" : ""}`}>
+    <div className={`project-folder${open ? " open" : ""}${selected ? " selected" : ""}${pinned ? " has-pin" : ""}${live ? " live" : ""}${dropOver ? " drop-over" : ""}`}>
       <div className="project-head">
         <button
           className="twist"
@@ -258,7 +259,13 @@ function ProjectFolder({
             if (id) store.moveSession(id, project.id);
           }}
         >
-          <span className="row-title">{project.name}</span>
+          <span>
+            <span className="row-title">{project.name}</span>
+            {/* When the folder is open the linked chat's own row says this
+                right underneath; the line only earns its height while the
+                folder is closed and would otherwise hide the live work. */}
+            {live && !open ? <span className="row-meta peer">{live.label}</span> : null}
+          </span>
         </button>
         <button
           className={`tiny project-info${selected && !store.activeSessionId ? " active" : ""}`}

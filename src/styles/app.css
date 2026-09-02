@@ -2146,6 +2146,22 @@ html.pane-dragging * {
   color: var(--peer);
 }
 
+/* A project folder in a call wears what its linked chat row wears: the peer
+   bar on the head, and the linked line in the peer colour while closed. */
+.project-folder.live .project-head {
+  box-shadow: inset 3px 0 0 var(--peer);
+}
+
+.project-head .row > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.project-head .row-meta.peer {
+  color: var(--peer);
+}
+
 .work-fold.subagent > summary {
   display: flex;
   align-items: center;

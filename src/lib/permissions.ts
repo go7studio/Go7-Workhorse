@@ -6,7 +6,31 @@ import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, Pe
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
+const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
+
+/**
+ * A sub-agent launch carries the whole assignment as its detail, so the words
+ * inside it — "write the test", "create the file" — are the helper's brief,
+ * not this call's target. Reading them as a target turned every launch into a
+ * write and asked the person to drop the sandbox for it. A delegation is
+ * judged at spawn admission; the write heuristic stays out of it.
+ */
+export function looksLikeDelegationTool(tool: string, detail: string): boolean {
+  if (DELEGATION_TOOLS.test(toolNameKey(tool))) return true;
+  const text = detail.trim();
+  if (!text.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(text) as { variant?: unknown };
+    return typeof parsed.variant === "string" && /^(?:task|agent)$/i.test(parsed.variant.trim());
+  } catch {
+    // A long brief can reach the desk clipped. The variant is the first key
+    // the vendors send, so it survives a cut that the closing brace does not.
+    return /^\{\s*"variant"\s*:\s*"(?:task|agent)"/i.test(text);
+  }
+}
+
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
+  if (looksLikeDelegationTool(tool, detail)) return false;
   const hay = `${tool} ${detail} ${filePath ?? ""}`.toLowerCase();
   if (
     /\b(read_file|list_dir|grep|search|web_search|web_fetch|todo_write|ripgrep|rg(?:\.exe)?)\b/.test(hay) &&
@@ -389,6 +413,67 @@ export function workerAccess(input: {
 /** What the desk records as granted, so the next reuse can read the clamp apart from a tightening. */
 export function workerGrant(input: { inherited: DeskAccess; prior?: WorkerAccessPrior }): DeskAccess {
   return tighterAccess(input.inherited, workerTightening(input.prior));
+}
+
+export type LineageChat = {
+  id: string;
+  parentId?: string;
+  hidden?: boolean;
+  mode: PermissionMode;
+  sandbox: SandboxProfile;
+  agentRun?: { role?: string; paths?: string[]; grantedAccess?: DeskAccess };
+};
+
+/**
+ * What this chat's lineage actually grants, told apart from the seat it runs
+ * under. A seat can be tighter for reasons the person never chose: a nested
+ * helper is read-only by design, a path-owned worker launches at Ask so its
+ * writes still reach the ownership preflight. Those are the desk's own clamps.
+ *
+ * The worker's recorded grant answers first — the desk wrote it at spawn from
+ * the parent path, before any clamp. With no record the walk climbs parentId
+ * to the first chat the person can see and takes its Permission and Sandbox; a
+ * parent calling through Link sits on that walk. Above that there is only the
+ * desk's Settings default, which is the last thing the person set.
+ */
+export function lineageGrant(input: {
+  session?: LineageChat;
+  sessions?: readonly LineageChat[];
+  deskAccess?: DeskAccess;
+}): DeskAccess {
+  const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
+  if (!input.session) return desk;
+  const granted = input.session.agentRun?.grantedAccess;
+  if (granted) return { mode: granted.mode, sandbox: granted.sandbox };
+  const rows = input.sessions ?? [];
+  const seen = new Set<string>();
+  let chat: LineageChat | undefined = input.session;
+  while (chat && !seen.has(chat.id)) {
+    seen.add(chat.id);
+    if (!chat.hidden) return { mode: chat.mode, sandbox: chat.sandbox };
+    const parentId: string | undefined = chat.parentId;
+    chat = parentId ? rows.find((item) => item.id === parentId) : undefined;
+  }
+  return desk;
+}
+
+/**
+ * Who owns a block. "person" only when the need climbs past what the lineage
+ * already grants — someone tightened the root chat, the parent, or this chat.
+ * Otherwise the seat that refused is a clamp the desk applied, and the desk
+ * answers it from the access the person did grant.
+ */
+export function promptOwner(need: ElevationNeed, lineage: DeskAccess): "person" | "desk" {
+  return elevationStillNeeded(lineage, need) ? "person" : "desk";
+}
+
+/** The clamp, named, so a denial says what actually stopped the work. */
+export function deskClampNote(run: { role?: string; paths?: string[] } | undefined): string {
+  if (run?.role === "helper") return "Helpers are read-only by design; hand this write to your parent.";
+  if ((run?.paths?.length ?? 0) > 0) {
+    return "This launch is path-owned; the desk answers its in-path writes from the access you granted.";
+  }
+  return "The desk narrowed this launch itself; the access you granted still stands.";
 }
 
 /**

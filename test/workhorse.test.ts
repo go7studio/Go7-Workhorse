@@ -165,7 +165,7 @@ import {
   stripOutputFromThought,
   wrapMarkdown,
 } from "../src/lib/markdown";
-import { applyPermissionAnswer, autoAllowPermission, classifyElevation, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
+import { applyPermissionAnswer, autoAllowPermission, classifyElevation, deskClampNote, describeElevation, elevationForBlock, enqueuePermission, grantedPolicyAnswer, inboundAccess, lineageGrant, looksLikeDelegationTool, looksLikeSearchOnly, looksLikeWriteTool, parseElevationInput, pathOwnerMode, permissionGrantKey, permissionPolicyAnswer, permissionResumeStatus, promptOwner, workerAccess, workerGrant, workerTightening } from "../src/lib/permissions";
 import { detectClaudeAccessDefaults, detectCursorAccessDefaults, detectGrokAccessDefaults } from "../electron/vendor-access";
 import { normalizePermissionGrants } from "../src/lib/permission-grants";
 import { appendUserMessage, applyComposerDrafts, applyDeleteDeskChat, applyDeleteLooseDeskChats, applyRenameDeskChat, archiveChat, autoRenameChat, canPlaceInProject, deleteChat, deleteChatGuard, deleteWorkerChats, dropDrafts, dropQueuedPrompt, enqueuePrompt, findListedChat, forkChat, omitQueuedUserMessages, forkTitle, formatLastTalked, hasComposerDraft, hiddenProjectChatCount, isDraftChat, isLooseDeleteScope, lastProjectChat, lastTalkedAt, lastUserMessage, listedChats, defaultInboundParentId, messagesThrough, moveChat, openDraft, activeProjectChat, pinnedCollapsedChat, PROJECT_CHAT_LIMIT, renameChat, resolveListedChat, rewindToUserMessage, shiftQueuedPrompt, visibleProjectChats, workersFoldOpen } from "../src/lib/chats";
@@ -455,6 +455,33 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(looksLikeWriteTool("read_file", "notes.md", "notes.md"), false);
   assert.equal(looksLikeWriteTool("rg", "rg -n leftover src"), false);
   assert.equal(looksLikeWriteTool("shell", "rg --files"), false);
+  // A sub-agent launch is judged at spawn admission. Its detail is the brief it
+  // hands the helper, so the words in there are never this call's target.
+  const launchBrief = JSON.stringify({ variant: "Task", prompt: "tail math check. Do not write files." });
+  assert.equal(looksLikeDelegationTool("IOpenER tail math check", launchBrief), true);
+  assert.equal(looksLikeWriteTool("IOpenER tail math check", launchBrief), false);
+  assert.equal(elevationForBlock({ mode: "plan", sandbox: "read-only", tool: "IOpenER tail math check", detail: launchBrief }), null);
+  assert.equal(looksLikeWriteTool("Write", JSON.stringify({ variant: "patch", path: "src/app.ts" })), true);
+  // A prompt is the person's only when the need climbs past what the lineage
+  // already grants. A helper's read-only seat is the desk's clamp, not a setting.
+  const alwaysRoot = { id: "root", mode: "always-approve" as const, sandbox: "off" as const };
+  const helperSeat = {
+    id: "helper",
+    parentId: "root",
+    hidden: true,
+    mode: "always-approve" as const,
+    sandbox: "read-only" as const,
+    agentRun: { role: "helper" },
+  };
+  assert.deepEqual(lineageGrant({ session: helperSeat, sessions: [alwaysRoot, helperSeat] }), { mode: "always-approve", sandbox: "off" });
+  assert.deepEqual(
+    lineageGrant({ session: { ...helperSeat, agentRun: { role: "helper", grantedAccess: { mode: "plan", sandbox: "read-only" } } }, sessions: [alwaysRoot] }),
+    { mode: "plan", sandbox: "read-only" },
+  );
+  assert.deepEqual(lineageGrant({ deskAccess: { mode: "ask", sandbox: "workspace" } }), { mode: "ask", sandbox: "workspace" });
+  assert.equal(promptOwner({ sandbox: "off" }, { mode: "always-approve", sandbox: "off" }), "desk");
+  assert.equal(promptOwner({ sandbox: "off" }, { mode: "plan", sandbox: "read-only" }), "person");
+  assert.equal(deskClampNote({ role: "helper" }), "Helpers are read-only by design; hand this write to your parent.");
   assert.equal(looksLikeSearchOnly("rg", "rg -n leftover src"), true);
   assert.equal(looksLikeSearchOnly("shell", "rg --files"), true);
   assert.equal(

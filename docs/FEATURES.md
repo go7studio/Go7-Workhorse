@@ -193,7 +193,10 @@ transcript rather than as a path.
   that chat's setting instead, and a vendor app set narrower than the desk
   keeps its own limit. Connecting or dropping a vendor never moves it.
 - **One permission inbox.** Every prompt lands in the same place and is
-  translated to each vendor's own protocol.
+  translated to each vendor's own protocol. A prompt reaches you only when a
+  setting you made is what blocks the work; clamps the desk applies on its own
+  — read-only helpers, path-owned launches — are answered by the desk from the
+  access you granted.
 - **Scoped approvals.** A session grant remembers the exact tool, command, and
   path for 24 hours. Changed or expired requests ask again.
 - **Execution directory** — a chat starts in a linked folder or managed git

@@ -64,6 +64,14 @@ export type PeerAsk = {
    * without it `npm run build` fails and no release can be cut.
    */
   role?: "auditor";
+  /**
+   * The seat this delegation asks its child to run under. Both are capped at
+   * the desk default, never at the caller's own seat, so a call may raise a
+   * child above a chat the person tightened. Silence inherits the caller.
+   * `permission` never carries plan: a child that cannot write cannot deliver.
+   */
+  permission?: string;
+  sandbox?: string;
   /** Inherit reuses compatible context; fresh accepts only a structured handoff. */
   seed?: WorkerSeed;
   handoff?: WorkerHandoff;

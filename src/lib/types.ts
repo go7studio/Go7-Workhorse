@@ -21,6 +21,15 @@ export type DeskAccess = {
   sandbox: SandboxProfile;
 };
 
+/**
+ * A worker's seat plus who decided it: the delegating call, the caller it was
+ * inherited from, or the desk default. A subagent's block is answered by the
+ * desk, so the denial has to be able to say which of the three to change.
+ */
+export type GrantedAccess = DeskAccess & {
+  source?: "call" | "inherited" | "desk";
+};
+
 export type SessionSecurityPolicy = {
   network: "blocked" | "allowed";
   root: "ask" | "blocked" | "allowed";
@@ -386,7 +395,7 @@ export type AgentRun = {
    * the person sees no modal for in-path work. It is also the mark that tells
    * the desk's own clamp apart from a narrowing the person set by hand.
    */
-  grantedAccess?: DeskAccess;
+  grantedAccess?: GrantedAccess;
   /** Structured review receipts parsed from the worker's terminal output. */
   findings?: WorkerFinding[];
   /** Structured routing policy inherited by every nested worker. */

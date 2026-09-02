@@ -158,6 +158,8 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         description: { type: "string", description: "Short 3–5 word label" },
         provider: { type: "string", description: "grok, codex, claude, or custom" },
         model: { type: "string", description: "Optional model id" },
+        permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default in Settings › LLMs, not at your own seat. Omit and the worker inherits your seat." },
+        sandbox: { type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Ask for the sandbox the work needs — the worker cannot ask the user for one later." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         rationale: { type: "string", description: "Why this agent fits this step" },

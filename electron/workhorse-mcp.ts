@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { offloadChatImage } from "./attachment-store";
 import { loadLinkState, readLinkState, runWithLinkState } from "./link-state";
+import { openMainLog } from "./main-log";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -413,6 +414,8 @@ const TOOLS = [
           required: ["acceptanceCriteria"],
           additionalProperties: false,
         },
+        permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat, so a tightened chat can still hand a worker the access it needs. Omit and the worker inherits your seat." },
+        sandbox: { type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Ask for the sandbox the work needs — a worker cannot ask you for one later." },
         route: { type: "string", description: "auto (default), quick, balanced, or deep" },
         role: { type: "string", description: "auditor when this slice checks another worker's output, so it routes deep instead of being sized from the prompt. It does not restrict the worker or pick a different vendor from the builder — name the builder in exclude for that." },
         exclude: { type: "array", items: { type: "string" }, description: "Provider, model, or bot terms this worker and its descendants must avoid" },
@@ -528,6 +531,8 @@ const TOOLS = [
         },
         provider: { type: "string", description: "Explicit user override only: grok, codex, claude, cursor, or custom" },
         model: { type: "string", description: "Explicit user override only, such as gpt-5.6-terra" },
+        permission: { type: "string", description: "Seat this worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat. Omit and the worker inherits your seat." },
+        sandbox: { type: "string", description: "Sandbox this worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. A nested helper is read-only unless you name one here." },
         route: { type: "string", description: "auto, quick, balanced, or deep" },
         chat: { type: "string", description: "Optional existing chat or vendor name to copy (Codex, Terra, Test)" },
         planStepId: { type: "string", description: "Optional executable plan step id" },
@@ -1833,6 +1838,33 @@ export function nestedTimeoutNote(requested: number | undefined, ceiling = NESTE
  * that no longer parses. The note goes inside the object there, and only a
  * prose result gets a line appended.
  */
+/**
+ * One `spawn:access` line per delegation, in the desk's own main.log.
+ *
+ * The desk decided the seat, so the desk composed the line and sent it back on
+ * the spawn reply; this only writes it down. Identifiers and seats only — a
+ * brief in a log is a brief on disk forever. The MCP helper runs beside the
+ * desk with WORKHORSE_STATE_PATH pointing into the same userData folder, which
+ * is the folder openMainLog writes under, so both processes append to one file.
+ * Every failure inside openMainLog is already swallowed: a log that can break
+ * the launch it explains is worse than no log.
+ */
+export function recordSpawnAccess(result: string): string {
+  const trimmed = result.trim();
+  if (!trimmed.startsWith("{")) return result;
+  let detail = "";
+  try {
+    const parsed = JSON.parse(trimmed) as { access?: { log?: unknown } };
+    detail = typeof parsed?.access?.log === "string" ? parsed.access.log : "";
+  } catch {
+    return result;
+  }
+  const userData = spawnUserDataDir();
+  if (!detail || !userData) return result;
+  openMainLog(userData).record("spawn:access", detail);
+  return result;
+}
+
 export function withSpawnNote(result: string, note: string): string {
   if (!note) return result;
   const trimmed = result.trim();
@@ -1972,6 +2004,9 @@ async function spawnAgent(
     chat?: string;
     worker?: string;
     effort?: string;
+    /** The seat this call asks for the child; the desk caps both at its default. */
+    permission?: string;
+    sandbox?: string;
     timeoutSeconds?: number;
     tokenBudget?: number;
     isolation?: "worktree" | "shared";
@@ -2117,6 +2152,8 @@ async function spawnAgent(
     chat: spawnInput.chat,
     worker: spawnInput.worker,
     effort: spawnInput.effort,
+    permission: spawnInput.permission,
+    sandbox: spawnInput.sandbox,
     timeoutSeconds: spawnInput.timeoutSeconds,
     tokenBudget: spawnInput.tokenBudget,
     isolation: spawnInput.isolation,
@@ -2145,7 +2182,7 @@ async function spawnAgent(
   if (isVendorDeclinedResult(first)) throw new Error(first.trim());
   const grant = parseVendorGrant(first);
   if (grant?.retrySpawn || grant?.allowed) {
-    return withSpawnNote(await postBridge("/spawn", {
+    return withSpawnNote(recordSpawnAccess(await postBridge("/spawn", {
       toSessionId: "",
       fromSessionId: fromId,
       exposureProfile: currentMcpProfile(),
@@ -2157,6 +2194,8 @@ async function spawnAgent(
       chat: spawnInput.chat,
       worker: spawnInput.worker,
       effort: spawnInput.effort,
+      permission: spawnInput.permission,
+      sandbox: spawnInput.sandbox,
       timeoutSeconds: spawnInput.timeoutSeconds,
       tokenBudget: spawnInput.tokenBudget,
       isolation: spawnInput.isolation,
@@ -2179,9 +2218,9 @@ async function spawnAgent(
       files: spawnInput.files,
       attachments,
       ...(spawnInput.traceId?.trim() ? { traceId: spawnInput.traceId.trim() } : {}),
-    } as PeerAsk), clampNote);
+    } as PeerAsk)), clampNote);
   }
-  return withSpawnNote(first, clampNote);
+  return withSpawnNote(recordSpawnAccess(first), clampNote);
 }
 
 /**
@@ -2575,6 +2614,8 @@ async function callMutatingTool(name: string, args: Record<string, unknown>, fro
         provider: initialBrain.provider,
         model: initialBrain.model,
         effort: initialBrain.effort,
+        permission: typeof args.permission === "string" ? args.permission : undefined,
+        sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
         route,
         exclude: mergedDelegateExclusions(task, args.exclude),
         constraints: Array.isArray(args.constraints) ? args.constraints.filter((item): item is string => typeof item === "string") : undefined,
@@ -2938,6 +2979,8 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
         chat: typeof args.chat === "string" ? args.chat : undefined,
         worker: typeof args.worker === "string" ? args.worker : undefined,
         effort: typeof args.effort === "string" ? args.effort : undefined,
+        permission: typeof args.permission === "string" ? args.permission : undefined,
+        sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
         timeoutSeconds: typeof args.timeoutSeconds === "number" ? args.timeoutSeconds : undefined,
         tokenBudget: typeof args.tokenBudget === "number" ? args.tokenBudget : undefined,
         isolation: args.isolation === "shared" ? "shared" : args.isolation === "worktree" ? "worktree" : undefined,
@@ -3586,7 +3629,7 @@ function isMcpEntry(): boolean {
  *   <helper> link chats [--parents] [--full]
  *   <helper> link read <sessionId> [--limit <n>]
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
- *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
+ *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
  *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--key <idempotencyKey>]
  *   <helper> link grok-pending
@@ -3600,6 +3643,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   // Flags that take a value; anything else starting with -- is a switch.
   const VALUE_FLAGS = new Set([
     "--provider", "--model", "--effort", "--route", "--chat", "--task", "--trace", "--key", "--pass", "--message", "--limit", "--passes",
+    "--permission", "--sandbox",
     "--host", "--capability", "--kind", "--role", "--media-type", "--origin", "--system",
     "--max-tokens", "--temperature", "--mode", "--seed", "--max-faces",
     "--target-engine", "--folder",
@@ -3623,7 +3667,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3665,6 +3709,8 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
         task,
         fromSessionId: chat,
         ...(Object.keys(initialBrain).length > 0 ? { initialBrain } : {}),
+        ...(flag("permission") ? { permission: flag("permission") } : {}),
+        ...(flag("sandbox") ? { sandbox: flag("sandbox") } : {}),
         ...(flag("folder") ? { folder: flag("folder") } : {}),
         ...(criteria.length
           ? { loop: { acceptanceCriteria: criteria, ...(Number.isFinite(passes) && passes >= 2 ? { maxIterations: Math.min(8, Math.floor(passes)) } : {}) } }

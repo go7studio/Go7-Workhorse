@@ -409,6 +409,18 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
     /const deskClamp =\n\s*blocked && owner && promptOwner\(blocked, lineage\) === "desk" \? deskClampNote\(owner\.agentRun\) : null;\n\s*const need = deskClamp \? null : blocked;/,
     "a desk-owned block must never become a prompt",
   );
+  // A custom host asking to elevate (electron/custom-host.ts) lands on the same
+  // `blocked`, so it is classified the same way and cannot drift off on its own.
+  assert.match(
+    store,
+    /const blocked =\n\s*eventElevate && owner\n\s*\? parseElevationInput\(eventElevate as Record<string, unknown>, owner\)\n\s*: owner && forced === "deny" && !security\.boundary\n\s*\? elevationForBlock\(\{/,
+    "the custom host's elevate goes through the same classification",
+  );
+  assert.match(
+    source("electron", "custom-host.ts"),
+    /elevate: blocked,/,
+    "and that is the event it sends",
+  );
   assert.match(
     store,
     /const lineage = lineageGrant\(\{\n\s*session: owner,\n\s*sessions: stateRef\.current\.sessions,\n\s*deskAccess: stateRef\.current\.settings\.access,\n\s*\}\);/,

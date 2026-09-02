@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld("workhorse", {
     return () => ipcRenderer.removeListener("terminal:event", listener);
   },
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
+  liveRunIds: () => ipcRenderer.invoke("runs:live") as Promise<string[]>,
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
   /** A finished worker's offloaded thinking and tool rows, each with the seat it held. */
   loadTranscript: (sessionId: string) =>

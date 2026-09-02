@@ -215,7 +215,7 @@ export function applyVendorTurnIdle(
   });
 }
 
-export function normalizeSession(raw: unknown): Session | null {
+export function normalizeSession(raw: unknown, liveRunIds?: ReadonlySet<string>): Session | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Partial<Session>;
   if (typeof record.id !== "string") return null;
@@ -295,7 +295,11 @@ export function normalizeSession(raw: unknown): Session | null {
         : grokGoalAfterTurnIdle(provider, normalizeGoal(record.goal)),
     // The environment goes with it: an interrupted worker's message names the
     // folder its work is sitting in, and only the session knows that folder.
-    agentRun: normalizeAgentRun(record.agentRun, normalizeSessionEnvironment(record.environment)),
+    agentRun: normalizeAgentRun(
+      record.agentRun,
+      normalizeSessionEnvironment(record.environment),
+      typeof record.id === "string" && liveRunIds ? liveRunIds.has(record.id) : false,
+    ),
     lineup: normalizeLineup(record.lineup),
     planRun: normalizePlanRun(record.planRun),
     routingMode: record.routingMode === "auto" ? "auto" : "manual",

@@ -144,6 +144,7 @@ type WorkhorseBridge = {
   terminalStop?: (sessionId: string) => Promise<void>;
   onTerminalEvent?: (handler: (event: import("../electron/terminal-host").TerminalEvent) => void) => () => void;
   loadState: () => Promise<Record<string, unknown>>;
+  liveRunIds: () => Promise<string[]>;
   saveState: (state: Record<string, unknown>) => Promise<void>;
   /** Optional, like every other bridge method: an older shell simply shows the prose. */
   loadTranscript?: (sessionId: string) => Promise<import("./lib/transcript-sidecar").TranscriptSidecar | null>;

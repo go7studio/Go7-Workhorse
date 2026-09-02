@@ -804,7 +804,7 @@ export function deskMissionForStoreSpawn(input: {
   return input.agentRun;
 }
 
-function hydrate(value: unknown): AppState {
+function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
   if (!value || typeof value !== "object") return EMPTY;
   const { watchDismissed: _droppedWatchDismissed, ...record } = value as Partial<AppState> & {
     watchDismissed?: unknown;
@@ -816,7 +816,7 @@ function hydrate(value: unknown): AppState {
   const panel = (record as { panel?: unknown }).panel;
   const settings = normalizeSettings(record.settings);
   const normalizedSessions = Array.isArray(record.sessions)
-    ? record.sessions.map(normalizeSession).filter((item): item is Session => item !== null)
+    ? record.sessions.map((row) => normalizeSession(row, liveRunIds)).filter((item): item is Session => item !== null)
     : [];
   const rawSessions = reconcilePersistedLineups(normalizedSessions);
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
@@ -1181,8 +1181,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const load = async () => {
       const saved = window.workhorse ? await window.workhorse.loadState() : null;
+      // Ask main what it is still driving before deciding any run died. A
+      // reopened window reloads this state from disk, and without this every
+      // live worker reads as interrupted.
+      const live = window.workhorse?.liveRunIds ? await window.workhorse.liveRunIds() : [];
       if (!cancelled) {
-        const next = hydrate(saved);
+        const next = hydrate(saved, new Set(live));
         setState(next);
         setReady(true);
         void (async () => {

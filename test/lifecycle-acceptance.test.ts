@@ -374,7 +374,7 @@ test("worker identity: a spawned worker id is resolvable in state and survives p
     writeVersionedState(file, { sessions: listedChats(live) }, (state) => state);
     const read = readVersionedState(file);
     const restored = Array.isArray(read.state.sessions)
-      ? read.state.sessions.map(normalizeSession).filter((row): row is Session => row !== null)
+      ? read.state.sessions.map((row) => normalizeSession(row)).filter((row): row is Session => row !== null)
       : [];
     const found = restored.find((row) => row.id === childId);
     assert.ok(found, "the worker is in workhorse-state.json");

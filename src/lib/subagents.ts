@@ -2008,7 +2008,11 @@ export function interruptedWorkerError(environment?: SessionEnvironment, process
   return `${opening} Its brief and its work are kept in the chat's own folder — resume it from the chat. ${processes}`;
 }
 
-export function normalizeAgentRun(raw: unknown, environment?: SessionEnvironment): AgentRun | undefined {
+export function normalizeAgentRun(
+  raw: unknown,
+  environment?: SessionEnvironment,
+  stillRunning = false,
+): AgentRun | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const row = raw as Partial<AgentRun>;
   const statuses: AgentRun["status"][] = ["running", "completed", "failed", "cancelled", "timed-out", "budget-exceeded", "interrupted"];
@@ -2021,8 +2025,13 @@ export function normalizeAgentRun(raw: unknown, environment?: SessionEnvironment
   // on disk reads as failed and the truth is gone — except the old code signed
   // its work. That exact sentence is its fingerprint, and no vendor failure
   // carries it, so an exact match recovers those runs without guessing.
+  // `running` on disk means the desk was driving this worker when state was
+  // written. Whether that is still true is something only the main process
+  // knows, so it is passed in. Without it the answer is no, which is right
+  // after a real exit and was the only behaviour before.
   const interrupted =
-    row.status === "running" || (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
+    (row.status === "running" && !stillRunning) ||
+    (row.status === "failed" && (row.error ?? "").trim() === LEGACY_INTERRUPTED_ERROR);
   const mission = normalizeMissionIteration(row.mission);
   const findings = normalizeWorkerFindings(row.findings);
   return {

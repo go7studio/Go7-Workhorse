@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.53](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.52...v0.6.53) (2026-09-02)
+
+
+### Features
+
+* a project folder in a call wears what its linked chat row wears ([9ccc480](https://github.com/go7studio/Go7-Workhorse/commit/9ccc480ce503f647638198c421ef6ec5e8f299b2))
+
 ## [0.6.52](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.51...v0.6.52) (2026-09-02)
 
 

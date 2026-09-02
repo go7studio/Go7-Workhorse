@@ -672,6 +672,29 @@ export function hydrateInterruptedPathLeases(raw: unknown, sessions: Session[]):
   );
 }
 
+/**
+ * The worker already carrying this mission pass, when it is still going.
+ *
+ * A spawn that lands on a pass another worker is running now is a duplicate,
+ * and the caller should be handed that worker rather than a second one. A pass
+ * that has already ENDED is last wave's work: answering a new call with it
+ * spawns nothing and hands back a report nobody asked for, which is how a
+ * chat's finished mission came to swallow every later delegation.
+ */
+export function livePassForSpawn(
+  sessions: Pick<Session, "id" | "parentId" | "agentRun">[],
+  callerId: string,
+  mission: Pick<MissionIteration, "id" | "iteration">,
+): Pick<Session, "id" | "parentId" | "agentRun"> | undefined {
+  const pass = sessions.find(
+    (session) =>
+      session.parentId === callerId &&
+      session.agentRun?.mission?.id === mission.id &&
+      session.agentRun?.mission?.iteration === mission.iteration,
+  );
+  return pass?.agentRun?.status === "running" ? pass : undefined;
+}
+
 export function campaignSpawnGate(input: {
   campaignContext: boolean;
   requested: MissionIteration | undefined;
@@ -5071,22 +5094,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (spawnMission) {
               const mission = spawnMission;
-              const existingPass = latest.sessions.find(
-                (session) =>
-                  session.parentId === caller.id &&
-                  session.agentRun?.mission?.id === mission.id &&
-                  session.agentRun?.mission?.iteration === mission.iteration,
-              );
-              // Only a pass that is still going is a duplicate. A finished one
-              // is last wave's work, and answering a new call with it hands the
-              // caller a report it did not ask for while nothing gets spawned.
-              // Say so either way, so a caller can tell this was not a spawn.
-              const passRun = existingPass?.agentRun?.status;
-              if (existingPass && passRun === "running") {
+              const existingPass = livePassForSpawn(latest.sessions, caller.id, mission);
+              if (existingPass) {
                 await replyAsk({
                   text: JSON.stringify(
                     {
-                      ...workerStatusSnapshot(existingPass),
+                      ...workerStatusSnapshot(existingPass as Session),
                       spawned: false,
                       note: `Pass ${mission.iteration} of this mission is already running as ${existingPass.id}. Nothing new was spawned.`,
                     },

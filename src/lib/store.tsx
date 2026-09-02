@@ -6806,12 +6806,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               path: event.path,
             })
           : null;
-        const allowed = forced ?? granted ?? autoAllowPermission({
-          tool: event.tool,
-          detail: event.detail,
-          path: event.path,
-          grants: owner?.permissionGrants,
-        });
+        // A block the desk owns is answered here whatever the policy said. The
+        // grant it recorded may allow the work outright; if nothing allows it,
+        // the desk denies and names its own clamp. Falling through to the
+        // prompt below would put the desk's narrowing in front of the person
+        // again, which is the whole thing this lane removes.
+        const allowed =
+          forced ??
+          granted ??
+          autoAllowPermission({
+            tool: event.tool,
+            detail: event.detail,
+            path: event.path,
+            grants: owner?.permissionGrants,
+          }) ??
+          (deskClamp ? ("deny" as const) : null);
+        const deniedBy =
+          security.boundary ??
+          (forced === "deny"
+            ? owner?.sandbox === "read-only" || owner?.sandbox === "strict"
+              ? "sandbox"
+              : "plan"
+            : "the desk");
         if (allowed) {
           if (provider === "codex") void window.workhorse?.codexAnswerPermission?.(event.requestId, allowed);
           else if (provider === "claude") void window.workhorse?.claudeAnswerPermission?.(event.requestId, allowed);
@@ -6838,7 +6854,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             {
                               id: uid("msg"),
                               role: "system" as const,
-                              text: `Denied by ${security.boundary ?? (owner?.sandbox === "read-only" || owner?.sandbox === "strict" ? "sandbox" : "plan")}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
+                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
                               createdAt: Date.now(),
                             },
                           ]

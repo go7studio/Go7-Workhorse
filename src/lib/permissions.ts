@@ -29,16 +29,68 @@ export function looksLikeDelegationTool(tool: string, detail: string): boolean {
   }
 }
 
+/**
+ * Tool names that only ever read. The exemption keys on the NAME, never on the
+ * detail or the path: a query, a filename, or a brief is the payload a tool was
+ * handed, not the thing the tool does. Matching words instead let
+ * `rm -rf ~/search` out through the read exemption, and denied a plain read of
+ * `src/delete-me.ts` as if it were a write.
+ */
+const READ_TOOL_KEYS: ReadonlySet<string> = new Set([
+  "read",
+  "read_file",
+  "readfile",
+  "view",
+  "list",
+  "list_dir",
+  "listdir",
+  "glob",
+  "grep",
+  "ripgrep",
+  "rg",
+  "rg_exe",
+  "search",
+  "codebase_search",
+  "file_search",
+  "web_search",
+  "web_fetch",
+  "todo_write",
+]);
+
+/** The search programs, by name. Narrower than a read: this one auto-allows. */
+const SEARCH_TOOL_KEYS: ReadonlySet<string> = new Set([
+  "grep",
+  "ripgrep",
+  "rg",
+  "rg_exe",
+  "search",
+  "codebase_search",
+  "file_search",
+]);
+
+/** A vendor namespace rides in front of the name: mcp__fs__read_file -> fs_read_file. */
+function toolKeyIn(tool: string, names: ReadonlySet<string>): boolean {
+  const key = toolNameKey(tool);
+  if (names.has(key)) return true;
+  const parts = key.split("_");
+  for (let index = 1; index < parts.length; index += 1) {
+    if (names.has(parts.slice(index).join("_"))) return true;
+  }
+  return false;
+}
+
+const WRITE_WORDS =
+  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/;
+
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
   if (looksLikeDelegationTool(tool, detail)) return false;
-  const hay = `${tool} ${detail} ${filePath ?? ""}`.toLowerCase();
-  if (
-    /\b(read_file|list_dir|grep|search|web_search|web_fetch|todo_write|ripgrep|rg(?:\.exe)?)\b/.test(hay) &&
-    !/\b(write|edit|replace|delete)\b/.test(hay)
-  ) {
-    return false;
-  }
-  return /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/.test(hay);
+  const shell = looksLikeShellTool(tool, detail);
+  // A tool that is not a shell is what its name says it is.
+  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return false;
+  // A shell's name says nothing about what it runs, so it is judged by the
+  // program it invokes. Everything else a shell does counts as a write.
+  if (shell && looksLikeSearchOnly(tool, detail, filePath)) return false;
+  return WRITE_WORDS.test(`${tool} ${detail} ${filePath ?? ""}`.toLowerCase());
 }
 
 export function looksLikeShellTool(tool: string, detail: string): boolean {
@@ -90,11 +142,12 @@ export function securityPolicyAnswer(input: {
 export function looksLikeSearchOnly(tool: string, detail: string, filePath?: string): boolean {
   const command = `${detail} ${filePath ?? ""}`.trim();
   const hay = `${tool} ${command}`.toLowerCase();
-  if (!/\b(rg(?:\.exe)?|ripgrep|grep)\b/.test(hay)) return false;
   if (/\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/.test(hay)) {
     return false;
   }
-  if (!looksLikeShellTool(tool, detail)) return !looksLikeWriteTool(tool, detail, filePath);
+  // A tool that is not a shell is judged by its name. "run a grep over the
+  // tree" sitting inside a brief is the brief talking, not the program.
+  if (!looksLikeShellTool(tool, detail)) return toolKeyIn(tool, SEARCH_TOOL_KEYS);
   const stripped = command
     .replace(/^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i, "")
     .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")

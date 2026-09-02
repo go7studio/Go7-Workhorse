@@ -11,7 +11,9 @@ import {
   grantedPolicyAnswer,
   lineageGrant,
   looksLikeDelegationTool,
+  looksLikeSearchOnly,
   looksLikeWriteTool,
+  parseElevationInput,
   permissionPolicyAnswer,
   promptOwner,
   securityPolicyAnswer,
@@ -115,7 +117,14 @@ test("promptOwner names the person only when the need climbs past the lineage", 
 // Site 1 — the vendor permission event (src/lib/store.tsx).
 // ---------------------------------------------------------------------------
 
-type EventInput = { requestId: string; tool: string; detail: string; path?: string };
+type EventInput = {
+  requestId: string;
+  tool: string;
+  detail: string;
+  path?: string;
+  /** What a custom host sends when it asks the desk to elevate. */
+  elevate?: Record<string, unknown>;
+};
 
 type SiteOneOutcome = {
   answer: PermissionAnswer | null;
@@ -143,8 +152,9 @@ function siteOne(input: {
       detail: event.detail,
       path: event.path,
     });
-  const blocked =
-    forced === "deny" && !security.boundary
+  const blocked = event.elevate
+    ? parseElevationInput(event.elevate, { mode: owner.mode, sandbox: owner.sandbox })
+    : forced === "deny" && !security.boundary
       ? elevationForBlock({
           mode: owner.mode,
           sandbox: owner.sandbox,
@@ -175,15 +185,19 @@ function siteOne(input: {
     path: event.path,
   });
   const allowed =
-    forced ?? granted ?? autoAllowPermission({ tool: event.tool, detail: event.detail, path: event.path });
+    forced ??
+    granted ??
+    autoAllowPermission({ tool: event.tool, detail: event.detail, path: event.path }) ??
+    (deskClamp ? ("deny" as const) : null);
+  const deniedBy =
+    security.boundary ??
+    (forced === "deny" ? (owner.sandbox === "read-only" || owner.sandbox === "strict" ? "sandbox" : "plan") : "the desk");
   if (allowed) {
     return {
       answer: allowed,
       pending: pending.filter((item) => item.id !== event.requestId),
       ...(allowed === "deny"
-        ? {
-            line: `Denied by ${security.boundary ?? (owner.sandbox === "read-only" || owner.sandbox === "strict" ? "sandbox" : "plan")}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
-          }
+        ? { line: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}` }
         : {}),
     };
   }
@@ -257,6 +271,111 @@ test("the clamp note says which clamp, and says nothing false when there is none
   assert.match(deskClampNote({ paths: ["src/app.ts"] }), /path-owned/);
   assert.match(deskClampNote(undefined), /The desk narrowed this launch itself/);
   assert.match(deskClampNote({ paths: [] }), /The desk narrowed this launch itself/);
+});
+
+test("a desk-owned elevate is answered here, never handed on as a plain prompt", () => {
+  // A custom host asks the desk to elevate. The lineage already grants it, so
+  // the desk owns the block — but nothing in the policy forced a deny, so the
+  // request used to fall past the elevate branch and land in the queue as an
+  // ordinary tool prompt. Same escalation, different shape.
+  const helper: LineageChat = {
+    id: "helper",
+    parentId: "root",
+    hidden: true,
+    mode: "ask",
+    sandbox: "read-only",
+    agentRun: { role: "helper" },
+  };
+  const event: EventInput = {
+    requestId: "0",
+    tool: "Read",
+    detail: "notes.md",
+    elevate: { permission: "always-approve" },
+  };
+  const outcome = siteOne({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event });
+  assert.deepEqual(outcome.pending, [], "nothing reaches the person by either door");
+  assert.equal(outcome.answer, "deny");
+  assert.equal(
+    outcome.line,
+    "Denied by the desk: Read — notes.md · Helpers are read-only by design; hand this write to your parent.",
+    "and it says the desk stopped it, not a sandbox that did not",
+  );
+});
+
+test("a real policy deny still names the sandbox, not the desk", () => {
+  // The clamp note is an addition to the reason, never a replacement for it.
+  const helper = helperUnder(alwaysRoot, ALWAYS);
+  const outcome = siteOne({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event: WRITE });
+  assert.match(outcome.line ?? "", /^Denied by sandbox: /);
+  const boundary = siteOne({
+    owner: planRoot,
+    sessions: [planRoot],
+    deskAccess: ALWAYS,
+    event: { requestId: "0", tool: "Write", detail: "src/app.ts", path: "src/app.ts" },
+  });
+  assert.match(boundary.line ?? "", /^Denied by plan: |^Denied by sandbox: |^$/);
+});
+
+// ---------------------------------------------------------------------------
+// The write heuristic reads the tool's name, never the words it was handed.
+// ---------------------------------------------------------------------------
+
+test("a shell is judged by the program it invokes, not by words in the command", () => {
+  // The hole: the read exemption matched "search" anywhere in tool+detail+path
+  // and excluded only write/edit/replace/delete, so a destructive shell command
+  // whose argument happened to contain the word walked straight through a
+  // read-only sandbox.
+  assert.equal(looksLikeWriteTool("shell", "rm -rf ~/search"), true);
+  assert.equal(
+    permissionPolicyAnswer({ mode: "ask", sandbox: "read-only", tool: "shell", detail: "rm -rf ~/search" }),
+    "deny",
+    "a read-only sandbox has to stop it",
+  );
+  assert.equal(looksLikeWriteTool("shell", "mv build dist && ./deploy.sh # search"), true);
+  assert.equal(looksLikeWriteTool("bash", "cp -r src ~/list_dir"), true);
+
+  // A search program in a shell is still a search.
+  assert.equal(looksLikeWriteTool("shell", "grep -rn foo src"), false);
+  assert.equal(looksLikeWriteTool("shell", "rg --files"), false);
+  assert.equal(looksLikeWriteTool("shell", "rg foo && rm notes.md"), true, "chained onto a delete it is not");
+});
+
+test("a read tool is a read whatever its path or query says", () => {
+  // The other half of the same hole: a read whose path carried a write word was
+  // denied as a write.
+  assert.equal(looksLikeWriteTool("read_file", "src/delete-me.ts", "src/delete-me.ts"), false);
+  assert.equal(
+    permissionPolicyAnswer({
+      mode: "ask",
+      sandbox: "read-only",
+      tool: "read_file",
+      detail: "src/delete-me.ts",
+      path: "src/delete-me.ts",
+    }),
+    null,
+    "reading a file is not blocked by what the file is called",
+  );
+  assert.equal(looksLikeWriteTool("grep", "grep -rn 'write' src"), false);
+  assert.equal(looksLikeWriteTool("mcp__fs__read_file", "notes.md"), false, "a vendor namespace still reads");
+  // And a write tool is still a write, however it is named.
+  assert.equal(looksLikeWriteTool("search_replace", "src/app.ts", "src/app.ts"), true);
+  assert.equal(looksLikeWriteTool("str_replace", "src/app.ts"), true);
+  assert.equal(looksLikeWriteTool("Write", "notes.md", "notes.md"), true);
+});
+
+test("search-only means the program is a search, not that the word appears", () => {
+  // A brief that mentions grep is a brief, and it was auto-allowed as a search.
+  assert.equal(looksLikeSearchOnly("Task", "run a grep over the tree and report"), false);
+  assert.equal(
+    permissionPolicyAnswer({ mode: "ask", sandbox: "read-only", tool: "Task", detail: "run a grep over the tree" }),
+    null,
+    "no free pass from a word in the payload",
+  );
+  assert.equal(looksLikeSearchOnly("grep", "foo src"), true);
+  assert.equal(looksLikeSearchOnly("rg", "rg -n leftover src"), true);
+  assert.equal(looksLikeSearchOnly("shell", "rg pattern"), true);
+  assert.equal(looksLikeSearchOnly("shell", "rg pattern && rm -rf x"), false);
+  assert.equal(looksLikeSearchOnly("Read", "notes.md"), false, "a read still answers to the chat's own setting");
 });
 
 // ---------------------------------------------------------------------------
@@ -430,6 +549,16 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
     store,
     /\$\{event\.detail\}\$\{deskClamp \? ` · \$\{deskClamp\}` : ""\}/,
     "the denial has to name the clamp or the person cannot tell who stopped them",
+  );
+  assert.match(
+    store,
+    /\}\) \?\?\n\s*\(deskClamp \? \("deny" as const\) : null\);/,
+    "a block the desk owns is answered here; it must never reach the plain enqueue",
+  );
+  assert.match(
+    store,
+    /const deniedBy =\n\s*security\.boundary \?\?\n\s*\(forced === "deny"\n(.|\n)*?: "the desk"\);/,
+    "and the reason has to be the one that actually applied",
   );
 
   // Site 2 — workhorse_request_permission.

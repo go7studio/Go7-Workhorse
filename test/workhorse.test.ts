@@ -455,6 +455,12 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.equal(looksLikeWriteTool("read_file", "notes.md", "notes.md"), false);
   assert.equal(looksLikeWriteTool("rg", "rg -n leftover src"), false);
   assert.equal(looksLikeWriteTool("shell", "rg --files"), false);
+  // The read exemption is the tool's NAME. Matched as words it let a shell out
+  // through its own argument, and denied a read for the file it was reading.
+  assert.equal(looksLikeWriteTool("shell", "rm -rf ~/search"), true);
+  assert.equal(looksLikeWriteTool("read_file", "src/delete-me.ts", "src/delete-me.ts"), false);
+  assert.equal(looksLikeWriteTool("search_replace", "src/app.ts", "src/app.ts"), true);
+  assert.equal(looksLikeSearchOnly("Task", "run a grep over the tree and report"), false);
   // A sub-agent launch is judged at spawn admission. Its detail is the brief it
   // hands the helper, so the words in there are never this call's target.
   const launchBrief = JSON.stringify({ variant: "Task", prompt: "tail math check. Do not write files." });

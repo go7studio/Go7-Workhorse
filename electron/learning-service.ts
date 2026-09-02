@@ -1,8 +1,10 @@
 import { stubCompile, stubCompileAgent, stubReconcile } from "../src/lib/learning-compiler";
 import { exportJsonl, exportMarkdown } from "../src/lib/learning-export";
 import {
+  ABANDONED_INPUT,
   boundedCompilerBatch,
   boundedCompilerMemories,
+  compileAttemptsSpent,
   compileBackoffMs,
   trimmedCompilerEvent,
   AGENT_INTELLIGENCE_LANE,
@@ -278,6 +280,32 @@ export class LearningService {
     );
   }
 
+  /**
+   * An input the desk will not send again. The marker is terminal and carries
+   * the batch watermark, so the lane steps past the evidence it cannot compile
+   * instead of offering the same batch forever and never reaching later events.
+   */
+  private abandonInput(
+    lane: EventIntelligenceLane | typeof MISMATCH_INTELLIGENCE_LANE,
+    inputHash: string,
+    priorRuns: CompilerRun[],
+    events: LearningEvent[],
+  ): CompileResult {
+    const last = priorRuns.at(-1);
+    const runId = last?.id ?? newRunId();
+    this.options.store.putCompilerRun({
+      ...(last ?? { id: runId, intelligenceLane: lane, attempt: this.policy().maxAttempts, inputHash }),
+      id: runId,
+      intelligenceLane: lane,
+      inputHash,
+      status: "failed",
+      errorClass: ABANDONED_INPUT,
+      endedAt: this.now(),
+      eventWatermark: events.at(-1)?.id ?? last?.eventWatermark,
+    });
+    return { ran: false, skipped: "attempts-exhausted", runId };
+  }
+
   private clearIdle() {
     if (this.idleTimer !== null) this.options.idle?.clearTimeout(this.idleTimer);
     this.idleTimer = null;
@@ -285,13 +313,7 @@ export class LearningService {
 
   async recover(): Promise<CompileResult> {
     this.ingestInbound();
-    const unfinished = this.options.store
-      .listCompilerRuns()
-      .find(
-        (run) =>
-          run.intelligenceLane !== "legacy-unclassified" &&
-          (run.status === "running" || run.status === "interrupted" || run.status === "pending"),
-      );
+    const unfinished = this.options.store.unfinishedCompilerRun();
     if (unfinished) return this.compile({ resume: unfinished.id });
     return this.compileIfDue();
   }
@@ -312,7 +334,7 @@ export class LearningService {
   }
 
   private eligibleEvents(lane: EventIntelligenceLane): LearningEvent[] {
-    const last = this.options.store.lastCompletedRun(lane);
+    const last = this.options.store.lastSettledRun(lane);
     return this.options.store.listEvents({
       afterWatermark: last?.eventWatermark,
       actorClass: lane === HUMAN_INTELLIGENCE_LANE ? "human" : "agent",
@@ -381,9 +403,13 @@ export class LearningService {
     // Attempts belong to the input, not to a run id. Every tick used to mint a
     // fresh run at attempt 1, so the two-attempt budget never bound and one
     // input could be sent to a model forever.
-    const spent = priorRuns.filter((run) => run.status === "failed" || run.status === "interrupted").length;
-    if (!input.resume && spent >= policy.maxAttempts) {
-      return { ran: false, skipped: "attempts-exhausted", runId: priorRuns.at(-1)?.id };
+    // Attempts belong to the input, not to a run id. Every tick used to mint a
+    // fresh run at attempt 1, so the budget never bound. `recover()` resumes an
+    // unfinished row on every desk start, so the gate has to hold there too, and
+    // a resumed row carries its own attempt count.
+    const spent = compileAttemptsSpent(priorRuns);
+    if (spent >= policy.maxAttempts) {
+      return this.abandonInput(lane, inputHash, priorRuns, events);
     }
 
     const resumed = resumable?.intelligenceLane === lane ? resumable : undefined;
@@ -612,9 +638,9 @@ export class LearningService {
     if (existing && !input.resume) {
       return { ran: false, skipped: "duplicate", runId: existing.id, intelligenceLane: lane };
     }
-    const spent = priorRuns.filter((run) => run.status === "failed" || run.status === "interrupted").length;
-    if (!input.resume && spent >= this.policy().maxAttempts) {
-      return { ran: false, skipped: "attempts-exhausted", runId: priorRuns.at(-1)?.id, intelligenceLane: lane };
+    const spent = compileAttemptsSpent(priorRuns);
+    if (spent >= this.policy().maxAttempts) {
+      return { ...this.abandonInput(lane, inputHash, priorRuns, []), intelligenceLane: lane };
     }
     const resumed = resumeRun?.intelligenceLane === lane ? resumeRun : undefined;
     if (resumed && resumed.attempt >= this.policy().maxAttempts) {

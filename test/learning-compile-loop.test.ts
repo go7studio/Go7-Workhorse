@@ -4,11 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
+  ABANDONED_INPUT,
   agentCompilerPrompt,
   AGENT_INTELLIGENCE_LANE,
   boundedCompilerBatch,
   boundedCompilerMemories,
+  compileAttemptsSpent,
   compileBackoffMs,
+  compileFailureIsTransient,
   compilerInputHash,
   compilerPrompt,
   DEFAULT_COMPILER_POLICY,
@@ -130,8 +133,12 @@ test("an input that keeps failing is not sent to a model forever", async () => {
     DEFAULT_COMPILER_POLICY.maxAttempts,
     `the model was called ${calls} times for one input; the budget is ${DEFAULT_COMPILER_POLICY.maxAttempts}`,
   );
+  // Once the input is abandoned the lane steps past it, so a later compile finds
+  // nothing to do rather than offering the same batch again.
   const last = await service.compile().catch(() => undefined);
-  assert.equal(last?.skipped, "attempts-exhausted");
+  assert.equal(last?.ran, false);
+  assert.equal(calls, DEFAULT_COMPILER_POLICY.maxAttempts, "no further model call after the budget is spent");
+  assert.equal(store.lastSettledRun(AGENT_INTELLIGENCE_LANE)?.errorClass, ABANDONED_INPUT);
 });
 
 test("attempts are spent per input, so fresh evidence still compiles", async () => {
@@ -227,4 +234,109 @@ test("the compile prompt shape is unchanged by the bound", () => {
   assert.match(agentCompilerPrompt(events, kept), /Agent events:/);
   assert.match(compilerPrompt(events, kept), /Events:/);
   assert.equal(compilerInputHash(events, kept, AGENT_INTELLIGENCE_LANE).length, 8);
+});
+
+// --- findings raised by the Lane 6 gate (Cursor Grok 4.6) -------------------
+
+function failingService(store: InMemoryStore, error: () => Error, calls: { n: number }) {
+  return new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false, compilerProvider: "custom", compilerModel: "m" }),
+    allowStub: false,
+    candidates: () => [
+      { provider: "custom" as const, model: "m", customBotId: "bot_a", connected: true, ephemeral: true, intelligence: 5, speed: 5, cost: 5 },
+    ],
+    caller: async () => {
+      calls.n += 1;
+      throw error();
+    },
+  });
+}
+
+test("recover cannot spend a model call the budget has already refused", async () => {
+  const store = new InMemoryStore(":memory:");
+  const calls = { n: 0 };
+  const service = failingService(store, () => new Error("Custom model HTTP 400: too large"), calls);
+  service.record(agentEvent("lev_recover", "a run finished"));
+  for (let round = 0; round < 4; round += 1) await service.compile().catch(() => undefined);
+  const spent = calls.n;
+  assert.equal(spent, DEFAULT_COMPILER_POLICY.maxAttempts);
+  await service.recover().catch(() => undefined);
+  await service.recover().catch(() => undefined);
+  assert.equal(calls.n, spent, "recover resumes an unfinished row and must obey the same budget");
+});
+
+test("a rate limit does not spend the budget that stops a bad request", async () => {
+  const store = new InMemoryStore(":memory:");
+  const calls = { n: 0 };
+  const service = failingService(store, () => new Error("Custom model HTTP 429: rate limited"), calls);
+  service.record(agentEvent("lev_429", "a run finished"));
+  for (let round = 0; round < 5; round += 1) await service.compile().catch(() => undefined);
+  assert.ok(
+    calls.n > DEFAULT_COMPILER_POLICY.maxAttempts,
+    `a transient failure burst wedged the input after ${calls.n} calls`,
+  );
+  assert.equal(compileFailureIsTransient("Custom model HTTP 429: rate limited"), true);
+  assert.equal(compileFailureIsTransient("Custom model HTTP 503"), true);
+  assert.equal(compileFailureIsTransient("Custom model HTTP 400: too large"), false);
+  assert.equal(compileFailureIsTransient("invalid-brief"), false);
+  assert.equal(compileFailureIsTransient(undefined), false);
+});
+
+test("an abandoned input steps the lane past evidence it cannot compile", async () => {
+  const store = new InMemoryStore(":memory:");
+  const calls = { n: 0 };
+  const service = failingService(store, () => new Error("Custom model HTTP 400: too large"), calls);
+  service.record(agentEvent("lev_poison", "the batch that will not compile"));
+  for (let round = 0; round < 4; round += 1) await service.compile().catch(() => undefined);
+  const marker = store.lastSettledRun(AGENT_INTELLIGENCE_LANE);
+  assert.equal(marker?.errorClass, ABANDONED_INPUT, "the exhausted input needs a terminal marker");
+  assert.equal(marker?.eventWatermark, "lev_poison", "the marker carries the batch watermark");
+  assert.equal(store.lastCompletedRun(AGENT_INTELLIGENCE_LANE), undefined, "nothing actually compiled");
+});
+
+test("attempts are counted from the rows, resumed rows included", () => {
+  const lane = AGENT_INTELLIGENCE_LANE;
+  const row = (patch: Record<string, unknown>) =>
+    ({ id: "r", intelligenceLane: lane, status: "interrupted", attempt: 1, inputHash: "h", ...patch }) as never;
+  assert.equal(compileAttemptsSpent([]), 0);
+  assert.equal(compileAttemptsSpent([row({ errorClass: "Custom model HTTP 400" })]), 1);
+  assert.equal(compileAttemptsSpent([row({ attempt: 2, errorClass: "Custom model HTTP 400" })]), 2);
+  assert.equal(compileAttemptsSpent([row({ errorClass: "Custom model HTTP 429" })]), 0);
+  assert.equal(compileAttemptsSpent([row({ status: "completed", errorClass: undefined })]), 0);
+});
+
+test("the mismatch lane spends the same budget", async () => {
+  const store = new InMemoryStore(":memory:");
+  const lane = "intent-performance-mismatch" as const;
+  store.putCompilerRun({ id: "run_m1", intelligenceLane: lane, status: "interrupted", attempt: 2, inputHash: "mm", errorClass: "Custom model HTTP 400", startedAt: 1 });
+  assert.equal(compileAttemptsSpent(store.runsForInput(lane, "mm")), 2);
+  const service = new LearningService({
+    store,
+    settings: () => ({ mode: "automatic", autoRetrieve: false }),
+    allowStub: true,
+  });
+  assert.ok(service, "the mismatch budget reads from the same counter as the event lanes");
+});
+
+test("the memory block keeps room for the proposals a brief is checked against", () => {
+  const corpus = [
+    ...Array.from({ length: 200 }, (_, index) => memory(`act_${index}`, { status: "active", statement: "a".repeat(1_200) })),
+    ...Array.from({ length: 200 }, (_, index) => memory(`prop_${index}`, { status: "proposed", statement: "p".repeat(180) })),
+  ];
+  const kept = boundedCompilerMemories(corpus, DEFAULT_COMPILER_POLICY.maxMemoryChars);
+  const proposals = kept.filter((item) => item.status === "proposed");
+  const durable = kept.filter((item) => item.status === "active");
+  assert.ok(durable.length > 0, "durable records must survive");
+  assert.ok(
+    proposals.length > 0,
+    "a block of nothing but durable records hides the duplicates the compiler must not repeat",
+  );
+});
+
+test("recover seeks its unfinished row instead of loading every run", () => {
+  const service = fs.readFileSync(path.join(ROOT, "electron", "learning-service.ts"), "utf8");
+  const body = service.slice(service.indexOf("  async recover("), service.indexOf("  async compileIfDue("));
+  assert.match(body, /unfinishedCompilerRun\(\)/);
+  assert.doesNotMatch(body, /listCompilerRuns/);
 });

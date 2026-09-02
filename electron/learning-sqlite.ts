@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { learningDatabasePath } from "../src/lib/learning-paths";
 import {
+  ABANDONED_INPUT,
   capRetrieved,
   DEFAULT_ITEM_CAP,
   DEFAULT_TOKEN_CAP,
@@ -701,6 +702,15 @@ export class SqliteMemoryStore implements MemoryStore {
         .prepare("SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at ASC")
         .all(lane) as Record<string, unknown>[]
     ).map(rowRun);
+  }
+
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
+    const row = this.conn()
+      .prepare(
+        "SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND (status = 'completed' OR (status = 'failed' AND error_class = ?)) ORDER BY started_at DESC LIMIT 1",
+      )
+      .get(lane, ABANDONED_INPUT) as Record<string, unknown> | undefined;
+    return row ? rowRun(row) : undefined;
   }
 
   unfinishedCompilerRun(): CompilerRun | undefined {

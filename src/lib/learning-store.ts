@@ -7,6 +7,7 @@ import {
   matchesForgetTarget,
   rankMemories,
 } from "./learning-policy";
+import { ABANDONED_INPUT } from "./learning-policy";
 import { boundStatement } from "./learning-redact";
 import type {
   CompilerRun,
@@ -113,6 +114,8 @@ export interface MemoryStore {
   runsForInput(lane: IntelligenceLane, inputHash: string): CompilerRun[];
   /** Completed runs in one lane, without loading every run ever recorded. */
   listCompletedRuns(lane: IntelligenceLane): CompilerRun[];
+  /** The newest run that settled a batch: compiled, or abandoned after its attempts. */
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined;
   unfinishedCompilerRun(): CompilerRun | undefined;
   putRetrievalAudit(audit: RetrievalAudit): void;
   listAudits(): RetrievalAudit[];
@@ -342,6 +345,16 @@ export class InMemoryStore implements MemoryStore {
 
   listCompletedRuns(lane: IntelligenceLane): CompilerRun[] {
     return this.listCompilerRuns().filter((run) => run.intelligenceLane === lane && run.status === "completed");
+  }
+
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
+    return this.listCompilerRuns()
+      .filter(
+        (run) =>
+          run.intelligenceLane === lane &&
+          (run.status === "completed" || (run.status === "failed" && run.errorClass === ABANDONED_INPUT)),
+      )
+      .at(-1);
   }
 
   unfinishedCompilerRun(): CompilerRun | undefined {

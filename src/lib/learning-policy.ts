@@ -2,6 +2,7 @@ import type { EffortLevel, ProviderId } from "./types";
 import type {
   AdaptiveSelection,
   CompilerPolicy,
+  CompilerRun,
   ForgetTarget,
   LearningBrief,
   LearningBriefProposal,
@@ -630,21 +631,54 @@ export function boundedCompilerBatch(
  * ceiling.
  */
 export function boundedCompilerMemories(memories: MemoryItem[], maxMemoryChars: number): MemoryItem[] {
-  const rank = (item: MemoryItem) => (item.status === "active" ? 0 : item.status === "approved" ? 1 : 2);
-  const ordered = [...memories].sort((a, b) => {
-    const byRank = rank(a) - rank(b);
-    return byRank !== 0 ? byRank : (b.lastConfirmedAt ?? b.createdAt ?? 0) - (a.lastConfirmedAt ?? a.createdAt ?? 0);
-  });
+  const cost = (item: MemoryItem) => (item.statement ?? "").length + (item.id ?? "").length + 64;
+  const byNewest = (a: MemoryItem, b: MemoryItem) =>
+    (b.lastConfirmedAt ?? b.createdAt ?? 0) - (a.lastConfirmedAt ?? a.createdAt ?? 0);
+  const durable = memories
+    .filter((item) => item.status === "active" || item.status === "approved")
+    .sort((a, b) => (a.status === b.status ? byNewest(a, b) : a.status === "active" ? -1 : 1));
+  // Proposals are what a new brief is checked against, so a block of nothing but
+  // durable records would hide the very duplicates the compiler must not repeat.
+  const proposed = memories.filter((item) => item.status !== "active" && item.status !== "approved").sort(byNewest);
   const kept: MemoryItem[] = [];
   let used = 0;
-  for (const item of ordered) {
-    const cost = (item.statement ?? "").length + (item.id ?? "").length + 64;
-    if (kept.length > 0 && used + cost > maxMemoryChars) break;
-    kept.push(item);
-    used += cost;
-    if (used >= maxMemoryChars) break;
-  }
+  const take = (items: MemoryItem[], budget: number) => {
+    for (const item of items) {
+      const next = cost(item);
+      if (kept.length > 0 && used + next > budget) return;
+      kept.push(item);
+      used += next;
+    }
+  };
+  take(durable, proposed.length > 0 ? Math.floor(maxMemoryChars / 2) : maxMemoryChars);
+  take(proposed, maxMemoryChars);
+  take(durable.filter((item) => !kept.includes(item)), maxMemoryChars);
   return kept;
+}
+
+/**
+ * A rate limit or a busy endpoint says nothing about the input, so it must not
+ * spend the budget that exists to stop a request the model will never accept.
+ * Anything not recognised as transient counts, so a new failure class binds by
+ * default rather than looping.
+ */
+export function compileFailureIsTransient(errorClass?: string): boolean {
+  if (!errorClass) return false;
+  if (/HTTP (408|409|425|429|5\d\d)\b/.test(errorClass)) return true;
+  return /\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|timed? ?out|overloaded|aborted)\b/i.test(
+    errorClass,
+  );
+}
+
+/** The error class on the terminal marker for an input the desk has stopped sending. */
+export const ABANDONED_INPUT = "attempts-exhausted";
+
+/** Attempts a run has already spent at one input. A resumed row carries its own count. */
+export function compileAttemptsSpent(runs: CompilerRun[]): number {
+  return runs
+    .filter((run) => run.status === "failed" || run.status === "interrupted")
+    .filter((run) => !compileFailureIsTransient(run.errorClass))
+    .reduce((total, run) => total + Math.max(1, run.attempt ?? 1), 0);
 }
 
 /** How long to wait before attempt n at one input: the quiet gap, doubled, capped. */

@@ -545,9 +545,17 @@ export function requestedWorkerAccess(input: {
   };
 }
 
+/** Who decided this seat, said the way a caller reads it. */
+function sourcePhrase(source: AccessSource, pass?: number): string {
+  if (source !== "inherited") return `from the ${source}`;
+  // A continuation inherits the wave it continues, not the chat it was called
+  // from, so saying "the caller" there would name the wrong thing entirely.
+  return pass ? `inherited from pass ${pass}` : "inherited from the caller";
+}
+
 /** The granted seat and any refusal, in the one line a spawn result carries. */
-export function grantedAccessLine(result: GrantedWorkerAccess): string {
-  const seat = `Permission ${modeLabel(result.granted.mode)}, Sandbox ${sandboxLabel(result.granted.sandbox)} (from the ${result.source}).`;
+export function grantedAccessLine(result: GrantedWorkerAccess, pass?: number): string {
+  const seat = `Permission ${modeLabel(result.granted.mode)}, Sandbox ${sandboxLabel(result.granted.sandbox)} (${sourcePhrase(result.source, pass)}).`;
   return result.refused ? `${seat} ${result.refused}` : seat;
 }
 
@@ -559,6 +567,8 @@ export function spawnAccessLogDetail(input: {
   granted: DeskAccess;
   ceiling: DeskAccess;
   source: AccessSource;
+  /** The pass this seat was handed forward from, when this is a continuation. */
+  pass?: number;
 }): string {
   const seat = (access: { mode?: string; sandbox?: string } | undefined) =>
     access?.mode || access?.sandbox ? `${access.mode ?? "-"}/${access.sandbox ?? "-"}` : "none";
@@ -569,7 +579,62 @@ export function spawnAccessLogDetail(input: {
     `granted=${seat(input.granted)}`,
     `cap=${seat(input.ceiling)}`,
     `source=${input.source}`,
+    ...(input.pass ? [`pass=${input.pass}`] : []),
   ].join(" ");
+}
+
+/**
+ * The seat the wave being continued actually ran under.
+ *
+ * A mission's second pass used to seat its workers from the chat it was called
+ * from, which is the parent chat — so a mission delegated with sandbox: off out
+ * of a chat the person had tightened wrote happily in pass 1 and was refused in
+ * pass 2. Nothing about the work changed; only which seat the desk read.
+ *
+ * The pass answers instead. Where its workers disagree the tightest one wins:
+ * handing a new worker the widest seat anyone in the wave held would quietly
+ * raise access nobody granted for this slice.
+ */
+export function passGrantedAccess(grants: readonly (DeskAccess | undefined)[]): DeskAccess | undefined {
+  const seats = grants.filter((seat): seat is DeskAccess => Boolean(seat?.mode && seat?.sandbox));
+  if (seats.length === 0) return undefined;
+  return seats.reduce<DeskAccess>((narrowest, seat) => tighterAccess(narrowest, seat), seats[0]!);
+}
+
+/** The seat a continuation hands forward, plus the pass it came from. */
+export type ContinuedAccess = { mode?: PermissionMode; sandbox?: SandboxProfile; pass?: number };
+
+/** Read off the wire, so anything malformed is simply absent rather than trusted. */
+export function parseContinuedAccess(raw: unknown): ContinuedAccess | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const mode = parseCallPermission(typeof record.mode === "string" ? record.mode : undefined);
+  const sandbox = parseSandboxValue(typeof record.sandbox === "string" ? record.sandbox : undefined);
+  const pass =
+    typeof record.pass === "number" && Number.isFinite(record.pass) && record.pass >= 1
+      ? Math.floor(record.pass)
+      : undefined;
+  if (!mode && !sandbox) return undefined;
+  return { ...(mode ? { mode } : {}), ...(sandbox ? { sandbox } : {}), ...(pass ? { pass } : {}) };
+}
+
+/**
+ * What a continuation's new worker inherits when the call named no seat: the
+ * pass it continues, still held to the desk default. The pass's own grant was
+ * capped when it was made, so this only bites when the person narrowed Settings
+ * between passes — and then their latest decision is the one that should win.
+ */
+export function continuedInheritedAccess(input: {
+  continued?: ContinuedAccess;
+  caller: DeskAccess;
+  ceiling?: DeskAccess;
+}): DeskAccess {
+  if (!input.continued) return input.caller;
+  const seat: DeskAccess = {
+    mode: input.continued.mode ?? input.caller.mode,
+    sandbox: input.continued.sandbox ?? input.caller.sandbox,
+  };
+  return tighterAccess(seat, input.ceiling ?? DESK_ACCESS_FALLBACK);
 }
 
 export type LineageChat = {

@@ -14,6 +14,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
+import { passGrantedAccess } from "../src/lib/permissions";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
 import {
   attachmentKind,
@@ -459,6 +460,8 @@ const TOOLS = [
           },
           additionalProperties: false,
         },
+        permission: { type: "string", description: "Seat this pass's worker runs under: ask, accept-edits, or always-approve. Capped at the desk default (Settings › LLMs), not at your own seat. Omit and this pass keeps the seat the previous pass ran under." },
+        sandbox: { type: "string", description: "Sandbox this pass's worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Omit and this pass keeps the previous pass's sandbox, so a mission does not lose access halfway." },
         route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
         tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
@@ -2007,6 +2010,8 @@ async function spawnAgent(
     /** The seat this call asks for the child; the desk caps both at its default. */
     permission?: string;
     sandbox?: string;
+    /** A continuation hands its wave's seat forward, so later passes keep it. */
+    continuedAccess?: { mode?: string; sandbox?: string; pass?: number };
     timeoutSeconds?: number;
     tokenBudget?: number;
     isolation?: "worktree" | "shared";
@@ -2154,6 +2159,7 @@ async function spawnAgent(
     effort: spawnInput.effort,
     permission: spawnInput.permission,
     sandbox: spawnInput.sandbox,
+    continuedAccess: spawnInput.continuedAccess,
     timeoutSeconds: spawnInput.timeoutSeconds,
     tokenBudget: spawnInput.tokenBudget,
     isolation: spawnInput.isolation,
@@ -2196,6 +2202,7 @@ async function spawnAgent(
       effort: spawnInput.effort,
       permission: spawnInput.permission,
       sandbox: spawnInput.sandbox,
+      continuedAccess: spawnInput.continuedAccess,
       timeoutSeconds: spawnInput.timeoutSeconds,
       tokenBudget: spawnInput.tokenBudget,
       isolation: spawnInput.isolation,
@@ -2442,9 +2449,18 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
           effort: requestedBrain.effort ?? inheritedBrain.effort,
         }
       : inheritedBrain;
+  // The seat this wave actually ran under, handed to the next one. Without it
+  // the desk seats pass 2 from the parent chat, so a mission delegated with
+  // sandbox: off out of a chat the person tightened stops writing at pass 2.
+  // Where the wave's workers disagree the tightest wins; a worker with no
+  // record contributes nothing rather than a guess.
+  const passSeat = passGrantedAccess(source.map((session) => session.agentRun?.grantedAccess));
   return spawnAgent(
     {
       prompt: missionContinuationPrompt({ mission: next.mission, remainingWork, evidence, reports: snapshot.reports ?? [] }),
+      permission: typeof args.permission === "string" ? args.permission : undefined,
+      sandbox: typeof args.sandbox === "string" ? args.sandbox : undefined,
+      ...(passSeat ? { continuedAccess: { ...passSeat, pass: previousPass } } : {}),
       // A continuation is the SAME mission, so it keeps the mission's name.
       // Defaulting to "Mission pass 2" retitled the parent chat on every pass
       // and the four-hour job's real name disappeared at the first follow-up.
@@ -3631,7 +3647,7 @@ function isMcpEntry(): boolean {
  *   <helper> link ask --chat <sessionId> --message "<text>" [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link delegate --chat <sessionId> --task "<text>" [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <idempotencyKey>]
  *   <helper> link status <workerId>
- *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--key <idempotencyKey>]
+ *   <helper> link follow-up <workerId> "<text>" --chat <sessionId> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--key <idempotencyKey>]
  *   <helper> link grok-pending
  *   <helper> link grok-reply <requestId> --text "<answer>"
  *
@@ -3667,7 +3683,7 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
   }
   const flag = (name: string): string | undefined => flags.get(name) || undefined;
   const usage =
-    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
+    "usage: link capabilities | capacity [--provider <id>] [--callable] | chats [--parents] [--full] | read <id> [--limit <n>] | ask --chat <id> --message <text> [--trace <id>] [--key <id>] | delegate --chat <id> --task <text> [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--accept <criterion>] [--passes <n>] [--folder <path>] [--trace <id>] [--key <id>] | status <workerId> | follow-up <workerId> <text> --chat <id> [--pass <n>] [--provider <id>] [--model <id>] [--effort <level>] [--permission <seat>] [--sandbox <profile>] [--route <tier>] [--trace <id>] [--key <id>] | grok-pending | grok-reply <id> --text <answer> | local-hosts | local-capabilities [--host <id>] | local-upload <path> --capability <id> --kind <kind> --role <role> --media-type <mime> | local-invoke <capabilityId> ['<invocation-json>'] | local-chat <prompt> | local-3d <sourceArtifactId> | local-job <jobId> | local-cancel <jobId> | local-artifact <artifactId> | local-materialize <artifactId> | local-continue <jobId> <continuationId> --chat <id> --folder <path>";
   if (sub === "capabilities") return { name: "workhorse_capabilities", args: {} };
   if (sub === "capacity") {
     return { name: "workhorse_query_capacity", args: { ...(flag("provider") ? { provider: flag("provider") } : {}), ...(flag("callable") ? { callableOnly: true } : {}) } };
@@ -3744,6 +3760,8 @@ export function linkCliCall(argv: string[]): { name: string; args: Record<string
         remainingWork: text.join(" "),
         fromSessionId: chat,
         ...(Object.keys(initialBrain).length > 0 ? { initialBrain } : {}),
+        ...(flag("permission") ? { permission: flag("permission") } : {}),
+        ...(flag("sandbox") ? { sandbox: flag("sandbox") } : {}),
         ...(flag("route") ? { route: flag("route") } : {}),
         ...(flag("trace") ? { traceId: flag("trace") } : {}),
         ...(flag("key") ? { idempotencyKey: flag("key") } : {}),

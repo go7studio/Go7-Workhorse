@@ -72,6 +72,13 @@ export type PeerAsk = {
    */
   permission?: string;
   sandbox?: string;
+  /**
+   * The seat the wave being continued ran under, handed forward so a mission's
+   * later passes are seated by the mission and not by the chat it was called
+   * from. Only a continuation sends it, and an explicit permission/sandbox on
+   * the same call still outranks it.
+   */
+  continuedAccess?: { mode?: string; sandbox?: string; pass?: number };
   /** Inherit reuses compatible context; fresh accepts only a structured handoff. */
   seed?: WorkerSeed;
   handoff?: WorkerHandoff;

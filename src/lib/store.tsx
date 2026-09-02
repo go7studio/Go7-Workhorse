@@ -53,15 +53,23 @@ import {
   describeElevation,
   elevationForBlock,
   enqueuePermission,
+  grantedAccessLine,
   grantedPolicyAnswer,
   inboundAccess,
   classifyElevationInput,
   lineageGrant,
+  parseCallPermission,
   parseElevationInput,
+  parseSandboxValue,
   permissionPolicyAnswer,
   permissionResumeStatus,
+  permissionSourceNote,
   promptOwner,
+  releasedHelper,
+  requestedWorkerAccess,
+  sandboxSourceNote,
   securityPolicyAnswer,
+  spawnAccessLogDetail,
   workerAccess,
   workerGrant,
 } from "./permissions";
@@ -1509,14 +1517,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const picked = provider ?? remembered!.provider;
       const model = provider ? defaultModel(provider).id : remembered!.model;
       const customBotId = picked === "custom" ? remembered?.customBotId : undefined;
-      const rememberedAccess = remembered?.provider === picked ? remembered : undefined;
       const nativeAccess = picked === "custom" ? undefined : current.settings.llms[picked].accessDefaults;
-      // A new chat seeds from the last chat's access when the vendor matches,
-      // and otherwise from the desk default narrowed by that vendor's own
-      // config. Switching vendor is not a restriction, so it no longer lands
-      // on Ask just because the new vendor has nothing recorded.
+      // A new chat starts at the desk default, narrowed by that vendor's own
+      // config. It no longer copies the last chat of the same vendor: one
+      // read-only review chat then made every next Grok chat read-only, and
+      // nobody had asked for that. A chat is tightened by the person, on that
+      // chat. Vendor, model and effort still come from memory below.
       const seat = inboundAccess({
-        parent: rememberedAccess ? { mode: rememberedAccess.mode, sandbox: rememberedAccess.sandbox } : undefined,
         desk: current.settings.access,
         vendor: nativeAccess,
       });
@@ -4359,6 +4366,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 });
                 return;
               }
+              // Same rule as the vendor event: a hidden worker's ask never
+              // becomes a card. The person is not in that chat, and the seat it
+              // wants moved belongs to a chat further up. Say which one.
+              if (from.hidden) {
+                await replyAsk({
+                  text: JSON.stringify({
+                    ok: false,
+                    reason: sandboxSourceNote({
+                      session: from,
+                      sessions: latest.sessions,
+                      deskAccess: latest.settings.access,
+                    }),
+                  }),
+                });
+                return;
+              }
               const need = classified.need;
               const requestId = uid("perm");
               elevatePeerReply.current.set(requestId, replyAsk);
@@ -5211,8 +5234,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               parentEnvironment: caller.environment,
               projectFolder,
             });
-            const spawnRole = nestedPolicy.role ??
-              (payload.role === "auditor" ? "auditor" as const : routeSpawn ? "worker" as const : undefined);
+            // A delegation's access is decided here, at the call. The ceiling
+            // is the desk default, never the caller's seat, so a chat the
+            // person tightened for reviews can still hand a working child the
+            // access the app allows. Silence keeps the caller's seat.
+            const requestedAccess = {
+              ...(parseCallPermission(payload.permission) ? { mode: parseCallPermission(payload.permission)! } : {}),
+              ...(parseSandboxValue(payload.sandbox) ? { sandbox: parseSandboxValue(payload.sandbox)! } : {}),
+            };
+            const callAccess = requestedWorkerAccess({
+              requested: requestedAccess,
+              inherited: inheritedAccess,
+              ceiling: latest.settings.access,
+            });
+            // A helper the call made writable is not a helper any more, so it
+            // is not recorded as one; the read-only clamp and the role are the
+            // same fact and they move together.
+            const helperReleased = releasedHelper({
+              role: nestedPolicy.role,
+              requestedSandbox: requestedAccess.sandbox,
+            });
+            const spawnRole = (helperReleased ? undefined : nestedPolicy.role) ??
+              (payload.role === "auditor" ? "auditor" as const : routeSpawn || helperReleased ? "worker" as const : undefined);
             const routingRole = spawnRole === "helper" ? "worker" as const : spawnRole;
             const routeRequest = {
               prompt: payload.message,
@@ -5433,6 +5476,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const childId = reusedWorker?.id || payload.childSessionId?.trim() || uid("sess");
             const assistantId = uid("msg");
             const startedAt = Date.now();
+            // The caller learns its child's seat from the spawn result, not
+            // from a card the person has to answer. `log` is the main-log line
+            // the Link helper records — identifiers and seats, no brief.
+            const accessReceipt = {
+              granted: callAccess.granted,
+              source: callAccess.source,
+              ...(callAccess.refused ? { refused: callAccess.refused } : {}),
+              summary: grantedAccessLine(callAccess),
+              log: spawnAccessLogDetail({
+                child: childId,
+                parent: parent.id,
+                requested: requestedAccess,
+                granted: callAccess.granted,
+                ceiling: latest.settings.access,
+                source: callAccess.source,
+              }),
+            };
             let spawnImages: import("./types").ChatImage[] = [];
             try {
               spawnImages = await fitModelImages(payload.attachments ?? []);
@@ -5646,9 +5706,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // second — it silences the modal without loosening the launch.
               // A tightening the person put on this worker chat outranks both.
               ...workerAccess({
-                inherited: inheritedAccess,
+                inherited: callAccess.granted,
                 owned: assignedPaths.length > 0,
-                readOnly: nestedPolicy.readOnly,
+                readOnly: nestedPolicy.readOnly && !helperReleased,
                 prior: priorWorker,
               }),
               securityPolicy: parent.securityPolicy,
@@ -5672,7 +5732,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ...(assignedConstraints.length > 0 ? { constraints: assignedConstraints } : {}),
                 ...(assignedPaths.length > 0 ? { paths: assignedPaths } : {}),
                 ...(effectiveExclusions.length > 0 ? { exclusions: effectiveExclusions } : {}),
-                grantedAccess: workerGrant({ inherited: inheritedAccess, prior: priorWorker }),
+                grantedAccess: { ...workerGrant({ inherited: callAccess.granted, prior: priorWorker }), source: callAccess.source },
                 correlationId: childCorrelationId,
                 ...(childMission ? { mission: childMission } : {}),
               },
@@ -5971,6 +6031,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ),
                     worker: workerName,
                     reused: Boolean(priorWorker),
+                    access: accessReceipt,
                     routingMode: routedWorkerIsRouted ? "auto" : "manual",
                     ...(routedWorkerIsRouted && routeDecision ? { routingDecision: routeDecision } : {}),
                     howToUse:
@@ -6008,6 +6069,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   provider: finished?.provider ?? spec.provider,
                   model: finished?.model ?? spec.model,
                   effort: finished?.effort ?? null,
+                  access: accessReceipt,
                   exclusions: finished?.agentRun?.exclusions ?? effectiveExclusions,
                   routingMode: finished?.routingMode ?? (routeDecision ? "auto" : "manual"),
                   ...(finished?.routingDecision ?? routeDecision
@@ -6770,8 +6832,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           sessions: stateRef.current.sessions,
           deskAccess: stateRef.current.settings.access,
         });
+        // A subagent never asks the person. Its chat is hidden, the person is
+        // not in it, and the setting it wants moved lives on some other chat
+        // entirely — so the card was unanswerable where it appeared. The desk
+        // denies and names the source of the sandbox instead; the worker reads
+        // that in its own transcript and asks for the seat in its next call.
+        // A VISIBLE chat's own vendor session still gets its card: that is the
+        // person asking to lift their own setting, in front of them.
         const deskClamp =
-          blocked && owner && promptOwner(blocked, lineage) === "desk" ? deskClampNote(owner.agentRun) : null;
+          blocked && owner
+            ? owner.hidden
+              ? sandboxSourceNote({
+                  session: owner,
+                  sessions: stateRef.current.sessions,
+                  deskAccess: stateRef.current.settings.access,
+                })
+              : promptOwner(blocked, lineage) === "desk"
+                ? deskClampNote(owner.agentRun)
+                : null
+            : null;
         const need = deskClamp ? null : blocked;
         if (need && owner) {
           setState((current) => ({
@@ -6811,7 +6890,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // the desk denies and names its own clamp. Falling through to the
         // prompt below would put the desk's narrowing in front of the person
         // again, which is the whole thing this lane removes.
-        const allowed =
+        const answered =
           forced ??
           granted ??
           autoAllowPermission({
@@ -6821,6 +6900,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             grants: owner?.permissionGrants,
           }) ??
           (deskClamp ? ("deny" as const) : null);
+        // The elevate card was only one of the two doors into the person's
+        // inbox. A worker seated at Ask is refused by nothing above — Ask does
+        // not deny, it declines to answer — so its request fell through to the
+        // ordinary prompt below and carded the person from a chat they are not
+        // in. A subagent's request is answered here instead: by its grant if
+        // that allows it, and otherwise denied with the seat that stopped it
+        // named, so the coordinator can ask for it in the next call.
+        const hiddenDeny = !answered && owner?.hidden === true;
+        const allowed = answered ?? (hiddenDeny ? ("deny" as const) : null);
+        const deskNote =
+          deskClamp ??
+          (hiddenDeny
+            ? permissionSourceNote({
+                session: owner,
+                sessions: stateRef.current.sessions,
+                deskAccess: stateRef.current.settings.access,
+              })
+            : null);
         const deniedBy =
           security.boundary ??
           (forced === "deny"
@@ -6854,7 +6951,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                             {
                               id: uid("msg"),
                               role: "system" as const,
-                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskClamp ? ` · ${deskClamp}` : ""}`,
+                              text: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskNote ? ` · ${deskNote}` : ""}`,
                               createdAt: Date.now(),
                             },
                           ]

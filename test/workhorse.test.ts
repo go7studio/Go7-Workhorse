@@ -10201,8 +10201,12 @@ test("a nested helper's clamped runtime is said out loud, not swallowed", () => 
   // exactly when a vendor had to be asked twice.
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   assert.match(mcp, /const clampNote = isNested \? nestedTimeoutNote\(input\.timeoutSeconds\) : "";/);
-  assert.match(mcp, /return withSpawnNote\(first, clampNote\);/, "the plain spawn result carries the note");
-  assert.match(mcp, /return withSpawnNote\(await postBridge\("\/spawn"/, "the granted retry carries it too");
+  assert.match(mcp, /return withSpawnNote\(recordSpawnAccess\(first\), clampNote\);/, "the plain spawn result carries the note");
+  assert.match(
+    mcp,
+    /return withSpawnNote\(recordSpawnAccess\(await postBridge\("\/spawn"/,
+    "the granted retry carries it too",
+  );
   assert.match(
     mcp,
     /timeoutSeconds: Math\.min\(NESTED_HELPER_TIMEOUT_SECONDS, Math\.max\(30, input\.timeoutSeconds \?\? NESTED_HELPER_TIMEOUT_SECONDS\)\)/,

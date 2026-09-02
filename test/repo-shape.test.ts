@@ -216,3 +216,31 @@ test("the public tree does not ship operator product law", () => {
   assert.match(readFileSync(path.join(ROOT, "CONTRIBUTING.md"), "utf8"), /does not live in this public repository/);
   assert.doesNotMatch(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /BIBLE/);
 });
+
+/**
+ * Three ship gates in a row dead-coded a branch with `if (false)` and watched a
+ * source pin stay green, because a pin matches the words inside the branch and
+ * the words survive. The pins are worth keeping — they say which line carries a
+ * rule — so the dead-coding is what has to be impossible. No shipped source has
+ * ever wanted a branch that cannot run.
+ */
+const DEAD_BRANCH = /\bif \(false\b|\bif \(0\)|&& false\b/;
+
+test("no shipped source dead-codes a branch", () => {
+  const offenders = tracked()
+    .map((entry) => entry.file)
+    .filter(
+      (file) =>
+        (file.startsWith("src/") || file.startsWith("electron/")) &&
+        (file.endsWith(".ts") || file.endsWith(".tsx")) &&
+        !file.includes(".test."),
+    )
+    .filter((file) => DEAD_BRANCH.test(readFileSync(path.join(ROOT, file), "utf8")))
+    .sort();
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these files hold a branch that cannot run, so a source pin over them proves nothing:\n  ${offenders.join("\n  ")}\nDelete the branch rather than switching it off.`,
+  );
+});

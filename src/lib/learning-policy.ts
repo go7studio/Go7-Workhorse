@@ -2,6 +2,7 @@ import type { EffortLevel, ProviderId } from "./types";
 import type {
   AdaptiveSelection,
   CompilerPolicy,
+  CompilerRun,
   ForgetTarget,
   LearningBrief,
   LearningBriefProposal,
@@ -30,7 +31,9 @@ export const DEFAULT_COMPILER_POLICY: CompilerPolicy = {
   quietMs: 15_000,
   maxEventsPerRun: 40,
   maxPayloadChars: 8_000,
+  maxMemoryChars: 24_000,
   maxAttempts: 2,
+  maxBackoffMs: 15 * 60_000,
 };
 
 export const DEFAULT_ITEM_CAP = 8;
@@ -618,6 +621,126 @@ export function boundedCompilerBatch(
     if (promptFor(selected, memories).length >= maxPayloadChars) break;
   }
   return selected;
+}
+
+/**
+ * The memory block a compile prompt carries. Every prompt used to embed the
+ * whole lane, so a corpus that only ever grows eventually made every request
+ * larger than the model would accept, and the same input then failed forever.
+ * Durable records come first, then the newest, and the block stops at its
+ * ceiling.
+ */
+export function boundedCompilerMemories(memories: MemoryItem[], maxMemoryChars: number): MemoryItem[] {
+  const cost = (item: MemoryItem) => (item.statement ?? "").length + (item.id ?? "").length + 64;
+  const byNewest = (a: MemoryItem, b: MemoryItem) =>
+    (b.lastConfirmedAt ?? b.createdAt ?? 0) - (a.lastConfirmedAt ?? a.createdAt ?? 0);
+  const durable = memories
+    .filter((item) => item.status === "active" || item.status === "approved")
+    .sort((a, b) => (a.status === b.status ? byNewest(a, b) : a.status === "active" ? -1 : 1));
+  // Proposals are what a new brief is checked against, so a block of nothing but
+  // durable records would hide the very duplicates the compiler must not repeat.
+  const proposed = memories.filter((item) => item.status !== "active" && item.status !== "approved").sort(byNewest);
+  const kept: MemoryItem[] = [];
+  let used = 0;
+  const take = (items: MemoryItem[], budget: number) => {
+    for (const item of items) {
+      const next = cost(item);
+      if (kept.length > 0 && used + next > budget) return;
+      kept.push(item);
+      used += next;
+    }
+  };
+  take(durable, proposed.length > 0 ? Math.floor(maxMemoryChars / 2) : maxMemoryChars);
+  take(proposed, maxMemoryChars);
+  take(durable.filter((item) => !kept.includes(item)), maxMemoryChars);
+  return kept;
+}
+
+/**
+ * A rate limit or a busy endpoint says nothing about the input, so it must not
+ * spend the budget that exists to stop a request the model will never accept.
+ * Anything not recognised as transient counts, so a new failure class binds by
+ * default rather than looping.
+ */
+export function compileFailureIsTransient(errorClass?: string): boolean {
+  if (!errorClass) return false;
+  // A status code decides on its own. A 400 whose body mentions a timeout is
+  // still a 400: the words only speak when no status was recorded.
+  const status = /HTTP (\d{3})\b/.exec(errorClass);
+  if (status) return /^(408|409|425|429|5\d\d)$/.test(status[1]);
+  return /\b(ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|timed? ?out|overloaded|aborted)\b/i.test(
+    errorClass,
+  );
+}
+
+/**
+ * The statuses that mean "this compile payload is not acceptable": malformed,
+ * too large, unprocessable. Only these say something about the input.
+ *
+ * 414 and 431 were here and should not have been: a URI that is too long and
+ * headers that are too large are faults in the request envelope the desk
+ * builds, not in the evidence being compiled, and a person fixing the endpoint
+ * would want that batch waiting for them.
+ *
+ * Named one by one on purpose. Reading it as "any 4xx but a few" abandoned
+ * evidence over a stale key (401), an unpaid bill (402), a wrong base URL
+ * (404) and a conflict (409) — all desk faults that a person fixes, after
+ * which the same batch would compile.
+ */
+const INPUT_REFUSED_STATUS = new Set(["400", "413", "422"]);
+
+/**
+ * Only the model refusing the request itself spends the budget. No bot
+ * connected yet, a bad key, a wrong path, a reply that was not JSON, a
+ * network fault, or an unknown throw say nothing about the input, so they are
+ * retried with a widening gap and never abandon the batch.
+ */
+export function compileFailureSpendsBudget(errorClass?: string): boolean {
+  if (!errorClass) return false;
+  const status = /HTTP (\d{3})\b/.exec(errorClass);
+  if (!status) return false;
+  return INPUT_REFUSED_STATUS.has(status[1]);
+}
+
+/** The marker already written for this input, if the desk has given up on it. */
+export function abandonMarkerFor(runs: CompilerRun[]): CompilerRun | undefined {
+  return runs.find((run) => run.errorClass === ABANDONED_INPUT);
+}
+
+/** The error class on the terminal marker for an input the desk has stopped sending. */
+export const ABANDONED_INPUT = "attempts-exhausted";
+
+/** Attempts a run has already spent at one input. A resumed row carries its own count. */
+export function compileAttemptsSpent(runs: CompilerRun[]): number {
+  return runs
+    .filter((run) => run.status === "failed" || run.status === "interrupted")
+    .filter((run) => compileFailureSpendsBudget(run.errorClass))
+    .reduce((total, run) => total + Math.max(1, run.attempt ?? 1), 0);
+}
+
+/** How long to wait before attempt n at one input: the quiet gap, doubled, capped. */
+export function compileBackoffMs(failures: number, quietMs: number, maxBackoffMs: number): number {
+  if (failures <= 0) return quietMs;
+  return Math.min(maxBackoffMs, quietMs * 2 ** Math.min(failures, 20));
+}
+
+/**
+ * One event may be larger than the whole budget. The old batch let the first
+ * event through whatever its size, which is how a single 27 kB payload became
+ * a request no model would take. Trim the payload instead of dropping the
+ * event, so the run still carries its evidence and its id.
+ */
+export function trimmedCompilerEvent(event: LearningEvent, maxPayloadChars: number): LearningEvent {
+  const encoded = JSON.stringify(event.payload ?? {});
+  if (encoded.length <= maxPayloadChars) return event;
+  const summary = typeof event.payload?.summary === "string" ? event.payload.summary : "";
+  return {
+    ...event,
+    payload: {
+      ...(summary ? { summary: summary.slice(0, Math.max(0, maxPayloadChars - 256)) } : {}),
+      trimmed: `payload trimmed from ${encoded.length} to fit the compile budget`,
+    },
+  };
 }
 
 export function lexicalScore(statement: string, query: string): number {

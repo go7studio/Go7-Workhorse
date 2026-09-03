@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { learningDatabasePath } from "../src/lib/learning-paths";
 import {
+  ABANDONED_INPUT,
   capRetrieved,
   DEFAULT_ITEM_CAP,
   DEFAULT_TOKEN_CAP,
@@ -10,7 +11,7 @@ import {
   matchesForgetTarget,
   rankMemories,
 } from "../src/lib/learning-policy";
-import { LEARNING_SCHEMA_VERSION, type CompilerRun, type EventFilter, type ForgetTarget, type LearningEvent, type LearningExportPayload, type LearningProbeResult, type MemoryFilter, type MemoryItem, type PurgeResult, type RankedMemory, type RetrievalAudit, type RetrievalQuery } from "../src/lib/learning-types";
+import { LEARNING_SCHEMA_VERSION, type CompilerRun, type EventFilter, type ForgetTarget, type IntelligenceLane, type LearningEvent, type LearningExportPayload, type LearningProbeResult, type MemoryFilter, type MemoryItem, type PurgeResult, type RankedMemory, type RetrievalAudit, type RetrievalQuery } from "../src/lib/learning-types";
 import { boundedReplace, expandDependentMemoryIds, removeSidecars, type MemoryStore } from "../src/lib/learning-store";
 
 const BUSY_MS = 5_000;
@@ -274,6 +275,11 @@ export class SqliteMemoryStore implements MemoryStore {
       if (!columns("compiler_runs").has("input_memory_ids")) {
         db.exec("ALTER TABLE compiler_runs ADD COLUMN input_memory_ids TEXT");
       }
+      // A desk that has compiled for weeks holds tens of thousands of runs. The
+      // attempt budget and the watermark are read on every quiet tick, so both
+      // reads must be an index seek rather than a table scan.
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runs_lane_hash ON compiler_runs (intelligence_lane, input_hash)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runs_lane_status_started ON compiler_runs (intelligence_lane, status, started_at)");
       db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', ?)").run(String(LEARNING_SCHEMA_VERSION));
       db.exec("COMMIT");
     } catch (error) {
@@ -673,6 +679,48 @@ export class SqliteMemoryStore implements MemoryStore {
 
   listCompilerRuns(): CompilerRun[] {
     return (this.conn().prepare("SELECT * FROM compiler_runs ORDER BY started_at ASC").all() as Record<string, unknown>[]).map(rowRun);
+  }
+
+  lastCompletedRun(lane: IntelligenceLane): CompilerRun | undefined {
+    const row = this.conn()
+      .prepare("SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1")
+      .get(lane) as Record<string, unknown> | undefined;
+    return row ? rowRun(row) : undefined;
+  }
+
+  runsForInput(lane: IntelligenceLane, inputHash: string): CompilerRun[] {
+    return (
+      this.conn()
+        .prepare("SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND input_hash = ? ORDER BY started_at ASC")
+        .all(lane, inputHash) as Record<string, unknown>[]
+    ).map(rowRun);
+  }
+
+  listCompletedRuns(lane: IntelligenceLane): CompilerRun[] {
+    return (
+      this.conn()
+        .prepare("SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND status = 'completed' ORDER BY started_at ASC")
+        .all(lane) as Record<string, unknown>[]
+    ).map(rowRun);
+  }
+
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[] {
+    return (
+      this.conn()
+        .prepare(
+          "SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND (status = 'completed' OR (status = 'failed' AND error_class = ?)) ORDER BY started_at ASC",
+        )
+        .all(lane, ABANDONED_INPUT) as Record<string, unknown>[]
+    ).map(rowRun);
+  }
+
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
+    const row = this.conn()
+      .prepare(
+        "SELECT * FROM compiler_runs WHERE intelligence_lane = ? AND (status = 'completed' OR (status = 'failed' AND error_class = ?)) ORDER BY started_at DESC LIMIT 1",
+      )
+      .get(lane, ABANDONED_INPUT) as Record<string, unknown> | undefined;
+    return row ? rowRun(row) : undefined;
   }
 
   unfinishedCompilerRun(): CompilerRun | undefined {

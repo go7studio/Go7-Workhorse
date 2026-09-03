@@ -7,10 +7,12 @@ import {
   matchesForgetTarget,
   rankMemories,
 } from "./learning-policy";
+import { ABANDONED_INPUT } from "./learning-policy";
 import { boundStatement } from "./learning-redact";
 import type {
   CompilerRun,
   EventFilter,
+  IntelligenceLane,
   ForgetTarget,
   LearningEvent,
   LearningExportPayload,
@@ -106,6 +108,16 @@ export interface MemoryStore {
   putCompilerRun(run: CompilerRun): void;
   getCompilerRun(id: string): CompilerRun | undefined;
   listCompilerRuns(): CompilerRun[];
+  /** The newest completed run in a lane. Reads the watermark without loading every run. */
+  lastCompletedRun(lane: IntelligenceLane): CompilerRun | undefined;
+  /** Runs already spent on one input, so an attempt budget can bind across ticks. */
+  runsForInput(lane: IntelligenceLane, inputHash: string): CompilerRun[];
+  /** Completed runs in one lane, without loading every run ever recorded. */
+  listCompletedRuns(lane: IntelligenceLane): CompilerRun[];
+  /** The newest run that settled a batch: compiled, or abandoned after its attempts. */
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined;
+  /** Every run that settled a batch in one lane, oldest first. */
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[];
   unfinishedCompilerRun(): CompilerRun | undefined;
   putRetrievalAudit(audit: RetrievalAudit): void;
   listAudits(): RetrievalAudit[];
@@ -321,6 +333,32 @@ export class InMemoryStore implements MemoryStore {
 
   listCompilerRuns(): CompilerRun[] {
     return [...this.state.runs.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+  }
+
+  lastCompletedRun(lane: IntelligenceLane): CompilerRun | undefined {
+    return this.listCompilerRuns()
+      .filter((run) => run.intelligenceLane === lane && run.status === "completed")
+      .at(-1);
+  }
+
+  runsForInput(lane: IntelligenceLane, inputHash: string): CompilerRun[] {
+    return this.listCompilerRuns().filter((run) => run.intelligenceLane === lane && run.inputHash === inputHash);
+  }
+
+  listCompletedRuns(lane: IntelligenceLane): CompilerRun[] {
+    return this.listCompilerRuns().filter((run) => run.intelligenceLane === lane && run.status === "completed");
+  }
+
+  listSettledRuns(lane: IntelligenceLane): CompilerRun[] {
+    return this.listCompilerRuns().filter(
+      (run) =>
+        run.intelligenceLane === lane &&
+        (run.status === "completed" || (run.status === "failed" && run.errorClass === ABANDONED_INPUT)),
+    );
+  }
+
+  lastSettledRun(lane: IntelligenceLane): CompilerRun | undefined {
+    return this.listSettledRuns(lane).at(-1);
   }
 
   unfinishedCompilerRun(): CompilerRun | undefined {

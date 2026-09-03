@@ -1483,15 +1483,6 @@ app.whenReady().then(async () => {
     return readTranscriptSidecar(transcriptSidecarPath(app.getPath("userData"), sessionId));
   });
 
-  /** The runs this process is still carrying. A reopened window asks before it calls anything dead. */
-  ipcMain.handle("runs:live", () => [
-    ...new Set([
-      ...claudeHost.liveSessionIds(),
-      ...codexHost.liveSessionIds(),
-      ...cursorHost.liveSessionIds(),
-      ...grokHost.liveSessionIds(),
-    ]),
-  ]);
   ipcMain.handle("state:load", () => {
     const load = readStateWithSource();
     const loaded = load.state;
@@ -1799,6 +1790,22 @@ app.whenReady().then(async () => {
   });
 
   const customHost = new CustomSessionHost();
+
+  /**
+   * The runs this process is still carrying, asked by a reopened window before
+   * it decides anything died. Registered here, below every host, so the
+   * handler can never be reached before one of them exists.
+   */
+  ipcMain.handle("runs:live", () => [
+    ...new Set([
+      ...claudeHost.liveSessionIds(),
+      ...codexHost.liveSessionIds(),
+      ...cursorHost.liveSessionIds(),
+      ...grokHost.liveSessionIds(),
+      ...customHost.liveSessionIds(),
+    ]),
+  ]);
+
   ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
     const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
     const result = await customHost.prompt(input, (payload) => {

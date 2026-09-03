@@ -277,6 +277,17 @@ export class CustomSessionHost {
   private tails = new Map<string, Promise<unknown>>();
   private aborts = new Map<string, AbortController>();
   private waiting = new Map<string, (answer: PermissionAnswer) => void>();
+
+  /**
+   * The sessions this host is still driving. Custom HTTP keeps no agent slot,
+   * so the in-flight abort controller is the handle: it is set when the turn
+   * starts and deleted in the same finally that ends it. Without this a custom
+   * worker — every synthetic bot on the desk — was still declared dead by a
+   * window reload, which is the whole bug the ACP hosts were fixed for.
+   */
+  liveSessionIds(): string[] {
+    return [...this.aborts.keys()];
+  }
   private readonly stream: typeof streamCustomHttp;
   private readonly safety: ResolvedCustomTurnSafety;
   private readonly now: () => number;

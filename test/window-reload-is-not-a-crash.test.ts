@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { LEGACY_INTERRUPTED_ERROR, normalizeAgentRun, interruptedWorkerError } from "../src/lib/subagents";
 import { normalizeSession } from "../src/lib/session";
+import { applyChildIdleSync } from "../src/lib/lineup";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -76,4 +77,43 @@ test("a vendor event follows the window that is on screen now", () => {
   const helper = main.slice(main.indexOf("const sendToDesk ="), main.indexOf("ipcMain.handle(\"state:save\""));
   assert.match(helper, /if \(!origin\.isDestroyed\(\)\)/, "the original window still wins while it lives");
   assert.match(helper, /BrowserWindow\.getAllWindows\(\)/, "and the live window catches the rest");
+});
+
+// --- from the Lane 9 gate (Cursor Grok 4.6): live runs that own no ACP slot ---
+
+test("a custom HTTP worker is live too, and says so", () => {
+  const src = read("electron/custom-host.ts");
+  assert.match(
+    src,
+    /liveSessionIds\(\): string\[\] \{\s*return \[\.\.\.this\.aborts\.keys\(\)\];/,
+    "custom keeps no agent slot; the in-flight abort controller is the handle",
+  );
+  const main = read("electron/main.ts");
+  assert.match(main, /\.\.\.customHost\.liveSessionIds\(\),/, "and runs:live must ask it, or every synthetic bot still dies on reload");
+  const handler = main.indexOf('ipcMain.handle("runs:live"');
+  assert.ok(handler > main.indexOf("const customHost = new CustomSessionHost()"), "registered after every host exists");
+});
+
+test("a terminal event can correct a run the desk only guessed was interrupted", () => {
+  const now = 5_000;
+  const child = (status: string) =>
+    ([{ id: "w", parentId: "p", status: "running", agentRun: { status, startedAt: 1 }, messages: [] }] as unknown as Parameters<typeof applyChildIdleSync>[0]);
+  const corrected = applyChildIdleSync(child("interrupted"), "w", "completed", { now });
+  assert.equal(
+    corrected.find((session) => session.id === "w")?.agentRun?.status,
+    "completed",
+    "interrupted is a guess about a run nobody could see; the vendor's own answer is fact",
+  );
+  for (const settled of ["completed", "failed", "cancelled", "timed-out", "budget-exceeded"]) {
+    const kept = applyChildIdleSync(child(settled), "w", "completed", { now });
+    assert.equal(kept.find((session) => session.id === "w")?.agentRun?.status, settled, `${settled} is already fact and stands`);
+  }
+});
+
+test("what is live is read before state, so the gap between them cannot lie", () => {
+  const store = read("src/lib/store.tsx");
+  const liveAt = store.indexOf("const live = window.workhorse?.liveRunIds");
+  const savedAt = store.indexOf("const saved = window.workhorse ? await window.workhorse.loadState()");
+  assert.ok(liveAt > 0 && savedAt > 0);
+  assert.ok(liveAt < savedAt, "a run that ends in the gap must already be terminal on disk when state is read");
 });

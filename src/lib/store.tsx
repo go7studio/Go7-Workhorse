@@ -1180,11 +1180,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const saved = window.workhorse ? await window.workhorse.loadState() : null;
-      // Ask main what it is still driving before deciding any run died. A
-      // reopened window reloads this state from disk, and without this every
-      // live worker reads as interrupted.
+      // Ask what is live BEFORE reading state, and the gap between the two
+      // cannot lie. A run that ends in between is already terminal on disk by
+      // the time state is read, and terminal always wins; ask the other way
+      // round and that run reads as running with no live handle, which is the
+      // false death this whole change exists to stop. Nothing can start a run
+      // in the gap, because the desk that starts them is the one booting.
       const live = window.workhorse?.liveRunIds ? await window.workhorse.liveRunIds() : [];
+      const saved = window.workhorse ? await window.workhorse.loadState() : null;
       if (!cancelled) {
         const next = hydrate(saved, new Set(live));
         setState(next);

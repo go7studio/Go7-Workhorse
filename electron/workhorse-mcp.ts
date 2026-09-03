@@ -2426,7 +2426,7 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
       : "previous mission pass is not completed");
   }
   const sessions = (readState().sessions ?? [])
-    .map(normalizeSession)
+    .map((row) => normalizeSession(row))
     .filter((session): session is NonNullable<typeof session> => session !== null)
     .map((session) => {
       const live = liveReports.get(session.id);

@@ -1428,7 +1428,7 @@ app.whenReady().then(async () => {
       typeof raw?.sessionId === "string" ? raw.sessionId : "",
       resolveSessionCwd(typeof raw?.cwd === "string" ? raw.cwd : ""),
       (payload: TerminalEvent) => {
-        if (!event.sender.isDestroyed()) event.sender.send("terminal:event", payload);
+        sendToDesk(event.sender, "terminal:event", payload);
       },
     ),
   );
@@ -1532,6 +1532,25 @@ app.whenReady().then(async () => {
     }
     return loaded;
   });
+  /**
+   * Send a vendor event to the desk that is on screen now.
+   *
+   * These used to go to `event.sender`, the webContents that asked for the
+   * turn. Reload the window and that sender is destroyed, so every chunk,
+   * tool call and terminal report for work already in flight went nowhere and
+   * the run could never finish. The origin is still preferred, so nothing
+   * changes while the window it started in is alive.
+   */
+  const sendToDesk = (origin: Electron.WebContents, channel: string, payload: unknown): void => {
+    if (!origin.isDestroyed()) {
+      origin.send(channel, payload);
+      return;
+    }
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send(channel, payload);
+    }
+  };
+
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
     // The catch keeps the chain alive: writeState guards its own body, but a
@@ -1707,7 +1726,7 @@ app.whenReady().then(async () => {
     };
     const result = await codexHost.prompt(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("codex:event", payload);
+        sendToDesk(event.sender, "codex:event", payload);
       } catch (error) {
         console.error("workhorse codex event send failed", error);
       }
@@ -1732,7 +1751,7 @@ app.whenReady().then(async () => {
     };
     const result = await claudeHost.prompt(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("claude:event", payload);
+        sendToDesk(event.sender, "claude:event", payload);
       } catch (error) {
         console.error("workhorse claude event send failed", error);
       }
@@ -1756,7 +1775,7 @@ app.whenReady().then(async () => {
     };
     const result = await cursorHost.prompt(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("cursor:event", payload);
+        sendToDesk(event.sender, "cursor:event", payload);
       } catch (error) {
         console.error("workhorse cursor event send failed", error);
       }
@@ -1771,11 +1790,27 @@ app.whenReady().then(async () => {
   });
 
   const customHost = new CustomSessionHost();
+
+  /**
+   * The runs this process is still carrying, asked by a reopened window before
+   * it decides anything died. Registered here, below every host, so the
+   * handler can never be reached before one of them exists.
+   */
+  ipcMain.handle("runs:live", () => [
+    ...new Set([
+      ...claudeHost.liveSessionIds(),
+      ...codexHost.liveSessionIds(),
+      ...cursorHost.liveSessionIds(),
+      ...grokHost.liveSessionIds(),
+      ...customHost.liveSessionIds(),
+    ]),
+  ]);
+
   ipcMain.handle("custom:prompt", async (event, raw: CustomPromptInput) => {
     const input = { ...raw, cwd: requireSessionCwd(raw.cwd) };
     const result = await customHost.prompt(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("custom:event", payload);
+        sendToDesk(event.sender, "custom:event", payload);
       } catch (error) {
         console.error("workhorse custom event send failed", error);
       }
@@ -1796,7 +1831,7 @@ app.whenReady().then(async () => {
     };
     const result = await grokHost.prompt(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+        sendToDesk(event.sender, "grok:event", payload);
       } catch (error) {
         console.error("workhorse grok event send failed", error);
       }
@@ -1819,7 +1854,7 @@ app.whenReady().then(async () => {
     };
     return grokHost.compact(input, (payload) => {
       try {
-        if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+        sendToDesk(event.sender, "grok:event", payload);
       } catch (error) {
         console.error("workhorse grok event send failed", error);
       }
@@ -1840,7 +1875,7 @@ app.whenReady().then(async () => {
     try {
       return await grokHost.fork(input, (payload) => {
         try {
-          if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+          sendToDesk(event.sender, "grok:event", payload);
         } catch (error) {
           console.error("workhorse grok event send failed", error);
         }
@@ -1858,7 +1893,7 @@ app.whenReady().then(async () => {
     try {
       return await grokHost.rewind(input, (payload) => {
         try {
-          if (!event.sender.isDestroyed()) event.sender.send("grok:event", payload);
+          sendToDesk(event.sender, "grok:event", payload);
         } catch (error) {
           console.error("workhorse grok event send failed", error);
         }

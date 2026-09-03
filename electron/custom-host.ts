@@ -277,6 +277,17 @@ export class CustomSessionHost {
   private tails = new Map<string, Promise<unknown>>();
   private aborts = new Map<string, AbortController>();
   private waiting = new Map<string, (answer: PermissionAnswer) => void>();
+
+  /**
+   * The sessions this host is still driving. Custom HTTP keeps no agent slot,
+   * so the in-flight abort controller is the handle: it is set when the turn
+   * starts and deleted in the same finally that ends it. Without this a custom
+   * worker — every synthetic bot on the desk — was still declared dead by a
+   * window reload, which is the whole bug the ACP hosts were fixed for.
+   */
+  liveSessionIds(): string[] {
+    return [...this.aborts.keys()];
+  }
   private readonly stream: typeof streamCustomHttp;
   private readonly safety: ResolvedCustomTurnSafety;
   private readonly now: () => number;
@@ -327,6 +338,22 @@ export class CustomSessionHost {
     this.aborts.get(input.sessionId)?.abort();
     const abort = new AbortController();
     this.aborts.set(input.sessionId, abort);
+    try {
+      return await this.promptWithAbort(input, emit, abort);
+    } finally {
+      // The abort handle is this host's answer to "is this run still live", so
+      // it has to be dropped on EVERY exit. Setup below can throw before the
+      // turn's own try block, and a leaked handle would make a finished worker
+      // read as running for the life of the desk.
+      if (this.aborts.get(input.sessionId) === abort) this.aborts.delete(input.sessionId);
+    }
+  }
+
+  private async promptWithAbort(
+    input: CustomPromptInput,
+    emit: GrokEventSink,
+    abort: AbortController,
+  ): Promise<GrokPromptResult> {
     const history = (input.history ?? [])
       .filter((item) => item.role === "user" || item.role === "assistant")
       .map((item) => hydrateHistoryMessage(item));

@@ -378,7 +378,11 @@ export function applyChildIdleSync(
   const next = sessions.map((session) => {
     if (session.id !== childId) return session;
     const run = session.agentRun;
-    const alreadyDone = Boolean(run && run.status !== "running");
+    // "interrupted" is the desk's guess about a run it could not see, and a
+    // window reload used to make that guess wrongly. A later terminal event
+    // from the vendor is fact, so it is allowed to correct the guess; every
+    // other terminal status is already fact and stands.
+    const alreadyDone = Boolean(run && run.status !== "running" && run.status !== "interrupted");
     return {
       ...session,
       status: "idle" as const,

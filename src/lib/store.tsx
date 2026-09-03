@@ -804,7 +804,7 @@ export function deskMissionForStoreSpawn(input: {
   return input.agentRun;
 }
 
-function hydrate(value: unknown): AppState {
+function hydrate(value: unknown, liveRunIds?: ReadonlySet<string>): AppState {
   if (!value || typeof value !== "object") return EMPTY;
   const { watchDismissed: _droppedWatchDismissed, ...record } = value as Partial<AppState> & {
     watchDismissed?: unknown;
@@ -816,7 +816,7 @@ function hydrate(value: unknown): AppState {
   const panel = (record as { panel?: unknown }).panel;
   const settings = normalizeSettings(record.settings);
   const normalizedSessions = Array.isArray(record.sessions)
-    ? record.sessions.map(normalizeSession).filter((item): item is Session => item !== null)
+    ? record.sessions.map((row) => normalizeSession(row, liveRunIds)).filter((item): item is Session => item !== null)
     : [];
   const rawSessions = reconcilePersistedLineups(normalizedSessions);
   const restored = rehomeCustomUsage(normalizeUsage(record.usage), settings.customBots, rawSessions);
@@ -1180,9 +1180,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      // Ask what is live BEFORE reading state, and the gap between the two
+      // cannot lie. A run that ends in between is already terminal on disk by
+      // the time state is read, and terminal always wins; ask the other way
+      // round and that run reads as running with no live handle, which is the
+      // false death this whole change exists to stop. Nothing can start a run
+      // in the gap, because the desk that starts them is the one booting.
+      const live = window.workhorse?.liveRunIds ? await window.workhorse.liveRunIds() : [];
       const saved = window.workhorse ? await window.workhorse.loadState() : null;
       if (!cancelled) {
-        const next = hydrate(saved);
+        const next = hydrate(saved, new Set(live));
         setState(next);
         setReady(true);
         void (async () => {

@@ -116,6 +116,17 @@ export function spawnCodexProcess(spec: ReturnType<typeof buildCodexLaunchSpec>)
 
 export class CodexSessionHost {
   private slots = new Map<string, { key: string; agent: GrokAgent }>();
+
+  /**
+   * The sessions this host is still driving right now.
+   *
+   * A window reload is not a crash. The desk used to rewrite every run marked
+   * running straight to interrupted on any state load, so reopening the window
+   * killed live work that this process was still carrying.
+   */
+  liveSessionIds(): string[] {
+    return [...this.slots.keys()];
+  }
   private tails = new Map<string, Promise<unknown>>();
 
   constructor(private readonly spawn: CodexSpawnFn = spawnCodexProcess) {}

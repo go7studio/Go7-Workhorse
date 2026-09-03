@@ -674,15 +674,20 @@ export function compileFailureIsTransient(errorClass?: string): boolean {
 }
 
 /**
- * The statuses that mean "this request, as sent, is not acceptable": too
- * large, malformed, unprocessable. Only these say something about the input.
+ * The statuses that mean "this compile payload is not acceptable": malformed,
+ * too large, unprocessable. Only these say something about the input.
+ *
+ * 414 and 431 were here and should not have been: a URI that is too long and
+ * headers that are too large are faults in the request envelope the desk
+ * builds, not in the evidence being compiled, and a person fixing the endpoint
+ * would want that batch waiting for them.
  *
  * Named one by one on purpose. Reading it as "any 4xx but a few" abandoned
  * evidence over a stale key (401), an unpaid bill (402), a wrong base URL
  * (404) and a conflict (409) — all desk faults that a person fixes, after
  * which the same batch would compile.
  */
-const INPUT_REFUSED_STATUS = new Set(["400", "413", "414", "422", "431"]);
+const INPUT_REFUSED_STATUS = new Set(["400", "413", "422"]);
 
 /**
  * Only the model refusing the request itself spends the budget. No bot

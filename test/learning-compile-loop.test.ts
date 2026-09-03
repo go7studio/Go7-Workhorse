@@ -454,14 +454,15 @@ test("the abandon marker is its own row and never eats a spent attempt", async (
 // --- round four: a desk fault is not the batch's fault ---
 
 test("a bad key, an unpaid bill, a wrong path or a conflict never abandon a batch", () => {
-  for (const status of ["401", "402", "403", "404", "405", "407", "408", "409", "425", "429", "500", "503"]) {
+  // 414 and 431 are faults in the envelope the desk builds, not in the evidence.
+  for (const status of ["401", "402", "403", "404", "405", "407", "408", "409", "414", "425", "429", "431", "500", "503"]) {
     assert.equal(
       compileFailureSpendsBudget(`Custom model HTTP ${status}: nope`),
       false,
       `HTTP ${status} is the desk's or the endpoint's problem, not the input's`,
     );
   }
-  for (const status of ["400", "413", "414", "422", "431"]) {
+  for (const status of ["400", "413", "422"]) {
     assert.equal(compileFailureSpendsBudget(`Custom model HTTP ${status}: nope`), true, `HTTP ${status} refuses the request itself`);
   }
 });

@@ -117,3 +117,15 @@ test("what is live is read before state, so the gap between them cannot lie", ()
   assert.ok(liveAt > 0 && savedAt > 0);
   assert.ok(liveAt < savedAt, "a run that ends in the gap must already be terminal on disk when state is read");
 });
+
+test("a custom turn drops its live handle even when setup throws", () => {
+  const src = read("electron/custom-host.ts");
+  const outer = src.slice(src.indexOf("private async promptUnlocked("), src.indexOf("private async promptWithAbort("));
+  assert.match(outer, /this\.aborts\.set\(input\.sessionId, abort\);\s*try \{/, "the handle is set, then guarded immediately");
+  assert.match(outer, /\} finally \{[\s\S]*this\.aborts\.delete\(input\.sessionId\)/, "and released on every exit, including a throw in setup");
+  assert.equal(
+    (src.match(/if \(this\.aborts\.get\(input\.sessionId\) === abort\) this\.aborts\.delete\(input\.sessionId\)/g) ?? []).length,
+    2,
+    "the inner turn still releases its own, and the outer guard catches the paths it never reaches",
+  );
+});

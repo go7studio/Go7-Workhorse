@@ -8,6 +8,29 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.54](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.53...v0.6.54) (2026-09-03)
+
+
+### Features
+
+* a model the vendor offers reaches the desk without a release ([9fbea1b](https://github.com/go7studio/Go7-Workhorse/commit/9fbea1b81c8fa1e988214cb6822655f87fc1e37b))
+
+
+### Bug Fixes
+
+* a chat's finished mission stops swallowing its later delegations ([a408646](https://github.com/go7studio/Go7-Workhorse/commit/a40864669042c45946bd9b6d46ecd1b05b7094ea))
+* a custom turn releases its live handle on every exit ([de9fdc3](https://github.com/go7studio/Go7-Workhorse/commit/de9fdc3970efe02e694362184353d32367e18f5d))
+* a desk fault does not cost the evidence behind it ([d9d45cd](https://github.com/go7studio/Go7-Workhorse/commit/d9d45cdf74398dabc53fbd6875fb128719eef0d1))
+* a finished pass is spent, even for a Mission-mode chat ([a9ab70f](https://github.com/go7studio/Go7-Workhorse/commit/a9ab70fdaf6b56224bd79375947460395d83a003))
+* a typed model is put to the vendor, not assumed accepted ([9276eb7](https://github.com/go7studio/Go7-Workhorse/commit/9276eb7d4239e07f18ca1246a60721e45d867a1b))
+* abandon a batch only when the model refused it ([4319b9b](https://github.com/go7studio/Go7-Workhorse/commit/4319b9b3fe651d7e2f341425031f6a5040b24ea8))
+* an envelope fault is not the compile payload's fault ([ed65758](https://github.com/go7studio/Go7-Workhorse/commit/ed65758b318ddb55d3588e6e3d19a42e00d72aeb))
+* hold the compile budget on every path, not just the scheduled one ([b2a51a1](https://github.com/go7studio/Go7-Workhorse/commit/b2a51a1466a248b2064b36b86b38d99dd286c023))
+* reopening the window is not a crash, and must not kill live work ([a1abbf2](https://github.com/go7studio/Go7-Workhorse/commit/a1abbf2913dc59fb58243dd5e408a2b6b39b17c7))
+* stop the learning compiler retrying one input forever ([48fde36](https://github.com/go7studio/Go7-Workhorse/commit/48fde36b1c5815ab486518b4ddc8ba36b7c49853))
+* the live-run check must cover every host, and a guess must be correctable ([03bd570](https://github.com/go7studio/Go7-Workhorse/commit/03bd57045e6dbbe60da46c2f6d557a375e1b3cb8))
+* the vendor's answer, not the launch talking to itself ([d9ef876](https://github.com/go7studio/Go7-Workhorse/commit/d9ef876525f97218fc4616c05d333197dfff252a))
+
 ## [0.6.53](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.52...v0.6.53) (2026-09-02)
 
 

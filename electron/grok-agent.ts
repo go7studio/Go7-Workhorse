@@ -867,8 +867,11 @@ export class GrokAgent {
             .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : null))
             .filter((value): value is string => typeof value === "string")
         : [];
-      if (option.currentValue === want.value) continue;
       const unlisted = want.id === "model" && this.spec.unlistedModel === true;
+      // The agent echoes whatever it was launched with as currentValue, so for
+      // a typed model this equality is the launch talking to itself, not the
+      // vendor agreeing. Skipping here let an unlisted model run unchecked.
+      if (option.currentValue === want.value && !unlisted) continue;
       if (allowed.length > 0 && !allowed.includes(want.value) && !(isCursor && want.id === "model") && !unlisted) continue;
       try {
         await this.request("session/set_config_option", { sessionId, configId: want.id, value: want.value });

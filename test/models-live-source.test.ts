@@ -136,3 +136,38 @@ test("a typed model is put to the vendor before the turn, and a refusal names it
   const launch = read("electron/claude-launch.ts");
   assert.match(launch, /unlistedModel: input\.unlistedModel === true,/);
 });
+
+// --- from the Lane 8 gate (Cursor Grok 4.6) ---
+
+test("the agent's own echo cannot excuse a typed model from the vendor's answer", () => {
+  const agent = read("electron/grok-agent.ts");
+  const config = agent.slice(agent.indexOf("private async applySessionConfig"), agent.indexOf("async prompt(text: string"));
+  assert.match(
+    config,
+    /const unlisted = want\.id === "model" && this\.spec\.unlistedModel === true;\s*\/\/[\s\S]*?if \(option\.currentValue === want\.value && !unlisted\) continue;/,
+    "currentValue is the launch talking to itself; a typed model must still be put to the vendor",
+  );
+  const skipAt = config.indexOf("option.currentValue === want.value");
+  const unlistedAt = config.indexOf("const unlisted =");
+  assert.ok(unlistedAt < skipAt, "the unlisted flag has to be known before the skip is considered");
+});
+
+test("listed is decided on what the launch will actually send", () => {
+  const main = read("electron/main.ts");
+  const check = main.slice(main.indexOf("const claudeModelListed"), main.indexOf("ipcMain.removeHandler(\"grok:plan-usage\")"));
+  assert.match(check, /const resolved = resolveClaudeModel\(model\)\.toLowerCase\(\);/, "a family alias resolves before it is judged");
+  assert.match(check, /id === raw \|\| id === resolved/, "and either spelling counts as listed");
+  assert.match(check, /cursorModelsOutput: null/, "this question must never spawn the Cursor CLI");
+});
+
+test("a vendor that answers with nothing does not wipe the list it gave before", () => {
+  const userData = mkdtempSync(path.join(os.tmpdir(), "wh-models-empty-"));
+  try {
+    assert.equal(rememberVendorModels(userData, "claude", ["claude-fable-5-1"]), true);
+    assert.equal(rememberVendorModels(userData, "claude", []), false, "an empty answer is a blip, not an instruction to forget");
+    const cache = JSON.parse(readFileSync(deskVendorCachePath(userData, "claude"), "utf8")) as { models: { slug: string }[] };
+    assert.deepEqual(cache.models.map((row) => row.slug), ["claude-fable-5-1"]);
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+});

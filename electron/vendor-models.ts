@@ -60,6 +60,9 @@ function readDeskVendorCache(
  * a launch.
  */
 export function rememberVendorModels(userData: string, provider: ProviderId, ids: string[]): boolean {
+  // An empty list is a vendor that answered with nothing, which is far more
+  // often a blip than a real "I offer no models". Keeping the last good list
+  // is the safe read; only a list with something in it replaces one.
   if (!userData || ids.length === 0) return false;
   const file = deskVendorCachePath(userData, provider);
   const existsSync = (filePath: string) => fs.existsSync(filePath);

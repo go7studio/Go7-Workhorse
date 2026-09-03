@@ -1896,6 +1896,29 @@ type SpawnCaller = {
   environment?: SessionEnvironment;
 };
 
+/**
+ * Has a worker under this chat already carried this exact pass to an end?
+ *
+ * A mission's lineup outlives the wave that ran it. Re-entering a pass whose
+ * worker has already finished does not continue the mission; it spawns a
+ * second worker for work that is done.
+ */
+export function missionPassAlreadyCarried(
+  sessions: unknown,
+  callerId: string,
+  mission: { id: string; iteration: number },
+): boolean {
+  if (!callerId || !Array.isArray(sessions)) return false;
+  return sessions.some((row) => {
+    if (!row || typeof row !== "object") return false;
+    const item = row as { parentId?: unknown; agentRun?: { status?: unknown; mission?: { id?: unknown; iteration?: unknown } } };
+    if (item.parentId !== callerId) return false;
+    const run = item.agentRun;
+    if (!run || run.status === "running") return false;
+    return run.mission?.id === mission.id && run.mission?.iteration === mission.iteration;
+  });
+}
+
 function callerSession(from?: string): SpawnCaller | undefined {
   const id = fromSessionId(from);
   if (!id) return undefined;
@@ -2069,8 +2092,16 @@ async function spawnAgent(
   // worker instead of spawning: the caller was told about someone else's work
   // and no worker was ever created. The lineup only counts when this caller is
   // actually in the mission — running as its worker, or set to Mission mode.
+  // ...and only while that mission still has a pass to run. A Mission-mode
+  // chat keeps the same lineup after its last pass ends, so without this it
+  // re-enters the finished pass and, since nothing is running to hold the
+  // spawn back, mints a twin of a worker that already did the work.
+  const deskMissionSpent = Boolean(
+    deskMission &&
+      missionPassAlreadyCarried(readState().sessions, caller?.id ?? "", deskMission),
+  );
   const insideDeskMission = Boolean(
-    caller?.agentRun?.mission || (deskMission && caller?.crewModes?.includes("mission")),
+    (caller?.agentRun?.mission || (deskMission && caller?.crewModes?.includes("mission"))) && !deskMissionSpent,
   );
   const explicitCampaignContext = Boolean(
     input.missionIteration !== undefined ||

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { handleWorkhorseRpc, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
+import { handleWorkhorseRpc, missionPassAlreadyCarried, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import { livePassForSpawn } from "../src/lib/store";
 import type { MissionIteration, Session } from "../src/lib/types";
 
@@ -183,4 +183,40 @@ test("only a pass that is still running holds a spawn back", () => {
   }
   assert.equal(livePassForSpawn(pass("running"), "someone-else", STALE), undefined, "another chat's pass is not this one");
   assert.equal(livePassForSpawn(pass("running"), "parent", { ...STALE, iteration: 2 }), undefined, "a different pass is not a duplicate");
+});
+
+// --- from the Lane 11 gate (Cursor Grok 4.6) ---
+
+test("a pass a worker already carried to an end is spent", () => {
+  const rows = (status: string) => [
+    { id: "w", parentId: "parent", agentRun: { status, startedAt: 1, mission: { id: STALE.id, iteration: 1 } } },
+  ];
+  assert.equal(missionPassAlreadyCarried(rows("completed"), "parent", STALE), true);
+  assert.equal(missionPassAlreadyCarried(rows("budget-exceeded"), "parent", STALE), true, "any end counts, not just a clean one");
+  assert.equal(missionPassAlreadyCarried(rows("running"), "parent", STALE), false, "a pass still going has not been carried");
+  assert.equal(missionPassAlreadyCarried(rows("completed"), "someone-else", STALE), false, "another chat's worker is not this chat's pass");
+  assert.equal(missionPassAlreadyCarried(rows("completed"), "parent", { ...STALE, iteration: 2 }), false, "a later pass is still to run");
+  assert.equal(missionPassAlreadyCarried(undefined, "parent", STALE), false);
+});
+
+test("a Mission-mode chat does not re-enter the pass it already finished", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-mission-mode-"));
+  try {
+    const statePath = deskWhereAMissionFinished(dir, "completed");
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as { sessions: Record<string, unknown>[] };
+    // The chat is set to Mission mode, which is the one case that legitimately
+    // reads the lineup — but its last pass is done.
+    state.sessions[0].crewModes = ["mission"];
+    writeFileSync(statePath, JSON.stringify(state));
+    const { seen, error } = await delegateAndCapture(statePath, { task: "Something else entirely." });
+    assert.equal(error, undefined, error);
+    const mission = seen?.missionIteration as MissionIteration | undefined;
+    assert.notEqual(
+      mission?.id === STALE.id && mission?.iteration === 1,
+      true,
+      "re-entering a finished pass mints a twin of a worker that already did the work",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

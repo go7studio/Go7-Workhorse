@@ -5083,7 +5083,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               liveContinuation: payload.missionContinuation,
             });
             const gate = campaignSpawnGate({
-              campaignContext: Boolean(payload.missionIteration || lineupMission || caller.agentRun?.mission),
+              // Same rule as the caller side: a lineup mission on its own is
+              // not context. A chat that merely once ran a mission is an
+              // ordinary chat, and its next delegation is ordinary work.
+              campaignContext: Boolean(
+                payload.missionIteration ||
+                  caller.agentRun?.mission ||
+                  (lineupMission && caller.crewModes?.includes("mission")),
+              ),
               requested: requestedMission,
               desk: deskMission,
             });

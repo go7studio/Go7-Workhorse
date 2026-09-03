@@ -8888,3 +8888,11 @@ html.pane-dragging * {
 .subagent-resume:hover {
   background: var(--bg-active);
 }
+
+
+.workshop-breakout { padding: 24px 28px 40px; overflow: auto; height: 100%; }
+.workshop-card { border-top: 1px solid var(--hairline, rgba(127,127,127,.25)); padding: 12px 0 16px; }
+.workshop-meter { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 10px; align-items: center; font-size: 13px; padding: 4px 0; }
+.workshop-track { height: 1px; background: var(--hairline, rgba(127,127,127,.35)); }
+.workshop-log { white-space: pre-wrap; font: inherit; font-size: 12px; opacity: .8; }
+.workshop-settings { margin-bottom: 8px; }

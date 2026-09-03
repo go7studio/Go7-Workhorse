@@ -48,6 +48,7 @@ const TOP_LEVEL = new Set([
   "tsconfig.json",
   "tsconfig.test.json",
   "vite.config.ts",
+  "workshop",
 ]);
 
 /**
@@ -185,6 +186,7 @@ const READS_THE_TREE_AS_TEXT = [
   "test/eval-kit.test.ts",
   "test/repo-shape.test.ts",
   "test/third-party-notices.test.ts",
+  "test/workshop-never.test.ts", // never-list pins: reads Settings/preload/bridge as text
 ];
 
 /** A string literal that resolves into the product: `"../src/…"` or `"../electron/…"`. */

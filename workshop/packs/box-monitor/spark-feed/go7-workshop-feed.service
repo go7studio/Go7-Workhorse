@@ -1,0 +1,10 @@
+[Unit]
+Description=Go7 Workshop Spark feed (read-only snapshot)
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/workloads/creative-llm/scripts/workshop-feed.py
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes

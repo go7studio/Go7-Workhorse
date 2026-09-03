@@ -314,6 +314,13 @@ type WorkhorseBridge = {
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
   cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
+  workshopList?: () => Promise<import("./lib/workshop").WorkshopPackListing[]>;
+  workshopOptin?: (input: { id: string }) => Promise<{ ok: boolean }>;
+  workshopRevoke?: (input: { id: string }) => Promise<{ ok: boolean }>;
+  workshopRead?: (input: { id: string; grant: string }) => Promise<unknown>;
+  workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string }>;
+  workshopOpenBreakout?: () => Promise<boolean>;
+  workshopCloseBreakout?: () => Promise<boolean>;
 };
 
 interface Window {

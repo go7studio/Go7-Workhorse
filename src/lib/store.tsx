@@ -350,6 +350,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
+import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";
@@ -518,6 +519,7 @@ export type Store = AppState & {
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
+  updateWorkshop: (settings: WorkshopSettings) => void;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
@@ -8005,6 +8007,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateWorkshop = useCallback((settings: WorkshopSettings) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        workshop: normalizeWorkshopSettings(settings),
+      },
+    }));
+  }, []);
+
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {
     setState((current) => ({
       ...current,
@@ -8358,6 +8370,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateAgentSystems,
       updateLocalCompute,
+      updateWorkshop,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,
@@ -8490,6 +8503,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateRouting,
       updateAgentSystems,
       updateLocalCompute,
+      updateWorkshop,
       grantPlanExternalAgents,
       agentRuntimes,
       agentCatalog,

@@ -1,0 +1,11 @@
+{
+  "id": "box-monitor",
+  "name": "Box monitor",
+  "version": "0.1.0",
+  "description": "Spark health: GPU %, watts, one writer, tok/param. Bloom soak is the first job, not the product name.",
+  "entry": "panel/index.html",
+  "host": ["host/metrics.js"],
+  "grants": ["read.box.metrics", "read.fs.sidecar"],
+  "defaultOff": true,
+  "sparkFeed": "spark-feed/"
+}

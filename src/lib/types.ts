@@ -920,6 +920,7 @@ export type Settings = {
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;
   localCompute: LocalComputeSettings;
+  workshop: import("./workshop").WorkshopSettings;
 };
 
 export type UsageRange = "today" | "week" | "month" | "all";

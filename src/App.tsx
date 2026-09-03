@@ -13,6 +13,8 @@ import { AddBot } from "./ui/AddBot";
 import { Settings } from "./ui/Settings";
 import { WatchNotices } from "./ui/WatchNotices";
 import { Welcome } from "./ui/Welcome";
+import { WorkshopBreakout } from "./ui/WorkshopBreakout";
+import { isWorkshopSurface } from "./lib/workshop";
 
 type AppView = {
   theme: Store["theme"];
@@ -52,6 +54,7 @@ function sameAppView(left: AppView, right: AppView): boolean {
 
 export function App() {
   const view = useStoreSelector(selectAppView, sameAppView);
+  if (isWorkshopSurface()) return <WorkshopBreakout />;
 
   useEffect(() => {
     const apply = () => {

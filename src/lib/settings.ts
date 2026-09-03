@@ -2,6 +2,7 @@ import { customBotEnabled, customBotServes, EMPTY_CUSTOM_DRAFT, normalizeCustomB
 import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
+import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   learning: { ...DEFAULT_LEARNING },
   localCompute: structuredClone(DEFAULT_LOCAL_COMPUTE_SETTINGS),
+  workshop: structuredClone(DEFAULT_WORKSHOP_SETTINGS),
 };
 
 export function normalizeRouting(raw: unknown): RoutingSettings {
@@ -406,6 +408,7 @@ export function normalizeSettings(raw: unknown): Settings {
     learning: normalizeLearning((record as { learning?: unknown }).learning),
     agentSystems: normalizeAgentSystems((record as { agentSystems?: unknown }).agentSystems),
     localCompute: normalizeLocalComputeSettings((record as { localCompute?: unknown }).localCompute),
+    workshop: normalizeWorkshopSettings((record as { workshop?: unknown }).workshop),
   };
 }
 

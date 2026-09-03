@@ -14,6 +14,7 @@ import {
   type ReasoningLevel,
 } from "../src/lib/models";
 import type { ProviderId } from "../src/lib/types";
+import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
 
@@ -25,7 +26,58 @@ export type VendorModelListInput = {
   readFile?: (filePath: string) => string;
   existsSync?: (filePath: string) => boolean;
   cursorModelsOutput?: string | null;
+  /** The desk's userData. Holds what each vendor advertised to a live session. */
+  userData?: string;
 };
+
+/** Where the desk keeps a vendor's advertised list: userData/vendor-models/<provider>.json */
+export function deskVendorCachePath(userData: string, provider: ProviderId): string {
+  return path.join(userData, "vendor-models", `${provider}.json`);
+}
+
+function readDeskVendorCache(
+  userData: string | undefined,
+  provider: ProviderId,
+  existsSync: (filePath: string) => boolean,
+  readFile: (filePath: string) => string,
+): VendorModelCache | undefined {
+  if (!userData) return undefined;
+  const raw = readText(deskVendorCachePath(userData, provider), existsSync, readFile);
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { models?: unknown };
+    return Array.isArray(parsed.models)
+      ? { models: parsed.models.filter((row): row is { slug: string; display_name?: string } => Boolean(row) && typeof row === "object" && typeof (row as { slug?: unknown }).slug === "string") }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Keep what a vendor said it offers, so the next boot lists it without a
+ * release. The list replaces the last one. Never throws: a list is not worth
+ * a launch.
+ */
+export function rememberVendorModels(userData: string, provider: ProviderId, ids: string[]): boolean {
+  // An empty list is a vendor that answered with nothing, which is far more
+  // often a blip than a real "I offer no models". Keeping the last good list
+  // is the safe read; only a list with something in it replaces one.
+  if (!userData || ids.length === 0) return false;
+  const file = deskVendorCachePath(userData, provider);
+  const existsSync = (filePath: string) => fs.existsSync(filePath);
+  const readFile = (filePath: string) => fs.readFileSync(filePath, "utf8");
+  const before = readDeskVendorCache(userData, provider, existsSync, readFile);
+  const next = vendorModelCacheFrom(ids);
+  if (sameVendorModelCache(before, next)) return false;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(next, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type VendorModelLists = Record<ProviderId, ModelInfo[]>;
 
@@ -212,17 +264,19 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
   const claudeRaw = readText(path.join(claudeHome, "models_cache.json"), existsSync, readFile) ?? "";
   const claudeLive = parseCodexModelsCache(claudeRaw);
   const claudeFromGrokShape = claudeLive.length ? claudeLive : parseGrokModelsCache(claudeRaw);
-  const cursorRaw = input.cursorModelsOutput ?? (Object.keys(input).length === 0 ? readInstalledCursorModels(env) : null);
+  const cursorRaw = input.cursorModelsOutput !== undefined ? input.cursorModelsOutput : input.existsSync || input.readFile ? null : readInstalledCursorModels(env);
+  const claudeDesk = readDeskVendorCache(input.userData, "claude", existsSync, readFile);
+  const claudeSeed = claudeFromGrokShape.length
+    ? claudeFromGrokShape.map((model) => ({
+        ...model,
+        contextWindow: advertisedClaudeWindow(model.id, model.contextWindow),
+      }))
+    : MODEL_CATALOG.claude;
   const cursorLive = parseCursorModelsOutput(cursorRaw ?? "");
 
   return {
     grok: grokLive.length ? grokLive : MODEL_CATALOG.grok,
-    claude: claudeFromGrokShape.length
-      ? claudeFromGrokShape.map((model) => ({
-          ...model,
-          contextWindow: advertisedClaudeWindow(model.id, model.contextWindow),
-        }))
-      : MODEL_CATALOG.claude,
+    claude: claudeAdvertisedRows(claudeSeed, claudeDesk?.models.map((row) => row.slug) ?? []),
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
     cursor: reconcileCursorModels(cursorLive),
     custom: MODEL_CATALOG.custom,

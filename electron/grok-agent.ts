@@ -77,6 +77,11 @@ export type GrokPromptResult = {
   nativeSessionArchived?: boolean;
 };
 
+/** The sentence a chat sees when a typed model is refused by its vendor. */
+export function modelNotOffered(agentLabel: string | undefined, model: string): string {
+  return `${agentLabel?.trim() || "The vendor"} does not offer ${model}. Pick a listed model.`;
+}
+
 export type GrokStartResult = {
   initialize: Record<string, unknown>;
   sessionNew: Record<string, unknown>;
@@ -862,11 +867,19 @@ export class GrokAgent {
             .map((choice) => (choice && typeof choice === "object" ? (choice as { value?: unknown }).value : null))
             .filter((value): value is string => typeof value === "string")
         : [];
-      if (option.currentValue === want.value) continue;
-      if (allowed.length > 0 && !allowed.includes(want.value) && !(isCursor && want.id === "model")) continue;
+      const unlisted = want.id === "model" && this.spec.unlistedModel === true;
+      // The agent echoes whatever it was launched with as currentValue, so for
+      // a typed model this equality is the launch talking to itself, not the
+      // vendor agreeing. Skipping here let an unlisted model run unchecked.
+      if (option.currentValue === want.value && !unlisted) continue;
+      if (allowed.length > 0 && !allowed.includes(want.value) && !(isCursor && want.id === "model") && !unlisted) continue;
       try {
         await this.request("session/set_config_option", { sessionId, configId: want.id, value: want.value });
-      } catch {
+      } catch (error) {
+        // A typed model is put to the vendor here on purpose. The agent echoes
+        // whatever it was launched with, so this call is the only place it
+        // says no; run the turn anyway and it lands on some other model.
+        if (unlisted) throw new Error(modelNotOffered(this.spec.agentLabel, want.value));
         /* a preference is not a reason to lose the session */
       }
     }

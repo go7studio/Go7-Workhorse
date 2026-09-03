@@ -16,6 +16,7 @@ import {
 import { CLAUDE_ACP_NOT_INSTALLED } from "./claude-login";
 import { buildClaudeLaunchSpec, claudeSpawnArgs } from "./claude-launch";
 import { composeVendorPrompt } from "../src/lib/context-preface";
+import { advertisedModelIds } from "../src/lib/advertised-models";
 import { titleFromRecord } from "./grok-title";
 import type { PermissionAnswer } from "../src/lib/permissions";
 
@@ -191,6 +192,7 @@ export class ClaudeSessionHost {
       mode: input.mode,
       sandbox: input.sandbox,
       mcpServers: input.mcpServers,
+      unlistedModel: input.unlistedModel,
     });
     const agent = new GrokAgent(spec, (launchSpec) => this.spawn(launchSpec as typeof spec));
     try {
@@ -206,6 +208,8 @@ export class ClaudeSessionHost {
       // Steal Claude ACP session/new title/displayName when present. No billed generate.
       const titled = titleFromRecord(started.sessionNew);
       if (titled) emit({ type: "title", sessionId: input.sessionId, title: titled });
+      const models = advertisedModelIds(started.sessionNew);
+      if (models.length > 0) emit({ type: "vendor-models", sessionId: input.sessionId, provider: "claude", models });
     } catch (error) {
       agent.dispose();
       const message = error instanceof Error ? error.message : String(error);

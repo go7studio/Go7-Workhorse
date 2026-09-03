@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { GrokSessionHost, resolveOrBaseSessionCwd, resolveSessionCwd, type GrokCompactInput, type GrokPromptInput } from "./grok-host";
 import { CodexSessionHost, type CodexPromptInput } from "./codex-host";
 import { ClaudeSessionHost, type ClaudePromptInput } from "./claude-host";
+import { resolveClaudeModel } from "./claude-launch";
 import { CursorSessionHost, type CursorPromptInput } from "./cursor-host";
 import { CustomSessionHost, type CustomPromptInput } from "./custom-host";
 import { probeMcpServer } from "./mcp-tool-bridge";
@@ -19,7 +20,7 @@ import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
-import { listVendorModels } from "./vendor-models";
+import { listVendorModels, rememberVendorModels } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
@@ -1653,7 +1654,25 @@ app.whenReady().then(async () => {
     if (!saved) return { ok: false, message: "Save this MCP server before testing it.", tools: [] };
     return probeMcpServer(saved);
   });
-  ipcMain.handle("models:list", () => listVendorModels());
+  ipcMain.handle("models:list", () => listVendorModels({ userData: app.getPath("userData") }));
+  /** Seed rows plus what Claude last advertised. Anything else was typed. */
+  const claudeModelListed = (model: string): boolean => {
+    const raw = model.trim().toLowerCase();
+    if (!raw) return true;
+    // Compare what the launch will actually send. A seed family the person can
+    // pick, such as an alias carrying a window suffix, resolves to a catalog id
+    // before it reaches the vendor; checking the raw string called those
+    // unlisted and refused a model the desk ships.
+    const resolved = resolveClaudeModel(model).toLowerCase();
+    // `cursorModelsOutput: null` keeps this off the Cursor CLI. Without it every
+    // Claude prompt spawned `cursor-agent models` and waited up to four seconds
+    // for a list this question does not use.
+    return listVendorModels({ userData: app.getPath("userData"), cursorModelsOutput: null }).claude.some((row) => {
+      const id = row.id.toLowerCase();
+      const aliases = row.aliases?.map((alias) => alias.toLowerCase()) ?? [];
+      return id === raw || id === resolved || aliases.includes(raw) || aliases.includes(resolved);
+    });
+  };
   ipcMain.removeHandler("grok:plan-usage");
   ipcMain.handle("grok:plan-usage", async () => {
     try {
@@ -1748,8 +1767,10 @@ app.whenReady().then(async () => {
     const input: ClaudePromptInput = {
       ...raw,
       cwd: requireSessionCwd(raw.cwd),
+      unlistedModel: !claudeModelListed(raw.model),
     };
     const result = await claudeHost.prompt(input, (payload) => {
+      if (payload.type === "vendor-models") rememberVendorModels(app.getPath("userData"), payload.provider, payload.models);
       try {
         sendToDesk(event.sender, "claude:event", payload);
       } catch (error) {

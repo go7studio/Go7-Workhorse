@@ -28,6 +28,12 @@ export type GrokSessionOpenInput = {
   role?: import("../src/lib/workhorse-rules").DeskRole;
   /** Reopen the vendor runtime while loading the same native session. */
   restartRuntime?: boolean;
+  /**
+   * The model was typed, not picked from any list the desk holds. The vendor
+   * is asked to take it before the turn runs, and a refusal is an error with
+   * the model's name rather than a turn on whatever the vendor fell back to.
+   */
+  unlistedModel?: boolean;
 };
 
 export type GrokPromptInput = GrokSessionOpenInput & {
@@ -81,7 +87,9 @@ export type GrokIpcEvent =
       opened: "session/new" | "session/load";
     }
   | { type: "title"; sessionId: string; title: string }
-  | { type: "commands"; sessionId: string; commands: import("../src/lib/types").Command[] };
+  | { type: "commands"; sessionId: string; commands: import("../src/lib/types").Command[] }
+  /** The vendor's own list of models it offers, as it said at session start. */
+  | { type: "vendor-models"; sessionId: string; provider: import("../src/lib/types").ProviderId; models: string[] };
 
 export type GrokEventSink = (event: GrokIpcEvent) => void;
 

@@ -17,7 +17,7 @@ words; 76px holds it in three 10px lines. Content column is 64px.
 
 ```
 ┌──────────┐  76px
-│ WORKSHOP ‹│  head · section-label 10px · whole head is the expand button
+│ WORKSHOP │  head · section-label 9px, 0.02em · the head is the expand button
 ├──────────┤  hairline var(--line)
 │  ╭────╮  │
 │ ╱  96  ╲ │  GPU ring 44px · hairline track · accent arc · tabular 15px
@@ -30,7 +30,7 @@ words; 76px holds it in three 10px lines. Content column is 64px.
 │ down /   │  models one-liner · 10px · 3-line clamp · full text in title
 │ train ex…│
 ├ ─ ─ ─ ─ ─┤
-│ 19s      │  feed age · .row-meta 9px · "—" when feed off
+│ 19s      │  feed age · .row-meta 10px, full opacity · "—" when feed off
 └──────────┘
 ```
 
@@ -38,8 +38,10 @@ Order top to bottom is the locked strip: `GPU% · watts · writer · models`.
 Feed age is the only addition; it qualifies every number above it.
 
 Expand control: the head is a `button.tiny` with `aria-expanded`. The whole
-strip below it is also a button (already so) — one click anywhere expands.
-The chevron `‹` points at the main pane, meaning "grow into it".
+strip below it is also a button (already so) — one click anywhere expands,
+and the strip takes `var(--bg-hover)` on hover so it reads as one control.
+No chevron in the collapsed head: at 76px, `WORKSHOP` plus a glyph wraps.
+The chevron lives in the expanded head only.
 
 Job log only (Box monitor Off): head, then one line `log live` when the tail
 is a string, `log —` when unknown. No ring, no watts.
@@ -99,9 +101,10 @@ zeroes it.
 Hierarchy, top down:
 
 1. **Head** — `WORKSHOP` in `.section-label` weight, feed age chip on the
-   right, then the collapse chevron `›`. Feed age is the one number a glance
-   needs before trusting anything else. Tone: `ok` under 2 min (matches
-   `WORKSHOP_FEED_FRESH_MS`), `warn` past it, `mute` when off.
+   right, then the collapse chevron `›` as a `.tiny` with a 24×22 minimum
+   hit area at 13px (a bare 10px glyph disappears). Feed age is the one
+   number a glance needs before trusting anything else. Tone: `ok` under
+   2 min (matches `WORKSHOP_FEED_FRESH_MS`), `warn` past it, `mute` when off.
 2. **Module head** — one per pack that is On. Pack name in 12px 590 weight,
    `On · rail` as `.row-meta`, a fold caret. Folding a module keeps its head
    and hides its cards. Fold state is view-local; it is never journaled.
@@ -125,7 +128,8 @@ Watts rounds to an integer for paint (`Math.round`). The snapshot is not
 changed; the title carries the raw value.
 
 Writer paints a 6px dot before the word: `var(--ok)` for `one`, `var(--warn)`
-for `no`, `var(--text-tertiary)` for `—`.
+for `no`. Unknown paints `—` with no dot; a grey dot beside a dash reads as
+a third state that does not exist.
 
 ### Models card
 
@@ -136,25 +140,33 @@ in §4.
 
 One chip per tile, order `healthz`, `readyz`, `v1/models`, text `path · status`.
 If any tile carries `detail`, one `.row-meta` under the row: `readyz · http-502`.
+Feed off: the three chips stay, `mute`, status `—`. The row never disappears,
+so the card keeps its height across states.
 
 ### Router card
 
 Four kv rows. Drop the 1px `.workshop-track` between label and value inside the
 rail: the track forces a single line and clips `nvidia-spark-train-infer`.
 Value column is `1fr`, right-aligned, `overflow-wrap: anywhere`. The
-`labels only, never route/lease/start/stop` line stays. It is the read-only
-law stated where the labels are.
+`labels only, never route/lease/start/stop` line stays, with 4px above it so
+it does not sit on the `qwen` row. It is the read-only law stated where the
+labels are.
 
 ### Job card
 
-Heading `JOB · Bloom soak` — name in the heading, not a row. Two rows:
-`Status`, `latest.json`. `latest.json` paints the **basename** (per `RAIL.md`)
-with the full path in `title`. Today's rail paints the full path and clips it.
+Heading `Job · Bloom soak` — name in the heading, not a row. The job name
+is a `<span>` with `text-transform: none` inside the `.section-label`, so it
+paints `JOB · Bloom soak`, not `JOB · BLOOM SOAK`. Unknown paints `JOB · —`.
+Two rows: `Status`, `latest.json`. `latest.json` paints the **basename** (per
+`RAIL.md`) with the full path in `title`. Today's rail paints the full path
+and clips it.
 
 ### Feed card
 
-One `.row-meta`: `present · 19s ago` or the host note verbatim (`Feed not
-present. Every meter is —. This desk does not remote-install.`).
+One line: `present · 19s ago` or the host note verbatim (`Feed not present.
+Every meter is —. This desk does not remote-install.`). The note wraps; it
+is the one meta line in the rail that may take two lines, so it gets its
+own class rather than `.row-meta`'s single-line ellipsis.
 
 ## 3. Two packs On
 
@@ -162,6 +174,10 @@ Modules stack in pack order: Box monitor, then Job log. Between modules a
 full-width hairline plus 8px, so the break reads heavier than a card break
 without a second color. Each module folds on its own. When both are folded,
 the rail is head + two module heads + foot, about 120px tall.
+
+The rail body scrolls as one column. Modules never scroll on their own; a
+capped, scrolling Box module cuts the Router card mid-line and hides the
+read-only law. Folding is how a user makes room for the log.
 
 The Job log card is a `<pre class="workshop-log">` at 11px `var(--mono)`,
 `max-height: 160px`, `overflow: auto`. Newest line at the bottom; the builder
@@ -207,7 +223,8 @@ three come free once the `--hairline` fallbacks are replaced with `--line`.
 
 New classes the builder may add, all under the `workshop-` prefix:
 `workshop-rail-ring`, `workshop-rail-foot`, `workshop-module`,
-`workshop-module-head`, `workshop-kv`. Nothing outside `app.css`.
+`workshop-module-head`, `workshop-module-break`, `workshop-kv`,
+`workshop-feed-note`, `workshop-label-name`. Nothing outside `app.css`.
 
 Card headings stay literal text nodes `Models`, `Router`, `Job`, `Infer`,
 `Box`, `Feed` inside `.section-label`; uppercase is the class, not the copy.
@@ -270,6 +287,31 @@ and *one dominant gauge per card*. What not to keep: green-to-red arcs,
 the blue chart blocks, GB/GiB toggles, the welcome header. The rail is a
 Workhorse widget: hairlines, tabular numbers, present-tense words, one
 accent.
+
+## 8. Render check
+
+A static mock of §1–§4 built from `tokens.css` and the reused classes was
+rendered in light, dark, and Workhorse themes, eight states each. What the
+render changed in this spec:
+
+- Collapsed head `WORKSHOP ‹` at 10px/0.04em clipped the `P` and wrapped the
+  chevron at 76px. → 9px, 0.02em, no chevron in the collapsed head.
+- Feed age `19s` at 9px/0.7 opacity was the faintest thing on the strip.
+  → 10px, full `.row-meta` colour.
+- `JOB · BLOOM SOAK` shouted. → job name exempt from the uppercase.
+- The router law sat on the `qwen` row. → 4px above.
+- The expanded head chevron at 10px vanished against the feed chip. → `.tiny`
+  with a 24×22 hit area.
+- Unknown writer painted a grey dot beside `—`. → no dot.
+- A module with its own `max-height` cut the Router card mid-line. → one
+  scroll column; fold to make room.
+
+What held: 76px carries the ring, watts, writer, a three-line models clamp,
+feed age, and a second pack's `log live` with room to spare. 296px carries
+`nvidia-spark-train-infer` and `running (one writer)` right-aligned without
+clipping. The ring reads as the one dominant gauge in all three themes; in
+Workhorse it is the only sunset element on the rail. Hairlines take the
+theme once `--line` replaces the `--hairline` fallbacks.
 
 ## Success
 

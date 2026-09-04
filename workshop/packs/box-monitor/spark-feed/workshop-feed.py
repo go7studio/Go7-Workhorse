@@ -4,11 +4,20 @@
 Writes ~/.local/share/go7-workshop/feed.json (override GO7_WORKSHOP_FEED).
 Failed refresh does not overwrite the last valid file.
 Does not start or stop Bloom, write leftover.json, or call spark-broker.
+
+Four sources, in this order. Nothing talks to NVIDIA Sync.
+  1. Identity  lease file + process table + probe unit + fence units
+  2. Live      the exclusive log's [step] lines (tqdm writes \\r; converted)
+  3. Durable   latest.json, frozen at the last save
+  4. Box       nvidia-smi name / util / watts (memory is N/A on UMA; never invented)
+The rate is the last-8 window over live [step] lines. The sidecar's whole-run
+tok/s and latest.json tokens_per_sec are never published.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -17,15 +26,87 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-FEED_PATH = Path(os.environ.get("GO7_WORKSHOP_FEED", os.path.expanduser("~/.local/share/go7-workshop/feed.json")))
-CKPT_ROOT = Path(os.path.expanduser("~/workloads/creative-llm/checkpoints"))
+HOME = Path(os.path.expanduser("~"))
+FEED_PATH = Path(os.environ.get("GO7_WORKSHOP_FEED", str(HOME / ".local/share/go7-workshop/feed.json")))
+WORKLOAD = Path(os.environ.get("GO7_WORKSHOP_WORKLOAD", str(HOME / "workloads/creative-llm")))
+CKPT_ROOT = WORKLOAD / "checkpoints"
+LEASE_PATH = WORKLOAD / "ACTIVE_GPU_JOB.json"
+LOG_DIR = WORKLOAD / "logs/exclusive-probes"
 GATEWAY = os.environ.get("GO7_INFERENCE_GATEWAY", "http://127.0.0.1:8788")
-KEY_FILE = Path(os.environ.get("GO7_INFERENCE_OWNER_KEY", os.path.expanduser("~/.config/go7-inference/client-keys/owner")))
+KEY_FILE = Path(os.environ.get("GO7_INFERENCE_OWNER_KEY", str(HOME / ".config/go7-inference/client-keys/owner")))
 SCHEMA = "go7-workshop-feed/v0"
+TRAIN_NAME = "train_pretrain.py"
+PROBE_UNIT = "bloom-v40-probe.service"
+FENCE_UNITS = ("qwen38-sglang.service", "bloom-v40-500m.service")
+LAST8_WINDOW_S = 480
+WARMUP_S = 60
+LOG_TAIL_BYTES = 256 * 1024
+LOG_TAIL_LINES = 40
+GPU_IDLE_S = 180
+
+STEP_RE = re.compile(r"\[step (\d+)\]([^\n]*)")
+KV_RE = re.compile(r"([A-Za-z_/]+)=([^\s]+)")
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def to_float(text: str) -> float | None:
+    try:
+        return float(text.replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_step_lines(text: str) -> list[dict]:
+    """[step N] train_loss=… tokens_seen=… t/param=… tok/s=… elapsed_s=…  → dicts, in order.
+
+    tqdm rewrites lines with carriage returns; treat every \\r as a line break.
+    Lines missing tokens_seen or elapsed_s are skipped.
+    """
+    rows: list[dict] = []
+    for match in STEP_RE.finditer(text.replace("\r", "\n")):
+        kv = {k: v for k, v in KV_RE.findall(match.group(2))}
+        tokens = to_float(kv.get("tokens_seen", ""))
+        elapsed = to_float(kv.get("elapsed_s", ""))
+        if tokens is None or elapsed is None:
+            continue
+        rows.append({
+            "step": int(match.group(1)),
+            "tokens": tokens,
+            "elapsed": elapsed,
+            "loss": to_float(kv.get("train_loss", "")),
+            "tpp": to_float(kv.get("t/param", "")),
+        })
+    return rows
+
+
+def last8_rate(rows: list[dict], window_s: float = LAST8_WINDOW_S, warmup_s: float = WARMUP_S) -> float | None:
+    """Δtokens / Δelapsed over [step] rows whose elapsed falls in the last `window_s`.
+
+    Skips the first `warmup_s` (compile). If the post-warmup window is shorter than
+    `window_s`, uses all of it. Needs two rows and forward time; else None.
+    """
+    if len(rows) < 2:
+        return None
+    last = rows[-1]
+    floor = max(warmup_s, last["elapsed"] - window_s)
+    picked = [r for r in rows if r["elapsed"] >= floor]
+    if len(picked) < 2:
+        picked = [r for r in rows if r["elapsed"] >= warmup_s]
+    if len(picked) < 2:
+        return None
+    first = picked[0]
+    dt = last["elapsed"] - first["elapsed"]
+    dtok = last["tokens"] - first["tokens"]
+    if dt <= 0 or dtok < 0:
+        return None
+    return dtok / dt
 
 
 def run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
@@ -46,11 +127,52 @@ def nvidia_smi(field: str) -> float | None:
         return None
 
 
-def train_name_match_count() -> int | None:
-    rc, out = run(["pgrep", "-f", "train_pretrain.py"])
+def nvidia_smi_text(field: str) -> str | None:
+    rc, out = run(["nvidia-smi", f"--query-gpu={field}", "--format=csv,noheader"])
+    if rc != 0 or not out:
+        return None
+    return out.splitlines()[0].strip() or None
+
+
+def train_pids() -> list[int] | None:
+    """pids whose command line names train_pretrain.py. A count, never a kill list."""
+    rc, out = run(["pgrep", "-f", TRAIN_NAME])
     if rc not in (0, 1):
         return None
-    return len([ln for ln in out.splitlines() if ln.strip()])
+    pids = []
+    for ln in out.splitlines():
+        try:
+            pids.append(int(ln.strip()))
+        except ValueError:
+            continue
+    return pids
+
+
+def read_json(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def lease() -> dict | None:
+    """ACTIVE_GPU_JOB.json: kind, pid, detail (yaml), started_utc."""
+    data = read_json(LEASE_PATH)
+    if data is None:
+        return None
+    pid = data.get("pid")
+    try:
+        pid = int(pid) if pid is not None else None
+    except (TypeError, ValueError):
+        pid = None
+    detail = data.get("detail") or data.get("yaml") or data.get("config")
+    return {
+        "kind": data.get("kind") if isinstance(data.get("kind"), str) else None,
+        "pid": pid,
+        "yaml": str(detail) if detail else None,
+        "startedUtc": data.get("started_utc") if isinstance(data.get("started_utc"), str) else None,
+    }
 
 
 def latest_json() -> Path | None:
@@ -62,30 +184,144 @@ def latest_json() -> Path | None:
     return max(found, key=lambda p: p.stat().st_mtime)
 
 
-def tok_per_param(path: Path | None) -> float | None:
+def _num(data: dict, *keys: str) -> float | None:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
+def _bool(data: dict, key: str) -> bool | None:
+    value = data.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def durable(path: Path | None) -> dict | None:
+    """latest.json fields that matter. tokens_per_sec is deliberately not read."""
     if path is None:
         return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json(path)
+    if data is None:
         return None
-    tokens = data.get("tokens_seen") or data.get("tokens") or data.get("n_tokens")
-    params = data.get("n_params") or data.get("params") or data.get("parameter_count")
     try:
-        if tokens is None or params is None or float(params) == 0:
-            return None
-        return float(tokens) / float(params)
-    except (TypeError, ValueError):
+        saved_at = iso(path.stat().st_mtime)
+    except OSError:
+        saved_at = None
+    return {
+        "step": _num(data, "step"),
+        "tokensSeen": _num(data, "tokens_seen", "tokens", "n_tokens"),
+        "tokPerParam": _num(data, "tokens_per_param", "t_per_param"),
+        "targetTokens": _num(data, "target_tokens"),
+        "targetTokPerParam": _num(data, "target_tokens_per_param"),
+        "tokensPerStep": _num(data, "tokens_per_step"),
+        "paramCount": _num(data, "param_count", "n_params", "params", "parameter_count"),
+        "trainLoss": _num(data, "train_loss"),
+        "valLoss": _num(data, "val_loss"),
+        "jobComplete": _bool(data, "job_complete"),
+        "undertrainedFlag": _bool(data, "undertrained_flag"),
+        "runName": data.get("run_name") if isinstance(data.get("run_name"), str) else None,
+        "savedAt": saved_at,
+    }
+
+
+def tok_per_param(dur: dict | None) -> float | None:
+    if not dur:
         return None
+    if dur.get("tokPerParam") is not None:
+        return dur["tokPerParam"]
+    tokens, params = dur.get("tokensSeen"), dur.get("paramCount")
+    if tokens is None or not params:
+        return None
+    return tokens / params
+
+
+def newest_log() -> Path | None:
+    if not LOG_DIR.is_dir():
+        return None
+    found = [p for p in LOG_DIR.glob("*.log") if p.is_file()]
+    if not found:
+        return None
+    return max(found, key=lambda p: p.stat().st_mtime)
+
+
+def read_tail(path: Path, max_bytes: int = LOG_TAIL_BYTES) -> str:
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            if size > max_bytes:
+                fh.seek(size - max_bytes)
+            return fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def live(path: Path | None) -> tuple[dict | None, str | None]:
+    """Last [step] line plus the last-8 rate, and a clean tail for the Job log pack."""
+    if path is None:
+        return None, None
+    text = read_tail(path)
+    rows = parse_step_lines(text)
+    clean = [ln for ln in text.replace("\r", "\n").splitlines() if ln.strip()]
+    tail = "\n".join(clean[-LOG_TAIL_LINES:]) if clean else None
+    if not rows:
+        return None, tail
+    last = rows[-1]
+    try:
+        log_as_of = iso(path.stat().st_mtime)
+    except OSError:
+        log_as_of = None
+    return {
+        "step": last["step"],
+        "tokensSeen": last["tokens"],
+        "trainLoss": last["loss"],
+        "tokPerParam": last["tpp"],
+        "elapsedS": last["elapsed"],
+        "last8TokS": last8_rate(rows),
+        "logAsOf": log_as_of,
+    }, tail
+
+
+def unit_active(unit: str) -> bool | None:
+    rc, out = run(["systemctl", "--user", "is-active", unit])
+    if rc == 0 and out == "active":
+        return True
+    if out in ("inactive", "failed", "dead", "activating", "deactivating"):
+        return out == "activating"
+    return None
 
 
 def probe_unit() -> str | None:
-    rc, out = run(["systemctl", "--user", "is-active", "bloom-v40-probe.service"])
-    if rc == 0 and out == "active":
-        return "active"
-    if out in ("inactive", "failed", "dead"):
-        return "inactive"
-    return None
+    active = unit_active(PROBE_UNIT)
+    if active is None:
+        return None
+    return "active" if active else "inactive"
+
+
+def job_flags(nproc: int | None, probe: str | None, parked: bool | None, gpu: float | None,
+              dur: dict | None, prev: dict | None, now_s: float) -> tuple[list[str], dict]:
+    """The four abort signals plus the small state they need across runs.
+
+    State rides in the feed itself (`state`), so a failed run keeps the last good one.
+    """
+    flags: list[str] = []
+    state: dict = {}
+    if nproc is not None and nproc >= 2:
+        flags.append("two-trainers")
+    if probe == "active" and parked is False:
+        flags.append("qwen-up-during-train")
+    prev_state = (prev or {}).get("state") or {}
+    if gpu is not None and gpu <= 0 and nproc:
+        since = prev_state.get("gpuIdleSince")
+        since = since if isinstance(since, (int, float)) else now_s
+        state["gpuIdleSince"] = since
+        if now_s - since >= GPU_IDLE_S:
+            flags.append("gpu-idle")
+    prev_step = ((prev or {}).get("job") or {}).get("durable", {}).get("step") if prev else None
+    cur_step = (dur or {}).get("step")
+    if isinstance(prev_step, (int, float)) and isinstance(cur_step, (int, float)) and cur_step < prev_step:
+        flags.append("step-backwards")
+    return flags, state
 
 
 def port_30000_up() -> bool:
@@ -149,13 +385,18 @@ def gateway_models() -> list[str] | None:
         return None
 
 
-def collect() -> dict:
+def collect(prev: dict | None = None, now_s: float | None = None) -> dict:
+    now_s = now_s if now_s is not None else datetime.now(timezone.utc).timestamp()
     errors: list[str] = []
+    # 4. Box
     gpu = nvidia_smi("utilization.gpu")
     watts = nvidia_smi("power.draw")
+    gpu_name = nvidia_smi_text("name")
     if gpu is None or watts is None:
         errors.append("nvidia-smi")
-    nproc = train_name_match_count()
+    # 1. Identity
+    pids = train_pids()
+    nproc = None if pids is None else len(pids)
     if nproc is None:
         errors.append("pgrep")
         one = None
@@ -163,17 +404,31 @@ def collect() -> dict:
         one = nproc == 1
         if nproc >= 2:
             errors.append("two-trainers")
-    latest = latest_json()
-    if latest is None:
-        errors.append("no-latest-json")
-    tpp = tok_per_param(latest)
+    owner = lease()
+    if owner is None:
+        errors.append("no-lease")
+    else:
+        owner["pidMatch"] = (owner["pid"] in pids) if (pids is not None and owner["pid"] is not None) else None
     unit = probe_unit()
     parked = qwen_parked()
     if unit == "active" and parked is False:
         errors.append("qwen-up-during-train")
+    fence = [{"unit": u.removesuffix(".service"), "active": unit_active(u)} for u in FENCE_UNITS]
+    # 3. Durable
+    latest = latest_json()
+    if latest is None:
+        errors.append("no-latest-json")
+    dur = durable(latest)
+    tpp = tok_per_param(dur)
+    # 2. Live
+    log = newest_log()
+    live_row, tail = live(log)
+    if live_row is None:
+        errors.append("no-live-log")
     models = gateway_models()
     if models is None:
         errors.append("infer-down-or-unready")
+    flags, state = job_flags(nproc, unit, parked, gpu, dur, prev, now_s)
     return {
         "schema": SCHEMA,
         "asOf": utcnow(),
@@ -183,10 +438,21 @@ def collect() -> dict:
         "oneWriter": one,
         "trainNameMatchCount": nproc,
         "tokPerParam": tpp,
+        # Whole-run tok/s is not a score. The desk reads job.live.last8TokS.
         "last8Toks": None,
         "latestJson": str(latest) if latest else None,
         "exclusiveSidecar": {"probeUnit": unit, "qwenParked": parked},
         "models": models,
+        "job": {
+            "lease": owner,
+            "live": live_row,
+            "durable": dur,
+            "fence": fence,
+            "flags": flags,
+            "gpuName": gpu_name,
+        },
+        "jobLogTail": tail,
+        "state": state,
         "errors": errors,
     }
 
@@ -203,8 +469,11 @@ def atomic_write(path: Path, doc: dict) -> None:
 
 
 def main() -> int:
+    prev = read_json(FEED_PATH)
+    if prev is not None and not valid_doc(prev):
+        prev = None
     try:
-        doc = collect()
+        doc = collect(prev)
     except Exception:
         return 1
     if not valid_doc(doc):

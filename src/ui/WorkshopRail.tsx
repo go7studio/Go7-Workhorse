@@ -5,12 +5,20 @@ import {
   type WorkshopMetricsSnapshot,
   type WorkshopPackListing,
   type WorkshopTone,
+  deriveJob,
   feedAgeLabel,
   feedTone,
+  fmtClock,
+  fmtFixed,
+  fmtHours,
+  fmtInt,
+  fmtTokens,
+  fmtWall,
   gaugePercent,
   inferTone,
   latestJsonBasename,
   modelsState,
+  paintJobFlag,
   paintJobStatus,
   paintModelsLine,
   paintQwenParked,
@@ -79,6 +87,19 @@ function Ring({ value, size }: { value: unknown; size: number }) {
         <strong>{pct == null ? WORKSHOP_UNKNOWN : Math.round(pct)}</strong>
         {pct == null ? null : <small>%</small>}
       </span>
+    </div>
+  );
+}
+
+/** A snapshot bar: how far tokens_seen has come toward target_tokens, from the current feed only. */
+function Bar({ pct, label }: { pct: unknown; label: string }) {
+  const value = gaugePercent(pct);
+  return (
+    <div className={`workshop-bar${value == null ? " is-unknown" : ""}`} role="img" aria-label={label}>
+      <div className="workshop-bar-track">
+        {value == null ? null : <div className="workshop-bar-fill" style={{ width: `${value}%` }} />}
+      </div>
+      <span>{value == null ? WORKSHOP_UNKNOWN : `${value.toFixed(1)}%`}</span>
     </div>
   );
 }
@@ -173,7 +194,6 @@ function BoxCards({ metrics, feed }: { metrics: WorkshopMetricsSnapshot | null; 
   const detail = tiles.find((tile) => typeof tile.detail === "string" && tile.detail.trim());
   const rawWatts = typeof metrics?.powerWatts === "number" ? String(metrics.powerWatts) : undefined;
   const latestPath = typeof metrics?.latestJson === "string" && metrics.latestJson !== WORKSHOP_UNKNOWN ? metrics.latestJson : undefined;
-  const feedLine = feed.present ? `present · ${feedAgeLabel(feed.asOf).replace(/^feed · /, "")}` : feed.note;
 
   return (
     <>
@@ -183,7 +203,11 @@ function BoxCards({ metrics, feed }: { metrics: WorkshopMetricsSnapshot | null; 
           <div className="workshop-box-kv">
             <Kv label="Watts" value={paintWatts(metrics?.powerWatts)} title={rawWatts} />
             <Kv label="Writer" value={<Writer value={metrics?.oneWriter} />} />
-            <Kv label="tok/param" value={dash(metrics?.tokPerParam)} />
+            <Kv
+              label="GPU"
+              value={typeof metrics?.job.gpuName === "string" ? metrics.job.gpuName.replace(/^NVIDIA\s+/i, "") : WORKSHOP_UNKNOWN}
+              title="nvidia-smi name. Memory is N/A on Spark UMA and is not shown."
+            />
           </div>
         </div>
       </Card>
@@ -228,21 +252,108 @@ function BoxCards({ metrics, feed }: { metrics: WorkshopMetricsSnapshot | null; 
         <p className="row-meta workshop-law">labels only, never route/lease/start/stop</p>
       </Card>
 
-      <Card
-        heading={
-          <>
-            Job · <span className="workshop-label-name">{feed.present ? "Bloom soak" : WORKSHOP_UNKNOWN}</span>
-          </>
-        }
-      >
-        <Kv label="Status" value={paintJobStatus(metrics, feed.present)} />
-        <Kv label="latest.json" value={latestJsonBasename(metrics?.latestJson)} title={latestPath} />
-      </Card>
-
-      <Card heading="Feed">
-        <p className="workshop-feed-note">{feedLine}</p>
-      </Card>
+      <JobCard metrics={metrics} feed={feed} latestPath={latestPath} />
+      <FeedCard feed={feed} />
     </>
+  );
+}
+
+function pieces(parts: Array<string | null | undefined>, sep = " · "): string {
+  return parts.filter((part): part is string => Boolean(part && part !== WORKSHOP_UNKNOWN)).join(sep);
+}
+
+/**
+ * The job the pack watches: identity, then the number that moves, then the number that survives a crash.
+ * Live (log) is always ahead of saved (latest.json); both are painted. ETA is remain / last-8 only.
+ * job_complete and undertrained_flag are the trainer's; the desk paints them, never derives them.
+ */
+function JobCard({ metrics, feed, latestPath }: { metrics: WorkshopMetricsSnapshot | null; feed: WorkshopFeedLive; latestPath?: string }) {
+  const job = metrics?.job;
+  const d = job ? deriveJob(job) : null;
+  const known = Boolean(job && feed.present);
+  const flags = job?.flags ?? [];
+  const identity = job
+    ? pieces([
+        typeof job.lease.yaml === "string" ? latestJsonBasename(job.lease.yaml) : null,
+        typeof job.lease.kind === "string" ? job.lease.kind : null,
+        typeof job.lease.pid === "number" ? `pid ${job.lease.pid}` : null,
+        fmtWall(job.lease.startedUtc),
+      ])
+    : "";
+  // The trainer writes the gate. Until tpp reaches the floor it stays undertrained; the desk never flips it from an ETA.
+  const gate = job
+    ? job.durable.jobComplete === true
+      ? "complete"
+      : job.durable.undertrainedFlag === true
+        ? "undertrained"
+        : job.durable.jobComplete === false
+          ? "open"
+          : WORKSHOP_UNKNOWN
+    : WORKSHOP_UNKNOWN;
+  const status = paintJobStatus(metrics, feed.present);
+  const last8 = job && typeof job.live.last8TokS === "number" ? `${fmtInt(job.live.last8TokS)} tok/s` : WORKSHOP_UNKNOWN;
+  const secPerIt = d && typeof d.secPerIt === "number" ? `${fmtFixed(d.secPerIt, 1)} s/it` : null;
+
+  return (
+    <Card
+      heading={
+        <>
+          Job · <span className="workshop-label-name">{known ? "Bloom soak" : WORKSHOP_UNKNOWN}</span>
+        </>
+      }
+      aside={
+        flags.length ? (
+          <span className="workshop-chip-row workshop-flags">
+            {flags.map((flag) => (
+              <Chip key={flag} tone="warn" title={flag}>
+                {paintJobFlag(flag)}
+              </Chip>
+            ))}
+          </span>
+        ) : null
+      }
+    >
+      {identity ? (
+        <p className="row-meta workshop-identity" title={pieces([job?.durable.runName as string, job?.lease.yaml as string])}>
+          {identity}
+        </p>
+      ) : null}
+      <Bar pct={d?.pct} label="tokens seen toward target" />
+      <div className="workshop-progress">
+        <div>
+          <strong>{fmtFixed(d?.tokPerParam, 2)}</strong>
+          <span className="row-meta">/ {fmtFixed(d?.targetTokPerParam, 1)} tok/param</span>
+        </div>
+        <div>
+          <strong>{fmtTokens(job?.live.tokensSeen ?? job?.durable.tokensSeen)}</strong>
+          <span className="row-meta">/ {fmtTokens(job?.durable.targetTokens)} tokens</span>
+        </div>
+      </div>
+      <Kv
+        label="Live"
+        value={pieces([fmtInt(job?.live.step), job && typeof job.live.trainLoss === "number" ? `loss ${fmtFixed(job.live.trainLoss, 2)}` : null]) || WORKSHOP_UNKNOWN}
+        title={typeof job?.live.logAsOf === "string" ? `log ${job.live.logAsOf}` : undefined}
+      />
+      <Kv
+        label="Saved"
+        value={pieces([fmtInt(job?.durable.step), job && typeof job.durable.tokPerParam === "number" ? `${fmtFixed(job.durable.tokPerParam, 2)} tpp` : null, fmtClock(job?.durable.savedAt)]) || WORKSHOP_UNKNOWN}
+        title={pieces([latestPath, job?.durable.savedAt as string], "\n") || undefined}
+      />
+      <Kv label="Last-8" value={pieces([last8, secPerIt]) || WORKSHOP_UNKNOWN} title="Δtokens / Δelapsed over the last 480 s of step lines" />
+      <Kv label="To floor" value={fmtHours(d?.hoursToFloor)} title={d && typeof d.remainTokens === "number" ? `${fmtTokens(d.remainTokens)} tokens remain` : undefined} />
+      <Kv label="Status" value={status} />
+      <Kv label="Gate" value={gate} title="job_complete / undertrained_flag as the trainer wrote them" />
+      <Kv label="latest.json" value={latestJsonBasename(metrics?.latestJson)} title={latestPath} />
+    </Card>
+  );
+}
+
+function FeedCard({ feed }: { feed: WorkshopFeedLive }) {
+  const feedLine = feed.present ? `present · ${feedAgeLabel(feed.asOf).replace(/^feed · /, "")}` : feed.note;
+  return (
+    <Card heading="Feed">
+      <p className="workshop-feed-note">{feedLine}</p>
+    </Card>
   );
 }
 
@@ -296,6 +407,10 @@ export function WorkshopRail() {
   const shortAge = feed.present ? feedAgeLabel(feed.asOf).replace(/^feed · /, "").replace(/ ago$/, "") : WORKSHOP_UNKNOWN;
   const modelsLine = paintModelsLine(metrics);
   const logLine = tail === WORKSHOP_UNKNOWN ? `log ${WORKSHOP_UNKNOWN}` : "log live";
+  const derived = metrics ? deriveJob(metrics.job) : null;
+  const glanceTpp = derived && typeof derived.tokPerParam === "number" ? `${fmtFixed(derived.tokPerParam, 2)} tpp` : null;
+  const glanceEta = derived && typeof derived.hoursToFloor === "number" ? fmtHours(derived.hoursToFloor) : null;
+  const glanceFlags = metrics?.job.flags.length ?? 0;
   const toggleFold = (id: string) =>
     update({ folded: view.folded.includes(id) ? view.folded.filter((item) => item !== id) : [...view.folded, id] });
 
@@ -327,6 +442,19 @@ export function WorkshopRail() {
               <span className="workshop-rail-models" title={modelsLine}>
                 {modelsLine}
               </span>
+              {glanceTpp || glanceEta || glanceFlags ? (
+                <span className="workshop-rail-glance" title="tok/param now · hours to the 5 tok/param floor at the last-8 rate">
+                  <Bar pct={derived?.pct} label="tokens seen toward target" />
+                  {glanceTpp ? <span className="workshop-rail-kv workshop-rail-tpp">{glanceTpp}</span> : null}
+                  {glanceEta ? <span className="workshop-rail-kv">{glanceEta}</span> : null}
+                  {glanceFlags ? (
+                    <span className="workshop-rail-kv workshop-tone-warn" title={metrics?.job.flags.map(paintJobFlag).join(" · ")}>
+                      <Dot tone="warn" />
+                      {glanceFlags === 1 ? paintJobFlag(metrics!.job.flags[0]) : `${glanceFlags} flags`}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
               <span className={`row-meta workshop-rail-age workshop-tone-${tone}`}>{shortAge}</span>
             </>
           ) : null}

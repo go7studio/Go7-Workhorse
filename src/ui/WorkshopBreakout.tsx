@@ -1,6 +1,13 @@
 import {
   WORKSHOP_UNKNOWN,
+  deriveJob,
   feedAgeLabel,
+  fmtClock,
+  fmtFixed,
+  fmtHours,
+  fmtInt,
+  fmtWall,
+  paintJobFlag,
   paintJobStatus,
   paintModelsLine,
   paintQwenParked,
@@ -9,6 +16,8 @@ import { dash, useWorkshopLive } from "./workshop-live";
 
 export function WorkshopBreakout() {
   const { packs, metrics, tail, feed } = useWorkshopLive();
+  const job = metrics?.job;
+  const derived = job ? deriveJob(job) : null;
   const on = packs.filter((pack) => pack.on);
   const off = packs.filter((pack) => !pack.on && !pack.refused);
   const labels = metrics?.labels ?? { trainFence: "nvidia-spark-train-infer", inferInvoke: "Local Compute" };
@@ -70,8 +79,14 @@ export function WorkshopBreakout() {
             <div className="section-label">Job this pack watches</div>
             <Meter label="Name" value="Bloom soak" />
             <Meter label="Role" value="first job, not the product name" />
+            <Meter label="Lease" value={[job?.lease.kind, typeof job?.lease.pid === "number" ? `pid ${job.lease.pid}` : null, fmtWall(job?.lease.startedUtc)].filter((p) => p && p !== WORKSHOP_UNKNOWN).join(" · ") || WORKSHOP_UNKNOWN} />
+            <Meter label="Progress" value={typeof derived?.pct === "number" ? `${derived.pct.toFixed(1)}% · ${fmtFixed(derived.tokPerParam, 2)} / ${fmtFixed(derived.targetTokPerParam, 1)} tok/param` : WORKSHOP_UNKNOWN} />
+            <Meter label="Live step" value={typeof job?.live.step === "number" ? `${fmtInt(job.live.step)} · loss ${fmtFixed(job.live.trainLoss, 2)}` : WORKSHOP_UNKNOWN} />
+            <Meter label="Saved step" value={typeof job?.durable.step === "number" ? `${fmtInt(job.durable.step)} · ${fmtClock(job.durable.savedAt)}` : WORKSHOP_UNKNOWN} />
+            <Meter label="last-8" value={typeof metrics?.last8Toks === "number" ? `${fmtInt(metrics.last8Toks)} tok/s` : WORKSHOP_UNKNOWN} />
+            <Meter label="To floor" value={fmtHours(derived?.hoursToFloor)} />
             <Meter label="Status" value={paintJobStatus(metrics, feed.present)} />
-            <Meter label="last-8" value={dash(metrics?.last8Toks)} />
+            <Meter label="Flags" value={job?.flags.length ? job.flags.map(paintJobFlag).join(" · ") : "none"} />
             <Meter label="latest.json" value={dash(metrics?.latestJson)} />
           </div>
           <div className="workshop-card">

@@ -18,6 +18,24 @@ Copy workshop-feed.py and the two systemd units from workshop/packs/box-monitor/
 
 Failed collector runs must leave the last valid feed.json in place.
 
+### How the collector reads the job
+
+Nothing talks to NVIDIA Sync. Four sources, in this order:
+
+| Source | Path / command | Feed field |
+| --- | --- | --- |
+| Lease | `~/workloads/creative-llm/ACTIVE_GPU_JOB.json` | `job.lease` — kind, pid, yaml, startedUtc, and `pidMatch` against `pgrep -f train_pretrain.py` |
+| Live log | newest `~/workloads/creative-llm/logs/exclusive-probes/*.log`, `\r` → `\n` | `job.live` — last `[step]` line, and `last8TokS` = Δtokens / Δelapsed over the last 480 s of step lines (first 60 s skipped) |
+| Durable | newest `checkpoints/**/latest.json` | `job.durable` — step, tokens_seen, target_tokens, tokens_per_step, param_count, losses, `job_complete`, `undertrained_flag`, run_name, savedAt (mtime) |
+| Box | `nvidia-smi` name / utilization / power | `gpuUtilPercent`, `powerWatts`, `job.gpuName`. UMA memory is N/A and never invented |
+| Fence | `systemctl --user is-active` on the probe unit, `qwen38-sglang`, `bloom-v40-500m` | `exclusiveSidecar`, `job.fence` |
+
+Never published: the sidecar's whole-run tok/s and `latest.json` `tokens_per_sec` (both include compile). `max_steps` is not an ETA input. The desk derives pct, remain, hours to the floor, and s/it from these fields only, and paints `job_complete` / `undertrained_flag` as the trainer wrote them.
+
+`job.flags` are the four abort signals: `two-trainers`, `qwen-up-during-train`, `gpu-idle` (0 % for 3 min with a trainer present), `step-backwards` (durable step below the previous feed's). They are labels on the rail; the desk does nothing about them.
+
+Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30 s accepted), the log (20–60 s), latest.json (60 s), and lease + systemd (30–60 s) in one pass. The desk polls the feed every 2 s and the feed is considered stale after 2 min.
+
 ## IPC (automation)
 
 | Call | Does | Does not |

@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WORKSHOP_UNKNOWN,
+  deriveJob,
   feedAgeLabel,
+  fmtClock,
+  fmtFixed,
+  fmtHours,
+  fmtInt,
+  fmtTokens,
+  fmtWall,
+  paintJobFlag,
+  parseJobDoc,
+  unknownJob,
   feedTone,
   gaugePercent,
   inferTone,
@@ -135,6 +145,93 @@ test("feedTone and inferTone: down is mute, stale is warn, absent is mute", () =
   assert.equal(inferTone("unauthorized"), "warn");
   assert.equal(inferTone("down"), "mute");
   assert.equal(inferTone("unknown"), "mute");
+});
+
+/** A soak snapshot shaped like the collector's `job` object. Numbers are round on purpose. */
+const SOAK_JOB_DOC = {
+  lease: { kind: "pretrain", pid: 4242, yaml: "configs/mb64_probe_v1.yaml", startedUtc: "2026-09-02 17:47Z", pidMatch: true },
+  live: { step: 84_000, tokensSeen: 2_064_384_000, trainLoss: 2.56, tokPerParam: 4.13, elapsedS: 156_000, last8TokS: 13_600, logAsOf: "2026-09-04T13:10:00.000Z" },
+  durable: {
+    step: 80_000, tokensSeen: 1_966_080_000, tokPerParam: 3.93, targetTokens: 2_500_000_000, targetTokPerParam: 5,
+    tokensPerStep: 24_576, paramCount: 500_000_000, trainLoss: 2.61, valLoss: null, jobComplete: false, undertrainedFlag: true,
+    runName: "shared_v40_v9_500m_bf16_mb64_probe_v1", savedAt: "2026-09-04T10:56:00.000Z",
+  },
+  fence: [{ unit: "qwen38-sglang", active: false }, { unit: "bloom-v40-500m", active: false }],
+  flags: ["gpu-idle", "not-a-flag"],
+  gpuName: "NVIDIA GB10",
+};
+
+test("parseJobDoc keeps what the collector says and makes the rest unknown", () => {
+  const job = parseJobDoc(SOAK_JOB_DOC);
+  assert.equal(job.lease.pid, 4242);
+  assert.equal(job.lease.pidMatch, true);
+  assert.equal(job.live.step, 84_000);
+  assert.equal(job.live.last8TokS, 13_600);
+  assert.equal(job.durable.step, 80_000);
+  assert.equal(job.durable.valLoss, WORKSHOP_UNKNOWN);
+  assert.equal(job.durable.jobComplete, false);
+  assert.equal(job.durable.undertrainedFlag, true);
+  assert.deepEqual(job.fence.map((f) => f.unit), ["qwen38-sglang", "bloom-v40-500m"]);
+  assert.deepEqual(job.flags, ["gpu-idle"]);
+  assert.equal(job.gpuName, "NVIDIA GB10");
+  assert.deepEqual(parseJobDoc(undefined), unknownJob());
+  assert.deepEqual(parseJobDoc("nope"), unknownJob());
+});
+
+test("deriveJob ships the widget formulas from live tokens and the last-8 rate", () => {
+  const d = deriveJob(parseJobDoc(SOAK_JOB_DOC));
+  assert.equal(d.tokPerParam, 4.13);
+  assert.equal(d.targetTokPerParam, 5);
+  assert.ok(typeof d.pct === "number" && Math.abs(d.pct - 82.575) < 0.01, `pct ${d.pct}`);
+  assert.equal(d.remainTokens, 2_500_000_000 - 2_064_384_000);
+  assert.ok(typeof d.hoursToFloor === "number" && Math.abs(d.hoursToFloor - 435_616_000 / 13_600 / 3600) < 1e-9);
+  assert.ok(typeof d.secPerIt === "number" && Math.abs(d.secPerIt - 24_576 / 13_600) < 1e-9);
+  assert.equal(d.stepsAhead, 4_000);
+});
+
+test("deriveJob never invents an ETA from the sidecar rate or a missing target", () => {
+  const noRate = parseJobDoc({ ...SOAK_JOB_DOC, live: { ...SOAK_JOB_DOC.live, last8TokS: null } });
+  const d1 = deriveJob(noRate);
+  assert.equal(d1.hoursToFloor, WORKSHOP_UNKNOWN);
+  assert.equal(d1.secPerIt, WORKSHOP_UNKNOWN);
+  assert.ok(typeof d1.pct === "number", "pct still known from tokens and target");
+  const noTarget = parseJobDoc({ ...SOAK_JOB_DOC, durable: { ...SOAK_JOB_DOC.durable, targetTokens: null } });
+  const d2 = deriveJob(noTarget);
+  assert.equal(d2.pct, WORKSHOP_UNKNOWN);
+  assert.equal(d2.remainTokens, WORKSHOP_UNKNOWN);
+  assert.equal(d2.hoursToFloor, WORKSHOP_UNKNOWN);
+  // Live log absent: falls back to the durable save, and tpp comes from tokens / params.
+  const noLive = parseJobDoc({ ...SOAK_JOB_DOC, live: undefined });
+  const d3 = deriveJob(noLive);
+  assert.equal(d3.tokPerParam, 1_966_080_000 / 500_000_000);
+  assert.equal(d3.stepsAhead, WORKSHOP_UNKNOWN);
+  assert.deepEqual(deriveJob(unknownJob()), {
+    tokPerParam: WORKSHOP_UNKNOWN, targetTokPerParam: WORKSHOP_UNKNOWN, pct: WORKSHOP_UNKNOWN, remainTokens: WORKSHOP_UNKNOWN,
+    hoursToFloor: WORKSHOP_UNKNOWN, secPerIt: WORKSHOP_UNKNOWN, stepsAhead: WORKSHOP_UNKNOWN,
+  });
+});
+
+test("formatters: tokens, ints, hours, wall, clock", () => {
+  assert.equal(fmtTokens(2_087_976_960), "2.09B");
+  assert.equal(fmtTokens(411_800_000), "412M");
+  assert.equal(fmtTokens(2_500_000), "2.5M");
+  assert.equal(fmtTokens(24_576), "24.6K");
+  assert.equal(fmtTokens(WORKSHOP_UNKNOWN), WORKSHOP_UNKNOWN);
+  assert.equal(fmtInt(84_960), "84,960");
+  assert.equal(fmtInt(null), WORKSHOP_UNKNOWN);
+  assert.equal(fmtFixed(4.176, 2), "4.18");
+  assert.equal(fmtHours(8.43), "8.4 h");
+  assert.equal(fmtHours(0.4), "24 min");
+  assert.equal(fmtHours(30.2), "30 h");
+  assert.equal(fmtHours(-1), WORKSHOP_UNKNOWN);
+  const now = Date.parse("2026-09-04T13:47:00.000Z");
+  assert.equal(fmtWall("2026-09-02 17:47Z", now), "44 h");
+  assert.equal(fmtWall("2026-09-04T13:20:00.000Z", now), "27 min");
+  assert.equal(fmtWall("garbage", now), WORKSHOP_UNKNOWN);
+  assert.equal(fmtClock("2026-09-04T10:56:00.000Z", "en-US", "America/New_York"), "06:56");
+  assert.equal(fmtClock(undefined), WORKSHOP_UNKNOWN);
+  assert.equal(paintJobFlag("two-trainers"), "two trainers");
+  assert.equal(paintJobFlag("step-backwards"), "step back");
 });
 
 test("feedAgeLabel formats seconds/minutes from asOf", () => {

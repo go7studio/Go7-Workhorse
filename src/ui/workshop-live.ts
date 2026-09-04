@@ -36,6 +36,8 @@ export function mergeSidecarInto(
       side.latestJson !== WORKSHOP_UNKNOWN && side.latestJson != null
         ? side.latestJson
         : current.latestJson,
+    job: side.job ?? current.job,
+    last8Toks: typeof side.last8Toks === "number" ? side.last8Toks : current.last8Toks,
   };
 }
 

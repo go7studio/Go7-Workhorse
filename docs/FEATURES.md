@@ -387,9 +387,12 @@ transcript rather than as a path.
   writer, loaded models, feed age) and expands to dense cards: Box, Models,
   Infer, Router, Job, Feed. Packs stack as modules and fold on their own.
   Two ship: Box monitor (Spark health from a feed you install yourself) and
-  Job log (a tail). Everything is the current snapshot — no history is kept —
-  and nothing on the rail starts, stops, routes, or leases anything. Detach
-  opens the same cards in their own window.
+  Job log (a tail). The Job card shows the training job two ways — the live
+  step and last-8 rate from the log, and the last durable save — with
+  progress toward the token target, hours to the floor at the live rate, and
+  the trainer's own gate. Everything is the current snapshot — no history is
+  kept — and nothing on the rail starts, stops, routes, or leases anything.
+  Detach opens the same cards in their own window.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

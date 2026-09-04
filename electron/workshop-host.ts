@@ -7,6 +7,7 @@ import {
   paintBool,
   paintNumber,
   paintString,
+  parseJobDoc,
   parseWorkshopManifest,
   unknownMetrics,
   WORKSHOP_FEED_SCHEMA,
@@ -239,6 +240,7 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         const names = doc.models.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
         snapshot.models = names.length ? names : WORKSHOP_UNKNOWN;
       }
+      // Whole-run tok/s (sidecar, latest.json) is never painted; the rate lives on job.live.last8TokS.
       snapshot.last8Toks = WORKSHOP_UNKNOWN;
     }
     if (grant === "read.fs.sidecar") {
@@ -248,6 +250,8 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         probeUnit: side.probeUnit === "active" || side.probeUnit === "inactive" ? side.probeUnit : WORKSHOP_UNKNOWN,
         qwenParked: paintBool(side.qwenParked),
       };
+      snapshot.job = parseJobDoc(doc.job);
+      snapshot.last8Toks = snapshot.job.live.last8TokS;
     }
     return snapshot;
   }

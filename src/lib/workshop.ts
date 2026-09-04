@@ -63,14 +63,71 @@ export type WorkshopInferTile = {
   status: "ok" | "unauthorized" | "down" | "unknown";
   detail?: string;
 };
+type U<T> = typeof WORKSHOP_UNKNOWN | T;
+
+/** Who owns the GPU: the lease file, confirmed against the process table. */
+export type WorkshopJobLease = {
+  kind: U<string>;
+  pid: U<number>;
+  yaml: U<string>;
+  startedUtc: U<string>;
+  /** The lease pid is one of the train_pretrain.py pids. */
+  pidMatch: U<boolean>;
+};
+
+/** The number that moves: the last `[step]` line of the exclusive log, plus the last-8 window rate. */
+export type WorkshopJobLive = {
+  step: U<number>;
+  tokensSeen: U<number>;
+  trainLoss: U<number>;
+  tokPerParam: U<number>;
+  elapsedS: U<number>;
+  /** Δtokens / Δelapsed over the last ~480s of step lines. Never the sidecar whole-run rate. */
+  last8TokS: U<number>;
+  logAsOf: U<string>;
+};
+
+/** Crash-safe progress: latest.json fields, frozen at the last save. */
+export type WorkshopJobDurable = {
+  step: U<number>;
+  tokensSeen: U<number>;
+  tokPerParam: U<number>;
+  targetTokens: U<number>;
+  targetTokPerParam: U<number>;
+  tokensPerStep: U<number>;
+  paramCount: U<number>;
+  trainLoss: U<number>;
+  valLoss: U<number>;
+  /** Written by the trainer only. The desk never flips these from an ETA. */
+  jobComplete: U<boolean>;
+  undertrainedFlag: U<boolean>;
+  runName: U<string>;
+  savedAt: U<string>;
+};
+
+export const WORKSHOP_JOB_FLAGS = ["two-trainers", "qwen-up-during-train", "gpu-idle", "step-backwards"] as const;
+export type WorkshopJobFlag = (typeof WORKSHOP_JOB_FLAGS)[number];
+
+export type WorkshopJobSnapshot = {
+  lease: WorkshopJobLease;
+  live: WorkshopJobLive;
+  durable: WorkshopJobDurable;
+  /** Units that must stay inactive during an exclusive train. */
+  fence: Array<{ unit: string; active: U<boolean> }>;
+  flags: WorkshopJobFlag[];
+  gpuName: U<string>;
+};
+
 export type WorkshopMetricsSnapshot = {
   gpuUtilPercent: typeof WORKSHOP_UNKNOWN | number;
   powerWatts: typeof WORKSHOP_UNKNOWN | number;
   oneWriter: typeof WORKSHOP_UNKNOWN | boolean;
   trainNameMatchCount: typeof WORKSHOP_UNKNOWN | number;
   tokPerParam: typeof WORKSHOP_UNKNOWN | number;
-  last8Toks: typeof WORKSHOP_UNKNOWN;
+  /** Last-8 window rate from the live log. The sidecar's whole-run tok/s is never painted. */
+  last8Toks: typeof WORKSHOP_UNKNOWN | number;
   latestJson: typeof WORKSHOP_UNKNOWN | string;
+  job: WorkshopJobSnapshot;
   exclusiveSidecar: {
     probeUnit: typeof WORKSHOP_UNKNOWN | "active" | "inactive";
     qwenParked: typeof WORKSHOP_UNKNOWN | boolean;
@@ -170,6 +227,21 @@ export function parseWorkshopManifest(raw: unknown, folderId: string): WorkshopL
   };
 }
 
+export function unknownJob(): WorkshopJobSnapshot {
+  const u = WORKSHOP_UNKNOWN;
+  return {
+    lease: { kind: u, pid: u, yaml: u, startedUtc: u, pidMatch: u },
+    live: { step: u, tokensSeen: u, trainLoss: u, tokPerParam: u, elapsedS: u, last8TokS: u, logAsOf: u },
+    durable: {
+      step: u, tokensSeen: u, tokPerParam: u, targetTokens: u, targetTokPerParam: u, tokensPerStep: u,
+      paramCount: u, trainLoss: u, valLoss: u, jobComplete: u, undertrainedFlag: u, runName: u, savedAt: u,
+    },
+    fence: [],
+    flags: [],
+    gpuName: u,
+  };
+}
+
 export function unknownMetrics(): WorkshopMetricsSnapshot {
   return {
     gpuUtilPercent: WORKSHOP_UNKNOWN,
@@ -179,6 +251,7 @@ export function unknownMetrics(): WorkshopMetricsSnapshot {
     tokPerParam: WORKSHOP_UNKNOWN,
     last8Toks: WORKSHOP_UNKNOWN,
     latestJson: WORKSHOP_UNKNOWN,
+    job: unknownJob(),
     exclusiveSidecar: { probeUnit: WORKSHOP_UNKNOWN, qwenParked: WORKSHOP_UNKNOWN },
     models: WORKSHOP_UNKNOWN,
     localComputeEmptyCapabilities: WORKSHOP_UNKNOWN,
@@ -287,6 +360,156 @@ export function inferTone(status: WorkshopInferTile["status"]): WorkshopTone {
   if (status === "ok") return "ok";
   if (status === "unauthorized") return "warn";
   return "mute";
+}
+
+function num(value: unknown): U<number> {
+  return paintNumber(value);
+}
+
+/** Parse the collector's `job` object. Every missing or odd field is unknown; nothing is inferred. */
+export function parseJobDoc(raw: unknown): WorkshopJobSnapshot {
+  const job = unknownJob();
+  if (!raw || typeof raw !== "object") return job;
+  const doc = raw as Record<string, unknown>;
+  const lease = doc.lease && typeof doc.lease === "object" ? (doc.lease as Record<string, unknown>) : {};
+  job.lease = {
+    kind: paintString(lease.kind),
+    pid: num(lease.pid),
+    yaml: paintString(lease.yaml),
+    startedUtc: paintString(lease.startedUtc),
+    pidMatch: paintBool(lease.pidMatch),
+  };
+  const live = doc.live && typeof doc.live === "object" ? (doc.live as Record<string, unknown>) : {};
+  job.live = {
+    step: num(live.step),
+    tokensSeen: num(live.tokensSeen),
+    trainLoss: num(live.trainLoss),
+    tokPerParam: num(live.tokPerParam),
+    elapsedS: num(live.elapsedS),
+    last8TokS: num(live.last8TokS),
+    logAsOf: paintString(live.logAsOf),
+  };
+  const durable = doc.durable && typeof doc.durable === "object" ? (doc.durable as Record<string, unknown>) : {};
+  job.durable = {
+    step: num(durable.step),
+    tokensSeen: num(durable.tokensSeen),
+    tokPerParam: num(durable.tokPerParam),
+    targetTokens: num(durable.targetTokens),
+    targetTokPerParam: num(durable.targetTokPerParam),
+    tokensPerStep: num(durable.tokensPerStep),
+    paramCount: num(durable.paramCount),
+    trainLoss: num(durable.trainLoss),
+    valLoss: num(durable.valLoss),
+    jobComplete: paintBool(durable.jobComplete),
+    undertrainedFlag: paintBool(durable.undertrainedFlag),
+    runName: paintString(durable.runName),
+    savedAt: paintString(durable.savedAt),
+  };
+  if (Array.isArray(doc.fence)) {
+    job.fence = doc.fence
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      .map((item) => ({ unit: paintString(item.unit), active: paintBool(item.active) }))
+      .filter((item): item is { unit: string; active: U<boolean> } => item.unit !== WORKSHOP_UNKNOWN);
+  }
+  if (Array.isArray(doc.flags)) {
+    const known = new Set<string>(WORKSHOP_JOB_FLAGS);
+    job.flags = doc.flags.filter((flag): flag is WorkshopJobFlag => typeof flag === "string" && known.has(flag));
+  }
+  job.gpuName = paintString(doc.gpuName);
+  return job;
+}
+
+export type WorkshopJobDerived = {
+  /** tokens_seen / param_count, from live tokens when the log is ahead of the save. */
+  tokPerParam: U<number>;
+  targetTokPerParam: U<number>;
+  /** 100 × tokens_seen / target_tokens. */
+  pct: U<number>;
+  remainTokens: U<number>;
+  /** remain / last-8 / 3600. Unknown without a live rate; never from the sidecar rate. */
+  hoursToFloor: U<number>;
+  /** tokens_per_step / last-8. */
+  secPerIt: U<number>;
+  /** The live log is ahead of the durable save by this many steps. */
+  stepsAhead: U<number>;
+};
+
+/** The widget formulas. Pure; unknown in, unknown out. */
+export function deriveJob(job: WorkshopJobSnapshot): WorkshopJobDerived {
+  const u = WORKSHOP_UNKNOWN;
+  const tokens = typeof job.live.tokensSeen === "number" ? job.live.tokensSeen : job.durable.tokensSeen;
+  const params = job.durable.paramCount;
+  const target = job.durable.targetTokens;
+  const rate = job.live.last8TokS;
+  const tpp =
+    typeof job.live.tokPerParam === "number"
+      ? job.live.tokPerParam
+      : typeof tokens === "number" && typeof params === "number" && params > 0
+        ? tokens / params
+        : job.durable.tokPerParam;
+  const remain = typeof tokens === "number" && typeof target === "number" ? Math.max(0, target - tokens) : u;
+  const pct = typeof tokens === "number" && typeof target === "number" && target > 0 ? Math.min(100, (100 * tokens) / target) : u;
+  const hours = typeof remain === "number" && typeof rate === "number" && rate > 0 ? remain / rate / 3600 : u;
+  const secPerIt =
+    typeof job.durable.tokensPerStep === "number" && typeof rate === "number" && rate > 0 ? job.durable.tokensPerStep / rate : u;
+  const ahead =
+    typeof job.live.step === "number" && typeof job.durable.step === "number" ? job.live.step - job.durable.step : u;
+  return { tokPerParam: tpp, targetTokPerParam: job.durable.targetTokPerParam, pct, remainTokens: remain, hoursToFloor: hours, secPerIt, stepsAhead: ahead };
+}
+
+/** 2,087,976,960 → "2.09B"; 411,800,000 → "412M"; 24,576 → "24.6K". */
+export function fmtTokens(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return WORKSHOP_UNKNOWN;
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e8) return `${Math.round(value / 1e6)}M`;
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
+  return String(Math.round(value));
+}
+
+/** 84960 → "84,960". */
+export function fmtInt(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return WORKSHOP_UNKNOWN;
+  return Math.round(value).toLocaleString("en-US");
+}
+
+export function fmtFixed(value: unknown, digits: number): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return WORKSHOP_UNKNOWN;
+  return value.toFixed(digits);
+}
+
+/** 8.43 → "8.4 h"; 0.4 → "24 min"; 30 → "30 h". */
+export function fmtHours(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return WORKSHOP_UNKNOWN;
+  if (value < 1) return `${Math.max(1, Math.round(value * 60))} min`;
+  if (value < 10) return `${value.toFixed(1)} h`;
+  return `${Math.round(value)} h`;
+}
+
+/** Hours since an ISO or `YYYY-MM-DD HH:MMZ` stamp, e.g. "44 h". */
+export function fmtWall(startedUtc: unknown, now = Date.now()): string {
+  if (typeof startedUtc !== "string" || !startedUtc.trim()) return WORKSHOP_UNKNOWN;
+  const iso = startedUtc.trim().replace(" ", "T");
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return WORKSHOP_UNKNOWN;
+  return fmtHours(Math.max(0, now - at) / 3_600_000);
+}
+
+/** Local wall-clock time of a save, e.g. "06:56". */
+export function fmtClock(iso: unknown, locale = "en-US", timeZone?: string): string {
+  if (typeof iso !== "string" || !iso.trim()) return WORKSHOP_UNKNOWN;
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return WORKSHOP_UNKNOWN;
+  return new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false, ...(timeZone ? { timeZone } : {}) });
+}
+
+/** Flag copy, present tense, one or two words. */
+export function paintJobFlag(flag: WorkshopJobFlag): string {
+  if (flag === "two-trainers") return "two trainers";
+  if (flag === "qwen-up-during-train") return "qwen up";
+  if (flag === "gpu-idle") return "gpu idle";
+  return "step back";
 }
 
 export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefined, feedPresent: boolean): string {

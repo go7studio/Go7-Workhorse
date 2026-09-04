@@ -23,6 +23,18 @@ test("mergeSidecarInto never clobbers GPU/watts/writer", () => {
   assert.equal(merged.latestJson, "latest.json");
 });
 
+test("mergeSidecarInto carries the job section and the live rate", () => {
+  const current: WorkshopMetricsSnapshot = { ...unknownMetrics(), gpuUtilPercent: 96 };
+  const side: WorkshopMetricsSnapshot = { ...unknownMetrics(), last8Toks: 13_600 };
+  side.job.live.step = 84_000;
+  side.job.durable.step = 80_000;
+  const merged = mergeSidecarInto(current, side);
+  assert.equal(merged.gpuUtilPercent, 96);
+  assert.equal(merged.job.live.step, 84_000);
+  assert.equal(merged.job.durable.step, 80_000);
+  assert.equal(merged.last8Toks, 13_600);
+});
+
 test("mergePortsInto keeps box meters and adopts models/infer/empty-caps", () => {
   const current: WorkshopMetricsSnapshot = {
     ...unknownMetrics(),

@@ -325,6 +325,39 @@ colour literal. Expanded/folded state is `localStorage`, never desk state.
 One change from §2: the Job log module paints its tail without a card
 heading, since the module head already names it.
 
+## 10. Job card as the progress card
+
+Steve's status line, read four ways (lease, live log, durable save, box),
+is what the Job card paints. The collector computes the last-8 window on
+the Spark; the desk derives pct, remain, hours to the floor, and s/it from
+feed fields and paints them. Still snapshot only: the rail stores nothing.
+
+```
+JOB · Bloom soak                     [two trainers] [qwen up]   flags · warn chips, only when raised
+mb64_probe_v1.yaml · pretrain · pid 280131 · 44 h              identity · row-meta · title = run_name
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━░░░░░░░░  83.5%        snapshot bar · tokens seen / target
+4.18                       2.09B                               17px 650 tabular
+/ 5.0 tok/param            / 2.50B tokens                      row-meta
+Live        84,960 · loss 2.56                                 the number that moves (log)
+Saved       80,000 · 3.93 tpp · 06:56                          the number that survives a crash
+Last-8      13,653 tok/s · 1.8 s/it                            Δtokens / Δelapsed, last 480 s
+To floor    8.4 h                                              remain / last-8; unknown without a live rate
+Status      running (one writer)
+Gate        undertrained                                       job_complete / undertrained_flag as written
+latest.json latest.json                                        basename · title = path
+```
+
+Box card: `tok/param` moved here beside its target; Box shows `GPU · GB10`
+from nvidia-smi name in its place. Memory is not shown on UMA.
+
+Collapsed strip adds one glance row under the models line: a 4px snapshot
+bar, `4.18 tpp`, `8.4 h`, and a warn word when a flag is raised (`gpu idle`,
+or `2 flags`). The locked order above it does not change.
+
+Unknown: every slot paints `—`, the bar is a track, the card keeps its
+height. Never: no hours are shown without a live last-8 rate; the sidecar
+whole-run rate and `max_steps` are not inputs.
+
 ## Success
 
 Glance without Settings: collapsed 76px shows GPU, watts, writer, models,

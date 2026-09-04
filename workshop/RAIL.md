@@ -36,4 +36,8 @@ From feed + soak already granted: `probeUnit`, `qwen` parked/up, models line (id
 
 ## Out of scope v1
 
-Fable polish pass, inventing history sparklines, new Settings tab, sidebar dock row, Usage/Watch fold-in, gateway/SSH changes.
+Inventing history sparklines, new Settings tab, sidebar dock row, Usage/Watch fold-in, gateway/SSH changes.
+
+## Paint
+
+Wires, states, token notes, and the never check for this surface: `RAIL-PAINT.md` (2026-09-04).

@@ -186,6 +186,7 @@ test("paintValue formats without inventing; switch picks the first matching case
 test("packSourceUrls builds the exact URLs the confirm screen shows", () => {
   assert.deepEqual(packSourceUrls("https://spark.test/", "box-monitor", { id: "feed", kind: "json", path: "feed", pollMs: 2000, freshMs: 120000, maxBytes: 1 }), ["https://spark.test/workshop/box-monitor/feed"]);
   assert.deepEqual(packSourceUrls("https://spark.test", "job-log", { id: "feed", kind: "json", namespace: "box-monitor", path: "feed", pollMs: 2000, freshMs: 120000, maxBytes: 1 }), ["https://spark.test/workshop/box-monitor/feed"]);
+  assert.deepEqual(packSourceUrls("https://spark.test", "box-monitor", { id: "feed", kind: "json", namespace: "v0", path: "feed", pollMs: 2000, freshMs: 120000, maxBytes: 1 }), ["https://spark.test/workshop/v0/feed"]);
   assert.deepEqual(packSourceUrls("https://spark.test", "x", { id: "i", kind: "probes", probes: ["healthz", "models"], pollMs: 5000 }), ["https://spark.test/healthz", "https://spark.test/v1/models"]);
 });
 

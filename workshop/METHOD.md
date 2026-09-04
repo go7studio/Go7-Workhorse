@@ -15,7 +15,12 @@ Separate add-on. Default off. Read-only.
 
 ## Spark (NVIDIA Sync terminal, operator only) (moves to the pack repo)
 
-Copy workshop-feed.py and the two systemd units from workshop/packs/box-monitor/spark-feed/ onto the Spark as the operator. Enable the user timer. Prove a local snapshot exists. The desk never installs this.
+Copy `workshop-feed.py` and the two systemd units from the pack repo
+(`packs/box-monitor/collector/`) onto the Spark as the operator into
+`~/.local/bin/` and `~/.config/systemd/user/`. Enable the user timer. Prove a
+local snapshot exists with `job.live` / `job.derived`. The desk never installs
+this. Gateway route for the feed is `/workshop/v0/feed` (not
+`/workshop/box-monitor/feed`). Packs declare `namespace: "v0"`.
 
 Failed collector runs must leave the last valid feed.json in place.
 

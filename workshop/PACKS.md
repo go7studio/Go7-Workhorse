@@ -15,8 +15,9 @@ Workshop).
 
 Additions since review, all in the contract file: `text` takes `parts` like
 `kv` (a primary line joined with ` · `); `basename` format; a json source may
-name another pack's `namespace` (job-log reads box-monitor's feed; the confirm
-screen shows the full URL either way).
+set `namespace` (defaults to the pack id). The DGX packs use `namespace: "v0"`
+so URLs join to the gateway allowlist `/workshop/v0/feed`; the confirm screen
+shows the full URL either way.
 
 ## 1. What a pack is
 
@@ -49,12 +50,14 @@ a removal bumps it.
 
 - Every read is a GET through one **Local Compute host** the user already
   configured, with that host's bearer. The user picks the host at grant time.
-- `json` sources are confined to the pack's own namespace on that gateway:
-  the host builds `<baseUrl>/workshop/<pack-id>/<path>`. `path` matches
+- `json` sources are confined to a gateway namespace under `/workshop/`:
+  the host builds `<baseUrl>/workshop/<namespace ?? pack-id>/<path>`. Packs
+  that share one feed (or match a host allowlist like `/workshop/v0/feed`)
+  set `namespace` explicitly. `path` matches
   `^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*$` — no leading slash, no
   `..`, no `//`, no `:`, no `?`, no `#`, no backslash, no percent-escapes.
   After the join the host asserts `url.origin === host origin` and that the
-  pathname starts with `/workshop/<pack-id>/`. A pack cannot name `/v1/keys`.
+  pathname starts with `/workshop/<namespace>/`. A pack cannot name `/v1/keys`.
 - `probes` come from a fixed host-owned list (`healthz` → `/healthz`,
   `readyz` → `/readyz`, `models` → `/v1/models`). A pack picks names, never
   paths. Probe results are `ok | unauthorized | down | unknown` plus an

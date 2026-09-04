@@ -44,4 +44,4 @@ Wires, states, token notes, and the never check for this surface: `RAIL-PAINT.md
 
 ## Packs
 
-How this rail becomes host + separately installed packs: `PACKS.md` (2026-09-04, design).
+The rail is a host. Packs are installed separately and paint through a closed vocabulary: `PACKS.md`. Workhorse ships none; the DGX Spark packs are `github.com/go7studio/workshop-pack-dgx-spark`.

@@ -381,18 +381,20 @@ transcript rather than as a path.
   and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
-- **Workshop** — an optional, read-only add-on rail on the right edge of the
-  desk. Turn a pack on from Settings → Skills → Workshop and confirm its read
-  grants; the rail appears, collapsed to a 76px strip (GPU ring, watts, one
-  writer, loaded models, feed age) and expands to dense cards: Box, Models,
-  Infer, Router, Job, Feed. Packs stack as modules and fold on their own.
-  Two ship: Box monitor (Spark health from a feed you install yourself) and
-  Job log (a tail). The Job card shows the training job two ways — the live
-  step and last-8 rate from the log, and the last durable save — with
-  progress toward the token target, hours to the floor at the live rate, and
-  the trainer's own gate. Everything is the current snapshot — no history is
-  kept — and nothing on the rail starts, stops, routes, or leases anything.
-  Detach opens the same cards in their own window.
+- **Workshop** — an optional, read-only rail on the right edge of the desk.
+  Add a pack from Settings → Skills → Workshop: paste a public GitHub repo URL
+  (the highest tagged release is downloaded) or pick a folder. A pack is data
+  only — one `pack.json` naming what it reads and how its cards look, plus an
+  optional collector the operator installs on the remote box. Nothing from a
+  pack runs in Workhorse. Turn a pack on, pick the Local Compute host it reads
+  through, and confirm the exact URLs, cadence, and byte cap it will GET; the
+  rail paints its cards collapsed to a 76px strip and expanded. Packs stack
+  as modules and fold on their own. Update re-reads the repo's tags; when a
+  pack's sources change you confirm again. Everything is the current snapshot
+  — no history is kept — and nothing on the rail starts, stops, routes, or
+  leases anything. Detach opens the same cards in their own window. Workhorse
+  ships no packs; the DGX Spark monitor lives at
+  github.com/go7studio/workshop-pack-dgx-spark.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

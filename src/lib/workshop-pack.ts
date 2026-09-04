@@ -98,7 +98,7 @@ export type Value =
 export type Widget =
   | { w: "ring"; of: Binding; size?: number }
   | { w: "bar"; num: Binding; den: Binding; label?: string; showPct?: boolean }
-  | ({ w: "text"; tone?: Tone; title?: Value } & Value)
+  | ({ w: "text"; tone?: Tone; title?: Value; parts?: Value[] } & Partial<Value>)
   | { w: "kv"; label: string; parts?: Value[]; title?: Value } & Partial<Value>
   | { w: "pair"; a: Value & { sub?: Value }; b: Value & { sub?: Value } }
   | { w: "meta"; parts: Value[]; title?: Value }
@@ -191,7 +191,7 @@ export type PackListing = {
   homepage?: string;
   on: boolean;
   hostId?: string;
-  sources: Array<{ id: string; kind: "json" | "probes"; path?: string; probes?: ProbeName[]; pollMs: number; maxBytes?: number }>;
+  sources: Array<{ id: string; kind: "json" | "probes"; path?: string; namespace?: string; probes?: ProbeName[]; pollMs: number; maxBytes?: number }>;
   granted: string[];
   collector?: string;
   installed?: { kind: "folder" | "repo"; from: string; tag?: string; sha256: string; at: string };
@@ -220,7 +220,7 @@ export type WorkshopSettings = { packs: WorkshopPackSetting[] };
 export const DEFAULT_WORKSHOP_SETTINGS: WorkshopSettings = { packs: [] };
 
 /**
- * Legacy rows ({ id, on, grants: [...] }) came from the bundled Spark packs. They become off with
+ * Legacy rows ({ id, on, grants: [...] }) came from the v0 bundled packs. They become off with
  * no sources: the user re-confirms against the installed pack's real URLs. Never widened silently.
  */
 export function normalizeWorkshopSettings(raw: unknown): WorkshopSettings {
@@ -379,8 +379,16 @@ function checkWidget(widget: unknown, ctx: Ctx, where: string, depth = 0): strin
       return checkBinding(widget.num, ctx, `${where}.num`) ?? checkBinding(widget.den, ctx, `${where}.den`);
     case "text": {
       if (widget.tone !== undefined && !["ok", "warn", "mute"].includes(widget.tone as string)) return `${where}: bad tone`;
-      const err = checkValue(widget, ctx, where);
-      if (err) return err;
+      if (widget.parts !== undefined) {
+        if (!Array.isArray(widget.parts) || widget.parts.length === 0 || widget.parts.length > 6) return `${where}: parts 1–6`;
+        for (const [i, part] of widget.parts.entries()) {
+          const err = checkValue(part, ctx, `${where}.parts[${i}]`);
+          if (err) return err;
+        }
+      } else {
+        const err = checkValue(widget, ctx, where);
+        if (err) return err;
+      }
       return widget.title === undefined ? null : checkValue(widget.title, ctx, `${where}.title`);
     }
     case "kv": {
@@ -731,4 +739,9 @@ export function gaugePercent(value: unknown): number | null {
 export function ratioPercent(num: unknown, den: unknown): number | null {
   if (typeof num !== "number" || typeof den !== "number" || !Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return null;
   return Math.max(0, Math.min(100, (100 * num) / den));
+}
+
+/** The detached window loads the desk with `?workshop`; App renders the breakout instead of the desk. */
+export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
+  return new URLSearchParams(search).has("workshop");
 }

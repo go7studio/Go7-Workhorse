@@ -1,15 +1,22 @@
 # Workshop packs — host/pack contract (v1 design, 2026-09-04)
 
-Status: design, reviewed, not yet built. `RAIL.md` and `METHOD.md` describe
-what ships today. This file says how Workshop becomes two things: the
-**host** (Workhorse: rail, renderer, fetcher, install UI — ships on the app's
-cadence) and **packs** (dashboards for one system, in their own repos, added
-by the user from Settings → Skills → Workshop).
+Status: built. The contract is `src/lib/workshop-pack.ts`; the host is
+`electron/workshop-host.ts` (poll, namespace, caps) and
+`electron/workshop-install.ts` (tag archive or folder, staged, validated);
+the renderer is `src/ui/workshop-paint.tsx`; the install UI is
+`src/ui/WorkshopBlock.tsx`. Workhorse ships no pack. The DGX Spark packs and
+their collector live at `github.com/go7studio/workshop-pack-dgx-spark`.
+`test/workshop-never.test.ts` pins that no vendor word returns to the host.
 
-Today the DGX Spark monitor is inlined in Workhorse: its fields, feed path,
-grant names, and paint live in `src/lib/workshop.ts`, `electron/workshop-host.ts`,
-`src/ui/WorkshopRail.tsx`, with `box-monitor` / `job-log` hard-coded and the
-pack folders bundled into the installer. This contract replaces that.
+Workshop is two things: the **host** (Workhorse: rail, renderer, fetcher,
+install UI — ships on the app's cadence) and **packs** (dashboards for one
+system, in their own repos, added by the user from Settings → Skills →
+Workshop).
+
+Additions since review, all in the contract file: `text` takes `parts` like
+`kv` (a primary line joined with ` · `); `basename` format; a json source may
+name another pack's `namespace` (job-log reads box-monitor's feed; the confirm
+screen shows the full URL either way).
 
 ## 1. What a pack is
 
@@ -151,7 +158,7 @@ Settings → Skills → Workshop → **Add pack**:
 `package.json` `extraResources workshop/packs` goes away; an artifact test
 proves the installer carries no pack and no collector.
 
-## 7. Migration — four PRs, not one
+## 7. Migration — as built
 
 1. **Contract + fetcher + renderer, packs still bundled.** `pack.json` schema
    and parser; namespaced GET with the path rule and post-join origin

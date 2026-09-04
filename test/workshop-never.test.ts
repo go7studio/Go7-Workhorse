@@ -1,143 +1,101 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+const read = (rel: string) => readFileSync(path.join(ROOT, ...rel.split("/")), "utf8");
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else out.push(full);
+  }
+  return out;
+}
+
+test("Workhorse ships no pack: no bundled packs folder, no extraResources for one, no vendor words in the host", () => {
+  assert.equal(existsSync(path.join(ROOT, "workshop", "packs")), false, "workshop/packs must not exist in this repo");
+  assert.equal(existsSync(path.join(ROOT, "src", "lib", "workshop.ts")), false, "the Spark-shaped module is gone");
+  const pkg = read("package.json");
+  assert.doesNotMatch(pkg, /workshop\/packs/);
+  // Every workshop source file in the app is generic. A box's words live in its pack repo.
+  const files = [
+    ...walk(path.join(ROOT, "src")).filter((f) => /workshop/i.test(path.basename(f))),
+    ...walk(path.join(ROOT, "electron")).filter((f) => /workshop/i.test(path.basename(f))),
+  ];
+  assert.ok(files.length >= 6, `workshop files found: ${files.length}`);
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    assert.doesNotMatch(text, /dgx|spark|nvidia|tok\/param|tpp\b|GB10|bloom|qwen|sglang|hours to 5|13,?653|latest\.json|train_pretrain|ACTIVE_GPU_JOB/i, path.relative(ROOT, file));
+  }
+});
 
 test("Workshop does not become a Settings tab, dock item, or Work popout", () => {
-  const settings = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  const settings = read("src/ui/Settings.tsx");
   assert.match(settings, /id: "profile"/);
   assert.match(settings, /id: "watch"/);
   assert.doesNotMatch(settings, /id: "workshop"/);
-  const types = readFileSync(path.join(ROOT, "src", "lib", "types.ts"), "utf8");
+  const types = read("src/lib/types.ts");
   assert.match(types, /export type SettingsSection = "profile" \| "llms" \| "skills" \| "routing" \| "learning" \| "usage" \| "watch"/);
   assert.match(types, /export type Panel = "settings" \| "add-bot" \| null/);
-  const skills = readFileSync(path.join(ROOT, "src", "ui", "SkillsPane.tsx"), "utf8");
+  const skills = read("src/ui/SkillsPane.tsx");
   assert.match(skills, /WorkshopBlock/);
   assert.doesNotMatch(skills, /WorkPopout/);
-  const popout = readFileSync(path.join(ROOT, "src", "ui", "WorkPopout.tsx"), "utf8");
-  assert.doesNotMatch(popout, /workshop/i);
+  assert.doesNotMatch(read("src/ui/WorkPopout.tsx"), /workshop/i);
 });
 
-test("preload grows workshop invoke without rebinding the HTTP bridge", () => {
-  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  assert.match(preload, /workshop:list/);
-  assert.doesNotMatch(preload, /workshop:kill|job\.stop|ssh:/);
-  const bridge = readFileSync(path.join(ROOT, "electron", "workhorse-bridge.ts"), "utf8");
-  assert.doesNotMatch(bridge, /workshop/);
-});
-
-test("v0 copy never ships hours to 5 tpp or a bakeoff leftover", () => {
-  const files = [
-    "src/ui/WorkshopBreakout.tsx",
-    "src/ui/WorkshopRail.tsx",
-    "src/ui/workshop-live.ts",
-    "src/lib/workshop.ts",
-    "electron/workshop-host.ts",
-    "workshop/packs/box-monitor/manifest.json",
-  ];
-  for (const rel of files) {
-    const text = readFileSync(path.join(ROOT, rel), "utf8");
-    assert.doesNotMatch(text, /hours to 5 tpp|hoursTo5|13,?653/i, rel);
+test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {
+  const preload = read("electron/preload.ts");
+  for (const channel of ["workshop:list", "workshop:view", "workshop:install-repo", "workshop:install-folder", "workshop:remove", "workshop:check-update", "workshop:update", "workshop:reveal-collector", "workshop:changed"]) {
+    assert.match(preload, new RegExp(channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), channel);
   }
+  assert.doesNotMatch(preload, /workshop:kill|workshop:read\b|workshop:feed-status|workshop:optin|workshop:revoke|job\.stop|ssh:/);
+  assert.doesNotMatch(read("electron/workhorse-bridge.ts"), /workshop/);
 });
 
-test("confirm flushes workshop settings; Detach is optional; rail mounts on desk", () => {
-  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
-  assert.match(block, /await store\.updateWorkshop/);
-  assert.match(block, /Install and grant only/);
-  assert.match(block, />\s*Detach\s*</);
-  // Confirm must not auto-open breakout — rail is primary live watch.
-  const turnOn = block.slice(block.indexOf("const turnOn"), block.indexOf("const turnOff"));
-  assert.doesNotMatch(turnOn, /workshopOpenBreakout/);
-  assert.match(block, /workshopOpenBreakout/);
-  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /const updateWorkshop = useCallback\(async/);
-  assert.match(store, /await window\.workhorse\.saveState/);
-  const app = readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8");
-  const themeIdx = app.indexOf("dataset.theme = resolvedTheme");
-  const workshopIdx = app.indexOf("if (isWorkshopSurface())");
-  assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
-  assert.match(app, /WorkshopRail/);
-  assert.match(app, /<WorkshopRail \/>/);
+test("the host fetches with GET only, in the pack's namespace, on the host origin, without redirects, capped", () => {
+  const hostSrc = read("electron/workshop-host.ts");
+  assert.match(hostSrc, /redirect: "error"/);
+  assert.match(hostSrc, /gatewayUrl\(/);
+  assert.match(hostSrc, /url\.origin !== base\.origin/);
+  assert.match(hostSrc, /\/workshop\/\$\{namespace\}\//);
+  assert.match(hostSrc, /readCapped\(/);
+  assert.match(hostSrc, /documentWithinLimits\(/);
+  assert.doesNotMatch(hostSrc, /method: "(POST|PUT|PATCH|DELETE)"/);
+  assert.doesNotMatch(hostSrc, /child_process|execFile|spawn\(|eval\(|new Function|import\(/);
+  const install = read("electron/workshop-install.ts");
+  assert.doesNotMatch(install, /child_process|execFile|spawn\(|\bgit\b(?!\))|eval\(|new Function|import\(/i);
+  assert.match(install, /lstatSync|isSymbolicLink/);
+  assert.match(install, /https:\/\/github\.com\//);
+  assert.doesNotMatch(install, /http:\/\//);
 });
 
-test("breakout refreshes from live workshop list, not only local store", () => {
-  const breakout = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBreakout.tsx"), "utf8");
-  assert.match(breakout, /useWorkshopLive/);
-  assert.doesNotMatch(breakout, /store\.settings\.workshop/);
-  const live = readFileSync(path.join(ROOT, "src", "ui", "workshop-live.ts"), "utf8");
+test("no pack code runs: the renderer paints a closed vocabulary and computes no domain number", () => {
+  const rail = read("src/ui/WorkshopRail.tsx");
+  const paint = read("src/ui/workshop-paint.tsx");
+  const breakout = read("src/ui/WorkshopBreakout.tsx");
+  const live = read("src/ui/workshop-live.ts");
+  for (const [rel, text] of [["WorkshopRail.tsx", rail], ["workshop-paint.tsx", paint], ["WorkshopBreakout.tsx", breakout], ["workshop-live.ts", live]] as const) {
+    assert.doesNotMatch(text, /dangerouslySetInnerHTML|<iframe|<webview|eval\(|new Function|import\(/, rel);
+    assert.doesNotMatch(text, /resolveBinding\([^)]*\)\s*[-+*/]/, `${rel}: arithmetic on a document value`);
+    assert.doesNotMatch(text, /Turn off|updateWorkshop|job\.start|job\.stop|ssh|\blease\w*\(|\broute\w*\(|\bstart\w*\(|\bstop\w*\(/, rel);
+    assert.doesNotMatch(text, /sparkline|history|series/i, rel);
+  }
+  assert.match(rail, /PaintWidget/);
+  assert.match(paint, /pickCase\(/);
+  assert.match(paint, /ratioPercent\(/);
+  assert.match(rail, /workshopOpenBreakout/);
+  assert.match(breakout, /PaintCard|PackCards/);
+  assert.match(live, /workshopView/);
   assert.match(live, /onWorkshopChanged/);
   assert.match(live, /setInterval\(.*pollMs/);
-  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
-  assert.match(preload, /workshop:changed/);
-  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
-  assert.match(main, /broadcastWorkshopChanged/);
-});
-
-
-test("Skills Workshop list refreshes on workshop:changed after Turn off", () => {
-  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
-  assert.match(block, /onWorkshopChanged/);
-  assert.match(block, /workshopCloseBreakout/);
-  assert.doesNotMatch(block, /workshopRevoke\?\./);
-});
-
-test("workshop optin/revoke never claim to flip packs", () => {
-  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
-  assert.match(main, /never flip packs/);
-  assert.match(main, /workshop:optin/);
-  assert.match(main, /workshop:revoke/);
-  const method = readFileSync(path.join(ROOT, "workshop", "METHOD.md"), "utf8");
-  assert.match(method, /updateWorkshop/);
-  assert.match(method, /Does not/);
-  assert.match(method, /workshopOptin/);
-});
-
-test("Box monitor paints Models and Router soak cards", () => {
-  const breakout = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBreakout.tsx"), "utf8");
-  assert.match(breakout, /paintModelsLine/);
-  assert.match(breakout, /paintJobStatus/);
-  assert.match(breakout, /section-label">Models/);
-  assert.match(breakout, /section-label">Router/);
-  const live = readFileSync(path.join(ROOT, "src", "ui", "workshop-live.ts"), "utf8");
-  assert.match(live, /read\.model\.ports/);
-  assert.match(live, /mergeSidecarInto/);
-  assert.match(live, /mergePortsInto/);
-  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  assert.match(rail, /section-label">Models|heading=[^\n]*Models/);
-  assert.match(rail, /section-label">Router|heading="Router"/);
-  assert.match(rail, /stripLine|paintModelsLine/);
-});
-
-test("the host fetches with GET only, on the host origin, without following redirects", () => {
-  const hostSrc = readFileSync(path.join(ROOT, "electron", "workshop-host.ts"), "utf8");
-  assert.match(hostSrc, /redirect: "error"/);
-  assert.match(hostSrc, /gatewayUrl\(host\.baseUrl, pathname\)/);
-  assert.match(hostSrc, /url\.origin !== base\.origin/);
-  assert.doesNotMatch(hostSrc, /method: "(POST|PUT|PATCH|DELETE)"/);
-  assert.doesNotMatch(hostSrc, /child_process|execFile|spawn\(/);
-});
-
-test("rail paints the six locked cards, a snapshot ring, and no control that changes the Spark", () => {
-  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  for (const card of ['heading="Box"', "Models", 'heading="Infer"', 'heading="Router"', "Job · ", 'heading="Feed"']) {
-    assert.match(rail, new RegExp(card.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), card);
-  }
-  // Collapsed strip keeps the locked order and the rail never grows a time series.
-  assert.match(rail, /GPU% · watts · writer · models one-liner/);
-  assert.doesNotMatch(rail, /sparkline|history|series/i);
-  // The only controls: expand, collapse, fold, Detach. Off lives in Settings → Skills.
-  // The read-only law is stated on the Router card; the words may appear there and nowhere as a call.
-  assert.doesNotMatch(rail, /Turn off|updateWorkshop|job\.start|job\.stop|ssh|\blease\w*\(|\broute\w*\(|start\w*\(|stop\w*\(/);
-  assert.match(rail, /labels only, never route\/lease\/start\/stop/);
-  assert.match(rail, /workshopOpenBreakout/);
-  // Watts is rounded for the glance and latest.json is a basename; the raw values ride in title.
-  assert.match(rail, /paintWatts/);
-  assert.match(rail, /latestJsonBasename/);
+  const contract = read("src/lib/workshop-pack.ts");
+  assert.match(contract, /needs a newer Workhorse/);
+  assert.match(contract, /FORBIDDEN_SEGMENT/);
   // Hairlines take the theme: no undefined --hairline token, no colour literal, in the workshop CSS.
-  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const css = read("src/styles/app.css");
   const start = css.indexOf("/* Workshop — a read-only add-on rail");
   const end = css.indexOf(".workshop-settings {", start);
   assert.ok(start >= 0 && end > start, "workshop css block present");
@@ -146,8 +104,24 @@ test("rail paints the six locked cards, a snapshot ring, and no control that cha
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b/i);
 });
 
-test("box-monitor manifest includes read.model.ports", () => {
-  const manifest = readFileSync(path.join(ROOT, "workshop", "packs", "box-monitor", "manifest.json"), "utf8");
-  assert.match(manifest, /read\.model\.ports/);
+test("Settings shows the exact URLs at confirm time, flushes settings, and never paints a box control", () => {
+  const block = read("src/ui/WorkshopBlock.tsx");
+  assert.match(block, /packSourceUrls\(/);
+  assert.match(block, /await store\.updateWorkshop/);
+  assert.match(block, /onWorkshopChanged/);
+  assert.match(block, /workshopCloseBreakout/);
+  assert.match(block, />\s*Detach\s*</);
+  assert.doesNotMatch(block, /\bgit\b|token|Start\b|Stop\b|Restart|Lease|Route\b/);
+  const store = read("src/lib/store.tsx");
+  assert.match(store, /const updateWorkshop = useCallback\(async/);
+  assert.match(store, /await window\.workhorse\.saveState/);
+  const app = read("src/App.tsx");
+  const themeIdx = app.indexOf("dataset.theme = resolvedTheme");
+  const workshopIdx = app.indexOf("if (isWorkshopSurface())");
+  assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
+  assert.match(app, /<WorkshopRail \/>/);
+  const method = read("workshop/METHOD.md");
+  assert.match(method, /Does not/);
+  assert.match(method, /workshop:install-repo/);
+  assert.doesNotMatch(method, /workshopOptin|workshop:optin/);
 });
-

@@ -4,15 +4,16 @@ Separate add-on. Default off. Read-only.
 
 ## Desk
 
-1. Open Workhorse Settings, then Skills, then Workshop.
-2. Turn on Box monitor and confirm the listed read grants (install/grant only).
-3. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. No new Settings tab. No dock item.
-4. Add a Local Compute host under Settings, LLMs, so infer and feed GETs can reuse that bearer.
-5. Infer tiles soak healthz, readyz, and v1/models now. GPU and train tiles stay unknown until the Spark feed GET is allowlisted and present.
-6. Turn off unloads host modules. It does not uninstall the Spark feed.
-7. Models + Router cards are soak labels only — no routing, lease, start, or stop.
+1. Add a Local Compute host under Settings → LLMs. Every pack read is a GET through one of these hosts with that host's bearer; Workhorse adds no other credential.
+2. Open Settings → Skills → Workshop. Paste a public GitHub repo URL and press Add (the highest tagged release is downloaded, staged, validated, then installed), or press From folder to copy a pack folder. No `git` binary. A pack outside the vocabulary is refused with the exact field or "needs a newer Workhorse".
+3. Press Turn on. Pick the host the pack reads through. The panel lists each source with its kind, cadence, byte cap, and the exact URLs the host will build. Untick what you do not want. Confirm stores `{ id, on, hostId, sources, version, contract }` under `settings.workshop`.
+4. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. No new Settings tab. No dock item.
+5. Update re-reads the repo's tags. When sources, host needs, cadence, byte caps, or contract changed, the pack turns off and asks you to Turn on again. Card-only changes apply with a version note.
+6. Turn off clears `sources` and stops the reads. Remove deletes the pack folder and its row. Neither touches the remote box.
+7. A pack's `collector/` is shown and revealed in the file manager only. Workhorse never runs, chmods, or copies it anywhere.
+8. Every card is a label. Nothing on the rail starts, stops, routes, or leases anything.
 
-## Spark (NVIDIA Sync terminal, operator only)
+## Spark (NVIDIA Sync terminal, operator only) (moves to the pack repo)
 
 Copy workshop-feed.py and the two systemd units from workshop/packs/box-monitor/spark-feed/ onto the Spark as the operator. Enable the user timer. Prove a local snapshot exists. The desk never installs this.
 
@@ -42,12 +43,18 @@ Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30
 
 | Call | Does | Does not |
 | --- | --- | --- |
-| Renderer `updateWorkshop` (via Settings → Skills) | Turns packs On/Off and sets grants | Open/close breakout by itself |
-| `workshopOpenBreakout` / `workshopCloseBreakout` | Opens or closes the breakout window | Flip pack on/off |
-| `workshopOptin` (`workshop:optin`) | Opens breakout **only if** a pack is already On | Opt a pack in or grant reads |
-| `workshopRevoke` (`workshop:revoke`) | Closes breakout **only if** no pack remains On | Turn a pack off or clear grants |
+| Renderer `updateWorkshop` (via Settings → Skills) | Turns packs on or off and sets `hostId` and `sources` | Open or close the breakout by itself |
+| `workshopList` (`workshop:list`) | Lists installed packs with sources, provenance, and grant state | Fetch anything from a host |
+| `workshopView` (`workshop:view`) | Returns the packs that are on with layout and main's cached documents | Start a timer; main owns the polling |
+| `workshopInstallRepo` (`workshop:install-repo`) | Downloads the highest tagged release of a public https repo, stages, validates, installs | Run `git`, follow redirects, or accept a private repo |
+| `workshopInstallFolder` (`workshop:install-folder`) | Opens the folder picker and copies the pack in | Reference the folder in place |
+| `workshopRemove` (`workshop:remove`) | Deletes the pack folder | Drop the settings row; the renderer rewrites it |
+| `workshopCheckUpdate` (`workshop:check-update`) | Reads the repo's tags and returns current and latest | Change anything on disk |
+| `workshopUpdate` (`workshop:update`) | Re-installs the latest tag; sets `reconfirm` and turns the pack off when sources changed | Widen a grant or keep an old grant against new URLs |
+| `workshopRevealCollector` (`workshop:reveal-collector`) | Shows the collector folder in the OS file manager | Run, chmod, or copy anything in it |
+| `workshopOpenBreakout` / `workshopCloseBreakout` (`workshop:open-breakout` / `workshop:close-breakout`) | Opens or closes the breakout window | Flip a pack on or off |
 
-Automation must not treat optin/revoke as pack toggles. Pack state is `settings.workshop` only.
+Pack state is `settings.workshop` only. No channel starts, stops, routes, or leases anything on the box.
 
 ## Soak labels (Box monitor breakout)
 

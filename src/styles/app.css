@@ -8989,10 +8989,27 @@ html.pane-dragging * {
   font-variant-numeric: tabular-nums;
 }
 
-.workshop-rail-watts {
+/* The number right under the ring is the strip's second headline (watts on the Spark pack). */
+.workshop-rail-watts,
+.workshop-rail-strip .workshop-ring + .workshop-rail-kv {
   font-size: 13px;
   font-weight: 590;
   margin-top: 2px;
+}
+
+/* One pack's strip widgets; packs stack with a hairline between them. */
+.workshop-pack-strip {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.workshop-rail-strip > * + .workshop-pack-strip {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
 }
 
 .workshop-rail-models {
@@ -9007,6 +9024,11 @@ html.pane-dragging * {
   line-height: 1.3;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.workshop-pack-strip > .workshop-rail-models:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .workshop-rail-age,
@@ -9228,7 +9250,19 @@ html.pane-dragging * {
 }
 
 .workshop-rail-glance .workshop-bar > span { display: none; }
-.workshop-rail-tpp { font-weight: 590; }
+
+/* A bar in the strip opens the glance group: hairline above, the numbers under it sit tight. */
+.workshop-rail-strip .workshop-bar {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.workshop-rail-strip .workshop-bar ~ .workshop-rail-kv { margin-top: -5px; }
+
+.workshop-rail-tpp,
+.workshop-rail-strip .workshop-bar + .workshop-rail-kv { font-weight: 590; }
 
 .workshop-dot {
   display: inline-block;
@@ -9250,7 +9284,23 @@ html.pane-dragging * {
   overflow-wrap: anywhere;
 }
 
-.workshop-law { margin-top: 4px; }
+/* A pack's note: the read-only law, or a host note. It may take two lines; it never clips. */
+.workshop-law {
+  margin-top: 4px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
+}
+
+/* Children side by side when the first is not a ring. */
+.workshop-hbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 2px 0;
+}
 
 .workshop-feed-note {
   margin: 0;
@@ -9315,5 +9365,50 @@ html.pane-dragging * {
 }
 
 .workshop-breakout .workshop-log { max-height: none; font-size: 12px; }
+.workshop-breakout .workshop-card p { margin: 0; }
+.workshop-breakout .workshop-kv { font-size: 13px; padding: 3px 0; }
+.workshop-breakout .actions { display: flex; align-items: center; gap: 8px; }
+
+/* One section per pack; its cards in two columns. */
+.workshop-breakout-pack + .workshop-breakout-pack { margin-top: 20px; }
+
+.workshop-breakout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+
+.workshop-breakout-grid > .workshop-card { min-width: 0; }
 .workshop-settings { margin-bottom: 8px; }
+
+/* Settings → Skills → Workshop: Add pack row, pack rows, the confirm panel and its source list. */
+.workshop-add { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.workshop-add .settings-search { flex: 1 1 auto; margin: 0; }
+.workshop-pack { flex: 1 1 auto; min-width: 0; }
+.workshop-pack > .row-meta { display: block; }
+.workshop-pack strong .row-meta { display: inline; margin: 0 0 0 4px; font-weight: 400; }
+.workshop-collector .tiny { margin-left: 8px; }
+.workshop-confirm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.workshop-confirm select {
+  margin-left: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-solid);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.workshop-sources { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.workshop-sources label { display: flex; align-items: baseline; gap: 8px; }
+.workshop-sources strong { display: inline; font-size: 12px; }
+.workshop-sources .row-meta { margin: 0; }
+.workshop-url {
+  display: block;
+  margin: 2px 0 0 24px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 

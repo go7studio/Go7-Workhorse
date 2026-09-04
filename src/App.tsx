@@ -15,7 +15,7 @@ import { WatchNotices } from "./ui/WatchNotices";
 import { Welcome } from "./ui/Welcome";
 import { WorkshopBreakout } from "./ui/WorkshopBreakout";
 import { WorkshopRail } from "./ui/WorkshopRail";
-import { isWorkshopSurface } from "./lib/workshop";
+import { isWorkshopSurface } from "./lib/workshop-pack";
 
 type AppView = {
   theme: Store["theme"];

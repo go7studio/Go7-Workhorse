@@ -1784,10 +1784,13 @@ html.pane-dragging * {
   align-items: flex-end;
   max-width: min(520px, 86%);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .turn.user .say {
   max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 10px 14px;
   background: var(--bg-solid);
   border: 1px solid var(--line);
@@ -1805,7 +1808,9 @@ html.pane-dragging * {
 
 .turn.user .command-line {
   margin: 0;
+  min-width: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .turn.user .chat-command {
@@ -2366,6 +2371,7 @@ html.pane-dragging * {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
 }
 
 .md p,
@@ -2374,10 +2380,12 @@ html.pane-dragging * {
 .md ol {
   margin: 0;
   line-height: 1.5;
+  min-width: 0;
 }
 
 .md p {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .md strong {
@@ -2391,6 +2399,7 @@ html.pane-dragging * {
 .md a {
   color: var(--accent);
   text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
 .md a:hover {
@@ -2404,6 +2413,7 @@ html.pane-dragging * {
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--bg-hover);
+  overflow-wrap: anywhere;
 }
 
 .md-file {

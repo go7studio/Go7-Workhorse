@@ -33,8 +33,8 @@ export function WorkshopBlock() {
     if (busy) return;
     setBusy(true);
     try {
-      // Flush workshop grants to main liveSettings before opening the breakout,
-      // or the second window reads packs still Off (confirm→breakout race).
+      // Flush workshop grants to main liveSettings. Live watch is the desk rail;
+      // breakout is optional Detach — do not auto-open on confirm.
       await store.updateWorkshop({
         packs: [
           ...packs
@@ -48,7 +48,6 @@ export function WorkshopBlock() {
         ],
       });
       setConfirmId(null);
-      await window.workhorse?.workshopOpenBreakout?.();
       reload();
     } finally {
       setBusy(false);
@@ -86,11 +85,13 @@ export function WorkshopBlock() {
       <div className="link-head">
         <div>
           <strong>Workshop</strong>
-          <p className="row-meta">Separate add-on. Default off. Read-only. Desk breakout + optional Spark feed.</p>
+          <p className="row-meta">
+            Install and grant only. Live watch is the desk rail. Breakout is optional detach.
+          </p>
         </div>
         {packs.some((pack) => pack.on) ? (
           <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
-            Open breakout
+            Detach
           </button>
         ) : null}
       </div>
@@ -100,7 +101,7 @@ export function WorkshopBlock() {
             <li key={pack.id} className="skill-row">
               <div>
                 <strong>{pack.name}</strong>
-                <span className="row-meta">{pack.on ? "On" : "Off"}{pack.refused ? " · refused " + pack.refused : ""}</span>
+                <span className="row-meta">{pack.on ? "On · rail watches" : "Off"}{pack.refused ? " · refused " + pack.refused : ""}</span>
                 {pack.description ? <em>{pack.description}</em> : null}
                 {confirmId === pack.id ? (
                   <p className="row-meta">

@@ -95,3 +95,31 @@ test("fresh feed fills granted metrics and refuses last-8 invention", async () =
     assert.equal(snap.last8Toks, WORKSHOP_UNKNOWN);
   }
 });
+
+
+test("feedStatus exposes asOf when feed is present", async () => {
+  const workshop = createWorkshopHost({
+    packsRoot: () => path.join(ROOT, "workshop", "packs"),
+    getSettings: () => ({ packs: [{ id: "box-monitor", on: true, grants: ["read.box.metrics"] }] }),
+    getHosts: () => [host],
+    readToken: () => "private-token",
+    now: () => Date.parse("2026-09-03T20:00:30.000Z"),
+    fetchImpl: fakeFetch({
+      "/healthz": { status: 200, body: "ok" },
+      "/readyz": { status: 200, body: "ok" },
+      "/v1/models": { status: 200, body: "{\"data\":[]}" },
+      "/workshop/v0/feed": {
+        status: 200,
+        body: JSON.stringify({
+          schema: "go7-workshop-feed/v0",
+          asOf: "2026-09-03T20:00:00.000Z",
+          gpuUtilPercent: 41,
+          oneWriter: true,
+        }),
+      },
+    }),
+  });
+  const status = await workshop.feedStatus("box-monitor");
+  assert.equal(status.present, true);
+  assert.equal(status.asOf, "2026-09-03T20:00:00.000Z");
+});

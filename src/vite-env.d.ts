@@ -320,7 +320,7 @@ type WorkhorseBridge = {
   /** Closes breakout only if no pack remains On. Does not flip packs. Prefer workshopCloseBreakout. */
   workshopRevoke?: (input: { id: string }) => Promise<{ ok: boolean }>;
   workshopRead?: (input: { id: string; grant: string }) => Promise<unknown>;
-  workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string }>;
+  workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string; asOf?: string }>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
   onWorkshopChanged?: (handler: () => void) => () => void;

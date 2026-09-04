@@ -34,7 +34,7 @@ export type WorkshopHostOptions = {
   createBreakout?: () => WorkshopBreakoutHandle | null;
 };
 
-export type WorkshopFeedStatus = { present: boolean; url?: string; reason?: string };
+export type WorkshopFeedStatus = { present: boolean; url?: string; reason?: string; asOf?: string };
 export type WorkshopBreakoutHandle = { show(): void; focus(): void; close(): void; isDestroyed(): boolean };
 
 
@@ -256,7 +256,11 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     const saved = packState(id);
     if (!saved?.on) return { present: false, reason: "off" };
     const feed = await soakFeed();
-    return { present: feed.present, url: feed.url, reason: feed.reason };
+    const asOf =
+      feed.doc && typeof feed.doc.asOf === "string" && feed.doc.asOf.trim()
+        ? feed.doc.asOf
+        : undefined;
+    return { present: feed.present, url: feed.url, reason: feed.reason, ...(asOf ? { asOf } : {}) };
   }
 
   function openBreakout(): boolean {

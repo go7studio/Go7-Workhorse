@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WORKSHOP_UNKNOWN,
+  feedAgeLabel,
   paintJobStatus,
   paintModelsLine,
   paintQwenParked,
+  stripLine,
   unknownMetrics,
 } from "../src/lib/workshop";
 
@@ -60,4 +62,27 @@ test("paintJobStatus derives from writer + feed", () => {
   assert.equal(paintJobStatus(base, false), WORKSHOP_UNKNOWN);
   assert.equal(paintJobStatus({ ...base, oneWriter: true }, true), "running (one writer)");
   assert.equal(paintJobStatus({ ...base, oneWriter: false }, true), "not exclusive");
+});
+
+test("stripLine paints GPU · watts · writer · models", () => {
+  const base = unknownMetrics();
+  assert.equal(
+    stripLine({
+      ...base,
+      gpuUtilPercent: 41,
+      powerWatts: 220,
+      oneWriter: true,
+      models: ["qwen3.8-27b"],
+    }),
+    "41% · 220W · one · qwen3.8-27b",
+  );
+  assert.equal(stripLine(null), `${WORKSHOP_UNKNOWN} · ${WORKSHOP_UNKNOWN} · ${WORKSHOP_UNKNOWN} · ${WORKSHOP_UNKNOWN}`);
+});
+
+test("feedAgeLabel formats seconds/minutes from asOf", () => {
+  const now = Date.parse("2026-09-04T12:00:12.000Z");
+  assert.equal(feedAgeLabel("2026-09-04T12:00:00.000Z", now), "feed · 12s ago");
+  assert.equal(feedAgeLabel("2026-09-04T11:55:00.000Z", now), "feed · 5m ago");
+  assert.equal(feedAgeLabel(undefined, now), WORKSHOP_UNKNOWN);
+  assert.equal(feedAgeLabel("not-a-date", now), WORKSHOP_UNKNOWN);
 });

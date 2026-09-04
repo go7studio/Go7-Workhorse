@@ -14,6 +14,7 @@ import { Settings } from "./ui/Settings";
 import { WatchNotices } from "./ui/WatchNotices";
 import { Welcome } from "./ui/Welcome";
 import { WorkshopBreakout } from "./ui/WorkshopBreakout";
+import { WorkshopRail } from "./ui/WorkshopRail";
 import { isWorkshopSurface } from "./lib/workshop";
 
 type AppView = {
@@ -91,6 +92,7 @@ export function App() {
           {surface === "session" && <SessionPane />}
           {surface === "project-home" && <ProjectHome />}
         </main>
+        <WorkshopRail />
       </div>
       <PermissionCard />
       <WatchNotices hidden={surface === "project-home"} />

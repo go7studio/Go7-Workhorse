@@ -31,6 +31,8 @@ test("preload grows workshop invoke without rebinding the HTTP bridge", () => {
 test("v0 copy never ships hours to 5 tpp or a bakeoff leftover", () => {
   const files = [
     "src/ui/WorkshopBreakout.tsx",
+    "src/ui/WorkshopRail.tsx",
+    "src/ui/workshop-live.ts",
     "src/lib/workshop.ts",
     "electron/workshop-host.ts",
     "workshop/packs/box-monitor/manifest.json",
@@ -41,10 +43,15 @@ test("v0 copy never ships hours to 5 tpp or a bakeoff leftover", () => {
   }
 });
 
-test("confirm flushes workshop settings before opening the breakout", () => {
+test("confirm flushes workshop settings; Detach is optional; rail mounts on desk", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   assert.match(block, /await store\.updateWorkshop/);
-  assert.match(block, /await window\.workhorse\?\.workshopOpenBreakout/);
+  assert.match(block, /Install and grant only/);
+  assert.match(block, />\s*Detach\s*</);
+  // Confirm must not auto-open breakout — rail is primary live watch.
+  const turnOn = block.slice(block.indexOf("const turnOn"), block.indexOf("const turnOff"));
+  assert.doesNotMatch(turnOn, /workshopOpenBreakout/);
+  assert.match(block, /workshopOpenBreakout/);
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /const updateWorkshop = useCallback\(async/);
   assert.match(store, /await window\.workhorse\.saveState/);
@@ -52,13 +59,17 @@ test("confirm flushes workshop settings before opening the breakout", () => {
   const themeIdx = app.indexOf("dataset.theme = resolvedTheme");
   const workshopIdx = app.indexOf("if (isWorkshopSurface())");
   assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
+  assert.match(app, /WorkshopRail/);
+  assert.match(app, /<WorkshopRail \/>/);
 });
 
 test("breakout refreshes from live workshop list, not only local store", () => {
   const breakout = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBreakout.tsx"), "utf8");
-  assert.match(breakout, /onWorkshopChanged/);
-  assert.match(breakout, /setInterval\(.*2_000/);
+  assert.match(breakout, /useWorkshopLive/);
   assert.doesNotMatch(breakout, /store\.settings\.workshop/);
+  const live = readFileSync(path.join(ROOT, "src", "ui", "workshop-live.ts"), "utf8");
+  assert.match(live, /onWorkshopChanged/);
+  assert.match(live, /setInterval\(.*pollMs/);
   const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
   assert.match(preload, /workshop:changed/);
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
@@ -90,7 +101,14 @@ test("Box monitor paints Models and Router soak cards", () => {
   assert.match(breakout, /paintJobStatus/);
   assert.match(breakout, /section-label">Models/);
   assert.match(breakout, /section-label">Router/);
-  assert.match(breakout, /read\.model\.ports/);
+  const live = readFileSync(path.join(ROOT, "src", "ui", "workshop-live.ts"), "utf8");
+  assert.match(live, /read\.model\.ports/);
+  assert.match(live, /mergeSidecarInto/);
+  assert.match(live, /mergePortsInto/);
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  assert.match(rail, /section-label">Models/);
+  assert.match(rail, /section-label">Router/);
+  assert.match(rail, /stripLine|paintModelsLine/);
 });
 
 test("box-monitor manifest includes read.model.ports", () => {

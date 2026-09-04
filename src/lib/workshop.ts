@@ -246,6 +246,30 @@ export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefin
   return WORKSHOP_UNKNOWN;
 }
 
+
+/** Collapsed Box-monitor strip: GPU% · watts · writer · models one-liner. */
+export function stripLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
+  const gpu =
+    metrics && typeof metrics.gpuUtilPercent === "number" ? `${metrics.gpuUtilPercent}%` : WORKSHOP_UNKNOWN;
+  const watts =
+    metrics && typeof metrics.powerWatts === "number" ? `${metrics.powerWatts}W` : WORKSHOP_UNKNOWN;
+  const writer =
+    metrics?.oneWriter === true ? "one" : metrics?.oneWriter === false ? "no" : WORKSHOP_UNKNOWN;
+  return `${gpu} · ${watts} · ${writer} · ${paintModelsLine(metrics)}`;
+}
+
+/** Feed age chip from asOf, e.g. "feed · 12s ago". */
+export function feedAgeLabel(asOf: string | null | undefined, now = Date.now()): string {
+  if (typeof asOf !== "string" || !asOf.trim()) return WORKSHOP_UNKNOWN;
+  const at = Date.parse(asOf);
+  if (!Number.isFinite(at)) return WORKSHOP_UNKNOWN;
+  const sec = Math.max(0, Math.round((now - at) / 1000));
+  if (sec < 60) return `feed · ${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `feed · ${min}m ago`;
+  return `feed · ${Math.round(min / 60)}h ago`;
+}
+
 export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
   return new URLSearchParams(search).has("workshop");
 }

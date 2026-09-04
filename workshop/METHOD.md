@@ -5,8 +5,8 @@ Separate add-on. Default off. Read-only.
 ## Desk
 
 1. Open Workhorse Settings, then Skills, then Workshop.
-2. Turn on Box monitor and confirm the listed read grants.
-3. A Workshop breakout window opens. No new Settings tab. No dock item.
+2. Turn on Box monitor and confirm the listed read grants (install/grant only).
+3. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. No new Settings tab. No dock item.
 4. Add a Local Compute host under Settings, LLMs, so infer and feed GETs can reuse that bearer.
 5. Infer tiles soak healthz, readyz, and v1/models now. GPU and train tiles stay unknown until the Spark feed GET is allowlisted and present.
 6. Turn off unloads host modules. It does not uninstall the Spark feed.

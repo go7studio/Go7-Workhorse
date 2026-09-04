@@ -1,0 +1,44 @@
+{
+  "id": "my-pack",
+  "name": "My pack",
+  "version": "1.0.0",
+  "contract": 1,
+  "description": "Read-only dashboard for one system. Never start or stop.",
+  "homepage": "https://github.com/owner/workshop-pack-my-pack",
+  "sources": [
+    {
+      "id": "feed",
+      "kind": "json",
+      "path": "feed",
+      "pollMs": 2000,
+      "freshMs": 120000,
+      "asOf": "/asOf",
+      "schema": "my-feed/v0",
+      "maxBytes": 262144
+    },
+    {
+      "id": "infer",
+      "kind": "probes",
+      "probes": ["healthz", "readyz", "models"],
+      "pollMs": 5000
+    }
+  ],
+  "strip": [
+    { "w": "text", "of": "feed:/status", "tone": "mute" }
+  ],
+  "cards": [
+    {
+      "title": "Status",
+      "rows": [
+        { "w": "kv", "label": "State", "of": "feed:/status" },
+        {
+          "w": "hbox",
+          "children": [
+            { "w": "kv", "label": "A", "of": "feed:/a", "fmt": "int" },
+            { "w": "kv", "label": "B", "of": "feed:/b", "fmt": "fixed1" }
+          ]
+        }
+      ]
+    }
+  ]
+}

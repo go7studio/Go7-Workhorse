@@ -17,17 +17,23 @@ export type WorkshopLiveState = { packs: PackView[] };
 
 /**
  * The renderer's one data call. Main owns the fetch timers and hands back its cache as
- * PackView[]; this hook re-reads it on an interval, on window focus, and when main says the
- * pack set changed. Nothing here fetches, and nothing here computes a domain number.
+ * PackView[]; this hook re-reads it when main says the pack set changed, on window focus,
+ * and on a slower heartbeat. Nothing here fetches, and nothing here computes a domain number.
+ * Unchanged `workshopView` JSON skips `setState` so React does not re-render.
  */
-export function useWorkshopLive(pollMs = 2_000): WorkshopLiveState {
+export function useWorkshopLive(pollMs = 5_000): WorkshopLiveState {
   const [state, setState] = useState<WorkshopLiveState>({ packs: [] });
 
   useEffect(() => {
     let live = true;
+    let lastJson = "";
     const run = async () => {
       const packs = (await window.workhorse?.workshopView?.()) ?? [];
-      if (live) setState({ packs: Array.isArray(packs) ? packs : [] });
+      const next = { packs: Array.isArray(packs) ? packs : [] };
+      const json = JSON.stringify(next);
+      if (!live || json === lastJson) return;
+      lastJson = json;
+      setState(next);
     };
     void run();
     const timer = window.setInterval(() => void run(), pollMs);

@@ -64,10 +64,13 @@ a removal bumps it.
   `http-NNN` detail; the `models` probe also yields the id list.
 - Host clamps: `pollMs ≥ 2000`, `maxBytes ≤ 256 KiB` streamed with a hard cap
   (not measured after `text()`), total and idle deadlines, `redirect: "error"`,
-  at most 4 sources and 8 probes per pack, one in-flight request per source,
-  jitter and backoff on failure. `schema` is a compatibility string the host
-  compares; shape is validated by the host (object root, depth ≤ 16, ≤ 4 000
-  nodes, strings ≤ 16 KiB).
+  at most 4 sources and 8 probes per pack, one in-flight request per **shared**
+  authorized URL (or identical probe set) on a host — packs that both grant
+  `/workshop/v0/feed` share one GET and one timer at `min(pollMs)`; each pack
+  still applies its own schema / freshMs / maxBytes and a pack without a grant
+  never receives another pack's body — jitter and backoff on failure. `schema`
+  is a compatibility string the host compares; shape is validated by the host
+  (object root, depth ≤ 16, ≤ 4 000 nodes, strings ≤ 16 KiB).
 - Freshness: the document at `asOf` must be within `freshMs`; otherwise the
   source is `stale` and its values paint `—`.
 - Main owns the timers. The renderer never fetches; it receives

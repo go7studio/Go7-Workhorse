@@ -393,7 +393,9 @@ transcript rather than as a path.
   pack's sources in that archive change, those packs turn off before polling
   restarts and you confirm again (grants are bound to source fingerprints).
   Everything is the current snapshot — no history is kept — and nothing on the
-  rail starts, stops, routes, or leases anything. Detach opens the same cards
+  rail starts, stops, routes, or leases anything. When two On packs grant the
+  same Local Compute URL, main issues one shared GET at the faster cadence
+  rather than polling twice. Detach opens the same cards
   in their own window. Workhorse ships no packs; the DGX Spark monitor lives at
   github.com/go7studio/workshop-pack-dgx-spark.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,

@@ -30,7 +30,9 @@ Nothing talks to NVIDIA Sync. Four sources, in this order:
 | Box | `nvidia-smi` name / utilization / power | `gpuUtilPercent`, `powerWatts`, `job.gpuName`. UMA memory is N/A and never invented |
 | Fence | `systemctl --user is-active` on the probe unit, `qwen38-sglang`, `bloom-v40-500m` | `exclusiveSidecar`, `job.fence` |
 
-Never published: the sidecar's whole-run tok/s and `latest.json` `tokens_per_sec` (both include compile). `max_steps` is not an ETA input. The desk derives pct, remain, hours to the floor, and s/it from these fields only, and paints `job_complete` / `undertrained_flag` as the trainer wrote them.
+Never published: the sidecar's whole-run tok/s and `latest.json` `tokens_per_sec` (both include compile). `max_steps` is not an ETA input. The collector publishes pct, remain, hours to the floor, s/it, and steps-ahead as `job.derived`; the desk formats them, and for a feed without `derived` computes the same formulas from the raw fields (`deriveJob`). The desk paints `job_complete` / `undertrained_flag` as the trainer wrote them.
+
+Gateway reads are GET only, on the configured host's origin, without following redirects, with a streamed 256 KiB cap (`gatewayUrl`, `readCapped`). The pack contract that generalises this is `PACKS.md`.
 
 `job.flags` are the four abort signals: `two-trainers`, `qwen-up-during-train`, `gpu-idle` (0 % for 3 min with a trainer present), `step-backwards` (durable step below the previous feed's). They are labels on the rail; the desk does nothing about them.
 

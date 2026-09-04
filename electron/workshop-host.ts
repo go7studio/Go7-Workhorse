@@ -39,6 +39,52 @@ export type WorkshopFeedStatus = { present: boolean; url?: string; reason?: stri
 export type WorkshopBreakoutHandle = { show(): void; focus(): void; close(): void; isDestroyed(): boolean };
 
 
+/**
+ * Gateway paths are absolute, plain, and stay on the host's origin. Nothing a pack could
+ * ever supply (`//evil`, `https:`, `..`, `?`, `#`, `%2e`) survives this, and the bearer never
+ * travels to a URL whose origin differs from the configured host. See workshop/PACKS.md §2.
+ */
+const GATEWAY_PATH = /^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
+
+export function gatewayUrl(baseUrl: string, pathname: string): URL | null {
+  if (!GATEWAY_PATH.test(pathname) || pathname.split("/").some((seg) => seg === "." || seg === "..")) return null;
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  if (base.protocol !== "https:" && base.protocol !== "http:") return null;
+  const url = new URL(pathname.replace(/^\//, ""), base.href.replace(/\/?$/, "/"));
+  if (url.origin !== base.origin) return null;
+  if (url.username || url.password || url.search || url.hash) return null;
+  return url;
+}
+
+/** Read at most `cap` bytes; anything past it is a refusal, not a truncation. */
+export async function readCapped(response: Response, cap: number): Promise<string | null> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > cap) return null;
+  if (!response.body) {
+    const text = await response.text();
+    return Buffer.byteLength(text) > cap ? null : text;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function safeJoin(root: string, rel: string): string | null {
   const resolved = path.resolve(root, rel);
   const base = path.resolve(root) + path.sep;
@@ -141,9 +187,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
   async function gatewayGet(pathname: string): Promise<{ status: number; body: string } | { error: string }> {
     const host = options.getHosts().find((item) => item.enabled);
     if (!host) return { error: "no-host" };
+    const url = gatewayUrl(host.baseUrl, pathname);
+    if (!url) return { error: "path" };
     const token = options.readToken(host.tokenFile);
     if (!token) return { error: "token" };
-    const url = new URL(pathname.replace(/^\//, ""), host.baseUrl.replace(/\/$/, "") + "/");
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     try {
@@ -151,9 +198,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         method: "GET",
         headers: { Accept: "application/json", Authorization: "Bearer " + token },
         signal: abort.signal,
+        redirect: "error",
       });
-      const text = await response.text();
-      if (text.length > MAX_FEED_BYTES) return { error: "too-large" };
+      const text = await readCapped(response, MAX_FEED_BYTES);
+      if (text === null) return { error: "too-large" };
       return { status: response.status, body: text };
     } catch {
       return { error: "unreachable" };

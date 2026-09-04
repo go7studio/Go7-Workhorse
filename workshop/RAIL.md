@@ -41,3 +41,7 @@ Inventing history sparklines, new Settings tab, sidebar dock row, Usage/Watch fo
 ## Paint
 
 Wires, states, token notes, and the never check for this surface: `RAIL-PAINT.md` (2026-09-04).
+
+## Packs
+
+How this rail becomes host + separately installed packs: `PACKS.md` (2026-09-04, design).

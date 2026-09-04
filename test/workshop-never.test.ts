@@ -111,6 +111,15 @@ test("Box monitor paints Models and Router soak cards", () => {
   assert.match(rail, /stripLine|paintModelsLine/);
 });
 
+test("the host fetches with GET only, on the host origin, without following redirects", () => {
+  const hostSrc = readFileSync(path.join(ROOT, "electron", "workshop-host.ts"), "utf8");
+  assert.match(hostSrc, /redirect: "error"/);
+  assert.match(hostSrc, /gatewayUrl\(host\.baseUrl, pathname\)/);
+  assert.match(hostSrc, /url\.origin !== base\.origin/);
+  assert.doesNotMatch(hostSrc, /method: "(POST|PUT|PATCH|DELETE)"/);
+  assert.doesNotMatch(hostSrc, /child_process|execFile|spawn\(/);
+});
+
 test("rail paints the six locked cards, a snapshot ring, and no control that changes the Spark", () => {
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   for (const card of ['heading="Box"', "Models", 'heading="Infer"', 'heading="Router"', "Job · ", 'heading="Feed"']) {

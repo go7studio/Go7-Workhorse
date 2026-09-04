@@ -282,6 +282,40 @@ def live(path: Path | None) -> tuple[dict | None, str | None]:
     }, tail
 
 
+def derived(live_row: dict | None, dur: dict | None) -> dict:
+    """The widget formulas, published so the desk only formats.
+
+    tpp = tokens_seen / param_count; remain = target − live tokens; pct = 100 × tokens / target;
+    hours_to_floor = remain / last-8 / 3600; s/it = tokens_per_step / last-8. None when an input is missing.
+    Never from the sidecar whole-run rate. job_complete / undertrained_flag are not touched here.
+    """
+    live_row = live_row or {}
+    dur = dur or {}
+    tokens = live_row.get("tokensSeen") if live_row.get("tokensSeen") is not None else dur.get("tokensSeen")
+    params = dur.get("paramCount")
+    target = dur.get("targetTokens")
+    rate = live_row.get("last8TokS")
+    tpp = live_row.get("tokPerParam")
+    if tpp is None and tokens is not None and params:
+        tpp = tokens / params
+    if tpp is None:
+        tpp = dur.get("tokPerParam")
+    remain = max(0.0, target - tokens) if tokens is not None and target is not None else None
+    pct = min(100.0, 100.0 * tokens / target) if tokens is not None and target else None
+    hours = remain / rate / 3600.0 if remain is not None and rate else None
+    sec_per_it = dur["tokensPerStep"] / rate if dur.get("tokensPerStep") is not None and rate else None
+    ahead = live_row["step"] - dur["step"] if live_row.get("step") is not None and dur.get("step") is not None else None
+    return {
+        "tokPerParam": tpp,
+        "targetTokPerParam": dur.get("targetTokPerParam"),
+        "pct": pct,
+        "remainTokens": remain,
+        "hoursToFloor": hours,
+        "secPerIt": sec_per_it,
+        "stepsAhead": ahead,
+    }
+
+
 def unit_active(unit: str) -> bool | None:
     rc, out = run(["systemctl", "--user", "is-active", unit])
     if rc == 0 and out == "active":
@@ -447,6 +481,7 @@ def collect(prev: dict | None = None, now_s: float | None = None) -> dict:
             "lease": owner,
             "live": live_row,
             "durable": dur,
+            "derived": derived(live_row, dur),
             "fence": fence,
             "flags": flags,
             "gpuName": gpu_name,

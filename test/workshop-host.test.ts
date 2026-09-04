@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { createWorkshopHost } from "../electron/workshop-host";
+import { createWorkshopHost, gatewayUrl, readCapped } from "../electron/workshop-host";
 import { WORKSHOP_UNKNOWN } from "../src/lib/workshop";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 
@@ -20,6 +20,55 @@ function fakeFetch(routes: Record<string, { status: number; body?: string }>): t
     return new Response(hit.body ?? "", { status: hit.status });
   }) as typeof fetch;
 }
+
+test("gatewayUrl keeps every path on the configured origin and refuses anything else", () => {
+  const base = "https://spark.example.test:8443/gw";
+  assert.equal(gatewayUrl(base, "/workshop/v0/feed")?.href, "https://spark.example.test:8443/gw/workshop/v0/feed");
+  assert.equal(gatewayUrl("https://spark.example.test", "/healthz")?.href, "https://spark.example.test/healthz");
+  assert.equal(gatewayUrl("https://spark.example.test/", "/v1/models")?.pathname, "/v1/models");
+  for (const bad of [
+    "https://evil.test/steal",
+    "//evil.test/steal",
+    "/..%2f..%2fetc",
+    "/workshop/../v1/keys",
+    "/workshop/./feed",
+    "/feed?token=1",
+    "/feed#x",
+    "/feed\\x",
+    "workshop/v0/feed",
+    "/",
+    "",
+    "/feed%2e%2e",
+    "/fe ed",
+  ]) {
+    assert.equal(gatewayUrl(base, bad), null, `must refuse ${JSON.stringify(bad)}`);
+  }
+  assert.equal(gatewayUrl("file:///etc", "/feed"), null);
+  assert.equal(gatewayUrl("not a url", "/feed"), null);
+});
+
+test("readCapped refuses a body past the cap instead of truncating it", async () => {
+  assert.equal(await readCapped(new Response("x".repeat(100)), 100), "x".repeat(100));
+  assert.equal(await readCapped(new Response("x".repeat(101)), 100), null);
+  assert.equal(await readCapped(new Response("short", { headers: { "content-length": "999999" } }), 100), null);
+});
+
+test("a bad path never reaches fetch, so the bearer never leaves the host origin", async () => {
+  const seen: string[] = [];
+  const workshop = createWorkshopHost({
+    packsRoot: () => path.join(ROOT, "workshop", "packs"),
+    getSettings: () => ({ packs: [{ id: "box-monitor", on: true, grants: ["read.box.metrics"] }] }),
+    getHosts: () => [{ ...host, baseUrl: "https://spark.example.test" }],
+    readToken: () => "private-token",
+    fetchImpl: (async (input) => {
+      seen.push(String(input));
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch,
+  });
+  await workshop.read("box-monitor", "read.box.metrics");
+  assert.ok(seen.length > 0);
+  for (const url of seen) assert.ok(url.startsWith("https://spark.example.test/"), url);
+});
 
 test("ungated read is unknown and token never leaves the host", async () => {
   let authorization = "";

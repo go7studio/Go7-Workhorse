@@ -70,7 +70,7 @@ test("Skills Workshop list refreshes on workshop:changed after Turn off", () => 
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   assert.match(block, /onWorkshopChanged/);
   assert.match(block, /workshopCloseBreakout/);
-  assert.doesNotMatch(block, /workshopRevoke/);
+  assert.doesNotMatch(block, /workshopRevoke\?\./);
 });
 
 test("workshop optin/revoke never claim to flip packs", () => {

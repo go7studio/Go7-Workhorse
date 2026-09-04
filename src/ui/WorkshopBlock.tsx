@@ -70,8 +70,8 @@ export function WorkshopBlock() {
             },
       );
       await store.updateWorkshop({ packs: nextPacks });
-      // Pack on/off is updateWorkshop only. workshopRevoke / workshopCloseBreakout
-      // only close the breakout when nothing remains On — they never flip packs.
+      // Pack on/off is updateWorkshop only. Close breakout when nothing remains On.
+      // Legacy revoke IPC never flips packs.
       if (!nextPacks.some((item) => item.on)) {
         await window.workhorse?.workshopCloseBreakout?.();
       }

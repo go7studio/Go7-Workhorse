@@ -1,168 +1,135 @@
-import { useState } from "react";
-import {
-  WORKSHOP_UNKNOWN,
-  feedAgeLabel,
-  paintJobStatus,
-  paintModelsLine,
-  paintQwenParked,
-  stripLine,
-} from "../lib/workshop";
-import { dash, useWorkshopLive } from "./workshop-live";
+import { Fragment, useCallback, useState } from "react";
+import { WORKSHOP_UNKNOWN } from "../lib/workshop-pack";
+import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
+import { Chip, Module, PaintWidget, PackCards } from "./workshop-paint";
 
-function Meter({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="workshop-meter">
-      <span>{label}</span>
-      <span className="workshop-track" />
-      <strong>{value}</strong>
-    </div>
-  );
+/** Rail view state is local to this window. It is never journaled with the desk. */
+const VIEW_KEY = "workhorse.workshop-rail";
+type RailView = { expanded: boolean; folded: string[] };
+
+function readView(): RailView {
+  try {
+    const raw = window.localStorage?.getItem(VIEW_KEY);
+    if (!raw) return { expanded: false, folded: [] };
+    const parsed = JSON.parse(raw) as Partial<RailView>;
+    return {
+      expanded: parsed.expanded === true,
+      folded: Array.isArray(parsed.folded) ? parsed.folded.filter((id) => typeof id === "string") : [],
+    };
+  } catch {
+    return { expanded: false, folded: [] };
+  }
 }
 
-function GpuBar({ value }: { value: unknown }) {
-  const pct = typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
-  return (
-    <div className="workshop-rail-gpu" aria-hidden={pct == null}>
-      <div className="workshop-rail-gpu-fill" style={pct == null ? undefined : { width: `${pct}%` }} />
-      <span>{pct == null ? WORKSHOP_UNKNOWN : `${pct}%`}</span>
-    </div>
-  );
+function writeView(view: RailView) {
+  try {
+    window.localStorage?.setItem(VIEW_KEY, JSON.stringify(view));
+  } catch {
+    /* view state is a convenience; losing it costs one click */
+  }
 }
 
-function HealthChip({ path, status }: { path: string; status: string }) {
-  const short = path.replace(/^\//, "");
-  const tone = status === "ok" || status === "up" ? "ok" : status === "unauthorized" ? "warn" : "mute";
-  return <span className={`workshop-chip workshop-chip-${tone}`}>{short} · {status}</span>;
-}
+// ---------------------------------------------------------------------------------------------
+// The rail
 
 /**
- * Desk-attached Workshop rail: live watch when any pack is On.
- * Settings → Skills stays install/grant only; breakout remains optional Detach.
+ * Desk-attached Workshop rail: live watch when any pack is On. Settings → Skills stays
+ * install/grant only; the breakout remains an optional Detach. Collapsed: each pack's strip
+ * (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the first.
+ * Expanded: one module per pack, its cards in pack order.
  */
 export function WorkshopRail() {
-  const { packs, metrics, tail, feed } = useWorkshopLive();
-  const [expanded, setExpanded] = useState(false);
+  const { packs } = useWorkshopLive();
+  const [view, setView] = useState<RailView>(readView);
+  const update = useCallback((next: Partial<RailView>) => {
+    setView((prev) => {
+      const merged = { ...prev, ...next };
+      writeView(merged);
+      return merged;
+    });
+  }, []);
+
   const on = packs.filter((pack) => pack.on);
   if (on.length === 0) return null;
 
-  const boxOn = on.some((pack) => pack.id === "box-monitor");
-  const jobOn = on.some((pack) => pack.id === "job-log");
-  const labels = metrics?.labels ?? { trainFence: "nvidia-spark-train-infer", inferInvoke: "Local Compute" };
-  const strip = boxOn ? stripLine(metrics) : jobOn ? "Job log" : "Workshop";
-  const feedChip = feed.present
-    ? feedAgeLabel(feed.asOf)
-    : feed.note.startsWith("Feed present")
-      ? "feed · present"
-      : "feed · off";
+  const now = Date.now();
+  const first = on[0];
+  const status = primaryStatus(first);
+  const tone = feedTone(status);
+  const age = feedAge(status, now);
+  const ageLabel = `feed · ${age}`;
+  const shortAge = status?.asOf ? age.replace(/ ago$/, "") : WORKSHOP_UNKNOWN;
+  const toggleFold = (id: string) =>
+    update({ folded: view.folded.includes(id) ? view.folded.filter((item) => item !== id) : [...view.folded, id] });
+
+  if (!view.expanded) {
+    const shown = on.slice(0, 2);
+    const more = on.length - shown.length;
+    return (
+      <aside className="workshop-rail is-collapsed" aria-label="Workshop rail">
+        <button
+          className="tiny workshop-rail-head"
+          type="button"
+          aria-expanded={false}
+          title="Expand Workshop"
+          onClick={() => update({ expanded: true })}
+        >
+          <span className="section-label">Workshop</span>
+        </button>
+        <button className="workshop-rail-strip" type="button" title={on.map((pack) => pack.name).join(" · ")} onClick={() => update({ expanded: true })}>
+          {shown.map((pack, i) => (
+            <Fragment key={pack.id}>
+              <div className="workshop-pack-strip" aria-label={pack.name}>
+                {pack.strip.map((widget, j) => (
+                  <PaintWidget key={j} widget={widget} documents={pack.documents} now={now} variant="strip" />
+                ))}
+              </div>
+              {i === 0 ? (
+                <span className={`row-meta workshop-rail-age workshop-tone-${tone}`} title={ageLabel}>
+                  {shortAge}
+                </span>
+              ) : null}
+            </Fragment>
+          ))}
+          {more > 0 ? <span className="row-meta">+{more}</span> : null}
+        </button>
+      </aside>
+    );
+  }
 
   return (
-    <aside
-      className={`workshop-rail${expanded ? " is-expanded" : " is-collapsed"}`}
-      aria-label="Workshop rail"
-    >
+    <aside className="workshop-rail is-expanded" aria-label="Workshop rail">
       <div className="workshop-rail-head">
-        <button
-          className="tiny workshop-rail-toggle"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {expanded ? "Collapse" : "Workshop"}
-        </button>
-        {expanded ? (
+        <span className="section-label">Workshop</span>
+        <div className="workshop-rail-head-side">
+          <Chip tone={tone} title={status?.asOf ?? status?.reason}>
+            {ageLabel}
+          </Chip>
           <button
-            className="tiny"
+            className="tiny workshop-rail-toggle"
             type="button"
-            onClick={() => void window.workhorse?.workshopOpenBreakout?.()}
+            aria-expanded={true}
+            title="Collapse Workshop"
+            onClick={() => update({ expanded: false })}
           >
-            Detach
+            ›
           </button>
-        ) : null}
+        </div>
       </div>
 
-      {!expanded ? (
-        <button
-          className="workshop-rail-strip"
-          type="button"
-          title={strip}
-          onClick={() => setExpanded(true)}
-        >
-          {boxOn ? (
-            <>
-              <span className="workshop-rail-kv">{typeof metrics?.gpuUtilPercent === "number" ? `${metrics.gpuUtilPercent}%` : WORKSHOP_UNKNOWN}</span>
-              <span className="workshop-rail-kv">{typeof metrics?.powerWatts === "number" ? `${metrics.powerWatts}W` : WORKSHOP_UNKNOWN}</span>
-              <span className="workshop-rail-kv">{metrics?.oneWriter === true ? "one" : metrics?.oneWriter === false ? "no" : WORKSHOP_UNKNOWN}</span>
-              <span className="workshop-rail-kv workshop-rail-kv-models" title={paintModelsLine(metrics)}>{paintModelsLine(metrics)}</span>
-              <span className="row-meta">{feedChip}</span>
-            </>
-          ) : null}
-          {jobOn ? <span className="workshop-rail-kv">Job log</span> : null}
-        </button>
-      ) : (
-        <div className="workshop-rail-body">
-          {boxOn ? (
-            <>
-              <div className="workshop-card">
-                <div className="section-label">Box</div>
-                <Meter label="GPU %" value={dash(metrics?.gpuUtilPercent)} />
-                <GpuBar value={metrics?.gpuUtilPercent} />
-                <Meter label="Watts" value={dash(metrics?.powerWatts)} />
-                <Meter label="Writer" value={dash(metrics?.oneWriter)} />
-                <Meter label="tok/param" value={dash(metrics?.tokPerParam)} />
-              </div>
-              <div className="workshop-card">
-                <div className="section-label">Models</div>
-                <Meter label="Loaded" value={paintModelsLine(metrics)} />
-              </div>
-              <div className="workshop-card">
-                <div className="section-label">Infer</div>
-                <div className="workshop-chip-row">
-                  {(metrics?.infer ?? []).map((tile) => (
-                    <HealthChip
-                      key={tile.path}
-                      path={tile.path}
-                      status={
-                        tile.status === "unauthorized"
-                          ? "unauthorized"
-                          : tile.status === "ok"
-                            ? "up"
-                            : tile.status === "down"
-                              ? "down"
-                              : WORKSHOP_UNKNOWN
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="workshop-card">
-                <div className="section-label">Router</div>
-                <Meter label="Train fence" value={labels.trainFence} />
-                <Meter label="Infer invoke" value={labels.inferInvoke} />
-                <Meter label="probeUnit" value={dash(metrics?.exclusiveSidecar?.probeUnit)} />
-                <Meter label="qwen" value={paintQwenParked(metrics?.exclusiveSidecar?.qwenParked ?? WORKSHOP_UNKNOWN)} />
-                <p className="row-meta">labels only, never route/lease/start/stop</p>
-              </div>
-              <div className="workshop-card">
-                <div className="section-label">Job this pack watches</div>
-                <Meter label="Name" value="Bloom soak" />
-                <Meter label="Status" value={paintJobStatus(metrics, feed.present)} />
-                <Meter label="latest.json" value={dash(metrics?.latestJson)} />
-              </div>
-              <div className="workshop-card">
-                <div className="section-label">Feed</div>
-                <p className="row-meta">{feed.present ? feedChip : feed.note}</p>
-              </div>
-            </>
-          ) : null}
+      <div className="workshop-rail-body">
+        {on.map((pack) => (
+          <Module key={pack.id} pack={pack} folded={view.folded.includes(pack.id)} onFold={() => toggleFold(pack.id)}>
+            <PackCards pack={pack} now={now} />
+          </Module>
+        ))}
+      </div>
 
-          {jobOn ? (
-            <div className="workshop-card">
-              <div className="section-label">Job log</div>
-              <pre className="workshop-log">{tail}</pre>
-            </div>
-          ) : null}
-        </div>
-      )}
+      <div className="workshop-rail-foot">
+        <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
+          Detach
+        </button>
+      </div>
     </aside>
   );
 }

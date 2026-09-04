@@ -381,6 +381,21 @@ transcript rather than as a path.
   and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
+- **Workshop** — an optional, read-only rail on the right edge of the desk.
+  Add a pack from Settings → Skills → Workshop: paste a public GitHub repo URL
+  (the highest tagged release is downloaded) or pick a folder. A pack is data
+  only — one `pack.json` naming what it reads and how its cards look, plus an
+  optional collector the operator installs on the remote box. Nothing from a
+  pack runs in Workhorse. Turn a pack on, pick the Local Compute host it reads
+  through, and confirm the exact URLs, cadence, and byte cap it will GET; the
+  rail paints its cards collapsed to a 76px strip and expanded. Packs stack
+  as modules and fold on their own. Update re-reads the repo's tags; when any
+  pack's sources in that archive change, those packs turn off before polling
+  restarts and you confirm again (grants are bound to source fingerprints).
+  Everything is the current snapshot — no history is kept — and nothing on the
+  rail starts, stops, routes, or leases anything. Detach opens the same cards
+  in their own window. Workhorse ships no packs; the DGX Spark monitor lives at
+  github.com/go7studio/workshop-pack-dgx-spark.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

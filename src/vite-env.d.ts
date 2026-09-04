@@ -314,13 +314,20 @@ type WorkhorseBridge = {
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
   cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
-  workshopList?: () => Promise<import("./lib/workshop").WorkshopPackListing[]>;
-  /** Opens breakout only if a pack is already On. Does not flip packs. Prefer workshopOpenBreakout. */
-  workshopOptin?: (input: { id: string }) => Promise<{ ok: boolean }>;
-  /** Closes breakout only if no pack remains On. Does not flip packs. Prefer workshopCloseBreakout. */
-  workshopRevoke?: (input: { id: string }) => Promise<{ ok: boolean }>;
-  workshopRead?: (input: { id: string; grant: string }) => Promise<unknown>;
-  workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string; asOf?: string }>;
+  /** Installed packs with their sources, install provenance, and the user's grant state. Settings → Skills → Workshop. */
+  workshopList?: () => Promise<import("./lib/workshop-pack").PackListing[]>;
+  /** Packs that are On, with layout and the documents main has fetched. Main owns the timers; this returns its cache. */
+  workshopView?: () => Promise<import("./lib/workshop-pack").PackView[]>;
+  /** Download the highest semver tag of a public https GitHub repo, stage, validate, install. No git. */
+  workshopInstallRepo?: (input: { url: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
+  /** Folder picker in main; the folder is copied, never referenced. */
+  workshopInstallFolder?: () => Promise<import("./lib/workshop-pack").InstallResult>;
+  workshopRemove?: (input: { id: string }) => Promise<{ ok: boolean; reason?: string }>;
+  workshopCheckUpdate?: (input: { id: string }) => Promise<{ ok: boolean; current: string; latest?: string; reason?: string }>;
+  /** Re-installs the latest tag. When sources changed (any pack in the archive) those packs turn off and `reconfirm`/`reconfirmIds` are set. */
+  workshopUpdate?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
+  /** Shows the pack's collector folder in the OS file manager. Never runs anything in it. */
+  workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
   onWorkshopChanged?: (handler: () => void) => () => void;

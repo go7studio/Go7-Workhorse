@@ -102,9 +102,10 @@ import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
-import { createWorkshopHost, resolveWorkshopPacksRoot } from "./workshop-host";
+import { createWorkshopHost } from "./workshop-host";
+import { checkPackUpdate, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
-import { normalizeWorkshopSettings } from "../src/lib/workshop";
+import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {
@@ -1019,10 +1020,17 @@ app.whenReady().then(async () => {
     }
   };
 
+  // Packs live in userData, never in the installer. Created lazily; nothing else writes here.
+  const workshopPacksRoot = (): string => {
+    const dir = path.join(app.getPath("userData"), "workshop", "packs");
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  };
   const workshopHost = createWorkshopHost({
-    packsRoot: () => resolveWorkshopPacksRoot(__dirname, process.resourcesPath),
+    packsRoot: workshopPacksRoot,
     getSettings: () => normalizeWorkshopSettings(liveSettings.workshop),
     getHosts: () => liveSettings.localCompute?.hosts ?? [],
+    onUpdate: () => broadcastWorkshopChanged(),
     readToken: (file) => {
       try {
         const stat = fs.statSync(file);
@@ -1604,7 +1612,10 @@ app.whenReady().then(async () => {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
       liveSettings = nextSettings;
-      if (workshopChanged) broadcastWorkshopChanged();
+      if (workshopChanged) {
+        workshopHost.refresh();
+        broadcastWorkshopChanged();
+      }
     }
     if ("theme" in state && typeof (state as { theme?: unknown }).theme === "string") {
       const theme = (state as { theme: string }).theme;
@@ -1626,24 +1637,99 @@ app.whenReady().then(async () => {
     ),
   );
 
+  // Pack on/off is renderer updateWorkshop → state:save only. Install, update, and remove change
+  // the folder on disk; the timers re-plan and every window is told to re-read.
+  const workshopInstalledChanged = () => {
+    workshopHost.refresh();
+    broadcastWorkshopChanged();
+  };
+  /**
+   * Turn affected On packs off in liveSettings before refresh so the poller cannot
+   * fetch new pack.json URLs under old grants. Renderer also clears when it sees reconfirmIds.
+   */
+  const workshopDisableForReconfirm = (candidateIds: string[]): string[] => {
+    if (!candidateIds.length) return [];
+    const { settings, reconfirmIds } = disablePacksForReconfirm(
+      normalizeWorkshopSettings(liveSettings.workshop),
+      candidateIds,
+    );
+    if (!reconfirmIds.length) return [];
+    liveSettings = { ...liveSettings, workshop: settings };
+    return reconfirmIds;
+  };
+  const workshopId = (input: unknown): string =>
+    input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "";
   ipcMain.handle("workshop:list", () => workshopHost.list());
-  // Pack on/off is renderer updateWorkshop → state:save only.
-  // workshop:optin / workshop:revoke never flip packs — they only open/close the breakout
-  // window based on whether any pack is already On (legacy names; prefer open/close-breakout).
-  ipcMain.handle("workshop:optin", (_event, input: { id?: string }) => {
-    if (typeof input?.id === "string" && workshopHost.anyOn()) workshopHost.openBreakout();
-    return { ok: typeof input?.id === "string" };
+  ipcMain.handle("workshop:view", () => workshopHost.view());
+  ipcMain.handle("workshop:install-repo", async (_event, input: unknown) => {
+    const url = input && typeof input === "object" && typeof (input as { url?: unknown }).url === "string" ? (input as { url: string }).url : "";
+    let reconfirmIds: string[] = [];
+    const result = await installFromRepo(url, workshopPacksRoot(), fetch, {
+      // Add/replace: any On pack being overwritten must reconfirm (old grants must not survive the swap).
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
   });
-  ipcMain.handle("workshop:revoke", () => {
-    if (!workshopHost.anyOn()) workshopHost.closeBreakout();
-    return { ok: true };
+  ipcMain.handle("workshop:install-folder", async () => {
+    const picked = await dialog.showOpenDialog({
+      title: "Add a Workshop pack folder",
+      buttonLabel: "Add pack",
+      properties: ["openDirectory"],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, reason: "canceled" };
+    let reconfirmIds: string[] = [];
+    const result = await installFromFolder(picked.filePaths[0], workshopPacksRoot(), {
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
   });
-  ipcMain.handle("workshop:read", (_event, input: { id?: string; grant?: string }) =>
-    workshopHost.read(typeof input?.id === "string" ? input.id : "", typeof input?.grant === "string" ? input.grant : ""),
-  );
-  ipcMain.handle("workshop:feed-status", (_event, input: { id?: string }) =>
-    workshopHost.feedStatus(typeof input?.id === "string" ? input.id : ""),
-  );
+  ipcMain.handle("workshop:remove", (_event, input: unknown) => {
+    const result = removePack(workshopId(input), workshopPacksRoot());
+    if (result.ok) workshopInstalledChanged();
+    return result;
+  });
+  ipcMain.handle("workshop:check-update", (_event, input: unknown) => checkPackUpdate(workshopId(input), workshopPacksRoot()));
+  ipcMain.handle("workshop:update", async (_event, input: unknown) => {
+    let reconfirmIds: string[] = [];
+    const result = await updatePack(workshopId(input), workshopPacksRoot(), fetch, {
+      // Every pack whose sources changed — including siblings in the same archive — reconfirms.
+      beforeReplace: ({ sourcesChangedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(sourcesChangedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
+  });
+  ipcMain.handle("workshop:reveal-collector", (_event, input: unknown) => {
+    const target = workshopHost.collectorPath(workshopId(input));
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
   ipcMain.handle("workshop:open-breakout", () => {
     const ok = workshopHost.openBreakout();
     broadcastWorkshopChanged();

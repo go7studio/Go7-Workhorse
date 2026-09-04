@@ -2,7 +2,7 @@ import { customBotEnabled, customBotServes, EMPTY_CUSTOM_DRAFT, normalizeCustomB
 import { normalizeAllowedExternalAgents } from "./agent-runtime";
 import { DEFAULT_LEARNING, normalizeLearning } from "./learning-policy";
 import { DEFAULT_LOCAL_COMPUTE_SETTINGS, normalizeLocalComputeSettings } from "./local-compute";
-import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop";
+import { DEFAULT_WORKSHOP_SETTINGS, normalizeWorkshopSettings } from "./workshop-pack";
 import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";

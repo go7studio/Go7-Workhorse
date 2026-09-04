@@ -249,4 +249,11 @@ contextBridge.exposeInMainWorld("workhorse", {
   workshopFeedStatus: (input: { id: string }) => ipcRenderer.invoke("workshop:feed-status", input),
   workshopOpenBreakout: () => ipcRenderer.invoke("workshop:open-breakout"),
   workshopCloseBreakout: () => ipcRenderer.invoke("workshop:close-breakout"),
+  onWorkshopChanged: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("workshop:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("workshop:changed", listener);
+    };
+  },
 });

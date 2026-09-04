@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { WORKSHOP_UNKNOWN, type WorkshopMetricsSnapshot, type WorkshopPackListing } from "../lib/workshop";
-import { useStore } from "../lib/store";
 
 type JobTail = { tail: string };
 
@@ -12,7 +11,6 @@ function dash(value: unknown): string {
 }
 
 export function WorkshopBreakout() {
-  const store = useStore();
   const [packs, setPacks] = useState<WorkshopPackListing[]>([]);
   const [metrics, setMetrics] = useState<WorkshopMetricsSnapshot | null>(null);
   const [tail, setTail] = useState<string>(WORKSHOP_UNKNOWN);
@@ -48,9 +46,18 @@ export function WorkshopBreakout() {
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15_000);
-    return () => { live = false; window.clearInterval(timer); };
-  }, [store.settings.workshop]);
+    // Poll main liveSettings — breakout store can lag the desk save that opened us.
+    const timer = window.setInterval(() => void refresh(), 2_000);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    const stop = window.workhorse?.onWorkshopChanged?.(() => void refresh());
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      stop?.();
+    };
+  }, []);
 
   const on = packs.filter((pack) => pack.on);
   const off = packs.filter((pack) => !pack.on && !pack.refused);

@@ -54,3 +54,14 @@ test("confirm flushes workshop settings before opening the breakout", () => {
   assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
 });
 
+test("breakout refreshes from live workshop list, not only local store", () => {
+  const breakout = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBreakout.tsx"), "utf8");
+  assert.match(breakout, /onWorkshopChanged/);
+  assert.match(breakout, /setInterval\(.*2_000/);
+  assert.doesNotMatch(breakout, /store\.settings\.workshop/);
+  const preload = readFileSync(path.join(ROOT, "electron", "preload.ts"), "utf8");
+  assert.match(preload, /workshop:changed/);
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /broadcastWorkshopChanged/);
+});
+

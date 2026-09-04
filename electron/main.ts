@@ -1013,6 +1013,12 @@ app.whenReady().then(async () => {
   attachLearningIpc(ipcMain, learningService, (settings) => {
     liveSettings = settings;
   });
+  const broadcastWorkshopChanged = () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send("workshop:changed");
+    }
+  };
+
   const workshopHost = createWorkshopHost({
     packsRoot: () => resolveWorkshopPacksRoot(__dirname, process.resourcesPath),
     getSettings: () => normalizeWorkshopSettings(liveSettings.workshop),
@@ -1594,7 +1600,12 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
-    if ("settings" in state) liveSettings = normalizeSettings((state as { settings?: unknown }).settings);
+    if ("settings" in state) {
+      const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
+      const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
+      liveSettings = nextSettings;
+      if (workshopChanged) broadcastWorkshopChanged();
+    }
     if ("theme" in state && typeof (state as { theme?: unknown }).theme === "string") {
       const theme = (state as { theme: string }).theme;
       if (theme === "system" || theme === "light" || theme === "dark" || theme === "workhorse") liveTheme = theme;
@@ -1630,7 +1641,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("workshop:feed-status", (_event, input: { id?: string }) =>
     workshopHost.feedStatus(typeof input?.id === "string" ? input.id : ""),
   );
-  ipcMain.handle("workshop:open-breakout", () => workshopHost.openBreakout());
+  ipcMain.handle("workshop:open-breakout", () => {
+    const ok = workshopHost.openBreakout();
+    broadcastWorkshopChanged();
+    return ok;
+  });
   ipcMain.handle("workshop:close-breakout", () => {
     workshopHost.closeBreakout();
     return true;

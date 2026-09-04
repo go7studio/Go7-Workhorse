@@ -321,6 +321,7 @@ type WorkhorseBridge = {
   workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string }>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
+  onWorkshopChanged?: (handler: () => void) => () => void;
 };
 
 interface Window {

@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { WORKSHOP_UNKNOWN, type WorkshopMetricsSnapshot, type WorkshopPackListing } from "../lib/workshop";
+import {
+  WORKSHOP_UNKNOWN,
+  paintJobStatus,
+  paintModelsLine,
+  paintQwenParked,
+  type WorkshopMetricsSnapshot,
+  type WorkshopPackListing,
+} from "../lib/workshop";
 
 type JobTail = { tail: string };
 
@@ -14,6 +21,7 @@ export function WorkshopBreakout() {
   const [packs, setPacks] = useState<WorkshopPackListing[]>([]);
   const [metrics, setMetrics] = useState<WorkshopMetricsSnapshot | null>(null);
   const [tail, setTail] = useState<string>(WORKSHOP_UNKNOWN);
+  const [feedPresent, setFeedPresent] = useState(false);
   const [feedNote, setFeedNote] = useState("Feed not present. Every meter is " + WORKSHOP_UNKNOWN + ".");
 
   useEffect(() => {
@@ -26,7 +34,9 @@ export function WorkshopBreakout() {
       const job = list.find((pack) => pack.id === "job-log" && pack.on);
       if (box) {
         const snap = await window.workhorse?.workshopRead?.({ id: "box-monitor", grant: "read.box.metrics" });
-        if (live && snap && typeof snap === "object" && !("unknown" in snap) && !("tail" in snap)) setMetrics(snap as WorkshopMetricsSnapshot);
+        if (live && snap && typeof snap === "object" && !("unknown" in snap) && !("tail" in snap)) {
+          setMetrics(snap as WorkshopMetricsSnapshot);
+        }
         const side = await window.workhorse?.workshopRead?.({ id: "box-monitor", grant: "read.fs.sidecar" });
         // Sidecar grant fills exclusiveSidecar/latestJson only — never clobber live GPU/watts/writer with —.
         if (live && side && typeof side === "object" && !("unknown" in side) && !("tail" in side)) {
@@ -40,12 +50,26 @@ export function WorkshopBreakout() {
             };
           });
         }
+        const ports = await window.workhorse?.workshopRead?.({ id: "box-monitor", grant: "read.model.ports" });
+        if (live && ports && typeof ports === "object" && !("unknown" in ports) && !("tail" in ports)) {
+          const portSnap = ports as WorkshopMetricsSnapshot;
+          setMetrics((current) => {
+            if (!current) return portSnap;
+            return {
+              ...current,
+              models: Array.isArray(portSnap.models) && portSnap.models.length ? portSnap.models : current.models,
+              infer: portSnap.infer?.length ? portSnap.infer : current.infer,
+            };
+          });
+        }
         const status = await window.workhorse?.workshopFeedStatus?.({ id: "box-monitor" });
         if (live && status) {
+          setFeedPresent(Boolean(status.present));
           setFeedNote(status.present ? "Feed present." : "Feed not present. Every meter is " + WORKSHOP_UNKNOWN + ". This desk does not remote-install.");
         }
       } else {
         setMetrics(null);
+        setFeedPresent(false);
       }
       if (job) {
         const log = await window.workhorse?.workshopRead?.({ id: "job-log", grant: "read.job.log" }) as JobTail | { unknown: true } | undefined;
@@ -70,6 +94,7 @@ export function WorkshopBreakout() {
 
   const on = packs.filter((pack) => pack.on);
   const off = packs.filter((pack) => !pack.on && !pack.refused);
+  const labels = metrics?.labels ?? { trainFence: "nvidia-spark-train-infer", inferInvoke: "Local Compute" };
 
   return (
     <section className="workshop-breakout settings">
@@ -99,18 +124,29 @@ export function WorkshopBreakout() {
             <Meter label="tok/param" value={dash(metrics?.tokPerParam)} />
           </div>
           <div className="workshop-card">
+            <div className="section-label">Models</div>
+            <Meter label="Loaded" value={paintModelsLine(metrics)} />
+          </div>
+          <div className="workshop-card">
             <div className="section-label">Infer</div>
             {(metrics?.infer ?? []).map((tile) => (
               <Meter key={tile.path} label={tile.path} value={tile.status === "unauthorized" ? "unauthorized" : tile.status === "ok" ? "up" : WORKSHOP_UNKNOWN} />
             ))}
-            <p className="row-meta">Train fence · nvidia-spark-train-infer. Infer invoke · Local Compute.</p>
+          </div>
+          <div className="workshop-card">
+            <div className="section-label">Router</div>
+            <Meter label="Train fence" value={labels.trainFence} />
+            <Meter label="Infer invoke" value={labels.inferInvoke} />
+            <Meter label="probeUnit" value={dash(metrics?.exclusiveSidecar?.probeUnit)} />
+            <Meter label="qwen" value={paintQwenParked(metrics?.exclusiveSidecar?.qwenParked ?? WORKSHOP_UNKNOWN)} />
+            <p className="row-meta">Labels only. Does not change Settings → Routing, start or stop, or hold a lease.</p>
           </div>
           <div className="workshop-card">
             <div className="section-label">Job this pack watches</div>
             <Meter label="Name" value="Bloom soak" />
             <Meter label="Role" value="first job, not the product name" />
-            <Meter label="Status" value={WORKSHOP_UNKNOWN} />
-            <Meter label="last-8" value={WORKSHOP_UNKNOWN} />
+            <Meter label="Status" value={paintJobStatus(metrics, feedPresent)} />
+            <Meter label="last-8" value={dash(metrics?.last8Toks)} />
             <Meter label="latest.json" value={dash(metrics?.latestJson)} />
           </div>
           <div className="workshop-card">

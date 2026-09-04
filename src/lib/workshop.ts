@@ -209,6 +209,64 @@ export function grantPlainWords(grant: WorkshopGrant): string {
   return "read last-8 / latest.json / exclusive sidecar";
 }
 
+export function paintQwenParked(value: unknown): typeof WORKSHOP_UNKNOWN | "parked" | "up" {
+  if (value === true) return "parked";
+  if (value === false) return "up";
+  return WORKSHOP_UNKNOWN;
+}
+
+export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
+  if (metrics && Array.isArray(metrics.models) && metrics.models.length > 0) {
+    return metrics.models.join(", ");
+  }
+  if (!metrics) return WORKSHOP_UNKNOWN;
+  const modelsTile = metrics.infer.find((tile) => tile.path === "/v1/models");
+  const modelsNotOk = modelsTile?.status !== "ok";
+  const trainExclusive =
+    metrics.exclusiveSidecar.qwenParked === true ||
+    (metrics.oneWriter === true && modelsNotOk);
+  // models down: no nonempty string[] (this branch)
+  if (trainExclusive) return "infer down (train exclusive)";
+  return WORKSHOP_UNKNOWN;
+}
+
+export function paintJobStatus(
+  metrics: WorkshopMetricsSnapshot | null | undefined,
+  feedPresent: boolean,
+): string {
+  if (!feedPresent || !metrics) return WORKSHOP_UNKNOWN;
+  if (metrics.oneWriter === true) return "running (one writer)";
+  if (metrics.oneWriter === false) return "not exclusive";
+  return WORKSHOP_UNKNOWN;
+}
+
 export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
   return new URLSearchParams(search).has("workshop");
+}
+
+export function paintQwenParked(value: WorkshopMetricsSnapshot["exclusiveSidecar"]["qwenParked"]): string {
+  if (value === true) return "parked";
+  if (value === false) return "up";
+  return WORKSHOP_UNKNOWN;
+}
+
+/** Loaded model ids, or plain words when exclusive train makes infer down. */
+export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
+  if (!metrics) return WORKSHOP_UNKNOWN;
+  if (Array.isArray(metrics.models) && metrics.models.length > 0) return metrics.models.join(", ");
+  const modelsTile = metrics.infer.find((tile) => tile.path === "/v1/models");
+  const modelsDown = !modelsTile || modelsTile.status === "down" || modelsTile.status === "unknown";
+  const trainExclusive =
+    metrics.exclusiveSidecar.qwenParked === true ||
+    (metrics.oneWriter === true && modelsDown);
+  if (trainExclusive && modelsDown) return "infer down (train exclusive)";
+  return WORKSHOP_UNKNOWN;
+}
+
+/** Job Status from live meters — never invents tok/s. last-8 stays separate. */
+export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefined, feedPresent: boolean): string {
+  if (!feedPresent || !metrics) return WORKSHOP_UNKNOWN;
+  if (metrics.oneWriter === true) return "running (one writer)";
+  if (metrics.oneWriter === false) return "not exclusive";
+  return WORKSHOP_UNKNOWN;
 }

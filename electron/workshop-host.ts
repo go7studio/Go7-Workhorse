@@ -232,6 +232,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
       snapshot.trainNameMatchCount = paintNumber(doc.trainNameMatchCount);
       snapshot.tokPerParam = paintNumber(doc.tokPerParam);
       snapshot.last8Toks = WORKSHOP_UNKNOWN;
+      if (Array.isArray(doc.models)) {
+        const names = doc.models.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+        snapshot.models = names.length ? names : WORKSHOP_UNKNOWN;
+      }
     }
     if (grant === "read.fs.sidecar") {
       snapshot.latestJson = paintString(doc.latestJson);

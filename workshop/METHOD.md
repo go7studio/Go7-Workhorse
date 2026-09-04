@@ -28,3 +28,7 @@ Failed collector runs must leave the last valid feed.json in place.
 
 Automation must not treat optin/revoke as pack toggles. Pack state is `settings.workshop` only.
 
+## Soak labels (Box monitor breakout)
+
+Models and Router cards are soak-only labels: loaded model ids (or `infer down (train exclusive)`), train fence / Local Compute invoke, probeUnit, qwen parked/up. They never change Settings → Routing, start/stop jobs, or hold leases.
+

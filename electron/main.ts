@@ -102,6 +102,9 @@ import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
+import { createWorkshopHost, resolveWorkshopPacksRoot } from "./workshop-host";
+import { createWorkshopBreakoutWindow } from "./workshop-window";
+import { normalizeWorkshopSettings } from "../src/lib/workshop";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {
@@ -941,6 +944,7 @@ app.whenReady().then(async () => {
   }
 
   let liveSettings: Settings = normalizeSettings({});
+  let liveTheme: import("../src/lib/types").Theme = "system";
   const inboundFile = learningInboundPath(app.getPath("userData"));
   const inboundIo = {
     mkdirSync: (dir: string, opts: { recursive: true }) => {
@@ -1008,6 +1012,44 @@ app.whenReady().then(async () => {
   });
   attachLearningIpc(ipcMain, learningService, (settings) => {
     liveSettings = settings;
+  });
+  const broadcastWorkshopChanged = () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.webContents.isDestroyed()) window.webContents.send("workshop:changed");
+    }
+  };
+
+  const workshopHost = createWorkshopHost({
+    packsRoot: () => resolveWorkshopPacksRoot(__dirname, process.resourcesPath),
+    getSettings: () => normalizeWorkshopSettings(liveSettings.workshop),
+    getHosts: () => liveSettings.localCompute?.hosts ?? [],
+    readToken: (file) => {
+      try {
+        const stat = fs.statSync(file);
+        if (!stat.isFile()) return null;
+        if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) return null;
+        const token = fs.readFileSync(file, "utf8").trim();
+        if (!token || token.length > 16_384 || /[\r\n]/.test(token)) return null;
+        return token;
+      } catch {
+        return null;
+      }
+    },
+    createBreakout: () => {
+      const dark =
+        liveTheme === "light"
+          ? false
+          : liveTheme === "dark" || liveTheme === "workhorse"
+            ? true
+            : nativeTheme.shouldUseDarkColors;
+      return createWorkshopBreakoutWindow({
+        preload: path.join(__dirname, "preload.mjs"),
+        deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
+        deskFile: path.join(__dirname, "../dist/index.html"),
+        icon: appIconPath(),
+        dark,
+      });
+    },
   });
   setInboundLearningSink((draft) => {
     learningService.record(draft);
@@ -1558,6 +1600,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
+    if ("settings" in state) {
+      const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
+      const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
+      liveSettings = nextSettings;
+      if (workshopChanged) broadcastWorkshopChanged();
+    }
+    if ("theme" in state && typeof (state as { theme?: unknown }).theme === "string") {
+      const theme = (state as { theme: string }).theme;
+      if (theme === "system" || theme === "light" || theme === "dark" || theme === "workhorse") liveTheme = theme;
+    }
     // The catch keeps the chain alive: writeState guards its own body, but a
     // future edit that throws before its try would otherwise poison the chain
     // and silently end every save after it.
@@ -1573,6 +1625,31 @@ app.whenReady().then(async () => {
       Array.isArray(hosts) ? hosts as import("../src/lib/types").LocalComputeHostSettings[] : [],
     ),
   );
+
+  ipcMain.handle("workshop:list", () => workshopHost.list());
+  ipcMain.handle("workshop:optin", (_event, input: { id?: string }) => {
+    if (typeof input?.id === "string" && workshopHost.anyOn()) workshopHost.openBreakout();
+    return { ok: typeof input?.id === "string" };
+  });
+  ipcMain.handle("workshop:revoke", () => {
+    if (!workshopHost.anyOn()) workshopHost.closeBreakout();
+    return { ok: true };
+  });
+  ipcMain.handle("workshop:read", (_event, input: { id?: string; grant?: string }) =>
+    workshopHost.read(typeof input?.id === "string" ? input.id : "", typeof input?.grant === "string" ? input.grant : ""),
+  );
+  ipcMain.handle("workshop:feed-status", (_event, input: { id?: string }) =>
+    workshopHost.feedStatus(typeof input?.id === "string" ? input.id : ""),
+  );
+  ipcMain.handle("workshop:open-breakout", () => {
+    const ok = workshopHost.openBreakout();
+    broadcastWorkshopChanged();
+    return ok;
+  });
+  ipcMain.handle("workshop:close-breakout", () => {
+    workshopHost.closeBreakout();
+    return true;
+  });
   ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 
   ipcMain.handle("app:quit", () => app.quit());

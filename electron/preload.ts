@@ -242,4 +242,18 @@ contextBridge.exposeInMainWorld("workhorse", {
   learningForget: (target: unknown) => ipcRenderer.invoke("learning:forget", target),
   learningPurge: (target: unknown) => ipcRenderer.invoke("learning:purge", target),
   learningExport: (dest: string) => ipcRenderer.invoke("learning:export", dest),
+  workshopList: () => ipcRenderer.invoke("workshop:list"),
+  workshopOptin: (input: { id: string }) => ipcRenderer.invoke("workshop:optin", input),
+  workshopRevoke: (input: { id: string }) => ipcRenderer.invoke("workshop:revoke", input),
+  workshopRead: (input: { id: string; grant: string }) => ipcRenderer.invoke("workshop:read", input),
+  workshopFeedStatus: (input: { id: string }) => ipcRenderer.invoke("workshop:feed-status", input),
+  workshopOpenBreakout: () => ipcRenderer.invoke("workshop:open-breakout"),
+  workshopCloseBreakout: () => ipcRenderer.invoke("workshop:close-breakout"),
+  onWorkshopChanged: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("workshop:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("workshop:changed", listener);
+    };
+  },
 });

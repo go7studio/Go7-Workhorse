@@ -1,0 +1,10 @@
+{
+  "id": "job-log",
+  "name": "Job log",
+  "version": "0.1.0",
+  "description": "Read-only tail of the job Box monitor watches. Never start or stop.",
+  "entry": "panel/index.html",
+  "host": ["host/log.js"],
+  "grants": ["read.job.log"],
+  "defaultOff": true
+}

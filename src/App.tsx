@@ -13,6 +13,8 @@ import { AddBot } from "./ui/AddBot";
 import { Settings } from "./ui/Settings";
 import { WatchNotices } from "./ui/WatchNotices";
 import { Welcome } from "./ui/Welcome";
+import { WorkshopBreakout } from "./ui/WorkshopBreakout";
+import { isWorkshopSurface } from "./lib/workshop";
 
 type AppView = {
   theme: Store["theme"];
@@ -65,6 +67,8 @@ export function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [view.theme]);
+
+  if (isWorkshopSurface()) return <WorkshopBreakout />;
 
   const surface = selectSurface({
     panel: view.panel,

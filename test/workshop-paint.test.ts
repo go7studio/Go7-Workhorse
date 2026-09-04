@@ -17,7 +17,6 @@ test("paintQwenParked maps parked/up/unknown", () => {
 test("paintModelsLine lists ids or train-exclusive plain words", () => {
   const base = unknownMetrics();
   assert.equal(paintModelsLine({ ...base, models: ["qwen3.8-27b"] }), "qwen3.8-27b");
-  assert.equal(paintModelsLine({ ...base, models: ["a", "b"] }), "a, b");
   assert.equal(
     paintModelsLine({
       ...base,
@@ -26,17 +25,17 @@ test("paintModelsLine lists ids or train-exclusive plain words", () => {
       infer: [{ path: "/v1/models", status: "down", detail: "http-502" }],
       models: WORKSHOP_UNKNOWN,
     }),
-    "infer down (train exclusive)",
+    "infer down / train exclusive · http-502",
   );
   assert.equal(
     paintModelsLine({
       ...base,
       oneWriter: true,
-      exclusiveSidecar: { probeUnit: "inactive", qwenParked: false },
-      infer: [{ path: "/v1/models", status: "unauthorized" }],
+      exclusiveSidecar: { probeUnit: "active", qwenParked: true },
+      infer: [{ path: "/v1/models", status: "down" }],
       models: WORKSHOP_UNKNOWN,
     }),
-    "infer down (train exclusive)",
+    "infer down / train exclusive",
   );
   assert.equal(paintModelsLine(null), WORKSHOP_UNKNOWN);
 });

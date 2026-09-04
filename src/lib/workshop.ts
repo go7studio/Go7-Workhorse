@@ -217,21 +217,20 @@ export function paintQwenParked(value: unknown): string {
 
 /** Loaded model ids, or plain words when exclusive train makes infer down. */
 export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
-  if (metrics && Array.isArray(metrics.models) && metrics.models.length > 0) {
-    return metrics.models.join(", ");
-  }
   if (!metrics) return WORKSHOP_UNKNOWN;
-  // models down: no nonempty string[] (this branch)
+  if (Array.isArray(metrics.models) && metrics.models.length > 0) return metrics.models.join(", ");
   const modelsTile = metrics.infer.find((tile) => tile.path === "/v1/models");
-  const modelsNotOk = modelsTile?.status !== "ok";
+  const modelsDown = !modelsTile || modelsTile.status === "down" || modelsTile.status === "unknown";
   const trainExclusive =
     metrics.exclusiveSidecar.qwenParked === true ||
-    (metrics.oneWriter === true && modelsNotOk);
-  if (trainExclusive) return "infer down (train exclusive)";
+    (metrics.oneWriter === true && modelsDown);
+  if (trainExclusive && modelsDown) {
+    const detail = typeof modelsTile?.detail === "string" && modelsTile.detail.trim() ? modelsTile.detail.trim() : "";
+    return detail ? `infer down / train exclusive · ${detail}` : "infer down / train exclusive";
+  }
   return WORKSHOP_UNKNOWN;
 }
 
-/** Job Status from live meters — never invents tok/s. last-8 stays separate. */
 export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefined, feedPresent: boolean): string {
   if (!feedPresent || !metrics) return WORKSHOP_UNKNOWN;
   if (metrics.oneWriter === true) return "running (one writer)";

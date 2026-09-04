@@ -389,11 +389,12 @@ transcript rather than as a path.
   pack runs in Workhorse. Turn a pack on, pick the Local Compute host it reads
   through, and confirm the exact URLs, cadence, and byte cap it will GET; the
   rail paints its cards collapsed to a 76px strip and expanded. Packs stack
-  as modules and fold on their own. Update re-reads the repo's tags; when a
-  pack's sources change you confirm again. Everything is the current snapshot
-  — no history is kept — and nothing on the rail starts, stops, routes, or
-  leases anything. Detach opens the same cards in their own window. Workhorse
-  ships no packs; the DGX Spark monitor lives at
+  as modules and fold on their own. Update re-reads the repo's tags; when any
+  pack's sources in that archive change, those packs turn off before polling
+  restarts and you confirm again (grants are bound to source fingerprints).
+  Everything is the current snapshot — no history is kept — and nothing on the
+  rail starts, stops, routes, or leases anything. Detach opens the same cards
+  in their own window. Workhorse ships no packs; the DGX Spark monitor lives at
   github.com/go7studio/workshop-pack-dgx-spark.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,

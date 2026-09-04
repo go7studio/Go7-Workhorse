@@ -206,6 +206,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     const infer = await soakInfer();
     const snapshot = unknownMetrics();
     snapshot.infer = infer;
+    const enabledHost = options.getHosts().find((item) => item.enabled);
+    snapshot.localComputeEmptyCapabilities = enabledHost
+      ? enabledHost.allowedCapabilities.length === 0
+      : WORKSHOP_UNKNOWN;
     if (grant === "read.model.ports") {
       const modelsTile = infer.find((tile) => tile.path === "/v1/models");
       if (modelsTile?.status === "ok") {
@@ -231,6 +235,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
       snapshot.oneWriter = paintBool(doc.oneWriter);
       snapshot.trainNameMatchCount = paintNumber(doc.trainNameMatchCount);
       snapshot.tokPerParam = paintNumber(doc.tokPerParam);
+      if (Array.isArray(doc.models)) {
+        const names = doc.models.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+        snapshot.models = names.length ? names : WORKSHOP_UNKNOWN;
+      }
       snapshot.last8Toks = WORKSHOP_UNKNOWN;
     }
     if (grant === "read.fs.sidecar") {

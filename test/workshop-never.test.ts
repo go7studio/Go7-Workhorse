@@ -84,3 +84,17 @@ test("workshop optin/revoke never claim to flip packs", () => {
   assert.match(method, /workshopOptin/);
 });
 
+test("Box monitor paints Models and Router soak cards", () => {
+  const breakout = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBreakout.tsx"), "utf8");
+  assert.match(breakout, /paintModelsLine/);
+  assert.match(breakout, /paintJobStatus/);
+  assert.match(breakout, /section-label">Models/);
+  assert.match(breakout, /section-label">Router/);
+  assert.match(breakout, /read\.model\.ports/);
+});
+
+test("box-monitor manifest includes read.model.ports", () => {
+  const manifest = readFileSync(path.join(ROOT, "workshop", "packs", "box-monitor", "manifest.json"), "utf8");
+  assert.match(manifest, /read\.model\.ports/);
+});
+

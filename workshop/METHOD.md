@@ -10,6 +10,7 @@ Separate add-on. Default off. Read-only.
 4. Add a Local Compute host under Settings, LLMs, so infer and feed GETs can reuse that bearer.
 5. Infer tiles soak healthz, readyz, and v1/models now. GPU and train tiles stay unknown until the Spark feed GET is allowlisted and present.
 6. Turn off unloads host modules. It does not uninstall the Spark feed.
+7. Models + Router cards are soak labels only — no routing, lease, start, or stop.
 
 ## Spark (NVIDIA Sync terminal, operator only)
 
@@ -27,4 +28,8 @@ Failed collector runs must leave the last valid feed.json in place.
 | `workshopRevoke` (`workshop:revoke`) | Closes breakout **only if** no pack remains On | Turn a pack off or clear grants |
 
 Automation must not treat optin/revoke as pack toggles. Pack state is `settings.workshop` only.
+
+## Soak labels (Box monitor breakout)
+
+Models and Router cards are soak-only labels: loaded model ids (or `infer down (train exclusive)`), train fence / Local Compute invoke, probeUnit, qwen parked/up. They never change Settings → Routing, start/stop jobs, or hold leases.
 

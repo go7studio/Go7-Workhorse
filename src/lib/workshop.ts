@@ -76,6 +76,8 @@ export type WorkshopMetricsSnapshot = {
     qwenParked: typeof WORKSHOP_UNKNOWN | boolean;
   };
   models: typeof WORKSHOP_UNKNOWN | string[];
+  /** Enabled Local Compute host has allowedCapabilities []. Fail-closed / inert for invoke. */
+  localComputeEmptyCapabilities: typeof WORKSHOP_UNKNOWN | boolean;
   infer: WorkshopInferTile[];
   labels: { trainFence: string; inferInvoke: string };
 };
@@ -179,6 +181,7 @@ export function unknownMetrics(): WorkshopMetricsSnapshot {
     latestJson: WORKSHOP_UNKNOWN,
     exclusiveSidecar: { probeUnit: WORKSHOP_UNKNOWN, qwenParked: WORKSHOP_UNKNOWN },
     models: WORKSHOP_UNKNOWN,
+    localComputeEmptyCapabilities: WORKSHOP_UNKNOWN,
     infer: [],
     labels: { trainFence: "nvidia-spark-train-infer", inferInvoke: "Local Compute" },
   };
@@ -207,6 +210,40 @@ export function grantPlainWords(grant: WorkshopGrant): string {
   if (grant === "read.job.log") return "read the job log tail";
   if (grant === "read.model.ports") return "read which models are listening (label only)";
   return "read last-8 / latest.json / exclusive sidecar";
+}
+
+export function paintQwenParked(value: unknown): string {
+  if (value === true) return "parked";
+  if (value === false) return "up";
+  return WORKSHOP_UNKNOWN;
+}
+
+/** Loaded model ids, or plain words for exclusive-train vs empty Local Compute capabilities. */
+export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
+  if (!metrics) return WORKSHOP_UNKNOWN;
+  if (Array.isArray(metrics.models) && metrics.models.length > 0) return metrics.models.join(", ");
+  const modelsTile = metrics.infer.find((tile) => tile.path === "/v1/models");
+  const modelsDown = !modelsTile || modelsTile.status === "down" || modelsTile.status === "unknown";
+  const trainExclusive =
+    metrics.exclusiveSidecar.qwenParked === true ||
+    (metrics.oneWriter === true && modelsDown);
+  // Prefer train-exclusive wording when Bloom exclusive explains /v1/models down.
+  if (trainExclusive && modelsDown) {
+    const detail = typeof modelsTile?.detail === "string" && modelsTile.detail.trim() ? modelsTile.detail.trim() : "";
+    return detail ? `infer down / train exclusive · ${detail}` : "infer down / train exclusive";
+  }
+  // Distinct soak label when the enabled Local Compute host is fail-closed (no capabilities).
+  if (metrics.localComputeEmptyCapabilities === true) {
+    return "Local Compute host has no allowed capabilities";
+  }
+  return WORKSHOP_UNKNOWN;
+}
+
+export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefined, feedPresent: boolean): string {
+  if (!feedPresent || !metrics) return WORKSHOP_UNKNOWN;
+  if (metrics.oneWriter === true) return "running (one writer)";
+  if (metrics.oneWriter === false) return "not exclusive";
+  return WORKSHOP_UNKNOWN;
 }
 
 export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {

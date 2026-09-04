@@ -6,7 +6,10 @@ import {
   PACK_LIMITS,
   WORKSHOP_UNKNOWN,
   bindingHas,
+  disablePacksForReconfirm,
   documentWithinLimits,
+  fingerprintsForSources,
+  grantsMatchFingerprints,
   highestSemverTag,
   normalizeWorkshopSettings,
   packSourceUrls,
@@ -18,6 +21,7 @@ import {
   pointerGet,
   ratioPercent,
   resolveBinding,
+  sourceFingerprint,
   type PackDocuments,
   type Widget,
 } from "../src/lib/workshop-pack";
@@ -198,17 +202,44 @@ test("highestSemverTag prefers releases and ignores junk", () => {
 });
 
 test("normalizeWorkshopSettings keeps the new shape and turns legacy grant rows off", () => {
+  const fingerprints = { feed: '{"kind":"json"}', infer: '{"kind":"probes"}' };
   const out = normalizeWorkshopSettings({
     packs: [
       { id: "box-monitor", on: true, grants: ["read.box.metrics"] },
-      { id: "sample", on: true, hostId: "spark", sources: ["feed", "feed", "infer"], version: "1.0.0", contract: 1 },
-      { id: "no-host", on: true, sources: ["feed"] },
+      { id: "sample", on: true, hostId: "spark", sources: ["feed", "feed", "infer"], sourceFingerprints: fingerprints, version: "1.0.0", contract: 1 },
+      { id: "no-host", on: true, sources: ["feed"], sourceFingerprints: { feed: "x" } },
+      { id: "no-fp", on: true, hostId: "spark", sources: ["feed"] },
       { id: "Bad", on: true, sources: ["feed"] },
     ],
   });
   assert.deepEqual(out.packs[0], { id: "box-monitor", on: false, sources: [] });
-  assert.deepEqual(out.packs[1], { id: "sample", on: true, hostId: "spark", sources: ["feed", "infer"], version: "1.0.0", contract: 1 });
+  assert.deepEqual(out.packs[1], {
+    id: "sample", on: true, hostId: "spark", sources: ["feed", "infer"],
+    sourceFingerprints: fingerprints, version: "1.0.0", contract: 1,
+  });
   assert.deepEqual(out.packs[2], { id: "no-host", on: false, sources: [] });
-  assert.equal(out.packs.length, 3);
+  assert.deepEqual(out.packs[3], { id: "no-fp", on: false, sources: [], hostId: "spark" });
+  assert.equal(out.packs.length, 4);
   assert.deepEqual(normalizeWorkshopSettings(undefined), { packs: [] });
+});
+
+test("source fingerprints bind grants to descriptors; disablePacksForReconfirm clears On rows", () => {
+  const feed = { id: "feed", kind: "json" as const, path: "feed", pollMs: 2000, freshMs: 120000, maxBytes: 65536 };
+  const moved = { ...feed, namespace: "v0" };
+  const fp = sourceFingerprint("box-monitor", feed);
+  assert.equal(grantsMatchFingerprints("box-monitor", [feed], ["feed"], { feed: fp }), true);
+  assert.equal(grantsMatchFingerprints("box-monitor", [moved], ["feed"], { feed: fp }), false);
+  assert.equal(grantsMatchFingerprints("box-monitor", [feed], ["feed"], undefined), false);
+  const disabled = disablePacksForReconfirm({
+    packs: [
+      { id: "box-monitor", on: true, hostId: "spark", sources: ["feed"], sourceFingerprints: { feed: fp } },
+      { id: "job-log", on: true, hostId: "spark", sources: ["feed"], sourceFingerprints: fingerprintsForSources("job-log", [feed], ["feed"]) },
+      { id: "other", on: false, sources: [] },
+    ],
+  }, ["box-monitor", "job-log", "missing"]);
+  assert.deepEqual(disabled.reconfirmIds, ["box-monitor", "job-log"]);
+  assert.equal(disabled.settings.packs[0]?.on, false);
+  assert.equal(disabled.settings.packs[0]?.sourceFingerprints, undefined);
+  assert.equal(disabled.settings.packs[1]?.on, false);
+  assert.equal(disabled.settings.packs[2]?.on, false);
 });

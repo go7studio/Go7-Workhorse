@@ -404,6 +404,7 @@ test("checkUpdate reads the record; update re-installs and flags changed sources
   const first = await updatePack("sample-box", root, repoFetch(["v1.0.0", "v1.1.0"], v11));
   assert.equal(first.ok, true);
   assert.equal(first.sourcesChanged, false);
+  assert.equal(first.sourcesChangedIds, undefined);
   assert.equal(readInstallRecord(path.join(root, "sample-box"))?.tag, "v1.1.0");
 
   // Sources change: the desk must re-confirm.
@@ -414,6 +415,7 @@ test("checkUpdate reads the record; update re-installs and flags changed sources
   const second = await updatePack("sample-box", root, repoFetch(["v1.2.0"], v12));
   assert.equal(second.ok, true);
   assert.equal(second.sourcesChanged, true);
+  assert.deepEqual(second.sourcesChangedIds, ["sample-box"]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, "sample-box", "pack.json"), "utf8")).version, "1.2.0");
 });
 
@@ -428,4 +430,155 @@ test("folder-installed packs have no update path", async () => {
   const update = await updatePack("sample-box", root, repoFetch(["v9.0.0"], null, seen));
   assert.equal(update.ok, false);
   assert.equal(seen.length, 0);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Grant / update race (adversarial)
+
+test("multi-pack update flags every sibling whose sources changed, not only the clicked id", async () => {
+  const root = tempRoot();
+  const box = fixturePack();
+  const sibling = {
+    id: "job-log",
+    name: "Job log",
+    version: "1.0.0",
+    contract: 1,
+    description: "sibling",
+    sources: [
+      { id: "feed", kind: "json", path: "feed", namespace: "v0", pollMs: 5000, freshMs: 120000, asOf: "/asOf", maxBytes: 65536 },
+    ],
+    strip: [{ w: "note", value: "log" }],
+    cards: [{ title: "Log", rows: [{ w: "note", value: "log" }] }],
+  };
+  const v1Files = {
+    ...samplePackFiles("packs/sample-box", box),
+    "packs/job-log/pack.json": JSON.stringify(sibling, null, 2),
+  };
+  assert.equal((await installFromRepo(REPO, root, repoFetch(["v1.0.0"], githubTarball("workshop-pack-sample-1.0.0", v1Files)))).ok, true);
+
+  const moved = {
+    ...sibling,
+    version: "1.1.0",
+    sources: [
+      { id: "feed", kind: "json", path: "feed", namespace: "job-log", pollMs: 5000, freshMs: 120000, asOf: "/asOf", maxBytes: 65536 },
+    ],
+  };
+  const boxSame = { ...box, version: "1.1.0" };
+  const v2Files = {
+    ...samplePackFiles("packs/sample-box", boxSame),
+    "packs/job-log/pack.json": JSON.stringify(moved, null, 2),
+  };
+  const seenHook: Array<{ replacedIds: string[]; sourcesChangedIds: string[] }> = [];
+  const result = await updatePack("sample-box", root, repoFetch(["v1.1.0"], githubTarball("workshop-pack-sample-1.1.0", v2Files)), {
+    beforeReplace: (info) => seenHook.push({ replacedIds: info.replacedIds, sourcesChangedIds: info.sourcesChangedIds }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.sourcesChanged, true);
+  assert.ok(result.sourcesChangedIds?.includes("job-log"), "sibling source change must be flagged");
+  assert.ok(!result.sourcesChangedIds?.includes("sample-box"), "unchanged requested pack stays quiet");
+  assert.deepEqual(seenHook[0]?.sourcesChangedIds, ["job-log"]);
+  assert.deepEqual(seenHook[0]?.replacedIds.sort(), ["job-log", "sample-box"]);
+});
+
+test("beforeReplace runs before folders swap so On packs can disable prior to refresh", async () => {
+  const root = tempRoot();
+  const src = sourceFolder();
+  assert.equal((await installFromFolder(src, root)).ok, true);
+
+  const pack = fixturePack();
+  (pack.sources as Array<Record<string, unknown>>)[0].namespace = "v0";
+  pack.version = "1.0.1";
+  fs.writeFileSync(path.join(src, "sample-box", "pack.json"), JSON.stringify(pack));
+
+  let sawOldPack = false;
+  let beforeReplaceAt = "";
+  const result = await installFromFolder(src, root, {
+    beforeReplace: ({ replacedIds, sourcesChangedIds }) => {
+      beforeReplaceAt = "hook";
+      assert.deepEqual(replacedIds, ["sample-box"]);
+      assert.deepEqual(sourcesChangedIds, ["sample-box"]);
+      // Folder on disk still has the old pack during the hook.
+      const old = JSON.parse(fs.readFileSync(path.join(root, "sample-box", "pack.json"), "utf8"));
+      sawOldPack = old.version === "1.0.0" && !old.sources[0].namespace;
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(beforeReplaceAt, "hook");
+  assert.equal(sawOldPack, true);
+  assert.deepEqual(result.sourcesChangedIds, ["sample-box"]);
+  const installed = JSON.parse(fs.readFileSync(path.join(root, "sample-box", "pack.json"), "utf8"));
+  assert.equal(installed.sources[0].namespace, "v0");
+});
+
+test("disable-before-refresh: host never fetches the new namespace under old grants", async () => {
+  const { createWorkshopHost } = await import("../electron/workshop-host");
+  const {
+    disablePacksForReconfirm,
+    fingerprintsForSources,
+    normalizeWorkshopSettings,
+  } = await import("../src/lib/workshop-pack");
+
+  const root = tempRoot();
+  const src = sourceFolder();
+  assert.equal((await installFromFolder(src, root)).ok, true);
+
+  const feedSource = {
+    id: "feed" as const,
+    kind: "json" as const,
+    path: "feed",
+    pollMs: 2000,
+    freshMs: 120000,
+    asOf: "/asOf",
+    schema: "sample-feed/v1",
+    maxBytes: 65536,
+  };
+  let settings = normalizeWorkshopSettings({
+    packs: [{
+      id: "sample-box",
+      on: true,
+      hostId: "spark",
+      sources: ["feed"],
+      sourceFingerprints: fingerprintsForSources("sample-box", [feedSource], ["feed"]),
+    }],
+  });
+  assert.equal(settings.packs[0]?.on, true);
+
+  const pack = fixturePack();
+  (pack.sources as Array<Record<string, unknown>>)[0].namespace = "v0";
+  pack.version = "1.0.1";
+  fs.writeFileSync(path.join(src, "sample-box", "pack.json"), JSON.stringify(pack));
+
+  const seen: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    seen.push(String(input));
+    return new Response(JSON.stringify({
+      schema: "sample-feed/v1", asOf: "2026-09-04T12:00:00.000Z", loadPercent: 1, watts: 1, oneWriter: true,
+      job: { done: 1, total: 2 }, flags: [],
+    }), { status: 200 });
+  }) as typeof fetch;
+
+  await installFromFolder(src, root, {
+    beforeReplace: ({ sourcesChangedIds }) => {
+      const next = disablePacksForReconfirm(settings, sourcesChangedIds);
+      settings = next.settings;
+      assert.deepEqual(next.reconfirmIds, ["sample-box"]);
+    },
+  });
+
+  const host = createWorkshopHost({
+    packsRoot: () => root,
+    getSettings: () => settings,
+    getHosts: () => [{
+      id: "spark", label: "Spark", baseUrl: "https://spark.example.test",
+      tokenFile: "t", enabled: true, allowedCallerRoles: ["desk"], allowedCapabilities: [], allowedContinuations: [],
+    }],
+    readToken: () => "tok",
+    fetchImpl,
+    now: () => Date.parse("2026-09-04T12:00:30.000Z"),
+  });
+  host.refresh();
+  await host.view();
+  assert.equal(seen.length, 0, "must not GET the new /workshop/v0/feed under the old grant");
+  assert.equal(host.list()[0]?.on, false);
+  host.dispose();
 });

@@ -193,13 +193,15 @@ export type PackListing = {
   hostId?: string;
   sources: Array<{ id: string; kind: "json" | "probes"; path?: string; namespace?: string; probes?: ProbeName[]; pollMs: number; maxBytes?: number }>;
   granted: string[];
+  /** Confirmed source descriptors when the pack is On; used so sibling confirms keep bindings. */
+  sourceFingerprints?: Record<string, string>;
   collector?: string;
   installed?: { kind: "folder" | "repo"; from: string; tag?: string; sha256: string; at: string };
   refused?: string;
 };
 
 export type InstallResult =
-  | { ok: true; ids: string[] }
+  | { ok: true; ids: string[]; reconfirm?: boolean; reconfirmIds?: string[]; sourcesChangedIds?: string[] }
   | { ok: false; reason: string };
 
 // ---------------------------------------------------------------------------------------------
@@ -212,6 +214,11 @@ export type WorkshopPackSetting = {
   hostId?: string;
   /** Source ids the user confirmed. */
   sources: string[];
+  /**
+   * Confirmed source descriptors, written at Confirm from
+   * `{kind,namespace,path,probes,pollMs,maxBytes}`. Missing while on ⇒ need reconfirm.
+   */
+  sourceFingerprints?: Record<string, string>;
   version?: string;
   contract?: number;
 };
@@ -219,9 +226,86 @@ export type WorkshopPackSetting = {
 export type WorkshopSettings = { packs: WorkshopPackSetting[] };
 export const DEFAULT_WORKSHOP_SETTINGS: WorkshopSettings = { packs: [] };
 
+/** Canonical grant binding for one source. Compared on every poll plan. */
+export function sourceFingerprint(packId: string, source: PackSource): string {
+  if (source.kind === "json") {
+    return JSON.stringify({
+      kind: "json",
+      namespace: source.namespace ?? packId,
+      path: source.path,
+      pollMs: source.pollMs,
+      maxBytes: source.maxBytes,
+    });
+  }
+  return JSON.stringify({ kind: "probes", probes: [...source.probes], pollMs: source.pollMs });
+}
+
+/** Fingerprints for the granted source ids (or every source when `granted` is omitted). */
+export function fingerprintsForSources(packId: string, sources: PackSource[], granted?: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const source of sources) {
+    if (granted && !granted.includes(source.id)) continue;
+    out[source.id] = sourceFingerprint(packId, source);
+  }
+  return out;
+}
+
+/** True when every granted id has a fingerprint that still matches the installed pack. */
+export function grantsMatchFingerprints(
+  packId: string,
+  sources: PackSource[],
+  granted: string[],
+  fingerprints: Record<string, string> | undefined,
+): boolean {
+  if (!fingerprints || granted.length === 0) return false;
+  for (const id of granted) {
+    const source = sources.find((item) => item.id === id);
+    if (!source) return false;
+    if (fingerprints[id] !== sourceFingerprint(packId, source)) return false;
+  }
+  return true;
+}
+
+/**
+ * Turn listed packs off and clear grants/fingerprints before a pack folder swap can
+ * restart polling under old grants. Returns the ids that were actually On.
+ */
+export function disablePacksForReconfirm(
+  settings: WorkshopSettings,
+  ids: string[],
+): { settings: WorkshopSettings; reconfirmIds: string[] } {
+  const want = new Set(ids);
+  const reconfirmIds: string[] = [];
+  const packs = settings.packs.map((pack) => {
+    if (!want.has(pack.id) || !pack.on) return pack;
+    reconfirmIds.push(pack.id);
+    return {
+      id: pack.id,
+      on: false,
+      sources: [] as string[],
+      ...(pack.hostId ? { hostId: pack.hostId } : {}),
+      ...(pack.version ? { version: pack.version } : {}),
+      ...(pack.contract != null ? { contract: pack.contract } : {}),
+    };
+  });
+  return { settings: { packs }, reconfirmIds };
+}
+
+function parseSourceFingerprints(raw: unknown, granted: string[]): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const id of granted) {
+    const value = (raw as Record<string, unknown>)[id];
+    if (typeof value !== "string" || value.length === 0 || value.length > 2000) return undefined;
+    out[id] = value;
+  }
+  return Object.keys(out).length === granted.length ? out : undefined;
+}
+
 /**
  * Legacy rows ({ id, on, grants: [...] }) came from the v0 bundled packs. They become off with
  * no sources: the user re-confirms against the installed pack's real URLs. Never widened silently.
+ * On rows without sourceFingerprints (pre-fingerprint desks) also come back off.
  */
 export function normalizeWorkshopSettings(raw: unknown): WorkshopSettings {
   if (!raw || typeof raw !== "object") return { packs: [] };
@@ -242,8 +326,18 @@ export function normalizeWorkshopSettings(raw: unknown): WorkshopSettings {
     const hostId = typeof record.hostId === "string" && record.hostId.trim() ? record.hostId.trim() : undefined;
     const version = typeof record.version === "string" && SEMVER.test(record.version) ? record.version : undefined;
     const contract = typeof record.contract === "number" && Number.isInteger(record.contract) && record.contract > 0 ? record.contract : undefined;
-    const on = !legacy && record.on === true && sources.length > 0 && Boolean(hostId);
-    packs.push({ id, on, sources: on ? sources : [], ...(hostId ? { hostId } : {}), ...(version ? { version } : {}), ...(contract ? { contract } : {}) });
+    const sourceFingerprints = parseSourceFingerprints(record.sourceFingerprints, sources);
+    // Missing fingerprints while claiming on ⇒ force reconfirm (migration + grant binding).
+    const on = !legacy && record.on === true && sources.length > 0 && Boolean(hostId) && Boolean(sourceFingerprints);
+    packs.push({
+      id,
+      on,
+      sources: on ? sources : [],
+      ...(on && sourceFingerprints ? { sourceFingerprints } : {}),
+      ...(hostId ? { hostId } : {}),
+      ...(version ? { version } : {}),
+      ...(contract ? { contract } : {}),
+    });
   }
   return { packs };
 }

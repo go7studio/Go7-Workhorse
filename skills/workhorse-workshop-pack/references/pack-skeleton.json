@@ -9,6 +9,7 @@
     {
       "id": "feed",
       "kind": "json",
+      "namespace": "v0",
       "path": "feed",
       "pollMs": 2000,
       "freshMs": 120000,

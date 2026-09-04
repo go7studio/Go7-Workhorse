@@ -167,8 +167,8 @@ proves the installer carries no pack and no collector.
    and parser; namespaced GET with the path rule and post-join origin
    assert; streamed byte cap; `redirect: "error"`; generic renderer painting
    the DGX `pack.json` from the existing components, verified against the
-   current rail in the harness. `deriveJob` stays on the desk as fallback for
-   `go7-workshop-feed/v0` until the collector publishes `job.derived`.
+   current rail in the harness. Derived job fields ship in the collector feed
+   (`job.derived`); the desk only formats — it does not recompute them.
 2. **Settings shape + host picker.** New row fields, normalizer, legacy
    `box-monitor` / `job-log` rows become off with "review grants" — never
    silently widened to `read.json`.
@@ -185,7 +185,7 @@ draft. Adopted: gateway namespace and post-join origin assert (both flagged
 bearer exfiltration through a pack-supplied path); archive install instead of
 `git clone`; staged link-free extraction; streamed byte cap; fail-closed
 contract major; `hbox` and `switch` so Models, Router, Gate, Status, and Feed
-age are expressible; `desk:` document; Job log stays a module; `deriveJob`
-kept until `job.derived` ships; four PRs. Rejected for v1: marketplace index,
+age are expressible; `desk:` document; Job log stays a module; collector-owned
+`job.derived` (desk formats only); four PRs. Rejected for v1: marketplace index,
 private repos, publisher signatures beyond the archive digest, sandboxed
 webview panels (possible later escape hatch behind its own grant).

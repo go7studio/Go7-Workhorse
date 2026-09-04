@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  fingerprintsForSources,
   packSourceUrls,
   type InstallResult,
   type PackListing,
@@ -14,7 +15,13 @@ import { useStore } from "../lib/store";
  * Nothing here starts, stops, routes, or leases anything.
  */
 
-export type PackChange = { id: string; on: boolean; hostId?: string; sources?: string[] };
+export type PackChange = {
+  id: string;
+  on: boolean;
+  hostId?: string;
+  sources?: string[];
+  sourceFingerprints?: Record<string, string>;
+};
 
 /** The settings rows the live list already stands for. Off rows keep no sources. */
 export function packSettings(packs: PackListing[]): WorkshopPackSetting[] {
@@ -22,6 +29,7 @@ export function packSettings(packs: PackListing[]): WorkshopPackSetting[] {
     id: pack.id,
     on: pack.on,
     sources: pack.on ? [...pack.granted] : [],
+    ...(pack.on && pack.sourceFingerprints ? { sourceFingerprints: { ...pack.sourceFingerprints } } : {}),
     ...(pack.hostId ? { hostId: pack.hostId } : {}),
     version: pack.version,
     contract: pack.contract,
@@ -31,19 +39,38 @@ export function packSettings(packs: PackListing[]): WorkshopPackSetting[] {
 /**
  * Rewrite the whole settings list from the live packs and apply one change, so turning one pack
  * on or off never drops or stales another. A turn-on with no host or no checked source is refused:
- * the list comes back unchanged.
+ * the list comes back unchanged. Confirm requires sourceFingerprints for every granted id.
  */
 export function nextPacks(current: PackListing[], change: PackChange): WorkshopPackSetting[] {
   const rows = packSettings(current);
   const sources = Array.from(new Set(change.sources ?? []));
   if (change.on && (!change.hostId || sources.length === 0)) return rows;
+  if (change.on && (!change.sourceFingerprints || sources.some((id) => !change.sourceFingerprints?.[id]))) return rows;
   const target = current.find((pack) => pack.id === change.id);
   const row: WorkshopPackSetting = change.on
-    ? { id: change.id, on: true, hostId: change.hostId, sources, version: target?.version, contract: target?.contract }
+    ? {
+        id: change.id,
+        on: true,
+        hostId: change.hostId,
+        sources,
+        sourceFingerprints: Object.fromEntries(sources.map((id) => [id, change.sourceFingerprints![id]])),
+        version: target?.version,
+        contract: target?.contract,
+      }
     : { id: change.id, on: false, sources: [], ...(target?.hostId ? { hostId: target.hostId } : {}), version: target?.version, contract: target?.contract };
   const index = rows.findIndex((item) => item.id === change.id);
   if (index < 0) return [...rows, row];
   return rows.map((item, i) => (i === index ? row : item));
+}
+
+/** Turn several packs off (after install/update reconfirm) without dropping the others. */
+export function nextPacksOff(current: PackListing[], ids: string[]): WorkshopPackSetting[] {
+  const want = new Set(ids);
+  return packSettings(current).map((row) =>
+    want.has(row.id)
+      ? { id: row.id, on: false, sources: [], ...(row.hostId ? { hostId: row.hostId } : {}), version: row.version, contract: row.contract }
+      : row,
+  );
 }
 
 type ListedSource = PackListing["sources"][number];
@@ -145,7 +172,12 @@ export function WorkshopBlock() {
     run(async () => {
       // Flush grants to main liveSettings. Live watch is the desk rail; Detach is optional —
       // do not open the breakout on confirm.
-      const next = nextPacks(packs, { id: pack.id, on: true, hostId, sources: checked });
+      const sourceFingerprints = fingerprintsForSources(
+        pack.id,
+        pack.sources.map(asPackSource),
+        checked,
+      );
+      const next = nextPacks(packs, { id: pack.id, on: true, hostId, sources: checked, sourceFingerprints });
       if (!next.some((row) => row.id === pack.id && row.on)) return;
       await store.updateWorkshop({ packs: next });
       setConfirmId(null);
@@ -161,12 +193,23 @@ export function WorkshopBlock() {
       reload();
     });
 
+  const applyReconfirm = async (result: InstallResult) => {
+    const ids = result.ok && result.reconfirm && result.reconfirmIds?.length ? result.reconfirmIds : [];
+    if (!ids.length) return;
+    await store.updateWorkshop({ packs: nextPacksOff(packs, ids) });
+  };
+
   const addRepo = () =>
     run(async () => {
       const install = window.workhorse?.workshopInstallRepo;
       if (!install) return;
       const result = await install({ url: url.trim() });
-      setInstallNote(installWords(result));
+      let words = installWords(result);
+      if (result.ok && result.reconfirm) {
+        await applyReconfirm(result);
+        words = "Sources changed. Turn on to review.";
+      }
+      setInstallNote(words);
       if (result.ok) {
         setUrl("");
         reload();
@@ -178,7 +221,12 @@ export function WorkshopBlock() {
       const install = window.workhorse?.workshopInstallFolder;
       if (!install) return;
       const result = await install();
-      setInstallNote(installWords(result));
+      let words = installWords(result);
+      if (result.ok && result.reconfirm) {
+        await applyReconfirm(result);
+        words = "Sources changed. Turn on to review.";
+      }
+      setInstallNote(words);
       if (result.ok) reload();
     });
 
@@ -221,7 +269,7 @@ export function WorkshopBlock() {
       }
       let words = installWords(result);
       if (result.reconfirm) {
-        await store.updateWorkshop({ packs: nextPacks(packs, { id, on: false }) });
+        await applyReconfirm(result);
         words = "Sources changed. Turn on to review.";
       }
       setUpdates((prev) => ({ ...prev, [id]: { current: prev[id]?.latest ?? prev[id]?.current ?? "", note: words } }));

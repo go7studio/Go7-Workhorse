@@ -105,7 +105,7 @@ import { probeLocalComputeHosts } from "./local-compute-registry";
 import { createWorkshopHost } from "./workshop-host";
 import { checkPackUpdate, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
-import { normalizeWorkshopSettings } from "../src/lib/workshop-pack";
+import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {
@@ -1643,15 +1643,41 @@ app.whenReady().then(async () => {
     workshopHost.refresh();
     broadcastWorkshopChanged();
   };
+  /**
+   * Turn affected On packs off in liveSettings before refresh so the poller cannot
+   * fetch new pack.json URLs under old grants. Renderer also clears when it sees reconfirmIds.
+   */
+  const workshopDisableForReconfirm = (candidateIds: string[]): string[] => {
+    if (!candidateIds.length) return [];
+    const { settings, reconfirmIds } = disablePacksForReconfirm(
+      normalizeWorkshopSettings(liveSettings.workshop),
+      candidateIds,
+    );
+    if (!reconfirmIds.length) return [];
+    liveSettings = { ...liveSettings, workshop: settings };
+    return reconfirmIds;
+  };
   const workshopId = (input: unknown): string =>
     input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "";
   ipcMain.handle("workshop:list", () => workshopHost.list());
   ipcMain.handle("workshop:view", () => workshopHost.view());
   ipcMain.handle("workshop:install-repo", async (_event, input: unknown) => {
     const url = input && typeof input === "object" && typeof (input as { url?: unknown }).url === "string" ? (input as { url: string }).url : "";
-    const result = await installFromRepo(url, workshopPacksRoot());
-    if (result.ok) workshopInstalledChanged();
-    return result;
+    let reconfirmIds: string[] = [];
+    const result = await installFromRepo(url, workshopPacksRoot(), fetch, {
+      // Add/replace: any On pack being overwritten must reconfirm (old grants must not survive the swap).
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
   });
   ipcMain.handle("workshop:install-folder", async () => {
     const picked = await dialog.showOpenDialog({
@@ -1660,9 +1686,20 @@ app.whenReady().then(async () => {
       properties: ["openDirectory"],
     });
     if (picked.canceled || !picked.filePaths[0]) return { ok: false, reason: "canceled" };
-    const result = await installFromFolder(picked.filePaths[0], workshopPacksRoot());
-    if (result.ok) workshopInstalledChanged();
-    return result;
+    let reconfirmIds: string[] = [];
+    const result = await installFromFolder(picked.filePaths[0], workshopPacksRoot(), {
+      beforeReplace: ({ replacedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(replacedIds);
+      },
+    });
+    if (!result.ok) return result;
+    workshopInstalledChanged();
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
   });
   ipcMain.handle("workshop:remove", (_event, input: unknown) => {
     const result = removePack(workshopId(input), workshopPacksRoot());
@@ -1671,11 +1708,21 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("workshop:check-update", (_event, input: unknown) => checkPackUpdate(workshopId(input), workshopPacksRoot()));
   ipcMain.handle("workshop:update", async (_event, input: unknown) => {
-    const result = await updatePack(workshopId(input), workshopPacksRoot());
+    let reconfirmIds: string[] = [];
+    const result = await updatePack(workshopId(input), workshopPacksRoot(), fetch, {
+      // Every pack whose sources changed — including siblings in the same archive — reconfirms.
+      beforeReplace: ({ sourcesChangedIds }) => {
+        reconfirmIds = workshopDisableForReconfirm(sourcesChangedIds);
+      },
+    });
     if (!result.ok) return result;
     workshopInstalledChanged();
-    // Sources changed: the renderer turns the row off (on:false, sources:[]) and asks the user to re-confirm.
-    return { ok: true, ids: result.ids, reconfirm: result.sourcesChanged === true };
+    return {
+      ok: true,
+      ids: result.ids,
+      ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
+    };
   });
   ipcMain.handle("workshop:reveal-collector", (_event, input: unknown) => {
     const target = workshopHost.collectorPath(workshopId(input));

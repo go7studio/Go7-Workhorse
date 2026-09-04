@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import { createWorkshopHost, gatewayUrl, listInstalledPacks, readCapped } from "../electron/workshop-host";
-import type { ProbeResult, WorkshopSettings } from "../src/lib/workshop-pack";
+import {
+  fingerprintsForSources,
+  sourceFingerprint,
+  type PackSource,
+  type ProbeResult,
+  type WorkshopSettings,
+} from "../src/lib/workshop-pack";
 import type { LocalComputeHostSettings } from "../src/lib/types";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -16,8 +22,19 @@ const spark: LocalComputeHostSettings = {
   allowedCallerRoles: ["desk"], allowedCapabilities: [], allowedContinuations: [],
 };
 
+const FIXTURE_SOURCES: PackSource[] = [
+  { id: "feed", kind: "json", path: "feed", pollMs: 2000, freshMs: 120000, asOf: "/asOf", schema: "sample-feed/v1", maxBytes: 65536 },
+  { id: "infer", kind: "probes", probes: ["healthz", "readyz", "models"], pollMs: 5000 },
+];
+
 const onSettings = (sources = ["feed", "infer"], hostId = "spark"): WorkshopSettings => ({
-  packs: [{ id: "sample-box", on: true, hostId, sources }],
+  packs: [{
+    id: "sample-box",
+    on: true,
+    hostId,
+    sources,
+    sourceFingerprints: fingerprintsForSources("sample-box", FIXTURE_SOURCES, sources),
+  }],
 });
 
 const freshFeed = () => JSON.stringify({
@@ -237,7 +254,7 @@ test("status maps http and transport failures", async () => {
   }
 });
 
-test("stale asOf keeps the document but reads present:false stale", async () => {
+test("stale asOf drops the document so meters paint —", async () => {
   const workshop = host({
     getSettings: () => onSettings(["feed"]),
     fetchImpl: fakeFetch({
@@ -248,8 +265,47 @@ test("stale asOf keeps the document but reads present:false stale", async () => 
   assert.equal(view.documents.status?.feed.present, false);
   assert.equal(view.documents.status?.feed.reason, "stale");
   assert.equal(view.documents.status?.feed.asOf, "2026-09-04T11:00:00.000Z");
-  assert.equal((view.documents.feed as { watts: number }).watts, 9);
+  assert.equal(view.documents.feed, undefined);
   workshop.dispose();
+});
+
+test("fingerprint mismatch or missing fingerprints skips fetch under old grants", async () => {
+  const seen: Array<{ url: string }> = [];
+  const routes = {
+    "/workshop/sample-box/feed": { status: 200, body: freshFeed() },
+    "/workshop/v0/feed": { status: 200, body: freshFeed() },
+  };
+  const mismatched = host({
+    getSettings: () => ({
+      packs: [{
+        id: "sample-box",
+        on: true,
+        hostId: "spark",
+        sources: ["feed"],
+        // Confirmed against a different namespace than the installed pack.
+        sourceFingerprints: {
+          feed: sourceFingerprint("sample-box", {
+            id: "feed", kind: "json", path: "feed", namespace: "v0", pollMs: 2000, freshMs: 120000, maxBytes: 65536,
+          }),
+        },
+      }],
+    }),
+    fetchImpl: fakeFetch(routes, seen),
+  });
+  assert.equal(mismatched.list()[0].on, false);
+  assert.deepEqual(await mismatched.view(), []);
+  assert.equal(seen.length, 0);
+  mismatched.dispose();
+
+  const legacy = host({
+    getSettings: () => ({ packs: [{ id: "sample-box", on: true, hostId: "spark", sources: ["feed"] }] }),
+    fetchImpl: fakeFetch(routes, seen),
+  });
+  // normalizeWorkshopSettings clears on without fingerprints; host also refuses.
+  assert.equal(legacy.list()[0].on, false);
+  assert.deepEqual(await legacy.view(), []);
+  assert.equal(seen.length, 0);
+  legacy.dispose();
 });
 
 test("schema mismatch, oversized, and malformed bodies are refused with their reason", async () => {

@@ -324,8 +324,8 @@ type WorkhorseBridge = {
   workshopInstallFolder?: () => Promise<import("./lib/workshop-pack").InstallResult>;
   workshopRemove?: (input: { id: string }) => Promise<{ ok: boolean; reason?: string }>;
   workshopCheckUpdate?: (input: { id: string }) => Promise<{ ok: boolean; current: string; latest?: string; reason?: string }>;
-  /** Re-installs the latest tag. When sources changed the pack is turned off and `reconfirm` is true. */
-  workshopUpdate?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult & { reconfirm?: boolean }>;
+  /** Re-installs the latest tag. When sources changed (any pack in the archive) those packs turn off and `reconfirm`/`reconfirmIds` are set. */
+  workshopUpdate?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
   /** Shows the pack's collector folder in the OS file manager. Never runs anything in it. */
   workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;

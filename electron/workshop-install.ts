@@ -34,6 +34,15 @@ export type InstallRecord = { kind: "folder" | "repo"; from: string; tag?: strin
 export type UpdateCheck = { ok: boolean; current: string; latest?: string; reason?: string };
 export type UpdateResult = InstallResult & { sourcesChanged?: boolean };
 export type TarEntry = { path: string; type: "file" | "dir"; data: Buffer };
+/** Called after staging validates and before any installed folder is replaced. */
+export type InstallReplaceHook = (info: {
+  ids: string[];
+  /** Pack ids already on disk that this commit will replace. */
+  replacedIds: string[];
+  /** Subset of replacedIds whose pack.json sources (descriptors) changed. */
+  sourcesChangedIds: string[];
+}) => void;
+export type InstallOptions = { beforeReplace?: InstallReplaceHook };
 
 class Refusal extends Error {}
 
@@ -419,7 +428,16 @@ function replaceDir(from: string, to: string, tmpParent: string): void {
   if (had) fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-function commit(staging: string, root: string, record: (staged: StagedPack) => InstallRecord): InstallResult {
+function sourcesEqual(a: PackSource[] | null, b: PackSource[] | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function commit(
+  staging: string,
+  root: string,
+  record: (staged: StagedPack) => InstallRecord,
+  options: InstallOptions = {},
+): InstallResult {
   const staged = validateStaged(staging);
   fs.mkdirSync(root, { recursive: true });
   const existing = fs.readdirSync(root);
@@ -427,12 +445,28 @@ function commit(staging: string, root: string, record: (staged: StagedPack) => I
     const clash = findCaseCollision(existing, item.pack.id);
     if (clash) refuse(`id ${JSON.stringify(item.pack.id)} collides with installed folder ${JSON.stringify(clash)}`);
   }
+  const ids = staged.map((item) => item.pack.id);
+  const replacedIds: string[] = [];
+  const sourcesChangedIds: string[] = [];
+  for (const item of staged) {
+    const dest = path.join(root, item.pack.id);
+    if (!fs.existsSync(dest)) continue;
+    replacedIds.push(item.pack.id);
+    const before = sourcesOf(root, item.pack.id);
+    if (!sourcesEqual(before, item.pack.sources)) sourcesChangedIds.push(item.pack.id);
+  }
+  // Disable grants in settings before folders swap so refresh cannot poll new URLs under old grants.
+  options.beforeReplace?.({ ids, replacedIds, sourcesChangedIds });
   for (const item of staged) {
     fs.writeFileSync(path.join(item.dir, INSTALL_RECORD), JSON.stringify(record(item), null, 2) + "\n");
   }
   const tmpParent = path.join(root, "..", "staging");
   for (const item of staged) replaceDir(item.dir, path.join(root, item.pack.id), tmpParent);
-  return { ok: true, ids: staged.map((item) => item.pack.id) };
+  return {
+    ok: true,
+    ids,
+    ...(sourcesChangedIds.length ? { sourcesChangedIds } : {}),
+  };
 }
 
 function reasonOf(error: unknown): string {
@@ -440,7 +474,10 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function withStaging(root: string, work: (staging: string) => Promise<InstallResult> | InstallResult): Promise<InstallResult> {
+async function withStaging(
+  root: string,
+  work: (staging: string) => Promise<InstallResult> | InstallResult,
+): Promise<InstallResult> {
   let staging: string | null = null;
   try {
     staging = makeStaging(root);
@@ -456,7 +493,7 @@ async function withStaging(root: string, work: (staging: string) => Promise<Inst
 // Public API
 
 /** Copy a folder (never referenced) into staging, validate, install. */
-export function installFromFolder(src: string, root: string): Promise<InstallResult> {
+export function installFromFolder(src: string, root: string, options: InstallOptions = {}): Promise<InstallResult> {
   return withStaging(root, (staging) => {
     const from = path.resolve(src);
     let stat: fs.Stats;
@@ -468,12 +505,17 @@ export function installFromFolder(src: string, root: string): Promise<InstallRes
     if (stat.isSymbolicLink()) refuse("folder is a symlink");
     if (!stat.isDirectory()) refuse("not a folder");
     copyTree(from, staging);
-    return commit(staging, root, (item) => ({ kind: "folder", from, sha256: sha256(item.manifestBytes), at: nowIso() }));
+    return commit(staging, root, (item) => ({ kind: "folder", from, sha256: sha256(item.manifestBytes), at: nowIso() }), options);
   });
 }
 
 /** Resolve the highest semver tag of a public GitHub repo, download that tag's tarball, stage, validate, install. */
-export function installFromRepo(url: string, root: string, fetchImpl: typeof fetch = fetch): Promise<InstallResult> {
+export function installFromRepo(
+  url: string,
+  root: string,
+  fetchImpl: typeof fetch = fetch,
+  options: InstallOptions = {},
+): Promise<InstallResult> {
   const repo = parseGitHubRepoUrl(url);
   if (!repo) return Promise.resolve({ ok: false, reason: "only https://github.com/<owner>/<repo> is accepted" });
   return withStaging(root, async (staging) => {
@@ -488,7 +530,7 @@ export function installFromRepo(url: string, root: string, fetchImpl: typeof fet
     }
     writeEntries(readTar(tar), staging);
     const digest = sha256(tarball);
-    return commit(staging, root, () => ({ kind: "repo", from: repo.canonical, tag, sha256: digest, at: nowIso() }));
+    return commit(staging, root, () => ({ kind: "repo", from: repo.canonical, tag, sha256: digest, at: nowIso() }), options);
   });
 }
 
@@ -538,16 +580,27 @@ function sourcesOf(root: string, id: string): PackSource[] | null {
   return parsed.ok ? parsed.pack.sources : null;
 }
 
-/** Re-install from the recorded repository. `sourcesChanged` means the grant must be re-confirmed. */
-export async function updatePack(id: string, root: string, fetchImpl: typeof fetch = fetch): Promise<UpdateResult> {
+/**
+ * Re-install from the recorded repository. `sourcesChanged` / `sourcesChangedIds` cover every
+ * pack folder the archive replaces — not only the requested id — so sibling grants reconfirm too.
+ */
+export async function updatePack(
+  id: string,
+  root: string,
+  fetchImpl: typeof fetch = fetch,
+  options: InstallOptions = {},
+): Promise<UpdateResult> {
   if (!PACK_ID.test(id)) return { ok: false, reason: "bad id" };
   const record = readInstallRecord(path.join(root, id));
   if (!record) return { ok: false, reason: "not installed" };
   if (record.kind !== "repo") return { ok: false, reason: "installed from a folder" };
-  const before = sourcesOf(root, id);
-  const result = await installFromRepo(record.from, root, fetchImpl);
+  const result = await installFromRepo(record.from, root, fetchImpl, options);
   if (!result.ok) return result;
-  const after = result.ids.includes(id) ? sourcesOf(root, id) : null;
-  const sourcesChanged = !before || !after || JSON.stringify(before) !== JSON.stringify(after);
-  return { ...result, sourcesChanged };
+  const sourcesChangedIds = result.sourcesChangedIds ?? [];
+  const { sourcesChangedIds: _changed, ...rest } = result;
+  return {
+    ...rest,
+    sourcesChanged: sourcesChangedIds.length > 0,
+    ...(sourcesChangedIds.length ? { sourcesChangedIds } : {}),
+  };
 }

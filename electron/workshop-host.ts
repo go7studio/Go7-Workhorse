@@ -13,6 +13,7 @@ import {
   PACK_LIMITS,
   PROBES,
   documentWithinLimits,
+  grantsMatchFingerprints,
   normalizeWorkshopSettings,
   parseWorkshopPack,
   pointerGet,
@@ -192,6 +193,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         };
       }
       const pack = item.pack;
+      const fingerprintOk =
+        saved?.on === true &&
+        Boolean(saved.hostId) &&
+        grantsMatchFingerprints(pack.id, pack.sources, saved.sources ?? [], saved.sourceFingerprints);
       return {
         id: pack.id,
         name: pack.name,
@@ -199,14 +204,15 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         contract: pack.contract,
         description: pack.description,
         ...(pack.homepage ? { homepage: pack.homepage } : {}),
-        on: saved?.on === true,
+        on: fingerprintOk,
         ...(saved?.hostId ? { hostId: saved.hostId } : {}),
         sources: pack.sources.map((source) =>
           source.kind === "json"
             ? { id: source.id, kind: "json" as const, path: source.path, ...(source.namespace ? { namespace: source.namespace } : {}), pollMs: source.pollMs, maxBytes: source.maxBytes }
             : { id: source.id, kind: "probes" as const, probes: source.probes, pollMs: source.pollMs },
         ),
-        granted: saved?.sources ?? [],
+        granted: fingerprintOk ? (saved?.sources ?? []) : [],
+        ...(fingerprintOk && saved?.sourceFingerprints ? { sourceFingerprints: saved.sourceFingerprints } : {}),
         ...(pack.collector ? { collector: pack.collector } : {}),
         ...(item.installed ? { installed: item.installed } : {}),
       };
@@ -272,7 +278,8 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
       const raw = pointerGet(doc, source.asOf);
       const at = typeof raw === "string" ? Date.parse(raw) : NaN;
       if (!Number.isFinite(at) || now() - at > source.freshMs) {
-        return { status: { present: false, reason: "stale", fetchedAt, ...(typeof raw === "string" ? { asOf: raw } : {}) }, doc };
+        // Drop the doc so meters paint — (PACKS.md §2); keep asOf on the status chip.
+        return { status: { present: false, reason: "stale", fetchedAt, ...(typeof raw === "string" ? { asOf: raw } : {}) } };
       }
       return { status: { present: true, asOf: raw as string, fetchedAt }, doc };
     }
@@ -382,6 +389,8 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
       if (!item.ok) continue;
       const saved = settingFor(settings, item.pack.id);
       if (!saved?.on || !saved.hostId) continue;
+      // Grant binding: missing or mismatched fingerprints ⇒ no fetch under old grants.
+      if (!grantsMatchFingerprints(item.pack.id, item.pack.sources, saved.sources, saved.sourceFingerprints)) continue;
       for (const source of item.pack.sources) {
         if (!saved.sources.includes(source.id)) continue;
         planned.set(`${item.pack.id}/${source.id}`, { packId: item.pack.id, hostId: saved.hostId, source });
@@ -422,7 +431,7 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     const out: PackView[] = [];
     for (const item of installed()) {
       const saved = settingFor(settings, item.folderId);
-      if (!saved?.on) continue;
+      if (!saved?.on || !saved.hostId) continue;
       if (!item.ok) {
         out.push({
           id: item.folderId, name: item.folderId, version: "", contract: 0, description: "", on: true,
@@ -432,6 +441,7 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
         continue;
       }
       const pack = item.pack;
+      if (!grantsMatchFingerprints(pack.id, pack.sources, saved.sources, saved.sourceFingerprints)) continue;
       const host = hostFor(saved.hostId);
       const status: Record<string, SourceStatus> = {};
       const documents: PackDocuments = {

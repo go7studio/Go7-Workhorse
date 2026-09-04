@@ -209,11 +209,7 @@ export function grantPlainWords(grant: WorkshopGrant): string {
   return "read last-8 / latest.json / exclusive sidecar";
 }
 
-export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
-  return new URLSearchParams(search).has("workshop");
-}
-
-export function paintQwenParked(value: WorkshopMetricsSnapshot["exclusiveSidecar"]["qwenParked"]): string {
+export function paintQwenParked(value: unknown): string {
   if (value === true) return "parked";
   if (value === false) return "up";
   return WORKSHOP_UNKNOWN;
@@ -221,17 +217,17 @@ export function paintQwenParked(value: WorkshopMetricsSnapshot["exclusiveSidecar
 
 /** Loaded model ids, or plain words when exclusive train makes infer down. */
 export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
+  if (metrics && Array.isArray(metrics.models) && metrics.models.length > 0) {
+    return metrics.models.join(", ");
+  }
   if (!metrics) return WORKSHOP_UNKNOWN;
-  if (Array.isArray(metrics.models) && metrics.models.length > 0) return metrics.models.join(", ");
+  // models down: no nonempty string[] (this branch)
   const modelsTile = metrics.infer.find((tile) => tile.path === "/v1/models");
-  const modelsDown = !modelsTile || modelsTile.status === "down" || modelsTile.status === "unknown";
+  const modelsNotOk = modelsTile?.status !== "ok";
   const trainExclusive =
     metrics.exclusiveSidecar.qwenParked === true ||
-    (metrics.oneWriter === true && modelsDown);
-  if (trainExclusive && modelsDown) {
-    const detail = typeof modelsTile?.detail === "string" && modelsTile.detail.trim() ? modelsTile.detail.trim() : "";
-    return detail ? `infer down / train exclusive · ${detail}` : "infer down / train exclusive";
-  }
+    (metrics.oneWriter === true && modelsNotOk);
+  if (trainExclusive) return "infer down (train exclusive)";
   return WORKSHOP_UNKNOWN;
 }
 
@@ -243,3 +239,6 @@ export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefin
   return WORKSHOP_UNKNOWN;
 }
 
+export function isWorkshopSurface(search = typeof window === "undefined" ? "" : window.location.search): boolean {
+  return new URLSearchParams(search).has("workshop");
+}

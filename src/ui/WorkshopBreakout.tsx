@@ -57,7 +57,7 @@ export function WorkshopBreakout() {
             if (!current) return portSnap;
             return {
               ...current,
-              models: Array.isArray(portSnap.models) && portSnap.models.length ? portSnap.models : current.models,
+              models: Array.isArray(portSnap.models) ? portSnap.models : current.models,
               infer: portSnap.infer?.length ? portSnap.infer : current.infer,
             };
           });
@@ -139,7 +139,7 @@ export function WorkshopBreakout() {
             <Meter label="Infer invoke" value={labels.inferInvoke} />
             <Meter label="probeUnit" value={dash(metrics?.exclusiveSidecar?.probeUnit)} />
             <Meter label="qwen" value={paintQwenParked(metrics?.exclusiveSidecar?.qwenParked ?? WORKSHOP_UNKNOWN)} />
-            <p className="row-meta">Labels only. Does not change Settings → Routing, start or stop, or hold a lease.</p>
+            <p className="row-meta">labels only, never route/lease/start/stop</p>
           </div>
           <div className="workshop-card">
             <div className="section-label">Job this pack watches</div>

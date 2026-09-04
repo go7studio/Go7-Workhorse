@@ -25,7 +25,7 @@ test("paintModelsLine lists ids or train-exclusive plain words", () => {
       infer: [{ path: "/v1/models", status: "down", detail: "http-502" }],
       models: WORKSHOP_UNKNOWN,
     }),
-    "infer down (train exclusive)",
+    "infer down / train exclusive · http-502",
   );
   assert.equal(paintModelsLine(null), WORKSHOP_UNKNOWN);
 });

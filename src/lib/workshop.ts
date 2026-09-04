@@ -228,7 +228,10 @@ export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefi
   const trainExclusive =
     metrics.exclusiveSidecar.qwenParked === true ||
     (metrics.oneWriter === true && modelsDown);
-  if (trainExclusive && modelsDown) return "infer down (train exclusive)";
+  if (trainExclusive && modelsDown) {
+    const detail = typeof modelsTile?.detail === "string" && modelsTile.detail.trim() ? modelsTile.detail.trim() : "";
+    return detail ? `infer down / train exclusive · ${detail}` : "infer down / train exclusive";
+  }
   return WORKSHOP_UNKNOWN;
 }
 

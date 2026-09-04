@@ -5,6 +5,7 @@ import { createWorkshopHost, gatewayUrl, listInstalledPacks, readCapped, sourceS
 import {
   fingerprintsForSources,
   sourceFingerprint,
+  type JsonSource,
   type PackSource,
   type ProbeResult,
   type WorkshopSettings,
@@ -400,7 +401,7 @@ test("breakout opens once, focuses on repeat, and closes", () => {
 
 const DEDUPE = path.join(ROOT, "test", "fixtures", "workshop-dedupe");
 
-const dedupeFeed = (): PackSource => ({
+const dedupeFeed = (): JsonSource => ({
   id: "feed", kind: "json", path: "feed", namespace: "v0", pollMs: 2000, freshMs: 120000, asOf: "/asOf", schema: "sample-feed/v1", maxBytes: 65536,
 });
 
@@ -488,8 +489,6 @@ test("sourceShareKey groups by host path, not pack id", () => {
   const b = sourceShareKey("box-b", "spark", { ...dedupeFeed(), pollMs: 5000 });
   assert.equal(a, b);
   assert.notEqual(a, sourceShareKey("box-a", "other-host", dedupeFeed()));
-  assert.notEqual(
-    a,
-    sourceShareKey("box-a", "spark", { ...dedupeFeed(), namespace: undefined, path: "feed" }),
-  );
+  const { namespace: _omit, ...packDefaultNs } = dedupeFeed();
+  assert.notEqual(a, sourceShareKey("box-a", "spark", { ...packDefaultNs, path: "feed" }));
 });

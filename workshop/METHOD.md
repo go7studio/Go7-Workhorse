@@ -33,3 +33,7 @@ Automation must not treat optin/revoke as pack toggles. Pack state is `settings.
 
 Models and Router cards are soak-only labels: loaded model ids (or `infer down (train exclusive)`), train fence / Local Compute invoke, probeUnit, qwen parked/up. They never change Settings → Routing, start/stop jobs, or hold leases.
 
+
+## Desk rail (2026-09-04)
+
+Live watch = desk Workshop rail (collapsed strip → expand; multi-pack stack). Skills = install/grant only. Breakout = optional detach. See RAIL.md.

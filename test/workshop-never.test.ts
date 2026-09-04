@@ -102,6 +102,8 @@ test("no pack code runs: the renderer paints a closed vocabulary and computes no
   const block = css.slice(start, end);
   assert.doesNotMatch(block, /--hairline/);
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b/i);
+  // Models one-liner wraps at spaces in the 76px strip; anywhere mid-token breaks look wrong.
+  assert.match(block, /\.workshop-rail-models\s*\{[^}]*overflow-wrap:\s*break-word/s);
 });
 
 test("Settings shows the exact URLs at confirm time, flushes settings, and never paints a box control", () => {

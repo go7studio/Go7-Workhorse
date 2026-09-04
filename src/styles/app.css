@@ -9023,7 +9023,9 @@ html.pane-dragging * {
   font-size: 10px;
   line-height: 1.3;
   color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  /* Break at spaces; only split a token when it alone exceeds the 64px column. */
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .workshop-pack-strip > .workshop-rail-models:first-child {

@@ -162,6 +162,11 @@ test("the DGX box-monitor cards paint the soak values the rail shows today", (t)
   assert.doesNotMatch(models, /Models · /);
   assert.match(models, /workshop-chip-mute[^>]*>train exclusive</);
   assert.match(models, /infer down \/ train exclusive · http-502/);
+  // Collapsed strip keeps the short exclusive line; detail stays on the Models card.
+  const exclusive = pack.strip.find((w) => w.w === "switch")!;
+  const stripExclusive = paint(exclusive, documents, "strip");
+  assert.match(stripExclusive, /workshop-rail-models[^>]*>infer down \/ train exclusive</);
+  assert.doesNotMatch(stripExclusive, /http-502/);
 
   const infer = byTitle("Infer");
   assert.match(infer, /healthz · up.*readyz · down.*v1\/models · down/s);

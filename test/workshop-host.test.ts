@@ -28,7 +28,7 @@ test("ungated read is unknown and token never leaves the host", async () => {
     getSettings: () => ({ packs: [] }),
     getHosts: () => [host],
     readToken: () => "private-token",
-    fetchImpl: (async (input, init) => {
+    fetchImpl: (async (_input, init) => {
       authorization = new Headers(init?.headers).get("authorization") ?? "";
       return new Response("{}", { status: 200 });
     }) as typeof fetch,

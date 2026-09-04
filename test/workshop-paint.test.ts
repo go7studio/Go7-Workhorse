@@ -24,6 +24,7 @@ test("paintModelsLine lists ids or train-exclusive plain words", () => {
       exclusiveSidecar: { probeUnit: "active", qwenParked: true },
       infer: [{ path: "/v1/models", status: "down", detail: "http-502" }],
       models: WORKSHOP_UNKNOWN,
+      localComputeEmptyCapabilities: true,
     }),
     "infer down / train exclusive · http-502",
   );
@@ -38,6 +39,20 @@ test("paintModelsLine lists ids or train-exclusive plain words", () => {
     "infer down / train exclusive",
   );
   assert.equal(paintModelsLine(null), WORKSHOP_UNKNOWN);
+});
+
+test("paintModelsLine names empty Local Compute capabilities when not train-exclusive", () => {
+  const base = unknownMetrics();
+  assert.equal(
+    paintModelsLine({
+      ...base,
+      oneWriter: false,
+      localComputeEmptyCapabilities: true,
+      infer: [{ path: "/v1/models", status: "unknown", detail: "no-host" }],
+      models: WORKSHOP_UNKNOWN,
+    }),
+    "Local Compute host has no allowed capabilities",
+  );
 });
 
 test("paintJobStatus derives from writer + feed", () => {

@@ -206,6 +206,10 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     const infer = await soakInfer();
     const snapshot = unknownMetrics();
     snapshot.infer = infer;
+    const enabledHost = options.getHosts().find((item) => item.enabled);
+    snapshot.localComputeEmptyCapabilities = enabledHost
+      ? enabledHost.allowedCapabilities.length === 0
+      : WORKSHOP_UNKNOWN;
     if (grant === "read.model.ports") {
       const modelsTile = infer.find((tile) => tile.path === "/v1/models");
       if (modelsTile?.status === "ok") {

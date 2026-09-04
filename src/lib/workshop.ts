@@ -76,6 +76,8 @@ export type WorkshopMetricsSnapshot = {
     qwenParked: typeof WORKSHOP_UNKNOWN | boolean;
   };
   models: typeof WORKSHOP_UNKNOWN | string[];
+  /** Enabled Local Compute host has allowedCapabilities []. Fail-closed / inert for invoke. */
+  localComputeEmptyCapabilities: typeof WORKSHOP_UNKNOWN | boolean;
   infer: WorkshopInferTile[];
   labels: { trainFence: string; inferInvoke: string };
 };
@@ -179,6 +181,7 @@ export function unknownMetrics(): WorkshopMetricsSnapshot {
     latestJson: WORKSHOP_UNKNOWN,
     exclusiveSidecar: { probeUnit: WORKSHOP_UNKNOWN, qwenParked: WORKSHOP_UNKNOWN },
     models: WORKSHOP_UNKNOWN,
+    localComputeEmptyCapabilities: WORKSHOP_UNKNOWN,
     infer: [],
     labels: { trainFence: "nvidia-spark-train-infer", inferInvoke: "Local Compute" },
   };
@@ -215,7 +218,7 @@ export function paintQwenParked(value: unknown): string {
   return WORKSHOP_UNKNOWN;
 }
 
-/** Loaded model ids, or plain words when exclusive train makes infer down. */
+/** Loaded model ids, or plain words for exclusive-train vs empty Local Compute capabilities. */
 export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefined): string {
   if (!metrics) return WORKSHOP_UNKNOWN;
   if (Array.isArray(metrics.models) && metrics.models.length > 0) return metrics.models.join(", ");
@@ -224,9 +227,14 @@ export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefi
   const trainExclusive =
     metrics.exclusiveSidecar.qwenParked === true ||
     (metrics.oneWriter === true && modelsDown);
+  // Prefer train-exclusive wording when Bloom exclusive explains /v1/models down.
   if (trainExclusive && modelsDown) {
     const detail = typeof modelsTile?.detail === "string" && modelsTile.detail.trim() ? modelsTile.detail.trim() : "";
     return detail ? `infer down / train exclusive · ${detail}` : "infer down / train exclusive";
+  }
+  // Distinct soak label when the enabled Local Compute host is fail-closed (no capabilities).
+  if (metrics.localComputeEmptyCapabilities === true) {
+    return "Local Compute host has no allowed capabilities";
   }
   return WORKSHOP_UNKNOWN;
 }

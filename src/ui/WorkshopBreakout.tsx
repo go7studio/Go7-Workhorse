@@ -59,6 +59,10 @@ export function WorkshopBreakout() {
               ...current,
               models: Array.isArray(portSnap.models) ? portSnap.models : current.models,
               infer: portSnap.infer?.length ? portSnap.infer : current.infer,
+              localComputeEmptyCapabilities:
+                portSnap.localComputeEmptyCapabilities !== WORKSHOP_UNKNOWN
+                  ? portSnap.localComputeEmptyCapabilities
+                  : current.localComputeEmptyCapabilities,
             };
           });
         }

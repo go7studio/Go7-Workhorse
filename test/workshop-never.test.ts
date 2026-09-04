@@ -106,9 +106,35 @@ test("Box monitor paints Models and Router soak cards", () => {
   assert.match(live, /mergeSidecarInto/);
   assert.match(live, /mergePortsInto/);
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  assert.match(rail, /section-label">Models/);
-  assert.match(rail, /section-label">Router/);
+  assert.match(rail, /section-label">Models|heading=[^\n]*Models/);
+  assert.match(rail, /section-label">Router|heading="Router"/);
   assert.match(rail, /stripLine|paintModelsLine/);
+});
+
+test("rail paints the six locked cards, a snapshot ring, and no control that changes the Spark", () => {
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  for (const card of ['heading="Box"', "Models", 'heading="Infer"', 'heading="Router"', "Job · ", 'heading="Feed"']) {
+    assert.match(rail, new RegExp(card.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), card);
+  }
+  // Collapsed strip keeps the locked order and the rail never grows a time series.
+  assert.match(rail, /GPU% · watts · writer · models one-liner/);
+  assert.doesNotMatch(rail, /sparkline|history|series/i);
+  // The only controls: expand, collapse, fold, Detach. Off lives in Settings → Skills.
+  // The read-only law is stated on the Router card; the words may appear there and nowhere as a call.
+  assert.doesNotMatch(rail, /Turn off|updateWorkshop|job\.start|job\.stop|ssh|\blease\w*\(|\broute\w*\(|start\w*\(|stop\w*\(/);
+  assert.match(rail, /labels only, never route\/lease\/start\/stop/);
+  assert.match(rail, /workshopOpenBreakout/);
+  // Watts is rounded for the glance and latest.json is a basename; the raw values ride in title.
+  assert.match(rail, /paintWatts/);
+  assert.match(rail, /latestJsonBasename/);
+  // Hairlines take the theme: no undefined --hairline token, no colour literal, in the workshop CSS.
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const start = css.indexOf("/* Workshop — a read-only add-on rail");
+  const end = css.indexOf(".workshop-settings {", start);
+  assert.ok(start >= 0 && end > start, "workshop css block present");
+  const block = css.slice(start, end);
+  assert.doesNotMatch(block, /--hairline/);
+  assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b/i);
 });
 
 test("box-monitor manifest includes read.model.ports", () => {

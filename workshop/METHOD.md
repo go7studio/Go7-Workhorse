@@ -42,7 +42,7 @@ Gateway reads are GET only, on the configured host's origin, without following r
 
 `job.flags` are the four abort signals: `two-trainers`, `qwen-up-during-train`, `gpu-idle` (0 % for 3 min with a trainer present), `step-backwards` (durable step below the previous feed's). They are labels on the rail; the desk does nothing about them.
 
-Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30 s accepted), the log (20–60 s), latest.json (60 s), and lease + systemd (30–60 s) in one pass. The desk polls the feed every 2 s and the feed is considered stale after 2 min.
+Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30 s accepted), the log (20–60 s), latest.json (60 s), and lease + systemd (30–60 s) in one pass. The desk polls the feed at the pack's `pollMs` (2 s for box-monitor); when job-log is also On against the same `/workshop/v0/feed`, main shares one GET at `min(pollMs)` rather than polling twice. The feed is considered stale after 2 min.
 
 ## IPC (automation)
 

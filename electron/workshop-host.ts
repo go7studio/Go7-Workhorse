@@ -1,10 +1,14 @@
 /**
  * Workshop host, Electron main. See workshop/PACKS.md §2 and §4.
  *
- * Main owns the timers. For every pack that is On with a host and confirmed sources, one poll runs
- * per source through the configured Local Compute host with that host's bearer. The renderer never
- * fetches: `view()` hands it the layout from `pack.json` plus the documents and statuses cached
- * here. Nothing a pack ships is executed or imported; `pack.json` is parsed and nothing else is read.
+ * Main owns the timers. For every pack that is On with a host and confirmed sources,
+ * granted sources poll through the configured Local Compute host with that host's bearer.
+ * Identical authorized gateway URLs (same host + path) — and identical probe sets on the
+ * same host — share one in-flight GET and one timer at `min(pollMs)` of their subscribers.
+ * Each pack still applies its own schema / freshMs / maxBytes; a pack that is not granted
+ * never receives another pack's body. The renderer never fetches: `view()` hands it the
+ * layout from `pack.json` plus the documents and statuses cached here. Nothing a pack ships
+ * is executed or imported; `pack.json` is parsed and nothing else is read.
  */
 
 import fs from "node:fs";
@@ -153,20 +157,59 @@ type SourceState = {
   packId: string;
   hostId: string;
   source: PackSource;
+  shareKey: string;
+  doc?: unknown;
+  status: SourceStatus;
+};
+
+/**
+ * One timer and one in-flight GET per identical authorized URL (or identical probe set)
+ * on a host. Packs that share `/workshop/v0/feed` subscribe here; each still applies its
+ * own schema / freshMs / maxBytes / grants. A pack that is not a member never receives
+ * another pack's body.
+ */
+type SharedGroup = {
+  shareKey: string;
+  hostId: string;
+  kind: "json" | "probes";
+  pathname?: string;
+  probes?: ProbeName[];
+  maxBytes: number;
+  pollMs: number;
+  members: Map<string, SourceState>;
   timer: NodeJS.Timeout | null;
   inFlight: Promise<void> | null;
   first: Promise<void>;
   failures: number;
-  doc?: unknown;
-  status: SourceStatus;
   stopped: boolean;
+  lastGet?: GetResult;
+  lastProbeDoc?: Record<string, ProbeResult>;
 };
+
+/** Share key for an authorized json GET: host + absolute gateway path. */
+export function jsonShareKey(hostId: string, pathname: string): string {
+  return `json\0${hostId}\0${pathname}`;
+}
+
+/** Share key for an identical probe set on one host (order-independent). */
+export function probesShareKey(hostId: string, probes: readonly ProbeName[]): string {
+  return `probes\0${hostId}\0${[...probes].slice().sort().join("\0")}`;
+}
+
+export function sourceShareKey(packId: string, hostId: string, source: PackSource): string {
+  if (source.kind === "json") {
+    const namespace = source.namespace ?? packId;
+    return jsonShareKey(hostId, `/workshop/${namespace}/${source.path}`);
+  }
+  return probesShareKey(hostId, source.probes);
+}
 
 export function createWorkshopHost(options: WorkshopHostOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const states = new Map<string, SourceState>();
+  const groups = new Map<string, SharedGroup>();
   let breakout: WorkshopBreakoutHandle | null = null;
   let disposed = false;
 
@@ -251,19 +294,14 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     return `http-${status}`;
   }
 
-  async function fetchJson(packId: string, source: JsonSource, host: LocalComputeHostSettings | undefined): Promise<SourceResult> {
-    if (!host) return { status: { present: false, reason: "no-host" } };
-    const namespace = source.namespace ?? packId;
-    const pathname = `/workshop/${namespace}/${source.path}`;
-    const url = gatewayUrl(host.baseUrl, pathname);
-    if (!url) return { status: { present: false, reason: "path" } };
-    const basePath = new URL(host.baseUrl).pathname.replace(/\/+$/, "");
-    if (!url.pathname.startsWith(`${basePath}/workshop/${namespace}/`)) return { status: { present: false, reason: "path" } };
-    const result = await get(host, pathname, Math.min(source.maxBytes, PACK_LIMITS.maxBytes));
+  /** Apply a shared (or solo) GET body to one pack's json source limits. */
+  function interpretJson(source: JsonSource, result: GetResult): SourceResult {
     if ("error" in result) return { status: { present: false, reason: result.error } };
     if (result.status !== 200) return { status: { present: false, reason: httpStatus(result.status) } };
     const fetchedAt = stamp();
     if (result.body === null) return { status: { present: false, reason: "too-large", fetchedAt } };
+    const cap = Math.min(source.maxBytes, PACK_LIMITS.maxBytes);
+    if (Buffer.byteLength(result.body) > cap) return { status: { present: false, reason: "too-large", fetchedAt } };
     let doc: unknown;
     try {
       doc = JSON.parse(result.body);
@@ -304,16 +342,19 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     }
   }
 
-  async function fetchProbes(source: ProbesSource, host: LocalComputeHostSettings | undefined): Promise<SourceResult> {
+  async function fetchProbeDoc(
+    probes: readonly ProbeName[],
+    host: LocalComputeHostSettings | undefined,
+  ): Promise<{ status: SourceStatus; doc: Record<string, ProbeResult> }> {
     const fetchedAt = stamp();
     if (!host) {
       const doc: Record<string, ProbeResult> = {};
-      for (const name of source.probes) doc[name] = { status: "unknown", detail: "no-host" };
+      for (const name of probes) doc[name] = { status: "unknown", detail: "no-host" };
       return { status: { present: false, reason: "no-host", fetchedAt }, doc };
     }
-    const results = await Promise.all(source.probes.map((name) => probe(name, host)));
+    const results = await Promise.all(probes.map((name) => probe(name, host)));
     const doc: Record<string, ProbeResult> = {};
-    source.probes.forEach((name, i) => {
+    probes.forEach((name, i) => {
       doc[name] = results[i];
     });
     if (results.some((r) => r.status === "ok")) return { status: { present: true, asOf: fetchedAt, fetchedAt }, doc };
@@ -323,25 +364,32 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     return { status: { present: false, reason, fetchedAt }, doc };
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Timers: one per granted source, one in-flight request, backoff with jitter on failure.
-
-  function stop(state: SourceState): void {
-    state.stopped = true;
-    if (state.timer) clearTimeout(state.timer);
-    state.timer = null;
+  function interpretProbes(source: ProbesSource, doc: Record<string, ProbeResult>, status: SourceStatus): SourceResult {
+    const sliced: Record<string, ProbeResult> = {};
+    for (const name of source.probes) sliced[name] = doc[name] ?? { status: "unknown" };
+    return { status, doc: sliced };
   }
 
-  function schedule(state: SourceState): void {
-    if (state.stopped || disposed) return;
-    const poll = clampPoll(state.source.pollMs);
-    const base = state.failures === 0 ? poll : Math.min(MAX_BACKOFF_MS, poll * 2 ** state.failures);
+  // -------------------------------------------------------------------------------------------
+  // Shared timers: one GET per identical authorized URL (or identical probe set) on a host.
+
+  function stopGroup(group: SharedGroup): void {
+    group.stopped = true;
+    if (group.timer) clearTimeout(group.timer);
+    group.timer = null;
+    group.members.clear();
+  }
+
+  function scheduleGroup(group: SharedGroup): void {
+    if (group.stopped || disposed || group.members.size === 0) return;
+    const poll = clampPoll(group.pollMs);
+    const base = group.failures === 0 ? poll : Math.min(MAX_BACKOFF_MS, poll * 2 ** group.failures);
     const delay = Math.round(base * (0.9 + Math.random() * 0.2));
-    state.timer = setTimeout(() => {
-      state.timer = null;
-      void run(state);
+    group.timer = setTimeout(() => {
+      group.timer = null;
+      void runGroup(group);
     }, delay);
-    state.timer.unref?.();
+    group.timer.unref?.();
   }
 
   function comparable(state: { doc?: unknown; status: SourceStatus }): string {
@@ -349,42 +397,97 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
     return JSON.stringify([state.doc, rest]);
   }
 
-  async function tick(state: SourceState): Promise<void> {
-    if (state.stopped || disposed) return;
-    const host = hostFor(state.hostId);
-    const result = state.source.kind === "json"
-      ? await fetchJson(state.packId, state.source, host)
-      : await fetchProbes(state.source, host);
-    if (state.stopped || disposed) return;
+  function applyToMember(state: SourceState, result: SourceResult): boolean {
     const changed = comparable(state) !== comparable(result);
     state.doc = result.doc;
     state.status = result.status;
-    const healthy = result.status.present || result.status.reason === "stale";
-    state.failures = healthy ? 0 : Math.min(state.failures + 1, MAX_BACKOFF_STEPS);
-    schedule(state);
-    if (changed) options.onUpdate?.();
+    return changed;
   }
 
-  function run(state: SourceState): Promise<void> {
-    if (state.inFlight) return state.inFlight;
-    state.inFlight = tick(state)
+  async function tickGroup(group: SharedGroup): Promise<void> {
+    if (group.stopped || disposed || group.members.size === 0) return;
+    const host = hostFor(group.hostId);
+    let anyChanged = false;
+    let healthy = false;
+
+    if (group.kind === "json" && group.pathname) {
+      let result: GetResult | "no-host";
+      if (!host) {
+        result = "no-host";
+        group.lastGet = undefined;
+      } else {
+        const url = gatewayUrl(host.baseUrl, group.pathname);
+        const parts = group.pathname.split("/");
+        const namespace = parts[2];
+        const basePath = new URL(host.baseUrl).pathname.replace(/\/+$/, "");
+        const pathOk = Boolean(url && namespace && url.pathname.startsWith(`${basePath}/workshop/${namespace}/`));
+        result = pathOk ? await get(host, group.pathname, group.maxBytes) : { error: "path" };
+        group.lastGet = result;
+      }
+      for (const state of group.members.values()) {
+        if (state.source.kind !== "json") continue;
+        const interpreted = result === "no-host"
+          ? { status: { present: false, reason: "no-host" } satisfies SourceStatus }
+          : interpretJson(state.source, result);
+        if (interpreted.status.present || interpreted.status.reason === "stale") healthy = true;
+        if (applyToMember(state, interpreted)) anyChanged = true;
+      }
+    } else if (group.kind === "probes" && group.probes) {
+      const { status, doc } = await fetchProbeDoc(group.probes, host);
+      group.lastProbeDoc = doc;
+      if (status.present || status.reason === "stale") healthy = true;
+      for (const state of group.members.values()) {
+        if (state.source.kind !== "probes") continue;
+        if (applyToMember(state, interpretProbes(state.source, doc, status))) anyChanged = true;
+      }
+    }
+
+    group.failures = healthy ? 0 : Math.min(group.failures + 1, MAX_BACKOFF_STEPS);
+    scheduleGroup(group);
+    if (anyChanged) options.onUpdate?.();
+  }
+
+  function runGroup(group: SharedGroup): Promise<void> {
+    if (group.inFlight) return group.inFlight;
+    group.inFlight = tickGroup(group)
       .catch(() => {
-        state.status = { present: false, reason: "unreachable", fetchedAt: stamp() };
-        state.doc = undefined;
-        state.failures = Math.min(state.failures + 1, MAX_BACKOFF_STEPS);
-        schedule(state);
+        const fetchedAt = stamp();
+        for (const state of group.members.values()) {
+          state.status = { present: false, reason: "unreachable", fetchedAt };
+          state.doc = undefined;
+        }
+        group.failures = Math.min(group.failures + 1, MAX_BACKOFF_STEPS);
+        scheduleGroup(group);
+        options.onUpdate?.();
       })
       .finally(() => {
-        state.inFlight = null;
+        group.inFlight = null;
       });
-    return state.inFlight;
+    return group.inFlight;
+  }
+
+  function syncGroupMeta(group: SharedGroup): void {
+    let pollMs: number = PACK_LIMITS.maxPollMs;
+    let maxBytes = 1;
+    const probeSet = new Set<ProbeName>();
+    for (const state of group.members.values()) {
+      pollMs = Math.min(pollMs, state.source.pollMs);
+      if (state.source.kind === "json") {
+        maxBytes = Math.max(maxBytes, Math.min(state.source.maxBytes, PACK_LIMITS.maxBytes));
+      } else {
+        for (const name of state.source.probes) probeSet.add(name);
+      }
+    }
+    group.pollMs = pollMs === PACK_LIMITS.maxPollMs ? PACK_LIMITS.minPollMs : pollMs;
+    group.maxBytes = maxBytes;
+    if (group.kind === "probes") group.probes = [...probeSet].sort() as ProbeName[];
   }
 
   /** Re-plan timers from installed packs and current settings. Main calls this whenever settings change. */
   function refresh(): void {
     if (disposed) return;
     const settings = currentSettings();
-    const planned = new Map<string, { packId: string; hostId: string; source: PackSource }>();
+    const planned = new Map<string, { packId: string; hostId: string; source: PackSource; shareKey: string }>();
     for (const item of installed()) {
       if (!item.ok) continue;
       const saved = settingFor(settings, item.pack.id);
@@ -393,23 +496,88 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
       if (!grantsMatchFingerprints(item.pack.id, item.pack.sources, saved.sources, saved.sourceFingerprints)) continue;
       for (const source of item.pack.sources) {
         if (!saved.sources.includes(source.id)) continue;
-        planned.set(`${item.pack.id}/${source.id}`, { packId: item.pack.id, hostId: saved.hostId, source });
+        const shareKey = sourceShareKey(item.pack.id, saved.hostId, source);
+        planned.set(`${item.pack.id}/${source.id}`, {
+          packId: item.pack.id, hostId: saved.hostId, source, shareKey,
+        });
       }
     }
+
+    // Drop source states that are gone or whose share identity changed.
     for (const [key, state] of states) {
       const plan = planned.get(key);
-      if (plan && plan.hostId === state.hostId && JSON.stringify(plan.source) === JSON.stringify(state.source)) continue;
-      stop(state);
+      if (plan && plan.hostId === state.hostId && plan.shareKey === state.shareKey && JSON.stringify(plan.source) === JSON.stringify(state.source)) {
+        continue;
+      }
+      const group = groups.get(state.shareKey);
+      group?.members.delete(key);
       states.delete(key);
     }
+
+    // Detach empty groups.
+    for (const [shareKey, group] of groups) {
+      if (group.members.size === 0) {
+        stopGroup(group);
+        groups.delete(shareKey);
+      } else {
+        syncGroupMeta(group);
+      }
+    }
+
+    const newGroups: SharedGroup[] = [];
     for (const [key, plan] of planned) {
-      if (states.has(key)) continue;
-      const state: SourceState = {
-        key, ...plan, timer: null, inFlight: null, first: Promise.resolve(), failures: 0,
-        status: { present: false }, stopped: false,
-      };
-      states.set(key, state);
-      state.first = run(state);
+      let state = states.get(key);
+      let created = false;
+      if (!state) {
+        created = true;
+        state = {
+          key, packId: plan.packId, hostId: plan.hostId, source: plan.source, shareKey: plan.shareKey,
+          status: { present: false },
+        };
+        states.set(key, state);
+      }
+      let group = groups.get(plan.shareKey);
+      if (!group) {
+        group = {
+          shareKey: plan.shareKey,
+          hostId: plan.hostId,
+          kind: plan.source.kind,
+          ...(plan.source.kind === "json"
+            ? { pathname: `/workshop/${plan.source.namespace ?? plan.packId}/${plan.source.path}` }
+            : { probes: [...plan.source.probes] }),
+          maxBytes: plan.source.kind === "json" ? Math.min(plan.source.maxBytes, PACK_LIMITS.maxBytes) : 1,
+          pollMs: plan.source.pollMs,
+          members: new Map(),
+          timer: null,
+          inFlight: null,
+          first: Promise.resolve(),
+          failures: 0,
+          stopped: false,
+        };
+        groups.set(plan.shareKey, group);
+        newGroups.push(group);
+      }
+      group.members.set(key, state);
+      syncGroupMeta(group);
+      // A pack that joins an already-running shared GET reuses the last body when present.
+      if (created && !newGroups.includes(group)) {
+        if (group.kind === "json" && group.lastGet && state.source.kind === "json") {
+          applyToMember(state, interpretJson(state.source, group.lastGet));
+        } else if (group.kind === "probes" && group.lastProbeDoc && state.source.kind === "probes") {
+          const present = Object.values(group.lastProbeDoc).some((row) => row.status === "ok");
+          const fetchedAt = stamp();
+          const status: SourceStatus = present
+            ? { present: true, asOf: fetchedAt, fetchedAt }
+            : { present: false, reason: "unreachable", fetchedAt };
+          applyToMember(state, interpretProbes(state.source, group.lastProbeDoc, status));
+        } else {
+          void runGroup(group);
+        }
+      }
+    }
+
+    for (const group of newGroups) {
+      group.first = runGroup(group);
     }
   }
 
@@ -418,7 +586,7 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
 
   async function view(): Promise<PackView[]> {
     refresh();
-    const pending = [...states.values()].map((state) => state.first);
+    const pending = [...groups.values()].map((group) => group.first);
     if (pending.length) {
       let waitTimer: NodeJS.Timeout | null = null;
       const wait = new Promise<void>((resolve) => {
@@ -520,7 +688,8 @@ export function createWorkshopHost(options: WorkshopHostOptions) {
 
   function dispose(): void {
     disposed = true;
-    for (const state of states.values()) stop(state);
+    for (const group of groups.values()) stopGroup(group);
+    groups.clear();
     states.clear();
   }
 

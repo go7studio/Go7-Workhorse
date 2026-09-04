@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { createWorkshopHost, gatewayUrl, listInstalledPacks, readCapped } from "../electron/workshop-host";
+import { createWorkshopHost, gatewayUrl, listInstalledPacks, readCapped, sourceShareKey } from "../electron/workshop-host";
 import {
   fingerprintsForSources,
   sourceFingerprint,
@@ -393,4 +393,103 @@ test("breakout opens once, focuses on repeat, and closes", () => {
   assert.equal(closed, 1);
   assert.equal(host({}).openBreakout(), false);
   workshop.dispose();
+});
+
+// ---------------------------------------------------------------------------------------------
+// Shared fetch: identical authorized URLs coalesce
+
+const DEDUPE = path.join(ROOT, "test", "fixtures", "workshop-dedupe");
+
+const dedupeFeed = (): PackSource => ({
+  id: "feed", kind: "json", path: "feed", namespace: "v0", pollMs: 2000, freshMs: 120000, asOf: "/asOf", schema: "sample-feed/v1", maxBytes: 65536,
+});
+
+test("two packs granting the same host URL share one GET per period", async () => {
+  const seen: Array<{ url: string }> = [];
+  const body = freshFeed();
+  let settings: WorkshopSettings = {
+    packs: [
+      {
+        id: "box-a", on: true, hostId: "spark", sources: ["feed"],
+        sourceFingerprints: fingerprintsForSources("box-a", [{ ...dedupeFeed(), pollMs: 2000 }], ["feed"]),
+      },
+      {
+        id: "box-b", on: true, hostId: "spark", sources: ["feed"],
+        sourceFingerprints: fingerprintsForSources("box-b", [{ ...dedupeFeed(), pollMs: 5000 }], ["feed"]),
+      },
+    ],
+  };
+  const workshop = createWorkshopHost({
+    packsRoot: () => DEDUPE,
+    getSettings: () => settings,
+    getHosts: () => [spark],
+    readToken: () => TOKEN,
+    now: () => NOW,
+    fetchImpl: fakeFetch({ "/workshop/v0/feed": { status: 200, body } }, seen),
+  });
+  const views = await workshop.view();
+  assert.equal(views.length, 2);
+  assert.equal(views.find((v) => v.id === "box-a")?.documents.status?.feed.present, true);
+  assert.equal(views.find((v) => v.id === "box-b")?.documents.status?.feed.present, true);
+  assert.equal((views.find((v) => v.id === "box-a")?.documents.feed as { watts: number }).watts, 220);
+  assert.equal((views.find((v) => v.id === "box-b")?.documents.feed as { watts: number }).watts, 220);
+  const feedGets = seen.filter((call) => new URL(call.url).pathname === "/workshop/v0/feed");
+  assert.equal(feedGets.length, 1, `expected one shared GET, got ${feedGets.length}: ${JSON.stringify(seen)}`);
+
+  // A second view must not start another fetch while the shared timer is idle with cache.
+  const before = seen.length;
+  await workshop.view();
+  assert.equal(seen.length, before);
+
+  settings = { packs: settings.packs.filter((p) => p.id === "box-a") };
+  workshop.refresh();
+  await workshop.view();
+  assert.equal((await workshop.view()).length, 1);
+  workshop.dispose();
+});
+
+test("fingerprint mismatch keeps an unauthorized pack off the shared GET", async () => {
+  const seen: Array<{ url: string }> = [];
+  const workshop = createWorkshopHost({
+    packsRoot: () => DEDUPE,
+    getSettings: () => ({
+      packs: [
+        {
+          id: "box-a", on: true, hostId: "spark", sources: ["feed"],
+          sourceFingerprints: fingerprintsForSources("box-a", [dedupeFeed()], ["feed"]),
+        },
+        {
+          id: "box-c", on: true, hostId: "spark", sources: ["feed"],
+          // Confirmed against a different namespace than the installed pack — must not fetch or receive.
+          sourceFingerprints: {
+            feed: sourceFingerprint("box-c", {
+              id: "feed", kind: "json", path: "feed", namespace: "other", pollMs: 2000, freshMs: 120000, maxBytes: 65536,
+            }),
+          },
+        },
+      ],
+    }),
+    getHosts: () => [spark],
+    readToken: () => TOKEN,
+    now: () => NOW,
+    fetchImpl: fakeFetch({ "/workshop/v0/feed": { status: 200, body: freshFeed() } }, seen),
+  });
+  const views = await workshop.view();
+  assert.equal(views.length, 1);
+  assert.equal(views[0].id, "box-a");
+  assert.equal(workshop.list().find((p) => p.id === "box-c")?.on, false);
+  assert.equal(seen.filter((c) => new URL(c.url).pathname === "/workshop/v0/feed").length, 1);
+  assert.equal(seen.filter((c) => c.url.includes("/workshop/other/")).length, 0);
+  workshop.dispose();
+});
+
+test("sourceShareKey groups by host path, not pack id", () => {
+  const a = sourceShareKey("box-a", "spark", dedupeFeed());
+  const b = sourceShareKey("box-b", "spark", { ...dedupeFeed(), pollMs: 5000 });
+  assert.equal(a, b);
+  assert.notEqual(a, sourceShareKey("box-a", "other-host", dedupeFeed()));
+  assert.notEqual(
+    a,
+    sourceShareKey("box-a", "spark", { ...dedupeFeed(), namespace: undefined, path: "feed" }),
+  );
 });

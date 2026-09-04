@@ -1,0 +1,16 @@
+{
+  "id": "box-c",
+  "name": "Box C",
+  "version": "1.0.0",
+  "contract": 1,
+  "description": "Dedupe fixture: same path as A/B but used for fingerprint-block cases.",
+  "sources": [
+    { "id": "feed", "kind": "json", "path": "feed", "namespace": "v0", "pollMs": 2000, "freshMs": 120000, "asOf": "/asOf", "schema": "sample-feed/v1", "maxBytes": 65536 }
+  ],
+  "strip": [
+    { "w": "text", "of": "feed:/watts", "fmt": "watts" }
+  ],
+  "cards": [
+    { "title": "C", "rows": [ { "w": "kv", "label": "Watts", "of": "feed:/watts", "fmt": "watts" } ] }
+  ]
+}

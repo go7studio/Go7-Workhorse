@@ -5,8 +5,10 @@ export function createWorkshopBreakoutWindow(input: {
   deskUrl: string | null;
   deskFile: string;
   icon?: string;
+  /** Prefer the desk theme; fall back to OS when omitted. */
+  dark?: boolean;
 }): BrowserWindow {
-  const dark = nativeTheme.shouldUseDarkColors;
+  const dark = typeof input.dark === "boolean" ? input.dark : nativeTheme.shouldUseDarkColors;
   const win = new BrowserWindow({
     width: 960,
     height: 720,

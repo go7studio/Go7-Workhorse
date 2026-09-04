@@ -40,3 +40,17 @@ test("v0 copy never ships hours to 5 tpp or a bakeoff leftover", () => {
     assert.doesNotMatch(text, /hours to 5 tpp|hoursTo5|13,?653/i, rel);
   }
 });
+
+test("confirm flushes workshop settings before opening the breakout", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  assert.match(block, /await store\.updateWorkshop/);
+  assert.match(block, /await window\.workhorse\?\.workshopOpenBreakout/);
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.match(store, /const updateWorkshop = useCallback\(async/);
+  assert.match(store, /await window\.workhorse\.saveState/);
+  const app = readFileSync(path.join(ROOT, "src", "App.tsx"), "utf8");
+  const themeIdx = app.indexOf("dataset.theme = resolvedTheme");
+  const workshopIdx = app.indexOf("if (isWorkshopSurface())");
+  assert.ok(themeIdx >= 0 && workshopIdx > themeIdx, "theme must apply before workshop early return");
+});
+

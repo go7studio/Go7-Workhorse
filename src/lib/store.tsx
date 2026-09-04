@@ -519,7 +519,7 @@ export type Store = AppState & {
   updateRouting: (patch: Partial<RoutingSettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
-  updateWorkshop: (settings: WorkshopSettings) => void;
+  updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
   grantPlanExternalAgents: (sessionId: string, allow: boolean) => void;
   agentRuntimes: import("./external-catalog").AgentRuntimeStatus[];
   agentCatalog: import("./external-catalog").ExternalAgent[];
@@ -8007,14 +8007,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const updateWorkshop = useCallback((settings: WorkshopSettings) => {
-    setState((current) => ({
+  const updateWorkshop = useCallback(async (settings: WorkshopSettings) => {
+    const current = stateRef.current;
+    const next = {
       ...current,
       settings: {
         ...current.settings,
         workshop: normalizeWorkshopSettings(settings),
       },
-    }));
+    };
+    stateRef.current = next;
+    setState(next);
+    if (persistTimer.current) {
+      window.clearTimeout(persistTimer.current);
+      persistTimer.current = null;
+    }
+    if (!window.workhorse?.saveState) return;
+    const saved = listedChats(applyComposerDrafts(next.sessions, composerDraftsRef.current));
+    await window.workhorse.saveState({
+      ...next,
+      sessions: saved,
+      activeSessionId:
+        next.activeSessionId && saved.some((session) => session.id === next.activeSessionId)
+          ? next.activeSessionId
+          : null,
+    });
   }, []);
 
   const grantPlanExternalAgents = useCallback((sessionId: string, allow: boolean) => {

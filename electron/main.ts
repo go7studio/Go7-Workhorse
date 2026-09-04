@@ -944,6 +944,7 @@ app.whenReady().then(async () => {
   }
 
   let liveSettings: Settings = normalizeSettings({});
+  let liveTheme: import("../src/lib/types").Theme = "system";
   const inboundFile = learningInboundPath(app.getPath("userData"));
   const inboundIo = {
     mkdirSync: (dir: string, opts: { recursive: true }) => {
@@ -1028,12 +1029,21 @@ app.whenReady().then(async () => {
         return null;
       }
     },
-    createBreakout: () => createWorkshopBreakoutWindow({
-      preload: path.join(__dirname, "preload.mjs"),
-      deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
-      deskFile: path.join(__dirname, "../dist/index.html"),
-      icon: appIconPath(),
-    }),
+    createBreakout: () => {
+      const dark =
+        liveTheme === "light"
+          ? false
+          : liveTheme === "dark" || liveTheme === "workhorse"
+            ? true
+            : nativeTheme.shouldUseDarkColors;
+      return createWorkshopBreakoutWindow({
+        preload: path.join(__dirname, "preload.mjs"),
+        deskUrl: process.env.VITE_DEV_SERVER_URL ?? null,
+        deskFile: path.join(__dirname, "../dist/index.html"),
+        icon: appIconPath(),
+        dark,
+      });
+    },
   });
   setInboundLearningSink((draft) => {
     learningService.record(draft);
@@ -1585,6 +1595,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("state:save", (_event, state: Persistable) => {
     if (!state || typeof state !== "object") return;
     if ("settings" in state) liveSettings = normalizeSettings((state as { settings?: unknown }).settings);
+    if ("theme" in state && typeof (state as { theme?: unknown }).theme === "string") {
+      const theme = (state as { theme: string }).theme;
+      if (theme === "system" || theme === "light" || theme === "dark" || theme === "workhorse") liveTheme = theme;
+    }
     // The catch keeps the chain alive: writeState guards its own body, but a
     // future edit that throws before its try would otherwise poison the chain
     // and silently end every save after it.

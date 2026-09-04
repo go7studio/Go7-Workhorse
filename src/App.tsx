@@ -54,7 +54,6 @@ function sameAppView(left: AppView, right: AppView): boolean {
 
 export function App() {
   const view = useStoreSelector(selectAppView, sameAppView);
-  if (isWorkshopSurface()) return <WorkshopBreakout />;
 
   useEffect(() => {
     const apply = () => {
@@ -68,6 +67,8 @@ export function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [view.theme]);
+
+  if (isWorkshopSurface()) return <WorkshopBreakout />;
 
   const surface = selectSurface({
     panel: view.panel,

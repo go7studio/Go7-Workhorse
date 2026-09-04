@@ -7,6 +7,7 @@ export function WorkshopBlock() {
   const [packs, setPacks] = useState<WorkshopPackListing[]>([]);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const reload = useCallback(() => {
     const run = window.workhorse?.workshopList;
@@ -21,24 +22,38 @@ export function WorkshopBlock() {
     reload();
   }, [reload, store.settings.workshop]);
 
-  const turnOn = (pack: WorkshopPackListing) => {
-    store.updateWorkshop({
-      packs: [
-        ...store.settings.workshop.packs.filter((item) => item.id !== pack.id),
-        { id: pack.id, on: true, grants: pack.grants },
-      ],
-    });
-    setConfirmId(null);
-    void window.workhorse?.workshopOpenBreakout?.();
-    reload();
+  const turnOn = async (pack: WorkshopPackListing) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Flush workshop grants to main liveSettings before opening the breakout,
+      // or the second window reads packs still Off (confirm→breakout race).
+      await store.updateWorkshop({
+        packs: [
+          ...store.settings.workshop.packs.filter((item) => item.id !== pack.id),
+          { id: pack.id, on: true, grants: pack.grants },
+        ],
+      });
+      setConfirmId(null);
+      await window.workhorse?.workshopOpenBreakout?.();
+      reload();
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const turnOff = (id: string) => {
-    store.updateWorkshop({
-      packs: store.settings.workshop.packs.map((item) => item.id === id ? { ...item, on: false, grants: [] } : item),
-    });
-    void window.workhorse?.workshopRevoke?.({ id });
-    reload();
+  const turnOff = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await store.updateWorkshop({
+        packs: store.settings.workshop.packs.map((item) => item.id === id ? { ...item, on: false, grants: [] } : item),
+      });
+      await window.workhorse?.workshopRevoke?.({ id });
+      reload();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -70,11 +85,11 @@ export function WorkshopBlock() {
               </div>
               <span className="skill-row-side">
                 {pack.refused ? <span className="row-meta">Refused</span> : pack.on ? (
-                  <button className="tiny" type="button" onClick={() => turnOff(pack.id)}>Turn off</button>
+                  <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>Turn off</button>
                 ) : confirmId === pack.id ? (
-                  <button className="tiny primary" type="button" onClick={() => turnOn(pack)}>Confirm grants</button>
+                  <button className="tiny primary" type="button" disabled={busy} onClick={() => void turnOn(pack)}>Confirm grants</button>
                 ) : (
-                  <button className="tiny" type="button" onClick={() => setConfirmId(pack.id)}>Turn on</button>
+                  <button className="tiny" type="button" disabled={busy} onClick={() => setConfirmId(pack.id)}>Turn on</button>
                 )}
               </span>
             </li>

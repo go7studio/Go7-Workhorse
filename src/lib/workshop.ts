@@ -239,6 +239,56 @@ export function paintModelsLine(metrics: WorkshopMetricsSnapshot | null | undefi
   return WORKSHOP_UNKNOWN;
 }
 
+export type WorkshopModelsState =
+  | { kind: "unknown"; line: typeof WORKSHOP_UNKNOWN }
+  | { kind: "loaded"; ids: string[] }
+  | { kind: "train-exclusive"; line: string }
+  | { kind: "empty-caps"; line: string };
+
+/** The Models card: ids as chips, or one plain-words line. Same words as paintModelsLine. */
+export function modelsState(metrics: WorkshopMetricsSnapshot | null | undefined): WorkshopModelsState {
+  if (metrics && Array.isArray(metrics.models) && metrics.models.length > 0) {
+    return { kind: "loaded", ids: metrics.models };
+  }
+  const line = paintModelsLine(metrics);
+  if (line === WORKSHOP_UNKNOWN) return { kind: "unknown", line: WORKSHOP_UNKNOWN };
+  if (line.startsWith("infer down / train exclusive")) return { kind: "train-exclusive", line };
+  return { kind: "empty-caps", line };
+}
+
+/** Watts rounds to a whole number for the glance. The snapshot keeps the raw value. */
+export function paintWatts(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} W` : WORKSHOP_UNKNOWN;
+}
+
+/** GPU percent clamped for a gauge, or null when the feed has none. */
+export function gaugePercent(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+/** The rail paints the file, not the path. Title carries the whole path. */
+export function latestJsonBasename(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return WORKSHOP_UNKNOWN;
+  const parts = value.trim().replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || WORKSHOP_UNKNOWN;
+}
+
+export type WorkshopTone = "ok" | "warn" | "mute";
+
+/** Feed chip tone: fresh within WORKSHOP_FEED_FRESH_MS, stale past it, mute when absent. */
+export function feedTone(present: boolean, asOf: unknown, now = Date.now()): WorkshopTone {
+  if (!present) return "mute";
+  return feedIsFresh(asOf, now) ? "ok" : "warn";
+}
+
+/** Infer chip tone. Down is mute, not danger: the soak expects infer down while training holds the box. */
+export function inferTone(status: WorkshopInferTile["status"]): WorkshopTone {
+  if (status === "ok") return "ok";
+  if (status === "unauthorized") return "warn";
+  return "mute";
+}
+
 export function paintJobStatus(metrics: WorkshopMetricsSnapshot | null | undefined, feedPresent: boolean): string {
   if (!feedPresent || !metrics) return WORKSHOP_UNKNOWN;
   if (metrics.oneWriter === true) return "running (one writer)";

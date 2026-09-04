@@ -313,6 +313,18 @@ clipping. The ring reads as the one dominant gauge in all three themes; in
 Workhorse it is the only sunset element on the rail. Hairlines take the
 theme once `--line` replaces the `--hairline` fallbacks.
 
+## 9. Built
+
+`WorkshopRail.tsx` and the workshop block in `app.css` follow §1–§8 as of
+this branch. Paint helpers (`modelsState`, `paintWatts`, `gaugePercent`,
+`latestJsonBasename`, `feedTone`, `inferTone`) live in `src/lib/workshop.ts`
+with tests in `test/workshop-paint.test.ts`. `test/workshop-never.test.ts`
+pins the six cards, the locked strip order, the absence of any control that
+changes the Spark, and a workshop CSS block with no `--hairline` and no
+colour literal. Expanded/folded state is `localStorage`, never desk state.
+One change from §2: the Job log module paints its tail without a card
+heading, since the module head already names it.
+
 ## Success
 
 Glance without Settings: collapsed 76px shows GPU, watts, writer, models,

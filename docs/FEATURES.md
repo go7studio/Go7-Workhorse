@@ -381,6 +381,15 @@ transcript rather than as a path.
   and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
+- **Workshop** — an optional, read-only add-on rail on the right edge of the
+  desk. Turn a pack on from Settings → Skills → Workshop and confirm its read
+  grants; the rail appears, collapsed to a 76px strip (GPU ring, watts, one
+  writer, loaded models, feed age) and expands to dense cards: Box, Models,
+  Infer, Router, Job, Feed. Packs stack as modules and fold on their own.
+  Two ship: Box monitor (Spark health from a feed you install yourself) and
+  Job log (a tail). Everything is the current snapshot — no history is kept —
+  and nothing on the rail starts, stops, routes, or leases anything. Detach
+  opens the same cards in their own window.
 - **The `/` palette** — new, project, link, model, effort, compact, plan,
   sandbox, usage, watch, schedule, goal, skills, review, context, rewind,
   export, memory, hooks, plugins, workflows, and more.

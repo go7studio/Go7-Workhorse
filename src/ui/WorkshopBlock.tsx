@@ -22,6 +22,13 @@ export function WorkshopBlock() {
     reload();
   }, [reload, store.settings.workshop]);
 
+  // Main broadcasts workshop:changed after liveSettings.workshop saves — keep the
+  // Skills list in sync when Turn off one pack so the other row cannot paint stale On.
+  useEffect(() => {
+    const stop = window.workhorse?.onWorkshopChanged?.(reload);
+    return () => stop?.();
+  }, [reload]);
+
   const turnOn = async (pack: WorkshopPackListing) => {
     if (busy) return;
     setBusy(true);
@@ -30,7 +37,13 @@ export function WorkshopBlock() {
       // or the second window reads packs still Off (confirm→breakout race).
       await store.updateWorkshop({
         packs: [
-          ...store.settings.workshop.packs.filter((item) => item.id !== pack.id),
+          ...packs
+            .filter((item) => item.id !== pack.id)
+            .map((item) => ({
+              id: item.id,
+              on: item.on,
+              grants: item.on ? (item.granted.length ? item.granted : item.grants) : [],
+            })),
           { id: pack.id, on: true, grants: pack.grants },
         ],
       });
@@ -46,10 +59,22 @@ export function WorkshopBlock() {
     if (busy) return;
     setBusy(true);
     try {
-      await store.updateWorkshop({
-        packs: store.settings.workshop.packs.map((item) => item.id === id ? { ...item, on: false, grants: [] } : item),
-      });
-      await window.workhorse?.workshopRevoke?.({ id });
+      // Rewrite from the live list so turning off one pack cannot drop/stale the other.
+      const nextPacks = packs.map((item) =>
+        item.id === id
+          ? { id: item.id, on: false, grants: [] }
+          : {
+              id: item.id,
+              on: item.on,
+              grants: item.on ? (item.granted.length ? item.granted : item.grants) : [],
+            },
+      );
+      await store.updateWorkshop({ packs: nextPacks });
+      // Pack on/off is updateWorkshop only. Close breakout when nothing remains On.
+      // Legacy revoke IPC never flips packs.
+      if (!nextPacks.some((item) => item.on)) {
+        await window.workhorse?.workshopCloseBreakout?.();
+      }
       reload();
     } finally {
       setBusy(false);

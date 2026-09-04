@@ -28,8 +28,17 @@ export function WorkshopBreakout() {
         const snap = await window.workhorse?.workshopRead?.({ id: "box-monitor", grant: "read.box.metrics" });
         if (live && snap && typeof snap === "object" && !("unknown" in snap) && !("tail" in snap)) setMetrics(snap as WorkshopMetricsSnapshot);
         const side = await window.workhorse?.workshopRead?.({ id: "box-monitor", grant: "read.fs.sidecar" });
+        // Sidecar grant fills exclusiveSidecar/latestJson only — never clobber live GPU/watts/writer with —.
         if (live && side && typeof side === "object" && !("unknown" in side) && !("tail" in side)) {
-          setMetrics((current) => current ? { ...current, ...(side as WorkshopMetricsSnapshot), infer: current.infer } : side as WorkshopMetricsSnapshot);
+          const sideSnap = side as WorkshopMetricsSnapshot;
+          setMetrics((current) => {
+            if (!current) return sideSnap;
+            return {
+              ...current,
+              exclusiveSidecar: sideSnap.exclusiveSidecar ?? current.exclusiveSidecar,
+              latestJson: sideSnap.latestJson !== WORKSHOP_UNKNOWN && sideSnap.latestJson != null ? sideSnap.latestJson : current.latestJson,
+            };
+          });
         }
         const status = await window.workhorse?.workshopFeedStatus?.({ id: "box-monitor" });
         if (live && status) {

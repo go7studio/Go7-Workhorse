@@ -315,7 +315,9 @@ type WorkhorseBridge = {
   ) => Promise<import("./lib/types").ExternalTask | null>;
   cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
   workshopList?: () => Promise<import("./lib/workshop").WorkshopPackListing[]>;
+  /** Opens breakout only if a pack is already On. Does not flip packs. Prefer workshopOpenBreakout. */
   workshopOptin?: (input: { id: string }) => Promise<{ ok: boolean }>;
+  /** Closes breakout only if no pack remains On. Does not flip packs. Prefer workshopCloseBreakout. */
   workshopRevoke?: (input: { id: string }) => Promise<{ ok: boolean }>;
   workshopRead?: (input: { id: string; grant: string }) => Promise<unknown>;
   workshopFeedStatus?: (input: { id: string }) => Promise<{ present: boolean; url?: string; reason?: string }>;

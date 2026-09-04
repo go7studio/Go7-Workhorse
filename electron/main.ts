@@ -104,7 +104,7 @@ import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
 import { createWorkshopHost, resolveWorkshopPacksRoot } from "./workshop-host";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
-import { normalizeWorkshopSettings } from "../src/lib/workshop";
+import { normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
 import type { Settings } from "../src/lib/types";
 import {

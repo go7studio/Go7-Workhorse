@@ -350,7 +350,7 @@ import {
 import { applyWorkhorseToggle, isConcreteTheme, isTheme, nextTheme } from "./theme";
 import { effectiveLearningMode, learningCaptures, normalizeLearning } from "./learning-policy";
 import { normalizeLocalComputeSettings } from "./local-compute";
-import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop";
+import { normalizeWorkshopSettings, type WorkshopSettings } from "./workshop-pack";
 import { agentTurnEvidence, learningEvidenceId } from "./learning-agent-evidence";
 import { settleSessionGoals } from "./learning-goal";
 import { BACKFILL_SUMMARY_CHARS, backfillEventId } from "./learning-backfill";

@@ -1627,6 +1627,9 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle("workshop:list", () => workshopHost.list());
+  // Pack on/off is renderer updateWorkshop → state:save only.
+  // workshop:optin / workshop:revoke never flip packs — they only open/close the breakout
+  // window based on whether any pack is already On (legacy names; prefer open/close-breakout).
   ipcMain.handle("workshop:optin", (_event, input: { id?: string }) => {
     if (typeof input?.id === "string" && workshopHost.anyOn()) workshopHost.openBreakout();
     return { ok: typeof input?.id === "string" };

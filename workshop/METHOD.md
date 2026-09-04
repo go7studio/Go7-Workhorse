@@ -16,3 +16,15 @@ Separate add-on. Default off. Read-only.
 Copy workshop-feed.py and the two systemd units from workshop/packs/box-monitor/spark-feed/ onto the Spark as the operator. Enable the user timer. Prove a local snapshot exists. The desk never installs this.
 
 Failed collector runs must leave the last valid feed.json in place.
+
+## IPC (automation)
+
+| Call | Does | Does not |
+| --- | --- | --- |
+| Renderer `updateWorkshop` (via Settings → Skills) | Turns packs On/Off and sets grants | Open/close breakout by itself |
+| `workshopOpenBreakout` / `workshopCloseBreakout` | Opens or closes the breakout window | Flip pack on/off |
+| `workshopOptin` (`workshop:optin`) | Opens breakout **only if** a pack is already On | Opt a pack in or grant reads |
+| `workshopRevoke` (`workshop:revoke`) | Closes breakout **only if** no pack remains On | Turn a pack off or clear grants |
+
+Automation must not treat optin/revoke as pack toggles. Pack state is `settings.workshop` only.
+

@@ -65,3 +65,22 @@ test("breakout refreshes from live workshop list, not only local store", () => {
   assert.match(main, /broadcastWorkshopChanged/);
 });
 
+
+test("Skills Workshop list refreshes on workshop:changed after Turn off", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  assert.match(block, /onWorkshopChanged/);
+  assert.match(block, /workshopCloseBreakout/);
+  assert.doesNotMatch(block, /workshopRevoke/);
+});
+
+test("workshop optin/revoke never claim to flip packs", () => {
+  const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
+  assert.match(main, /never flip packs/);
+  assert.match(main, /workshop:optin/);
+  assert.match(main, /workshop:revoke/);
+  const method = readFileSync(path.join(ROOT, "workshop", "METHOD.md"), "utf8");
+  assert.match(method, /updateWorkshop/);
+  assert.match(method, /Does not/);
+  assert.match(method, /workshopOptin/);
+});
+

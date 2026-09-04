@@ -8,6 +8,40 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.55](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.54...v0.6.55) (2026-09-04)
+
+
+### Features
+
+* **workshop:** add-on v0 desk breakout + Spark feed packs ([acb2b22](https://github.com/go7studio/Go7-Workhorse/commit/acb2b22c723884179da70fe61fb79744c7edd16b))
+* **workshop:** add-on v0 desk breakout + Spark feed packs ([2580c8e](https://github.com/go7studio/Go7-Workhorse/commit/2580c8e2a84f6c2771af91089b4b5ab981572b82))
+* **workshop:** Box monitor Models + Router soak labels ([101e878](https://github.com/go7studio/Go7-Workhorse/commit/101e878771b7955466695ef03465eca90c0ce514))
+* **workshop:** Box monitor Models + Router soak labels ([8fc17cd](https://github.com/go7studio/Go7-Workhorse/commit/8fc17cd9d99fb3ab8597f56b3e8d9abbc64837d2))
+* **workshop:** desk rail live watch (collapsed strip → expand) ([aee3baf](https://github.com/go7studio/Go7-Workhorse/commit/aee3bafd87fda8afd9a0f402c23dcf788774a86a))
+* **workshop:** desk rail live watch (RAIL.md) ([d85b4b2](https://github.com/go7studio/Go7-Workhorse/commit/d85b4b25e5752fbd4680eeb975021d130450e896))
+* **workshop:** host + installed packs — the DGX box leaves the app ([02dde34](https://github.com/go7studio/Go7-Workhorse/commit/02dde34197a672c5871e6ec6b4434b5f7d7a95bb))
+* **workshop:** rail paint — ring gauge, module stack, tokened hairlines ([39f8e33](https://github.com/go7studio/Go7-Workhorse/commit/39f8e33f26a51ae327e6e118c20d547a31a2a2e8))
+
+
+### Bug Fixes
+
+* **workshop:** breakout polls liveSettings and workshop:changed ([d3bd409](https://github.com/go7studio/Go7-Workhorse/commit/d3bd4094bcea92f24679f10dcfc003d3ce443719))
+* **workshop:** close pack grant/update race before refresh ([8f3f802](https://github.com/go7studio/Go7-Workhorse/commit/8f3f802fde6ac30209351dc94f3d3c91b14be9e5))
+* **workshop:** dedupe paintModelsLine helpers ([4f58239](https://github.com/go7studio/Go7-Workhorse/commit/4f58239640c491b0c6027f9d47c97aef507aab8b))
+* **workshop:** distinguish empty Local Compute caps on Models ([38603f8](https://github.com/go7studio/Go7-Workhorse/commit/38603f8bde5143a6e34bcd4d9adfde91c9846199))
+* **workshop:** don't let sidecar grant clobber live GPU meters ([62d218e](https://github.com/go7studio/Go7-Workhorse/commit/62d218ec648306c1eeb0aea04564e51be9237ddd))
+* **workshop:** flush grants before breakout; inherit desk theme ([ed498f3](https://github.com/go7studio/Go7-Workhorse/commit/ed498f3a0c851e2c57d160c4abd5a26fd38631e5))
+* **workshop:** Models line includes http-502 during train exclusive ([4c1ce48](https://github.com/go7studio/Go7-Workhorse/commit/4c1ce48afd34caf7c570d92633d97fcb6e5ae5ed))
+* **workshop:** Models train-exclusive line includes http-502 ([eb8fa50](https://github.com/go7studio/Go7-Workhorse/commit/eb8fa50dc758415f68df153d1e876b8b68795fce))
+* **workshop:** refresh Skills list on turn-off; document optin/revoke ([ac34aee](https://github.com/go7studio/Go7-Workhorse/commit/ac34aeed68822f7432cf42645684743286fbc6d6))
+* **workshop:** restore soak Models label to train-exclusive wording ([fb53ec1](https://github.com/go7studio/Go7-Workhorse/commit/fb53ec1b7bb563a3513d2fbc23e48775870eba6f))
+* **workshop:** sidecar grant must not clobber live GPU meters ([27bb6f6](https://github.com/go7studio/Go7-Workhorse/commit/27bb6f60aa291e0a769ac52b9f54c7ebb7fe7b1e))
+* **workshop:** silence unused input in host test ([8e50095](https://github.com/go7studio/Go7-Workhorse/commit/8e50095e585b81eaadf98725e9c59f56406f88fd))
+* **workshop:** unblock never-test tripped by revoke mention in comment ([6aff430](https://github.com/go7studio/Go7-Workhorse/commit/6aff43013896748532c856f5e7e358a9bbd00b50))
+* **workshop:** wrap models strip at spaces, not mid-token ([7cebfa2](https://github.com/go7studio/Go7-Workhorse/commit/7cebfa2507619c9adcf9a56935a38b8fb8dd059d))
+* wrap long URLs in the user prompt bubble ([b90d308](https://github.com/go7studio/Go7-Workhorse/commit/b90d3088ccde36a691d7db353cc00b460e3ed5b1))
+* wrap long URLs in the user prompt bubble ([598823e](https://github.com/go7studio/Go7-Workhorse/commit/598823e544b88621d3e7b5f36efcb7dcf704f6f6))
+
 ## [0.6.54](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.53...v0.6.54) (2026-09-03)
 
 

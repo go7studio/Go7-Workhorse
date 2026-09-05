@@ -80,7 +80,12 @@ jobs:
           - os: windows-latest
             script: package:win
             installer: "*Workhorse-Setup-*.exe"
-          - os: macos-latest
+          # Pinned, not latest: the macos-26 image that rolled on 2026-08-28
+          # (runner image 20260828) breaks electron-builder's temporary
+          # signing keychain at set-key-partition-list ("SecKeychainUnlock:
+          # passphrase incorrect"). The 0.6.55 cut signed on the 20260728
+          # image with the same electron-builder. Revisit when either moves.
+          - os: macos-15
             script: package:mac
             # Both Apple silicon and Intel. The glob has to keep the arch
             # suffix in view or it collects one dmg and Intel Macs get nothing.

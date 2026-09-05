@@ -206,6 +206,16 @@ type WorkhorseBridge = {
     model: string;
     api?: "anthropic-messages" | "openai-completions";
   }) => Promise<{ ok: boolean; message: string; contextWindow?: number; model?: string; api?: "anthropic-messages" | "openai-completions" }>;
+  /** What the bot's host publishes at /v1/models. Null when it publishes none. */
+  customBotCatalog?: (
+    botId: string,
+    refresh?: boolean,
+  ) => Promise<import("../electron/custom-catalog").CustomCatalog | null>;
+  /** One short completion through this bot at one model, for the editor's row test. */
+  testCustomBotModel?: (
+    botId: string,
+    model: string,
+  ) => Promise<import("../electron/custom-http").CustomModelTestResult>;
   customAnswerPermission: (requestId: string, answer: import("./lib/permissions").PermissionAnswer) => Promise<boolean>;
   customPrompt: (input: {
     sessionId: string;

@@ -114,7 +114,10 @@ test("the advertised list flows from the session start to the desk cache and the
   const main = read("electron/main.ts");
   assert.match(main, /payload\.type === "vendor-models"\) rememberVendorModels\(app\.getPath\("userData"\), payload\.provider, payload\.models\)/);
   assert.doesNotMatch(main, /rememberVendorModels\(app\.getPath\("userData"\), "claude", \[input\.model\]\)/, "a finished turn is not the vendor accepting the model");
-  assert.match(main, /listVendorModels\(\{ userData: app\.getPath\("userData"\) \}\)/);
+  // The rule is that the desk's own userData reaches the list, so the picker
+  // reads what Claude advertised here. What else rides along — the custom
+  // hosts' catalogs, for one — is not this pin's business.
+  assert.match(main, /listVendorModels\(\{ userData: app\.getPath\("userData"\)(?:, [^}]*)? \}\)/);
   const store = read("src/lib/store.tsx");
   assert.match(store, /event\.type === "vendor-models"\) \{\s*refreshVendorModels\(\);/);
   const setup = read("src/ui/SessionSetup.tsx");

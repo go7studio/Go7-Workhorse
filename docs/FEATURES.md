@@ -377,6 +377,11 @@ transcript rather than as a path.
   one is sent. It keeps no count of its own — the host is the only thing that
   knows who else is using it. Large catalogs are grouped, frontier-first, searchable, and
   explicitly approved; one key keeps one ring with separate model rows.
+  A multi-model host is asked what it serves: the editor lists the host's own
+  models with the window and price it publishes, each is ticked to offer it,
+  tested on its own for a reply, a latency and token counts, and rated for
+  Auto — so every offered model is a routing candidate at the window its host
+  gave. A host that publishes no list says so, and its ids stay hand-typed.
   Qwen 3.8 bots use the model's native Off/Low/Medium/Extra reasoning levels
   and its published thinking/direct-mode sampling profiles.
   Dev shells keep a pasted key on the bot itself, because their credential

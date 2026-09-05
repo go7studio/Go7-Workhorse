@@ -15,6 +15,12 @@ export type ModelInfo = {
   reasoningLevels?: ReasoningLevel[];
   /** Other vendor ids that are this same family (effort/fast spellings). */
   aliases?: string[];
+  /**
+   * The host itself published this row, window included. Only a custom host
+   * sets it, and only its own `/models` answer can: a seeded row is Workhorse
+   * guessing, and a guess must never outrank the window an owner saved.
+   */
+  hostListed?: boolean;
 };
 
 export type ModelChoice = {
@@ -456,12 +462,33 @@ export function advertisedCodexWindow(modelId: string, reported?: number): numbe
   return Math.max(known, seen) || 272_000;
 }
 
+/**
+ * The window a live custom host published for this id.
+ *
+ * Only a row the host itself listed counts. `MODEL_CATALOG.custom` is a seed —
+ * Workhorse's guess about three ids — and the number an owner typed into the
+ * bot beats a guess. Neither beats the host saying what it actually serves, so
+ * that answer, and only that answer, is preferred here.
+ */
+function liveCustomWindow(modelId: string): number | undefined {
+  const id = modelId.trim();
+  if (!id) return undefined;
+  const row = liveCatalog.custom?.find(
+    (item) => item.hostListed === true && (item.id === id || item.aliases?.includes(id)),
+  );
+  return row && row.contextWindow > 0 ? row.contextWindow : undefined;
+}
+
 export function contextWindowFor(
   provider: ProviderId,
   modelId: string,
   customWindow?: number,
 ): number {
-  if (provider === "custom" && customWindow && customWindow > 0) return customWindow;
+  if (provider === "custom") {
+    const listed = liveCustomWindow(modelId);
+    if (listed) return listed;
+    if (customWindow && customWindow > 0) return customWindow;
+  }
   if (provider === "claude") return advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow);
   return findModel(provider, modelId)?.contextWindow ?? 128_000;
 }

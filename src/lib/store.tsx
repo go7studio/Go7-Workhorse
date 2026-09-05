@@ -440,6 +440,8 @@ export type Store = AppState & {
   setCustomBotEnabled: (id: string, enabled: boolean) => void;
   probeCustomDraft: () => Promise<{ ok: boolean; message: string }>;
   probeCustomBot: (id: string) => Promise<{ ok: boolean; message: string }>;
+  /** Re-read the desk catalog. A custom host's freshly read model list lands here. */
+  refreshVendorModels: () => void;
   setSessionEffort: (effort: EffortLevel) => void;
   setSessionEnvironment: (kind: "local" | "worktree") => Promise<{ ok: boolean; message: string }>;
   selectSession: (id: string) => void;
@@ -8398,6 +8400,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCustomBotEnabled,
       probeCustomDraft,
       probeCustomBot,
+      refreshVendorModels,
       setSessionEffort,
       setSessionEnvironment,
       selectSession,
@@ -8533,6 +8536,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setCustomBotEnabled,
       probeCustomDraft,
       probeCustomBot,
+      refreshVendorModels,
       setSessionEffort,
       setSessionEnvironment,
       selectSession,

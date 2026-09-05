@@ -963,6 +963,125 @@ async function fetchListedContext(
   }
 }
 
+/** What a per-model test asks for. Exact enough that a wrong model is obvious. */
+export const CUSTOM_MODEL_TEST_PROMPT = "Reply with exactly: WORKHORSE-OK";
+
+export type CustomModelTestResult = {
+  ok: boolean;
+  model: string;
+  /** The host's own words on a failure; on success, what came back. */
+  message: string;
+  reply?: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+/** One non-streamed reply, in either dialect. Empty when the body carries none. */
+export function replyTextFromBody(raw: unknown, api: CustomApiKind): string {
+  const root = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (api !== "openai-completions") return textFromBlocks(root.content).text.trim();
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const first = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : {};
+  const message = first.message && typeof first.message === "object" ? (first.message as Record<string, unknown>) : {};
+  const content = message.content ?? first.text;
+  if (typeof content === "string") return content.trim();
+  // Some OpenAI-compatible hosts answer with the parts array they accept.
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (part && typeof part === "object" ? (part as { text?: unknown }).text : part))
+    .filter((text): text is string => typeof text === "string")
+    .join("")
+    .trim();
+}
+
+/**
+ * Send one short completion through a bot at one named model.
+ *
+ * `probeCustomHttp` answers "is this connection alive" with a hand-written
+ * body. That was right for a connection and wrong for a model: a key can reach
+ * a host and still be unentitled to half of what the host lists, and the
+ * hand-written body is not the body a chat sends, so a dialect fault could pass
+ * here and fail in use. This goes through the same builder the chat path uses,
+ * so the headers, the api kind and the per-model sampling profile under test
+ * are the ones that will carry the real work.
+ *
+ * Two things are switched off for a one-word reply: the stream, because there
+ * is no progress to show, and the desk toolset, because a model weighing thirty
+ * tools before answering is a test of the tools.
+ */
+export async function testCustomModel(
+  config: CustomHttpConfig,
+  fetchImpl: typeof fetch = fetch,
+  clock: () => number = () => Date.now(),
+): Promise<CustomModelTestResult> {
+  const model = config.model.trim();
+  const baseUrl = config.baseUrl.trim();
+  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim());
+  if (!apiKey || !model || !baseUrl) {
+    return { ok: false, model, message: CUSTOM_NOT_CONFIGURED, latencyMs: 0 };
+  }
+  const api = resolveCustomApi(config);
+  const url = customMessagesUrl(baseUrl, api);
+  const messages: CustomChatMessage[] = [{ role: "user", text: CUSTOM_MODEL_TEST_PROMPT }];
+  const body =
+    api === "openai-completions"
+      ? buildOpenAiBody({ model, messages, baseUrl, inputs: config.inputs })
+      : buildAnthropicBody({ model, messages, inputs: config.inputs });
+  body.stream = false;
+  delete body.stream_options;
+  delete body.tools;
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+    authorization: `Bearer ${apiKey}`,
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+    ...customHttpIdentityHeaders(baseUrl),
+  };
+  const startedAt = clock();
+  try {
+    const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const text = await response.text();
+    const latencyMs = Math.max(0, Math.round(clock() - startedAt));
+    if (!response.ok) {
+      return { ok: false, model, latencyMs, message: customHttpErrorMessage(response.status, text) };
+    }
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    const reply = sanitizeCustomReply(replyTextFromBody(parsed, api));
+    const usage = parseCustomUsage(parsed);
+    if (!reply) {
+      return {
+        ok: false,
+        model,
+        latencyMs,
+        message: "The host answered without a reply.",
+        ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+      };
+    }
+    return {
+      ok: true,
+      model,
+      latencyMs,
+      reply,
+      message: reply,
+      ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      model,
+      latencyMs: Math.max(0, Math.round(clock() - startedAt)),
+      message: grokBotShimDownMessage(baseUrl, error),
+    };
+  }
+}
+
 export async function probeCustomHttp(
   config: CustomHttpConfig,
   fetchImpl: typeof fetch = fetch,

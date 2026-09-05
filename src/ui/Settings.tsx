@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
+import { BOT_COLORS, customBotEnabled, customModelRoutingOverride } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -617,6 +617,211 @@ function MassSend({
   );
 }
 
+type CustomCatalog = import("../../electron/custom-catalog").CustomCatalog;
+type CustomCatalogModel = import("../../electron/custom-catalog").CustomCatalogModel;
+type CustomModelTestResult = import("../../electron/custom-http").CustomModelTestResult;
+type ModelRoutingProfile = import("../lib/types").ModelRoutingProfile;
+
+/**
+ * The three roles the bot editor already offers, on the 1-5 scale the person
+ * authored. Routing doubles intelligence onto its internal 1-10 at read time,
+ * which is why a row shows both numbers: the control they set and the score it
+ * produces.
+ */
+const MODEL_ROLES: Record<"quick" | "balanced" | "deep", { intelligence: number; speed: number; cost: number }> = {
+  quick: { intelligence: 3, speed: 5, cost: 1 },
+  balanced: { intelligence: 4, speed: 4, cost: 3 },
+  deep: { intelligence: 5, speed: 2, cost: 5 },
+};
+
+function storedRole(stored?: Partial<ModelRoutingProfile>): "" | "quick" | "balanced" | "deep" {
+  if (!stored || stored.intelligence === undefined) return "";
+  for (const [role, values] of Object.entries(MODEL_ROLES)) {
+    if (stored.intelligence === values.intelligence && stored.speed === values.speed && stored.cost === values.cost) {
+      return role as "quick" | "balanced" | "deep";
+    }
+  }
+  return stored.intelligence >= 5 ? "deep" : (stored.speed ?? 0) >= 5 && (stored.cost ?? 5) <= 2 ? "quick" : "balanced";
+}
+
+function priceLabel(model: CustomCatalogModel | undefined): string {
+  if (!model) return "";
+  const money = (value: number) => (value >= 1 ? value.toFixed(2) : value.toFixed(3));
+  const parts: string[] = [];
+  if (model.pricePerMTokIn !== undefined) parts.push(`$${money(model.pricePerMTokIn)}/M in`);
+  if (model.pricePerMTokOut !== undefined) parts.push(`$${money(model.pricePerMTokOut)}/M out`);
+  return parts.join(" · ");
+}
+
+function testLabel(result: CustomModelTestResult): string {
+  if (!result.ok) return result.message;
+  const counts =
+    result.inputTokens !== undefined || result.outputTokens !== undefined
+      ? ` · ${result.inputTokens ?? 0} in / ${result.outputTokens ?? 0} out`
+      : "";
+  return `${result.reply ?? result.message} · ${result.latencyMs} ms${counts}`;
+}
+
+/**
+ * What the host serves, what this bot offers, and what Auto will think of each.
+ *
+ * A multi-model host sells dozens behind one key. Typing the ids by hand made
+ * every one of them a guess — the right spelling, the real window, the price —
+ * and a wrong guess is only found when a chat fails. So the list comes from the
+ * host, the windows and prices are the host's own numbers, and each row can be
+ * tested on its own before anyone routes work to it.
+ *
+ * Nothing is written on open. A catalog arriving does not approve a model, and
+ * the rating shown beside a row is the effective one from the family table
+ * until the person deliberately overrides it. Only a tick, a role change or a
+ * test button writes anything.
+ */
+function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
+  const store = useStore();
+  const [catalog, setCatalog] = useState<CustomCatalog | null | undefined>(undefined);
+  const [tests, setTests] = useState<Record<string, CustomModelTestResult | "busy">>({});
+  const { id: botId, baseUrl } = bot;
+
+  useEffect(() => {
+    let live = true;
+    setCatalog(undefined);
+    if (!window.workhorse?.customBotCatalog) {
+      setCatalog(null);
+      return () => {
+        live = false;
+      };
+    }
+    void window.workhorse
+      .customBotCatalog(botId)
+      .then((next) => {
+        if (!live) return;
+        setCatalog(next);
+        // A window the host published beats the one saved on the bot, and the
+        // chat picker reads it from the desk catalog rather than from here.
+        if (next) store.refreshVendorModels();
+      })
+      .catch(() => {
+        if (live) setCatalog(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [botId, baseUrl, store]);
+
+  const primary = bot.model.trim();
+  const approved = new Set(bot.models ?? []);
+  const listed = catalog?.models ?? [];
+  const rows = [primary, ...listed.map((model) => model.id).filter((id) => id !== primary)].filter(Boolean);
+  const byId = new Map(listed.map((model) => [model.id, model]));
+
+  const toggle = (id: string) => {
+    const next = new Set(approved);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    store.updateCustomBot(bot.id, { models: [...next].filter((item) => item !== primary) });
+  };
+
+  const setRole = (id: string, role: string) => {
+    const next = { ...(bot.routingProfiles ?? {}) };
+    if (role === "") delete next[id];
+    else next[id] = MODEL_ROLES[role as keyof typeof MODEL_ROLES];
+    store.updateCustomBot(bot.id, { routingProfiles: next });
+  };
+
+  const runTest = (id: string) => {
+    if (!window.workhorse?.testCustomBotModel) return;
+    setTests((current) => ({ ...current, [id]: "busy" }));
+    void window.workhorse
+      .testCustomBotModel(bot.id, id)
+      .then((result) => setTests((current) => ({ ...current, [id]: result })))
+      .catch((error: unknown) =>
+        setTests((current) => ({
+          ...current,
+          [id]: {
+            ok: false,
+            model: id,
+            latencyMs: 0,
+            message: error instanceof Error ? error.message : "The test could not run.",
+          },
+        })),
+      );
+  };
+
+  return (
+    <div className="field wide bot-offered">
+      <span>Offered models</span>
+      {catalog === undefined ? (
+        <p className="row-meta">Asking the host what it serves…</p>
+      ) : catalog === null ? (
+        <p className="row-meta">
+          This host does not publish a model list. Add the ids you want by hand under “Models on this key” above.
+        </p>
+      ) : (
+        <p className="row-meta">
+          {listed.length} model{listed.length === 1 ? "" : "s"} on this host. Tick the ones this bot may offer; every
+          ticked model becomes a routing candidate.
+        </p>
+      )}
+      {catalog
+        ? rows.map((id) => {
+            const model = byId.get(id);
+            const isPrimary = id === primary;
+            const on = isPrimary || approved.has(id);
+            const effective = routingProfileForModel("custom", id, customModelRoutingOverride(bot, id));
+            const result = tests[id];
+            return (
+              <div className="bot-offered-row" key={id}>
+                <label className="bot-offered-pick">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={isPrimary}
+                    title={isPrimary ? "The bot's own model is always offered" : id}
+                    onChange={() => toggle(id)}
+                  />
+                  <strong>{id}</strong>
+                </label>
+                <span className="row-meta">
+                  {model?.contextWindow ? `${formatWindow(model.contextWindow)} context` : "window unpublished"}
+                  {priceLabel(model) ? ` · ${priceLabel(model)}` : ""}
+                  {isPrimary ? " · default" : ""}
+                </span>
+                <div className="actions">
+                  <span className="row-meta">
+                    intelligence {effective.intelligence} of 10 · speed {effective.speed} · cost {effective.cost}
+                  </span>
+                  <select
+                    value={storedRole(bot.routingProfiles?.[id])}
+                    aria-label={`Routing role for ${id}`}
+                    onChange={(event) => setRole(id, event.target.value)}
+                  >
+                    <option value="">Rated by family</option>
+                    <option value="quick">Quick</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="deep">Deep</option>
+                  </select>
+                  <button
+                    className="tiny"
+                    type="button"
+                    disabled={result === "busy"}
+                    onClick={() => runTest(id)}
+                  >
+                    {result === "busy" ? "Testing…" : "Test"}
+                  </button>
+                </div>
+                {result && result !== "busy" ? (
+                  <p className={result.ok ? "row-meta bot-offered-ok" : "row-meta bot-offered-failed"}>
+                    {testLabel(result)}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })
+        : null}
+    </div>
+  );
+}
+
 function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void }) {
   const store = useStore();
   const bot = store.settings.customBots.find((item) => item.id === botId);
@@ -676,7 +881,7 @@ function CustomBotDetail({ botId, onGone }: { botId: string; onGone: () => void 
         }}
       />
 
-      {isGrokBotUrl(bot.baseUrl) ? <GrokBotWakeSetup /> : null}
+      {isGrokBotUrl(bot.baseUrl) ? <GrokBotWakeSetup /> : <OfferedModels bot={bot} />}
 
       <BotRoutingFields bot={bot} />
 

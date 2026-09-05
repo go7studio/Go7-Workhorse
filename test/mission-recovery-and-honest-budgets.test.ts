@@ -119,6 +119,15 @@ test("naming only the sibling that completed does not earn the next phase; the w
   const earlier = { id: "earlier", parentId: "parent", title: "earlier", messages: [], agentRun: { status: "failed", startedAt: 0 } } as unknown as Session;
   const withPlain = [worker("coord", "completed"), plainRev, earlier];
   assert.deepEqual(missionWave(withPlain, "parent", ["coord"], MISSION).sort(), ["coord", "plain"], "a plain sibling that ran during the pass counts; an earlier one does not");
+  // The window closes when the next pass begins: a plain helper of pass 2 is
+  // not pulled back into pass 1, so a finished pass is not made to look open.
+  const nextCoord = { ...worker("coord2", "running"), agentRun: { status: "running", startedAt: 10, mission: { ...MISSION, iteration: 2 } } } as unknown as Session;
+  const laterPlain = { id: "later", parentId: "parent", title: "later", messages: [], agentRun: { status: "failed", startedAt: 15 } } as unknown as Session;
+  assert.deepEqual(
+    missionWave([worker("coord", "completed"), plainRev, nextCoord, laterPlain], "parent", ["coord"], MISSION).sort(),
+    ["coord", "plain"],
+    "a plain helper that started after the next pass began belongs to that pass",
+  );
   const shaped = nextMissionIteration(withPlain, "parent", ["coord"], 1);
   assert.equal(shaped.ok, false, "omitting the plain reviewer earns nothing");
   const carriedPlain = nextMissionIteration(withPlain, "parent", ["coord"], 1, { allowUnfinished: true });

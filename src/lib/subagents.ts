@@ -1869,12 +1869,22 @@ export function missionWave(
     (min, session) => Math.min(min, session.agentRun?.startedAt ?? Number.POSITIVE_INFINITY),
     Number.POSITIVE_INFINITY,
   );
+  // The window closes when the next pass begins: the earliest start of any
+  // same-parent worker carrying this mission at a later iteration. A helper of
+  // a later pass must not make this one look unfinished or still running.
+  const passEnd = sessions.reduce((min, session) => {
+    const run = session.agentRun;
+    if (session.parentId !== parentId || run?.mission?.id !== mission.id) return min;
+    if ((run.mission?.iteration ?? 0) <= mission.iteration || typeof run.startedAt !== "number") return min;
+    return Math.min(min, run.startedAt);
+  }, Number.POSITIVE_INFINITY);
   const plain = sessions.filter(
     (session) =>
       session.parentId === parentId &&
       !session.agentRun?.mission &&
       typeof session.agentRun?.startedAt === "number" &&
-      session.agentRun.startedAt >= passStart,
+      session.agentRun.startedAt >= passStart &&
+      session.agentRun.startedAt < passEnd,
   );
   return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
 }

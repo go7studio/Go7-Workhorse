@@ -9492,3 +9492,48 @@ html.pane-dragging * {
   overflow-wrap: anywhere;
 }
 
+
+/* Offered models on a multi-model host. One row per model the host publishes:
+   what it costs, what Auto thinks of it, and a test that proves the key really
+   reaches it. The row carries its own result so a failure names its model. */
+.bot-offered {
+  gap: 4px;
+}
+
+.bot-offered > .row-meta {
+  margin: 0 0 4px;
+}
+
+.bot-offered-row {
+  display: grid;
+  gap: 2px;
+  padding: 6px 2px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.bot-offered-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-offered-pick strong {
+  overflow-wrap: anywhere;
+  font-weight: 510;
+}
+
+.bot-offered-row .actions {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bot-offered-ok {
+  color: var(--ok);
+}
+
+.bot-offered-failed {
+  color: var(--danger);
+}

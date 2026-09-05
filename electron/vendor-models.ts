@@ -13,7 +13,9 @@ import {
   type ModelInfo,
   type ReasoningLevel,
 } from "../src/lib/models";
-import type { ProviderId } from "../src/lib/types";
+import type { CustomBot, ProviderId } from "../src/lib/types";
+import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
+import type { CustomCatalog } from "./custom-catalog";
 import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
@@ -29,6 +31,13 @@ export type VendorModelListInput = {
   cursorModelsOutput?: string | null;
   /** The desk's userData. Holds what each vendor advertised to a live session. */
   userData?: string;
+  /** Enabled custom bots and what their hosts last published, when known. */
+  customBots?: CustomBotCatalog[];
+};
+
+export type CustomBotCatalog = {
+  bot: Pick<CustomBot, "id" | "model" | "models" | "enabled">;
+  catalog?: CustomCatalog;
 };
 
 /** Where the desk keeps a vendor's advertised list: userData/vendor-models/<provider>.json */
@@ -268,6 +277,59 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
   return models;
 }
 
+/**
+ * The desk's `custom` rows: every model an enabled bot offers, carrying the
+ * window its own host published.
+ *
+ * Offered, never merely served. A host sells dozens behind one key and the
+ * owner ticks the ones they want, so widening this to the whole catalog would
+ * put ids nobody approved in front of a chat. Only approved ids get a row, and
+ * a row is marked `hostListed` only when the host supplied its window — that
+ * mark is what lets `contextWindowFor` prefer it over the number saved on the
+ * bot without ever preferring a seed over it.
+ *
+ * The seed stays underneath. A desk with one Synthetic bot and one MiniMax bot
+ * that publishes no list must not lose MiniMax's rows because Synthetic
+ * answered.
+ */
+export function customVendorRows(rows: CustomBotCatalog[] = []): ModelInfo[] {
+  const models: ModelInfo[] = [];
+  // One row per slot per model. Two bots may serve the same id at different
+  // windows, and collapsing them here would hand whichever bot happened to be
+  // second the first one's context. `modelsFor` collapses by id for anything
+  // that wants a plain catalog; the window lookup reads these rows as they are.
+  const seen = new Set<string>();
+  for (const { bot, catalog } of rows) {
+    if (!customBotEnabled(bot)) continue;
+    const listed = new Map((catalog?.models ?? []).map((model) => [model.id, model]));
+    for (const id of customBotModels(bot)) {
+      const key = `${bot.id}\n${id}`;
+      if (seen.has(key)) continue;
+      const published = listed.get(id);
+      const seed = MODEL_CATALOG.custom.find((item) => item.id === id);
+      const contextWindow = published?.contextWindow ?? seed?.contextWindow ?? 0;
+      if (!contextWindow) continue;
+      seen.add(key);
+      models.push({
+        id,
+        name: seed?.name ?? id,
+        effort: seed?.effort ?? false,
+        contextWindow,
+        customBotId: bot.id,
+        ...(seed?.reasoningLevels ? { reasoningLevels: seed.reasoningLevels } : {}),
+        ...(published?.contextWindow ? { hostListed: true } : {}),
+      });
+    }
+  }
+  const offered = new Set(models.map((model) => model.id));
+  for (const seed of MODEL_CATALOG.custom) {
+    if (offered.has(seed.id)) continue;
+    offered.add(seed.id);
+    models.push(seed);
+  }
+  return models;
+}
+
 export function listVendorModels(input: VendorModelListInput = {}): VendorModelLists {
   const env = input.env ?? process.env;
   const homedir = input.homedir ?? os.homedir();
@@ -298,6 +360,6 @@ export function listVendorModels(input: VendorModelListInput = {}): VendorModelL
     claude: claudeAdvertisedRows(claudeSeed, claudeDesk?.models.map((row) => row.slug) ?? []),
     codex: codexLive.length ? codexLive : MODEL_CATALOG.codex,
     cursor: reconcileCursorModels(cursorLive),
-    custom: MODEL_CATALOG.custom,
+    custom: customVendorRows(input.customBots),
   };
 }

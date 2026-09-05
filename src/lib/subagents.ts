@@ -1847,6 +1847,14 @@ export function nextMissionIteration(
   parentId: string,
   previousWorkerIds: string[],
   previousIteration?: number,
+  /**
+   * A caller asking to CONTINUE may carry on past a worker that ended badly:
+   * one dead worker must not strand a mission's id, pass count and acceptance
+   * criteria forever. Phase derivation must not, because the desk holding a
+   * mission at a phase is what forgery rejection rests on — a pass nobody
+   * finished is not proof the desk reached the next one.
+   */
+  options?: { allowUnfinished?: boolean },
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
@@ -1859,8 +1867,18 @@ export function nextMissionIteration(
   if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
     return { ok: false, error: "previous mission pass is still running" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")) {
-    return { ok: false, error: "resume the interrupted worker before continuing the mission" };
+  // A pass that ENDED badly is not a reason to end the mission. It used to be:
+  // an interrupted worker refused the continuation, and no tool could resume
+  // one, so the caller was told to do something it had no way to do. The
+  // mission's id, pass count and acceptance criteria were stranded with it.
+  // A continuation may carry on and inherit that work; deriving a phase may
+  // not, because the desk holding a mission at a phase is what stops a caller
+  // forging the build phase.
+  if (
+    !options?.allowUnfinished &&
+    ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")
+  ) {
+    return { ok: false, error: "that pass did not finish; continue the mission to pick its work up" };
   }
   const latest = sessions
     .filter((session) => session.parentId === parentId && session.agentRun?.mission?.id === first.id)

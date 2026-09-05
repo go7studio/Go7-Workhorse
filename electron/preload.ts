@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   loadState: () => ipcRenderer.invoke("state:load") as Promise<Record<string, unknown>>,
   liveRunIds: () => ipcRenderer.invoke("runs:live") as Promise<string[]>,
   saveState: (state: Record<string, unknown>) => ipcRenderer.invoke("state:save", state),
+  /** One routing:decision line in the desk's own main.log. Identities and numbers only. */
+  recordRoutingDecision: (detail: string) => ipcRenderer.invoke("routing:record-decision", detail),
   /** A finished worker's offloaded thinking and tool rows, each with the seat it held. */
   loadTranscript: (sessionId: string) =>
     ipcRenderer.invoke("transcript:load", sessionId) as Promise<

@@ -154,6 +154,7 @@ export function WorkshopBlock() {
         packs: [],
         source: "none",
         stale: false,
+        expired: false,
         unreachable: true,
         pinFailed: false,
         reason: "Catalog unreachable",
@@ -161,8 +162,23 @@ export function WorkshopBlock() {
       });
       return;
     }
-    void run().then(setCatalog);
-  }, []);
+    void run().then(async (view) => {
+      setCatalog(view);
+      // Yank at refresh: persist Off + clear grants (main already stopped the poller).
+      if (view.yankedForceOffIds?.length) {
+        const listing = await window.workhorse?.workshopList?.();
+        if (listing) {
+          await store.updateWorkshop({ packs: nextPacksOff(listing, view.yankedForceOffIds) });
+          setPacks(listing.map((pack) =>
+            view.yankedForceOffIds!.includes(pack.id)
+              ? { ...pack, on: false, granted: [], sourceFingerprints: undefined }
+              : pack,
+          ));
+          setNote("Yanked from catalog — turned Off.");
+        }
+      }
+    });
+  }, [store]);
 
   useEffect(() => {
     reload();
@@ -194,6 +210,16 @@ export function WorkshopBlock() {
 
   const turnOn = (pack: PackListing) =>
     run(async () => {
+      // Yank bites at Turn-on — install-time check alone is insufficient.
+      const yanked = catalog?.packs.find((entry) => entry.id === pack.id && entry.version === pack.version && entry.yanked);
+      if (yanked) {
+        setNote("Yanked from catalog");
+        const next = nextPacksOff(packs, [pack.id]);
+        await store.updateWorkshop({ packs: next });
+        setConfirmId(null);
+        reload();
+        return;
+      }
       const sourceFingerprints = fingerprintsForSources(
         pack.id,
         pack.sources.map(asPackSource),
@@ -215,7 +241,12 @@ export function WorkshopBlock() {
     });
 
   const applyReconfirm = async (result: InstallResult) => {
-    const ids = result.ok && result.reconfirm && result.reconfirmIds?.length ? result.reconfirmIds : [];
+    if (!result.ok) return;
+    const ids = result.reconfirmIds?.length
+      ? result.reconfirmIds
+      : result.versionChangedIds?.length
+        ? result.versionChangedIds
+        : [];
     if (!ids.length) return;
     await store.updateWorkshop({ packs: nextPacksOff(packs, ids) });
   };
@@ -228,9 +259,13 @@ export function WorkshopBlock() {
       const result = await install({ id });
       // Fixed chrome only — never concatenate catalog summary into refuse copy.
       const words = result.ok ? `Installed ${result.ids.join(", ")} on this desk (Off until you Turn on).` : result.reason;
-      if (result.ok && result.reconfirm) {
-        await applyReconfirm(result);
-        setAvailableNote("Sources changed. Turn on to review.");
+      if (result.ok && (result.reconfirm || result.versionChangedIds?.length)) {
+        await applyReconfirm(
+          result.reconfirm
+            ? result
+            : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds },
+        );
+        setAvailableNote("Updated — Off until you Turn on.");
       } else {
         setAvailableNote(words);
       }
@@ -306,16 +341,16 @@ export function WorkshopBlock() {
         return;
       }
       let words = installWords(result);
-      if (result.reconfirm) {
-        await applyReconfirm(result);
-        words = "Sources changed. Turn on to review.";
+      // Version change drops to Off + fresh confirm (no grant carry), even if sources match.
+      if (result.reconfirm || (result.versionChangedIds && result.versionChangedIds.length > 0)) {
+        await applyReconfirm(result.reconfirm ? result : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds });
+        words = "Updated — Off until you Turn on.";
       }
       setUpdates((prev) => ({ ...prev, [id]: { current: prev[id]?.latest ?? prev[id]?.current ?? "", note: words } }));
       reload();
     });
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
-  const installedIds = new Set(packs.map((pack) => pack.id));
   const catalogState = catalog;
 
   return (
@@ -460,9 +495,9 @@ export function WorkshopBlock() {
       <p className="row-meta">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
       {catalogState == null ? (
         <p className="row-meta">Loading catalog…</p>
-      ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed ? (
+      ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed || catalogState.expired ? (
         <div className="workshop-catalog-empty">
-          <p className="row-meta">Catalog unreachable</p>
+          <p className="row-meta">{catalogState.expired ? "Catalog expired" : "Catalog unreachable"}</p>
           <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
             Retry
           </button>
@@ -479,8 +514,14 @@ export function WorkshopBlock() {
           {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
           <ul className="skills-list">
             {catalogState.packs.map((entry) => {
-              const already = installedIds.has(entry.id);
-              const disabled = busy || entry.installDisabled || already || !catalogState.installAllowed;
+              const installed = packs.find((pack) => pack.id === entry.id);
+              const sameVersion = installed?.version === entry.version;
+              const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
+              const disabled =
+                busy ||
+                entry.installDisabled ||
+                !catalogState.installAllowed ||
+                (Boolean(installed) && sameVersion);
               return (
                 <li key={entry.id} className="skill-row">
                   <div className="workshop-pack">
@@ -492,11 +533,16 @@ export function WorkshopBlock() {
                     <span className="row-meta">Rail · {entry.rail}</span>
                     {entry.yanked ? <span className="row-meta">Yanked</span> : null}
                     {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
-                    {already ? <span className="row-meta">Already on this desk</span> : null}
+                    {installed && sameVersion ? <span className="row-meta">Already on this desk</span> : null}
+                    {needsUpdate ? (
+                      <span className="row-meta">
+                        Installed {vLabel(installed!.version)} — Update drops to Off
+                      </span>
+                    ) : null}
                   </div>
                   <span className="skill-row-side">
                     <button className="tiny" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
-                      Install
+                      {needsUpdate ? "Update" : "Install"}
                     </button>
                   </span>
                 </li>

@@ -8,9 +8,11 @@ import { gzipSync } from "node:zlib";
 import {
   CATALOG_PIN_SHA256,
   catalogAgentPacks,
+  catalogIsExpired,
   catalogTextHasDangerousChars,
   catalogTrustLine,
   catalogViewFromDocument,
+  catalogYankMatches,
   parseWorkshopCatalog,
   sanitizeCatalogText,
   verifyCatalogBytes,
@@ -231,7 +233,8 @@ test("installCatalogEntry refuses id/version mismatch", async () => {
     root,
     fetchImpl,
   );
-  assert.deepEqual(wrongId, { ok: false, reason: "Pack refused (id)" });
+  // Archive members are under packs/sample-box/, outside packs/other-pack/ ⇒ abort.
+  assert.deepEqual(wrongId, { ok: false, reason: "Pack refused (archive)" });
   const wrongVer = await installCatalogEntry(
     { id: "sample-box", version: "9.9.9", source: "https://example.test/good.tar.gz", digest },
     root,
@@ -240,7 +243,7 @@ test("installCatalogEntry refuses id/version mismatch", async () => {
   assert.deepEqual(wrongVer, { ok: false, reason: "Pack refused (version)" });
 });
 
-test("multi-pack archive installs only the requested id", async () => {
+test("multi-pack archive aborts when members escape packs/<id>/", async () => {
   const root = tempRoot();
   const box = fixturePack();
   const sibling = {
@@ -265,11 +268,29 @@ test("multi-pack archive installs only the requested id", async () => {
     root,
     fetchImpl,
   );
+  assert.deepEqual(result, { ok: false, reason: "Pack refused (archive)" });
+  assert.equal(fs.existsSync(path.join(root, "sample-box")), false);
+  assert.equal(fs.existsSync(path.join(root, "job-log")), false, "sibling must never be written");
+});
+
+test("catalog install accepts archive scoped to packs/<id>/ only", async () => {
+  const root = tempRoot();
+  const box = fixturePack();
+  const tarball = githubTarball("fixture-1.0.0", {
+    "packs/sample-box/pack.json": JSON.stringify(box),
+    "packs/sample-box/collector/README.md": "notes\n",
+  });
+  const digest = sha256Hex(tarball);
+  const fetchImpl = (async () => new Response(new Uint8Array(tarball), { status: 200 })) as typeof fetch;
+  const result = await installCatalogEntry(
+    { id: "sample-box", version: "1.0.0", source: "https://example.test/scoped.tar.gz", digest },
+    root,
+    fetchImpl,
+  );
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.deepEqual(result.ids, ["sample-box"]);
   assert.ok(fs.existsSync(path.join(root, "sample-box", "pack.json")));
-  assert.equal(fs.existsSync(path.join(root, "job-log")), false, "sibling must not install silently");
 });
 
 test("catalog service entryForInstall blocks stale and yanked", async () => {
@@ -315,4 +336,151 @@ test("UI never uses catalog prose as GitHub hero CTA", () => {
   const availableSlice = block.slice(availableIdx, advancedIdx);
   assert.doesNotMatch(availableSlice, /placeholder="https:\/\/github\.com\/owner\/repo"/);
   assert.doesNotMatch(availableSlice, /workshopInstallRepo/);
+});
+
+test("bad charset / overlong summary rows are dropped, not sanitized-and-shown", () => {
+  const raw = JSON.parse(fs.readFileSync(SEED, "utf8"));
+  const goodId = raw.packs[0].id;
+  raw.packs[0] = { ...raw.packs[0], summary: "evil\u0000row" };
+  raw.packs.push({
+    ...raw.packs[1],
+    id: "too-long-summary-pack",
+    summary: "x".repeat(121),
+  });
+  const parsed = parseWorkshopCatalog(raw);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.ok(parsed.dropped && parsed.dropped >= 2);
+  assert.ok(!parsed.catalog.packs.some((pack) => pack.id === goodId && pack.summary.includes("\u0000")));
+  assert.ok(!parsed.catalog.packs.some((pack) => pack.id === "too-long-summary-pack"));
+  assert.ok(parsed.catalog.packs.some((pack) => pack.id === "job-log" || pack.id === "spark-media"));
+});
+
+test("sourcesPreview is refused; notAfter past empties Available", () => {
+  const raw = JSON.parse(fs.readFileSync(SEED, "utf8"));
+  raw.packs[0] = { ...raw.packs[0], sourcesPreview: ["GET /secret"] };
+  const withPreview = parseWorkshopCatalog(raw);
+  assert.equal(withPreview.ok, true);
+  if (!withPreview.ok) return;
+  assert.ok(!withPreview.catalog.packs.some((pack) => pack.id === raw.packs[0].id));
+
+  const seed = JSON.parse(fs.readFileSync(SEED, "utf8"));
+  assert.ok(seed.notAfter);
+  const parsed = parseWorkshopCatalog(seed);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(catalogIsExpired(parsed.catalog, Date.parse("2027-09-06T00:00:00.000Z")), true);
+  const view = catalogViewFromDocument(parsed.catalog, {
+    source: "seed",
+    nowMs: Date.parse("2027-09-06T00:00:00.000Z"),
+  });
+  assert.equal(view.ok, false);
+  assert.equal(view.expired, true);
+  assert.equal(view.unreachable, true);
+  assert.equal(view.packs.length, 0);
+  assert.equal(view.installAllowed, false);
+});
+
+test("yank matches installed id@version for Turn-on / refresh force-off", () => {
+  const raw = JSON.parse(fs.readFileSync(SEED, "utf8"));
+  raw.packs = raw.packs.map((pack: Record<string, unknown>, i: number) =>
+    i === 0 ? { ...pack, yanked: true } : pack,
+  );
+  const parsed = parseWorkshopCatalog(raw);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  const yanked = parsed.catalog.packs[0]!;
+  assert.equal(catalogYankMatches(parsed.catalog, yanked.id, yanked.version), true);
+  assert.equal(catalogYankMatches(parsed.catalog, yanked.id, "9.9.9"), false);
+  assert.equal(catalogYankMatches(parsed.catalog, "nope", yanked.version), false);
+});
+
+test("catalog update version change reports versionChangedIds (Off + reconfirm)", async () => {
+  const root = tempRoot();
+  const pack = fixturePack();
+  const v1 = githubTarball("fixture-1.0.0", {
+    "packs/sample-box/pack.json": JSON.stringify(pack),
+    "packs/sample-box/collector/README.md": "notes\n",
+  });
+  const digest1 = sha256Hex(v1);
+  const fetch1 = (async () => new Response(new Uint8Array(v1), { status: 200 })) as typeof fetch;
+  assert.equal(
+    (await installCatalogEntry(
+      { id: "sample-box", version: "1.0.0", source: "https://example.test/v1.tar.gz", digest: digest1 },
+      root,
+      fetch1,
+    )).ok,
+    true,
+  );
+
+  const v2pack = { ...pack, version: "1.1.0" };
+  // Same sources — version-only bump must still flag versionChangedIds.
+  const v2 = githubTarball("fixture-1.1.0", {
+    "packs/sample-box/pack.json": JSON.stringify(v2pack),
+    "packs/sample-box/collector/README.md": "notes\n",
+  });
+  const digest2 = sha256Hex(v2);
+  const seen: Array<{ versionChangedIds: string[]; sourcesChangedIds: string[] }> = [];
+  const fetch2 = (async () => new Response(new Uint8Array(v2), { status: 200 })) as typeof fetch;
+  const result = await installCatalogEntry(
+    { id: "sample-box", version: "1.1.0", source: "https://example.test/v2.tar.gz", digest: digest2 },
+    root,
+    fetch2,
+    {
+      beforeReplace: (info) =>
+        seen.push({ versionChangedIds: info.versionChangedIds, sourcesChangedIds: info.sourcesChangedIds }),
+    },
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.versionChangedIds, ["sample-box"]);
+  assert.equal(result.sourcesChangedIds, undefined);
+  assert.deepEqual(seen[0]?.versionChangedIds, ["sample-box"]);
+});
+
+test("pin mismatch remote never paints; C1 freeze comment present", async () => {
+  const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), "catalog-pin-"));
+  const seedPath = path.join(seedDir, "catalog-seed.json");
+  fs.copyFileSync(SEED, seedPath);
+  const cacheDir = path.join(seedDir, "cache");
+  const other = JSON.parse(fs.readFileSync(SEED, "utf8"));
+  other.asOf = "2026-01-01T00:00:00.000Z";
+  const otherBytes = Buffer.from(JSON.stringify(other, null, 2) + "\n", "utf8");
+  assert.notEqual(sha256Hex(otherBytes), CATALOG_PIN_SHA256);
+
+  let assetFetched = false;
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/releases/latest")) {
+      return new Response(
+        JSON.stringify({
+          assets: [{ name: "workshop-catalog.json", browser_download_url: "https://example.test/catalog.json" }],
+        }),
+        { status: 200 },
+      );
+    }
+    if (url === "https://example.test/catalog.json") {
+      assetFetched = true;
+      return new Response(new Uint8Array(otherBytes), { status: 200 });
+    }
+    return new Response("", { status: 404 });
+  }) as typeof fetch;
+
+  const svc = createCatalogService({
+    seedPath: () => seedPath,
+    cacheDir: () => cacheDir,
+    fetchImpl,
+    now: () => Date.parse("2026-09-05T21:00:00.000Z"),
+  });
+  const view = await svc.refresh();
+  assert.equal(assetFetched, true);
+  assert.equal(view.ok, true);
+  assert.equal(view.source, "seed");
+  assert.equal(view.pinFailed, false);
+  assert.ok(view.packs.length > 0);
+  assert.equal(fs.existsSync(path.join(cacheDir, "catalog-cache.json")), false, "non-matching remote must not cache");
+
+  const freezeDocs = fs.readFileSync(path.join(ROOT, "electron/workshop-catalog.ts"), "utf8");
+  assert.match(freezeDocs, /C1 freeze/);
+  assert.match(freezeDocs, /never paint/);
 });

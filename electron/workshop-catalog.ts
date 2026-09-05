@@ -3,6 +3,12 @@
  *
  * Renderer never fetches catalog bytes. Available paints only after app-pin verify.
  * Remote home: go7studio/workshop-catalog release assets (v0 may be seed-only).
+ *
+ * C1 freeze (v0): a remote release asset is accepted only when its sha256 equals
+ * CATALOG_PIN_SHA256 (same bytes as the shipped seed until the next app pin bump).
+ * Non-matching remote bytes are discarded — they never paint Available, never
+ * become `document()`, and never overwrite last-good cache. Pin-matching seed,
+ * cache, or remote are the only paint sources.
  */
 
 import { createHash } from "node:crypto";
@@ -93,6 +99,8 @@ export type CatalogService = {
   document: () => CatalogDocument | null;
   /** Pack Ref for Install, or null if missing/yanked/stale/unusable. */
   entryForInstall: (id: string) => { ok: true; ref: CatalogPackRef } | { ok: false; reason: string };
+  /** Attach yanked-force-off ids (main computes from installed folders). */
+  withYankForceOff: (ids: string[]) => CatalogViewState;
 };
 
 function emptyView(reason: string, pinFailed = false): CatalogViewState {
@@ -189,7 +197,8 @@ export function createCatalogService(options: CatalogServiceOptions): CatalogSer
       if (response.status !== 200) return null;
       const bytes = await readBytesCapped(response, CATALOG_BODY_BYTES);
       if (!bytes) return null;
-      // v0: remote must match the app pin (same bytes as seed until the next app release).
+      // C1 freeze: remote paints Available only when sha256 === app pin.
+      // Non-matching bytes are dropped here — never cached, never set as document.
       const verified = verifyOrNull(bytes);
       if (!verified) return null;
       return { ...verified, bytes };
@@ -198,12 +207,17 @@ export function createCatalogService(options: CatalogServiceOptions): CatalogSer
     }
   };
 
-  const setFrom = (verified: { catalog: CatalogDocument; digest: string }, source: CatalogViewState["source"], extra?: { reason?: string }) => {
+  const setFrom = (
+    verified: { catalog: CatalogDocument; digest: string },
+    source: CatalogViewState["source"],
+    extra?: { reason?: string; yankedForceOffIds?: string[] },
+  ) => {
     doc = verified.catalog;
     latest = catalogViewFromDocument(verified.catalog, {
       source,
       nowMs: now(),
       ...(extra?.reason ? { reason: extra.reason } : {}),
+      ...(extra?.yankedForceOffIds?.length ? { yankedForceOffIds: extra.yankedForceOffIds } : {}),
     });
     return latest;
   };
@@ -236,11 +250,25 @@ export function createCatalogService(options: CatalogServiceOptions): CatalogSer
     entryForInstall(id: string) {
       if (!doc || !latest.ok) return { ok: false, reason: "Catalog unreachable" };
       if (latest.pinFailed) return { ok: false, reason: "catalog pin mismatch" };
+      if (latest.expired) return { ok: false, reason: "Catalog expired" };
       if (!latest.installAllowed || latest.stale) return { ok: false, reason: "Catalog stale" };
       const ref = findCatalogEntry(doc, id);
       if (!ref) return { ok: false, reason: "Pack not in catalog" };
       if (ref.yanked) return { ok: false, reason: "Yanked from catalog" };
       return { ok: true, ref };
+    },
+    withYankForceOff(ids: string[]) {
+      if (!doc) {
+        latest = { ...latest, ...(ids.length ? { yankedForceOffIds: ids } : {}) };
+        return latest;
+      }
+      latest = catalogViewFromDocument(doc, {
+        source: latest.source,
+        nowMs: now(),
+        ...(latest.reason ? { reason: latest.reason } : {}),
+        ...(ids.length ? { yankedForceOffIds: ids } : {}),
+      });
+      return latest;
     },
   };
 }

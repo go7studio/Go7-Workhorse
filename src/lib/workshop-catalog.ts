@@ -5,13 +5,18 @@
  * Settings list, never agent instructions, never markdown-exec, never eval.
  * Available Install binds archive bytes to digest; highest-semver is not used here.
  *
+ * C1 freeze (v0): Available paints only pin-matching bytes. A remote fetch whose
+ * sha256 does not equal CATALOG_PIN_SHA256 is ignored — it never paints Available,
+ * never becomes the live document, and does not replace last-good cache. Seed and
+ * pin-matching cache/remote are the only paint sources until the next app pin bump.
+ *
  * See workshop/PACKS.md and workshop/workshop-catalog.schema.json.
  */
 
 import { PACK_ID, SEMVER, WORKSHOP_CONTRACT } from "./workshop-pack";
 
 /** sha256 of workshop/catalog-seed.json (sorted-keys, 2-space indent, trailing newline). */
-export const CATALOG_PIN_SHA256 = "db0124ec39a73ecdc1fc7b6aa7eec1e7301f89c1f0d0e183dbc6ab46712e64d0";
+export const CATALOG_PIN_SHA256 = "bc9f717f70a75dc09143fa26bdabb6b07d5d3b9cf09f8f7a117679bfc516357c";
 
 export const CATALOG_SCHEMA = "go7-workshop-catalog/v0";
 export const CATALOG_DIGEST_ALG = "sha256";
@@ -21,11 +26,15 @@ export const CATALOG_TIER = "first-party";
 /** Default soft freshness when the document omits maxAgeMs (7 days). */
 export const CATALOG_DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const CATALOG_MAX_PACKS = 64;
-export const CATALOG_SUMMARY_MAX = 280;
+/** Opus SEC: summary ≤ 120 printable ASCII. */
+export const CATALOG_SUMMARY_MAX = 120;
 export const CATALOG_RAIL_MAX = 48;
+export const CATALOG_ID_MAX = 64;
 
 const HTTPS_SOURCE = /^https:\/\/[^\s]+$/i;
 const HEX64 = /^[0-9a-f]{64}$/;
+/** Printable ASCII (space through tilde). No NUL, C0/C1, bidi, or non-ASCII. */
+const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
 
 export type CatalogPackRef = {
   id: string;
@@ -40,18 +49,19 @@ export type CatalogPackRef = {
   rail: string;
   homepage?: string;
   yanked?: boolean;
-  sourcesPreview?: string[];
 };
 
 export type CatalogDocument = {
   schema: typeof CATALOG_SCHEMA;
   asOf: string;
   maxAgeMs: number;
+  /** Hard expiry; past this Available stays empty + Retry. */
+  notAfter?: string;
   packs: CatalogPackRef[];
 };
 
 export type CatalogParseResult =
-  | { ok: true; catalog: CatalogDocument }
+  | { ok: true; catalog: CatalogDocument; dropped?: number }
   | { ok: false; reason: string };
 
 export type CatalogVerifyResult =
@@ -79,28 +89,35 @@ export type CatalogViewState = {
   source: "seed" | "cache" | "remote" | "none";
   asOf?: string;
   stale: boolean;
+  /** Hard seed/catalog expiry (notAfter) elapsed. */
+  expired: boolean;
   /** No pin-verified catalog available to paint. */
   unreachable: boolean;
   pinFailed: boolean;
   reason?: string;
   /** Aggregate: Install on any Available row requires this. */
   installAllowed: boolean;
+  /**
+   * Installed pack ids that must drop to Off because their id@version is yanked
+   * in the current verified catalog (filled by main after refresh).
+   */
+  yankedForceOffIds?: string[];
 };
 
-/** Bidirectional / invisible format chars that must not reach textContent paint. */
-const BIDI_AND_INVISIBLE = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+/** Bidirectional / invisible / control chars — refuse the row (do not sanitize-and-show). */
+const BIDI_AND_INVISIBLE = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069\ufeff]/;
 
 /**
- * Strip controls/bidi and cap length — catalog strings are untrusted display data only.
- * Never feed these to agents, tools, system prompts, or markdown/HTML renderers.
+ * Cap length for display helpers. Prefer refusing bad rows at parse time;
+ * never feed these to agents, tools, system prompts, or markdown/HTML renderers.
  */
 export function sanitizeCatalogText(input: string, max = CATALOG_SUMMARY_MAX): string {
-  return input.replace(BIDI_AND_INVISIBLE, "").trim().slice(0, max);
+  return input.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069\ufeff]/g, "").trim().slice(0, max);
 }
 
-/** True when the raw string contained NUL or bidi marks (refuse the field). */
+/** True when the raw string is not safe catalog display text (controls, bidi, or non-ASCII). */
 export function catalogTextHasDangerousChars(input: string): boolean {
-  return /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069\ufeff]/.test(input);
+  return BIDI_AND_INVISIBLE.test(input) || !PRINTABLE_ASCII.test(input);
 }
 
 function isIsoDate(value: string): boolean {
@@ -114,7 +131,9 @@ function parsePackRef(raw: unknown, index: number): { ok: true; ref: CatalogPack
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: `${where}: object required` };
   const row = raw as Record<string, unknown>;
   const id = row.id;
-  if (typeof id !== "string" || !PACK_ID.test(id) || id.length > 48) return { ok: false, reason: `${where}: bad id` };
+  if (typeof id !== "string" || !PACK_ID.test(id) || id.length > CATALOG_ID_MAX) {
+    return { ok: false, reason: `${where}: bad id` };
+  }
   const version = row.version;
   if (typeof version !== "string" || !SEMVER.test(version)) return { ok: false, reason: `${where}: bad version` };
   if (row.contract !== WORKSHOP_CONTRACT) return { ok: false, reason: `${where}: contract must be ${WORKSHOP_CONTRACT}` };
@@ -123,6 +142,10 @@ function parsePackRef(raw: unknown, index: number): { ok: true; ref: CatalogPack
     return { ok: false, reason: `${where}: source must be https URL` };
   }
   if (source.toLowerCase().startsWith("http://")) return { ok: false, reason: `${where}: source must be https` };
+  // Auto-generated floating tarballs are unstable digests — refuse at parse.
+  if (/\/archive\/refs\/tags\//i.test(source)) {
+    return { ok: false, reason: `${where}: source must not be /archive/refs/tags/` };
+  }
   const digest = row.digest;
   if (typeof digest !== "string" || !HEX64.test(digest)) return { ok: false, reason: `${where}: digest must be sha256 hex` };
   if (row.digestAlg !== CATALOG_DIGEST_ALG) return { ok: false, reason: `${where}: digestAlg must be sha256` };
@@ -130,29 +153,25 @@ function parsePackRef(raw: unknown, index: number): { ok: true; ref: CatalogPack
   if (row.tier !== CATALOG_TIER) return { ok: false, reason: `${where}: tier must be first-party` };
   if (typeof row.summary !== "string" || !row.summary.trim()) return { ok: false, reason: `${where}: summary required` };
   if (typeof row.rail !== "string" || !row.rail.trim()) return { ok: false, reason: `${where}: rail required` };
+  if (row.summary.length > CATALOG_SUMMARY_MAX || row.rail.length > CATALOG_RAIL_MAX) {
+    return { ok: false, reason: `${where}: summary/rail over max length` };
+  }
   if (catalogTextHasDangerousChars(row.summary) || catalogTextHasDangerousChars(row.rail)) {
     return { ok: false, reason: `${where}: summary/rail has forbidden characters` };
   }
-  const summary = sanitizeCatalogText(row.summary, CATALOG_SUMMARY_MAX);
-  const rail = sanitizeCatalogText(row.rail, CATALOG_RAIL_MAX);
-  if (!summary || !rail) return { ok: false, reason: `${where}: summary/rail empty after sanitize` };
+  if (!PRINTABLE_ASCII.test(row.summary.trim()) || !PRINTABLE_ASCII.test(row.rail.trim())) {
+    return { ok: false, reason: `${where}: summary/rail must be printable ASCII` };
+  }
+  const summary = row.summary.trim();
+  const rail = row.rail.trim();
   if ("yanked" in row && typeof row.yanked !== "boolean") return { ok: false, reason: `${where}: yanked must be boolean` };
   if ("homepage" in row && row.homepage !== undefined) {
     if (typeof row.homepage !== "string" || !HTTPS_SOURCE.test(row.homepage) || row.homepage.length > 512) {
       return { ok: false, reason: `${where}: homepage must be https URL` };
     }
   }
-  let sourcesPreview: string[] | undefined;
-  if ("sourcesPreview" in row && row.sourcesPreview !== undefined) {
-    if (!Array.isArray(row.sourcesPreview) || row.sourcesPreview.length > 8) {
-      return { ok: false, reason: `${where}: sourcesPreview must be a short string list` };
-    }
-    sourcesPreview = [];
-    for (const item of row.sourcesPreview) {
-      if (typeof item !== "string") return { ok: false, reason: `${where}: sourcesPreview entries must be strings` };
-      sourcesPreview.push(sanitizeCatalogText(item, 160));
-    }
-  }
+  // v0: sourcesPreview cut — unreconciled preview must not understate Turn-on URLs.
+  if ("sourcesPreview" in row) return { ok: false, reason: `${where}: sourcesPreview refused` };
   // Refuse legacy keys so a poisoned catalog cannot smuggle grant bypass language.
   for (const banned of ["grants", "hostModules", "defaultOff", "modules", "actions"]) {
     if (banned in row) return { ok: false, reason: `${where}: legacy field ${banned} refused` };
@@ -170,12 +189,11 @@ function parsePackRef(raw: unknown, index: number): { ok: true; ref: CatalogPack
     rail,
     ...(typeof row.yanked === "boolean" ? { yanked: row.yanked } : {}),
     ...(typeof row.homepage === "string" ? { homepage: row.homepage } : {}),
-    ...(sourcesPreview ? { sourcesPreview } : {}),
   };
   return { ok: true, ref };
 }
 
-/** Parse and validate a catalog document. Does not check the app pin. */
+/** Parse and validate a catalog document. Does not check the app pin. Bad pack rows are dropped. */
 export function parseWorkshopCatalog(raw: unknown): CatalogParseResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "catalog: object required" };
   const doc = raw as Record<string, unknown>;
@@ -188,17 +206,30 @@ export function parseWorkshopCatalog(raw: unknown): CatalogParseResult {
     }
     maxAgeMs = doc.maxAgeMs;
   }
+  let notAfter: string | undefined;
+  if ("notAfter" in doc && doc.notAfter !== undefined) {
+    if (typeof doc.notAfter !== "string" || !isIsoDate(doc.notAfter)) {
+      return { ok: false, reason: "catalog: notAfter must be an ISO date" };
+    }
+    notAfter = doc.notAfter;
+  }
   if (!Array.isArray(doc.packs)) return { ok: false, reason: "catalog: packs must be an array" };
   if (doc.packs.length > CATALOG_MAX_PACKS) return { ok: false, reason: `catalog: more than ${CATALOG_MAX_PACKS} packs` };
   const packs: CatalogPackRef[] = [];
   const seen = new Set<string>();
+  let dropped = 0;
   for (let i = 0; i < doc.packs.length; i++) {
     const parsed = parsePackRef(doc.packs[i], i);
-    if (!parsed.ok) return parsed;
-    const key = `${parsed.ref.id}@${parsed.ref.version}`;
-    if (seen.has(parsed.ref.id)) return { ok: false, reason: `catalog: duplicate pack id ${JSON.stringify(parsed.ref.id)}` };
+    if (!parsed.ok) {
+      // Fail closed per row: drop, do not sanitize-and-show.
+      dropped += 1;
+      continue;
+    }
+    if (seen.has(parsed.ref.id)) {
+      dropped += 1;
+      continue;
+    }
     seen.add(parsed.ref.id);
-    void key;
     packs.push(parsed.ref);
   }
   return {
@@ -207,8 +238,10 @@ export function parseWorkshopCatalog(raw: unknown): CatalogParseResult {
       schema: CATALOG_SCHEMA,
       asOf: doc.asOf,
       maxAgeMs,
+      ...(notAfter ? { notAfter } : {}),
       packs,
     },
+    ...(dropped ? { dropped } : {}),
   };
 }
 
@@ -240,9 +273,20 @@ export function catalogIsStale(catalog: CatalogDocument, nowMs: number): boolean
   return nowMs - asOf > catalog.maxAgeMs;
 }
 
+/** Hard pin expiry — past notAfter the document must not paint Available. */
+export function catalogIsExpired(catalog: CatalogDocument, nowMs: number): boolean {
+  if (!catalog.notAfter) return false;
+  const until = Date.parse(catalog.notAfter);
+  if (!Number.isFinite(until)) return true;
+  return nowMs > until;
+}
+
 /**
- * Build the Available view. Refuses to paint packs when pin/parse failed.
+ * Build the Available view. Refuses to paint packs when pin/parse failed or notAfter elapsed.
  * Yanked rows remain visible but Install stays disabled.
+ *
+ * C1 freeze: callers must only pass pin-verified catalogs. Non-matching remote bytes
+ * never reach this function as a paint source.
  */
 export function catalogViewFromDocument(
   catalog: CatalogDocument | null,
@@ -252,6 +296,7 @@ export function catalogViewFromDocument(
     unreachable?: boolean;
     reason?: string;
     nowMs?: number;
+    yankedForceOffIds?: string[];
   },
 ): CatalogViewState {
   const nowMs = opts.nowMs ?? Date.now();
@@ -261,10 +306,28 @@ export function catalogViewFromDocument(
       packs: [],
       source: opts.source,
       stale: false,
+      expired: false,
       unreachable: true,
       pinFailed: Boolean(opts.pinFailed) || !catalog,
       reason: opts.reason ?? (opts.pinFailed ? "catalog pin mismatch" : "Catalog unreachable"),
       installAllowed: false,
+      ...(opts.yankedForceOffIds?.length ? { yankedForceOffIds: opts.yankedForceOffIds } : {}),
+    };
+  }
+  const expired = catalogIsExpired(catalog, nowMs);
+  if (expired) {
+    return {
+      ok: false,
+      packs: [],
+      source: opts.source,
+      asOf: catalog.asOf,
+      stale: false,
+      expired: true,
+      unreachable: true,
+      pinFailed: false,
+      reason: opts.reason ?? "Catalog expired",
+      installAllowed: false,
+      ...(opts.yankedForceOffIds?.length ? { yankedForceOffIds: opts.yankedForceOffIds } : {}),
     };
   }
   const stale = catalogIsStale(catalog, nowMs);
@@ -295,16 +358,32 @@ export function catalogViewFromDocument(
     source: opts.source,
     asOf: catalog.asOf,
     stale,
+    expired: false,
     unreachable: false,
     pinFailed: false,
     ...(opts.reason ? { reason: opts.reason } : {}),
     installAllowed,
+    ...(opts.yankedForceOffIds?.length ? { yankedForceOffIds: opts.yankedForceOffIds } : {}),
   };
 }
 
 /** Look up a Pack Ref by id in a verified catalog (for Install bind). */
 export function findCatalogEntry(catalog: CatalogDocument, id: string): CatalogPackRef | null {
   return catalog.packs.find((pack) => pack.id === id) ?? null;
+}
+
+/**
+ * True when the verified catalog lists this exact id@version as yanked.
+ * Used at Turn-on and catalog refresh — install-time yank alone is insufficient.
+ */
+export function catalogYankMatches(
+  catalog: CatalogDocument | null,
+  id: string,
+  version: string,
+): boolean {
+  if (!catalog) return false;
+  const ref = findCatalogEntry(catalog, id);
+  return Boolean(ref && ref.yanked === true && ref.version === version);
 }
 
 /**

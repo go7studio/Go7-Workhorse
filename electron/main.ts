@@ -104,10 +104,11 @@ import { SqliteMemoryStore } from "./learning-sqlite";
 import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
-import { createWorkshopHost } from "./workshop-host";
+import { createWorkshopHost, listInstalledPacks } from "./workshop-host";
 import { invokeMediaCreate } from "./local-media-create";
 import { checkPackUpdate, installCatalogEntry, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
 import { createCatalogService } from "./workshop-catalog";
+import { catalogYankMatches } from "../src/lib/workshop-catalog";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
 import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
@@ -1694,7 +1695,23 @@ app.whenReady().then(async () => {
     input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string" ? (input as { id: string }).id : "";
   ipcMain.handle("workshop:list", () => workshopHost.list());
   ipcMain.handle("workshop:view", () => workshopHost.view());
-  ipcMain.handle("workshop:catalog", async () => workshopCatalog.refresh());
+  ipcMain.handle("workshop:catalog", async () => {
+    const view = await workshopCatalog.refresh();
+    const doc = workshopCatalog.document();
+    const forced: string[] = [];
+    if (doc) {
+      for (const item of listInstalledPacks(workshopPacksRoot())) {
+        if (!item.ok) continue;
+        if (catalogYankMatches(doc, item.pack.id, item.pack.version)) forced.push(item.pack.id);
+      }
+    }
+    if (forced.length) {
+      // Tombstone bites at refresh: force Off so yanked packs stop painting under old grants.
+      workshopDisableForReconfirm(forced);
+      return workshopCatalog.withYankForceOff(forced);
+    }
+    return view;
+  });
   ipcMain.handle("workshop:install-catalog", async (_event, input: unknown) => {
     const id =
       input && typeof input === "object" && typeof (input as { id?: unknown }).id === "string"
@@ -1706,6 +1723,7 @@ app.whenReady().then(async () => {
       const fixed =
         entry.reason === "Yanked from catalog" ||
         entry.reason === "Catalog stale" ||
+        entry.reason === "Catalog expired" ||
         entry.reason === "Catalog unreachable" ||
         entry.reason === "catalog pin mismatch" ||
         entry.reason === "Pack not in catalog"
@@ -1730,6 +1748,7 @@ app.whenReady().then(async () => {
       ok: true,
       ids: result.ids,
       ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(result.versionChangedIds?.length ? { versionChangedIds: result.versionChangedIds } : {}),
       ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
     };
   });
@@ -1782,9 +1801,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("workshop:update", async (_event, input: unknown) => {
     let reconfirmIds: string[] = [];
     const result = await updatePack(workshopId(input), workshopPacksRoot(), fetch, {
-      // Every pack whose sources changed — including siblings in the same archive — reconfirms.
-      beforeReplace: ({ sourcesChangedIds }) => {
-        reconfirmIds = workshopDisableForReconfirm(sourcesChangedIds);
+      // Version change or sources change ⇒ Off + fresh Turn-on (no grant carry). Includes siblings.
+      beforeReplace: ({ sourcesChangedIds, versionChangedIds }) => {
+        const ids = Array.from(new Set([...sourcesChangedIds, ...versionChangedIds]));
+        reconfirmIds = workshopDisableForReconfirm(ids);
       },
     });
     if (!result.ok) return result;
@@ -1793,6 +1813,7 @@ app.whenReady().then(async () => {
       ok: true,
       ids: result.ids,
       ...(result.sourcesChangedIds?.length ? { sourcesChangedIds: result.sourcesChangedIds } : {}),
+      ...(result.versionChangedIds?.length ? { versionChangedIds: result.versionChangedIds } : {}),
       ...(reconfirmIds.length ? { reconfirm: true, reconfirmIds } : {}),
     };
   });

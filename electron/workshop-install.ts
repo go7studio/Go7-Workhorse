@@ -41,6 +41,8 @@ export type InstallReplaceHook = (info: {
   replacedIds: string[];
   /** Subset of replacedIds whose pack.json sources (descriptors) changed. */
   sourcesChangedIds: string[];
+  /** Subset of replacedIds whose pack.json version changed (Opus SEC: always Off + reconfirm). */
+  versionChangedIds: string[];
 }) => void;
 export type InstallOptions = { beforeReplace?: InstallReplaceHook };
 
@@ -448,15 +450,18 @@ function commit(
   const ids = staged.map((item) => item.pack.id);
   const replacedIds: string[] = [];
   const sourcesChangedIds: string[] = [];
+  const versionChangedIds: string[] = [];
   for (const item of staged) {
     const dest = path.join(root, item.pack.id);
     if (!fs.existsSync(dest)) continue;
     replacedIds.push(item.pack.id);
     const before = sourcesOf(root, item.pack.id);
     if (!sourcesEqual(before, item.pack.sources)) sourcesChangedIds.push(item.pack.id);
+    const prevVersion = installedVersion(root, item.pack.id);
+    if (prevVersion && prevVersion !== item.pack.version) versionChangedIds.push(item.pack.id);
   }
-  // Disable grants in settings before folders swap so refresh cannot poll new URLs under old grants.
-  options.beforeReplace?.({ ids, replacedIds, sourcesChangedIds });
+  // Disable grants before swap. Version change always requires Off + fresh Turn-on (no grant carry).
+  options.beforeReplace?.({ ids, replacedIds, sourcesChangedIds, versionChangedIds });
   for (const item of staged) {
     fs.writeFileSync(path.join(item.dir, INSTALL_RECORD), JSON.stringify(record(item), null, 2) + "\n");
   }
@@ -466,6 +471,7 @@ function commit(
     ok: true,
     ids,
     ...(sourcesChangedIds.length ? { sourcesChangedIds } : {}),
+    ...(versionChangedIds.length ? { versionChangedIds } : {}),
   };
 }
 
@@ -597,11 +603,13 @@ export async function updatePack(
   const result = await installFromRepo(record.from, root, fetchImpl, options);
   if (!result.ok) return result;
   const sourcesChangedIds = result.sourcesChangedIds ?? [];
-  const { sourcesChangedIds: _changed, ...rest } = result;
+  const versionChangedIds = result.versionChangedIds ?? [];
+  const { sourcesChangedIds: _changed, versionChangedIds: _ver, ...rest } = result;
   return {
     ...rest,
     sourcesChanged: sourcesChangedIds.length > 0,
     ...(sourcesChangedIds.length ? { sourcesChangedIds } : {}),
+    ...(versionChangedIds.length ? { versionChangedIds } : {}),
   };
 }
 
@@ -665,7 +673,9 @@ export async function installCatalogEntry(
       if (error instanceof Refusal) throw error;
       refuse("Pack refused (archive)");
     }
-    writeEntries(entries, staging);
+    // Abort (do not skip): every archive member must live under packs/<id>/.
+    const scoped = entriesUnderPackId(entries, request.id);
+    writeEntries(scoped, staging);
     keepOnlyRequestedPack(staging, request.id, request.version);
     return commit(
       staging,
@@ -677,8 +687,30 @@ export async function installCatalogEntry(
 }
 
 /**
- * Multi-pack archives may list several pack folders. Available Install keeps only the
- * requested id; siblings are removed from staging before commit (no silent install).
+ * Catalog Install extracts exactly packs/<id>/. Any member outside that folder
+ * aborts the install — never write sibling pack ids, never skip-and-continue.
+ */
+function entriesUnderPackId(entries: TarEntry[], id: string): TarEntry[] {
+  const prefix = `packs/${id}/`;
+  const dirExact = `packs/${id}`;
+  const scoped: TarEntry[] = [];
+  for (const entry of entries) {
+    const rel = entry.path.replace(/\/+$/, "");
+    // Allow the packs/ parent directory itself; everything else must be under packs/<id>/.
+    if (rel === "packs" && entry.type === "dir") continue;
+    if (rel === dirExact || rel.startsWith(prefix)) {
+      scoped.push(entry);
+      continue;
+    }
+    refuse("Pack refused (archive)");
+  }
+  if (!scoped.some((entry) => entry.type === "file")) refuse("Pack refused (missing)");
+  return scoped;
+}
+
+/**
+ * Belt-and-suspenders after entriesUnderPackId: keep only the requested id.
+ * Siblings should already have aborted; if any remain, remove before commit.
  */
 function keepOnlyRequestedPack(staging: string, id: string, version: string): void {
   const found = findPackFolders(staging);

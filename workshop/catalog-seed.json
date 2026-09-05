@@ -1,6 +1,7 @@
 {
   "asOf": "2026-09-05T21:00:00.000Z",
   "maxAgeMs": 604800000,
+  "notAfter": "2027-09-05T21:00:00.000Z",
   "packs": [
     {
       "contract": 1,
@@ -11,10 +12,6 @@
       "id": "box-monitor",
       "rail": "Box",
       "source": "https://codeload.github.com/go7studio/workshop-pack-dgx-spark/tar.gz/refs/tags/v1.0.4",
-      "sourcesPreview": [
-        "GET /workshop/v0/feed",
-        "probes: healthz, readyz, models"
-      ],
       "summary": "Box health and the training job it runs: load, watts, writer, models, job meters.",
       "tier": "first-party",
       "version": "1.0.4"
@@ -28,9 +25,6 @@
       "id": "job-log",
       "rail": "Job",
       "source": "https://codeload.github.com/go7studio/workshop-pack-dgx-spark/tar.gz/refs/tags/v1.0.4",
-      "sourcesPreview": [
-        "GET /workshop/v0/feed"
-      ],
       "summary": "Read-only tail of the job Box monitor watches. Never start or stop.",
       "tier": "first-party",
       "version": "1.0.4"
@@ -44,9 +38,6 @@
       "id": "spark-media",
       "rail": "Media",
       "source": "https://github.com/go7studio/workshop-pack-spark-media/releases/download/v1.0.0/workshop-pack-spark-media-1.0.0.tar.gz",
-      "sourcesPreview": [
-        "GET /workshop/media/feed"
-      ],
       "summary": "Queue, gallery, and create templates from a Local Compute media feed.",
       "tier": "first-party",
       "version": "1.0.0"

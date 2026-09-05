@@ -211,7 +211,7 @@ export type PackListing = {
 };
 
 export type InstallResult =
-  | { ok: true; ids: string[]; reconfirm?: boolean; reconfirmIds?: string[]; sourcesChangedIds?: string[] }
+  | { ok: true; ids: string[]; reconfirm?: boolean; reconfirmIds?: string[]; sourcesChangedIds?: string[]; versionChangedIds?: string[] }
   | { ok: false; reason: string };
 
 // ---------------------------------------------------------------------------------------------

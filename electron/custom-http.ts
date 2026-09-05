@@ -143,34 +143,49 @@ export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base
  * the main process by the one route that was never meant to carry it. Redaction
  * happens before the message is built, so no caller can forget.
  *
- * Matched by the prefixes real keys carry, never by "this looks long": model ids
- * such as `hf:moonshotai/Kimi-K3` are the same shape as a token and must survive
- * intact, or the message stops naming what failed.
+ * Chasing vendor prefixes does not end: `sk-`, then `hf_`, then a Google key
+ * with no prefix at all, then the same key in a query string. So the last rule
+ * is not a prefix at all, it is a shape — a long opaque run, whatever issued it.
+ * The named rules above it stay because they catch shorter keys, and because a
+ * `Bearer` or a `token=` says "secret" no matter how short the value is.
  *
- * The prefix alone is not enough either. `api_` starts a key and it also starts
- * `api_rate_limit`, and blanking that left "[redacted] exceeded", which names
- * nothing and reads like a leak was caught. So a prefix only counts when what
- * follows is token-shaped: twelve unbroken characters at least. That clears
- * `rate_limit`, which is ten, and no English phrase in an error body runs
- * further than that before its first space.
+ * What every rule has to leave alone is a model id. `hf:moonshotai/Kimi-K3` is
+ * the same alphabet as a token, and a message that redacts the model it failed
+ * on has stopped being a message.
  *
- * A JWT needs its own line. It carries no vendor prefix, and it arrives bare as
- * often as it arrives behind `Bearer` or inside a named JSON field, so the two
- * rules above both miss it. Its own header is the tell: `eyJ` is base64 for the
- * `{"` that starts every one of them.
+ * Two thresholds carry that line:
+ *
+ * - A vendor prefix counts only ahead of twelve unbroken characters. That
+ *   clears `rate_limit`, which is ten, and no English phrase in an error body
+ *   runs further before its first space.
+ * - An unprefixed run counts at thirty-two characters, and only when twenty of
+ *   them are unbroken letters and digits. A hex blob is thirty-two unbroken. A
+ *   model name is words joined by hyphens, and the longest word in
+ *   `hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` — thirty-nine
+ *   characters, and a real row in Synthetic's catalog — is `Nemotron`, eight.
  */
 const SECRET_SHAPES: [RegExp, string][] = [
+  // A parameter that names a credential. The value is secret at any length.
+  [/\b(?:api[_-]?key|access[_-]?token|authorization|token|key)=[^&\s"'#]+/gi, "[redacted]"],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],
+  [/\bBasic\s+[A-Za-z0-9+/=_-]{16,}/gi, "Basic [redacted]"],
   [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]"],
+  [/\bAIza[0-9A-Za-z_-]{20,}/g, "[redacted]"],
   [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9_-]{12,}[A-Za-z0-9._~+/=-]*/gi, "[redacted]"],
   [/("(?:[a-z_-]*(?:api[_-]?key|authorization|token|secret)[a-z_-]*)"\s*:\s*")[^"]{8,}(")/gi, "$1[redacted]$2"],
 ];
+
+/** A long run with no `:` or `/` in it, because those are what a model id has. */
+const OPAQUE_RUN = /\b[A-Za-z0-9_-]{32,}\b/g;
+
+/** Unbroken letters and digits inside that run. Not global: this one is only tested. */
+const DENSE_RUN = /[A-Za-z0-9]{20,}/;
 
 /** Strip anything key-shaped out of a host's own words. */
 export function redactSecrets(text: string): string {
   let next = text;
   for (const [shape, mask] of SECRET_SHAPES) next = next.replace(shape, mask);
-  return next;
+  return next.replace(OPAQUE_RUN, (run) => (DENSE_RUN.test(run) ? "[redacted]" : run));
 }
 
 export function customHttpErrorMessage(status: number, detail = ""): string {

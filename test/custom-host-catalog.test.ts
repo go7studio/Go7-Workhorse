@@ -504,4 +504,41 @@ test("a host that quotes the key back never gets it to the renderer", async () =
   assert.equal(redactSecrets(`rejected ${jwt} at the gateway`), "rejected [redacted] at the gateway");
   assert.equal(redactSecrets(`Authorization: Bearer ${jwt}`), "Authorization: Bearer [redacted]");
   assert.equal(redactSecrets(`{"token": "${jwt}"}`), '{"token": "[redacted]"}');
+
+  // A credential named as a parameter is secret at any length, in a query
+  // string or a form body, however the host spells the name.
+  assert.equal(
+    redactSecrets("GET /v1/models?api_key=abcdefghij1234567890 failed"),
+    "GET /v1/models?[redacted] failed",
+  );
+  assert.equal(redactSecrets("apikey=shortish&model=kimi"), "[redacted]&model=kimi");
+  assert.equal(redactSecrets("access_token=xyz123 rejected"), "[redacted] rejected");
+  assert.equal(redactSecrets("KEY=abcdef sent"), "[redacted] sent");
+
+  // Basic auth hides a user and password in one base64 run.
+  assert.equal(redactSecrets("Authorization: Basic dXNlcjpwYXNzd29yZA=="), "Authorization: Basic [redacted]");
+
+  // A Google key carries no vendor prefix this list would have guessed.
+  assert.equal(redactSecrets("AIzaSyD-abcdefghij1234567890xyz was refused"), "[redacted] was refused");
+
+  // And the rule that stops the prefix chase: a long opaque run, whoever
+  // issued it. A 32-character hex blob is exactly this shape.
+  assert.equal(
+    redactSecrets("signature 9f8e7d6c5b4a32109f8e7d6c5b4a3210 did not match"),
+    "signature [redacted] did not match",
+  );
+
+  // The whole point of the two thresholds: every id this host actually serves
+  // still reads back. The Nemotron row is 39 characters after its slash and
+  // would have been blanked by a plain length rule.
+  for (const id of [
+    "hf:zai-org/GLM-5.2",
+    "syn:large:text",
+    "hf:moonshotai/Kimi-K3",
+    "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+    "hf:Qwen/Qwen3.8-27B",
+    "hf:openai/gpt-oss-120b",
+  ]) {
+    assert.equal(redactSecrets(`no access to ${id}`), `no access to ${id}`, id);
+  }
 });

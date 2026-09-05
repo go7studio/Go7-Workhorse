@@ -255,6 +255,8 @@ contextBridge.exposeInMainWorld("workhorse", {
   learningExport: (dest: string) => ipcRenderer.invoke("learning:export", dest),
   workshopList: () => ipcRenderer.invoke("workshop:list"),
   workshopView: () => ipcRenderer.invoke("workshop:view"),
+  workshopCatalog: () => ipcRenderer.invoke("workshop:catalog"),
+  workshopInstallCatalog: (input: { id: string }) => ipcRenderer.invoke("workshop:install-catalog", input),
   workshopInstallRepo: (input: { url: string }) => ipcRenderer.invoke("workshop:install-repo", input),
   workshopInstallFolder: () => ipcRenderer.invoke("workshop:install-folder"),
   workshopRemove: (input: { id: string }) => ipcRenderer.invoke("workshop:remove", input),

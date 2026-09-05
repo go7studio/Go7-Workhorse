@@ -51,7 +51,7 @@ test("Workshop is a Settings tab for install/grant, not a dock item or Work popo
 
 test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {
   const preload = read("electron/preload.ts");
-  for (const channel of ["workshop:list", "workshop:view", "workshop:install-repo", "workshop:install-folder", "workshop:remove", "workshop:check-update", "workshop:update", "workshop:reveal-collector", "workshop:changed"]) {
+  for (const channel of ["workshop:list", "workshop:view", "workshop:catalog", "workshop:install-catalog", "workshop:install-repo", "workshop:install-folder", "workshop:remove", "workshop:check-update", "workshop:update", "workshop:reveal-collector", "workshop:changed"]) {
     assert.match(preload, new RegExp(channel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), channel);
   }
   assert.doesNotMatch(preload, /workshop:kill|workshop:read\b|workshop:feed-status|workshop:optin|workshop:revoke|job\.stop|ssh:/);
@@ -112,6 +112,8 @@ test("no pack code runs: the renderer paints a closed vocabulary and computes no
 test("Settings shows the exact URLs at confirm time, flushes settings, and never paints a box control", () => {
   const block = read("src/ui/WorkshopBlock.tsx");
   assert.match(block, /packSourceUrls\(/);
+  assert.match(block, /workshopInstallCatalog/);
+  assert.match(block, /Catalog unreachable/);
   assert.match(block, /await store\.updateWorkshop/);
   assert.match(block, /onWorkshopChanged/);
   assert.match(block, /workshopCloseBreakout/);

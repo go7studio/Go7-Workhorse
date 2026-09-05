@@ -396,7 +396,7 @@ test("checkUpdate reads the record; update re-installs and flags changed sources
   const check = await checkPackUpdate("sample-box", root, repoFetch(["v1.0.0", "v1.1.0"], null));
   assert.deepEqual(check, { ok: true, current: "1.0.0", latest: "v1.1.0" });
 
-  // Cards-only change: same sources, no reconfirm.
+  // Cards-only change: same sources, but version bump still flags versionChangedIds (Off + reconfirm).
   const cardsOnly = fixturePack();
   cardsOnly.version = "1.1.0";
   (cardsOnly.cards as Array<{ title: string }>)[0].title = "Box (renamed)";
@@ -405,6 +405,7 @@ test("checkUpdate reads the record; update re-installs and flags changed sources
   assert.equal(first.ok, true);
   assert.equal(first.sourcesChanged, false);
   assert.equal(first.sourcesChangedIds, undefined);
+  assert.deepEqual(first.versionChangedIds, ["sample-box"]);
   assert.equal(readInstallRecord(path.join(root, "sample-box"))?.tag, "v1.1.0");
 
   // Sources change: the desk must re-confirm.
@@ -468,9 +469,14 @@ test("multi-pack update flags every sibling whose sources changed, not only the 
     ...samplePackFiles("packs/sample-box", boxSame),
     "packs/job-log/pack.json": JSON.stringify(moved, null, 2),
   };
-  const seenHook: Array<{ replacedIds: string[]; sourcesChangedIds: string[] }> = [];
+  const seenHook: Array<{ replacedIds: string[]; sourcesChangedIds: string[]; versionChangedIds: string[] }> = [];
   const result = await updatePack("sample-box", root, repoFetch(["v1.1.0"], githubTarball("workshop-pack-sample-1.1.0", v2Files)), {
-    beforeReplace: (info) => seenHook.push({ replacedIds: info.replacedIds, sourcesChangedIds: info.sourcesChangedIds }),
+    beforeReplace: (info) =>
+      seenHook.push({
+        replacedIds: info.replacedIds,
+        sourcesChangedIds: info.sourcesChangedIds,
+        versionChangedIds: info.versionChangedIds,
+      }),
   });
   assert.equal(result.ok, true);
   assert.equal(result.sourcesChanged, true);
@@ -478,6 +484,8 @@ test("multi-pack update flags every sibling whose sources changed, not only the 
   assert.ok(!result.sourcesChangedIds?.includes("sample-box"), "unchanged requested pack stays quiet");
   assert.deepEqual(seenHook[0]?.sourcesChangedIds, ["job-log"]);
   assert.deepEqual(seenHook[0]?.replacedIds.sort(), ["job-log", "sample-box"]);
+  assert.ok(seenHook[0]?.versionChangedIds.includes("sample-box"));
+  assert.ok(seenHook[0]?.versionChangedIds.includes("job-log"));
 });
 
 test("beforeReplace runs before folders swap so On packs can disable prior to refresh", async () => {

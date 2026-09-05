@@ -1,0 +1,47 @@
+{
+  "asOf": "2026-09-05T21:00:00.000Z",
+  "maxAgeMs": 604800000,
+  "notAfter": "2027-09-05T21:00:00.000Z",
+  "packs": [
+    {
+      "contract": 1,
+      "digest": "bac632e7f4fc4e24eefee9ff77026c1ea4edefff44aec142578e373c045b0590",
+      "digestAlg": "sha256",
+      "digestOf": "archive-bytes",
+      "homepage": "https://github.com/go7studio/workshop-pack-dgx-spark",
+      "id": "box-monitor",
+      "rail": "Box",
+      "source": "https://codeload.github.com/go7studio/workshop-pack-dgx-spark/tar.gz/refs/tags/v1.0.4",
+      "summary": "Box health and the training job it runs: load, watts, writer, models, job meters.",
+      "tier": "first-party",
+      "version": "1.0.4"
+    },
+    {
+      "contract": 1,
+      "digest": "bac632e7f4fc4e24eefee9ff77026c1ea4edefff44aec142578e373c045b0590",
+      "digestAlg": "sha256",
+      "digestOf": "archive-bytes",
+      "homepage": "https://github.com/go7studio/workshop-pack-dgx-spark",
+      "id": "job-log",
+      "rail": "Job",
+      "source": "https://codeload.github.com/go7studio/workshop-pack-dgx-spark/tar.gz/refs/tags/v1.0.4",
+      "summary": "Read-only tail of the job Box monitor watches. Never start or stop.",
+      "tier": "first-party",
+      "version": "1.0.4"
+    },
+    {
+      "contract": 1,
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "digestAlg": "sha256",
+      "digestOf": "archive-bytes",
+      "homepage": "https://github.com/go7studio/workshop-pack-spark-media",
+      "id": "spark-media",
+      "rail": "Media",
+      "source": "https://github.com/go7studio/workshop-pack-spark-media/releases/download/v1.0.0/workshop-pack-spark-media-1.0.0.tar.gz",
+      "summary": "Queue, gallery, and create templates from a Local Compute media feed.",
+      "tier": "first-party",
+      "version": "1.0.0"
+    }
+  ],
+  "schema": "go7-workshop-catalog/v0"
+}

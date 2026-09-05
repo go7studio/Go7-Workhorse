@@ -206,12 +206,12 @@ export type PackListing = {
   /** Confirmed source descriptors when the pack is On; used so sibling confirms keep bindings. */
   sourceFingerprints?: Record<string, string>;
   collector?: string;
-  installed?: { kind: "folder" | "repo"; from: string; tag?: string; sha256: string; at: string };
+  installed?: { kind: "folder" | "repo" | "catalog"; from: string; tag?: string; sha256: string; at: string };
   refused?: string;
 };
 
 export type InstallResult =
-  | { ok: true; ids: string[]; reconfirm?: boolean; reconfirmIds?: string[]; sourcesChangedIds?: string[] }
+  | { ok: true; ids: string[]; reconfirm?: boolean; reconfirmIds?: string[]; sourcesChangedIds?: string[]; versionChangedIds?: string[] }
   | { ok: false; reason: string };
 
 // ---------------------------------------------------------------------------------------------

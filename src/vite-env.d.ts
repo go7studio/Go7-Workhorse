@@ -333,6 +333,8 @@ type WorkhorseBridge = {
   /** Packs that are On, with layout and the documents main has fetched. Main owns the timers; this returns its cache. */
   workshopView?: () => Promise<import("./lib/workshop-pack").PackView[]>;
   /** Download the highest semver tag of a public https GitHub repo, stage, validate, install. No git. */
+  workshopCatalog?: () => Promise<import("./lib/workshop-catalog").CatalogViewState>;
+  workshopInstallCatalog?: (input: { id: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
   workshopInstallRepo?: (input: { url: string }) => Promise<import("./lib/workshop-pack").InstallResult>;
   /** Folder picker in main; the folder is copied, never referenced. */
   workshopInstallFolder?: () => Promise<import("./lib/workshop-pack").InstallResult>;

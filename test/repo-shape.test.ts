@@ -20,6 +20,7 @@ function tracked(): { mode: string; file: string }[] {
 /** Top level is a closed list. Widening it is a decision, so it changes here too. */
 const TOP_LEVEL = new Set([
   ".github",
+  ".gitattributes",
   ".gitignore",
   ".release-please-manifest.json",
   "AGENTS.md",

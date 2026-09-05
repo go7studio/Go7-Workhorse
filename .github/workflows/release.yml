@@ -67,11 +67,10 @@ jobs:
       # the wrong question, and what it cost.
       - name: Detect an unpublished version bump
         id: detect
-        env:
+                env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        env:
           WORKHORSE_RELEASE_MANUAL: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
-        run: node scripts/detect-release.mjs
+run: node scripts/detect-release.mjs
 
   installers:
     needs: [prepare, detect-release]

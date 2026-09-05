@@ -41,21 +41,30 @@ test("the raised budget rides the same channel as the timeout clamp", () => {
   assert.match(clamp, /nestedHelperBudgetNote\(input\.tokenBudget/, "the budget clamp must speak too");
 });
 
-test("a continuation survives a worker that ended badly", () => {
-  for (const dead of ["interrupted", "failed", "timed-out", "cancelled", "budget-exceeded"]) {
+const DEAD = ["interrupted", "failed", "timed-out", "cancelled", "budget-exceeded"];
+
+test("a continuation survives a worker that ended badly, and stays on the phase it did not finish", () => {
+  for (const dead of DEAD) {
     const decision = nextMissionIteration([worker("w", dead)], "parent", ["w"], 1, { allowUnfinished: true });
     assert.equal(decision.ok, true, `a ${dead} pass must not end the mission: ${"error" in decision ? decision.error : ""}`);
-    if (decision.ok) assert.equal(decision.mission.iteration, 2, "the mission advances by one pass");
+    if (!decision.ok) continue;
+    assert.equal(decision.mission.iteration, 2, "the mission advances by one pass");
+    assert.equal(decision.mission.phase, MISSION.phase, `a ${dead} pass earned no phase; the next pass re-runs it`);
   }
+  const clean = nextMissionIteration([worker("w", "completed")], "parent", ["w"], 1, { allowUnfinished: true });
+  assert.equal(clean.ok, true);
+  if (clean.ok) assert.notEqual(clean.mission.phase, MISSION.phase, "a pass everyone finished does move the mission on");
 });
 
-test("but a pass nobody finished is not proof the desk reached the next phase", () => {
+test("a pass nobody finished is not proof the desk reached the next phase, whatever way it ended", () => {
   // Forgery rejection rests on the desk itself holding the mission at a phase.
   // A continuation may inherit an unfinished worker's slice; deriving a phase
   // from one would let a caller claim a phase it never reached.
-  const derived = nextMissionIteration([worker("w", "interrupted")], "parent", ["w"], 1);
-  assert.equal(derived.ok, false, "phase derivation must still refuse an unfinished pass");
-  if (!derived.ok) assert.match(derived.error, /did not finish/);
+  for (const dead of DEAD) {
+    const derived = nextMissionIteration([worker("w", dead)], "parent", ["w"], 1);
+    assert.equal(derived.ok, false, `phase derivation must refuse a ${dead} pass`);
+    if (!derived.ok) assert.match(derived.error, /did not finish/);
+  }
   assert.equal(nextMissionIteration([worker("w", "completed")], "parent", ["w"], 1).ok, true, "a finished pass still derives");
 });
 

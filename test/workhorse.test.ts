@@ -1211,7 +1211,7 @@ test("adaptive missions continue one terminal pass at a time", () => {
   });
   const runningDecision = nextMissionIteration([running!], "parent", ["worker_running"]);
   assert.equal(runningDecision.ok, false);
-  if (!runningDecision.ok) assert.match(runningDecision.error, /still running|did not finish/);
+  if (!runningDecision.ok) assert.match(runningDecision.error, /did not finish/);
 
   const newer = normalizeSession({
     ...worker,

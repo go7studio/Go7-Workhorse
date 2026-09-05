@@ -1874,10 +1874,11 @@ export function nextMissionIteration(
   // A continuation may carry on and inherit that work; deriving a phase may
   // not, because the desk holding a mission at a phase is what stops a caller
   // forging the build phase.
-  if (
-    !options?.allowUnfinished &&
-    ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")
-  ) {
+  // Anything short of completed is unfinished: interrupted, failed, timed out,
+  // cancelled, over budget. Deriving a phase from any of them would let a
+  // caller claim a phase the desk never reached.
+  const unfinished = ids.filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed");
+  if (!options?.allowUnfinished && unfinished.length > 0) {
     return { ok: false, error: "that pass did not finish; continue the mission to pick its work up" };
   }
   const latest = sessions
@@ -1885,7 +1886,11 @@ export function nextMissionIteration(
     .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
   if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
   if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
-  const phase = nextCampaignPhase(first.phase);
+  // A phase is earned by finishing it. A continuation that carries a dead
+  // worker's slice forward re-runs the SAME phase; only a pass every worker
+  // completed moves the mission on. Without this a failed approve pass rolled
+  // straight into build, which is the forgery the campaign gate exists to stop.
+  const phase = unfinished.length > 0 ? first.phase : nextCampaignPhase(first.phase);
   if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   return {
     ok: true,

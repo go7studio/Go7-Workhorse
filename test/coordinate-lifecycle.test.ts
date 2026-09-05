@@ -287,14 +287,20 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
     ["coordinator", "supporting-reviewer", "supporting-reviewer"],
   );
 
+  // Reviewer B was cancelled, so this wave did not finish. The mission still
+  // continues — that is the point — but through the continuation door, and it
+  // re-runs the phase rather than claiming one nobody earned.
   const nextPass = nextMissionIteration(
     healed,
     PARENT_ID,
     [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID],
+    undefined,
+    { allowUnfinished: true },
   );
   assert.equal(nextPass.ok, true);
   if (!nextPass.ok) return;
   assert.equal(nextPass.mission.iteration, 2);
+  assert.equal(nextPass.mission.phase, mission.phase, "a cancelled reviewer earns the wave no phase");
   assert.deepEqual(nextPass.mission.previousWorkerIds, [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID]);
 });
 

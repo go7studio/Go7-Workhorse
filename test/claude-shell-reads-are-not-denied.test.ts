@@ -18,7 +18,13 @@ import { WRITE_LIMIT_HINT } from "../src/lib/workhorse-rules";
 import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
+/**
+ * Line endings are normalised because the assertions below pin shapes that
+ * span lines. A Windows checkout hands back CRLF, so a `\n` in a pattern sat
+ * behind a `\r` and never matched, and the suite went red on windows-latest
+ * for a difference that is not in the code.
+ */
+const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8").replaceAll("\r\n", "\n");
 
 /**
  * The two calls a Claude worker was denied for on 5 September 2026, copied off

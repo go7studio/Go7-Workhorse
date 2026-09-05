@@ -1,25 +1,10 @@
 /**
- * A worker token ceiling is a runaway brake on what this slice actually spends.
+ * Slice spend is counted so the chat meter can show it. It is not a stop.
  *
- * It used to count only fresh input growth plus the LAST turn's output, and it
- * dropped cached reads entirely on the theory that re-reading context the
- * worker already holds is not new work. Billing disagrees. Measured against
- * 2,912 vendor receipts on a real desk, cached reads are discounted but not
- * free — roughly a third of the fresh-input rate — and because a deep agentic
- * turn re-reads its whole context on every round trip they were about 69% of
- * the money. A worker's on-screen number came out a median 27x under what it
- * had spent, and the ceiling it was compared against could never be reached.
- *
- * So: input growth is cumulative by nature (the prompt only grows), while
- * output and cached reads are per-turn and are summed. Cache is counted at
- * CACHE_BILLED_RATIO, deliberately a little above the measured ratio, because
- * a brake that trips early costs a pass and a brake that trips late costs a
- * week.
- *
- * When a ceiling is set, one pass cannot spend the whole mission. The last
- * fifth is held for verifying and handing off. An unset ceiling is unbounded:
- * every reserve, warning, and stop is a no-op — which is why spawns now carry
- * DEFAULT_WORKER_TOKEN_BUDGET rather than nothing.
+ * Input growth is cumulative (the prompt only grows). Output and cached reads
+ * are per-turn and are summed. Cache is counted at CACHE_BILLED_RATIO. A
+ * persisted tokenBudget on an old run is ignored: nextBudgetRunState never
+ * warns, hands off, or terminates.
  */
 
 export type WorkerBudgetMeter = {
@@ -60,13 +45,7 @@ export const VERIFY_RESERVE_RATIO = 0.18;
  */
 export const CACHE_BILLED_RATIO = 0.3;
 
-/**
- * The ceiling a spawn carries when nobody names one. Without it `exceeded` is
- * false forever and the reserve, the warning and the stop are all no-ops — a
- * runaway brake wired to nothing. Generous enough for a deep pass and far
- * below the tens of millions a single unattended worker has been measured
- * spending.
- */
+/** Legacy default. Spawns no longer receive a ceiling; kept for persisted math tests. */
 export const DEFAULT_WORKER_TOKEN_BUDGET = 8_000_000;
 
 /**
@@ -195,12 +174,12 @@ export function applyWorkerBudgetUsage(
 
 /**
  * A new assignment starts a new accounting window. The previous slice's
- * ceiling and its consumed count do not carry over. Lifetime is a running
- * total for cost, never a brake: the ceiling is this slice's new work.
+ * consumed count does not carry over. Lifetime is a running total for the
+ * meter, never a brake. No assignment writes a token ceiling.
  */
 export function beginAssignmentBudget(
   prior: WorkerBudgetState | undefined,
-  assignment: {
+  _assignment?: {
     tokenBudget?: number;
     mission?: {
       tokenBudget?: number;
@@ -215,14 +194,10 @@ export function beginAssignmentBudget(
   lifetimeUsedTokens?: number;
 } {
   const lifetime = (prior?.lifetimeUsedTokens ?? 0) + (prior?.usedTokens ?? 0);
-  const split = splitPassBudget(assignment);
-  return {
-    ...split,
-    ...(lifetime > 0 ? { lifetimeUsedTokens: lifetime } : {}),
-  };
+  return lifetime > 0 ? { lifetimeUsedTokens: lifetime } : {};
 }
 
-export function splitPassBudget(assignment: {
+export function splitPassBudget(_assignment?: {
   tokenBudget?: number;
   mission?: {
     tokenBudget?: number;
@@ -231,21 +206,7 @@ export function splitPassBudget(assignment: {
     maxIterations: number;
   };
 }): { tokenBudget?: number; missionTokenBudget?: number } {
-  const requested = positive(assignment.tokenBudget);
-  const mission = assignment.mission;
-  if (!mission) {
-    // No ceiling asked for still means a ceiling. Returning {} here left
-    // tokenBudget undefined, and an undefined budget makes every stop a no-op.
-    return { tokenBudget: requested ?? DEFAULT_WORKER_TOKEN_BUDGET };
-  }
-  const firstPassSetsMission = mission.iteration === 1 && !positive(mission.tokenBudget);
-  const missionBudget = positive(mission.tokenBudget) ?? requested ?? DEFAULT_WORKER_TOKEN_BUDGET;
-  const remaining = Math.max(0, missionBudget - nonNeg(mission.usedTokens));
-  const leftPasses = Math.max(1, mission.maxIterations - mission.iteration + 1);
-  const fairShare = Math.floor(remaining / leftPasses);
-  const requestedPass = firstPassSetsMission ? undefined : requested;
-  const pass = Math.max(1, requestedPass ? Math.min(requestedPass, Math.max(1, fairShare)) : Math.max(1, fairShare));
-  return { missionTokenBudget: missionBudget, tokenBudget: remaining > 0 ? pass : 1 };
+  return {};
 }
 
 export function missionUsedTokens(
@@ -270,9 +231,9 @@ export function budgetTerminalReport(run: WorkerBudgetState): string {
 }
 
 export function nextBudgetRunState(
-  run: WorkerBudgetState,
+  _run: WorkerBudgetState,
   spend: ReturnType<typeof applyWorkerBudgetUsage>,
-  now: number,
+  _now?: number,
 ): {
   usedTokens: number;
   budgetBaseline: number;
@@ -287,67 +248,15 @@ export function nextBudgetRunState(
   action: BudgetAction;
   notice?: string;
 } {
-  const usedTokens = spend.usedTokens;
-  const budgetBaseline = spend.budgetBaseline;
-  const outputTokensTotal = spend.outputTokensTotal;
-  const cacheTokensTotal = spend.cacheTokensTotal;
-  if (!positive(run.tokenBudget)) {
-    return { usedTokens, budgetBaseline, outputTokensTotal, cacheTokensTotal, action: "none" };
-  }
-  const alreadyHandoff = run.budgetPhase === "verify" || run.budgetPhase === "handoff" || Boolean(run.budgetHandoffAt);
-  if (spend.exceeded && alreadyHandoff) {
-    return {
-      usedTokens,
-      budgetBaseline,
-      outputTokensTotal,
-      cacheTokensTotal,
-      budgetPhase: "exhausted",
-      budgetWarnedAt: run.budgetWarnedAt,
-      budgetHandoffAt: run.budgetHandoffAt,
-      status: "budget-exceeded",
-      finishedAt: now,
-      error: budgetTerminalReport({ ...run, usedTokens }),
-      action: "terminate",
-      notice: budgetTerminalReport({ ...run, usedTokens }),
-    };
-  }
-  if (spend.reserveCrossed || spend.exceeded) {
-    return {
-      usedTokens,
-      budgetBaseline,
-      outputTokensTotal,
-      cacheTokensTotal,
-      budgetPhase: "verify",
-      budgetWarnedAt: run.budgetWarnedAt ?? now,
-      action: "handoff",
-      notice: BUDGET_HANDOFF_PROMPT,
-    };
-  }
-  if (spend.warn && !run.budgetWarnedAt) {
-    return {
-      usedTokens,
-      budgetBaseline,
-      outputTokensTotal,
-      cacheTokensTotal,
-      budgetPhase: "produce",
-      budgetWarnedAt: now,
-      action: "warn",
-      notice:
-        "Token budget warning: most of this pass is spent. Finish current work, then verify and hand off. Do not start new producing.",
-    };
-  }
   return {
-    usedTokens,
-    budgetBaseline,
-    outputTokensTotal,
-    cacheTokensTotal,
-    budgetPhase: run.budgetPhase,
-    budgetWarnedAt: run.budgetWarnedAt,
-    budgetHandoffAt: run.budgetHandoffAt,
+    usedTokens: spend.usedTokens,
+    budgetBaseline: spend.budgetBaseline,
+    outputTokensTotal: spend.outputTokensTotal,
+    cacheTokensTotal: spend.cacheTokensTotal,
     action: "none",
   };
 }
 
-export function needsBudgetHandoffTurn(run: WorkerBudgetState | undefined): boolean {
-  return Boolean(run && run.budgetPhase === "verify" && !run.budgetHandoffAt && run.status !== "budget-exceeded");
+export function needsBudgetHandoffTurn(_run?: WorkerBudgetState): boolean {
+  return false;
 }

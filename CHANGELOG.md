@@ -8,6 +8,14 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.58](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.57...v0.6.58) (2026-09-05)
+
+
+### Features
+
+* Workshop Settings tab, chat spend on the meter, and skill discovery ([05820a0](https://github.com/go7studio/Go7-Workhorse/commit/05820a0059646062b9ea05260e4a2dd01e090134))
+* Workshop Settings tab, chat spend on the meter, and skill discovery ([f517f26](https://github.com/go7studio/Go7-Workhorse/commit/f517f26647f1dcdb7b12aee61a176c62851d4d80))
+
 ## [0.6.57](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.56...v0.6.57) (2026-09-05)
 
 

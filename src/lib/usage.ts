@@ -395,6 +395,12 @@ export function rollup(events: UsageEvent[]): UsageTotals {
   return events.reduce(add, { ...EMPTY });
 }
 
+/** Billed spend for one chat. Total is in + out, same as Settings → Usage. */
+export function chatSpend(events: UsageEvent[], sessionId: string | undefined): UsageTotals {
+  if (!sessionId) return { ...EMPTY };
+  return rollup(events.filter((event) => event.sessionId === sessionId));
+}
+
 export function byProvider(events: UsageEvent[]): UsageGroup[] {
   return PROVIDERS.map((provider) => {
     const slice = events.filter((event) => event.provider === provider.id);

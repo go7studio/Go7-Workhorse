@@ -1,6 +1,9 @@
 import {
   collapseThoughtDisplay,
+  collapseToolText,
   mergeThoughtText,
+  splitToolLine,
+  toolIsFinished,
   upsertCompactMessage,
   upsertThoughtMessage,
   upsertToolMessage,
@@ -9,6 +12,7 @@ import {
 } from "./grok-events";
 import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
+import { describePeerTool, prettyToolTitle } from "./tool-labels";
 import type { ChatMessage } from "./types";
 
 export type WorkStepType = "thought" | "tool" | "compact" | "subagent";
@@ -390,6 +394,59 @@ export function startTranscriptFill(
 
 export function workRowToolCount(row: GroupedWorkRow): number {
   return row.type === "tools" ? row.items.length : 0;
+}
+
+export type NamedToolAction = {
+  name: string;
+  loc: string;
+  live: boolean;
+};
+
+/** Closed work line: `Read GOAL.md` while a call is in flight, `Read · Grep` when it is done. */
+export const WORK_SUMMARY_NAME_CAP = 4;
+
+export function namedToolAction(message: ChatMessage): NamedToolAction {
+  const line = splitToolLine(collapseToolText(message.text, message.toolStatus));
+  const info = describePeerTool(line.title, line.detail);
+  const name = (info?.title || prettyToolTitle(line.title) || "tool").trim();
+  return {
+    name,
+    loc: info ? "" : line.detail.trim(),
+    live: !toolIsFinished(message.toolStatus),
+  };
+}
+
+export function formatNamedToolAction(action: NamedToolAction): string {
+  const place = action.loc.trim();
+  if (!place) return action.name;
+  if (action.name.toLowerCase().endsWith(place.toLowerCase())) return action.name;
+  return `${action.name} ${place}`;
+}
+
+export function namedWorkSummary(
+  tools: ChatMessage[],
+  input: { live?: boolean; allowThinking?: boolean } = {},
+): string {
+  const live = Boolean(input.live);
+  if (live) {
+    for (let index = tools.length - 1; index >= 0; index -= 1) {
+      const tool = tools[index];
+      if (!tool) continue;
+      const action = namedToolAction(tool);
+      if (action.live) return formatNamedToolAction(action);
+    }
+  }
+  const names: string[] = [];
+  for (const tool of tools) {
+    const name = namedToolAction(tool).name;
+    if (!name || names.includes(name)) continue;
+    names.push(name);
+  }
+  if (names.length === 0) return live && input.allowThinking !== false ? "Thinking" : "";
+  if (names.length <= WORK_SUMMARY_NAME_CAP) return names.join(" · ");
+  const keep = WORK_SUMMARY_NAME_CAP - 1;
+  const rest = names.length - keep;
+  return `${names.slice(0, keep).join(" · ")} · ${rest} more`;
 }
 
 export function earlierWorkLabel(rows: GroupedWorkRow[]): string {

@@ -32,18 +32,21 @@ test("Workhorse ships no pack: no bundled packs folder, no extraResources for on
   }
 });
 
-test("Workshop does not become a Settings tab, dock item, or Work popout", () => {
+test("Workshop is a Settings tab for install/grant, not a dock item or Work popout", () => {
   const settings = read("src/ui/Settings.tsx");
   assert.match(settings, /id: "profile"/);
   assert.match(settings, /id: "watch"/);
-  assert.doesNotMatch(settings, /id: "workshop"/);
+  assert.match(settings, /id: "workshop", label: "Workshop"/);
+  assert.match(settings, /section === "workshop" && <WorkshopBlock/);
   const types = read("src/lib/types.ts");
-  assert.match(types, /export type SettingsSection = "profile" \| "llms" \| "skills" \| "routing" \| "learning" \| "usage" \| "watch"/);
+  assert.match(types, /export type SettingsSection = "profile" \| "llms" \| "skills" \| "workshop" \| "routing" \| "learning" \| "usage" \| "watch"/);
   assert.match(types, /export type Panel = "settings" \| "add-bot" \| null/);
   const skills = read("src/ui/SkillsPane.tsx");
-  assert.match(skills, /WorkshopBlock/);
+  assert.doesNotMatch(skills, /WorkshopBlock/);
   assert.doesNotMatch(skills, /WorkPopout/);
   assert.doesNotMatch(read("src/ui/WorkPopout.tsx"), /workshop/i);
+  const sidebar = read("src/ui/Sidebar.tsx");
+  assert.doesNotMatch(sidebar, /setSettingsSection\("workshop"\)/);
 });
 
 test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {

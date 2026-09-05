@@ -14,6 +14,7 @@ import type { AgentRuntimeStatus } from "../lib/external-catalog";
 import { BotForm } from "./BotForm";
 import { ContextMeter } from "./ContextMeter";
 import { SkillsPane } from "./SkillsPane";
+import { WorkshopBlock } from "./WorkshopBlock";
 import { UsagePane } from "./UsagePane";
 import { WatchPane } from "./WatchPane";
 import { RoutingPane } from "./RoutingPane";
@@ -28,6 +29,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "llms", label: "LLMs" },
   { id: "skills", label: "Skills" },
+  { id: "workshop", label: "Workshop" },
   { id: "routing", label: "Routing" },
   { id: "learning", label: "Learning" },
   { id: "usage", label: "Usage" },
@@ -367,6 +369,8 @@ export function Settings() {
       )}
 
       {section === "skills" && <SkillsPane />}
+
+      {section === "workshop" && <WorkshopBlock />}
 
       {section === "routing" && <RoutingPane />}
 

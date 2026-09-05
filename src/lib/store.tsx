@@ -125,7 +125,7 @@ import {
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
-import { sameDeskSkills } from "./skills-catalog";
+import { sameDeskSkills, skillsForAutoLoad } from "./skills-catalog";
 import { withSkillDiscoveryHint } from "./skill-suggestions";
 import { mcpServersForSession } from "./mcp-servers";
 import {
@@ -137,6 +137,7 @@ import {
   normalizeSettings,
   normalizeAgentSystems,
   normalizeRouting,
+  normalizeSkillDiscovery,
   vendorAttachedForSession,
   vendorLaunchGate,
 } from "./settings";
@@ -166,7 +167,7 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
 } from "./routing";
-import type { AgentRun, AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
+import type { AgentSystemsSettings, ChatMessage, ExternalTask, FileLease } from "./types";
 import {
   approvePlanRun,
   assignPlanStep,
@@ -257,7 +258,6 @@ import {
   releaseCancelledSessionLeases,
   releaseDeletedSessionLeases,
   releaseSessionLeases,
-  appendRunEvent,
   scopedChildAgentIds,
   type WorkerNameReservation,
   type WorkerRecord,
@@ -308,12 +308,7 @@ import {
 import {
   applyWorkerBudgetUsage,
   beginAssignmentBudget,
-  BUDGET_HANDOFF_PROMPT,
   missionUsedTokens,
-  needsBudgetHandoffTurn,
-  nestedHelperBudget,
-  nextBudgetRunState,
-  parentBudgetRemaining,
 } from "./worker-budget";
 import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
@@ -390,6 +385,7 @@ import type {
   Theme,
   UsageDraft,
   UsageRange,
+  SkillDiscoverySettings,
   WatchSettings,
   RoutingSettings,
 } from "./types";
@@ -525,6 +521,7 @@ export type Store = AppState & {
   setUsageBudget: (provider: ProviderId, tokens: number | null) => void;
   updateWatch: (patch: Partial<WatchSettings>) => void;
   updateRouting: (patch: Partial<RoutingSettings>) => void;
+  updateSkillDiscovery: (patch: Partial<SkillDiscoverySettings>) => void;
   updateAgentSystems: (patch: Partial<AgentSystemsSettings>) => void;
   updateLocalCompute: (settings: import("./types").LocalComputeSettings) => void;
   updateWorkshop: (settings: WorkshopSettings) => Promise<void>;
@@ -2253,7 +2250,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Vendor slash commands must remain the first bytes of the prompt. The
     // radar is for natural language; explicit commands already chose a route.
     if (!originalText.startsWith("/")) {
-      vendorText = withSkillDiscoveryHint(vendorText, originalText, deskSkillsRef.current);
+      const policy = stateRef.current.settings.skills;
+      const catalog = policy.suggestFromWording === false ? [] : skillsForAutoLoad(deskSkillsRef.current, policy);
+      vendorText = withSkillDiscoveryHint(vendorText, originalText, catalog);
     }
     const haltPlan = options?.afterGoalHalt
       ? "send-now"
@@ -5466,12 +5465,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const spawnTimeoutSeconds = isNested
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;
-            const spawnTokenBudget = isNested
-              ? nestedHelperBudget({
-                  requested: payload.tokenBudget,
-                  parentRemaining: parentBudgetRemaining(caller.agentRun),
-                })
-              : payload.tokenBudget;
             const spawnIsolation = nestedPolicy.isolation ?? payload.isolation ?? "worktree";
             const admitted = admitSpawn({
               parent: caller,
@@ -5721,9 +5714,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const timeoutMs = typeof spawnTimeoutSeconds === "number"
               ? Math.max(30, Math.min(3_600, spawnTimeoutSeconds)) * 1_000
               : 10 * 60 * 1_000;
-            const tokenBudget = typeof spawnTokenBudget === "number" && spawnTokenBudget > 0
-              ? Math.floor(spawnTokenBudget)
-              : undefined;
             const project = boundProject;
             const root = admitted.cwd;
             let environment: SessionEnvironment = { kind: "local" };
@@ -5842,29 +5832,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               workerName = reserved.name;
             }
             const assignmentBudget = beginAssignmentBudget(priorWorker?.agentRun, {
-              tokenBudget,
               mission: spawnMission
                 ? {
-                    tokenBudget: spawnMission.tokenBudget,
                     usedTokens: missionUsedTokens(latest.sessions, spawnMission.id),
                     iteration: spawnMission.iteration,
                     maxIterations: spawnMission.maxIterations,
                   }
                 : undefined,
             });
-            const childMission = spawnMission
-              ? {
-                  ...spawnMission,
-                  ...(assignmentBudget.missionTokenBudget
-                    ? { tokenBudget: assignmentBudget.missionTokenBudget }
-                    : {}),
-                }
-              : undefined;
+            const childMission = spawnMission;
             const child: Session = {
               // A reused worker keeps everything it already is — most of all
               // vendorSessionId, which IS its memory of the last slice. Only
-              // the run and the new message are fresh. Budget and usedTokens
-              // come from THIS assignment, never the previous slice.
+              // the run and the new message are fresh. Slice spend starts at
+              // zero on this assignment; billed usage for the chat stays on the meter.
               ...(priorWorker ?? {}),
               id: childId,
               workerName,
@@ -6056,46 +6037,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
                 if (liveRun?.status === "budget-exceeded") {
                   terminalFailure = "budget-exceeded";
-                  throw error;
                 }
-                if (!needsBudgetHandoffTurn({ ...liveRun, status: liveRun?.status })) throw error;
-              }
-              const liveAfter = stateRef.current.sessions.find((item) => item.id === childId);
-              if (needsBudgetHandoffTurn(liveAfter?.agentRun) && liveAfter?.agentRun?.status === "running") {
-                const handoffAt = Date.now();
-                setState((current) => ({
-                  ...current,
-                  sessions: current.sessions.map((item) =>
-                    item.id === childId && item.agentRun
-                      ? {
-                          ...item,
-                          status: "running" as const,
-                          agentRun: appendRunEvent(
-                            {
-                              ...item.agentRun,
-                              budgetPhase: "handoff",
-                              budgetHandoffAt: handoffAt,
-                            },
-                            { at: handoffAt, type: "budget-handoff", detail: BUDGET_HANDOFF_PROMPT },
-                          ),
-                        }
-                      : item,
-                  ),
-                }));
-                try {
-                  reply = (await promptVendor(
-                    { ...liveAfter, status: "running" },
-                    BUDGET_HANDOFF_PROMPT,
-                    latest.settings.mcpServers,
-                  )) || reply;
-                } catch (error) {
-                  const liveRun = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun;
-                  if (liveRun?.status === "budget-exceeded") {
-                    terminalFailure = "budget-exceeded";
-                    throw error;
-                  }
-                  throw error;
-                }
+                throw error;
               }
               const terminalStatus = stateRef.current.sessions.find((item) => item.id === childId)?.agentRun?.status;
               if (terminalStatus === "timed-out" || terminalStatus === "cancelled" || terminalStatus === "budget-exceeded") {
@@ -7233,64 +7176,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const liveSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         if (liveSession?.agentRun?.status === "running") {
           const spend = applyWorkerBudgetUsage(liveSession.agentRun, event);
-          const now = Date.now();
-          const next = nextBudgetRunState(liveSession.agentRun, spend, now);
-          if (next.action === "handoff" || next.action === "terminate") cancelVendorSession(liveSession);
           setState((current) => ({
             ...current,
-            sessions: withSubagentStatus(
-              current.sessions.map((session) => {
-                if (session.id !== event.sessionId || !session.agentRun) return session;
-                let agentRun: AgentRun = {
+            sessions: current.sessions.map((session) => {
+              if (session.id !== event.sessionId || !session.agentRun) return session;
+              return {
+                ...session,
+                agentRun: {
                   ...session.agentRun,
-                  usedTokens: next.usedTokens,
-                  budgetBaseline: next.budgetBaseline,
-                  outputTokensTotal: next.outputTokensTotal,
-                  cacheTokensTotal: next.cacheTokensTotal,
-                  ...(next.budgetPhase ? { budgetPhase: next.budgetPhase } : {}),
-                  ...(next.budgetWarnedAt ? { budgetWarnedAt: next.budgetWarnedAt } : {}),
-                  ...(next.budgetHandoffAt ? { budgetHandoffAt: next.budgetHandoffAt } : {}),
-                  ...(next.status === "budget-exceeded"
-                    ? {
-                        status: "budget-exceeded" as const,
-                        finishedAt: next.finishedAt ?? now,
-                        error: next.error,
-                      }
-                    : {}),
-                };
-                if (next.action !== "none" && next.notice) {
-                  const type =
-                    next.action === "terminate"
-                      ? "budget-exceeded" as const
-                      : next.action === "handoff"
-                        ? "budget-verify" as const
-                        : "budget-warn" as const;
-                  agentRun = appendRunEvent(agentRun, { at: now, type, detail: next.notice });
-                }
-                const alreadyNoted =
-                  !next.notice ||
-                  session.messages.some((message) => message.role === "system" && message.text === next.notice);
-                return {
-                  ...session,
-                  status: next.action === "terminate" ? "idle" : session.status,
-                  agentRun,
-                  messages:
-                    next.notice && !alreadyNoted
-                      ? [
-                          ...session.messages,
-                          {
-                            id: uid("msg"),
-                            role: "system" as const,
-                            text: next.notice,
-                            createdAt: now,
-                          },
-                        ]
-                      : session.messages,
-                };
-              }),
-              event.sessionId,
-              next.action === "terminate" ? "failed" : "running",
-            ),
+                  usedTokens: spend.usedTokens,
+                  budgetBaseline: spend.budgetBaseline,
+                  outputTokensTotal: spend.outputTokensTotal,
+                  cacheTokensTotal: spend.cacheTokensTotal,
+                },
+              };
+            }),
           }));
         }
         const occupancy = occupancyFromUsage(
@@ -8161,6 +8061,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateSkillDiscovery = useCallback((patch: Partial<SkillDiscoverySettings>) => {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        skills: normalizeSkillDiscovery({ ...current.settings.skills, ...patch }),
+      },
+    }));
+  }, []);
+
   const updateAgentSystems = useCallback((patch: Partial<AgentSystemsSettings>) => {
     setState((current) => ({
       ...current,
@@ -8563,6 +8473,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateSkillDiscovery,
       updateAgentSystems,
       updateLocalCompute,
       updateWorkshop,
@@ -8697,6 +8608,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setUsageBudget,
       updateWatch,
       updateRouting,
+      updateSkillDiscovery,
       updateAgentSystems,
       updateLocalCompute,
       updateWorkshop,

@@ -89,6 +89,8 @@ test("ContextMeter populates Cursor retained context without a Grok-only live se
   assert.match(store, /draft\.source === "estimate" && draft\.provider !== "cursor"/);
   assert.match(store, /estimateMessageTokens/);
   assert.match(meter, /formatRetainedPct/);
+  assert.match(meter, /chatSpend/);
+  assert.match(meter, /billed on this chat/);
 });
 
 test("a six-message Cursor chat does not keep retained context at 0 of 200k", () => {

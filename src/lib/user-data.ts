@@ -1,11 +1,22 @@
+function stripWrappingQuotes(value: string): string {
+  return value.replace(/^["']|["']$/g, "").trim();
+}
+
 export function workhorseUserDataOverride(
   argv: string[] = process.argv,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   const fromEnv = env.WORKHORSE_USER_DATA_PATH?.trim();
   if (fromEnv) return fromEnv;
-  const flag = argv.find((arg) => arg.startsWith("--workhorse-user-data="));
-  const fromFlag = flag?.slice("--workhorse-user-data=".length).trim();
+  const idx = argv.findIndex((arg) => arg.startsWith("--workhorse-user-data="));
+  if (idx < 0) return undefined;
+  let fromFlag = stripWrappingQuotes(argv[idx].slice("--workhorse-user-data=".length));
+  // Start-Process on Windows drops quotes, so "Go7 Workhorse Dev" arrives as extra tokens.
+  for (let i = idx + 1; i < argv.length; i++) {
+    const next = argv[i];
+    if (!next || next.startsWith("-")) break;
+    fromFlag = stripWrappingQuotes(`${fromFlag} ${next}`);
+  }
   return fromFlag || undefined;
 }
 

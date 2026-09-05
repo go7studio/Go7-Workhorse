@@ -349,9 +349,9 @@ export type AgentRun = {
   startedAt: number;
   finishedAt?: number;
   timeoutMs?: number;
-  /** This pass’s ceiling. Unset means unbounded. */
+  /** Persisted from older desks. The live path never writes or enforces a ceiling. */
   tokenBudget?: number;
-  /** Mission-level ceiling when this pass is one of several. */
+  /** Persisted mission-level ceiling. No longer assigned. */
   missionTokenBudget?: number;
   /** Current assignment spend. Resets when a reused worker takes a new slice. */
   usedTokens?: number;
@@ -667,9 +667,11 @@ export type Sheet = "project" | "reference" | null;
 
 export type Panel = "settings" | "add-bot" | null;
 
-export type SettingsSection = "profile" | "llms" | "skills" | "routing" | "learning" | "usage" | "watch";
+export type SettingsSection = "profile" | "llms" | "skills" | "workshop" | "routing" | "learning" | "usage" | "watch";
 
 export type SkillOrigin = "grok" | "codex" | "claude" | "cursor" | "workhorse";
+
+export type SkillSource = "home" | "plugin";
 
 export type DeskSkill = {
   name: string;
@@ -679,6 +681,8 @@ export type DeskSkill = {
   skillFile: string;
   /** True only for copies stored in Workhorse's own skills home. */
   managed?: boolean;
+  /** Plugin trees are listed in Settings; auto-load omits them unless the person opts in. */
+  source?: SkillSource;
 };
 
 export type DeskExportKind = "skills" | "chats";
@@ -833,6 +837,14 @@ export type RoutingSettings = {
   includeExternalAgents?: boolean;
 };
 
+/** How the desk auto-loads skills into a turn. Settings lists the full catalog either way. */
+export type SkillDiscoverySettings = {
+  /** Radar may suggest from wording. Off still keeps slash and Settings. */
+  suggestFromWording: boolean;
+  /** Plugin trees (`~/.codex/plugins`, `~/.cursor/plugins`, …) join radar and list_skills. Off by default. */
+  includePluginPacks: boolean;
+};
+
 export type AgentSystemsSettings = {
   inboundSessionId?: string;
   inboundProjectId?: string;
@@ -935,6 +947,7 @@ export type Settings = {
   usageBudgets: Partial<Record<ProviderId, number>>;
   watch: WatchSettings;
   routing: RoutingSettings;
+  skills: SkillDiscoverySettings;
   learning: import("./learning-types").LearningSettings;
   agentSystems?: AgentSystemsSettings;
   localCompute: LocalComputeSettings;

@@ -43,8 +43,8 @@ const box = listing({
 });
 const log = listing({ id: "job-log", version: "0.3.1" });
 
-test("workshop settings are a block under Skills, not a Settings section; legacy grants rows come back off", () => {
-  assert.equal(isSettingsSection("workshop"), false);
+test("workshop settings are a Settings section; legacy grants rows come back off", () => {
+  assert.equal(isSettingsSection("workshop"), true);
   assert.equal(isSettingsSection("skills"), true);
   const fingerprints = { log: '{"kind":"json"}' };
   const settings = normalizeSettings({

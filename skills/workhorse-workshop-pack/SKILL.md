@@ -88,7 +88,7 @@ At Turn on, Workhorse lists exact URLs from `packSourceUrls(baseUrl, packId, sou
 
 ## Install and release
 
-Desk: Settings → Skills → Workshop → **Add pack**.
+Desk: Settings → Workshop → **Add pack**.
 
 1. Public `https` GitHub repo only → highest semver tag archive (no `git` binary), or **From folder** (copy, never reference). GitLab and other hosts are refused.
 2. Stage → refuse symlinks / zip-slip / size → `parseWorkshopPack` → install under `userData/workshop/packs/<id>/`.

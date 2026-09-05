@@ -32,7 +32,7 @@ export function WorkshopBreakout() {
       </div>
 
       {on.length === 0 ? (
-        <p className="row-meta">Off until a pack is On. Add or turn on a pack from Settings → Skills → Workshop. Packs are read-only.</p>
+        <p className="row-meta">Off until a pack is On. Add or turn on a pack from Settings → Workshop. Packs are read-only.</p>
       ) : null}
 
       {on.map((pack) => (

@@ -10,7 +10,7 @@ their collector live at `github.com/go7studio/workshop-pack-dgx-spark`.
 
 Workshop is two things: the **host** (Workhorse: rail, renderer, fetcher,
 install UI — ships on the app's cadence) and **packs** (dashboards for one
-system, in their own repos, added by the user from Settings → Skills →
+system, in their own repos, added by the user from Settings →
 Workshop).
 
 Additions since review, all in the contract file: `text` takes `parts` like
@@ -130,7 +130,7 @@ folder and the row.
 
 ## 5. Install — archive or folder, no git
 
-Settings → Skills → Workshop → **Add pack**:
+Settings → Workshop → **Add pack**:
 
 - Paste an `https` repo URL. The host resolves the highest semver tag and
   downloads that tag's archive (GitHub/GitLab archive URL) with Electron's

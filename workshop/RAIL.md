@@ -13,7 +13,7 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 
 | Surface | Role |
 | --- | --- |
-| Settings → Skills → Workshop | **INSTALL / GRANT only** — opt-in, confirm grants, turn off. Not the live watch surface. |
+| Settings → Workshop | **INSTALL / GRANT only** — opt-in, confirm grants, turn off. Not the live watch surface. |
 | Desk **Workshop rail** | **Live watch** — primary. Collapsed strip + expand. |
 | Breakout window | **Secondary detach** — same cards, optional. |
 
@@ -24,7 +24,7 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 - **Multi-pack**: rail **stacks modules** when each is On (Box monitor, Job log, future packs) — not one monolithic page.
 - Theme: inherit desk light/dark. Work-like chrome (hairlines, `.tiny`, present-tense). Not a second NVIDIA Dashboard.
 - Sparklines **only** if a time series already exists in the feed. **v1: no new time-series store.** Use bars/chips from current snapshot only.
-- Still never: vendor, leftover ring, new Settings tab, start/stop/route/lease. Labels + soak only.
+- Still never: vendor, leftover ring, live watch in Settings, start/stop/route/lease. Labels + soak only.
 
 ### Denser status (existing data only)
 
@@ -32,11 +32,11 @@ From feed + soak already granted: `probeUnit`, `qwen` parked/up, models line (id
 
 ### Bible delta (one sentence append)
 
-> Live watch is a desk-attached Workshop rail (collapsed strip → expand; packs stack when On). Settings → Skills → Workshop stays install/grant only; breakout remains optional detach.
+> Live watch is a desk-attached Workshop rail (collapsed strip → expand; packs stack when On). Settings → Workshop stays install/grant only; breakout remains optional detach.
 
 ## Out of scope v1
 
-Inventing history sparklines, new Settings tab, sidebar dock row, Usage/Watch fold-in, gateway/SSH changes.
+Inventing history sparklines, sidebar dock row, Usage/Watch fold-in, gateway/SSH changes.
 
 ## Paint
 

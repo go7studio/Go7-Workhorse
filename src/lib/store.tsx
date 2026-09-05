@@ -3135,8 +3135,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
           }));
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
@@ -7345,8 +7348,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         if (session?.provider === "cursor") {
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));

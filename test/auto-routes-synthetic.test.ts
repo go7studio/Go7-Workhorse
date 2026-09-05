@@ -9,6 +9,8 @@
  * ranked result, so none of them can pass by reading the source.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import {
   chooseRoutingDecision,
@@ -32,6 +34,7 @@ import { planAfterRefresh, shouldRefreshPlansForRouting, watchVendorStatuses } f
 import type { GrokPlanUsage, RoutingSettings, Settings } from "../src/lib/types";
 import type { WatchPlans, WatchVendorStatus } from "../src/lib/watch";
 
+const ROOT = path.resolve(import.meta.dirname, "..");
 const NOW = Date.parse("2026-09-05T18:00:00.000Z");
 
 const routing: RoutingSettings = {
@@ -604,6 +607,32 @@ test("a failed refresh keeps the reading the desk already had", () => {
   const kept = planAfterRefresh(syntheticPlan, undefined);
   const row = kimiRow(settings, { custom: { bot_wfd6ghzwhfa7: kept } });
   assert.equal(row?.capacity?.usedPercent, 19.26, "a failed refresh must not make a known meter unknown");
+});
+
+test("every meter fetch keeps the reading, including the two that fire when a Cursor turn ends", () => {
+  // The refreshers were fixed and two older call sites were not: the desk asks
+  // Cursor for its meter again the moment a Cursor turn finishes, which is
+  // exactly when that endpoint is busiest, and both still wrote `plan ??
+  // undefined`. One answer of nothing there blanked a good reading on the path
+  // that runs most often. store.tsx is a React module the suite cannot mount,
+  // so this reads the file; planAfterRefresh's own behaviour is asserted above.
+  const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
+  assert.equal(
+    /setCursorPlan\(plan \?\? undefined\)/.test(store),
+    false,
+    "no Cursor path writes an answer of nothing over a reading",
+  );
+  const writes = store.match(/setCursorPlan\(.*/g) ?? [];
+  const folds = writes.filter((call) => call.includes("planAfterRefresh"));
+  // Every write but one: the early return for a desk with no Cursor meter at
+  // all, which holds nothing to keep.
+  assert.equal(writes.length - folds.length, 1, `only the no-meter path writes directly: ${writes.join(" | ")}`);
+  assert.ok(folds.length >= 3, "the refresher and both turn-end fetches fold their answers in");
+  assert.equal(
+    /delete next\[bot\.id\]/.test(store),
+    false,
+    "and no failure path deletes a custom bot's meter",
+  );
 });
 
 test("a custom bot's watch row is derived from the same plan, so plan-first is never staler", () => {

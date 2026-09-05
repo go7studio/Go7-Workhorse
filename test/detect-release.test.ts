@@ -141,3 +141,16 @@ test("a development-stamped build cannot be published", async () => {
   assert.ok(gate > 0, "the release workflow must run the channel gate");
   assert.ok(gate < upload, "the gate must run before the installer is uploaded");
 });
+
+test("a manual run from main publishes an unreleased version, and nothing else", () => {
+  // The 0.6.56 cut failed in the installer job; the fix changed only the
+  // workflow, so the version stayed put and no push could cut it again.
+  const manual = releaseDecision({ version: "0.6.56", previousVersion: "0.6.56", alreadyReleased: false, manual: true });
+  assert.equal(manual.cut, true);
+  assert.match(manual.why, /manual publish of unreleased v0\.6\.56/);
+  assert.equal(releaseDecision({ version: "0.6.56", previousVersion: "0.6.56", alreadyReleased: true, manual: true }).cut, false, "a published version is never rebuilt, manual or not");
+  const typed = releaseDecision({ version: "0.6.57", previousVersion: "0.6.56", alreadyReleased: false, manifestVersion: "0.6.56", manual: true });
+  assert.equal(typed.cut, false, "a hand-typed version is still refused");
+  assert.equal(typed.byHand, true);
+  assert.equal(releaseDecision({ version: "0.6.56", previousVersion: "0.6.56", alreadyReleased: false, manual: false }).cut, false, "without the manual flag the old rule holds");
+});

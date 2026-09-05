@@ -52,7 +52,7 @@ import {
 } from "./desk-export-host";
 import { showDesktopNotice } from "./notify";
 import { applyAppUpdate, checkAppUpdate } from "./app-update";
-import { ensureDeskRipgrep } from "./desk-path";
+import { deskToolEnv, ensureDeskRipgrep } from "./desk-path";
 import { ensureManagedWorktree, pruneOrphanWorktrees, type EnsureWorktreeInput } from "./worktree-host";
 import { offloadStateAttachments } from "./attachment-store";
 import {
@@ -155,6 +155,9 @@ function runExternalRuntimeProcess(taskId: string, file: string, args: string[])
     timeoutMs: 120_000,
     maxOutputBytes: 16 * 1024 * 1024,
     sessionId: taskId,
+    // A harness CLI is a vendor process. It gets the desk's PATH and none of
+    // the desk's private names, the same as every other vendor child.
+    env: deskToolEnv(),
   });
   externalRuntimeProcesses.set(taskId, child);
   return done.then((result) => {
@@ -1180,7 +1183,12 @@ app.whenReady().then(async () => {
       {
         existsSync: (file) => fs.existsSync(file),
         execFile: (file, args) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 8_000, windowsHide: true });
+          const result = spawnSync(file, args, {
+            encoding: "utf8",
+            timeout: 8_000,
+            windowsHide: true,
+            env: deskToolEnv(),
+          });
           return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
         },
       },
@@ -1263,7 +1271,12 @@ app.whenReady().then(async () => {
           fs.mkdirSync(dir, { recursive: true });
         },
         exec: (file, args) => {
-          const result = spawnSync(file, args, { encoding: "utf8", timeout: 15_000, windowsHide: true });
+          const result = spawnSync(file, args, {
+            encoding: "utf8",
+            timeout: 15_000,
+            windowsHide: true,
+            env: deskToolEnv(),
+          });
           // A missing binary is status null + ENOENT, not a failed run. Say
           // which, so "not installed" is not reported as "exit 1".
           const missing = result.error && (result.error as NodeJS.ErrnoException).code === "ENOENT";

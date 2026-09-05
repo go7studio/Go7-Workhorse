@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { deskToolEnv } from "./desk-path";
 
 /**
  * `claude auth login` writes the shared credential store, so using it here
@@ -22,6 +23,16 @@ export type SetupTokenInput = {
   timeoutMs?: number;
 };
 
+/**
+ * The Claude CLI minting a fresh token needs the person's PATH, and needs to
+ * be told not to open a browser. It does not need a token to make one: a
+ * `CLAUDE_CODE_OAUTH_TOKEN` already on the environment would be the desk's
+ * vault copy, and this flow is how that copy gets replaced.
+ */
+export function setupTokenEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskToolEnv(base, { NO_BROWSER: "" });
+}
+
 /** Runs the token flow, streaming its output so the sign-in stays visible. */
 export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenResult> {
   const spawnFn = input.spawnFn ?? spawn;
@@ -30,7 +41,7 @@ export function runClaudeSetupToken(input: SetupTokenInput): Promise<SetupTokenR
     try {
       child = spawnFn(input.cli, ["setup-token"], {
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, NO_BROWSER: "" },
+        env: setupTokenEnv(),
       });
     } catch (error) {
       resolve({ ok: false, message: error instanceof Error ? error.message : String(error) });

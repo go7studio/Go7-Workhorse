@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { app } from "electron";
 import { APP_VERSION } from "../src/lib/app-info";
+import { deskHelperEnv } from "./desk-path";
 import {
   MAC_APP_NAME,
   macBundleFromExecPath,
@@ -76,12 +77,22 @@ function deskRoot(): string | null {
   return null;
 }
 
+/*
+ * The updater's children are the desk's own: `hdiutil` to mount the image,
+ * `schtasks` and `powershell` to hand Windows the installer, and the bash
+ * script that swaps the bundle. None of them is the person's program and none
+ * needs a login, so both sites below take the named list.
+ *
+ * This module cannot hold that builder itself — it imports `electron`, so no
+ * test can load it — which is why it calls `deskHelperEnv` straight.
+ */
 async function run(cmd: string, args: string[], cwd: string, timeout = 120_000): Promise<string> {
   const { stdout, stderr } = await execFileAsync(cmd, args, {
     cwd,
     timeout,
     windowsHide: true,
     encoding: "utf8",
+    env: deskHelperEnv(),
   });
   return `${stdout}\n${stderr}`.trim();
 }
@@ -131,7 +142,14 @@ async function installMacDmg(version: string): Promise<AppUpdateApplyResult> {
       }),
       { mode: 0o755 },
     );
-    const child = spawn("/bin/bash", [helper], { detached: true, stdio: "ignore" });
+    // Detached on purpose: it has to outlive the app it is replacing. So
+    // whatever it inherits it keeps once the desk is gone and nothing is left
+    // to stop it — which is the whole reason it gets a named list.
+    const child = spawn("/bin/bash", [helper], {
+      detached: true,
+      stdio: "ignore",
+      env: deskHelperEnv(),
+    });
     child.unref();
   } catch (error) {
     if (device) {

@@ -2,8 +2,18 @@ import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { deskGitEnv } from "./desk-path";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The sweep's git runs without the desk's private names on it. It still reads
+ * the person's SSH agent and credential helper, because a worktree can sit on
+ * a repository that needs them.
+ */
+export function worktreeGitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskGitEnv(base, { GIT_OPTIONAL_LOCKS: "0" });
+}
 
 export type EnsureWorktreeInput = {
   sessionId: string;
@@ -25,6 +35,7 @@ async function git(args: string[], cwd?: string): Promise<string> {
     windowsHide: true,
     timeout: 30_000,
     maxBuffer: 2 * 1024 * 1024,
+    env: worktreeGitEnv(),
   });
   return String(result.stdout ?? "").trim();
 }
@@ -124,7 +135,7 @@ function gitSync(args: string[], cwd?: string): { ok: boolean; out: string } {
       maxBuffer: 2 * 1024 * 1024,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" },
+      env: worktreeGitEnv(),
     });
     return { ok: true, out: String(stdout ?? "").trim() };
   } catch (error) {

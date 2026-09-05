@@ -17,6 +17,7 @@ import type { ProviderId } from "../src/lib/types";
 import { claudeAdvertisedRows, sameVendorModelCache, vendorModelCacheFrom, type VendorModelCache } from "../src/lib/advertised-models";
 import { parseCursorModelsOutput, reconcileCursorModels as collapseCursorLive } from "../src/lib/cursor-catalog";
 import { resolveCursorBinary, resolveCursorPrefixArgs, type CursorLoginDetectInput } from "./cursor-login";
+import { deskToolEnv } from "./desk-path";
 
 export { parseCursorModelsOutput };
 
@@ -101,13 +102,25 @@ export function cursorModelsCommand(
   return { command: binary, args: [...resolveCursorPrefixArgs(input), "models"] };
 }
 
+/**
+ * `cursor-agent models` is Cursor's own CLI, so it gets the desk's PATH and
+ * the person's shell settings — and not the Claude login the desk keeps in its
+ * vault, which is what a plain spread of `process.env` handed it.
+ */
+export function cursorModelsEnv(
+  env: NodeJS.Dict<string> = {},
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return deskToolEnv(base, env as NodeJS.ProcessEnv);
+}
+
 function readInstalledCursorModels(env: NodeJS.Dict<string>): string | null {
   const spawnAs = cursorModelsCommand({ env });
   if (!spawnAs) return null;
   try {
     return execFileSync(spawnAs.command, spawnAs.args, {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: cursorModelsEnv(env),
       timeout: 4_000,
       maxBuffer: 1_048_576,
       windowsHide: true,

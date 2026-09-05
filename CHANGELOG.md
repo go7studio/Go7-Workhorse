@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.59](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.58...v0.6.59) (2026-09-05)
+
+
+### Bug Fixes
+
+* **permissions:** a read-only seat runs read-only shell commands, and judges the word the shell builds ([dcd4f3b](https://github.com/go7studio/Go7-Workhorse/commit/dcd4f3b58c428fc312c39a99adc25c436d66d6d8))
+
 ## [0.6.58](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.57...v0.6.58) (2026-09-05)
 
 

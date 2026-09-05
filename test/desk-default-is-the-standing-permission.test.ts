@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { deskClampNote, releasedHelper, standingGrant } from "../src/lib/permissions";
+import { applyStandingGrant } from "../src/lib/session";
+import type { Session } from "../src/lib/types";
 import { assertSharedWrite, claimSharedFiles, workerMayWrite } from "../src/lib/subagents";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,15 +94,41 @@ test("a hidden worker's need within the desk default is granted, not carded", ()
 });
 
 test("both elevate sites consult the standing grant before a card or a denial", () => {
-  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8");
+  const store = readFileSync(new URL("../src/lib/store.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   // The vendor block: standing decides before the clamp note and before the card.
-  assert.match(store, /const standing =\n\s*blocked && owner\n\s*\? standingGrant\(\{ session: owner, need: blocked, deskAccess: stateRef\.current\.settings\.access \}\)/);
+  assert.match(store, /const standing =\n\s*blocked && owner && !security\.boundary && security\.answer !== "deny"\n\s*\? standingGrant\(\{ session: owner, need: blocked, deskAccess: stateRef\.current\.settings\.access \}\)/, "a security boundary is never granted past");
   assert.match(store, /blocked && owner && !standing\n\s*\? owner\.hidden/, "a granted need is not a desk clamp");
   assert.match(store, /const need = deskClamp \|\| standing \? null : blocked;/, "a granted need raises no card");
   assert.match(store, /\(standing \? \("once" as const\) : null\) \?\?\n\s*forced \?\?/, "the grant answers the vendor before any seat-derived denial");
-  assert.match(store, /\.\.\.\(standing \? applySessionElevation\(session, standing\) : \{\}\)/, "and the seat is actually raised");
+  assert.match(store, /\.\.\.\(standing \? applyStandingGrant\(session, standing\) : \{\}\)/, "and the seat and its lineage record are raised together");
   assert.match(store, /Granted from the desk default: \$\{describeElevation\(session, standing\)\}/);
   // The Link ask from a hidden chat: granted within the default, told the source past it.
-  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,400}?const standing = standingGrant\(\{ session: from, need: classified\.need, deskAccess: latest\.settings\.access \}\);[\s\S]{0,1400}?ok: true,\n\s*elevated: true,/);
+  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,900}?const standing = standingGrant\(\{ session: from, need: classified\.need, deskAccess: latest\.settings\.access \}\);[\s\S]{0,1400}?ok: true,\n\s*elevated: true,/);
+  assert.match(store, /if \(!elevationStillNeeded\(\{ mode: from\.mode, sandbox: from\.sandbox \}, classified\.need\)\) \{[\s\S]{0,400}?alreadyElevated: true,/, "a seat that already covers the need is not denied for a stale record");
   assert.match(store, /howToUse: "Granted from the desk default\. Continue the work\.",/);
+});
+
+test("a seat the call asked for holds; the desk hands over only what nobody chose", () => {
+  const desk = { mode: "always-approve", sandbox: "off" } as const;
+  const byCall = { hidden: true, mode: "always-approve", sandbox: "read-only", agentRun: { grantedAccess: { source: "call" as const } } } as const;
+  assert.equal(standingGrant({ session: byCall, need: { sandbox: "off" }, deskAccess: desk }), null, "the coordinator said read-only and meant it");
+  const inherited = { ...byCall, agentRun: { grantedAccess: { source: "inherited" as const } } };
+  assert.deepEqual(standingGrant({ session: inherited, need: { sandbox: "off" }, deskAccess: desk }), { sandbox: "off" }, "an inherited clamp is the desk's to lift");
+});
+
+test("a standing grant raises the lineage record with the seat", () => {
+  const session = {
+    id: "w",
+    hidden: true,
+    mode: "plan",
+    sandbox: "read-only",
+    messages: [],
+    agentRun: { status: "running", grantedAccess: { mode: "plan", sandbox: "read-only", source: "inherited" } },
+  } as unknown as Session;
+  const raised = applyStandingGrant(session, { mode: "ask", sandbox: "off" });
+  assert.equal(raised.mode, "ask");
+  assert.equal(raised.sandbox, "off");
+  assert.deepEqual(raised.agentRun?.grantedAccess, { mode: "ask", sandbox: "off", source: "inherited" }, "the next ask classifies against the raised grant");
+  const bare = { ...session, agentRun: undefined } as unknown as Session;
+  assert.equal(applyStandingGrant(bare, { sandbox: "off" }).sandbox, "off", "a chat with no run record still gets its seat");
 });

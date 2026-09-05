@@ -114,6 +114,28 @@ export function applySessionElevation(
   };
 }
 
+/**
+ * A standing grant raises the seat AND the record the lineage reads. Without
+ * the second half, the next ask classifies against a stale grant, finds a
+ * raise, then finds nothing missing from the seat, and denies work the desk
+ * had just allowed.
+ */
+export function applyStandingGrant(
+  session: Session,
+  standing: { mode?: PermissionMode; sandbox?: SandboxProfile },
+): Session {
+  const raised = applySessionElevation(session, standing);
+  const granted = session.agentRun?.grantedAccess;
+  if (!session.agentRun || !granted) return raised;
+  return {
+    ...raised,
+    agentRun: {
+      ...session.agentRun,
+      grantedAccess: { ...granted, mode: raised.mode, sandbox: raised.sandbox },
+    },
+  };
+}
+
 export function applySessionModelChange(
   session: Session,
   next: { provider: ProviderId; model: string; effort: EffortLevel | null; customBotId?: string },

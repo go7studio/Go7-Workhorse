@@ -144,9 +144,21 @@ function siteOne(input: {
   event: EventInput;
   pending?: PermissionRequest[];
 }): SiteOneOutcome {
+  return siteOneWithRoots({ ...input, roots: [] });
+}
+
+function siteOneWithRoots(input: {
+  owner: LineageChat;
+  sessions: readonly LineageChat[];
+  deskAccess: DeskAccess;
+  event: EventInput;
+  pending?: PermissionRequest[];
+  roots: string[];
+  policy?: { network: "allowed" | "blocked"; root: "allowed" | "ask" | "blocked" };
+}): SiteOneOutcome {
   const { owner, event } = input;
   const pending = input.pending ?? [];
-  const security = securityPolicyAnswer({ tool: event.tool, detail: event.detail, path: event.path, roots: [] });
+  const security = securityPolicyAnswer({ policy: input.policy, tool: event.tool, detail: event.detail, path: event.path, roots: input.roots });
   const forced =
     security.answer ??
     permissionPolicyAnswer({
@@ -170,7 +182,10 @@ function siteOne(input: {
   const lineage = lineageGrant({ session: owner, sessions: input.sessions, deskAccess: input.deskAccess });
   // The desk default is the standing permission for work the system started:
   // a hidden worker's need within it is granted here, no card and no note.
-  const standing = blocked ? standingGrant({ session: owner, need: blocked, deskAccess: input.deskAccess }) : null;
+  const standing =
+    blocked && !security.boundary && security.answer !== "deny"
+      ? standingGrant({ session: owner, need: blocked, deskAccess: input.deskAccess })
+      : null;
   // Past it, a hidden worker never reaches the person; the desk answers and
   // names the source of the sandbox. Only a visible chat's own block still asks.
   const deskClamp = blocked && !standing
@@ -538,6 +553,54 @@ test("within the desk default a hidden worker is granted the seat, with no card 
   });
   assert.equal(outcome.prompted, false, "a subagent's ask is never a card");
   assert.deepEqual(outcome.reply, { ok: true, elevated: true, granted: { mode: "always-approve", sandbox: "off" } });
+});
+
+test("a security boundary is never granted past, even when the host asks to elevate", () => {
+  // The gate's attack: a custom host emits `elevate` on a sandbox deny, so
+  // `blocked` is set whatever the policy said. The boundary still wins.
+  const helper = helperUnder(alwaysRoot, ALWAYS);
+  const event: EventInput = {
+    requestId: "0",
+    tool: "Write",
+    detail: "/tmp/outside.txt",
+    path: "/tmp/outside.txt",
+    elevate: { permission: "always-approve", sandbox: "off" },
+  };
+  const policy = { network: "allowed", root: "blocked" } as const;
+  const security = securityPolicyAnswer({ policy, tool: event.tool, detail: event.detail, path: event.path, roots: ["/repo"] });
+  assert.ok(security.boundary, "precondition: a write outside every root is a boundary when the root policy blocks");
+  assert.equal(
+    standingGrant({ session: helper, need: { mode: "always-approve", sandbox: "off" }, deskAccess: ALWAYS }) !== null,
+    true,
+    "precondition: without the gate the grant would say yes",
+  );
+  const outcome = siteOneWithRoots({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event, roots: ["/repo"], policy });
+  assert.equal(outcome.answer, "deny", "the boundary answers, not the grant");
+  // With the root policy at ask, the boundary is still set and the grant still stays out of it.
+  const asked = siteOneWithRoots({
+    owner: helper,
+    sessions: [alwaysRoot, helper],
+    deskAccess: ALWAYS,
+    event,
+    roots: ["/repo"],
+    policy: { network: "allowed", root: "ask" },
+  });
+  assert.notEqual(asked.answer, "once", "a boundary the policy only asks about is still not granted past");
+  assert.deepEqual(outcome.pending, []);
+});
+
+test("a helper the call asked to run read-only stays read-only on its first write", () => {
+  const helper: LineageChat = {
+    id: "helper",
+    parentId: "root",
+    hidden: true,
+    mode: "always-approve",
+    sandbox: "read-only",
+    agentRun: { role: "helper", grantedAccess: { mode: "always-approve", sandbox: "read-only", source: "call" } },
+  };
+  const outcome = siteOne({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event: WRITE });
+  assert.equal(outcome.answer, "deny", "the coordinator chose that seat; the desk does not undo it");
+  assert.deepEqual(outcome.pending, [], "and still no card");
 });
 
 test("past the desk default a hidden worker is told where to ask instead", () => {

@@ -51,6 +51,7 @@ import {
   autoAllowPermission,
   deskClampNote,
   describeElevation,
+  elevationStillNeeded,
   standingGrant,
   elevationForBlock,
   enqueuePermission,
@@ -281,7 +282,7 @@ import {
   parsePermissionMode,
   parseSandbox,
   vendorSessionForSend,
-  applySessionElevation,
+  applyStandingGrant,
 } from "./session";
 import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
@@ -4409,15 +4410,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 // Within the desk default the desk grants the seat itself: the
                 // worker was started by the system, and nothing is raised past
                 // what the person set. Past the ceiling, it is told the source.
+                if (!elevationStillNeeded({ mode: from.mode, sandbox: from.sandbox }, classified.need)) {
+                  // The seat already covers it; only the lineage record lagged.
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: true,
+                      alreadyElevated: true,
+                      mode: from.mode,
+                      sandbox: from.sandbox,
+                      howToUse: "This chat already has that access. Continue the work.",
+                    }),
+                  });
+                  return;
+                }
                 const standing = standingGrant({ session: from, need: classified.need, deskAccess: latest.settings.access });
                 if (standing) {
-                  const raised = applySessionElevation(from, standing);
+                  const raised = applyStandingGrant(from, standing);
                   setState((current) => ({
                     ...current,
                     sessions: current.sessions.map((item) =>
                       item.id === from.id
                         ? {
-                            ...applySessionElevation(item, standing),
+                            ...applyStandingGrant(item, standing),
                             messages: [
                               ...item.messages,
                               {
@@ -6940,8 +6954,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // started. A hidden worker blocked by a seat the desk default already
         // covers is handed that seat here: allowed, raised, and told so in its
         // transcript. No card, no denial note, no second call to fix.
+        // A security boundary is never granted past: an elevate event arrives
+        // with `blocked` set whatever the policy said, so the gate sits here.
         const standing =
-          blocked && owner
+          blocked && owner && !security.boundary && security.answer !== "deny"
             ? standingGrant({ session: owner, need: blocked, deskAccess: stateRef.current.settings.access })
             : null;
         // A subagent never asks the person. Its chat is hidden, the person is
@@ -7057,7 +7073,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ),
                       agentRun: session.agentRun,
                     }),
-                    ...(standing ? applySessionElevation(session, standing) : {}),
+                    ...(standing ? applyStandingGrant(session, standing) : {}),
                     messages:
                       allowed === "deny"
                         ? [

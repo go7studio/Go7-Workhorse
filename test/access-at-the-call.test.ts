@@ -435,11 +435,11 @@ test("the store decides the seat at the call and records who decided it", () => 
   );
   assert.match(
     store,
-    /if \(from\.hidden\) \{[\s\S]{0,1900}?reason: sandboxSourceNote\(\{/,
+    /if \(from\.hidden\) \{[\s\S]{0,2600}?reason: sandboxSourceNote\(\{/,
     "site 2: the same rule on workhorse_request_permission, past the standing grant",
   );
   // The elevate enqueue still exists below that guard, for the visible chat.
-  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,2200}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
+  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,3400}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
 });
 
 test("the rules text tells a coordinator to ask for the sandbox in the call", () => {

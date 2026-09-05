@@ -707,11 +707,19 @@ export function promptOwner(need: ElevationNeed, lineage: DeskAccess): "person" 
  * caller reads why in its transcript.
  */
 export function standingGrant(input: {
-  session: { hidden?: boolean; mode: PermissionMode; sandbox: SandboxProfile };
+  session: {
+    hidden?: boolean;
+    mode: PermissionMode;
+    sandbox: SandboxProfile;
+    agentRun?: { grantedAccess?: { source?: AccessSource } };
+  };
   need: ElevationNeed;
   deskAccess?: DeskAccess;
 }): ElevationNeed | null {
   if (!input.session.hidden) return null;
+  // A seat the call asked for is the caller's own clamp: a coordinator that
+  // said read-only meant it. The desk hands over only what nobody chose.
+  if (input.session.agentRun?.grantedAccess?.source === "call") return null;
   const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
   if (elevationStillNeeded(desk, input.need)) return null;
   return elevationStillNeeded({ mode: input.session.mode, sandbox: input.session.sandbox }, input.need);

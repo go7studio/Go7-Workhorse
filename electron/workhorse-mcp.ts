@@ -14,8 +14,8 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
-import { passGrantedAccess } from "../src/lib/permissions";
-import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits } from "../src/lib/types";
+import { passGrantedAccess, releasedHelper } from "../src/lib/permissions";
+import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
 import {
   attachmentKind,
   attachmentMime,
@@ -2143,7 +2143,11 @@ async function spawnAgent(
         }),
         isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
-        role: nestedPolicy.role,
+        // The role and the read-only clamp are the same fact. A helper the call
+        // did not ask to run read-only is released, so it is not stamped one.
+        role: releasedHelper({ role: nestedPolicy.role, requestedSandbox: input.sandbox as SandboxProfile | undefined })
+          ? undefined
+          : nestedPolicy.role,
       }
     : {
         ...inheritedInput,

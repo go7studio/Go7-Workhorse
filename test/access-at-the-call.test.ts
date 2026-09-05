@@ -223,29 +223,29 @@ test("a silent call under the same caller yields read-only, source inherited", (
   assert.equal(spawned.line, "Permission Always approve, Sandbox Read-only (inherited from the caller).");
 });
 
-test("a nested helper keeps its read-only clamp until the call asks for a sandbox", () => {
-  // The policy this lane picked: a helper the call made writable is no longer
-  // a helper, so the desk records it as a worker. Keeping the label would make
-  // the denial say "helpers are read-only" about a chat that is writing files.
-  const clamped = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true });
-  assert.equal(clamped.seat.sandbox, "read-only", "silence leaves the clamp exactly where it was");
-  assert.equal(clamped.role, "helper");
+test("a nested helper sits at the seat it inherited unless the call asks it to run read-only", () => {
+  // The desk default is the standing permission for work the system starts.
+  // A helper nobody asked to clamp is a worker at its parent's seat; the label
+  // and the read-only clamp are one fact, so releasing one releases the other.
+  const silent = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true });
+  assert.equal(silent.seat.sandbox, DESK_DEFAULT.sandbox, "silence inherits; it does not clamp");
+  assert.equal(silent.role, "worker");
 
-  const released = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true, call: { sandbox: "off" } });
-  assert.equal(released.seat.sandbox, "off", "the call lifted it on purpose");
-  assert.equal(released.role, "worker", "and the role went with the access");
+  const clamped = spawnSeat({ caller: DESK_DEFAULT, desk: DESK_DEFAULT, nested: true, call: { sandbox: "read-only" } });
+  assert.equal(clamped.seat.sandbox, "read-only", "the call asked for read-only, so read-only it is");
+  assert.equal(clamped.role, "helper", "and the label says what the seat does");
 
-  // Asking only for a permission is not asking for a sandbox: the clamp holds.
+  // Asking only for a permission does not clamp the sandbox either.
   const modeOnly = spawnSeat({
     caller: DESK_DEFAULT,
     desk: DESK_DEFAULT,
     nested: true,
     call: { permission: "always-approve" },
   });
-  assert.equal(modeOnly.seat.sandbox, "read-only");
-  assert.equal(modeOnly.role, "helper");
-  assert.equal(releasedHelper({ role: "worker", requestedSandbox: "off" }), false, "only a helper is released");
-  assert.equal(releasedHelper({ role: "helper" }), false);
+  assert.equal(modeOnly.seat.sandbox, DESK_DEFAULT.sandbox);
+  assert.equal(modeOnly.role, "worker");
+  assert.equal(releasedHelper({ role: "worker", requestedSandbox: "off" }), false, "only a helper is subject to release");
+  assert.equal(releasedHelper({ role: "helper" }), true, "a helper the call did not clamp is released");
 });
 
 test("the desk ceiling still holds over a delegation to a path-owned worker", () => {
@@ -430,16 +430,16 @@ test("the store decides the seat at the call and records who decided it", () => 
   // and the note must reach `need`, so dead-coding the branch fails this.
   assert.match(
     store,
-    /blocked && owner\n\s*\? owner\.hidden\n\s*\? sandboxSourceNote\(\{[\s\S]{0,200}?\}\)\n\s*: promptOwner\(blocked, lineage\) === "desk"/,
-    "site 1: a subagent's block is answered, a visible chat's is not",
+    /blocked && owner && !standing\n\s*\? owner\.hidden\n\s*\? sandboxSourceNote\(\{[\s\S]{0,200}?\}\)\n\s*: promptOwner\(blocked, lineage\) === "desk"/,
+    "site 1: a subagent's block past the desk default is answered, a visible chat's is not",
   );
   assert.match(
     store,
-    /if \(from\.hidden\) \{[\s\S]{0,320}?reason: sandboxSourceNote\(\{/,
-    "site 2: the same rule on workhorse_request_permission",
+    /if \(from\.hidden\) \{[\s\S]{0,2600}?reason: sandboxSourceNote\(\{/,
+    "site 2: the same rule on workhorse_request_permission, past the standing grant",
   );
   // The elevate enqueue still exists below that guard, for the visible chat.
-  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,600}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
+  assert.match(store, /if \(from\.hidden\) \{[\s\S]{0,3400}?const need = classified\.need;[\s\S]{0,600}?kind: "elevate",/);
 });
 
 test("the rules text tells a coordinator to ask for the sandbox in the call", () => {

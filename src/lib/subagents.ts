@@ -23,6 +23,7 @@ import type {
   WorkerFindingSeverity,
   WorkerHandoff,
   WorkerSeed,
+  SandboxProfile,
 } from "./types";
 import { beginAssignmentBudget } from "./worker-budget";
 import { looksLikeWorkerBrief, type DeskRole } from "./workhorse-rules";
@@ -1999,8 +2000,17 @@ export function nestedWorkerPolicy(input: {
   };
 }
 
-export function workerMayWrite(role?: DeskRole): boolean {
-  return role !== "auditor" && role !== "helper";
+/**
+ * The seat decides. A role is a routing hint — auditor routes deep, helper is
+ * bounded — not a second permission system. Refusing every auditor and helper
+ * outright meant a review that needed to write its own report under a desk
+ * default of always-approve / off was told "Review-only agents cannot write"
+ * and then asked the person to elevate. Only a sandbox that is actually
+ * read-only or strict refuses a write.
+ */
+export function workerMayWrite(role?: DeskRole, sandbox?: SandboxProfile): boolean {
+  void role;
+  return sandbox !== "read-only" && sandbox !== "strict";
 }
 
 export type CancelWorkerResult = {
@@ -2258,11 +2268,12 @@ export function claimSharedFiles(input: {
   sessionId: string;
   isolation?: "worktree" | "shared";
   role?: DeskRole;
+  sandbox?: SandboxProfile;
   files: Array<{ path: string; fingerprint: string }>;
   now?: number;
 }): { ok: true; leases: FileLease[] } | { ok: false; error: string; conflicts: string[] } {
-  if (!workerMayWrite(input.role)) {
-    return { ok: false, error: "Review-only agents cannot write.", conflicts: input.files.map((file) => file.path) };
+  if (!workerMayWrite(input.role, input.sandbox)) {
+    return { ok: false, error: "This worker's sandbox is read-only, so it cannot write.", conflicts: input.files.map((file) => file.path) };
   }
   const now = input.now ?? Date.now();
   const next = [...input.leases];
@@ -2296,11 +2307,12 @@ export function assertSharedWrite(input: {
   sessionId: string;
   isolation?: "worktree" | "shared";
   role?: DeskRole;
+  sandbox?: SandboxProfile;
   path: string;
   currentFingerprint: string;
 }): { ok: true } | { ok: false; error: string } {
-  if (!workerMayWrite(input.role)) {
-    return { ok: false, error: "Review-only agents cannot write." };
+  if (!workerMayWrite(input.role, input.sandbox)) {
+    return { ok: false, error: "This worker's sandbox is read-only, so it cannot write." };
   }
   const key = normalizeLeasePath(input.path).toLowerCase();
   const lease = input.leases.find((item) => item.sessionId === input.sessionId && normalizeLeasePath(item.path).toLowerCase() === key);
@@ -2336,6 +2348,7 @@ export function assertAgentPathWrite(input: {
   root?: string;
   currentFingerprint: string;
   role?: DeskRole;
+  sandbox?: SandboxProfile;
 }): { ok: true } | { ok: false; error: string } {
   const path = leasePathForWrite(input.path, input.root);
   const allowed = normalizePathAllowlist(input.paths);
@@ -2346,6 +2359,7 @@ export function assertAgentPathWrite(input: {
     leases: input.leases,
     sessionId: input.sessionId,
     role: input.role,
+    sandbox: input.sandbox,
     path,
     currentFingerprint: input.currentFingerprint,
   });

@@ -469,6 +469,18 @@ test("two slots serving the same model id each keep their own window", () => {
   assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_box" }), "32k");
   assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_syn" }), "200k");
 
+  // And the candidate Auto ranks carries its own slot's window. Routing names
+  // the bot now, so the two rows for one model id do not collapse onto the
+  // wider of them and send the local box threads it cannot hold.
+  const settings = { ...structuredClone(DEFAULT_SETTINGS), customBots: [SYNTHETIC_BOT, local] };
+  const glmCandidates = routingCandidatesForDesk(settings).filter(
+    (row) => row.provider === "custom" && row.model === "hf:zai-org/GLM-5.2",
+  );
+  assert.deepEqual(
+    glmCandidates.map((row) => [row.customBotId, row.contextWindow]).sort(),
+    [["bot_box", 32_000], ["bot_syn", 200_000]],
+    "each bot's catalog window reaches that bot's own candidate",
+  );
   resetVendorCatalog();
 });
 

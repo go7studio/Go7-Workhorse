@@ -112,6 +112,18 @@ test("naming only the sibling that completed does not earn the next phase; the w
   // A sibling of ANOTHER pass is not in this wave.
   const other = { ...worker("old", "failed"), agentRun: { status: "failed", startedAt: 1, mission: { ...MISSION, iteration: 0 } } } as unknown as Session;
   assert.deepEqual(missionWave([...sessions, other], "parent", ["coord"], MISSION).sort(), ["coord", "rev"]);
+  // The gate's second attack: a supporting reviewer spawned beside the
+  // coordinator with no mission metadata at all. It ran during the pass, so it
+  // is in the wave; one that started before the pass is not.
+  const plainRev = { id: "plain", parentId: "parent", title: "plain", messages: [], agentRun: { status: "failed", startedAt: 5 } } as unknown as Session;
+  const earlier = { id: "earlier", parentId: "parent", title: "earlier", messages: [], agentRun: { status: "failed", startedAt: 0 } } as unknown as Session;
+  const withPlain = [worker("coord", "completed"), plainRev, earlier];
+  assert.deepEqual(missionWave(withPlain, "parent", ["coord"], MISSION).sort(), ["coord", "plain"], "a plain sibling that ran during the pass counts; an earlier one does not");
+  const shaped = nextMissionIteration(withPlain, "parent", ["coord"], 1);
+  assert.equal(shaped.ok, false, "omitting the plain reviewer earns nothing");
+  const carriedPlain = nextMissionIteration(withPlain, "parent", ["coord"], 1, { allowUnfinished: true });
+  assert.equal(carriedPlain.ok, true);
+  if (carriedPlain.ok) assert.equal(carriedPlain.mission.phase, MISSION.phase);
   // A wave every sibling finished still moves on, whoever the caller named.
   const done = nextMissionIteration([worker("coord", "completed"), worker("rev", "completed")], "parent", ["rev"], 1, { allowUnfinished: true });
   assert.equal(done.ok, true);

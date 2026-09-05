@@ -1854,15 +1854,29 @@ export function missionWave(
   ids: readonly string[],
   mission: { id: string; iteration: number },
 ): string[] {
-  const siblings = sessions
-    .filter(
-      (session) =>
-        session.parentId === parentId &&
-        session.agentRun?.mission?.id === mission.id &&
-        session.agentRun?.mission?.iteration === mission.iteration,
-    )
-    .map((session) => session.id);
-  return [...new Set([...ids, ...siblings])];
+  const bearing = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      session.agentRun?.mission?.id === mission.id &&
+      session.agentRun?.mission?.iteration === mission.iteration,
+  );
+  // A supporting worker the parent ran during the pass may carry no mission
+  // metadata at all (a plain delegation beside the coordinator). It is still
+  // part of what the desk ran for that pass, so it counts from the moment the
+  // pass began. Anything that started before the pass belongs to an earlier
+  // one and is left out.
+  const passStart = bearing.reduce(
+    (min, session) => Math.min(min, session.agentRun?.startedAt ?? Number.POSITIVE_INFINITY),
+    Number.POSITIVE_INFINITY,
+  );
+  const plain = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      !session.agentRun?.mission &&
+      typeof session.agentRun?.startedAt === "number" &&
+      session.agentRun.startedAt >= passStart,
+  );
+  return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
 }
 
 export function nextMissionIteration(

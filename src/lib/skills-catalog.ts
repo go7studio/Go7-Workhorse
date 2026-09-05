@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DeskSkill, SkillOrigin } from "./types";
+import type { DeskSkill, SkillOrigin, SkillSource } from "./types";
 
 const SKIP = new Set([
   "node_modules",
@@ -33,7 +33,7 @@ export type SkillFs = {
   isDir: (filePath: string) => boolean;
 };
 
-export type SkillHome = { origin: SkillOrigin; root: string; managed?: boolean };
+export type SkillHome = { origin: SkillOrigin; root: string; managed?: boolean; source?: SkillSource };
 
 export function workhorseSkillsHome(homedir = os.homedir()): string {
   return path.join(homedir, ".workhorse", "skills");
@@ -50,10 +50,10 @@ export function skillHomes(
     { origin: "claude", root: path.join(home, ".claude", "skills") },
     { origin: "cursor", root: path.join(home, ".cursor", "skills") },
     { origin: "workhorse", root: workhorseSkillsHome(home), managed: true },
-    { origin: "codex", root: path.join(home, ".codex", "plugins") },
-    { origin: "grok", root: path.join(home, ".grok", "plugins") },
-    { origin: "claude", root: path.join(home, ".claude", "plugins") },
-    { origin: "cursor", root: path.join(home, ".cursor", "plugins") },
+    { origin: "codex", root: path.join(home, ".codex", "plugins"), source: "plugin" },
+    { origin: "grok", root: path.join(home, ".grok", "plugins"), source: "plugin" },
+    { origin: "claude", root: path.join(home, ".claude", "plugins"), source: "plugin" },
+    { origin: "cursor", root: path.join(home, ".cursor", "plugins"), source: "plugin" },
     { origin: "workhorse", root: path.join(home, ".agents", "skills") },
   ];
   for (const root of input.bundled ?? []) {
@@ -119,7 +119,7 @@ export function catalogSkills(
   const seen = new Set<string>();
   const skills: DeskSkill[] = [];
   for (const home of homes) {
-    walk(home.root, home.origin, home.managed === true, 0, io, seen, skills);
+    walk(home.root, home.origin, home.managed === true, skillTreeSource(home.root, home.source), 0, io, seen, skills);
   }
   const unique = new Map<string, DeskSkill>();
   for (const skill of skills) {
@@ -133,6 +133,7 @@ function walk(
   dir: string,
   origin: SkillOrigin,
   managed: boolean,
+  source: SkillSource,
   depth: number,
   io: SkillFs,
   seen: Set<string>,
@@ -154,6 +155,7 @@ function walk(
         dir,
         skillFile,
         managed,
+        source,
       });
     }
     return;
@@ -168,7 +170,7 @@ function walk(
     if (SKIP.has(name) || name === "SKILL.md") continue;
     const next = path.join(dir, name);
     if (CODEY.has(name) && !io.existsSync(path.join(next, "SKILL.md"))) continue;
-    walk(next, origin, managed, depth + 1, io, seen, skills);
+    walk(next, origin, managed, source, depth + 1, io, seen, skills);
   }
 }
 
@@ -191,7 +193,8 @@ export function sameDeskSkills(left: DeskSkill[], right: DeskSkill[]): boolean {
       skill.name === other.name &&
       skill.description === other.description &&
       skill.origin === other.origin &&
-      skill.managed === other.managed
+      skill.managed === other.managed &&
+      skillSource(skill) === skillSource(other)
     );
   });
 }
@@ -256,6 +259,26 @@ export function resolveRequestedSkills(skills: DeskSkill[], queries: string[] = 
 
 export function publicSkillCard(skill: DeskSkill): { name: string; origin: SkillOrigin; description: string } {
   return { name: skill.name, origin: skill.origin, description: skill.description };
+}
+
+export function skillTreeSource(root: string, explicit?: SkillSource): SkillSource {
+  if (explicit === "home" || explicit === "plugin") return explicit;
+  const normalized = root.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  return /(^|\/)plugins$/i.test(normalized) || /\/plugins\//i.test(normalized) ? "plugin" : "home";
+}
+
+export function skillSource(skill: Pick<DeskSkill, "source" | "dir">): SkillSource {
+  if (skill.source === "home" || skill.source === "plugin") return skill.source;
+  return skillTreeSource(skill.dir);
+}
+
+/** Radar and list_skills. Settings and slash still see the full catalog. */
+export function skillsForAutoLoad(
+  skills: DeskSkill[],
+  policy: { includePluginPacks?: boolean } = {},
+): DeskSkill[] {
+  if (policy.includePluginPacks === true) return skills;
+  return skills.filter((skill) => skillSource(skill) !== "plugin");
 }
 
 export function nodeSkillFs(): SkillFs {

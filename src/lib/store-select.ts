@@ -87,10 +87,11 @@ export function sameComposerDesk(left: ComposerDesk, right: ComposerDesk): boole
 export type ContextDesk = {
   session: Session | null;
   settings: Store["settings"];
+  usage: Store["usage"];
 };
 
 export function selectContextDesk(store: Store): ContextDesk {
-  return { session: activeDeskSession(store), settings: store.settings };
+  return { session: activeDeskSession(store), settings: store.settings, usage: store.usage };
 }
 
 /**
@@ -115,7 +116,7 @@ export function sameContextSession(left: Session | null, right: Session | null):
 
 export function sameContextDesk(left: ContextDesk, right: ContextDesk): boolean {
   if (left === right) return true;
-  return sameContextSession(left.session, right.session) && left.settings === right.settings;
+  return sameContextSession(left.session, right.session) && left.settings === right.settings && left.usage === right.usage;
 }
 
 export type WatchDesk = {

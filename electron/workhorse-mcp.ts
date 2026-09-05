@@ -58,7 +58,6 @@ import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
 import { isGrokBotUrl } from "../src/lib/custom-http-identity";
-import { nestedHelperBudget, nestedHelperBudgetNote, parentBudgetRemaining } from "../src/lib/worker-budget";
 import {
   askViaInbox,
   interpretPeerAskHttp,
@@ -427,7 +426,7 @@ const TOOLS = [
         tools: { type: "array", items: { type: "string" }, description: "Tools the task requires" },
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
-        tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
+        tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         planStepId: { type: "string", description: "Optional executable plan step id" },
         folder: { type: "string", description: "Optional absolute working folder" },
@@ -465,7 +464,7 @@ const TOOLS = [
         sandbox: { type: "string", description: "Sandbox this pass's worker runs under: off, workspace, read-only, or strict. Same ceiling as permission. Omit and this pass keeps the previous pass's sandbox, so a mission does not lose access halfway." },
         route: { type: "string", description: "Omit to keep the prior brain; auto, quick, balanced, or deep opts into routing" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
-        tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
+        tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree or shared" },
         folder: { type: "string", description: "Optional absolute working folder" },
         wait: { type: "boolean", description: "Ignored on Link. Always returns the next worker id promptly." },
@@ -550,7 +549,7 @@ const TOOLS = [
         files: { type: "array", items: { type: "string" }, description: "Files to attach to the worker" },
         effort: { type: "string", description: "Explicit user override only. Omit to keep a reused worker's thinking level; otherwise the desk derives it from task depth" },
         timeoutSeconds: { type: "number", description: "Optional 30-3600 second runtime limit. The desk stops the worker when it passes this; the run ends timed-out." },
-        tokenBudget: { type: "number", description: "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway." },
+        tokenBudget: { type: "number", description: "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter." },
         isolation: { type: "string", description: "worktree (default) or shared. Independent writers default to a worktree. Nested bounded helpers are always shared." },
         seed: {
           type: "string",
@@ -883,7 +882,7 @@ const TOOLS = [
   {
     name: "workhorse_list_skills",
     description:
-      "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse (name, origin, description). Call this proactively when a request or Workhorse skill-radar hint resembles an installed workflow, even if the user did not name a skill. Skills are instruction folders — reading one does not run its scripts.",
+      "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse (name, origin, description). Call this when a request is an installed workflow or Workhorse skill radar listed a genuine match. Do not list skills for generic chat. Skills are instruction folders — reading one does not run its scripts.",
     inputSchema: {
       type: "object",
       properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, cursor, or workhorse" } },
@@ -893,7 +892,7 @@ const TOOLS = [
   {
     name: "workhorse_read_skill",
     description:
-      "Read one SKILL.md by name (or origin:name) before acting on a genuine match from the skill list or Workhorse skill radar. Returns instructions only. If the skill needs files or shell, say so — a custom HTTP bot cannot run those scripts.",
+      "Read one SKILL.md by name (or origin:name) when the request is that workflow. Returns instructions only. If the skill needs files or shell, say so — a custom HTTP bot cannot run those scripts.",
     inputSchema: {
       type: "object",
       properties: { skill: { type: "string", description: "Skill name, or grok:pdf" } },
@@ -2153,10 +2152,7 @@ async function spawnAgent(
     ? {
         ...inheritedInput,
         timeoutSeconds: Math.min(NESTED_HELPER_TIMEOUT_SECONDS, Math.max(30, input.timeoutSeconds ?? NESTED_HELPER_TIMEOUT_SECONDS)),
-        tokenBudget: nestedHelperBudget({
-          requested: input.tokenBudget,
-          parentRemaining: parentBudgetRemaining(caller?.agentRun),
-        }),
+        tokenBudget: undefined,
         isolation: nestedPolicy.isolation,
         route: input.route ?? "quick",
         // The role and the read-only clamp are the same fact. A helper the call
@@ -2167,22 +2163,13 @@ async function spawnAgent(
       }
     : {
         ...inheritedInput,
+        tokenBudget: undefined,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };
   // The schema offers 30-3600 s; a nested helper is held to a two-minute
   // check. Clamping in silence let a caller ask for an hour, get two minutes,
   // and read the early stop as a crash. Say so in the result instead.
-  // Both clamps speak. A raised token budget was the one that stayed silent,
-  // and it is the control the schema calls "stopping a runaway".
-  const clampNote = isNested
-    ? [
-        nestedTimeoutNote(input.timeoutSeconds),
-        nestedHelperBudgetNote(input.tokenBudget, nestedHelperBudget({
-          requested: input.tokenBudget,
-          parentRemaining: parentBudgetRemaining(caller?.agentRun),
-        })),
-      ].filter(Boolean).join(" ")
-    : "";
+  const clampNote = isNested ? nestedTimeoutNote(input.timeoutSeconds) : "";
   const skillQueries = spawnInput.skills?.filter((skill) => skill.trim()) ?? [];
   const requestedSkills = skillQueries.length > 0
     ? resolveRequestedSkills(listDeskSkills(projectFoldersFromState()), skillQueries)
@@ -3513,7 +3500,11 @@ async function callDeskTool(name: string, args: Record<string, unknown>, from?: 
   }
   if (name === "workhorse_list_skills") {
     const origin = typeof args.origin === "string" ? args.origin.trim().toLowerCase() : "";
-    const rows = publicDeskSkills(projectFoldersFromState());
+    const rows = publicDeskSkills(
+      projectFoldersFromState(),
+      undefined,
+      normalizeSettings(readState().settings).skills,
+    );
     return JSON.stringify(
       origin ? rows.filter((row) => row.origin === origin) : rows,
       null,

@@ -10,7 +10,7 @@ import {
 import { useStore } from "../lib/store";
 
 /**
- * Settings → Skills → Workshop. Add a pack, pick the Local Compute host it reads through,
+ * Settings → Workshop. Add a pack, pick the Local Compute host it reads through,
  * confirm the exact URLs. Live watch is the desk rail; this block never paints it.
  * Nothing here starts, stops, routes, or leases anything.
  */
@@ -146,7 +146,7 @@ export function WorkshopBlock() {
   }, [reload, store.settings.workshop]);
 
   // Main broadcasts workshop:changed after liveSettings.workshop saves — keep the
-  // Skills list in sync so a row cannot paint stale On after another turns off.
+  // pack list in sync so a row cannot paint stale On after another turns off.
   useEffect(() => {
     const stop = window.workhorse?.onWorkshopChanged?.(reload);
     return () => stop?.();

@@ -6445,6 +6445,10 @@ html.pane-dragging * {
   margin-bottom: 10px;
 }
 
+.context-pop header.context-spend {
+  margin-bottom: 10px;
+}
+
 .context-pop header strong {
   font-size: 13px;
   font-weight: 620;
@@ -9461,7 +9465,7 @@ html.pane-dragging * {
 
 .workshop-settings { margin-bottom: 8px; }
 
-/* Settings → Skills → Workshop: Add pack row, pack rows, the confirm panel and its source list. */
+/* Settings → Workshop: Add pack row, pack rows, the confirm panel and its source list. */
 .workshop-add { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .workshop-add .settings-search { flex: 1 1 auto; margin: 0; }
 .workshop-pack { flex: 1 1 auto; min-width: 0; }

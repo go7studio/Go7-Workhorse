@@ -5,7 +5,7 @@ import { deskInk } from "../lib/settings";
 import { useStoreSelector } from "../lib/store";
 import { sameContextDesk, selectContextDesk } from "../lib/store-select";
 import type { Session } from "../lib/types";
-import { formatTokens } from "../lib/usage";
+import { chatSpend, formatIoLine, formatTokens } from "../lib/usage";
 
 function categoryShare(tokens: number, total: number): number {
   if (tokens <= 0 || total <= 0) return 0;
@@ -196,6 +196,11 @@ export function ContextMeter({
   const shownUsed = stats?.used ?? 0;
   const shownTotal = stats?.total ?? fallbackWindow ?? 0;
   const animatedUsed = useAnimatedNumber(shownUsed, session?.id);
+  const spend = useMemo(
+    () => (referenceOnly ? null : chatSpend(desk.usage, session?.id)),
+    [referenceOnly, desk.usage, session?.id],
+  );
+  const spentTokens = spend?.totalTokens ?? 0;
   if ((!session || !estimate || !stats) && !(fallbackWindow && fallbackWindow > 0)) return null;
   if ((!session || !estimate || !stats) && fallbackWindow && fallbackWindow > 0) {
     return (
@@ -228,7 +233,7 @@ export function ContextMeter({
       <button
         type="button"
         className={`context-meter ${session.provider}`}
-        title={`${shownUsed.toLocaleString()} of ${shownTotal.toLocaleString()} tokens retained for the next request`}
+        title={`${shownUsed.toLocaleString()} of ${shownTotal.toLocaleString()} tokens retained for the next request${spentTokens > 0 ? ` · ${spentTokens.toLocaleString()} billed on this chat` : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={(event) => {
@@ -253,6 +258,7 @@ export function ContextMeter({
         <span className="context-copy">
           <strong>{animatedUsed > 0 ? formatWindow(Math.round(animatedUsed)) : "0"}</strong>
           <em>of {formatWindow(shownTotal)}</em>
+          {spentTokens > 0 ? <em>{formatTokens(spentTokens)} spent</em> : null}
         </span>
       </button>
       {open && (
@@ -269,6 +275,15 @@ export function ContextMeter({
               {formatTokens(stats.used)} of {formatTokens(stats.total)} · {formatRetainedPct(stats.used, stats.usagePct)}
             </span>
           </header>
+          {spentTokens > 0 && spend ? (
+            <header className="context-spend">
+              <strong>Spent</strong>
+              <span>
+                {formatTokens(spend.totalTokens)} billed on this chat
+                {spend.events > 0 ? ` · ${formatIoLine(spend)}` : ""}
+              </span>
+            </header>
+          ) : null}
           <div className="context-stack" aria-hidden="true">
             {stats.occupying.map((row) => (
               <i

@@ -186,12 +186,19 @@ function openWinDevApp(dest: string) {
   const roaming = process.env.APPDATA?.trim() || path.join(os.homedir(), "AppData", "Roaming");
   const userData = path.join(roaming, WORKHORSE_DEV_USER_DATA_DIR);
   fs.mkdirSync(userData, { recursive: true });
+  const q = (value: string) => value.replace(/'/g, "''");
+  // Put the desk path in env, not argv. A launch flag with a spaced Dev path
+  // is split at the first space on Windows, and Electron then loads empty %APPDATA%\Go7.
   const launched = spawnSync(
     "powershell.exe",
     [
       "-NoProfile",
       "-Command",
-      `Start-Process -FilePath '${exe.replace(/'/g, "''")}' -WorkingDirectory '${dest.replace(/'/g, "''")}' -ArgumentList @('--workhorse-user-data=${userData.replace(/'/g, "''")}','--workhorse-volatile-credentials')`,
+      [
+        `$env:WORKHORSE_USER_DATA_PATH = '${q(userData)}'`,
+        `$env:WORKHORSE_VOLATILE_CREDENTIALS = '1'`,
+        `Start-Process -FilePath '${q(exe)}' -WorkingDirectory '${q(dest)}'`,
+      ].join("; "),
     ],
     { windowsHide: true, encoding: "utf8" },
   );

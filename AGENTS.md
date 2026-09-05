@@ -13,7 +13,7 @@ may read. Do not add operator Bibles, studio memory, or working papers here.
 - **A chat starts, then you pick the model.** The composer menu holds vendor, model (for example Grok 4.6 or GPT-5.6-Sol), and brain effort. A vendor client such as the Grok Build CLI or Codex CLI is not a model. Do not put a brain picker in front of New chat.
 - **Tools** (Figma, GitHub, and so on) attach to a runtime. They are not extra tabs.
 - Permissions are one inbox. Each click is translated to that vendor’s own protocol later.
-- **Settings holds Profile, connected LLMs, skills, routing, learning, usage, watch.** Usage is not a top-level sidebar item. Adapters call `recordUsage`. Do not invent tokens for preview chats.
+- **Settings holds Profile, connected LLMs, skills, workshop, routing, learning, usage, watch.** Usage is not a top-level sidebar item. Adapters call `recordUsage`. Do not invent tokens for preview chats.
 - Do not merge subscriptions, context, or sandboxes across vendors.
 
 ## Layout

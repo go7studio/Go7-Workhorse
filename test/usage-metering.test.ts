@@ -12,6 +12,7 @@ import {
   billedCompactUsage,
   byModel,
   cellDotBackground,
+  chatSpend,
   deskUsageCards,
   heatCellBots,
   eventTotal,
@@ -889,4 +890,51 @@ test("Spend docs keep leftover, billed tokens, and retained context distinct", (
   assert.match(features, /Grok, Claude, and Codex stay unknown/);
   assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);
   assert.match(features, /Retained context is this chat's window occupancy, never the[\s\S]*leftover ring/);
+  assert.match(features, /billed total is on the chat meter/);
+});
+
+test("chat spend is this session's billed in plus out", () => {
+  const events = [
+    {
+      id: "a",
+      at: 1,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "b",
+      at: 2,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "chat-1",
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    {
+      id: "c",
+      at: 3,
+      provider: "grok" as const,
+      model: "grok-4.6",
+      sessionId: "other",
+      inputTokens: 9_999,
+      outputTokens: 9_999,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+  ];
+  const spend = chatSpend(events, "chat-1");
+  assert.equal(spend.inputTokens, 120);
+  assert.equal(spend.outputTokens, 50);
+  assert.equal(spend.cacheReadTokens, 800);
+  assert.equal(spend.totalTokens, 170);
+  assert.equal(spend.events, 2);
+  assert.equal(chatSpend(events, "missing").events, 0);
+  assert.equal(chatSpend(events, undefined).events, 0);
 });

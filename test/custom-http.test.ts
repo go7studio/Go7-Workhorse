@@ -2446,14 +2446,23 @@ test("routing evidence is kept only for the worker identity that ran", () => {
  * and comparing normalized strings let it through: a symlink sitting inside
  * the workspace passed `startsWith` while pointing anywhere.
  */
-test("the sandbox contains the real path, not the spelling of it", () => {
+test("the sandbox contains the real path, not the spelling of it", (t) => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "wh-contain-"));
   const workspace = path.join(tmp, "workspace");
   const secrets = path.join(tmp, "secrets");
   mkdirSync(workspace);
   mkdirSync(secrets);
   writeFileSync(path.join(secrets, "key.txt"), "not for the agent");
-  symlinkSync(secrets, path.join(workspace, "escape"));
+  try {
+    symlinkSync(secrets, path.join(workspace, "escape"));
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
 
   // A file inside the workspace is still fine.
   writeFileSync(path.join(workspace, "notes.md"), "ok");

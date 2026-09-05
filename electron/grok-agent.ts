@@ -36,6 +36,8 @@ export type GrokUsageDraft = {
 export type GrokPermissionAsk = {
   requestId: string;
   tool: string;
+  /** The vendor's own name for the call, unprettified, for the classifiers. */
+  rawTool?: string;
   detail: string;
   path?: string;
 };
@@ -570,6 +572,20 @@ function toolTitle(params: Record<string, unknown>): string {
   const title = rawToolTitle(params);
   if (!title) return "use a tool";
   return prettyToolTitle(title);
+}
+
+/**
+ * The vendor's own word for what the call does. Claude sends a shell call with
+ * the command itself as the title, which the desk's labeller renames to "Run a
+ * command" for the card — a name the permission classifiers did not know, so a
+ * plain grep was denied on a read-only seat. The ACP kind ("execute", "read",
+ * "search") rides alongside the title so the classifiers judge the raw name
+ * while the card still shows the pretty one.
+ */
+function rawToolName(params: Record<string, unknown>): string | undefined {
+  const toolCall = asRecord(params.toolCall);
+  const kind = typeof toolCall.kind === "string" ? toolCall.kind.trim() : "";
+  return kind || undefined;
 }
 
 function toolDetail(params: Record<string, unknown>): string {
@@ -1233,6 +1249,7 @@ export class GrokAgent {
     const ask: GrokPermissionAsk = {
       requestId,
       tool: toolTitle(params),
+      rawTool: rawToolName(params),
       detail: toolDetail(params),
       path: toolPath(params),
     };

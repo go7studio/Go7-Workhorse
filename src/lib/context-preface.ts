@@ -114,9 +114,9 @@ export function buildPolicyContext(
           : "Ask — changing tools wait for the user.";
   const box =
     sandbox === "read-only"
-      ? "Read-only — writes, edits, creates, deletes, and shell commands are blocked."
+      ? "Read-only — writes, edits, creates, and deletes are blocked. A command that only reads still runs."
       : sandbox === "strict"
-        ? "Strict — tightest box. Writes and shell commands are blocked."
+        ? "Strict — tightest box. Writes are blocked. A command that only reads still runs."
         : sandbox === "workspace"
           ? "Workspace — writes stay in the project folder."
           : "Off — full machine access, subject to Permission.";

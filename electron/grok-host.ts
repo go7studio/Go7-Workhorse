@@ -58,6 +58,8 @@ export type GrokIpcEvent =
       sessionId: string;
       requestId: string;
       tool: string;
+      /** The vendor's own name for the call. The classifiers judge this; the card shows `tool`. */
+      rawTool?: string;
       detail: string;
       path?: string;
       elevate?: { mode?: import("../src/lib/types").PermissionMode; sandbox?: import("../src/lib/types").SandboxProfile };
@@ -271,12 +273,13 @@ export class GrokSessionHost {
           provider: "grok",
           ...usage,
         }),
-      onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>
+      onPermission: (ask: { requestId: string; tool: string; rawTool?: string; detail: string; path?: string }) =>
         emit({
           type: "permission" as const,
           sessionId: input.sessionId,
           requestId: ask.requestId,
           tool: ask.tool,
+          rawTool: ask.rawTool,
           detail: ask.detail,
           path: ask.path,
         }),

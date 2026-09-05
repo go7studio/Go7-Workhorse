@@ -6918,20 +6918,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? event.elevate
             : undefined;
         const ownerProject = owner ? stateRef.current.projects.find((item) => item.id === owner.projectId) : undefined;
+        // The card shows the title the desk's labeller made — "Run a command".
+        // The classifiers need the vendor's own name for the same call, which
+        // rides alongside it, because a title no classifier knew read as
+        // not-a-shell and denied a Claude worker's grep on a read-only seat.
+        const classifyTool =
+          "rawTool" in event && typeof event.rawTool === "string" && event.rawTool.trim()
+            ? `${event.tool} ${event.rawTool.trim()}`
+            : event.tool;
         const security = owner
           ? securityPolicyAnswer({
               policy: owner.securityPolicy,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
               roots: ownerProject?.folders.map((folder) => folder.path) ?? [],
+              // Where this worker actually runs, so a `..` inside a command is
+              // measured from there. A worktree session is not its project
+              // folder, and resolving against the wrong one moves the boundary.
+              cwd: sessionExecutionCwd(owner.environment, primaryFolder(ownerProject, folderExists)?.path ?? ""),
             })
           : { answer: null };
         const forced = security.answer ?? (owner
           ? permissionPolicyAnswer({
               mode: owner.mode,
               sandbox: owner.sandbox,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
             })
@@ -6943,7 +6955,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? elevationForBlock({
                   mode: owner.mode,
                   sandbox: owner.sandbox,
-                  tool: event.tool,
+                  tool: classifyTool,
                   detail: event.detail,
                   path: event.path,
                 })
@@ -7016,7 +7028,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ? grantedPolicyAnswer({
               granted: owner.agentRun?.grantedAccess?.mode,
               sandbox: owner.sandbox,
-              tool: event.tool,
+              tool: classifyTool,
               detail: event.detail,
               path: event.path,
             })

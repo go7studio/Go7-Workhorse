@@ -26,6 +26,7 @@ import {
   withoutMachineWrittenScores,
   writeBackTripleFor,
 } from "../src/lib/custom-bots";
+import { contextWindowFor } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
 import { shouldRefreshPlansForRouting } from "../src/lib/watch";
 import type { GrokPlanUsage, RoutingSettings, Settings } from "../src/lib/types";
@@ -205,7 +206,7 @@ test("a write-back of the family default is taken back off, in both directions",
     createdAt: 1,
     routingProfile: { intelligence: 5, speed: 3, cost: 3, local: true },
   };
-  assert.equal(routingProfileForModel("custom", spark.model).intelligence, 6, "the family says 6");
+  const family = routingProfileForModel("custom", spark.model);
   assert.equal(
     routingProfileForModel("custom", spark.model, spark.routingProfile).intelligence,
     10,
@@ -214,7 +215,22 @@ test("a write-back of the family default is taken back off, in both directions",
   const [migrated] = migrateCustomBotRatings([normalizeCustomBot(spark)!]);
   assert.equal(migrated?.routingProfile?.intelligence, undefined, "the rating nobody wrote is dropped");
   assert.equal(migrated?.routingProfile?.local, true, "ticking Local was a real choice and stays");
-  assert.equal(routingProfileForModel("custom", spark.model, migrated?.routingProfile).intelligence, 6);
+  assert.equal(
+    routingProfileForModel("custom", spark.model, migrated?.routingProfile).intelligence,
+    family.intelligence,
+    "and the bot falls back to whatever the family says",
+  );
+  // The write-back was stored when qwen3.8 was an unrated slug scoring 6/3/3.
+  // Naming it in the family table changes its signature, so the migration has
+  // to keep recognising the unrated default or this fix would silently undo
+  // itself the moment the table moved. It has moved, in this same change.
+  assert.notEqual(family.intelligence, 6, "qwen3.8 now has its own row");
+  assert.deepEqual(writeBackTripleFor(family), { intelligence: 5, speed: 4, cost: 2 });
+  assert.notDeepEqual(
+    writeBackTripleFor(family),
+    { intelligence: 5, speed: 3, cost: 3 },
+    "so the stored triple is no longer this model's own signature",
+  );
   // The other direction, on the same rule: Kimi's legacy triple.
   const [kimi] = migrateCustomBotRatings([
     normalizeCustomBot(syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3 } }))!,
@@ -353,6 +369,81 @@ test("deep work still goes to a frontier seat, not to the cheap bot", () => {
   };
   const ranked = rankRoutingCandidates([kimi, opus], { ...codingBrief, tier: "deep" }, routing);
   assert.equal(ranked[0]?.provider, "claude", "under the deep bar of 10, Kimi is charged for the gap");
+});
+
+// C — Synthetic's whole catalog, rated so it can compete
+
+test("every model Synthetic serves is rated, and ranks in the order the table says", () => {
+  // Ids and context lengths from the vendor's own published catalog,
+  // GET https://api.synthetic.new/v1/models. One bot, every approved model.
+  const catalog = [
+    "hf:moonshotai/Kimi-K3",
+    "hf:zai-org/GLM-5.2",
+    "hf:zai-org/GLM-5.3-Flash",
+    "hf:zai-org/GLM-4.7-Flash",
+    "hf:Qwen/Qwen3.8-27B",
+    "hf:openai/gpt-oss-120b",
+    "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+  ];
+  const settings = deskWith([syntheticBot({ models: catalog })]);
+  const rows = routingCandidatesForDesk(settings, [], plansWith());
+  const rated = new Map(rows.map((row) => [row.model, row.profile]));
+  assert.equal(rated.size, catalog.length, "every approved model became a candidate");
+  // Nothing lands on the unrated mid-field default any more.
+  for (const model of catalog) {
+    assert.notDeepEqual(
+      [rated.get(model)!.intelligence, rated.get(model)!.speed, rated.get(model)!.cost],
+      [6, 3, 3],
+      `${model} is rated, not left unknown`,
+    );
+  }
+  const ranked = rankRoutingCandidates(rows, codingBrief, routing);
+  // Only the two flagships clear the balanced bar of 8.
+  const overBar = ranked.filter((row) => row.profile.intelligence >= 8).map((row) => row.model);
+  assert.deepEqual(new Set(overBar), new Set(["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"]));
+  assert.ok(
+    ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"].includes(ranked[0]!.model),
+    `a flagship wins balanced coding, got ${ranked[0]!.model}`,
+  );
+  // And the ordering the table promises holds all the way down.
+  const rank = (model: string) => ranked.findIndex((row) => row.model === model);
+  assert.ok(rank("hf:zai-org/GLM-5.3-Flash") < rank("hf:zai-org/GLM-4.7-Flash"), "5.3 Flash over 4.7 Flash");
+  assert.ok(rank("hf:Qwen/Qwen3.8-27B") < rank("hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"), "Qwen over Nemotron");
+});
+
+test("a text-only model is not offered work that carries an image", () => {
+  // Routing an image at a model that cannot read one is a failed send, not a
+  // worse pick. GLM 5.2, GLM 4.7 Flash, gpt-oss and Nemotron are text only in
+  // the vendor's catalog; Kimi K3 and Qwen3.8 take images.
+  const textOnly = ["hf:zai-org/GLM-5.2", "hf:zai-org/GLM-4.7-Flash", "hf:openai/gpt-oss-120b"];
+  const withVision = ["hf:moonshotai/Kimi-K3", "hf:Qwen/Qwen3.8-27B"];
+  const settings = deskWith([syntheticBot({ models: [...textOnly, ...withVision] })]);
+  const rows = routingCandidatesForDesk(settings, [], plansWith());
+  const ranked = rankRoutingCandidates(rows, { ...codingBrief, requirements: { images: true } }, routing);
+  const picked = ranked.map((row) => row.model);
+  for (const model of textOnly) assert.equal(picked.includes(model), false, `${model} reads no images`);
+  for (const model of withVision) assert.equal(picked.includes(model), true, `${model} does`);
+});
+
+test("a bot saved at the 128k default still gets its model's real window", () => {
+  // The live Synthetic connection carries contextWindow 128000 because it was
+  // saved before its model was catalogued. Kimi K3 holds 524288, and routing
+  // was skipping it on any thread wider than 128k.
+  assert.equal(contextWindowFor("custom", "hf:moonshotai/Kimi-K3", 128_000), 524_288);
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-4.7-Flash", 128_000), 196_608);
+  assert.equal(contextWindowFor("custom", "syn:small:vision", 128_000), 262_144);
+  // A bot that reports more than the catalog keeps its own figure: neither
+  // source is allowed to shrink the other.
+  assert.equal(contextWindowFor("custom", "hf:moonshotai/Kimi-K3", 1_000_000), 1_000_000);
+  // A model nobody has catalogued still falls back the way it always did.
+  assert.equal(contextWindowFor("custom", "some-private-model", 200_000), 200_000);
+  assert.equal(contextWindowFor("custom", "some-private-model"), 128_000);
+
+  // And the effect that matters: a 300k thread no longer skips the bot.
+  const settings = deskWith([syntheticBot()]);
+  const rows = routingCandidatesForDesk(settings, [], plansWith());
+  const ranked = rankRoutingCandidates(rows, { ...codingBrief, contextNeed: 300_000 }, routing);
+  assert.equal(ranked[0]?.customBotId, "bot_wfd6ghzwhfa7", "the 524k window holds a 300k thread");
 });
 
 // D — one line that says what happened

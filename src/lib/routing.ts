@@ -344,7 +344,9 @@ function profile(
   intelligence: number,
   speed: number,
   cost: number,
-  patch: Partial<ModelRoutingProfile> = {},
+  // A family names only the modalities it differs from, so a text-only model
+  // says `{ inputs: { images: false } }` and inherits the rest from INPUTS.
+  patch: Partial<Omit<ModelRoutingProfile, "inputs">> & { inputs?: Partial<ModelInputCapabilities> } = {},
 ): ModelRoutingProfile {
   return {
     intelligence,
@@ -367,7 +369,11 @@ function profile(
  *
  * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
  * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
- * gpt-5.4, sol/terra/luna before any bare gpt-5.6.
+ * gpt-5.4, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
+ * glm-5.2 before glm-5 before glm, qwen3.8 before any later qwen.
+ *
+ * The whole table is a standing judgement, not a measurement. It is meant to
+ * be argued with and edited.
  */
 export function routingProfileForModel(
   provider: ProviderId,
@@ -431,13 +437,42 @@ export function routingProfileForModel(
     base = profile(7, 5, 2);
   } else if (slug.includes("gemini")) {
     base = slug.includes("pro") ? profile(8, 4, 3) : profile(5, 5, 2);
-  } else if (slug.includes("kimi")) {
+  } else if (slug.includes("kimi-k3")) {
     // Balanced band, beside Terra and Sonnet 4.6, and cheaper than both. Kimi
-    // and GLM shared one row at 7 and both missed the bar of 8; only Kimi has
-    // the coding record to move, so GLM keeps the old rating below.
+    // and GLM shared one row at 7 and both missed the bar of 8, so Auto could
+    // never put ordinary coding on either.
     base = profile(8, 3, 2, { strengths: CODE });
-  } else if (slug.includes("glm")) {
+  } else if (slug.includes("kimi")) {
+    // An older or unannounced Kimi is not automatically the flagship.
     base = profile(7, 3, 2, { strengths: CODE });
+  } else if (slug.includes("glm-5.2")) {
+    base = profile(8, 3, 2, { strengths: CODE, inputs: { images: false } });
+  } else if (slug.includes("glm-5")) {
+    // GLM 5.3 Flash: a 524k window and quick, but a Flash is not the flagship.
+    base = profile(7, 4, 2, { strengths: CODE });
+  } else if (slug.includes("glm")) {
+    // GLM 4.7 Flash and older. Text only, in the 30B class.
+    base = profile(6, 4, 2, { inputs: { images: false } });
+  } else if (slug.includes("qwen3.8")) {
+    // Synthetic's syn:small:vision. The vendor calls it a small but capable
+    // coding and vision model that drains rate limits slowly.
+    base = profile(7, 4, 2, { strengths: CODE });
+  } else if (slug.includes("gpt-oss")) {
+    base = profile(7, 3, 2, { strengths: CODE, inputs: { images: false } });
+  } else if (slug.includes("nemotron")) {
+    base = profile(6, 3, 2, { inputs: { images: false } });
+  } else if (slug === "syn:large:vision") {
+    // The aliases are rated as whatever Synthetic points them at today, so the
+    // same model cannot score two different ways depending on which of its two
+    // names a chat happens to hold. Re-check these against the published
+    // catalog when the vendor moves an alias.
+    base = profile(8, 3, 2, { strengths: CODE }); // -> moonshotai/Kimi-K3
+  } else if (slug === "syn:large:text") {
+    base = profile(7, 4, 2, { strengths: CODE }); // -> zai-org/GLM-5.3-Flash
+  } else if (slug === "syn:small:vision") {
+    base = profile(7, 4, 2, { strengths: CODE }); // -> Qwen/Qwen3.8-27B
+  } else if (slug === "syn:small:text") {
+    base = profile(6, 4, 2, { inputs: { images: false } }); // -> zai-org/GLM-4.7-Flash
   } else if (slug.includes("gpt-5.5") || slug.includes("gpt-5.4")) {
     base = profile(8, 4, 3, { strengths: CODE });
   } else if (/gpt-5\.[1-3]/.test(slug)) {

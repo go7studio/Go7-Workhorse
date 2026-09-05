@@ -69,12 +69,17 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-sonnet-4-6"), 8);
   assert.equal(intelligence("cursor", "composer-2.5"), 8);
   assert.equal(intelligence("codex", "gpt-5.5"), 8);
-  // The two open models with the coding record sit in the balanced band, so
-  // ordinary coding can reach them. The bar for balanced is still 8.
+  // The flagship open models sit in the balanced band, so ordinary coding can
+  // reach them. The bar for balanced is still 8.
   assert.equal(intelligence("custom", "MiniMax-M3"), 8);
   assert.equal(intelligence("custom", "hf:moonshotai/Kimi-K3"), 8);
-  // GLM has not earned the same move and keeps the old rating.
-  assert.equal(intelligence("custom", "hf:zai-org/GLM-5.2"), 7);
+  assert.equal(intelligence("custom", "hf:zai-org/GLM-5.2"), 8);
+  // The rest of Synthetic's catalog, below the flagships and above nothing.
+  assert.equal(intelligence("custom", "hf:zai-org/GLM-5.3-Flash"), 7);
+  assert.equal(intelligence("custom", "hf:Qwen/Qwen3.8-27B"), 7);
+  assert.equal(intelligence("custom", "hf:openai/gpt-oss-120b"), 7);
+  assert.equal(intelligence("custom", "hf:zai-org/GLM-4.7-Flash"), 6);
+  assert.equal(intelligence("custom", "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"), 6);
   // Light
   assert.equal(intelligence("claude", "claude-haiku-4-5"), 5);
   assert.equal(intelligence("codex", "gpt-5.6-luna"), 5);
@@ -95,8 +100,18 @@ test("slug order: the specific name wins before the generic one", () => {
   assert.equal(intelligence("claude-sonnet-5"), 9);
   assert.equal(intelligence("MiniMax-M3"), 8, "minimax-m3 before minimax");
   assert.equal(intelligence("MiniMax-M2.7"), 6, "generic minimax is last gen");
-  assert.equal(intelligence("hf:moonshotai/Kimi-K3"), 8, "kimi before glm");
-  assert.equal(intelligence("hf:zai-org/GLM-5.2"), 7, "glm keeps the old rating");
+  assert.equal(intelligence("hf:moonshotai/Kimi-K3"), 8, "kimi-k3 before kimi");
+  assert.equal(intelligence("kimi-k2"), 7, "an older Kimi is not the flagship");
+  assert.equal(intelligence("hf:zai-org/GLM-5.2"), 8, "glm-5.2 before glm-5");
+  assert.equal(intelligence("hf:zai-org/GLM-5.3-Flash"), 7, "glm-5 before glm");
+  assert.equal(intelligence("hf:zai-org/GLM-4.7-Flash"), 6, "bare glm is last");
+  assert.equal(intelligence("hf:Qwen/Qwen3.8-27B"), 7, "qwen3.8 is named");
+  // An alias scores as whatever Synthetic points it at, so one model cannot
+  // compete at two ratings depending on which of its names a chat holds.
+  assert.equal(intelligence("syn:large:vision"), intelligence("hf:moonshotai/Kimi-K3"));
+  assert.equal(intelligence("syn:large:text"), intelligence("hf:zai-org/GLM-5.3-Flash"));
+  assert.equal(intelligence("syn:small:vision"), intelligence("hf:Qwen/Qwen3.8-27B"));
+  assert.equal(intelligence("syn:small:text"), intelligence("hf:zai-org/GLM-4.7-Flash"));
   assert.equal(intelligence("grok-4.6"), 10, "grok-4.6 before grok-4.5");
   assert.equal(intelligence("grok-4.5"), 8);
   assert.equal(intelligence("gpt-5.4-mini"), 5, "mini before gpt-5.4");

@@ -29,6 +29,19 @@ export const ROUTING_ROLE_PRESETS: Record<"quick" | "balanced" | "deep", Routing
  */
 const LEGACY_WRITTEN_TRIPLE: RoutingScoreTriple = { intelligence: 3, speed: 3, cost: 3 };
 
+/**
+ * The mid-field default every unrated slug scored before it was named.
+ *
+ * A write-back signature is read against the family table, so adding a model to
+ * that table changes its signature and would quietly un-catch the stale value
+ * already on disk. DGX Spark proved it: stored 5/3/3 from the unrated default
+ * of 6/3/3, and the moment `qwen3.8` earned its own row the migration stopped
+ * recognising it and the bogus rating of 10 would have come back. Any model
+ * being named today was unrated yesterday, so the unrated default's own
+ * write-back is always a signature worth checking.
+ */
+const UNRATED_FAMILY: RoutingScoreTriple = { intelligence: 6, speed: 3, cost: 3 };
+
 function sameTriple(profile: Partial<ModelRoutingProfile>, triple: RoutingScoreTriple): boolean {
   return (
     profile.intelligence === triple.intelligence &&
@@ -74,6 +87,7 @@ export function withoutMachineWrittenScores(
   if (Object.values(ROUTING_ROLE_PRESETS).some((preset) => sameTriple(profile, preset))) return profile;
   const machineWritten =
     sameTriple(profile, LEGACY_WRITTEN_TRIPLE) ||
+    sameTriple(profile, writeBackTripleFor(UNRATED_FAMILY)) ||
     (family !== undefined && sameTriple(profile, writeBackTripleFor(family)));
   if (!machineWritten) return profile;
   const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = profile;

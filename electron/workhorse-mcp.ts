@@ -2438,12 +2438,6 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
   if ((snapshot.running ?? []).length > 0) throw new Error("previous mission pass is still running");
   const liveReports = new Map((snapshot.reports ?? []).map((report) => [report.childSessionId, report]));
   const completedWorkerIds = previousWorkerIds.filter((id) => liveReports.get(id)?.status === "completed");
-  // A worker that ended badly does not end the mission. The pass carries what
-  // did not finish, so the next one can pick that work up instead of the
-  // mission dying with its id and acceptance criteria stranded.
-  const unfinishedWorkers = previousWorkerIds
-    .filter((id) => liveReports.get(id)?.status !== "completed")
-    .map((id) => ({ id, status: liveReports.get(id)?.status ?? "unknown" }));
   const sessions = (readState().sessions ?? [])
     .map((row) => normalizeSession(row))
     .filter((session): session is NonNullable<typeof session> => session !== null)
@@ -2464,6 +2458,17 @@ async function continueMission(args: Record<string, unknown>, from?: string): Pr
     });
   const next = nextMissionIteration(sessions, parentId, previousWorkerIds, previousPass, { allowUnfinished: true });
   if (!next.ok) throw new Error(next.error);
+  // A worker that ended badly does not end the mission. The pass carries what
+  // did not finish, so the next one can pick that work up instead of the
+  // mission dying with its id and acceptance criteria stranded. The list is
+  // the desk's wave, not the caller's: a sibling the caller left out still
+  // counts, and the next pass is told about it.
+  const unfinishedWorkers = next.mission.previousWorkerIds
+    .filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed")
+    .map((id) => ({
+      id,
+      status: sessions.find((session) => session.id === id)?.agentRun?.status ?? liveReports.get(id)?.status ?? "unknown",
+    }));
   const requestedTrace = typeof args.traceId === "string" ? args.traceId.trim() : "";
   if (requestedTrace && requestedTrace !== next.mission.id) throw new Error("traceId does not match this mission");
   const source = previousWorkerIds

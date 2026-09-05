@@ -1842,6 +1842,29 @@ export function resolveMissionManifest(
   return { mission: first, coordinatorId: coordinator.id };
 }
 
+/**
+ * Every worker the desk seated in that mission pass: the caller's ids plus
+ * every sibling on the same parent carrying the same mission id and
+ * iteration. Phase, running and unfinished checks read the wave, so a caller
+ * cannot shape the verdict by choosing which workers to mention.
+ */
+export function missionWave(
+  sessions: Session[],
+  parentId: string,
+  ids: readonly string[],
+  mission: { id: string; iteration: number },
+): string[] {
+  const siblings = sessions
+    .filter(
+      (session) =>
+        session.parentId === parentId &&
+        session.agentRun?.mission?.id === mission.id &&
+        session.agentRun?.mission?.iteration === mission.iteration,
+    )
+    .map((session) => session.id);
+  return [...new Set([...ids, ...siblings])];
+}
+
 export function nextMissionIteration(
   sessions: Session[],
   parentId: string,
@@ -1864,7 +1887,7 @@ export function nextMissionIteration(
   if (ids.some((id) => !sessions.find((session) => session.id === id && session.parentId === parentId))) {
     return { ok: false, error: "unknown worker in this mission" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
+  if (missionWave(sessions, parentId, ids, first).some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
     return { ok: false, error: "previous mission pass is still running" };
   }
   // A pass that ENDED badly is not a reason to end the mission. It used to be:
@@ -1877,7 +1900,11 @@ export function nextMissionIteration(
   // Anything short of completed is unfinished: interrupted, failed, timed out,
   // cancelled, over budget. Deriving a phase from any of them would let a
   // caller claim a phase the desk never reached.
-  const unfinished = ids.filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed");
+  // The wave is the desk's own record of that pass, not the caller's list. A
+  // caller who names only the sibling that completed must not earn the next
+  // phase for a wave whose reviewer failed; the omitted worker still counts.
+  const wave = missionWave(sessions, parentId, ids, first);
+  const unfinished = wave.filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed");
   if (!options?.allowUnfinished && unfinished.length > 0) {
     return { ok: false, error: "that pass did not finish; continue the mission to pick its work up" };
   }
@@ -1897,7 +1924,7 @@ export function nextMissionIteration(
     mission: {
       ...first,
       iteration: first.iteration + 1,
-      previousWorkerIds: ids,
+      previousWorkerIds: wave,
       phase,
       clearance: undefined,
     },

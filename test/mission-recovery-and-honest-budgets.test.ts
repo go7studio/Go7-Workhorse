@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { NESTED_HELPER_TOKEN_BUDGET, nestedHelperBudget, nestedHelperBudgetNote } from "../src/lib/worker-budget";
-import { nextMissionIteration } from "../src/lib/subagents";
+import { missionWave, nextMissionIteration } from "../src/lib/subagents";
 import type { MissionIteration, Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -88,9 +88,32 @@ test("the advice that could not be followed is gone", () => {
 
 test("the next pass is told which workers did not finish", () => {
   const mcp = read("electron/workhorse-mcp.ts");
-  assert.match(mcp, /const unfinishedWorkers = previousWorkerIds/, "the dead workers are collected");
+  assert.match(mcp, /const unfinishedWorkers = next.mission.previousWorkerIds/, "the dead workers are collected");
   assert.match(mcp, /unfinished: unfinishedWorkers,/, "and handed to the pass that follows");
   const prompt = mcp.slice(mcp.indexOf("function missionContinuationPrompt"), mcp.indexOf("async function continueMission"));
   assert.match(prompt, /DID NOT FINISH LAST PASS/, "so the next pass knows that work is still open");
   assert.match(prompt, /do not assume anything they claimed was verified/);
+});
+
+test("naming only the sibling that completed does not earn the next phase; the wave is the desk's record", () => {
+  // The gate's attack: an approve wave {coord completed, rev failed}, continued
+  // with previousWorkerIds: [coord]. The omitted reviewer still counts.
+  const sessions = [worker("coord", "completed"), worker("rev", "failed")];
+  assert.deepEqual(missionWave(sessions, "parent", ["coord"], MISSION).sort(), ["coord", "rev"], "the wave is every sibling of that pass");
+  const derived = nextMissionIteration(sessions, "parent", ["coord"], 1);
+  assert.equal(derived.ok, false, "derivation refuses: someone in that pass did not finish");
+  if (!derived.ok) assert.match(derived.error, /did not finish/);
+  const carried = nextMissionIteration(sessions, "parent", ["coord"], 1, { allowUnfinished: true });
+  assert.equal(carried.ok, true);
+  if (carried.ok) {
+    assert.equal(carried.mission.phase, MISSION.phase, "the next pass re-runs the phase the wave did not finish");
+    assert.deepEqual([...carried.mission.previousWorkerIds].sort(), ["coord", "rev"], "and it carries the omitted worker forward");
+  }
+  // A sibling of ANOTHER pass is not in this wave.
+  const other = { ...worker("old", "failed"), agentRun: { status: "failed", startedAt: 1, mission: { ...MISSION, iteration: 0 } } } as unknown as Session;
+  assert.deepEqual(missionWave([...sessions, other], "parent", ["coord"], MISSION).sort(), ["coord", "rev"]);
+  // A wave every sibling finished still moves on, whoever the caller named.
+  const done = nextMissionIteration([worker("coord", "completed"), worker("rev", "completed")], "parent", ["rev"], 1, { allowUnfinished: true });
+  assert.equal(done.ok, true);
+  if (done.ok) assert.notEqual(done.mission.phase, MISSION.phase);
 });

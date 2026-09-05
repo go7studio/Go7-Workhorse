@@ -177,7 +177,8 @@ export function securityPolicyAnswer(input: {
   ) {
     const command = shellCommandIn(input.detail) ?? input.detail;
     const cwd = (input.cwd ?? "").trim() || (roots[0] ?? "");
-    if (commandPaths(command, cwd).some(outside)) {
+    const targets = commandTargets(command, cwd);
+    if (targets.unjudgeable || targets.paths.some(outside)) {
       if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
       if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
     }
@@ -275,7 +276,16 @@ const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 type CommandStage = { program: string; args: string[] };
-type CommandWalk = { stages: CommandStage[]; unsafe: boolean };
+type CommandWalk = {
+  stages: CommandStage[];
+  /** Anything that stops the programs at the front speaking for the command. */
+  unsafe: boolean;
+  /** Text this side cannot see the value of: a substitution, or an open quote. */
+  hidden: boolean;
+};
+
+/** Characters a backslash is escaping. Anywhere else it is part of the word. */
+const SHELL_ESCAPABLE = /[ \t"'$`\\|&;<>\n]/;
 
 /**
  * Split a command into pipeline stages, honouring quotes. Splitting the raw
@@ -288,6 +298,7 @@ type CommandWalk = { stages: CommandStage[]; unsafe: boolean };
 function shellWalk(command: string): CommandWalk {
   const stages: CommandStage[] = [];
   let unsafe = false;
+  let hidden = false;
   let tokens: string[] = [];
   let token = "";
   let quote: '"' | "'" | null = null;
@@ -322,19 +333,26 @@ function shellWalk(command: string): CommandWalk {
       continue;
     }
     if (char === "\\") {
-      if (index + 1 < command.length) {
-        token += command[index + 1] as string;
+      // A backslash escapes only what a shell escapes. Swallowing it wholesale
+      // turned `C:\repo\..\etc` into `C:repo..etc`, which is not an absolute
+      // path, so no Windows drive path was ever held to the root boundary.
+      const next = command[index + 1];
+      if (next !== undefined && SHELL_ESCAPABLE.test(next)) {
+        token += next;
         index += 1;
+      } else {
+        token += char;
       }
       continue;
     }
-    if (char === ">" || char === "<" || char === "`") {
+    if (char === ">" || char === "<") {
       unsafe = true;
       endToken();
       continue;
     }
-    if (char === "$" && command[index + 1] === "(") {
+    if (char === "`" || (char === "$" && command[index + 1] === "(")) {
       unsafe = true;
+      hidden = true;
       endToken();
       continue;
     }
@@ -348,9 +366,12 @@ function shellWalk(command: string): CommandWalk {
     }
     token += char;
   }
-  if (quote) unsafe = true;
+  if (quote) {
+    unsafe = true;
+    hidden = true;
+  }
   endStage();
-  return { stages, unsafe };
+  return { stages, unsafe, hidden };
 }
 
 /** A matching pair of surrounding quotes comes off; a lone one does not. */
@@ -368,9 +389,25 @@ function climbsOut(value: string): boolean {
 }
 
 /**
- * Resolve a relative path against the folder the command runs in, so `..` is
- * measured where it actually lands. `cat ../../etc/passwd` named no absolute
- * path, so the root check had nothing to test and let it through.
+ * A token the shell rewrites before the program ever sees it. `$HOME/../etc`
+ * and `~/../etc` read here as folders named `$HOME` and `~` sitting under the
+ * working folder, so both resolved to somewhere inside the root and were
+ * allowed; the shell lands them on /etc. Where the token goes is unknowable
+ * from this side, so it is judged as outside rather than guessed at. Single
+ * quotes stop the shell expanding, so a literal '$HOME' really is a name.
+ */
+function expandsAtRuntime(raw: string): boolean {
+  if (raw.length > 1 && raw.startsWith("'") && raw.endsWith("'")) return false;
+  const value = unquote(raw);
+  return /^[$~]/.test(value) || value.includes("${") || value.includes("$(") || value.includes("`");
+}
+
+/**
+ * Resolve a path against the folder the command runs in and flatten every `..`
+ * in it, so the path is measured where it actually lands. `cat ../../etc/passwd`
+ * named no absolute path, so the root check had nothing to test; and
+ * `/repo/../etc/passwd` was absolute but unflattened, so a prefix test read it
+ * as sitting inside /repo. Both land on /etc/passwd.
  */
 function resolveFrom(base: string, value: string): string {
   const combined = absolutePath(value) ? value : `${base}/${value}`;
@@ -388,23 +425,46 @@ function resolveFrom(base: string, value: string): string {
 }
 
 /**
- * The paths a command names, so a root boundary can be applied to them.
- * Absolute paths stand as they are; a path that climbs out with `..` is
- * resolved against the folder the command runs in.
+ * The paths a command names, so a root boundary can be applied to them. Every
+ * path carrying a `..` is flattened first, absolute or not, because a prefix
+ * test cannot see through one. A token the shell rewrites is reported as
+ * unjudgeable rather than guessed at.
+ *
+ * One thing this walk cannot see: a symlink inside the root pointing out of
+ * it. Following that needs realpath on the machine, which is not available
+ * here, so it stays a known gap rather than a silent claim.
  */
-function commandPaths(command: string, cwd: string): string[] {
-  const found: string[] = [];
-  for (const stage of shellWalk(command).stages) {
+function commandTargets(command: string, cwd: string): { paths: string[]; unjudgeable: boolean } {
+  const paths: string[] = [];
+  const walk = shellWalk(command);
+  // A substitution or an unclosed quote hides the target outright. A plain
+  // redirect does not: its file is the next token along, and that is checked.
+  let unjudgeable = walk.hidden;
+  for (const stage of walk.stages) {
     for (const token of [stage.program, ...stage.args]) {
       if (token.includes("://")) continue;
       const afterFlag = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+      if (expandsAtRuntime(afterFlag)) {
+        unjudgeable = true;
+        continue;
+      }
       const value = unquote(afterFlag);
       if (!value) continue;
-      if (absolutePath(value)) found.push(value);
-      else if (cwd && climbsOut(value)) found.push(resolveFrom(cwd, value));
+      if (climbsOut(value)) {
+        if (absolutePath(value) || cwd) paths.push(resolveFrom(cwd, value));
+      } else if (absolutePath(value)) {
+        paths.push(value);
+      }
     }
   }
-  return found;
+  return { paths, unjudgeable };
+}
+
+/** A command holding a token only the shell can resolve is not a search. */
+function expandsSomewhere(command: string): boolean {
+  return shellWalk(command).stages.some((stage) =>
+    [stage.program, ...stage.args].some((token) => expandsAtRuntime(token)),
+  );
 }
 
 function programName(raw: string): string {
@@ -551,6 +611,9 @@ function detailRunsAWrite(detail: string, filePath?: string): boolean {
 function readOnlyPipeline(command: string): boolean {
   const { stages, unsafe } = shellWalk(command);
   if (unsafe || stages.length === 0) return false;
+  // A token the shell rewrites could name anything, so the command cannot be
+  // called a search on the strength of the programs alone.
+  if (expandsSomewhere(command)) return false;
   return stages.every((stage) => {
     const program = programName(stage.program);
     if (!READ_ONLY_PROGRAMS.has(program)) return false;

@@ -247,6 +247,53 @@ test("a path that climbs out of the folder is measured where it lands", () => {
   assert.deepEqual(ask("cat ../../etc/passwd", []), { answer: null }, "no roots, no boundary");
 });
 
+test("a path is flattened before the root test, so `..` cannot hide inside it", () => {
+  const ask = (command: string, roots: string[]) =>
+    securityPolicyAnswer({
+      policy: { network: "allowed", root: "blocked" },
+      tool: DESK_TITLE,
+      detail: JSON.stringify({ command }),
+      roots,
+    });
+  const denied = { answer: "deny", boundary: "outside-workspace" };
+  // inside() is a prefix test, so an unflattened /repo/../etc/passwd read as
+  // sitting under /repo. It lands on /etc/passwd.
+  assert.deepEqual(ask("cat /repo/../etc/passwd", ["/repo"]), denied);
+  assert.deepEqual(ask(String.raw`cat "/repo/../etc/passwd"`, ["/repo"]), denied);
+  assert.deepEqual(ask("cat /repo/app/../src/a.ts", ["/repo"]), { answer: null });
+  // A Windows drive path had its separators eaten as escapes, so it was never
+  // an absolute path and never reached the boundary at all.
+  assert.deepEqual(ask(String.raw`type C:\repo\..\etc\hosts`, [String.raw`C:\repo`]), denied);
+  assert.deepEqual(ask(String.raw`type C:\repo\app\..\src\a.ts`, [String.raw`C:\repo`]), { answer: null });
+});
+
+test("a token only the shell can resolve is not judged here, and is not a search", () => {
+  const ask = (command: string, root: "blocked" | "ask") =>
+    securityPolicyAnswer({
+      policy: { network: "allowed", root },
+      tool: DESK_TITLE,
+      detail: JSON.stringify({ command }),
+      roots: ["/repo/app"],
+      cwd: "/repo/app",
+    });
+  // $HOME and ~ read here as folders sitting under the working folder, so both
+  // resolved to somewhere inside the root. The shell lands them on /etc.
+  for (const command of ["cat $HOME/../etc/passwd", "cat ~/../etc/passwd", String.raw`cat "$(cat /etc/passwd)"`, "cat `whoami`"]) {
+    assert.deepEqual(ask(command, "blocked"), { answer: "deny", boundary: "outside-workspace" }, command);
+    assert.deepEqual(ask(command, "ask"), { answer: null, boundary: "outside-workspace" }, command);
+  }
+  assert.equal(
+    looksLikeSearchOnly(DESK_TITLE, JSON.stringify({ command: "grep x $FILE_IN_ROOT" })),
+    false,
+    "the desk cannot say where the variable points",
+  );
+  // Single quotes stop the shell expanding, so a literal '$HOME' is a name.
+  assert.equal(looksLikeSearchOnly("shell", String.raw`grep '$HOME' notes.md`), true);
+  for (const detail of LIVE_DETAILS) {
+    assert.equal(looksLikeSearchOnly(DESK_TITLE, detail), true, "a trailing $ in a pattern is not an expansion");
+  }
+});
+
 test("a vendor's read-sounding tool name does not make a write a read", () => {
   // The raw name now rides with the title, and it is the vendor's to choose.
   assert.equal(looksLikeWriteTool("Read file read", "rm -rf src"), true);

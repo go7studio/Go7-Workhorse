@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { storedClaudeToken } from "./claude-stored-token";
 import { extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
 import { detectClaudeAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
@@ -36,6 +37,8 @@ export type ClaudeLoginDetectInput = {
   electron?: boolean;
   /** Injectable so tests never depend on the machine's own keychain. */
   keychainHasLogin?: () => boolean;
+  /** Workhorse's own Claude token. Injectable so tests never read the vault. */
+  storedToken?: () => string | null;
 };
 
 export type ClaudeLoginDetectResult = {
@@ -368,16 +371,22 @@ export function detectClaudeLogin(input: ClaudeLoginDetectInput = {}): ClaudeLog
   const launch = resolveClaudeAcpLaunch({ ...input, env, homedir, platform, existsSync, pathDirs });
   const acpBinary = launch?.acpFile ?? null;
   const cliBinary = resolveClaudeCliBinary({ ...input, env, homedir, platform, existsSync, pathDirs });
-  const loggedIn = hasClaudeLoginArtifact(
-    claudeHome,
-    homedir,
-    existsSync,
-    readFile,
-    env,
-    platform,
-    Date.now(),
-    input.keychainHasLogin ?? macKeychainHasClaudeLogin,
-  );
+  // The desk's own token is a login. It used to be counted through the
+  // environment, which is how it reached every other vendor's child; the vault
+  // is where it lives now, and reading it here keeps sign-in on this desk
+  // working without spreading the token to do it.
+  const loggedIn =
+    Boolean((input.storedToken ?? storedClaudeToken)()) ||
+    hasClaudeLoginArtifact(
+      claudeHome,
+      homedir,
+      existsSync,
+      readFile,
+      env,
+      platform,
+      Date.now(),
+      input.keychainHasLogin ?? macKeychainHasClaudeLogin,
+    );
   const connected = Boolean(acpBinary && loggedIn);
   // Same split as Codex: claude-launch.ts reads cliBinary as
   // CLAUDE_CODE_EXECUTABLE and throws CLAUDE_CLI_NOT_INSTALLED without it, so a

@@ -9,6 +9,7 @@ import {
   type GrokSessionMeta,
 } from "./grok-launch";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { storedClaudeToken } from "./claude-stored-token";
 import {
   CLAUDE_ACP_NOT_INSTALLED,
   CLAUDE_CLI_NOT_INSTALLED,
@@ -35,6 +36,8 @@ export type ClaudeLaunchInput = {
   role?: DeskRole;
   /** The model is on no list the desk holds; the vendor must accept it or the session fails. */
   unlistedModel?: boolean;
+  /** Workhorse's own Claude token. Injectable so tests never read the vault. */
+  storedToken?: () => string | null;
 };
 
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan";
@@ -167,7 +170,22 @@ export function buildClaudeLaunchSpec(input: ClaudeLaunchInput): ClaudeLaunchSpe
   // that path sits in app.asar, and spawn goes to the OS, which cannot read an
   // archive — the user gets "spawn ENOTDIR" and no idea what is missing.
   else if (isInsideAsar(launch.acpFile)) throw new Error(CLAUDE_CLI_NOT_INSTALLED);
-  if (!env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+  /*
+   * Claude's login goes on Claude's own env, and nowhere else. The desk used to
+   * copy its vault token onto the shared `process.env` and let this child
+   * inherit it, which handed the user's Claude login to every Codex, Cursor and
+   * Grok child as well. The vault is read here instead. The user's own exported
+   * names are carried across on this spec too, because the desk now drops them
+   * on the way to a child rather than letting four vendors share them.
+   */
+  const outer = input.detect?.env ?? process.env;
+  const stored = (input.storedToken ?? storedClaudeToken)();
+  const ownOauth = outer.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  const ownKey = outer.ANTHROPIC_API_KEY?.trim();
+  if (stored) env.CLAUDE_CODE_OAUTH_TOKEN = stored;
+  else if (ownOauth) env.CLAUDE_CODE_OAUTH_TOKEN = ownOauth;
+  else if (ownKey) env.ANTHROPIC_API_KEY = ownKey;
+  else {
     const desktop = readClaudeDesktopOauth(input.detect);
     if (desktop?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = desktop.accessToken;
   }

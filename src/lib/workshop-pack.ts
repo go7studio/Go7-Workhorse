@@ -837,7 +837,7 @@ export function bindingHas(value: unknown): boolean {
 /** Pick the switch branch. Returns undefined when no case matches and there is no else. */
 
 /** Normalize a feed outputs array into closed gallery rows the paint layer can draw. */
-export function galleryItems(raw: unknown, limit = PACK_LIMITS.maxGalleryItems): GalleryItem[] {
+export function galleryItems(raw: unknown, limit: number = PACK_LIMITS.maxGalleryItems): GalleryItem[] {
   if (!Array.isArray(raw)) return [];
   const cap = Math.min(Math.max(1, limit), PACK_LIMITS.maxGalleryItems);
   const out: GalleryItem[] = [];

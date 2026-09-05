@@ -103,6 +103,24 @@ export function nestedHelperBudget(input: { requested?: number; parentRemaining?
   return Math.max(1, Math.min(remaining, floor));
 }
 
+/**
+ * What to tell a caller whose helper budget was not the one it asked for.
+ *
+ * The floor above is right — 5,000 stopped being a brake when the meter was
+ * rewritten — but raising a caller's number in silence broke the one control
+ * documented for stopping a runaway. A coordinator bounded a helper at 5,000,
+ * the desk gave it 60,000, and the coordinator had no way to know. The sibling
+ * timeout clamp already answered this: clamp, then say so in the result.
+ */
+export function nestedHelperBudgetNote(requested: number | undefined, granted: number): string {
+  const asked = positive(requested);
+  if (!asked || asked === granted) return "";
+  if (granted > asked) {
+    return `Token budget raised from ${asked.toLocaleString("en-US")} to ${granted.toLocaleString("en-US")}: a nested helper cannot run below ${NESTED_HELPER_TOKEN_BUDGET.toLocaleString("en-US")} on the current meter.`;
+  }
+  return `Token budget lowered from ${asked.toLocaleString("en-US")} to ${granted.toLocaleString("en-US")}: that is all the parent's own ceiling has left.`;
+}
+
 export const BUDGET_HANDOFF_PROMPT =
   "TOKEN BUDGET: stop producing. Verify what is already on disk and return a bounded handoff. Say what exists, what was verified, and what remains. Example: patches present; verification incomplete.";
 

@@ -21,9 +21,16 @@ import { appendFileSync } from "node:fs";
  * repository's first commit — where the version is new by definition.
  */
 export function releaseDecision(input) {
-  const { version, previousVersion, alreadyReleased, manifestVersion } = input;
+  const { version, previousVersion, alreadyReleased, manifestVersion, manual } = input;
   if (!version) return { cut: false, why: "package.json has no version" };
   if (alreadyReleased) return { cut: false, why: `v${version} is already released` };
+  // A manual run from main may publish a version that has no release yet:
+  // the 0.6.56 cut failed in the installer job, and the fix was a workflow
+  // change that left the version where it was, so no push could cut it again.
+  // A hand-typed version is still refused below, manual or not.
+  if (manual && !(manifestVersion !== undefined && manifestVersion !== version)) {
+    return { cut: true, why: `manual publish of unreleased v${version}` };
+  }
   if (previousVersion && previousVersion === version) {
     return { cut: false, why: `version is still ${version}; this push changed something else` };
   }
@@ -87,6 +94,7 @@ function main() {
     previousVersion,
     alreadyReleased: version ? isReleased(tag, process.env.GITHUB_REPOSITORY ?? "") : false,
     manifestVersion: manifestVersionFrom(readAt("HEAD", ".release-please-manifest.json")),
+    manual: process.env.WORKHORSE_RELEASE_MANUAL === "1",
   });
   // Say it out loud: a release that does not happen should never be a silence.
   console.log(`${decision.cut ? "CUT" : "no cut"} — ${decision.why}`);

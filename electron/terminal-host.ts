@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessTree, trackProcessGroup } from "./process-registry";
 
 export type TerminalEvent =
@@ -36,7 +37,13 @@ export class TerminalHost {
     try {
       const child = spawn(command, args, {
         cwd,
-        env: process.env,
+        // The same environment every vendor launch gets: the person's normal
+        // login and PATH, without the desk's own bridge token, state paths or
+        // vault-held vendor login. This shell was the one spawn on the desk
+        // that skipped the filter, so `printenv WORKHORSE_BRIDGE_TOKEN` in the
+        // built-in Terminal printed the credential that authenticates calls
+        // into Workhorse.
+        env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
         // An interactive shell is the shortest route to a runaway on this desk:

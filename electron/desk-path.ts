@@ -339,11 +339,26 @@ export function withDeskToolEnv(
 }
 
 /**
+ * One vendor's login is not another vendor's to read. These names are a Claude
+ * login — `claude-login.ts` counts either of them as one — so they are dropped
+ * on the way to a child. Claude's own launch spec puts the token back on its
+ * own env, which is the only process that gets it.
+ */
+export const VENDOR_LOGIN_ENV_NAMES = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
+
+/**
  * ACP vendor processes need the user's normal login environment, but a user
  * MCP launched by that vendor must not inherit Workhorse's private bridge
  * token or state paths. The built-in Workhorse MCP receives its exact env on
- * its own server row instead.
+ * its own server row instead. Another vendor's login goes the same way: the
+ * desk holds a Claude token in its vault, and the shared environment is how it
+ * reached the Codex, Cursor and Grok children it was never meant for.
  */
 export function withoutWorkhorsePrivateEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(base).filter(([name]) => !name.toUpperCase().startsWith("WORKHORSE_")));
+  return Object.fromEntries(
+    Object.entries(base).filter(([name]) => {
+      const upper = name.toUpperCase();
+      return !upper.startsWith("WORKHORSE_") && !VENDOR_LOGIN_ENV_NAMES.includes(upper as (typeof VENDOR_LOGIN_ENV_NAMES)[number]);
+    }),
+  );
 }

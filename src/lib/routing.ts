@@ -284,6 +284,9 @@ export function routingCandidatesForDesk(
         label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
         customBotId: bot.id,
         connected: !capacity?.holding,
+        // Follow-up for lane 15 (PR #253): once contextWindowFor takes a fourth
+        // customBotId argument, pass bot.id here so a listed window belongs to
+        // this connection and never pools across two bots on the same model id.
         contextWindow: contextWindowFor("custom", model, bot.contextWindow),
         profile,
         ...(paceUnmetered ? { paceUnmetered: true } : {}),

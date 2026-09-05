@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeDesktopConfigLooksLoggedIn, findClaudeDesktopRoot, readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { storedClaudeToken } from "./claude-stored-token";
-import { extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
+import { deskHelperEnv, extraDeskDirs, isInsideAsar, runningInElectron } from "./desk-path";
 import { detectClaudeAccessDefaults } from "./vendor-access";
 import type { BotAccessDefaults } from "../src/lib/types";
 
@@ -307,6 +307,7 @@ export function macKeychainHasClaudeLogin(): boolean {
     execFileSync("security", ["find-generic-password", "-s", "Claude Code-credentials"], {
       stdio: ["ignore", "ignore", "ignore"],
       timeout: 3000,
+      env: deskHelperEnv(),
     });
     return true;
   } catch {

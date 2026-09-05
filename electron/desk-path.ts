@@ -237,6 +237,7 @@ function defaultRegPathQuery(hivePath: string): string {
       windowsHide: true,
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: deskHelperEnv(),
     });
     return parseRegPathValue(out);
   } catch {
@@ -361,4 +362,87 @@ export function withoutWorkhorsePrivateEnv(base: NodeJS.ProcessEnv = process.env
       return !upper.startsWith("WORKHORSE_") && !VENDOR_LOGIN_ENV_NAMES.includes(upper as (typeof VENDOR_LOGIN_ENV_NAMES)[number]);
     }),
   );
+}
+
+/**
+ * The env for a person-facing program the desk runs on their behalf — a vendor
+ * CLI, a model listing, a shell. It needs their PATH and their shell settings,
+ * so it starts from the real environment and takes away what is not its own:
+ * the desk's private names and another vendor's login.
+ *
+ * The filter runs over the merge, not just over `base`. Filtering first and
+ * overlaying after looks identical and is not: the model listing passes the
+ * caller's own copy of `process.env` as `extra`, so the overlay put back every
+ * name the filter had just removed and the child was handed the lot. A caller
+ * cannot restore a private name through this door. Claude's launch spec, which
+ * is the one child that carries the Claude token, does not come through it.
+ */
+export function deskToolEnv(
+  base: NodeJS.ProcessEnv = process.env,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return withDeskToolEnv(withoutWorkhorsePrivateEnv({ ...base, ...extra }));
+}
+
+/**
+ * The env for a `git` call. Git is a person-facing program: it reads their SSH
+ * agent, their credential helper and their `GIT_*` settings, and none of that
+ * survives an allowlist. So it gets the same filter every vendor child gets,
+ * plus the one setting the desk owns — git may never stop and ask a terminal
+ * that nobody is watching for a password.
+ *
+ * Deliberately not `deskToolEnv`: the diff panes call this per file with an
+ * 800ms budget, and building the desk PATH walks the disk every time.
+ */
+export function deskGitEnv(
+  base: NodeJS.ProcessEnv = process.env,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  // Same order as `deskToolEnv`: filter the merge, so an overlay cannot put a
+  // private name back. `GIT_TERMINAL_PROMPT` is set last and is not a caller's
+  // to turn off — an unwatched git must never stop and ask for a password.
+  return { ...withoutWorkhorsePrivateEnv({ ...base, ...extra }), GIT_TERMINAL_PROMPT: "0" };
+}
+
+/**
+ * Names a helper the desk starts for itself needs merely to run: where to find
+ * a binary, where the user's files are, where to write a temporary file, and
+ * what language to speak. Nothing here is anyone's login.
+ *
+ * On Windows this is not politeness. `powershell.exe`, `reg.exe` and
+ * `taskkill.exe` are found through `PATH` and `PATHEXT` and load their own
+ * runtime out of `SystemRoot`; drop those three and the helper does not start.
+ */
+const DESK_HELPER_ENV_NAMES = [
+  "PATH", "Path", "PATHEXT", "HOME", "USERPROFILE", "USER", "LOGNAME",
+  "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "ProgramFiles", "ProgramFiles(x86)",
+  "SystemRoot", "SystemDrive", "windir", "COMSPEC", "ComSpec",
+  "TMP", "TEMP", "TMPDIR",
+  "LANG", "LC_ALL", "LC_CTYPE",
+  "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+] as const;
+
+const DESK_HELPER_ENV_KEYS = new Set(DESK_HELPER_ENV_NAMES.map((name) => name.toLowerCase()));
+
+/**
+ * The env for one of the desk's own helpers: the Grok Bot shim, the update
+ * script, a keychain read, a process the reaper is counting. These are not the
+ * user's programs and have no business reading the user's environment, so they
+ * get a named list and nothing else. A detached child always comes through
+ * here — it outlives the desk, so whatever it holds it holds unsupervised.
+ *
+ * `extra` is how a caller adds the one or two names its helper actually needs,
+ * by name. It is never a spread of `process.env`.
+ */
+export function deskHelperEnv(
+  base: NodeJS.ProcessEnv = process.env,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  const allowed: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(base)) {
+    const lower = name.toLowerCase();
+    if (typeof value !== "string") continue;
+    if (DESK_HELPER_ENV_KEYS.has(lower) || lower.startsWith("lc_")) allowed[name] = value;
+  }
+  return { ...allowed, ...extra };
 }

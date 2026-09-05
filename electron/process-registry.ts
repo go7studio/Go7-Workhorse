@@ -2,6 +2,26 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ChildProcess } from "node:child_process";
+import { deskHelperEnv, deskToolEnv } from "./desk-path";
+
+/**
+ * `ps`, `taskkill` and `powershell` are the desk counting and stopping its own
+ * children. They report numbers; they have no user and no login, so they get
+ * the named list and nothing else.
+ */
+export function processToolEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskHelperEnv(base);
+}
+
+/**
+ * A command run through `runInProcessGroup` is a harness or vendor CLI doing
+ * the person's work, so it needs their PATH — but not the desk's private names
+ * and not another vendor's login. A caller that has built its own env passes
+ * it; a caller that forgets gets this rather than the whole environment.
+ */
+export function groupRunEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskToolEnv(base);
+}
 
 /**
  * A worker's processes have to die with the worker.
@@ -75,7 +95,12 @@ export type KillIo = {
 
 function defaultTaskkill(pid: number): void {
   try {
-    execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: 5_000, windowsHide: true, stdio: "ignore" });
+    execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+      timeout: 5_000,
+      windowsHide: true,
+      stdio: "ignore",
+      env: processToolEnv(),
+    });
   } catch {
     /* the tree was already gone, or taskkill is missing — nothing else to try */
   }
@@ -305,6 +330,7 @@ export function procTreeSnapshot(platform: NodeJS.Platform = process.platform): 
       timeout: 5_000,
       maxBuffer: 4 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
+      env: processToolEnv(),
     })
       .split("\n")
       .map((row) => row.trim().split(/\s+/).map(Number))
@@ -432,7 +458,7 @@ export function runInProcessGroup(
   const cap = options.maxOutputBytes ?? GROUP_RUN_MAX_OUTPUT;
   const child = spawn(file, args, {
     cwd: options.cwd,
-    env: options.env,
+    env: options.env ?? groupRunEnv(),
     shell: options.shell ?? false,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -539,6 +565,7 @@ export function leaderStartedAt(pgid: number, platform: NodeJS.Platform = proces
         encoding: "utf8",
         timeout: 5_000,
         windowsHide: true,
+        env: processToolEnv(),
       }).trim();
       const parsed = Date.parse(out);
       return out && Number.isFinite(parsed) ? parsed : null;
@@ -547,6 +574,7 @@ export function leaderStartedAt(pgid: number, platform: NodeJS.Platform = proces
       encoding: "utf8",
       timeout: 5_000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: processToolEnv(),
     }).trim();
     const parsed = Date.parse(out);
     return out && Number.isFinite(parsed) ? parsed : null;

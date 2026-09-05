@@ -2,7 +2,17 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { detectCodexLogin, type CodexLoginDetectInput } from "./codex-login";
+import { deskToolEnv } from "./desk-path";
 import { APP_VERSION } from "../src/lib/app-info";
+
+/**
+ * A caller that built its own env passes it. The version and login probes do
+ * not, and used to fall through to the whole of `process.env` — which is how
+ * the Codex app server read a Claude login it has no business holding.
+ */
+export function codexAppServerEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskToolEnv(base);
+}
 
 type JsonObject = Record<string, unknown>;
 
@@ -68,7 +78,7 @@ export class CodexAppServerClient {
     const spawnProcess = this.options.spawnProcess ?? spawn;
     const child = spawnProcess(this.options.command, [...(this.options.argsPrefix ?? []), "app-server"], {
       cwd: this.options.cwd,
-      env: this.options.env ?? process.env,
+      env: this.options.env ?? codexAppServerEnv(),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       // The app server runs the same tools the ACP path does, so it leads its

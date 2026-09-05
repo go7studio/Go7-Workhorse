@@ -53,6 +53,7 @@ import {
 import { normalizeSession } from "../src/lib/session";
 import { sessionExecutionCwd } from "../src/lib/session-environment";
 import { uid } from "../src/lib/id";
+import { deskToolEnv } from "./desk-path";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
@@ -1621,9 +1622,24 @@ function queryCapacity(args: Record<string, unknown>): string {
   );
 }
 
+/**
+ * `godot`, `adb` and `xcrun` are the person's own tools and need their PATH,
+ * so this is the filter and not an allowlist. What they must not read is this
+ * helper's environment: the MCP process carries the desk's bridge token, and a
+ * plain inherit handed it to every device probe.
+ */
+export function runtimeProbeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskToolEnv(base);
+}
+
 function probeRuntime(): string {
   const run = (command: string, args: string[]) => {
-    const result = spawnSync(command, args, { encoding: "utf8", timeout: 5_000, windowsHide: true });
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      timeout: 5_000,
+      windowsHide: true,
+      env: runtimeProbeEnv(),
+    });
     return {
       available: !result.error && result.status === 0,
       output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim().slice(0, 2_000),

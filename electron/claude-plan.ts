@@ -7,6 +7,16 @@ import type { GrokPlanProduct, GrokPlanUsage } from "../src/lib/types";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
+import { deskHelperEnv } from "./desk-path";
+
+/**
+ * `security` is the desk asking macOS for one keychain item. It is not a
+ * vendor process and it must never be handed a vendor login: the token this
+ * reads is exactly the one the law keeps off every other child's environment.
+ */
+export function keychainToolEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return deskHelperEnv(base);
+}
 
 export type ClaudePlanUsage = GrokPlanUsage;
 
@@ -90,6 +100,7 @@ function defaultMacClaudeKeychain(): string | null {
       encoding: "utf8",
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
+      env: keychainToolEnv(),
     });
   } catch {
     return null;
@@ -101,7 +112,7 @@ function persistMacClaudeKeychain(contents: string): void {
   execFileSync(
     "security",
     ["add-generic-password", "-U", "-s", "Claude Code-credentials", "-a", os.userInfo().username, "-w", contents],
-    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "ignore", "ignore"] },
+    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "ignore", "ignore"], env: keychainToolEnv() },
   );
 }
 

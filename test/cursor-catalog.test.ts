@@ -153,8 +153,10 @@ test("family profiles fill Composer, Auto, Gemini, Kimi, GLM, GPT-5.x on the 1-1
   assert.deepEqual(triple("gemini-3.7-flash"), [5, 5, 2]);
   assert.deepEqual(triple("gemini-3.1-pro"), [8, 4, 3], "a pro Gemini is not a flash");
   assert.deepEqual(triple("composer-2.5"), [8, 4, 2]);
-  assert.deepEqual(triple("kimi-k3"), [7, 3, 2]);
-  assert.deepEqual(triple("glm-5.2"), [7, 3, 2]);
+  // One family table serves every vendor, so a Kimi on a Cursor seat is rated
+  // the same 8 as a Kimi on a custom bot.
+  assert.deepEqual(triple("kimi-k3"), [8, 3, 2]);
+  assert.deepEqual(triple("glm-5.2"), [8, 3, 2]);
   assert.deepEqual(triple("gpt-5.5"), [8, 4, 3]);
   assert.deepEqual(triple("gpt-5.4"), [8, 4, 3]);
   assert.deepEqual(triple("gpt-5.3-codex"), [7, 4, 3]);

@@ -1,6 +1,9 @@
 import type {
   ChatImage,
+  CustomBot,
   EffortLevel,
+  GrokPlanProduct,
+  GrokPlanUsage,
   ModelInputCapabilities,
   ModelRoutingProfile,
   ProviderId,
@@ -8,10 +11,16 @@ import type {
   RoutingSettings,
   RoutingTaskTier,
   Settings,
+  StoredRoutingProfile,
   TaskDomain,
 } from "./types";
 import { isLocalEndpoint } from "./usage";
-import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
+import {
+  customBotEnabled,
+  customBotModels,
+  customModelRoutingOverride,
+  withoutMachineWrittenScores,
+} from "./custom-bots";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
@@ -275,6 +284,9 @@ export function routingCandidatesForDesk(
         label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
         customBotId: bot.id,
         connected: !capacity?.holding,
+        // Follow-up for lane 15 (PR #253): once contextWindowFor takes a fourth
+        // customBotId argument, pass bot.id here so a listed window belongs to
+        // this connection and never pools across two bots on the same model id.
         contextWindow: contextWindowFor("custom", model, bot.contextWindow),
         profile,
         ...(paceUnmetered ? { paceUnmetered: true } : {}),
@@ -282,18 +294,42 @@ export function routingCandidatesForDesk(
         // would hand it the same spare-capacity subsidy a dead gauge used to
         // get, and a 0%-used local bot already outscored a metered model that
         // fit better. No gauge means no gauge.
-        capacity:
-          paceUnmetered || profile.local
-            ? {}
-            : {
-                usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-                resetsAt: product?.resetsAt ?? capacity?.resetsAt,
-                period: plan?.period ?? capacity?.period,
-              },
+        capacity: paceUnmetered || profile.local ? {} : customBotCapacity(product, plan, capacity),
       });
     }
   }
   return candidates;
+}
+
+/**
+ * A custom bot's meter, read from the closest thing to the model it serves.
+ *
+ * A stock vendor's product labels carry model slugs, so the product lookup
+ * above finds the right window and the meter lands. Synthetic labels its two
+ * products "5h" and "Weekly" — neither contains a model id — so the lookup
+ * found nothing and the whole capacity fell through to a Watch row routing is
+ * not always handed. Called with no statuses the Kimi K3 row came back as
+ * `{ period: "weekly" }`: no usedPercent, so weeklyDrawState returned nothing
+ * and a bot with over half its weekly allowance left scored with no capacity
+ * term at all. The plan the desk already holds knew the number the whole time.
+ *
+ * A source is taken whole. Splicing a product's percentage onto the plan's
+ * reset would pace a 5-hour pool against a weekly window.
+ */
+function customBotCapacity(
+  product: GrokPlanProduct | undefined,
+  plan: GrokPlanUsage | undefined,
+  status: WatchVendorStatus | undefined,
+): RoutingCapacity {
+  const period = plan?.period ?? status?.period;
+  if (product) {
+    return { usedPercent: product.usagePercent, resetsAt: product.resetsAt, period };
+  }
+  if (plan && Number.isFinite(plan.usedPercent)) {
+    return { usedPercent: plan.usedPercent, resetsAt: plan.resetsAt, period };
+  }
+  // Still no gauge anywhere: unknown stays unknown, never a guessed 0.
+  return { usedPercent: status?.usedPercent, resetsAt: status?.resetsAt, period };
 }
 
 const INPUTS: ModelInputCapabilities = {
@@ -312,7 +348,9 @@ function profile(
   intelligence: number,
   speed: number,
   cost: number,
-  patch: Partial<ModelRoutingProfile> = {},
+  // A family names only the modalities it differs from, so a text-only model
+  // says `{ inputs: { images: false } }` and inherits the rest from INPUTS.
+  patch: Partial<Omit<ModelRoutingProfile, "inputs">> & { inputs?: Partial<ModelInputCapabilities> } = {},
 ): ModelRoutingProfile {
   return {
     intelligence,
@@ -335,12 +373,17 @@ function profile(
  *
  * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
  * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
- * gpt-5.4, sol/terra/luna before any bare gpt-5.6.
+ * gpt-5.4, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
+ * glm-5.3-flash and glm-4.7-flash before glm-5.2 before glm, qwen3.8 before
+ * any later qwen.
+ *
+ * The whole table is a standing judgement, not a measurement. It is meant to
+ * be argued with and edited.
  */
 export function routingProfileForModel(
   provider: ProviderId,
   model: string,
-  override?: Partial<ModelRoutingProfile>,
+  override?: StoredRoutingProfile,
 ): ModelRoutingProfile {
   const slug = normalizeModelId(provider, model).toLowerCase();
   const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
@@ -385,7 +428,10 @@ export function routingProfileForModel(
   } else if (slug.includes("haiku")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    base = profile(7, 4, 2, { strengths: CODE });
+    // Balanced band. Rated 7 it sat one point under the bar of 8, so no amount
+    // of spare capacity could put ordinary coding on it and every balanced pick
+    // went to a paid seat. The bar stays at 8; the rating is what was wrong.
+    base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
@@ -396,8 +442,46 @@ export function routingProfileForModel(
     base = profile(7, 5, 2);
   } else if (slug.includes("gemini")) {
     base = slug.includes("pro") ? profile(8, 4, 3) : profile(5, 5, 2);
-  } else if (slug.includes("kimi") || slug.includes("glm")) {
+  } else if (slug.includes("kimi-k3")) {
+    // Balanced band, beside Terra and Sonnet 4.6, and cheaper than both. Kimi
+    // and GLM shared one row at 7 and both missed the bar of 8, so Auto could
+    // never put ordinary coding on either.
+    base = profile(8, 3, 2, { strengths: CODE });
+  } else if (slug.includes("kimi")) {
+    // An older or unannounced Kimi is not automatically the flagship.
     base = profile(7, 3, 2, { strengths: CODE });
+  } else if (slug.includes("glm-5.3-flash")) {
+    // A 524k window and quick, but a Flash is not the flagship.
+    base = profile(7, 4, 2, { strengths: CODE });
+  } else if (slug.includes("glm-4.7-flash")) {
+    // Text only, in the 30B class.
+    base = profile(6, 4, 2, { inputs: { images: false } });
+  } else if (slug.includes("glm-5.2")) {
+    base = profile(8, 3, 2, { strengths: CODE, inputs: { images: false } });
+  } else if (slug.includes("glm")) {
+    // An unannounced GLM sits with the family, not above it and not at the
+    // unrated mid-field.
+    base = profile(7, 3, 2, { strengths: CODE });
+  } else if (slug.includes("qwen3.8")) {
+    // Synthetic's syn:small:vision. The vendor calls it a small but capable
+    // coding and vision model that drains rate limits slowly.
+    base = profile(7, 4, 2, { strengths: CODE });
+  } else if (slug.includes("gpt-oss")) {
+    base = profile(7, 3, 2, { strengths: CODE, inputs: { images: false } });
+  } else if (slug.includes("nemotron")) {
+    base = profile(6, 3, 2, { inputs: { images: false } });
+  } else if (slug === "syn:large:vision") {
+    // The aliases are rated as whatever Synthetic points them at today, so the
+    // same model cannot score two different ways depending on which of its two
+    // names a chat happens to hold. Re-check these against the published
+    // catalog when the vendor moves an alias.
+    base = profile(8, 3, 2, { strengths: CODE }); // -> moonshotai/Kimi-K3
+  } else if (slug === "syn:large:text") {
+    base = profile(7, 4, 2, { strengths: CODE }); // -> zai-org/GLM-5.3-Flash
+  } else if (slug === "syn:small:vision") {
+    base = profile(7, 4, 2, { strengths: CODE }); // -> Qwen/Qwen3.8-27B
+  } else if (slug === "syn:small:text") {
+    base = profile(6, 4, 2, { inputs: { images: false } }); // -> zai-org/GLM-4.7-Flash
   } else if (slug.includes("gpt-5.5") || slug.includes("gpt-5.4")) {
     base = profile(8, 4, 3, { strengths: CODE });
   } else if (/gpt-5\.[1-3]/.test(slug)) {
@@ -419,6 +503,56 @@ export function routingProfileForModel(
     speed: clamp(Math.round(override?.speed ?? base.speed), 1, 5),
     cost: clamp(Math.round(override?.cost ?? base.cost), 1, 5),
   };
+}
+
+/**
+ * Take back the ratings the old bot editor wrote by itself.
+ *
+ * The pane saved `{ ...resolved, ...one change }`, so one tick on any control
+ * stored the family default as an override — clamped from the internal 1-10
+ * scale down to 1-5, where 5 means frontier and doubles back to 10. Two live
+ * bots show both directions of the same fault: Kimi K3 carried the legacy
+ * 3/3/3 and scored 6 against a balanced bar of 8, so Auto could never send it
+ * ordinary work; DGX Spark, a local Qwen 27B, carried 5/3/3 (its family's
+ * 6/3/3 clamped) and scored 10, level with Opus 5 and eligible for deep work.
+ *
+ * This lives here because only this file knows the family table. It is
+ * deliberately narrow: a triple is dropped only when it exactly matches what a
+ * write-back for that model would have stored, and never when it matches a
+ * role the person could have picked.
+ */
+export function migrateCustomBotRatings<
+  T extends Pick<CustomBot, "model" | "routingProfile" | "routingProfiles" | "ratingsMigrated">,
+>(bots: T[]): T[] {
+  const familyFor = (model: string) => {
+    const base = routingProfileForModel("custom", model);
+    return { intelligence: base.intelligence, speed: base.speed, cost: base.cost };
+  };
+  return bots.map((bot) => {
+    // Once per bot, then never again. The repair recognises a rating by its
+    // shape, so leaving it armed would strip that shape a second time if the
+    // person ever chose it on purpose. This is a one-time repair of what an old
+    // pane wrote, not a standing rule about which triples are allowed.
+    if (bot.ratingsMigrated) return bot;
+    const routingProfile = withoutMachineWrittenScores(bot.routingProfile, familyFor(bot.model));
+    const profiles = bot.routingProfiles;
+    let routingProfiles = profiles;
+    if (profiles) {
+      const next: Record<string, StoredRoutingProfile> = {};
+      for (const [model, profile] of Object.entries(profiles)) {
+        const cleaned = withoutMachineWrittenScores(profile, familyFor(model));
+        if (cleaned) next[model] = cleaned;
+      }
+      routingProfiles = Object.keys(next).length > 0 ? next : undefined;
+    }
+    const { routingProfile: _profile, routingProfiles: _profiles, ...rest } = bot;
+    return {
+      ...(rest as T),
+      ...(routingProfile ? { routingProfile } : {}),
+      ...(routingProfiles ? { routingProfiles } : {}),
+      ratingsMigrated: true,
+    };
+  });
 }
 
 export function attachmentRequirements(attachments: ChatImage[] = []): Partial<ModelInputCapabilities> {
@@ -892,6 +1026,41 @@ function outcomeTilt(tally: RoutingOutcomeTally | undefined): number {
   return clamp((tally.verifiedSuccesses - tally.verifiedFailures) * 1.5, -8, 8);
 }
 
+/** Why a candidate never reached scoring. Undefined means it did. */
+export type RoutingSkipReason =
+  | "not launchable"
+  | "holding"
+  | "local off"
+  | "inputs"
+  | "excluded"
+  | "grok-bot"
+  | "context";
+
+/**
+ * The one place a candidate is refused, so the ranker and the decision log can
+ * never drift about why. Order is the order the ranker applied.
+ */
+export function routingSkipReason(
+  candidate: RoutingCandidate,
+  request: RoutingRequest,
+  settings: RoutingSettings,
+  required: Partial<ModelInputCapabilities>,
+): RoutingSkipReason | undefined {
+  // Connected is not launchable. A vendor whose CLI is missing cannot be
+  // assigned work, however well it scores.
+  if (candidate.launchable === false) return "not launchable";
+  if (!candidate.connected) return "holding";
+  if (!settings.allowLocal && candidate.profile.local) return "local off";
+  if (!supports(candidate.profile, required)) return "inputs";
+  if (routingIdentityExcluded(candidate, request.exclude)) return "excluded";
+  if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) return "grok-bot";
+  // A model that cannot hold the conversation is not a worse pick, it is a
+  // failed send. Routing never knew the window before, so a 300k thread
+  // could rank onto a 128k bot and die on arrival.
+  if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) return "context";
+  return undefined;
+}
+
 export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
@@ -920,16 +1089,7 @@ export function rankRoutingCandidates(
     : 0;
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
-    // Connected is not launchable. A vendor whose CLI is missing cannot be
-    // assigned work, however well it scores.
-    if (candidate.launchable === false) continue;
-    if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
-    if (routingIdentityExcluded(candidate, request.exclude)) continue;
-    if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) continue;
-    // A model that cannot hold the conversation is not a worse pick, it is a
-    // failed send. Routing never knew the window before, so a 300k thread
-    // could rank onto a 128k bot and die on arrival.
-    if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) continue;
+    if (routingSkipReason(candidate, request, settings, required)) continue;
     const gap = candidate.profile.intelligence - minimum;
     // Falling below the bar is a quality failure and is charged by how far.
     const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
@@ -1004,6 +1164,91 @@ export function rankRoutingCandidates(
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+}
+
+/** provider/model, plus the bot id when a custom bot serves it. Identities only. */
+function routingIdentityLabel(
+  candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+): string {
+  return candidate.customBotId
+    ? `${candidate.provider}/${candidate.model}#${candidate.customBotId}`
+    : `${candidate.provider}/${candidate.model}`;
+}
+
+/** A log line has to end. Past this many names the rest are counted, not listed. */
+const ROUTING_LOG_MAX_NAMES = 12;
+
+function routingLogList(key: string, names: string[]): string[] {
+  if (names.length === 0) return [];
+  const shown = names.slice(0, ROUTING_LOG_MAX_NAMES);
+  const rest = names.length - shown.length;
+  return [`${key}=${shown.join(",")}${rest > 0 ? `+${rest}` : ""}`];
+}
+
+/**
+ * One `routing:decision` line per spawn or Auto turn.
+ *
+ * Finding out why Auto had never once sent balanced work to the Synthetic bot
+ * took a replay script against a copy of the desk state, because the desk wrote
+ * down what it picked and nothing about what it refused. This is the missing
+ * half: the tier and domain the request was read as, the winner and the runner
+ * up with the margin between them, how many candidates were eligible, and every
+ * candidate that was dropped with the reason it was dropped.
+ *
+ * Identities, tiers and numbers only. No prompt, no folder, no key — a brief in
+ * a log is a brief on disk forever.
+ */
+export function routingDecisionLogDetail(input: {
+  source: RoutingEvidenceSource;
+  candidates: RoutingCandidate[];
+  request: RoutingRequest;
+  settings: RoutingSettings;
+  selected?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
+}): string {
+  const { candidates, request, settings } = input;
+  const tier =
+    request.tier ??
+    inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
+  const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
+  const required = mergeInputRequirements(request.attachments, request.requirements);
+  const minimum = requiredIntelligence(tier);
+  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings);
+  const skipped: string[] = [];
+  for (const candidate of candidates) {
+    const reason = routingSkipReason(candidate, request, settings, required);
+    if (reason) skipped.push(`${routingIdentityLabel(candidate)}:${reason.replace(/ /g, "-")}`);
+  }
+  // Under the bar is not a refusal — the candidate is still scored, and charged
+  // for the gap. It is named here because it is the reason a bot that looks
+  // present never wins, which is exactly the question this line exists for.
+  const belowBar = ranked
+    .filter((row) => row.profile.intelligence < minimum)
+    .map((row) => routingIdentityLabel(row));
+  const reserved = ranked
+    .filter((row) => {
+      if (!settings.capacityAware) return false;
+      const draw = weeklyDrawState(row.capacity, request.now);
+      if (draw.usedPercent === undefined || draw.delta === undefined) return false;
+      return draw.usedPercent >= 100 - settings.reservePercent && reservePenaltyWeight(draw.resetMs) > 0;
+    })
+    .map((row) => routingIdentityLabel(row));
+  const winner = ranked[0];
+  const runnerUp = ranked[1];
+  const selected = input.selected ?? winner;
+  return [
+    `source=${input.source}`,
+    `tier=${tier}`,
+    `domain=${domain}`,
+    `bar=${minimum}`,
+    `selected=${selected ? routingIdentityLabel(selected) : "none"}`,
+    `runner_up=${runnerUp ? routingIdentityLabel(runnerUp) : "none"}`,
+    `margin=${winner && runnerUp ? Math.round((winner.score - runnerUp.score) * 10) / 10 : "none"}`,
+    `eligible=${ranked.length}`,
+    `considered=${candidates.length}`,
+    ...routingLogList("skipped", skipped),
+    ...routingLogList("below_bar", belowBar),
+    ...routingLogList("reserve", reserved),
+  ].join(" ");
 }
 
 export function chooseRoutingDecision(

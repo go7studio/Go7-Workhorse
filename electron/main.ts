@@ -1642,6 +1642,13 @@ app.whenReady().then(async () => {
     if (!drafts || typeof drafts !== "object" || Array.isArray(drafts)) return;
     writeComposerDraftFile(statePath(), drafts);
   });
+  // The event name is fixed here, not passed in: the renderer supplies the
+  // detail and nothing else, so no caller can invent a log event. The detail is
+  // capped for the same reason the log has a byte ceiling.
+  ipcMain.handle("routing:record-decision", (_event, detail: unknown) => {
+    if (typeof detail !== "string" || !detail.trim()) return;
+    mainLog.record("routing:decision", detail.slice(0, 2000));
+  });
   ipcMain.handle("localCompute:probe", (_event, hosts: unknown) =>
     probeLocalComputeHosts(
       Array.isArray(hosts) ? hosts as import("../src/lib/types").LocalComputeHostSettings[] : [],

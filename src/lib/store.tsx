@@ -159,6 +159,7 @@ import {
   outcomesFromLearningEvents,
   routingCandidatesForDesk,
   routingDecisionEvidence,
+  routingDecisionLogDetail,
   routingIdentityExcluded,
   routingProfileForModel,
   shouldRouteSessionTurn,
@@ -344,7 +345,9 @@ import {
   normalizeWatch,
   normalizeWatchDayMarks,
   normalizeWatchPermits,
+  planAfterRefresh,
   pruneWatchPermits,
+  shouldRefreshPlansForRouting,
   syncWatchDayMarks,
   watchVendorStatuses,
   type WatchHold,
@@ -1114,6 +1117,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const draftPersistTimer = useRef<number | null>(null);
   const composerDraftsRef = useRef<Record<string, ComposerDraftSnap>>({});
   const plansRef = useRef<import("./watch").WatchPlans>({});
+  /**
+   * Meter freshness on the routing paths (MASTER-AUDIT Repair 16).
+   *
+   * Nothing refreshed deskPlans except boot, the Usage pane and the setup
+   * sheet, so a desk left open all day paced every spawn against a stale
+   * reading. `runPlanRefresh` is filled in below, once the per-vendor
+   * refreshers exist; `planRefreshAt` is the debounce, so a burst of spawns
+   * costs one round of meter calls, not one per spawn.
+   */
+  const runPlanRefresh = useRef<() => void>(() => undefined);
+  const planRefreshAt = useRef<number | undefined>(undefined);
   const pathLeasesRef = useRef<FileLease[]>([]);
   const pathPermissionPreflight = useRef(new Set<string>());
   const approvedPathWrites = useRef(new Map<string, Array<{ path: string; root: string }>>());
@@ -1175,6 +1189,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   stateRef.current = state;
   pathLeasesRef.current = state.leases ?? [];
   plansRef.current = { grok: grokPlan, codex: codexPlan, claude: claudePlan, cursor: cursorPlan, custom: customPlans };
+
+  /** Ask the meters again when a routing path is about to pace on an old reading. */
+  const refreshPlansForRouting = useCallback((plans: import("./watch").WatchPlans, now = Date.now()) => {
+    if (!shouldRefreshPlansForRouting({ plans, now, lastRefreshAt: planRefreshAt.current })) return;
+    planRefreshAt.current = now;
+    runPlanRefresh.current();
+  }, []);
+
+  /**
+   * The desk wrote down what it picked and nothing about what it refused, so
+   * "why has Auto never sent this bot real work" could only be answered by
+   * replaying the ranker outside the app. One line per decision answers it here.
+   */
+  const recordRoutingDecision = useCallback(
+    (input: Parameters<typeof routingDecisionLogDetail>[0]) => {
+      if (!window.workhorse?.recordRoutingDecision) return;
+      try {
+        void window.workhorse.recordRoutingDecision(routingDecisionLogDetail(input)).catch(() => {});
+      } catch {
+        // A desk that cannot log still has to route.
+      }
+    },
+    [],
+  );
   useEffect(() => {
     setState((current) => ({ ...current, deskPlans: plansRef.current }));
   }, [grokPlan, codexPlan, claudePlan, cursorPlan, customPlans]);
@@ -2616,6 +2654,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // switch decides how a new chat starts; it does not reach into a chat the
     // person has already set one way or the other.
     if (shouldRouteSessionTurn({ routingMode: session.routingMode, text: originalText, hideUser })) {
+      // The next turn gets the fresher meters; this one still routes now rather
+      // than waiting on a network round trip to pick a model.
+      refreshPlansForRouting(plansRef.current);
       const statuses = watchVendorStatuses({
         settings: current.settings,
         usage: current.usage,
@@ -2640,6 +2681,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         contextNeed: session.contextUsed || undefined,
       };
       const decision = chooseRoutingDecision(routeCandidates, routeRequest, current.settings.routing);
+      recordRoutingDecision({
+        source: "chat",
+        candidates: routeCandidates,
+        request: routeRequest,
+        settings: current.settings.routing,
+        ...(decision ? { selected: decision } : {}),
+      });
       if (decision) {
         // Auto picks the effort with the model: a quick task at low, a deep
         // one at high. Keeping the person's old effort here left Auto choosing
@@ -3091,8 +3139,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
           }));
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
@@ -5321,6 +5372,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               model: payload.model,
               chat: payload.chat,
             });
+            if (routeSpawn) refreshPlansForRouting(latest.deskPlans ?? plansRef.current);
             const routeStatuses = routeSpawn
               ? watchVendorStatuses({
                   settings: latest.settings,
@@ -5387,6 +5439,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeDecision = routeSpawn
               ? chooseRoutingDecision(routeCandidates, routeRequest, latest.settings.routing)
               : null;
+            if (routeSpawn) {
+              recordRoutingDecision({
+                source: "spawn",
+                candidates: routeCandidates,
+                request: routeRequest,
+                settings: latest.settings.routing,
+                ...(routeDecision ? { selected: routeDecision } : {}),
+              });
+            }
             if (routeSpawn && !routeDecision) {
               await replyAsk({
                 error: `no capable route: ${describeRoutingMiss(routeCandidates, routeRequest, latest.settings.routing)}`,
@@ -7291,8 +7352,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         if (session?.provider === "cursor") {
           void window.workhorse?.cursorPlanUsage?.()
+            // The same rule as the refreshers below. These two fire when a
+            // Cursor turn ends, which is exactly when the meter is busiest, and
+            // they were still blanking the reading on an answer of nothing.
             .then((plan) => {
-              setCursorPlan(plan ?? undefined);
+              setCursorPlan((previous) => planAfterRefresh(previous, plan));
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
@@ -7931,16 +7995,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, threadWidth: clampPaneWidth(width, THREAD_PANE) }));
   }, []);
 
+  /**
+   * A refresh that fails must not spend the reading the desk already has.
+   *
+   * Every refresher used to write undefined into its plan on a rejection, and
+   * on an answer of nothing. That was survivable while plans were only fetched
+   * at boot and in the Usage pane. Routing now asks whenever a plan is over
+   * fifteen minutes old, so one flaky call in the middle of a spawn wave would
+   * have turned a known meter into an unknown one and pulled a vendor's
+   * capacity term out from under the ranking.
+   *
+   * Unknown still means unknown. A vendor that has never answered holds
+   * undefined already, so leaving the previous value alone keeps a first
+   * failure reading unknown and keeps a later failure reading what it last
+   * knew. Only an answer replaces an answer.
+   */
   const refreshGrokPlan = useCallback(() => {
     if (!window.workhorse?.grokPlanUsage) return;
     void window.workhorse
       .grokPlanUsage()
       .then((plan) => {
-        setGrokPlan(plan);
+        setGrokPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("grok");
       })
       .catch(() => {
-        setGrokPlan(undefined);
+        setGrokPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("grok");
       });
   }, [markVendorPlanKnown]);
@@ -7950,16 +8029,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .codexPlanUsage()
       .then((plan) => {
-        setCodexPlan(plan);
+        setCodexPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("codex");
       })
       .catch(() => {
-        setCodexPlan(undefined);
+        setCodexPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("codex");
       });
   }, [markVendorPlanKnown]);
 
   const refreshCursorPlan = useCallback(() => {
+    // No bridge method at all is not a failed reading, it is no meter.
     if (!window.workhorse?.cursorPlanUsage) {
       setCursorPlan(undefined);
       return;
@@ -7967,11 +8047,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .cursorPlanUsage()
       .then((plan) => {
-        setCursorPlan(plan ?? undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("cursor");
       })
       .catch(() => {
-        setCursorPlan(undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("cursor");
       });
   }, [markVendorPlanKnown]);
@@ -7981,7 +8061,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .claudePlanUsage()
       .then((plan) => {
-        setClaudePlan(plan);
+        setClaudePlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("claude");
         if (plan) {
           if (claudePlanRetry.current) window.clearTimeout(claudePlanRetry.current);
@@ -7997,7 +8077,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, 90_000);
       })
       .catch(() => {
-        setClaudePlan(undefined);
+        setClaudePlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("claude");
       });
   }, [markVendorPlanKnown]);
@@ -8012,30 +8092,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           model: bot.model,
           credentialId: bot.credentialId || `custom-bot-${bot.id}`,
         })
+        // Same rule as the stock meters: an answer replaces an answer, and a
+        // failure leaves whatever was last known in place. Deleting the entry
+        // here is what would turn a live bot's meter into unknown mid-wave.
         .then((plan) => {
-          setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
+          setCustomPlans((current) => ({ ...current, [bot.id]: planAfterRefresh(current[bot.id], plan) }));
           setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         })
         .catch(() => {
-          setCustomPlans((current) => {
-            const next = { ...current };
-            delete next[bot.id];
-            return next;
-          });
           setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         });
     }
   }, []);
 
+  const refreshAllPlans = useCallback(() => {
+    refreshGrokPlan();
+    refreshCodexPlan();
+    refreshClaudePlan();
+    refreshCursorPlan();
+    refreshCustomPlans();
+  }, [refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+  // Declared far above, beside plansRef, because the routing paths run before
+  // any of these refreshers exist in this body.
+  runPlanRefresh.current = refreshAllPlans;
+
   useEffect(() => {
-    if (ready) {
-      refreshGrokPlan();
-      refreshCodexPlan();
-      refreshClaudePlan();
-      refreshCursorPlan();
-      refreshCustomPlans();
-    }
-  }, [ready, refreshGrokPlan, refreshCodexPlan, refreshClaudePlan, refreshCursorPlan, refreshCustomPlans]);
+    if (ready) refreshAllPlans();
+  }, [ready, refreshAllPlans]);
 
   const setUsageBudget = useCallback((provider: ProviderId, tokens: number | null) => {
     setState((current) => {

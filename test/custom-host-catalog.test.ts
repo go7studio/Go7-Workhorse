@@ -299,35 +299,46 @@ test("the desk catalog carries the host's windows for approved models only", () 
     ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2", "hf:zai-org/GLM-5.3-Flash"],
     "the three this bot offers",
   );
-  assert.equal(ids.includes("syn:large:text"), false, "served by the host, approved by nobody");
+  // Served by the host, approved by nobody: it reaches the desk only as a seed
+  // row, carrying no slot, so no chat on this bot can be sent to it.
+  assert.equal(rows.find((row) => row.id === "syn:large:text")?.customBotId, undefined);
+  assert.equal(rows.filter((row) => row.customBotId === "bot_syn").length, 3, "three offered, and only three");
   assert.equal(rows.find((row) => row.id === "hf:zai-org/GLM-5.2")?.contextWindow, 200_000);
-  assert.equal(rows.every((row) => row.id.startsWith("hf:") ? row.hostListed === true : true), true);
+  // Lane 14 seeded these ids too, so "starts with hf:" no longer means "the
+  // host said so". The mark belongs to the rows this slot actually offers.
+  assert.equal(rows.filter((row) => row.customBotId === "bot_syn").every((row) => row.hostListed === true), true);
 
   // The seed survives underneath: another bot's models must not vanish because
   // this host answered.
   assert.equal(ids.includes("MiniMax-M3"), true);
   assert.equal(rows.find((row) => row.id === "MiniMax-M3")?.hostListed, undefined);
 
-  // A disabled bot offers nothing, and a bot with no catalog keeps the seed.
-  assert.equal(
-    customVendorRows([{ bot: { ...SYNTHETIC_BOT, enabled: false }, catalog: catalogOf(SYNTHETIC_MODELS) }]).some(
-      (row) => row.id === "hf:zai-org/GLM-5.2",
-    ),
-    false,
-  );
-  assert.equal(customVendorRows([{ bot: SYNTHETIC_BOT }]).some((row) => row.id === "hf:zai-org/GLM-5.2"), false);
+  // A disabled bot offers nothing. The seed still lists these ids, so what has
+  // to be absent is the slot, not the row.
+  const offRows = customVendorRows([
+    { bot: { ...SYNTHETIC_BOT, enabled: false }, catalog: catalogOf(SYNTHETIC_MODELS) },
+  ]);
+  assert.equal(offRows.some((row) => row.customBotId !== undefined), false);
+  assert.equal(offRows.find((row) => row.id === "hf:zai-org/GLM-5.2")?.hostListed, undefined);
+  // A bot whose host published nothing still gets rows, because lane 14 seeded
+  // these ids, but none of them claims the host said so.
+  const unasked = customVendorRows([{ bot: SYNTHETIC_BOT }]).filter((row) => row.id === "hf:zai-org/GLM-5.2");
+  assert.equal(unasked.length, 1);
+  assert.equal(unasked[0]?.hostListed, undefined, "a seed is not the host speaking");
 });
 
 test("the host's window beats the number saved on the bot, and a seed never does", () => {
   resetVendorCatalog();
-  // With no live answer the bot's own window stands, exactly as before.
-  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000), 128_000);
-  assert.equal(contextWindowFor("custom", "hf:moonshotai/Kimi-K3", 256_000), 256_000, "a seed row is only a guess");
+  // With no live answer, widest wins between the seed and the bot's own number,
+  // so a connection created on the 128k default is no longer read as a 128k
+  // model. An id nobody seeded still stands on the bot's number alone.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000), 524_288);
+  assert.equal(contextWindowFor("custom", "box-only-model", 256_000), 256_000);
 
   applyVendorCatalog({ custom: customVendorRows([{ bot: SYNTHETIC_BOT, catalog: catalogOf(SYNTHETIC_MODELS) }]) });
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000), 200_000);
   assert.equal(contextWindowFor("custom", "hf:moonshotai/Kimi-K3", 128_000), 524_288);
-  assert.equal(contextWindowFor("custom", "MiniMax-M3", 32_000), 32_000, "the seed still loses to the owner");
+  assert.equal(contextWindowFor("custom", "MiniMax-M3", 32_000), 1_000_000, "widest wins where no host spoke");
   assert.equal(contextWindowFor("custom", "never-listed", 64_000), 64_000);
   resetVendorCatalog();
 });
@@ -371,7 +382,7 @@ test("a per-model override moves that model alone", () => {
   assert.equal(flash?.intelligence, 6, "a stored 3 is doubled onto routing's 1-10");
   assert.equal(flash?.speed, 5);
   assert.equal(flash?.cost, 1);
-  assert.equal(glm?.intelligence, 7, "the sibling keeps the family score");
+  assert.equal(glm?.intelligence, 8, "the sibling keeps the family score");
   assert.equal(glm?.speed, 3);
 });
 
@@ -437,11 +448,13 @@ test("two slots serving the same model id each keep their own window", () => {
   applyVendorCatalog({ custom: rows });
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000, "bot_syn"), 200_000);
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 64_000, "bot_box"), 32_000);
-  // A slot with no published row for the id falls back to its own number, and
-  // never borrows another slot's.
-  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000, "bot_absent"), 96_000);
-  // Named by nobody, two hosts disagreeing: the caller's own number stands.
-  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000), 96_000);
+  // A slot with no published row for the id never borrows another slot's. Both
+  // live answers here are narrower than the seed, so taking either would show
+  // as a number below 524_288.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000, "bot_absent"), 524_288);
+  // Named by nobody, two hosts disagreeing: neither answer is this id's, so the
+  // seed and the caller's own number settle it between them.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000), 524_288);
   // One host, no disagreement, so the id's window is still that id's window.
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.3-Flash", 96_000), 128_000);
 
@@ -455,6 +468,7 @@ test("two slots serving the same model id each keep their own window", () => {
     formatWindow(contextWindowFor(session.provider, session.model, undefined, session.customBotId));
   assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_box" }), "32k");
   assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_syn" }), "200k");
+
   resetVendorCatalog();
 });
 

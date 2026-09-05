@@ -311,3 +311,55 @@ test("the rail formats document values and never computes from them; it paints n
   assert.doesNotMatch(block, /#[0-9a-f]{3,8}\b/i);
   assert.match(block, /\.workshop-pack-strip \+ \.workshop-pack-strip|\* \+ \.workshop-pack-strip/);
 });
+
+test("create refuse switch paints refuseReason when create.allowed is false", () => {
+  const widget: Widget = {
+    w: "switch",
+    cases: [
+      { when: "feed:/create/allowed", is: false, paint: { w: "kv", label: "Create", of: "feed:/create/refuseReason" } },
+      { when: "feed:/create/allowed", is: true, paint: { w: "chips", of: "feed:/create/templateLabels", tone: "mute" } },
+    ],
+    else: { w: "text", value: "—" },
+  };
+  const refused = paint(widget, {
+    feed: {
+      create: {
+        allowed: false,
+        refuseReason: "infer down / train exclusive — create paused",
+        templateLabels: ["Flux still"],
+      },
+    },
+  });
+  assert.match(refused, /infer down \/ train exclusive — create paused/);
+  assert.doesNotMatch(refused, /Flux still/);
+  const allowed = paint(widget, {
+    feed: {
+      create: {
+        allowed: true,
+        refuseReason: "",
+        templateLabels: ["Flux still"],
+      },
+    },
+  });
+  assert.match(allowed, /Flux still/);
+});
+
+test("gallery paints kind chip, label, and path actions", () => {
+  const html = paint(
+    { w: "gallery", of: "feed:/outputs", limit: 8 },
+    {
+      feed: {
+        outputs: [
+          { kind: "image", label: "still.png", path: "/tmp/still.png" },
+          { kind: "video", label: "clip.mp4" },
+        ],
+      },
+    },
+  );
+  assert.match(html, /workshop-gallery/);
+  assert.match(html, />image</);
+  assert.match(html, /still\.png/);
+  assert.match(html, />Open</);
+  assert.match(html, />Reveal</);
+  assert.match(html, /No local path/);
+});

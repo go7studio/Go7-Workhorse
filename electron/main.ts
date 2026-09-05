@@ -103,6 +103,7 @@ import { attachLearningIpc } from "./learning-ipc";
 import { runLearningSmoke } from "./learning-smoke";
 import { probeLocalComputeHosts } from "./local-compute-registry";
 import { createWorkshopHost } from "./workshop-host";
+import { invokeMediaCreate } from "./local-media-create";
 import { checkPackUpdate, installFromFolder, installFromRepo, removePack, updatePack } from "./workshop-install";
 import { createWorkshopBreakoutWindow } from "./workshop-window";
 import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
@@ -1738,6 +1739,42 @@ app.whenReady().then(async () => {
   ipcMain.handle("workshop:close-breakout", () => {
     workshopHost.closeBreakout();
     return true;
+  });
+
+  const safeLocalPath = (input: unknown): string | null => {
+    if (typeof input !== "string" || !input || input.length > 4096 || input.includes("\0")) return null;
+    if (!path.isAbsolute(input)) return null;
+    const resolved = path.resolve(input);
+    try {
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile() && !stat.isDirectory()) return null;
+      return resolved;
+    } catch {
+      return null;
+    }
+  };
+  ipcMain.handle("desk:open-local-path", async (_event, input: unknown) => {
+    const target = safeLocalPath(input);
+    if (!target) return false;
+    const err = await shell.openPath(target);
+    return !err;
+  });
+  ipcMain.handle("desk:reveal-local-path", (_event, input: unknown) => {
+    const target = safeLocalPath(input);
+    if (!target) return false;
+    shell.showItemInFolder(target);
+    return true;
+  });
+  ipcMain.handle("localMedia:create", async (_event, input: unknown) => {
+    const stateDir = path.join(app.getPath("userData"), "local-media-create");
+    fs.mkdirSync(stateDir, { recursive: true });
+    return invokeMediaCreate(
+      {
+        hosts: liveSettings.localCompute?.hosts ?? [],
+        stateDir,
+      },
+      input,
+    );
   });
   ipcMain.handle("jobs:sync", (_event, sessions: unknown) => jobEngine?.sync(sessions) ?? []);
 

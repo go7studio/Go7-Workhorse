@@ -2,6 +2,7 @@ import { Fragment, useCallback, useState } from "react";
 import { WORKSHOP_UNKNOWN } from "../lib/workshop-pack";
 import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
 import { Chip, Module, PaintWidget, PackCards } from "./workshop-paint";
+import { MediaCreatePanel, packOffersCreate } from "./MediaCreatePanel";
 
 /** Rail view state is local to this window. It is never journaled with the desk. */
 const VIEW_KEY = "workhorse.workshop-rail";
@@ -121,6 +122,7 @@ export function WorkshopRail() {
         {on.map((pack) => (
           <Module key={pack.id} pack={pack} folded={view.folded.includes(pack.id)} onFold={() => toggleFold(pack.id)}>
             <PackCards pack={pack} now={now} />
+            {packOffersCreate(pack.documents) ? <MediaCreatePanel pack={pack} /> : null}
           </Module>
         ))}
       </div>

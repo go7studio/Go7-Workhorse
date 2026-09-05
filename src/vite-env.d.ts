@@ -330,6 +330,14 @@ type WorkhorseBridge = {
   workshopRevealCollector?: (input: { id: string }) => Promise<boolean>;
   workshopOpenBreakout?: () => Promise<boolean>;
   workshopCloseBreakout?: () => Promise<boolean>;
+  deskOpenLocalPath?: (path: string) => Promise<boolean>;
+  deskRevealLocalPath?: (path: string) => Promise<boolean>;
+  localMediaCreate?: (input: {
+    hostId: string;
+    capability: string;
+    templateId: string;
+    fields?: Record<string, string | number | boolean>;
+  }) => Promise<{ ok: true; jobId?: string; message: string } | { ok: false; reason: string }>;
   onWorkshopChanged?: (handler: () => void) => () => void;
 };
 

@@ -16,6 +16,7 @@ import {
   paintValue,
   parseBinding,
   parsePointer,
+  galleryItems,
   parseWorkshopPack,
   pickCase,
   pointerGet,
@@ -64,7 +65,7 @@ test("fixture packs parse and every widget kind is exercised by at least one", (
       });
     }
   }
-  for (const kind of ["ring", "bar", "text", "kv", "pair", "meta", "note", "chips", "probes", "flags", "log", "hbox", "switch"]) {
+  for (const kind of ["ring", "bar", "text", "kv", "pair", "meta", "note", "chips", "probes", "flags", "log", "gallery", "hbox", "switch"]) {
     assert.ok(kinds.has(kind), `fixtures exercise ${kind}`);
   }
 });
@@ -242,4 +243,40 @@ test("source fingerprints bind grants to descriptors; disablePacksForReconfirm c
   assert.equal(disabled.settings.packs[0]?.sourceFingerprints, undefined);
   assert.equal(disabled.settings.packs[1]?.on, false);
   assert.equal(disabled.settings.packs[2]?.on, false);
+});
+
+test("gallery widget validates and galleryItems normalizes feed rows", () => {
+  const pack = minimal();
+  (pack.cards as unknown[]) = [{ title: "G", rows: [{ w: "gallery", of: "feed:/outputs", limit: 12 }] }];
+  assert.equal(parseWorkshopPack(pack, "sample").ok, true);
+  const bad = minimal();
+  (bad.cards as unknown[]) = [{ title: "G", rows: [{ w: "gallery", of: "feed:/outputs", limit: 999 }] }];
+  const refused = parseWorkshopPack(bad, "sample");
+  assert.equal(refused.ok, false);
+  if (!refused.ok) assert.match(refused.reason, /gallery limit/);
+  const items = galleryItems([
+    { kind: "image", label: "a.png", path: "/tmp/a.png" },
+    { kind: "video", label: "b.mp4" },
+    { kind: "other", label: "skip" },
+    { label: "no-kind" },
+  ], 10);
+  assert.equal(items.length, 2);
+  assert.equal(items[0]?.kind, "image");
+  assert.equal(items[1]?.kind, "video");
+});
+
+test("spark-media fixture pack parses under contract 1", () => {
+  const parsed = parseWorkshopPack(fixture("spark-media"), "spark-media");
+  assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.reason);
+  if (parsed.ok) {
+    assert.equal(parsed.pack.id, "spark-media");
+    assert.equal(parsed.pack.sources[0]?.kind, "json");
+    if (parsed.pack.sources[0]?.kind === "json") {
+      assert.equal(parsed.pack.sources[0].namespace, "media");
+      assert.equal(parsed.pack.sources[0].path, "feed");
+      assert.equal(parsed.pack.sources[0].schema, "go7-workshop-media/v0");
+    }
+    assert.ok(parsed.pack.cards.some((card) => card.title === "Gallery"));
+    assert.ok(parsed.pack.cards.some((card) => card.title === "Create"));
+  }
 });

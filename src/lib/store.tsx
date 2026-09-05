@@ -964,12 +964,14 @@ function stopDeletedWorkerSessions(before: Session[], after: Session[]) {
 }
 
 function occupancyForSession(
-  session: { provider: ProviderId; model: string; messages?: Parameters<typeof estimateMessageTokens>[0] } | undefined,
+  session:
+    | { provider: ProviderId; model: string; customBotId?: string; messages?: Parameters<typeof estimateMessageTokens>[0] }
+    | undefined,
   draft: UsageDraft,
   seen?: number,
 ): number | undefined {
   if (typeof seen === "number" && seen > 0) return seen;
-  const window = session ? contextWindowFor(session.provider, session.model) : 0;
+  const window = session ? contextWindowFor(session.provider, session.model, undefined, session.customBotId) : 0;
   if (draft.source === "estimate") {
     const occupying = session?.messages ? estimateMessageTokens(session.messages).tokens : 0;
     return occupancyFromUsage(
@@ -2442,7 +2444,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const outcome = applyCompactOutcome({
                 leftoverPercent: 0,
                 contextUsed: item.contextUsed,
-                windowSize: contextWindowFor(item.provider, item.model),
+                windowSize: contextWindowFor(item.provider, item.model, undefined, item.customBotId),
                 omittedMessages: checkpoint.omittedMessages,
                 keptMessages: Math.max(0, visible.length - checkpoint.omittedMessages),
                 summaryChars: checkpoint.summary.length,
@@ -7220,7 +7222,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         const occupancy = occupancyFromUsage(
           incoming,
-          liveSession ? contextWindowFor(liveSession.provider, liveSession.model) : 0,
+          liveSession ? contextWindowFor(liveSession.provider, liveSession.model, undefined, liveSession.customBotId) : 0,
         );
         if (occupancy !== undefined) {
           grokContextSeen.current[event.sessionId] = occupancy;

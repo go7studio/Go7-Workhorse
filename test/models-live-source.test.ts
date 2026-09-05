@@ -137,7 +137,11 @@ test("the advertised list flows from the session start to the desk cache and the
   const store = read("src/lib/store.tsx");
   assert.match(store, /event\.type === "vendor-models"\) \{\s*refreshVendorModels\(\);/);
   const setup = read("src/ui/SessionSetup.tsx");
-  assert.match(setup, /formatWindow\(contextWindowFor\(session\.provider, session\.model\)\)/, "an unlisted id still shows a window");
+  assert.match(
+    setup,
+    /formatWindow\(contextWindowFor\(session\.provider, session\.model, undefined, session\.customBotId\)\)/,
+    "an unlisted id still shows a window, and it is the window of this chat's own slot",
+  );
 });
 
 test("a typed model is put to the vendor before the turn, and a refusal names it", () => {

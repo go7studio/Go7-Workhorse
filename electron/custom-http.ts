@@ -146,10 +146,16 @@ export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base
  * Matched by the prefixes real keys carry, never by "this looks long": model ids
  * such as `hf:moonshotai/Kimi-K3` are the same shape as a token and must survive
  * intact, or the message stops naming what failed.
+ *
+ * The prefix alone is not enough either. `api_` starts a key and it also starts
+ * `api_rate_limit`, and blanking that left "[redacted] exceeded", which names
+ * nothing and reads like a leak was caught. So a prefix only counts when what
+ * follows is token-shaped: sixteen unbroken characters at least, which no
+ * English phrase in an error body reaches before its first space.
  */
 const SECRET_SHAPES: [RegExp, string][] = [
   [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],
-  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9._~+/=-]{8,}/gi, "[redacted]"],
+  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9_-]{16,}[A-Za-z0-9._~+/=-]*/gi, "[redacted]"],
   [/("(?:[a-z_-]*(?:api[_-]?key|authorization|token|secret)[a-z_-]*)"\s*:\s*")[^"]{8,}(")/gi, "$1[redacted]$2"],
 ];
 

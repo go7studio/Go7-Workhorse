@@ -171,7 +171,7 @@ export function SessionSetup({ onClose }: { onClose: () => void }) {
           <div>
             <strong>Model</strong>
           </div>
-          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(contextWindowFor(session.provider, session.model))} context</span>
+          <span className="setup-current">{routeLabel ? `${routeLabel} · ` : ""}{formatWindow(contextWindowFor(session.provider, session.model, undefined, session.customBotId))} context</span>
         </div>
 
         <div className="setup-subgroup">

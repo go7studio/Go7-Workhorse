@@ -11,7 +11,7 @@ import {
 } from "../electron/custom-catalog";
 import { CUSTOM_MODEL_TEST_PROMPT, redactSecrets, testCustomModel } from "../electron/custom-http";
 import { customVendorRows } from "../electron/vendor-models";
-import { applyVendorCatalog, contextWindowFor, modelsFor, resetVendorCatalog } from "../src/lib/models";
+import { applyVendorCatalog, contextWindowFor, formatWindow, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { routingCandidatesForDesk } from "../src/lib/routing";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import type { CustomBot } from "../src/lib/types";
@@ -424,19 +424,19 @@ test("two slots serving the same model id each keep their own window", () => {
     { bot: SYNTHETIC_BOT, catalog: catalogOf(SYNTHETIC_MODELS) },
     {
       bot: local,
-      catalog: { models: [{ id: "hf:zai-org/GLM-5.2", contextWindow: 32_768 }], fetchedAt: 2 },
+      catalog: { models: [{ id: "hf:zai-org/GLM-5.2", contextWindow: 32_000 }], fetchedAt: 2 },
     },
   ]);
   const glm = rows.filter((row) => row.id === "hf:zai-org/GLM-5.2");
   assert.equal(glm.length, 2, "one row per slot, not one row per id");
   assert.deepEqual(
     glm.map((row) => [row.customBotId, row.contextWindow]).sort(),
-    [["bot_box", 32_768], ["bot_syn", 200_000]],
+    [["bot_box", 32_000], ["bot_syn", 200_000]],
   );
 
   applyVendorCatalog({ custom: rows });
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000, "bot_syn"), 200_000);
-  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 64_000, "bot_box"), 32_768);
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 64_000, "bot_box"), 32_000);
   // A slot with no published row for the id falls back to its own number, and
   // never borrows another slot's.
   assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000, "bot_absent"), 96_000);
@@ -448,6 +448,13 @@ test("two slots serving the same model id each keep their own window", () => {
   // The plain catalog view stays one row per id, so nothing that reads it as a
   // model list sees the same model twice.
   assert.equal(modelsFor("custom").filter((row) => row.id === "hf:zai-org/GLM-5.2").length, 1);
+
+  // What the chat-settings header prints, computed the way the header computes
+  // it. A chat on the local box must read its own 32k, never the Synthetic 200k.
+  const headerWindow = (session: { provider: "custom"; model: string; customBotId?: string }) =>
+    formatWindow(contextWindowFor(session.provider, session.model, undefined, session.customBotId));
+  assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_box" }), "32k");
+  assert.equal(headerWindow({ provider: "custom", model: "hf:zai-org/GLM-5.2", customBotId: "bot_syn" }), "200k");
   resetVendorCatalog();
 });
 
@@ -479,4 +486,11 @@ test("a host that quotes the key back never gets it to the renderer", async () =
     "hf:zai-org/GLM-5.2 and hf:moonshotai/Kimi-K3 are fine",
   );
   assert.equal(redactSecrets("token hf_ABCdef0123456789 here"), "token [redacted] here");
+
+  // A prefix is not a key. These three read like an error and must stay legible;
+  // "[redacted] exceeded" names nothing and looks like a leak was caught.
+  assert.equal(redactSecrets("api_rate_limit exceeded"), "api_rate_limit exceeded");
+  assert.equal(redactSecrets("invalid_api_key for this project"), "invalid_api_key for this project");
+  assert.equal(redactSecrets("token expired after 30s"), "token expired after 30s");
+  assert.equal(redactSecrets("used api_9f8e7d6c5b4a3210abcd once"), "used [redacted] once");
 });

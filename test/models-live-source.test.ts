@@ -136,12 +136,8 @@ test("the advertised list flows from the session start to the desk cache and the
   assert.equal(glm?.customBotId, "bot_syn", "and stays attached to the slot that published it");
   const store = read("src/lib/store.tsx");
   assert.match(store, /event\.type === "vendor-models"\) \{\s*refreshVendorModels\(\);/);
-  const setup = read("src/ui/SessionSetup.tsx");
-  assert.match(
-    setup,
-    /formatWindow\(contextWindowFor\(session\.provider, session\.model, undefined, session\.customBotId\)\)/,
-    "an unlisted id still shows a window, and it is the window of this chat's own slot",
-  );
+  // The chat-setup header's own window is behaviour, not source: the formula it
+  // renders is asserted against two live slots in custom-host-catalog.test.ts.
 });
 
 test("a typed model is put to the vendor before the turn, and a refusal names it", () => {

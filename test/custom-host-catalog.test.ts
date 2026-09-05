@@ -493,4 +493,15 @@ test("a host that quotes the key back never gets it to the renderer", async () =
   assert.equal(redactSecrets("invalid_api_key for this project"), "invalid_api_key for this project");
   assert.equal(redactSecrets("token expired after 30s"), "token expired after 30s");
   assert.equal(redactSecrets("used api_9f8e7d6c5b4a3210abcd once"), "used [redacted] once");
+
+  // Twelve characters is the shortest tail a real key is allowed to have, so a
+  // key that stopped just short of the old bar no longer walks through.
+  assert.equal(redactSecrets("sk-abcdef123456 rejected"), "[redacted] rejected");
+
+  // A JWT wears no vendor prefix, so it needs its own rule. Bare, behind
+  // Bearer, and inside a named field all end the same way.
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQabcdefgh";
+  assert.equal(redactSecrets(`rejected ${jwt} at the gateway`), "rejected [redacted] at the gateway");
+  assert.equal(redactSecrets(`Authorization: Bearer ${jwt}`), "Authorization: Bearer [redacted]");
+  assert.equal(redactSecrets(`{"token": "${jwt}"}`), '{"token": "[redacted]"}');
 });

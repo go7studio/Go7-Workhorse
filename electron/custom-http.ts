@@ -150,12 +150,19 @@ export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base
  * The prefix alone is not enough either. `api_` starts a key and it also starts
  * `api_rate_limit`, and blanking that left "[redacted] exceeded", which names
  * nothing and reads like a leak was caught. So a prefix only counts when what
- * follows is token-shaped: sixteen unbroken characters at least, which no
- * English phrase in an error body reaches before its first space.
+ * follows is token-shaped: twelve unbroken characters at least. That clears
+ * `rate_limit`, which is ten, and no English phrase in an error body runs
+ * further than that before its first space.
+ *
+ * A JWT needs its own line. It carries no vendor prefix, and it arrives bare as
+ * often as it arrives behind `Bearer` or inside a named JSON field, so the two
+ * rules above both miss it. Its own header is the tell: `eyJ` is base64 for the
+ * `{"` that starts every one of them.
  */
 const SECRET_SHAPES: [RegExp, string][] = [
   [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],
-  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9_-]{16,}[A-Za-z0-9._~+/=-]*/gi, "[redacted]"],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]"],
+  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9_-]{12,}[A-Za-z0-9._~+/=-]*/gi, "[redacted]"],
   [/("(?:[a-z_-]*(?:api[_-]?key|authorization|token|secret)[a-z_-]*)"\s*:\s*")[^"]{8,}(")/gi, "$1[redacted]$2"],
 ];
 

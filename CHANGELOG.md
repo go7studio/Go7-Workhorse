@@ -8,6 +8,18 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.57](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.56...v0.6.57) (2026-09-05)
+
+
+### Features
+
+* **custom:** pick, test and route every model a multi-model host serves ([66e788c](https://github.com/go7studio/Go7-Workhorse/commit/66e788c3024a25417dbebb09a8f65c1a6cf0e015))
+
+
+### Bug Fixes
+
+* **routing:** Auto can route ordinary work to a Synthetic bot, and says why ([f9ef6f7](https://github.com/go7studio/Go7-Workhorse/commit/f9ef6f719bde10008f5d5bbe4502e496dcc9e115))
+
 ## [0.6.56](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.55...v0.6.56) (2026-09-05)
 
 

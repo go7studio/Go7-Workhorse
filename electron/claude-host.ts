@@ -151,12 +151,13 @@ export class ClaudeSessionHost {
           provider: "claude",
           ...usage,
         }),
-      onPermission: (ask: { requestId: string; tool: string; detail: string; path?: string }) =>
+      onPermission: (ask: { requestId: string; tool: string; rawTool?: string; detail: string; path?: string }) =>
         emit({
           type: "permission" as const,
           sessionId: input.sessionId,
           requestId: ask.requestId,
           tool: ask.tool,
+          rawTool: ask.rawTool,
           detail: ask.detail,
           path: ask.path,
         }),

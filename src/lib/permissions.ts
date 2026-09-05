@@ -80,7 +80,7 @@ function toolKeyIn(tool: string, names: ReadonlySet<string>): boolean {
 }
 
 const WRITE_WORDS =
-  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run command|run_command)\b/;
+  /\b(write|write_file|edit|search_replace|str_replace|create|delete|unlink|rm |remove|move|rename|bash|shell|powershell|cmd\.exe|run a command|run command|run_command)\b/;
 
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
   if (looksLikeDelegationTool(tool, detail)) return false;
@@ -90,10 +90,22 @@ export function looksLikeWriteTool(tool: string, detail: string, filePath?: stri
   // A shell's name says nothing about what it runs, so it is judged by the
   // program it invokes. Everything else a shell does counts as a write.
   if (shell && looksLikeSearchOnly(tool, detail, filePath)) return false;
+  if (shell) return true;
   return WRITE_WORDS.test(`${tool} ${detail} ${filePath ?? ""}`.toLowerCase());
 }
 
+/**
+ * Shell names that never say "bash". The desk's own labeller turns a pasted
+ * command into the title "Run a command", and the ACP kind for that same call
+ * is "execute" — so a Claude worker's grep arrived named something no
+ * classifier knew, was judged not-a-shell, and fell through to a deny. These
+ * are matched on the NAME alone: a brief that merely says "execute the plan"
+ * is still a brief.
+ */
+const SHELL_TOOL_NAMES = /\b(run a command|execute|terminal|run_terminal_cmd|local_shell|shell_command)\b/i;
+
 export function looksLikeShellTool(tool: string, detail: string): boolean {
+  if (SHELL_TOOL_NAMES.test(tool)) return true;
   return /\b(bash|shell|powershell|cmd\.exe|run command|run_command)\b/i.test(`${tool} ${detail}`);
 }
 
@@ -138,22 +150,244 @@ export function securityPolicyAnswer(input: {
   return { answer: null };
 }
 
+const WRITE_HINT_WORDS =
+  /\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/;
+
+/**
+ * Claude hands the desk a shell call as JSON — {"command":"grep …",
+ * "description":"…"} — and Codex sends `cmd`. Judging that envelope as if it
+ * were the command read the braces and the description instead of the program,
+ * so a plain grep counted as neither a search nor a write. The command string
+ * is what the shell runs; everything beside it is a label.
+ */
+export function shellCommandIn(detail: string): string | undefined {
+  const text = detail.trim();
+  if (!text.startsWith("{")) return undefined;
+  const fromRecord = (value: unknown): string | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    for (const key of ["command", "cmd"]) {
+      const found = record[key];
+      if (typeof found === "string" && found.trim()) return found.trim();
+    }
+    return undefined;
+  };
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return fromRecord(parsed) ?? fromRecord(parsed.tool_input) ?? fromRecord(parsed.input);
+  } catch {
+    // A long call can reach the desk clipped. The command survives a cut that
+    // the closing brace does not, so it is read back out of the raw text.
+    const match = /"(?:command|cmd)"\s*:\s*("(?:[^"\\]|\\.)*")/.exec(text);
+    if (!match?.[1]) return undefined;
+    try {
+      const value = JSON.parse(match[1]) as unknown;
+      return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * Programs that only ever read. Every stage of a pipeline has to start with one
+ * of these before the command counts as a search.
+ */
+const READ_ONLY_PROGRAMS: ReadonlySet<string> = new Set([
+  "grep",
+  "rg",
+  "ripgrep",
+  "egrep",
+  "fgrep",
+  "sed",
+  "awk",
+  "gawk",
+  "mawk",
+  "head",
+  "tail",
+  "cat",
+  "wc",
+  "sort",
+  "uniq",
+  "cut",
+  "tr",
+  "ls",
+  "find",
+  "echo",
+  "printf",
+  "git",
+  "which",
+  "type",
+  "file",
+  "stat",
+  "du",
+  "df",
+  "pwd",
+  "env",
+  "printenv",
+]);
+
+/** The read forms of git. Everything else it can do puts something on disk. */
+const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "log",
+  "status",
+  "diff",
+  "show",
+  "blame",
+  "rev-parse",
+  "ls-files",
+  "branch",
+]);
+
+type CommandStage = { program: string; args: string[] };
+
+/**
+ * Split a command into pipeline stages, honouring quotes. Splitting the raw
+ * text tore `grep "a\|b" test | head -40` apart at the pipe inside the pattern
+ * and left a stage that started with nothing. Redirection, command
+ * substitution and backgrounding end the walk: none of them can be judged by
+ * the program at the front.
+ */
+function shellStages(command: string): CommandStage[] | null {
+  const stages: CommandStage[] = [];
+  let tokens: string[] = [];
+  let token = "";
+  let quote: '"' | "'" | null = null;
+  const endToken = () => {
+    if (token) tokens.push(token);
+    token = "";
+  };
+  const endStage = () => {
+    endToken();
+    if (tokens.length > 0) stages.push({ program: tokens[0] ?? "", args: tokens.slice(1) });
+    tokens = [];
+  };
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index] as string;
+    if (quote) {
+      if (char === "\\" && quote === '"' && index + 1 < command.length) {
+        token += char + (command[index + 1] as string);
+        index += 1;
+        continue;
+      }
+      if (char === quote) quote = null;
+      else token += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      token += char;
+      continue;
+    }
+    if (char === "\\") {
+      if (index + 1 < command.length) {
+        token += command[index + 1] as string;
+        index += 1;
+      }
+      continue;
+    }
+    if (char === ">" || char === "<" || char === "`") return null;
+    if (char === "$" && command[index + 1] === "(") return null;
+    if (char === "|" || char === ";" || char === "&" || char === "\n" || char === "\r") {
+      endStage();
+      continue;
+    }
+    if (char === " " || char === "\t") {
+      endToken();
+      continue;
+    }
+    token += char;
+  }
+  if (quote) return null;
+  endStage();
+  return stages;
+}
+
+function programName(raw: string): string {
+  return raw
+    .replace(/^["']|["']$/g, "")
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+}
+
+function positionals(args: string[]): string[] {
+  return args.filter((arg) => !arg.startsWith("-"));
+}
+
+/** Programs on the list that still hold a way to write, and the flag that does it. */
+function stageWrites(program: string, args: string[]): boolean {
+  if (program === "sed" || program === "awk" || program === "gawk" || program === "mawk") {
+    // -i edits in place, awk's `print >` and sed's `w` write from inside the
+    // script, and the script arrives quoted so the redirection walk misses it.
+    if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return true;
+    if (args.some((arg) => arg.includes(">"))) return true;
+    if (program === "sed" && args.some((arg) => /(?:^|[;}])\s*w\s|\/w\s/.test(arg))) return true;
+    return false;
+  }
+  if (program === "find") {
+    return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/.test(arg));
+  }
+  if (program === "sort") return args.some((arg) => arg === "-o" || arg.startsWith("--output"));
+  // `uniq in out` writes its second file.
+  if (program === "uniq") return positionals(args).length > 1;
+  // `env FOO=1 rm x` runs rm, so env only reads when it names no program.
+  if (program === "env") return positionals(args).length > 0;
+  if (program === "git") {
+    const sub = positionals(args)[0];
+    if (!sub || !GIT_READ_SUBCOMMANDS.has(sub.toLowerCase())) return true;
+    // `git branch` reads; `git branch <name>` and `git branch -d` do not.
+    if (sub.toLowerCase() === "branch") {
+      if (positionals(args).length > 1) return true;
+      return args.some((arg) => /^-(?:[dDmMcCf]|-delete|-move|-copy|-force|-set-upstream.*|-unset-upstream|-edit-description)$/.test(arg));
+    }
+    return false;
+  }
+  return false;
+}
+
+const POWERSHELL_WRAPPER = /^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i;
+
+/** Every stage starts with a program that only reads, and nothing redirects. */
+function readOnlyPipeline(command: string): boolean {
+  const stages = shellStages(command);
+  if (!stages || stages.length === 0) return false;
+  return stages.every((stage) => {
+    const program = programName(stage.program);
+    if (!READ_ONLY_PROGRAMS.has(program)) return false;
+    return !stageWrites(program, stage.args);
+  });
+}
+
 /** rg / grep as the invoked program — allow through Ask / Plan / Always. */
 export function looksLikeSearchOnly(tool: string, detail: string, filePath?: string): boolean {
   const command = `${detail} ${filePath ?? ""}`.trim();
-  const hay = `${tool} ${command}`.toLowerCase();
-  if (/\b(write|edit|replace|delete|unlink|rm\b|remove|move|rename|mkdir|out-file|set-content|new-item)\b/.test(hay)) {
-    return false;
-  }
   // A tool that is not a shell is judged by its name. "run a grep over the
   // tree" sitting inside a brief is the brief talking, not the program.
-  if (!looksLikeShellTool(tool, detail)) return toolKeyIn(tool, SEARCH_TOOL_KEYS);
-  const stripped = command
-    .replace(/^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i, "")
-    .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
-  return /^(rg(?:\.exe)?|ripgrep|grep)\b/im.test(stripped) || /^(rg(?:\.exe)?|ripgrep|grep)\b/i.test(command);
+  if (!looksLikeShellTool(tool, detail)) {
+    if (WRITE_HINT_WORDS.test(`${tool} ${command}`.toLowerCase())) return false;
+    return toolKeyIn(tool, SEARCH_TOOL_KEYS);
+  }
+  // A shell is judged by the programs it invokes, never by the words in its
+  // text: a grep whose pattern held "remove" read as a write, and a search
+  // that piped into head read as neither.
+  const json = shellCommandIn(detail);
+  if (json !== undefined) return readOnlyPipeline(json);
+  // A PowerShell interpreter is not one of the programs below and its cmdlets
+  // are not those either, so its payload keeps the older, narrower rule: the
+  // search it was unwrapped for, and nothing else.
+  if (POWERSHELL_WRAPPER.test(command)) {
+    const inner = command
+      .replace(POWERSHELL_WRAPPER, "")
+      .replace(/^try\s*\{[\s\S]*?\}\s*catch\s*\{\s*\}\s*/i, "")
+      .trim();
+    return /^(rg(?:\.exe)?|ripgrep|grep)\b/im.test(inner);
+  }
+  // Only a quote pair that wraps the WHOLE command comes off. Stripping either
+  // end on its own took the closing quote off `sed -n '1,20p'` and left the
+  // walk inside a quote that never ended.
+  const wrapped = command.length > 1 && /^(["'])[\s\S]*\1$/.test(command);
+  return readOnlyPipeline(wrapped ? command.slice(1, -1).trim() : command);
 }
 
 const QUIET_DESK_TOOLS = new Set([
@@ -843,12 +1077,17 @@ export function permissionPolicyAnswer(input: {
   detail: string;
   path?: string;
 }): PermissionAnswer | null {
+  const searchOnly = looksLikeSearchOnly(input.tool, input.detail, input.path);
+  // A read-only seat blocks writes, never reads. A search-only command is a
+  // read whatever the seat is, so it is answered above the sandbox clamp and
+  // above the plan clamp rather than leaning on the write check to spare it.
+  // Security boundaries still win: securityPolicyAnswer runs before this.
+  if (searchOnly) return input.mode === "always-approve" ? "session" : "once";
   const write = looksLikeWriteTool(input.tool, input.detail, input.path);
   const planFile = /plan\.md/i.test(`${input.path ?? ""} ${input.detail}`);
   if ((input.sandbox === "read-only" || input.sandbox === "strict") && write) return "deny";
   if (input.mode === "plan" && write && !planFile) return "deny";
   if (input.mode === "always-approve") return "session";
-  if (looksLikeSearchOnly(input.tool, input.detail, input.path)) return "once";
   if (input.mode === "accept-edits" && write && !looksLikeShellTool(input.tool, input.detail)) return "once";
   return null;
 }

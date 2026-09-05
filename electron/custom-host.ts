@@ -737,6 +737,7 @@ export class CustomSessionHost {
               sessionId: input.sessionId,
               requestId,
               tool: use.name,
+              rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
               elevate: blocked,
@@ -756,6 +757,7 @@ export class CustomSessionHost {
               sessionId: input.sessionId,
               requestId,
               tool: use.name,
+              rawTool: use.name,
               detail: detail.detail,
               path: detail.path,
             });

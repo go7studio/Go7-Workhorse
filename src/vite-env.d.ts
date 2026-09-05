@@ -27,6 +27,8 @@ type GrokBridgeEvent =
       sessionId: string;
       requestId: string;
       tool: string;
+      /** The vendor's own name for the call. The classifiers judge this; the card shows `tool`. */
+      rawTool?: string;
       detail: string;
       path?: string;
       elevate?: { mode?: import("./lib/types").PermissionMode; sandbox?: import("./lib/types").SandboxProfile };

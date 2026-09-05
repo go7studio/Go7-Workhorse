@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled, routingProfileEdit } from "../lib/custom-bots";
+import { BOT_COLORS, customBotEnabled, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -486,15 +486,7 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
   const patch = (change: Parameters<typeof routingProfileEdit>[1]) =>
     store.updateCustomBot(bot.id, { routingProfile: routingProfileEdit(saved, change) });
   const setRole = (role: string) =>
-    patch(
-      role === "family"
-        ? "family"
-        : role === "deep"
-          ? { intelligence: 5, speed: 2, cost: 5 }
-          : role === "quick"
-            ? { intelligence: 3, speed: 5, cost: 1 }
-            : { intelligence: 4, speed: 4, cost: 3 },
-    );
+    patch(role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS]);
   const rated = saved?.intelligence !== undefined;
   const role = !rated
     ? "family"

@@ -1,5 +1,6 @@
 import type {
   ChatImage,
+  CustomBot,
   EffortLevel,
   GrokPlanProduct,
   GrokPlanUsage,
@@ -13,7 +14,12 @@ import type {
   TaskDomain,
 } from "./types";
 import { isLocalEndpoint } from "./usage";
-import { customBotEnabled, customBotModels, customModelRoutingOverride } from "./custom-bots";
+import {
+  customBotEnabled,
+  customBotModels,
+  customModelRoutingOverride,
+  withoutMachineWrittenScores,
+} from "./custom-bots";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
@@ -453,6 +459,51 @@ export function routingProfileForModel(
     speed: clamp(Math.round(override?.speed ?? base.speed), 1, 5),
     cost: clamp(Math.round(override?.cost ?? base.cost), 1, 5),
   };
+}
+
+/**
+ * Take back the ratings the old bot editor wrote by itself.
+ *
+ * The pane saved `{ ...resolved, ...one change }`, so one tick on any control
+ * stored the family default as an override — clamped from the internal 1-10
+ * scale down to 1-5, where 5 means frontier and doubles back to 10. Two live
+ * bots show both directions of the same fault: Kimi K3 carried the legacy
+ * 3/3/3 and scored 6 against a balanced bar of 8, so Auto could never send it
+ * ordinary work; DGX Spark, a local Qwen 27B, carried 5/3/3 (its family's
+ * 6/3/3 clamped) and scored 10, level with Opus 5 and eligible for deep work.
+ *
+ * This lives here because only this file knows the family table. It is
+ * deliberately narrow: a triple is dropped only when it exactly matches what a
+ * write-back for that model would have stored, and never when it matches a
+ * role the person could have picked.
+ */
+export function migrateCustomBotRatings<T extends Pick<CustomBot, "model" | "routingProfile" | "routingProfiles">>(
+  bots: T[],
+): T[] {
+  const familyFor = (model: string) => {
+    const base = routingProfileForModel("custom", model);
+    return { intelligence: base.intelligence, speed: base.speed, cost: base.cost };
+  };
+  return bots.map((bot) => {
+    const routingProfile = withoutMachineWrittenScores(bot.routingProfile, familyFor(bot.model));
+    const profiles = bot.routingProfiles;
+    let routingProfiles = profiles;
+    if (profiles) {
+      const next: Record<string, Partial<ModelRoutingProfile>> = {};
+      for (const [model, profile] of Object.entries(profiles)) {
+        const cleaned = withoutMachineWrittenScores(profile, familyFor(model));
+        if (cleaned) next[model] = cleaned;
+      }
+      routingProfiles = Object.keys(next).length > 0 ? next : undefined;
+    }
+    if (routingProfile === bot.routingProfile && routingProfiles === bot.routingProfiles) return bot;
+    const { routingProfile: _profile, routingProfiles: _profiles, ...rest } = bot;
+    return {
+      ...(rest as T),
+      ...(routingProfile ? { routingProfile } : {}),
+      ...(routingProfiles ? { routingProfiles } : {}),
+    };
+  });
 }
 
 export function attachmentRequirements(attachments: ChatImage[] = []): Partial<ModelInputCapabilities> {

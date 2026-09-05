@@ -12,13 +12,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   chooseRoutingDecision,
+  migrateCustomBotRatings,
   rankRoutingCandidates,
   routingCandidatesForDesk,
   routingDecisionLogDetail,
   routingProfileForModel,
   type RoutingCandidate,
 } from "../src/lib/routing";
-import { normalizeCustomBot, routingProfileEdit, withoutMachineWrittenScores } from "../src/lib/custom-bots";
+import {
+  normalizeCustomBot,
+  routingProfileEdit,
+  ROUTING_ROLE_PRESETS,
+  withoutMachineWrittenScores,
+  writeBackTripleFor,
+} from "../src/lib/custom-bots";
 import { normalizeSettings } from "../src/lib/settings";
 import { shouldRefreshPlansForRouting } from "../src/lib/watch";
 import type { GrokPlanUsage, RoutingSettings, Settings } from "../src/lib/types";
@@ -179,6 +186,92 @@ test("a rating a person did author is left exactly alone", () => {
 test("the migration keeps nothing behind when the triple was all there was", () => {
   assert.equal(withoutMachineWrittenScores({ intelligence: 3, speed: 3, cost: 3 }), undefined);
   assert.equal(withoutMachineWrittenScores(undefined), undefined);
+});
+
+test("a write-back of the family default is taken back off, in both directions", () => {
+  // DGX Spark, live on this desk: a local Qwen 27B whose family is 6/3/3. One
+  // tick in the old pane stored the resolved profile clamped to 5/3/3, and 5 on
+  // the stored scale means frontier, so it doubled back to 10. A 27B box was
+  // rated level with Opus 5 and eligible for deep work.
+  const spark = {
+    id: "bot_073z7u6n2d3j",
+    name: "DGX Spark",
+    color: "#30d158",
+    baseUrl: "https://go7-dgx-spark.example.net/v1",
+    model: "qwen3.8-27b",
+    apiKey: "sk_spark",
+    api: "openai-completions" as const,
+    contextWindow: 128_000,
+    createdAt: 1,
+    routingProfile: { intelligence: 5, speed: 3, cost: 3, local: true },
+  };
+  assert.equal(routingProfileForModel("custom", spark.model).intelligence, 6, "the family says 6");
+  assert.equal(
+    routingProfileForModel("custom", spark.model, spark.routingProfile).intelligence,
+    10,
+    "the stored write-back says 10, which is the fault",
+  );
+  const [migrated] = migrateCustomBotRatings([normalizeCustomBot(spark)!]);
+  assert.equal(migrated?.routingProfile?.intelligence, undefined, "the rating nobody wrote is dropped");
+  assert.equal(migrated?.routingProfile?.local, true, "ticking Local was a real choice and stays");
+  assert.equal(routingProfileForModel("custom", spark.model, migrated?.routingProfile).intelligence, 6);
+  // The other direction, on the same rule: Kimi's legacy triple.
+  const [kimi] = migrateCustomBotRatings([
+    normalizeCustomBot(syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3 } }))!,
+  ]);
+  assert.equal(kimi?.routingProfile, undefined);
+});
+
+test("a rating the person could have picked survives, even where it collides", () => {
+  // A triple that matches a role in the select is a choice, not an artefact.
+  // Kept even when it would also be a write-back, because a rating wrongly kept
+  // is a number they can see and change, and one wrongly dropped is silent.
+  for (const [role, preset] of Object.entries(ROUTING_ROLE_PRESETS)) {
+    assert.deepEqual(withoutMachineWrittenScores(preset, preset), preset, `${role} is a choice`);
+  }
+  // And a triple that is neither a role nor this model's write-back is kept.
+  assert.deepEqual(withoutMachineWrittenScores({ intelligence: 2, speed: 1, cost: 4 }, { intelligence: 6, speed: 3, cost: 3 }), {
+    intelligence: 2,
+    speed: 1,
+    cost: 4,
+  });
+  // The write-back triple is the family's, clamped to the stored 1-5 scale.
+  assert.deepEqual(writeBackTripleFor({ intelligence: 8, speed: 3, cost: 2 }), {
+    intelligence: 5,
+    speed: 3,
+    cost: 2,
+  });
+});
+
+test("the migration reaches a per-model override, and leaves an untouched bot alone", () => {
+  const bot = normalizeCustomBot(
+    syntheticBot({
+      models: ["hf:moonshotai/Kimi-K3", "hf:zai-org/GLM-5.2"],
+      // GLM's family is 7/3/2, so 5/3/2 is its write-back. Kimi's own slot is a
+      // deliberate Deep and must not move.
+      routingProfile: { intelligence: 5, speed: 2, cost: 5 },
+      routingProfiles: { "hf:zai-org/GLM-5.2": { intelligence: 5, speed: 3, cost: 2 } },
+    }),
+  )!;
+  const [migrated] = migrateCustomBotRatings([bot]);
+  assert.deepEqual(migrated?.routingProfile, { intelligence: 5, speed: 2, cost: 5 }, "Deep was chosen");
+  assert.equal(migrated?.routingProfiles, undefined, "the GLM write-back is dropped");
+  // A bot that never had a profile is returned untouched, same object.
+  const plain = normalizeCustomBot(syntheticBot())!;
+  assert.equal(migrateCustomBotRatings([plain])[0], plain);
+});
+
+test("normalizeSettings runs the migration, so a loaded desk is already clean", () => {
+  // A write-back triple, not the legacy one: normalizeCustomBot catches 3/3/3
+  // on its own, so only a write-back proves the family-aware pass is wired in.
+  // Kimi's family is 8/3/2, so its write-back is 5/3/2, which resolves to 10.
+  const desk = deskWith([syntheticBot({ routingProfile: { intelligence: 5, speed: 3, cost: 2, local: false } })]);
+  const bot = desk.customBots.find((row) => row.id === "bot_wfd6ghzwhfa7");
+  assert.equal(bot?.routingProfile?.intelligence, undefined, "the write-back is taken off at load");
+  assert.equal(kimiRow(desk, plansWith())?.profile.intelligence, 8, "not the 10 the write-back scored");
+  // And the legacy triple is cleaned at the same seam.
+  const legacy = deskWith([syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3, local: false } })]);
+  assert.equal(kimiRow(legacy, plansWith())?.profile.intelligence, 8);
 });
 
 test("a tick on an unrated bot leaves that bot on its family rating", () => {

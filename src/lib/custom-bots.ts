@@ -2,34 +2,79 @@ import { isGrokBotModel, isGrokBotUrl } from "./custom-http-identity";
 import { uid } from "./id";
 import type { CustomBot, CustomLlm, ModelRoutingProfile } from "./types";
 
-/**
- * The triple the old bot editor wrote when nobody touched the sliders.
- *
- * Ticking Local, or Images, or Docs saved the whole resolved profile back,
- * so the family default the person was only looking at became an override
- * they never authored. Kimi K3 on this desk carried intelligence 3, which
- * doubles to 6 and can never clear the balanced bar of 8 — Auto had a bot it
- * was structurally unable to send ordinary coding work to, and nothing in
- * Settings said so.
- *
- * No control writes this triple. The role select offers 3/5/1, 4/4/3 and
- * 5/2/5, so 3/3/3 can only have come from the machine.
- */
-const DEFAULT_WRITTEN_TRIPLE = { intelligence: 3, speed: 3, cost: 3 } as const;
+export type RoutingScoreTriple = { intelligence: number; speed: number; cost: number };
 
 /**
- * Drop the three numbers when they are exactly the triple the old editor wrote
- * by itself. Anything the person really chose — Local, or which inputs the bot
- * accepts — is theirs and stays. An absent number means the family default.
+ * Every rating the bot editor can actually author.
+ *
+ * The pane offers a three-way role select and nothing else, so these are the
+ * only triples a person can produce by choosing. Anything else in a stored
+ * profile was put there by the machine or by hand. The pane reads this list
+ * too, so the two can never drift.
+ */
+export const ROUTING_ROLE_PRESETS: Record<"quick" | "balanced" | "deep", RoutingScoreTriple> = {
+  quick: { intelligence: 3, speed: 5, cost: 1 },
+  balanced: { intelligence: 4, speed: 4, cost: 3 },
+  deep: { intelligence: 5, speed: 2, cost: 5 },
+};
+
+/**
+ * The triple the pre-1-to-10 editor wrote when nobody touched the controls.
+ *
+ * No family in today's table produces it, and no role does, so a saved 3/3/3
+ * can only have come from an older pane writing its own default back. Kimi K3
+ * on this desk carried it, which doubles to 6 and can never clear the balanced
+ * bar of 8: Auto had a bot it was structurally unable to send ordinary coding
+ * work to, and Settings said "Balanced".
+ */
+const LEGACY_WRITTEN_TRIPLE: RoutingScoreTriple = { intelligence: 3, speed: 3, cost: 3 };
+
+function sameTriple(profile: Partial<ModelRoutingProfile>, triple: RoutingScoreTriple): boolean {
+  return (
+    profile.intelligence === triple.intelligence &&
+    profile.speed === triple.speed &&
+    profile.cost === triple.cost
+  );
+}
+
+/**
+ * What one tick in the old pane stored for a model on this family.
+ *
+ * The pane laid its change over the resolved profile, which is on the internal
+ * 1-10 scale, and the save then clamped each number to 1-5. So a family rated
+ * 6/3/3 came back as 5/3/3 — and 5 on the stored scale means frontier, which
+ * doubles to 10. DGX Spark, a local Qwen 27B, was rated as capable as Opus 5
+ * and eligible for deep work because somebody once ticked Local.
+ */
+export function writeBackTripleFor(family: RoutingScoreTriple): RoutingScoreTriple {
+  const clamp = (value: number) => Math.min(5, Math.max(1, Math.round(value)));
+  return { intelligence: clamp(family.intelligence), speed: clamp(family.speed), cost: clamp(family.cost) };
+}
+
+/**
+ * Drop the three numbers when no control in the pane could have written them.
+ *
+ * Two signatures qualify: the legacy 3/3/3, and the exact clamped write-back of
+ * this model's own family default. Both are conservative on purpose. A triple
+ * that matches a role the person could have chosen is theirs and is kept, even
+ * where it collides with a write-back, because a rating wrongly kept is a
+ * number they can see and change while a rating wrongly dropped is silent.
+ *
+ * `family` is the model's own family triple on the internal scale. Callers
+ * without the family table still get the legacy rule.
+ *
+ * Anything the person really chose — Local, or which inputs the bot accepts —
+ * is theirs and stays. An absent number means the family default.
  */
 export function withoutMachineWrittenScores(
   profile: Partial<ModelRoutingProfile> | undefined,
+  family?: RoutingScoreTriple,
 ): Partial<ModelRoutingProfile> | undefined {
   if (!profile) return undefined;
+  if (Object.values(ROUTING_ROLE_PRESETS).some((preset) => sameTriple(profile, preset))) return profile;
   const machineWritten =
-    profile.intelligence === DEFAULT_WRITTEN_TRIPLE.intelligence &&
-    profile.speed === DEFAULT_WRITTEN_TRIPLE.speed &&
-    profile.cost === DEFAULT_WRITTEN_TRIPLE.cost;
+    sameTriple(profile, LEGACY_WRITTEN_TRIPLE) ||
+    (family !== undefined && sameTriple(profile, writeBackTripleFor(family)));
   if (!machineWritten) return profile;
   const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = profile;
   return Object.keys(rest).length > 0 ? rest : undefined;

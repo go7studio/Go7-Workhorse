@@ -304,14 +304,14 @@ test("isolated user data accepts an env or explicit launch flag", () => {
       [
         "electron",
         ".",
-        "--workhorse-user-data=C:\\Users\\lgovo\\AppData\\Roaming\\Go7",
+        "--workhorse-user-data=C:\\Users\\someone\\AppData\\Roaming\\Go7",
         "Workhorse",
         "Dev",
         "--workhorse-volatile-credentials",
       ],
       {},
     ),
-    "C:\\Users\\lgovo\\AppData\\Roaming\\Go7 Workhorse Dev",
+    "C:\\Users\\someone\\AppData\\Roaming\\Go7 Workhorse Dev",
   );
   assert.equal(workhorseUserDataOverride([], {}), undefined);
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
@@ -10329,12 +10329,11 @@ test("a nested helper's clamped runtime is said out loud, not swallowed", () => 
   // vendor grant. A note on only one of them is a note that goes missing
   // exactly when a vendor had to be asked twice.
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
-  // Both nested clamps speak now, so this checks that each is wired rather than
-  // pinning one exact line: the timeout clamp always said so, the raised token
-  // budget did not, and that silence broke the one control for a runaway.
+  // The timeout clamp speaks. Spend is not a stop, so a nested token ceiling
+  // is not assigned and has no note to carry.
   assert.match(mcp, /const clampNote = isNested/);
   assert.match(mcp, /nestedTimeoutNote\(input\.timeoutSeconds\)/);
-  assert.match(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
+  assert.doesNotMatch(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
   assert.match(mcp, /return withSpawnNote\(recordSpawnAccess\(first\), clampNote\);/, "the plain spawn result carries the note");
   assert.match(
     mcp,

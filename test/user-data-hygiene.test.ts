@@ -285,13 +285,23 @@ test("pruneOrphanWorktrees keeps a worktree whose commit no ref can reach", () =
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees will not follow a symlink out of the managed folder", () => {
+test("pruneOrphanWorktrees will not follow a symlink out of the managed folder", (t) => {
   const { root, repo, managed } = repoWithWorktree("symlink");
   const outside = path.join(root, "outside");
   fs.mkdirSync(outside);
   const real = path.join(outside, "real");
   execFileSync("git", ["worktree", "add", "--quiet", "--detach", real], { cwd: repo });
-  fs.symlinkSync(real, path.join(managed, "sess_link"));
+  try {
+    fs.symlinkSync(real, path.join(managed, "sess_link"));
+  } catch (err) {
+    fs.rmSync(root, { recursive: true, force: true });
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
 
   const pruned = pruneOrphanWorktrees(managed, []);
 
@@ -304,13 +314,23 @@ test("pruneOrphanWorktrees will not follow a symlink out of the managed folder",
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("pruneOrphanWorktrees keeps a directory whose .git link dangles", () => {
+test("pruneOrphanWorktrees keeps a directory whose .git link dangles", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "workhorse-prune-dangling-"));
   const managed = path.join(root, "worktrees");
   const orphan = path.join(managed, "sess_gone");
   fs.mkdirSync(orphan, { recursive: true });
   // the repository this worktree belonged to has been deleted, leaving the link broken
-  fs.symlinkSync(path.join(root, "vanished", ".git", "worktrees", "sess_gone"), path.join(orphan, ".git"));
+  try {
+    fs.symlinkSync(path.join(root, "vanished", ".git", "worktrees", "sess_gone"), path.join(orphan, ".git"));
+  } catch (err) {
+    fs.rmSync(root, { recursive: true, force: true });
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("Windows without symlink privilege");
+      return;
+    }
+    throw err;
+  }
   fs.writeFileSync(path.join(orphan, "untracked.bin"), "work that exists nowhere else");
   assert.equal(fs.existsSync(path.join(orphan, ".git")), false, "a dangling link must read as absent, or this test proves nothing");
 

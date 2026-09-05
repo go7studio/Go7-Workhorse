@@ -364,7 +364,9 @@ transcript rather than as a path.
   Codex, Claude and Cursor homes, and can be pushed back to a vendor. A small
   per-turn skill radar matches natural task language against installed names
   and descriptions, then asks the agent to read and verify only the strongest
-  candidates. Slash commands remain the explicit, exact route.
+  candidates. Settings → Skills can turn that wording match off, and can
+  include plugin packs in the auto-load catalog. Slash commands remain the
+  explicit, exact route.
 - **MCP servers** — Settings → Skills can add and test local stdio servers,
   attach each one only to selected runtimes, and choose the tools exposed to
   custom HTTP models. Calls use the same approval and result path as built-in

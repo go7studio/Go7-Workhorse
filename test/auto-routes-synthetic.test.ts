@@ -324,6 +324,51 @@ test("ticking one modality authors that modality and no other", () => {
   assert.equal(routingProfileForModel("custom", glm.model, glm.routingProfile).inputs.audio, true);
 });
 
+test("the tick the pane actually performs writes one key, and a second tick keeps the first", () => {
+  // The test above hands routingProfileEdit a single key and checks the storage
+  // shape. Nothing drove what the pane itself supplies, and the pane was still
+  // spreading the resolved bag, so ticking Docs on an unrated bot stored all
+  // five modalities while that test went on passing. This is the handler.
+  type Stored = import("../src/lib/types").StoredRoutingProfile;
+  const tick = (
+    saved: Stored | undefined,
+    key: "images" | "documents" | "audio" | "video",
+    value: boolean,
+  ): Stored | undefined => routingProfileEdit(saved, { inputs: { [key]: value } });
+
+  const first = tick(undefined, "documents", true);
+  assert.equal(first?.intelligence, undefined, "still no rating");
+  assert.equal(Object.keys(first?.inputs ?? {}).length, 1, "not the family's answer for the other four");
+  assert.deepEqual(first, { inputs: { documents: true } }, "one tick, one key");
+
+  // A second tick adds its own key rather than replacing the bag.
+  const second = tick(first, "audio", true);
+  assert.deepEqual(second, { inputs: { documents: true, audio: true } });
+
+  // Unticking a box the family allows is a refusal the person did author.
+  const refused = tick(undefined, "images", false);
+  assert.deepEqual(refused, { inputs: { images: false } });
+  assert.equal(routingProfileForModel("custom", "hf:moonshotai/Kimi-K3", refused).inputs.images, false);
+
+  // Through the load, and the family still answers for everything untouched.
+  const bot = normalizeCustomBot(syntheticBot({ routingProfile: second }))!;
+  assert.deepEqual(bot.routingProfile, { inputs: { documents: true, audio: true } });
+  const resolved = routingProfileForModel("custom", bot.model, bot.routingProfile);
+  assert.equal(resolved.inputs.images, true, "the family still answers for images");
+  assert.equal(resolved.inputs.video, false);
+  assert.equal(resolved.intelligence, 8, "a tick is not a rating");
+
+  // The pane must not go back to sending the resolved bag. src/ui is a React
+  // module the suite cannot mount, so the handler's shape is pinned here.
+  const pane = readFileSync(path.join(ROOT, "src", "ui", "Settings.tsx"), "utf8");
+  assert.equal(
+    /inputs: \{ \.\.\.current\.inputs/.test(pane),
+    false,
+    "a tick must not spread the resolved profile back into storage",
+  );
+  assert.match(pane, /patch\(\{ inputs: \{ \[key\]: value \} \}\)/, "the handler sends the touched key alone");
+});
+
 test("the repair runs once per bot, so a rating chosen later is kept", () => {
   // The signatures describe what an old pane wrote, not which triples a person
   // is allowed. Once a bot has been repaired it is left alone for good.

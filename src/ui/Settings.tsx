@@ -495,8 +495,13 @@ function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
       : current.speed >= 5 && current.cost <= 2
         ? "quick"
         : "balanced";
-  const input = (key: keyof typeof current.inputs, value: boolean) =>
-    patch({ inputs: { ...current.inputs, [key]: value } });
+  // One tick is one key. Spreading `current.inputs` here was the last control
+  // still laying its change over the resolved profile: the ratings were fixed
+  // and this one was not, so ticking Docs on an unrated bot went on authoring
+  // the family's answer for images, audio and video as three overrides nobody
+  // chose. Storage stopped inventing keys, but the pane was still supplying
+  // them. routingProfileEdit merges the bag, so an earlier tick survives.
+  const input = (key: keyof typeof current.inputs, value: boolean) => patch({ inputs: { [key]: value } });
   return (
     <div className="field">
       <span>Routing</span>

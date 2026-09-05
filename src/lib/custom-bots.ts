@@ -101,6 +101,11 @@ export function withoutMachineWrittenScores(
  * the person had already saved, never over the resolved profile, so ticking a
  * checkbox cannot leave a rating behind. `"family"` drops the three numbers and
  * keeps the rest, which is how a person takes a rating back off.
+ *
+ * `inputs` is laid over key by key for the same reason the rest of the profile
+ * is. Replacing the bag wholesale would make each tick forget the last one, and
+ * the alternative — sending all five keys every time, which is what the pane
+ * used to do — is the very thing that authored four family defaults per click.
  */
 export function routingProfileEdit(
   saved: StoredRoutingProfile | undefined,
@@ -110,7 +115,8 @@ export function routingProfileEdit(
     const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = saved ?? {};
     return Object.keys(rest).length > 0 ? rest : undefined;
   }
-  return { ...saved, ...change };
+  const inputs = change.inputs ? { ...saved?.inputs, ...change.inputs } : saved?.inputs;
+  return { ...saved, ...change, ...(inputs ? { inputs } : {}) };
 }
 
 function normalizeRoutingProfile(raw: unknown): StoredRoutingProfile | undefined {

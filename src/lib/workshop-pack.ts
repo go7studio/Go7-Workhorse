@@ -33,6 +33,7 @@ export const PACK_LIMITS = {
   maxCards: 12,
   maxRows: 24,
   maxLogLines: 200,
+  maxGalleryItems: 48,
   maxDepth: 16,
   maxNodes: 4_000,
   maxStringChars: 16 * 1024,
@@ -107,8 +108,17 @@ export type Widget =
   | { w: "probes"; of: string }
   | { w: "flags"; of: Binding; words: Record<string, string> }
   | { w: "log"; of: Binding; lines: number }
+  | { w: "gallery"; of: Binding; limit?: number }
   | { w: "hbox"; children: Widget[] }
   | { w: "switch"; cases: SwitchCase[]; else?: Widget };
+
+/** One gallery row from a feed array. Desk paints label + kind; open/reveal use local paths only. */
+export type GalleryItem = {
+  kind: "image" | "video";
+  label: string;
+  path?: string;
+  thumbPath?: string;
+};
 
 export type SwitchCase = {
   when: Binding;
@@ -540,6 +550,16 @@ function checkWidget(widget: unknown, ctx: Ctx, where: string, depth = 0): strin
       }
       return null;
     }
+    case "gallery": {
+      const err = checkBinding(widget.of, ctx, where);
+      if (err) return err;
+      if (widget.limit !== undefined) {
+        if (typeof widget.limit !== "number" || !Number.isInteger(widget.limit) || widget.limit < 1 || widget.limit > PACK_LIMITS.maxGalleryItems) {
+          return `${where}: gallery limit 1–${PACK_LIMITS.maxGalleryItems}`;
+        }
+      }
+      return null;
+    }
     case "hbox": {
       if (!Array.isArray(widget.children) || widget.children.length === 0 || widget.children.length > 6) return `${where}: hbox children 1–6`;
       for (const [i, child] of widget.children.entries()) {
@@ -815,6 +835,27 @@ export function bindingHas(value: unknown): boolean {
 }
 
 /** Pick the switch branch. Returns undefined when no case matches and there is no else. */
+
+/** Normalize a feed outputs array into closed gallery rows the paint layer can draw. */
+export function galleryItems(raw: unknown, limit = PACK_LIMITS.maxGalleryItems): GalleryItem[] {
+  if (!Array.isArray(raw)) return [];
+  const cap = Math.min(Math.max(1, limit), PACK_LIMITS.maxGalleryItems);
+  const out: GalleryItem[] = [];
+  for (const item of raw) {
+    if (out.length >= cap) break;
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const label = typeof row.label === "string" ? row.label.trim() : "";
+    if (!label || label.length > 240) continue;
+    const kind = row.kind === "image" || row.kind === "video" ? row.kind : null;
+    if (!kind) continue;
+    const path = typeof row.path === "string" && row.path.length > 0 && row.path.length <= 4096 ? row.path : undefined;
+    const thumbPath = typeof row.thumbPath === "string" && row.thumbPath.length > 0 && row.thumbPath.length <= 4096 ? row.thumbPath : undefined;
+    out.push({ kind, label, ...(path ? { path } : {}), ...(thumbPath ? { thumbPath } : {}) });
+  }
+  return out;
+}
+
 export function pickCase(widget: Extract<Widget, { w: "switch" }>, documents: PackDocuments): Widget | undefined {
   for (const c of widget.cases) {
     const value = resolveBinding(c.when, documents);

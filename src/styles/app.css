@@ -9391,6 +9391,74 @@ html.pane-dragging * {
 }
 
 .workshop-breakout-grid > .workshop-card { min-width: 0; }
+
+.workshop-gallery {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workshop-gallery-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.workshop-gallery-item:first-child { border-top: none; padding-top: 0; }
+.workshop-gallery-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.workshop-gallery-meta strong {
+  font-weight: 590;
+  overflow-wrap: anywhere;
+}
+.workshop-gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.media-create-panel {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.media-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.media-create-field span { color: var(--muted); }
+.media-create-field input,
+.media-create-field select {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+}
+.media-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.media-create-refuse {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn, var(--muted));
+}
+.media-create-message { margin: 0; }
+
 .workshop-settings { margin-bottom: 8px; }
 
 /* Settings → Skills → Workshop: Add pack row, pack rows, the confirm panel and its source list. */

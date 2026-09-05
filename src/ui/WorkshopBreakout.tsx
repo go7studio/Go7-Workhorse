@@ -1,4 +1,5 @@
 import { Chip, PaintCard } from "./workshop-paint";
+import { MediaCreatePanel, packOffersCreate } from "./MediaCreatePanel";
 import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
 
 /**
@@ -45,6 +46,7 @@ export function WorkshopBreakout() {
               <PaintCard key={i} card={card} documents={pack.documents} now={now} />
             ))}
           </div>
+          {packOffersCreate(pack.documents) ? <MediaCreatePanel pack={pack} /> : null}
         </section>
       ))}
 

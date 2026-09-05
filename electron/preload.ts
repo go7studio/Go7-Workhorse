@@ -252,6 +252,17 @@ contextBridge.exposeInMainWorld("workhorse", {
   workshopRevealCollector: (input: { id: string }) => ipcRenderer.invoke("workshop:reveal-collector", input),
   workshopOpenBreakout: () => ipcRenderer.invoke("workshop:open-breakout"),
   workshopCloseBreakout: () => ipcRenderer.invoke("workshop:close-breakout"),
+  deskOpenLocalPath: (path: string) => ipcRenderer.invoke("desk:open-local-path", path) as Promise<boolean>,
+  deskRevealLocalPath: (path: string) => ipcRenderer.invoke("desk:reveal-local-path", path) as Promise<boolean>,
+  localMediaCreate: (input: {
+    hostId: string;
+    capability: string;
+    templateId: string;
+    fields?: Record<string, string | number | boolean>;
+  }) =>
+    ipcRenderer.invoke("localMedia:create", input) as Promise<
+      { ok: true; jobId?: string; message: string } | { ok: false; reason: string }
+    >,
   onWorkshopChanged: (handler: () => void) => {
     const listener = () => handler();
     ipcRenderer.on("workshop:changed", listener);

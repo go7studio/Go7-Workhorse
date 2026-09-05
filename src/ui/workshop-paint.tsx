@@ -1,18 +1,21 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   WORKSHOP_UNKNOWN,
+  galleryItems,
   gaugePercent,
   paintValue,
   pickCase,
   ratioPercent,
   resolveBinding,
   type Card as PackCard,
+  type GalleryItem,
   type PackDocuments,
   type PackView,
   type Tone,
   type Value,
   type Widget,
 } from "../lib/workshop-pack";
+import { copyText } from "../lib/copy-text";
 import { clipLog, flagWords, joinParts, probeRows } from "./workshop-live";
 
 // ---------------------------------------------------------------------------------------------
@@ -199,6 +202,46 @@ function stripTextClass(spec: Value): string {
  * Paint one widget from the pack vocabulary. `strip` is the 76px collapsed column; `card` is a
  * row inside a card. Every value is a format of a document field; the only ratio drawn is a bar's.
  */
+
+function GalleryGrid({ items }: { items: GalleryItem[] }) {
+  if (items.length === 0) {
+    return <p className="row-meta">No outputs yet.</p>;
+  }
+  const openPath = (path: string | undefined) => {
+    if (!path) return;
+    void window.workhorse?.deskOpenLocalPath?.(path);
+  };
+  const revealPath = (path: string | undefined) => {
+    if (!path) return;
+    void window.workhorse?.deskRevealLocalPath?.(path);
+  };
+  const copyPath = (path: string | undefined) => {
+    if (!path) return;
+    void copyText(path);
+  };
+  return (
+    <ul className="workshop-gallery" aria-label="Outputs">
+      {items.map((item, i) => (
+        <li key={`${item.label}-${i}`} className="workshop-gallery-item">
+          <div className="workshop-gallery-meta">
+            <Chip tone="mute">{item.kind}</Chip>
+            <strong title={item.path ?? item.label}>{item.label}</strong>
+          </div>
+          {item.path ? (
+            <div className="workshop-gallery-actions">
+              <button className="tiny" type="button" onClick={() => openPath(item.path)}>Open</button>
+              <button className="tiny" type="button" onClick={() => revealPath(item.path)}>Reveal</button>
+              <button className="tiny" type="button" onClick={() => copyPath(item.path)}>Copy</button>
+            </div>
+          ) : (
+            <span className="row-meta">No local path</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function PaintWidget({ widget, documents, now, variant }: PaintProps): ReactNode {
   switch (widget.w) {
     case "ring":
@@ -342,6 +385,11 @@ export function PaintWidget({ widget, documents, now, variant }: PaintProps): Re
 
     case "log":
       return <LogTail tail={clipLog(resolveBinding(widget.of, documents), widget.lines)} />;
+
+    case "gallery": {
+      const items = galleryItems(resolveBinding(widget.of, documents), widget.limit ?? 24);
+      return <GalleryGrid items={items} />;
+    }
 
     case "hbox": {
       const [first, ...rest] = widget.children;

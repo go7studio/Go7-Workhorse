@@ -7,6 +7,7 @@ import { defaultModel, withEffort, type ModelChoice } from "./models";
 import { inboundAccess } from "./permissions";
 import { providerById } from "./providers";
 import type { AgentSystemsSettings, BotAccessDefaults, CustomBot, CustomLlm, DeskAccess, LlmLink, ProviderId, McpServerConfig, Profile, RoutingSettings, Session, Settings, SettingsSection } from "./types";
+import { migrateCustomBotRatings } from "./routing";
 import { normalizeWatch } from "./watch";
 import { DEFAULT_WATCH } from "./watch-defaults";
 
@@ -399,7 +400,10 @@ export function normalizeSettings(raw: unknown): Settings {
       cursor: link(record.llms?.cursor),
       custom: custom(record.llms?.custom),
     },
-    customBots: normalizeCustomBots(record.customBots, custom(record.llms?.custom)),
+    // The migration runs here, at the one seam every load passes through, and
+    // not inside normalizeCustomBots, because only the routing table knows what
+    // a family default would have been written back as.
+    customBots: migrateCustomBotRatings(normalizeCustomBots(record.customBots, custom(record.llms?.custom))),
     mcpServers: normalizeMcpServers(record.mcpServers),
     access: normalizeDeskAccess((record as { access?: unknown }).access),
     usageBudgets: normalizeUsageBudgets(record.usageBudgets),

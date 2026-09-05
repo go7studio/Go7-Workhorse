@@ -117,7 +117,30 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
       contextWindow: 204_800,
       reasoningLevels: MINIMAX_EFFORTS,
     },
+    // Synthetic's published catalog (GET https://api.synthetic.new/v1/models,
+    // no key needed), with the context length each model reports. A bot saved
+    // before its model was listed here keeps the 128k default it was created
+    // with, and contextWindowFor takes the wider of the two, so a 524k Kimi is
+    // no longer treated as a 128k one and skipped on a long thread.
     { id: "hf:moonshotai/Kimi-K3", name: "Kimi K3", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-5.2", name: "GLM 5.2", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-5.3-Flash", name: "GLM 5.3 Flash", effort: false, contextWindow: 524_288 },
+    { id: "hf:zai-org/GLM-4.7-Flash", name: "GLM 4.7 Flash", effort: false, contextWindow: 196_608 },
+    { id: "hf:Qwen/Qwen3.8-27B", name: "Qwen3.8 27B", effort: false, contextWindow: 262_144 },
+    { id: "hf:openai/gpt-oss-120b", name: "GPT-OSS 120B", effort: false, contextWindow: 131_072 },
+    {
+      id: "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+      name: "Nemotron 3 Super 120B",
+      effort: false,
+      contextWindow: 262_144,
+    },
+    // Aliases. Synthetic points these at whichever model it currently runs for
+    // that size and modality, so the window here is the one the alias reports,
+    // not a copy of a particular model's.
+    { id: "syn:large:text", name: "Synthetic Large", effort: false, contextWindow: 524_288 },
+    { id: "syn:large:vision", name: "Synthetic Large Vision", effort: false, contextWindow: 524_288 },
+    { id: "syn:small:text", name: "Synthetic Small", effort: false, contextWindow: 196_608 },
+    { id: "syn:small:vision", name: "Synthetic Small Vision", effort: false, contextWindow: 262_144 },
   ],
 };
 
@@ -461,7 +484,17 @@ export function contextWindowFor(
   modelId: string,
   customWindow?: number,
 ): number {
-  if (provider === "custom" && customWindow && customWindow > 0) return customWindow;
+  if (provider === "custom") {
+    // The bot's own number is whatever it was created with, and a connection
+    // saved before its model was catalogued carries the 128k default. Taking it
+    // on its own read a 524k Kimi K3 as 128k, and routing then skipped it on
+    // any thread wider than that. Widest wins, the same rule Claude uses above:
+    // the catalog is the vendor's published figure, the bot's is a default or a
+    // probe, and neither is allowed to shrink the other.
+    const known = findModel(provider, modelId)?.contextWindow ?? 0;
+    const reported = customWindow && customWindow > 0 ? customWindow : 0;
+    return Math.max(known, reported) || 128_000;
+  }
   if (provider === "claude") return advertisedClaudeWindow(modelId, findModel(provider, modelId)?.contextWindow);
   return findModel(provider, modelId)?.contextWindow ?? 128_000;
 }

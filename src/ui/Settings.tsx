@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled } from "../lib/custom-bots";
+import { BOT_COLORS, customBotEnabled, routingProfileEdit, ROUTING_ROLE_PRESETS } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -466,33 +466,59 @@ function StockBotDetail({
   );
 }
 
+/**
+ * Ticking a box is not rating a bot.
+ *
+ * Every handler here used to save `{ ...current, ...one change }`, and `current`
+ * is the resolved profile, not the stored one. So a person who only ticked
+ * Local or Docs had the family default written back as an override they never
+ * authored, on the 1-5 scale, where it stuck. Kimi K3 on this desk ended up
+ * rated 3, which doubles to 6 and can never clear the balanced bar of 8: Auto
+ * could not send it ordinary coding work, and this pane showed "Balanced".
+ *
+ * Now each control writes only its own field, over whatever is stored, and the
+ * readout says which numbers are the person's and what they score out of 10.
+ */
 function BotRoutingFields({ bot }: { bot: import("../lib/types").CustomBot }) {
   const store = useStore();
-  const current = routingProfileForModel("custom", bot.model, bot.routingProfile);
-  const setRole = (role: string) => {
-    const values = role === "deep"
-      ? { intelligence: 5, speed: 2, cost: 5 }
-      : role === "quick"
-        ? { intelligence: 3, speed: 5, cost: 1 }
-        : { intelligence: 4, speed: 4, cost: 3 };
-    store.updateCustomBot(bot.id, { routingProfile: { ...current, ...values } });
-  };
-  const role = current.intelligence >= 9 ? "deep" : current.speed >= 5 && current.cost <= 2 ? "quick" : "balanced";
-  const input = (key: keyof typeof current.inputs, value: boolean) =>
-    store.updateCustomBot(bot.id, {
-      routingProfile: { ...current, inputs: { ...current.inputs, [key]: value } },
-    });
+  const saved = bot.routingProfile;
+  const current = routingProfileForModel("custom", bot.model, saved);
+  const patch = (change: Parameters<typeof routingProfileEdit>[1]) =>
+    store.updateCustomBot(bot.id, { routingProfile: routingProfileEdit(saved, change) });
+  const setRole = (role: string) =>
+    patch(role === "family" ? "family" : ROUTING_ROLE_PRESETS[role as keyof typeof ROUTING_ROLE_PRESETS]);
+  const rated = saved?.intelligence !== undefined;
+  const role = !rated
+    ? "family"
+    : current.intelligence >= 9
+      ? "deep"
+      : current.speed >= 5 && current.cost <= 2
+        ? "quick"
+        : "balanced";
+  // One tick is one key. Spreading `current.inputs` here was the last control
+  // still laying its change over the resolved profile: the ratings were fixed
+  // and this one was not, so ticking Docs on an unrated bot went on authoring
+  // the family's answer for images, audio and video as three overrides nobody
+  // chose. Storage stopped inventing keys, but the pane was still supplying
+  // them. routingProfileEdit merges the bag, so an earlier tick survives.
+  const input = (key: keyof typeof current.inputs, value: boolean) => patch({ inputs: { [key]: value } });
   return (
     <div className="field">
       <span>Routing</span>
       <div className="actions">
         <select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Routing role">
+          <option value="family">Family default</option>
           <option value="quick">Quick</option>
           <option value="balanced">Balanced</option>
           <option value="deep">Deep</option>
         </select>
-        <label><input type="checkbox" checked={current.local} onChange={(event) => store.updateCustomBot(bot.id, { routingProfile: { ...current, local: event.target.checked } })} /> Local</label>
+        <label><input type="checkbox" checked={current.local} onChange={(event) => patch({ local: event.target.checked })} /> Local</label>
       </div>
+      <p className="row-meta">
+        {rated
+          ? `Rated ${saved!.intelligence} of 5 · scores ${current.intelligence} of 10`
+          : `Family default · scores ${current.intelligence} of 10`}
+      </p>
       <div className="actions">
         <label><input type="checkbox" checked={current.inputs.images} onChange={(event) => input("images", event.target.checked)} /> Images</label>
         <label><input type="checkbox" checked={current.inputs.documents} onChange={(event) => input("documents", event.target.checked)} /> Docs</label>

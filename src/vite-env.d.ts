@@ -147,6 +147,8 @@ type WorkhorseBridge = {
   loadState: () => Promise<Record<string, unknown>>;
   liveRunIds: () => Promise<string[]>;
   saveState: (state: Record<string, unknown>) => Promise<void>;
+  /** One routing:decision line in main.log. Optional, like every other bridge method. */
+  recordRoutingDecision?: (detail: string) => Promise<void>;
   /** Optional, like every other bridge method: an older shell simply shows the prose. */
   loadTranscript?: (sessionId: string) => Promise<import("./lib/transcript-sidecar").TranscriptSidecar | null>;
   saveComposerDrafts?: (drafts: Record<string, { text?: string; images?: import("./lib/types").ChatImage[] }>) => Promise<void>;

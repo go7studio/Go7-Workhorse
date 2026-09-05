@@ -86,6 +86,15 @@ test("no builder behind a desk child hands it the desk's own secrets", () => {
       "the check itself cannot see a raw process.env, so it proves nothing",
     );
 
+    /*
+     * Each call below is the shape its own spawn uses. That is the whole point
+     * of the list: calling a builder with no argument when the live path hands
+     * it one tests an env the child never receives. `cursorModelsEnv` is where
+     * that mattered — `listVendorModels()` defaults its `env` to `process.env`
+     * and passes it down, so the live call overlays the environment onto
+     * itself, and a no-argument call looked clean while the child was handed
+     * the desk's whole environment.
+     */
     const builders: Array<[string, NodeJS.ProcessEnv]> = [
       // The filter: person-facing programs that need PATH and shell settings.
       ["deskToolEnv", deskToolEnv()],
@@ -94,7 +103,8 @@ test("no builder behind a desk child hands it the desk's own secrets", () => {
       ["project-diff projectGitEnv", projectGitEnv()],
       ["process-registry groupRunEnv", groupRunEnv()],
       ["cursor-login cursorProbeEnv", cursorProbeEnv()],
-      ["vendor-models cursorModelsEnv", cursorModelsEnv()],
+      // listVendorModels() → readInstalledCursorModels(process.env) → here.
+      ["vendor-models cursorModelsEnv", cursorModelsEnv(process.env)],
       ["codex-app-server codexAppServerEnv", codexAppServerEnv()],
       ["workhorse-mcp runtimeProbeEnv", runtimeProbeEnv()],
       ["claude-auth setupTokenEnv", setupTokenEnv()],
@@ -102,12 +112,40 @@ test("no builder behind a desk child hands it the desk's own secrets", () => {
       ["deskHelperEnv", deskHelperEnv()],
       ["process-registry processToolEnv", processToolEnv()],
       ["claude-plan keychainToolEnv", keychainToolEnv()],
+      // grok-bot-shim-host passes the user-data path, and only that.
       ["grok-bot-shim shimSpawnEnv", shimSpawnEnv("/tmp/workhorse-user-data")],
       ["grok-bot-shim shimKeepaliveEnv", shimKeepaliveEnv()],
-      // Already a named list before this change; it stays one.
-      ["mcp-tool-bridge mcpSpawnEnvironment", mcpSpawnEnvironment({})],
+      // Already a named list before this change; it stays one. The live call
+      // passes the saved server row, whose `env` the person configured.
+      ["mcp-tool-bridge mcpSpawnEnvironment", mcpSpawnEnvironment({ env: { MY_SERVER_FLAG: "1" } })],
     ];
     for (const [label, env] of builders) assertCarriesNoDeskSecret(label, env);
+  });
+});
+
+/**
+ * The bug this test exists to keep out. Filtering the base and then overlaying
+ * `extra` reads as safe and is not, because `extra` is sometimes the very
+ * environment that was just filtered — `listVendorModels()` defaults its `env`
+ * to `process.env` and hands it down to the `cursor-agent models` child. So
+ * the filter runs over the merge, and an overlay cannot restore a private name
+ * however the caller spells it.
+ */
+test("an overlay cannot put back what the filter took out", () => {
+  withDeskSecretsOnProcessEnv(() => {
+    for (const [label, env] of [
+      ["deskToolEnv over itself", deskToolEnv(process.env, process.env)],
+      ["deskGitEnv over itself", deskGitEnv(process.env, process.env)],
+      ["cursorModelsEnv, the live argument", cursorModelsEnv(process.env)],
+      ["cursorModelsEnv, a named poison", cursorModelsEnv({ ANTHROPIC_API_KEY: ANTHROPIC_KEY })],
+    ] as const) {
+      assertCarriesNoDeskSecret(label, env);
+    }
+    // The overlay still does its job for a name that is nobody's login.
+    assert.equal(deskToolEnv(process.env, { NO_BROWSER: "" }).NO_BROWSER, "");
+    assert.equal(worktreeGitEnv().GIT_OPTIONAL_LOCKS, "0");
+    // And git's own setting is not a caller's to turn off.
+    assert.equal(deskGitEnv(process.env, { GIT_TERMINAL_PROMPT: "1" }).GIT_TERMINAL_PROMPT, "0");
   });
 });
 
@@ -227,9 +265,25 @@ test("the Claude launch spec is the only env that carries the Claude token", () 
  */
 test("the two modules a test cannot load still pass a builder at every child", () => {
   const update = source("app-update.ts");
-  assert.match(update, /import \{ deskHelperEnv \} from "\.\/desk-path"/);
-  assert.match(update, /const \{ stdout, stderr \} = await execFileAsync\(cmd, args, \{[\s\S]*?env: deskHelperEnv\(\),/);
+  assert.match(update, /import \{ deskGitEnv, deskHelperEnv, deskToolEnv \} from "\.\/desk-path"/);
+  // The installer's own children keep the allowlist, including the detached one.
+  assert.match(update, /env: NodeJS\.ProcessEnv = deskHelperEnv\(\),/);
   assert.match(update, /spawn\("\/bin\/bash", \[helper\], \{[\s\S]*?env: deskHelperEnv\(\),/);
+  /*
+   * Updating a source checkout is a different job: `git fetch` over SSH needs
+   * the person's agent, and `npm install` needs a PATH that can find npm.
+   * Every command on that path takes the git env, not the allowlist.
+   */
+  assert.match(update, /function sourceUpdateEnv\(\): NodeJS\.ProcessEnv \{\s*return deskGitEnv\(deskToolEnv\(\)\);/);
+  for (const command of [
+    /await run\("git", \["fetch", "origin", "tag", tag, "--force"\], root, 120_000, sourceEnv\)/,
+    /await run\("git", \["fetch", "origin", "--tags", "--force"\], root, 120_000, sourceEnv\)/,
+    /await run\("git", \["merge", "--ff-only", tag\], root, 120_000, sourceEnv\)/,
+    /await run\("git", \["checkout", tag\], root, 120_000, sourceEnv\)/,
+    /await run\(npm, \["install"\], root, 300_000, sourceEnv\)/,
+  ]) {
+    assert.match(update, command);
+  }
   assert.doesNotMatch(update, /\.\.\.process\.env/);
 
   const main = source("main.ts");

@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { app } from "electron";
 import { APP_VERSION } from "../src/lib/app-info";
-import { deskHelperEnv } from "./desk-path";
+import { deskGitEnv, deskHelperEnv, deskToolEnv } from "./desk-path";
 import {
   MAC_APP_NAME,
   macBundleFromExecPath,
@@ -86,15 +86,34 @@ function deskRoot(): string | null {
  * This module cannot hold that builder itself — it imports `electron`, so no
  * test can load it — which is why it calls `deskHelperEnv` straight.
  */
-async function run(cmd: string, args: string[], cwd: string, timeout = 120_000): Promise<string> {
+async function run(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  timeout = 120_000,
+  env: NodeJS.ProcessEnv = deskHelperEnv(),
+): Promise<string> {
   const { stdout, stderr } = await execFileAsync(cmd, args, {
     cwd,
     timeout,
     windowsHide: true,
     encoding: "utf8",
-    env: deskHelperEnv(),
+    env,
   });
   return `${stdout}\n${stderr}`.trim();
+}
+
+/**
+ * Updating a source checkout is not the same job as installing a package. It
+ * runs `git` and `npm` against the person's own clone, over their remote, so
+ * it needs their SSH agent, their credential helper, their `GIT_*` settings
+ * and a PATH that can find `npm` — none of which survives the helper
+ * allowlist. `git fetch origin` over SSH simply fails without `SSH_AUTH_SOCK`.
+ * So this path takes the git filter on top of the desk's PATH, and the
+ * detached relaunch helper below keeps the allowlist.
+ */
+function sourceUpdateEnv(): NodeJS.ProcessEnv {
+  return deskGitEnv(deskToolEnv());
 }
 
 async function installMacDmg(version: string): Promise<AppUpdateApplyResult> {
@@ -283,19 +302,20 @@ export async function applyAppUpdate(version: string): Promise<AppUpdateApplyRes
   const root = deskRoot();
   if (!root) return { ok: false, message: packagedUpdateMissingMessage(process.platform) };
   const tag = releaseTag(wanted);
+  const sourceEnv = sourceUpdateEnv();
   try {
     try {
-      await run("git", ["fetch", "origin", "tag", tag, "--force"], root);
+      await run("git", ["fetch", "origin", "tag", tag, "--force"], root, 120_000, sourceEnv);
     } catch {
-      await run("git", ["fetch", "origin", "--tags", "--force"], root);
+      await run("git", ["fetch", "origin", "--tags", "--force"], root, 120_000, sourceEnv);
     }
     try {
-      await run("git", ["merge", "--ff-only", tag], root);
+      await run("git", ["merge", "--ff-only", tag], root, 120_000, sourceEnv);
     } catch {
-      await run("git", ["checkout", tag], root);
+      await run("git", ["checkout", tag], root, 120_000, sourceEnv);
     }
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    await run(npm, ["install"], root, 300_000);
+    await run(npm, ["install"], root, 300_000, sourceEnv);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Install failed.";
     return { ok: false, message: message.slice(0, 280) };

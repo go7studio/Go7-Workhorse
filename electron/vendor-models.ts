@@ -106,6 +106,12 @@ export function cursorModelsCommand(
  * `cursor-agent models` is Cursor's own CLI, so it gets the desk's PATH and
  * the person's shell settings — and not the Claude login the desk keeps in its
  * vault, which is what a plain spread of `process.env` handed it.
+ *
+ * `env` is the detect environment, and in the live path it is `process.env`
+ * itself: `listVendorModels()` defaults to it and hands it down. So this
+ * overlays the environment onto itself, and it is `deskToolEnv` filtering the
+ * merge rather than only its base that keeps the desk's names out of the
+ * child. Anything passed here is treated as untrusted for that reason.
  */
 export function cursorModelsEnv(
   env: NodeJS.Dict<string> = {},

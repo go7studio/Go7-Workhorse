@@ -369,12 +369,19 @@ export function withoutWorkhorsePrivateEnv(base: NodeJS.ProcessEnv = process.env
  * CLI, a model listing, a shell. It needs their PATH and their shell settings,
  * so it starts from the real environment and takes away what is not its own:
  * the desk's private names and another vendor's login.
+ *
+ * The filter runs over the merge, not just over `base`. Filtering first and
+ * overlaying after looks identical and is not: the model listing passes the
+ * caller's own copy of `process.env` as `extra`, so the overlay put back every
+ * name the filter had just removed and the child was handed the lot. A caller
+ * cannot restore a private name through this door. Claude's launch spec, which
+ * is the one child that carries the Claude token, does not come through it.
  */
 export function deskToolEnv(
   base: NodeJS.ProcessEnv = process.env,
   extra: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
-  return withDeskToolEnv({ ...withoutWorkhorsePrivateEnv(base), ...extra });
+  return withDeskToolEnv(withoutWorkhorsePrivateEnv({ ...base, ...extra }));
 }
 
 /**
@@ -391,7 +398,10 @@ export function deskGitEnv(
   base: NodeJS.ProcessEnv = process.env,
   extra: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
-  return { ...withoutWorkhorsePrivateEnv(base), GIT_TERMINAL_PROMPT: "0", ...extra };
+  // Same order as `deskToolEnv`: filter the merge, so an overlay cannot put a
+  // private name back. `GIT_TERMINAL_PROMPT` is set last and is not a caller's
+  // to turn off — an unwatched git must never stop and ask for a password.
+  return { ...withoutWorkhorsePrivateEnv({ ...base, ...extra }), GIT_TERMINAL_PROMPT: "0" };
 }
 
 /**

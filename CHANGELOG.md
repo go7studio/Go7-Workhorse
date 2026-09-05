@@ -8,6 +8,25 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.56](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.55...v0.6.56) (2026-09-05)
+
+
+### Features
+
+* **workshop:** gallery widget + media create via Local Compute ([ee1346e](https://github.com/go7studio/Go7-Workhorse/commit/ee1346ede8707a852e9de7c1eb1f212d351c43d3))
+* **workshop:** Spark media gallery + Local Compute create ([13a54c1](https://github.com/go7studio/Go7-Workhorse/commit/13a54c1ba84d187ff3c3651e6c285b7497ec5044))
+
+
+### Bug Fixes
+
+* **missions:** a pass is earned by finishing it, and the wave is the desk's record ([c9888f7](https://github.com/go7studio/Go7-Workhorse/commit/c9888f76e927f5e15483ec61996ab9d2d5f5f072))
+* **permissions:** the desk default is the standing permission for system-started work ([e39a71a](https://github.com/go7studio/Go7-Workhorse/commit/e39a71af4d4dcae49d8356abbcf9e42dd252a343))
+* **vendors:** keep each vendor's login out of every other vendor's process ([6126df4](https://github.com/go7studio/Go7-Workhorse/commit/6126df47246084e36d1e77d4e01c129d61863b37))
+* **workshop:** share identical gateway GETs across packs ([6094d54](https://github.com/go7studio/Go7-Workhorse/commit/6094d5416c85fcde968500d1da31f1c39634c361))
+* **workshop:** share identical gateway GETs across packs ([0ac3f39](https://github.com/go7studio/Go7-Workhorse/commit/0ac3f3954bc7264030a65754fd6f0ecbabcbdf9f))
+* **workshop:** type dedupe share-key fixture as JsonSource ([30d8c9a](https://github.com/go7studio/Go7-Workhorse/commit/30d8c9a15f06e4b33f83e2af71d12e37e9704358))
+* **workshop:** type galleryItems limit as number ([abe92fa](https://github.com/go7studio/Go7-Workhorse/commit/abe92fa5ea64b49a09dca7215c3a25a8e4c2f6b9))
+
 ## [0.6.55](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.54...v0.6.55) (2026-09-04)
 
 

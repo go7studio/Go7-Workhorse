@@ -374,13 +374,57 @@ function shellWalk(command: string): CommandWalk {
   return { stages, unsafe, hidden };
 }
 
-/** A matching pair of surrounding quotes comes off; a lone one does not. */
-function unquote(value: string): string {
-  const first = value[0];
-  if ((first === '"' || first === "'") && value.length > 1 && value.endsWith(first)) {
-    return value.slice(1, -1);
+/** Inside double quotes a backslash escapes only these; elsewhere it is a character. */
+const DQ_ESCAPABLE = /["$`\\\n]/;
+
+/**
+ * The word the shell builds out of a token, with its quoting taken off. Only a
+ * pair wrapping the whole token used to come off, which meant a quote broken
+ * across the middle hid a path in plain sight: `"/etc/pass"wd` is one word and
+ * the shell reads it as /etc/passwd, but the leading quote survived and the
+ * absolute-path test never fired. So did `""/etc/passwd` and `/e"t"c/passwd`.
+ * Spans are joined the way the shell joins them, which closes the shape rather
+ * than the two examples of it, and leaves an ordinary `--include='*.dart'`
+ * alone.
+ */
+function dequote(raw: string): string {
+  let out = "";
+  let single = false;
+  let double = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index] as string;
+    if (char === "\\") {
+      const next = raw[index + 1];
+      if (!escapesNext(next, single, double)) {
+        out += char;
+        continue;
+      }
+      out += next as string;
+      index += 1;
+      continue;
+    }
+    if (char === "'" && !double) {
+      single = !single;
+      continue;
+    }
+    if (char === '"' && !single) {
+      double = !double;
+      continue;
+    }
+    out += char;
   }
-  return value;
+  return out;
+}
+
+/**
+ * Whether a backslash is escaping what follows it. A backslash escapes nothing
+ * inside single quotes, a short list inside double quotes, and only the shell's
+ * own characters outside both. Swallowing it everywhere turned `C:\repo\..\etc`
+ * into `C:repo..etc`, which is not a path, so the boundary never saw it.
+ */
+function escapesNext(next: string | undefined, single: boolean, double: boolean): boolean {
+  if (next === undefined || single) return false;
+  return double ? DQ_ESCAPABLE.test(next) : SHELL_ESCAPABLE.test(next);
 }
 
 /** A token that walks out of its own folder. Nothing else can leave the cwd. */
@@ -406,17 +450,32 @@ function climbsOut(value: string): boolean {
  */
 function expandsAtRuntime(raw: string): boolean {
   let single = false;
+  let double = false;
   for (let index = 0; index < raw.length; index += 1) {
-    const char = raw[index];
-    if (char === "'") {
+    const char = raw[index] as string;
+    if (char === "\\") {
+      if (escapesNext(raw[index + 1], single, double)) index += 1;
+      continue;
+    }
+    if (char === "'" && !double) {
       single = !single;
       continue;
     }
+    if (char === '"' && !single) {
+      double = !double;
+      continue;
+    }
     if (single) continue;
-    if (raw[index - 1] === "\\") continue;
     if (char === "`") return true;
     if (char === "$") {
       const next = raw[index + 1] ?? "";
+      // $'…' decodes its escapes and $"…" is translated, so both can become a
+      // path this side never saw: `cat $'\x2fetc/passwd'` is /etc/passwd. They
+      // only do that outside a quote, so a `$` sitting inside double quotes is
+      // not one of them.
+      if (!double && (next === "'" || next === '"')) return true;
+      // A `$` expands only when something can follow it as a name, so the
+      // trailing `$` anchoring a grep pattern stays a pattern.
       if (/[A-Za-z_{(?#@*!$0-9-]/.test(next)) return true;
       continue;
     }
@@ -467,20 +526,23 @@ function commandTargets(command: string, cwd: string): { paths: string[]; unjudg
   let unjudgeable = walk.hidden;
   for (const stage of walk.stages) {
     for (const token of [stage.program, ...stage.args]) {
-      if (token.includes("://")) continue;
-      // The whole token is tested for expansion, so both paths agree; only the
+      // The whole token is tested for expansion, so both walks agree; only the
       // path test looks past a flag's `=`.
       if (expandsAtRuntime(token)) {
         unjudgeable = true;
         continue;
       }
-      const afterFlag = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
-      const value = unquote(afterFlag);
-      if (!value) continue;
-      if (climbsOut(value)) {
-        if (absolutePath(value) || cwd) paths.push(resolveFrom(cwd, value));
-      } else if (absolutePath(value)) {
-        paths.push(value);
+      const word = dequote(token);
+      if (word.includes("://")) continue;
+      // A flag's value is a path as readily as a bare word is, and the word is
+      // judged too, so `--file=/etc/x` and `/etc/x` are both seen.
+      for (const value of word.includes("=") ? [word, word.slice(word.indexOf("=") + 1)] : [word]) {
+        if (!value) continue;
+        if (climbsOut(value)) {
+          if (absolutePath(value) || cwd) paths.push(resolveFrom(cwd, value));
+        } else if (absolutePath(value)) {
+          paths.push(value);
+        }
       }
     }
   }
@@ -495,8 +557,8 @@ function expandsSomewhere(command: string): boolean {
 }
 
 function programName(raw: string): string {
-  return raw
-    .replace(/^["']|["']$/g, "")
+  // Quoting is taken off the way the shell takes it off, so `r"m"` is rm.
+  return dequote(raw)
     .replace(/^.*[\\/]/, "")
     .replace(/\.exe$/i, "")
     .toLowerCase();
@@ -531,9 +593,8 @@ function interpreterScriptReads(program: string, args: string[]): boolean {
     // side cannot read, so it is never a search.
     if (args.some((arg) => /^(?:-f|--file)/.test(arg))) return false;
     if (scripts.length === 0) return false;
-    const script = scripts[0] ?? "";
+    const script = dequote(scripts[0] ?? "");
     return script
-      .replace(/^["']|["']$/g, "")
       .split(/[;\n]/)
       .every((piece) => {
         const text = piece.trim();

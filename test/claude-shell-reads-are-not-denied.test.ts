@@ -444,6 +444,99 @@ test("a hidden worker's read is answered, and its write is still denied", () => 
   );
 });
 
+/**
+ * Every command shape any gate round has raised, judged the way the desk
+ * judges one: the security boundary first, then the seat. `search` is whether
+ * the command reads as a search; `verdict` is what the desk answers, which is
+ * the boundary's answer when it has one and the seat's otherwise.
+ *
+ * One row per shape, so the next hole found is one line to add here.
+ */
+const REGRESSION: Array<{
+  name: string;
+  command: string;
+  search: boolean;
+  verdict: PermissionAnswer;
+  roots?: string[];
+  cwd?: string;
+}> = [
+  // The two calls this lane exists for, and ordinary reads beside them.
+  { name: "live grep into sed", command: "@liveA", search: true, verdict: "once" },
+  { name: "live grep into head", command: "@liveB", search: true, verdict: "once" },
+  { name: "plain grep", command: "grep -rn foo lib", search: true, verdict: "once" },
+  { name: "git read", command: "git log --oneline | head", search: true, verdict: "once" },
+  { name: "absolute inside the root", command: "cat /repo/src/a.ts", search: true, verdict: "once" },
+  // Absolute paths, quoted every way a shell allows.
+  { name: "absolute outside", command: "cat /etc/passwd", search: true, verdict: "deny" },
+  { name: "double quoted", command: 'cat "/etc/passwd"', search: true, verdict: "deny" },
+  { name: "single quoted", command: "cat '/etc/passwd'", search: true, verdict: "deny" },
+  { name: "quoted with a space", command: 'cat "/etc/my secrets"', search: true, verdict: "deny" },
+  { name: "quoted and inside", command: 'cat "/repo/src/a.ts"', search: true, verdict: "once" },
+  { name: "quote broken mid word", command: 'cat "/etc/pass"wd', search: true, verdict: "deny" },
+  { name: "empty span in front", command: 'cat ""/etc/passwd', search: true, verdict: "deny" },
+  { name: "quote in the middle", command: 'cat /e"t"c/passwd', search: true, verdict: "deny" },
+  // Climbing out, absolute and relative.
+  { name: "dot dot inside an absolute", command: "cat /repo/../etc/passwd", search: true, verdict: "deny" },
+  { name: "dot dot that lands inside", command: "cat /repo/app/../src/a.ts", search: true, verdict: "once" },
+  { name: "relative dot dot", command: "cat ../../etc/passwd", search: true, verdict: "deny" },
+  { name: "relative that lands inside", command: "cat ../src/a.ts", search: true, verdict: "once" },
+  // Anything the shell rewrites before the program sees it.
+  { name: "bare variable", command: "cat $HOME/../etc/passwd", search: false, verdict: "deny" },
+  { name: "quoted variable glued", command: 'cat "$HOME"/../etc/passwd', search: false, verdict: "deny" },
+  { name: "quoted variable, no dot dot", command: 'cat "$HOME"/etc/passwd', search: false, verdict: "deny" },
+  { name: "braced variable", command: 'cat "${HOME}"/../etc/passwd', search: false, verdict: "deny" },
+  { name: "adjacent quoted spans", command: `cat "$HOME"'/../etc'`, search: false, verdict: "deny" },
+  { name: "tilde", command: "cat ~/../etc/passwd", search: false, verdict: "deny" },
+  { name: "tilde with a user", command: "cat ~user/../etc/passwd", search: false, verdict: "deny" },
+  { name: "backtick", command: "cat `whoami`", search: false, verdict: "deny" },
+  { name: "command substitution", command: 'cat "$(cat /etc/passwd)"', search: false, verdict: "deny" },
+  { name: "ansi-c quoting, hex", command: "cat $'\\x2fetc/passwd'", search: false, verdict: "deny" },
+  { name: "ansi-c quoting, plain", command: "cat $'/etc/passwd'", search: false, verdict: "deny" },
+  // Things that only look like an expansion.
+  { name: "trailing tilde is a file name", command: "grep foo backup~", search: true, verdict: "once" },
+  { name: "single quotes stop the shell", command: "grep '$HOME' notes.md", search: true, verdict: "once" },
+  { name: "a dollar in a quoted path", command: "cat '/repo/with$dollar'", search: true, verdict: "once" },
+  // Windows, both separators.
+  { name: "windows backslash", command: "type C:\\repo\\..\\etc\\hosts", search: true, verdict: "deny", roots: ["C:\\repo"], cwd: "C:\\repo" },
+  { name: "windows forward slash", command: "type C:/repo/../etc/hosts", search: true, verdict: "deny", roots: ["C:/repo"], cwd: "C:/repo" },
+  { name: "windows inside the root", command: "type C:\\repo\\app\\..\\src\\a.ts", search: true, verdict: "once", roots: ["C:\\repo"], cwd: "C:\\repo" },
+  // Argument and redirection shapes.
+  { name: "after end of flags", command: "cat -- /etc/passwd", search: true, verdict: "deny" },
+  { name: "read from a redirect", command: "cat < /etc/passwd", search: false, verdict: "deny" },
+  { name: "glob outside the root", command: "grep foo /etc/*", search: true, verdict: "deny" },
+  { name: "glob inside the root", command: "grep foo /repo/src/*", search: true, verdict: "once" },
+  // Programs that write, and prefixes that run something else.
+  { name: "pipe into tee", command: "grep x | tee out.txt", search: false, verdict: "deny" },
+  { name: "sed in place", command: "sed -i 's/a/b/' f", search: false, verdict: "deny" },
+  { name: "awk running a program", command: `awk 'BEGIN{system("rm x")}'`, search: false, verdict: "deny" },
+  { name: "sed running a program", command: "sed 'e rm x'", search: false, verdict: "deny" },
+  { name: "find deleting", command: "find . -delete", search: false, verdict: "deny" },
+  { name: "xargs into rm", command: "grep -l x . | xargs rm", search: false, verdict: "deny" },
+  { name: "env running a program", command: "env FOO=1 rm x", search: false, verdict: "deny" },
+  { name: "nice prefix", command: "nice grep foo lib", search: false, verdict: "deny" },
+  { name: "nohup prefix", command: "nohup grep foo lib", search: false, verdict: "deny" },
+];
+
+test("every shape any gate round raised, judged the way the desk judges it", () => {
+  for (const row of REGRESSION) {
+    const detail =
+      row.command === "@liveA" ? LIVE_GREP_SED : row.command === "@liveB" ? LIVE_GREP_HEAD : JSON.stringify({ command: row.command });
+    const roots = row.roots ?? ["/repo"];
+    const cwd = row.cwd ?? "/repo/app";
+    assert.equal(looksLikeSearchOnly(DESK_TITLE, detail), row.search, `${row.name}: search-only`);
+    const security = securityPolicyAnswer({
+      policy: { network: "allowed", root: "blocked" },
+      tool: DESK_TITLE,
+      detail,
+      roots,
+      cwd,
+    });
+    const seat = permissionPolicyAnswer({ mode: "plan", sandbox: "read-only", tool: DESK_TITLE, detail });
+    // The store asks the boundary first and the seat only if it said nothing.
+    assert.equal(security.answer ?? seat, row.verdict, `${row.name}: desk verdict`);
+  }
+});
+
 test("every vendor host hands the classifiers the vendor's own tool name", () => {
   const agent = read("electron/grok-agent.ts");
   assert.match(agent, /rawTool: rawToolName\(params\)/, "the ACP agent reads the tool kind off the call");

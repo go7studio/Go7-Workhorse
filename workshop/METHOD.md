@@ -5,9 +5,9 @@ Separate add-on. Default off. Read-only.
 ## Desk
 
 1. Add a Local Compute host under Settings → LLMs. Every pack read is a GET through one of these hosts with that host's bearer; Workhorse adds no other credential.
-2. Open Settings → Skills → Workshop. Paste a public GitHub repo URL and press Add (the highest tagged release is downloaded, staged, validated, then installed), or press From folder to copy a pack folder. No `git` binary. A pack outside the vocabulary is refused with the exact field or "needs a newer Workhorse".
+2. Open Settings → Workshop. Paste a public GitHub repo URL and press Add (the highest tagged release is downloaded, staged, validated, then installed), or press From folder to copy a pack folder. No `git` binary. A pack outside the vocabulary is refused with the exact field or "needs a newer Workhorse".
 3. Press Turn on. Pick the host the pack reads through. The panel lists each source with its kind, cadence, byte cap, and the exact URLs the host will build. Untick what you do not want. Confirm stores `{ id, on, hostId, sources, sourceFingerprints, version, contract }` under `settings.workshop`.
-4. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. No new Settings tab. No dock item.
+4. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. Settings → Workshop is install/grant only. No dock item.
 5. Update re-reads the repo's tags. When sources, host needs, cadence, byte caps, or contract changed for **any** pack in the archive, those packs turn off **before** polling restarts and ask you to Turn on again. Card-only changes apply with a version note. Replacing an On pack via Add / From folder likewise forces reconfirm.
 6. Turn off clears `sources` and stops the reads. Remove deletes the pack folder and its row. Neither touches the remote box.
 7. A pack's `collector/` is shown and revealed in the file manager only. Workhorse never runs, chmods, or copies it anywhere.
@@ -48,7 +48,7 @@ Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30
 
 | Call | Does | Does not |
 | --- | --- | --- |
-| Renderer `updateWorkshop` (via Settings → Skills) | Turns packs on or off and sets `hostId` and `sources` | Open or close the breakout by itself |
+| Renderer `updateWorkshop` (via Settings → Workshop) | Turns packs on or off and sets `hostId` and `sources` | Open or close the breakout by itself |
 | `workshopList` (`workshop:list`) | Lists installed packs with sources, provenance, and grant state | Fetch anything from a host |
 | `workshopView` (`workshop:view`) | Returns the packs that are on with layout and main's cached documents | Start a timer; main owns the polling |
 | `workshopInstallRepo` (`workshop:install-repo`) | Downloads the highest tagged release of a public https repo, stages, validates, installs | Run `git`, follow redirects, or accept a private repo |

@@ -175,7 +175,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
         tokenBudget: {
           type: "number",
           description:
-            "Optional ceiling on this slice’s new work (output plus input growth after the first meter). Not leftover, occupancy, or inherited context. Omit unless stopping a runaway.",
+            "Ignored. The desk does not stop a worker on a token ceiling. This chat's billed spend is on the meter.",
         },
         isolation: { type: "string", description: "worktree (default) or shared" },
         seed: {
@@ -358,7 +358,7 @@ const DESK_TOOLS: { name: string; description: string; input_schema: Record<stri
   },
   {
     name: "workhorse_list_skills",
-    description: "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse. Call proactively when the request or Workhorse skill radar resembles an installed workflow, even if the user did not name it.",
+    description: "List desk skills from Grok, Codex, Claude, Cursor, and Workhorse. Call when the request is an installed workflow or Workhorse skill radar listed a genuine match. Do not list skills for generic chat.",
     input_schema: { type: "object", properties: { origin: { type: "string", description: "Optional filter: grok, codex, claude, cursor, or workhorse" } } },
   },
   {

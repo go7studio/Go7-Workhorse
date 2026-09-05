@@ -211,6 +211,7 @@ import {
   displayWorkSteps,
   earlierWorkLabel,
   formatWorked,
+  namedWorkSummary,
   groupTranscript,
   groupWorkRows,
   isActiveWorkRow,
@@ -297,6 +298,20 @@ test("isolated user data accepts an env or explicit launch flag", () => {
   assert.equal(
     workhorseUserDataOverride(["electron", ".", "--workhorse-user-data=/tmp/flag-profile"], {}),
     "/tmp/flag-profile",
+  );
+  assert.equal(
+    workhorseUserDataOverride(
+      [
+        "electron",
+        ".",
+        "--workhorse-user-data=C:\\Users\\lgovo\\AppData\\Roaming\\Go7",
+        "Workhorse",
+        "Dev",
+        "--workhorse-volatile-credentials",
+      ],
+      {},
+    ),
+    "C:\\Users\\lgovo\\AppData\\Roaming\\Go7 Workhorse Dev",
   );
   assert.equal(workhorseUserDataOverride([], {}), undefined);
   assert.equal(workhorseVolatileCredentials(["electron", ".", "--workhorse-volatile-credentials"], {}), true);
@@ -3605,6 +3620,66 @@ test("parseGrokPlanUsage reads weekly SuperGrok pool remaining", () => {
   assert.equal(plan?.period, "weekly");
   assert.equal(plan?.products[0]?.label, "Build");
   assert.match(readFileSync(path.join(ROOT, "src", "ui", "UsagePane.tsx"), "utf8"), /% left/);
+
+  const spent = parseGrokPlanUsage({
+    config: {
+      currentPeriod: {
+        type: "USAGE_PERIOD_TYPE_WEEKLY",
+        start: "2026-08-23T13:53:32.726325+00:00",
+        end: "2026-08-30T13:53:32.726325+00:00",
+      },
+      creditUsagePercent: 100.0,
+      productUsage: [
+        { product: "GrokBuild", usagePercent: 100.0 },
+        { product: "GrokChat" },
+      ],
+      prepaidBalance: { val: 0 },
+    },
+  });
+  assert.equal(spent?.usedPercent, 100);
+  assert.equal(spent?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spent })?.label,
+    "0%",
+  );
+
+  const spentBuildOnly = parseGrokPlanUsage({
+    config: {
+      currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2026-08-23T00:00:00Z", end: "2026-08-30T00:00:00Z" },
+      productUsage: [{ product: "GrokBuild", usagePercent: 100 }],
+    },
+  });
+  assert.equal(spentBuildOnly?.usedPercent, 100);
+  assert.equal(spentBuildOnly?.leftPercent, 0);
+
+  // Live spent SuperGrok often reports leftover polarity (remaining 0) and
+  // omits creditUsagePercent. That is known zero, not a missing meter.
+  const spentRemaining = parseGrokPlanUsage({
+    config: {
+      remainingPercent: 0,
+      productUsage: [{ product: "GrokBuild", remainingPercent: 0 }],
+    },
+  });
+  assert.equal(spentRemaining?.usedPercent, 100);
+  assert.equal(spentRemaining?.leftPercent, 0);
+  assert.equal(
+    planRingView({ focus: "grok", provider: "grok", key: "grok" }, { grok: spentRemaining })?.label,
+    "0%",
+  );
+  const spentVal = parseGrokPlanUsage({ config: { creditRemainingPercent: { val: 0 } } });
+  assert.equal(spentVal?.leftPercent, 0);
+  const spentOnDemand = parseGrokPlanUsage({
+    config: { onDemandUsed: { val: 10 }, onDemandCap: { val: 10 } },
+  });
+  assert.equal(spentOnDemand?.usedPercent, 100);
+  assert.equal(spentOnDemand?.leftPercent, 0);
+  assert.equal(
+    parseGrokPlanUsage({ config: { onDemandUsed: { val: 0 }, onDemandCap: { val: 0 } } }),
+    undefined,
+    "a 0 on-demand cap is not a spent week",
+  );
+  assert.equal(parseGrokPlanUsage({}), undefined, "missing leftover stays unknown");
+  assert.equal(parseGrokPlanUsage({ config: {} }), undefined);
 });
 
 test("parseCodexPlanUsage reads weekly leftover the same way as SuperGrok", () => {
@@ -6243,6 +6318,45 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(resolveWorkedMs(1_000, undefined, [2_000, 20_000]), 19_000);
   assert.equal(resolveWorkedMs(1_000, undefined, [1_000]), undefined);
 
+  const readGoal: ChatMessage = {
+    id: "t1",
+    role: "system",
+    kind: "tool",
+    toolCallId: "1",
+    text: "Read · running — GOAL.md",
+    toolStatus: "running",
+    createdAt: 3,
+  };
+  const grepDone: ChatMessage = {
+    id: "t2",
+    role: "system",
+    kind: "tool",
+    toolCallId: "2",
+    text: "Grep · completed",
+    toolStatus: "completed",
+    createdAt: 4,
+  };
+  const readDone: ChatMessage = { ...readGoal, text: "Read · completed — GOAL.md", toolStatus: "completed" };
+  assert.equal(namedWorkSummary([readGoal], { live: true }), "Read GOAL.md");
+  assert.equal(namedWorkSummary([grepDone, readGoal], { live: true }), "Read GOAL.md");
+  assert.equal(namedWorkSummary([readDone, grepDone]), "Read · Grep");
+  assert.equal(namedWorkSummary([], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([], { live: true, allowThinking: false }), "");
+  assert.equal(
+    namedWorkSummary(
+      ["Read", "Grep", "Edit", "Write", "Glob"].map((title, index) => ({
+        id: `t${index}`,
+        role: "system" as const,
+        kind: "tool" as const,
+        toolCallId: String(index),
+        text: `${title} · completed`,
+        toolStatus: "completed",
+        createdAt: index,
+      })),
+    ),
+    "Read · Grep · Edit · 2 more",
+  );
+
   const messages: ChatMessage[] = [
     { id: "u", role: "user", text: "hi", createdAt: 1 },
     { id: "a", role: "assistant", text: "Done.", thought: "Checking the process tree.", createdAt: 2, workedMs: 14000 },
@@ -6314,7 +6428,12 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
   assert.match(popout, /bodyOpen && hasInner/);
   assert.match(popout, /earlierOpen \?/);
-  assert.match(popout, /1 \? "tool" : "tools"/);
+  assert.match(popout, /namedWorkSummary\(otherTools/);
+  assert.doesNotMatch(popout, /1 \? "tool" : "tools"/);
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /Working · 19s · Read GOAL\.md/,
+  );
   assert.match(popout, /packWorkRows/);
   assert.match(popout, /earlierWorkLabel/);
   assert.match(popout, /data-kind="earlier"/);
@@ -6815,7 +6934,8 @@ test("Workhorse /goal and pulled skills join the Codex slash palette", () => {
   assert.match(storeSend, /commandContinuesToVendor\(match\.run\)/);
   assert.match(storeSend, /prepareVendorSend\(/);
   assert.match(storeSend, /if \(!originalText\.startsWith\("\/"\)\)/);
-  assert.match(storeSend, /withSkillDiscoveryHint\(vendorText, originalText, deskSkillsRef\.current\)/);
+  assert.match(storeSend, /withSkillDiscoveryHint\(vendorText, originalText, catalog\)/);
+  assert.match(storeSend, /skillsForAutoLoad\(deskSkillsRef\.current, policy\)/);
   assert.match(storeSend, /nextGoalForSend\(/);
   assert.doesNotMatch(storeSend, /vendorText = goalVendorPrompt/);
   assert.doesNotMatch(storeSend, /hideUser = true/);
@@ -9877,8 +9997,9 @@ test("the repo tracks no symlinks and states its working rules", () => {
   assert.match(tryDesk, /delete env\.CSC_LINK/);
   assert.match(tryDesk, /packWindowsDir/);
   assert.match(tryDesk, /installWinDevApp/);
-  assert.match(tryDesk, /--workhorse-user-data=/);
+  assert.match(tryDesk, /WORKHORSE_USER_DATA_PATH/);
   assert.match(tryDesk, /Start-Process/);
+  assert.doesNotMatch(tryDesk, /--workhorse-user-data=/);
   assert.doesNotMatch(tryDesk, /WORKHORSE_RELEASE_BUILD=1/);
   assert.doesNotMatch(tryDesk, /taskkill[\s\S]*Go7 Workhorse\.exe/);
   assert.equal(WORKHORSE_DEV_APP_ID, `${WORKHORSE_APP_ID}.dev`);

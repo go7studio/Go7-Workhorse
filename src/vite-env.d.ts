@@ -326,7 +326,7 @@ type WorkhorseBridge = {
     request: import("./lib/external-task").RuntimeStartRequest,
   ) => Promise<import("./lib/types").ExternalTask | null>;
   cancelExternalRuntimeTask?: (taskId: string) => Promise<boolean>;
-  /** Installed packs with their sources, install provenance, and the user's grant state. Settings → Skills → Workshop. */
+  /** Installed packs with their sources, install provenance, and the user's grant state. Settings → Workshop. */
   workshopList?: () => Promise<import("./lib/workshop-pack").PackListing[]>;
   /** Packs that are On, with layout and the documents main has fetched. Main owns the timers; this returns its cache. */
   workshopView?: () => Promise<import("./lib/workshop-pack").PackView[]>;

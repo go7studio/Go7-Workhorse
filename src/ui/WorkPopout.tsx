@@ -6,7 +6,7 @@ import { brainCaption, brainStamp } from "../lib/session";
 import { useStore } from "../lib/store";
 import { subagentTurns, workerTaskTitle } from "../lib/subagents";
 import { describePeerTool, prettyToolStatus, prettyToolTitle, talkingToSummary, toolNameKey } from "../lib/tool-labels";
-import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
+import { displayWorkSteps, formatWorked, groupWorkRows, isActiveWorkRow, namedWorkSummary, packWorkRows, earlierWorkLabel, resolveWorkedMs, type DisplayWorkStep, type GroupedWorkRow, type TranscriptBlock } from "../lib/turns";
 import type { ChatMessage } from "../lib/types";
 import { MessageBody } from "./MessageBody";
 import { TimeStamp } from "./TimeStamp";
@@ -392,14 +392,14 @@ export const WorkPopout = memo(function WorkPopout({
   const peerTools = workTools.filter((tool) => isPeerTool(tool));
   const otherTools = workTools.filter((tool) => !peerTools.some((item) => item.id === tool.id));
   const talking = talkingToSummary(peerTools);
+  const named = namedWorkSummary(otherTools, {
+    live,
+    allowThinking: !talking && threads.length === 0,
+  });
   const summary = [
     label,
     talking,
-    otherTools.length > 0
-      ? `${otherTools.length} ${talking ? "other " : ""}${otherTools.length === 1 ? "tool" : "tools"}`
-      : !talking && workTools.length > 0
-        ? `${workTools.length} ${workTools.length === 1 ? "tool" : "tools"}`
-        : "",
+    named,
     threads.length > 0 ? `${threads.length} ${threads.length === 1 ? "subagent" : "subagents"}` : "",
   ]
     .filter(Boolean)

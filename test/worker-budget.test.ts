@@ -7,9 +7,7 @@ import {
   applyWorkerBudgetUsage,
   beginAssignmentBudget,
   billedFreshInput,
-  budgetTerminalReport,
   budgetThresholds,
-  BUDGET_HANDOFF_PROMPT,
   missionUsedTokens,
   needsBudgetHandoffTurn,
   nestedHelperBudget,
@@ -112,9 +110,9 @@ test("no ceiling never exceeds, warns, or reserves", () => {
 test("the live usage path uses slice spend, not input plus output", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   assert.match(store, /applyWorkerBudgetUsage\(/);
-  assert.match(store, /nextBudgetRunState\(/);
   assert.match(store, /beginAssignmentBudget\(/);
-  assert.match(store, /BUDGET_HANDOFF_PROMPT/);
+  assert.doesNotMatch(store, /nextBudgetRunState\(/);
+  assert.doesNotMatch(store, /BUDGET_HANDOFF_PROMPT/);
   assert.doesNotMatch(
     store,
     /usedTokens = Math\.max\(\s*liveSession\.agentRun\.usedTokens \?\? 0,\s*Math\.max\(0, event\.inputTokens\) \+ Math\.max\(0, event\.outputTokens\)/,
@@ -141,66 +139,52 @@ test("reserve is 15-20% and warn comes first", () => {
   assert.equal(over.exceeded, true);
 });
 
-test("crossing the reserve asks for a handoff instead of killing the run", () => {
+test("a ceiling on disk does not stop the run", () => {
   const spend = applyWorkerBudgetUsage({ tokenBudget: 10_000 }, { outputTokens: 8_500 });
   const next = nextBudgetRunState({ tokenBudget: 10_000 }, spend, 50);
-  assert.equal(next.action, "handoff");
-  assert.equal(next.budgetPhase, "verify");
+  assert.equal(next.action, "none");
   assert.equal(next.status, undefined);
-  assert.match(next.notice ?? "", /stop producing/i);
-  assert.equal(needsBudgetHandoffTurn({ tokenBudget: 10_000, budgetPhase: "verify" }), true);
-});
-
-test("a later overrun after handoff terminates with a truthful report", () => {
-  const spend = applyWorkerBudgetUsage(
+  assert.equal(next.notice, undefined);
+  assert.equal(needsBudgetHandoffTurn({ tokenBudget: 10_000, budgetPhase: "verify" }), false);
+  const over = applyWorkerBudgetUsage(
     { tokenBudget: 10_000, usedTokens: 10_500, budgetPhase: "verify", changedFiles: ["src/lib/store.tsx"] },
     { outputTokens: 10_500 },
   );
-  const next = nextBudgetRunState(
+  const terminated = nextBudgetRunState(
     { tokenBudget: 10_000, usedTokens: 8_500, budgetPhase: "verify", changedFiles: ["src/lib/store.tsx"] },
-    spend,
+    over,
     90,
   );
-  assert.equal(next.action, "terminate");
-  assert.equal(next.status, "budget-exceeded");
-  assert.match(next.error ?? "", /patches present; verification incomplete/);
-  assert.equal(
-    budgetTerminalReport({ tokenBudget: 10_000, usedTokens: 10_500, changedFiles: ["a.ts"] }),
-    "patches present; verification incomplete. Used 10500 of 10000.",
-  );
+  assert.equal(terminated.action, "none");
+  assert.equal(terminated.status, undefined);
 });
 
-test("one mission pass cannot consume the whole mission", () => {
+test("one mission pass is not split by a token ceiling", () => {
   const first = splitPassBudget({
     tokenBudget: 100_000,
     mission: { iteration: 1, maxIterations: 3 },
   });
-  assert.equal(first.missionTokenBudget, 100_000);
-  assert.equal(first.tokenBudget, 33_333);
+  assert.equal(first.tokenBudget, undefined);
+  assert.equal(first.missionTokenBudget, undefined);
   const second = splitPassBudget({
     mission: { tokenBudget: 100_000, usedTokens: 33_333, iteration: 2, maxIterations: 3 },
   });
-  assert.equal(second.tokenBudget, 33_333);
-  assert.ok((second.tokenBudget ?? 0) < 100_000);
+  assert.equal(second.tokenBudget, undefined);
 });
 
-test("a reused worker does not inherit the previous slice ceiling or spend", () => {
+test("a reused worker does not inherit the previous slice spend as a ceiling", () => {
   const prior = { tokenBudget: 100_000, usedTokens: 110_883, budgetBaseline: 70_000 };
   const unbound = beginAssignmentBudget(prior, {});
-  // It does not inherit the prior ceiling — but it is no longer unbounded.
-  // An undefined budget makes every reserve, warning and stop a no-op, which
-  // is a runaway brake wired to nothing.
-  assert.notEqual(unbound.tokenBudget, 100_000, "the prior slice ceiling must not carry over");
-  assert.equal(unbound.tokenBudget, DEFAULT_WORKER_TOKEN_BUDGET);
+  assert.equal(unbound.tokenBudget, undefined);
   assert.equal(unbound.missionTokenBudget, undefined);
   assert.equal(unbound.lifetimeUsedTokens, 110_883);
   const spend = applyWorkerBudgetUsage(unbound, { inputTokens: 200_000, outputTokens: 50_000 });
   assert.equal(spend.exceeded, false);
   assert.equal(spend.reserveCrossed, false);
-  const capped = beginAssignmentBudget(prior, { tokenBudget: 20_000 });
-  assert.equal(capped.tokenBudget, 20_000);
-  assert.equal(capped.lifetimeUsedTokens, 110_883);
-  const firstMeter = applyWorkerBudgetUsage(capped, { inputTokens: 200_000, outputTokens: 100 });
+  const named = beginAssignmentBudget(prior, { tokenBudget: 20_000 });
+  assert.equal(named.tokenBudget, undefined, "a requested ceiling is not written");
+  assert.equal(named.lifetimeUsedTokens, 110_883);
+  const firstMeter = applyWorkerBudgetUsage(named, { inputTokens: 200_000, outputTokens: 100 });
   assert.equal(firstMeter.usedTokens, 100);
   assert.equal(firstMeter.budgetBaseline, 200_000, "the inherited prompt is still not a spend");
   assert.equal(firstMeter.exceeded, false);
@@ -220,11 +204,10 @@ test("mission usedTokens is the sum of this mission’s assignment windows", () 
   );
 });
 
-test("handoff prompt is the bounded checkpoint the live path sends", () => {
-  assert.match(BUDGET_HANDOFF_PROMPT, /patches present; verification incomplete/);
+test("the live path does not send a token-budget handoff", () => {
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
-  assert.match(store, /needsBudgetHandoffTurn/);
-  assert.match(store, /holdForHandoff/);
+  assert.doesNotMatch(store, /needsBudgetHandoffTurn/);
+  assert.doesNotMatch(store, /BUDGET_HANDOFF_PROMPT/);
 });
 
 test("parent takeover is a recorded fact the UI and join can show", () => {
@@ -368,26 +351,21 @@ test("a helper can never be handed more than its parent has left", () => {
   assert.equal(parentBudgetRemaining({ usedTokens: 1_000 }), DEFAULT_WORKER_TOKEN_BUDGET - 1_000);
 });
 
-test("both spawn doors read the same nested ceiling", () => {
-  // Two doors spawn a helper — the MCP tool and the store. They disagreed on
-  // nothing while both said 5,000; the risk is that only one of them is fixed
-  // and a helper's ceiling then depends on which door it came through.
+test("neither spawn door writes a nested token ceiling", () => {
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
   const store = readFileSync(path.join(ROOT, "src", "lib", "store.tsx"), "utf8");
   for (const [name, source] of [["electron/workhorse-mcp.ts", mcp], ["src/lib/store.tsx", store]] as const) {
-    assert.doesNotMatch(source, /Math\.min\(5_000/, `${name} no longer carries the old 5,000 cap`);
-    assert.match(source, /nestedHelperBudget\(\{/, `${name} asks the shared helper for the ceiling`);
-    assert.match(source, /parentRemaining: parentBudgetRemaining\(/, `${name} caps the helper at what the parent has left`);
+    assert.doesNotMatch(source, /nestedHelperBudget\(\{/, `${name} does not assign a helper ceiling`);
+    assert.doesNotMatch(source, /parentBudgetRemaining\(/, `${name} does not cap a helper on parent remainder`);
   }
 });
 
-test("the budget ceiling says when it is read", () => {
-  // The ceiling is compared at meter time, so a single long turn can pass it
-  // without being stopped. That is a stated limit, not a second meter.
+test("FEATURES.md says the desk does not stop on a token ceiling", () => {
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
   assert.match(
     features,
-    /reads the ceiling when the vendor reports usage[\s\S]{0,160}not part-way through a turn/,
-    "FEATURES.md says the ceiling is checked at the meter, not inside a turn",
+    /does not stop a worker on a token ceiling/,
+    "FEATURES.md says spend is visible, not a stop",
   );
+  assert.match(features, /billed total is on the chat meter/);
 });

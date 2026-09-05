@@ -177,8 +177,10 @@ transcript rather than as a path.
   here takes the work's own name instead of the prompt's first few words, so
   long as its workers agree on one.
 - User and assistant turns in the transcript use the same clock.
-- A turn’s work stays on one compact line while it runs. Open it when you
-  want the ordered detail: think, tools, think. Consecutive tool calls share
+- A turn’s work stays on one compact line while it runs, named for the live
+  action (`Working · 19s · Read GOAL.md`). When the turn ends it lists the
+  tools that ran (`Worked 19s · Read · Grep`). Open it when you want the
+  ordered detail: think, tools, think. Consecutive tool calls share
   one fold labelled "3 tools"; expand it to see the calls listed underneath, not
   a row of "1 tool". A single call shows its name. A later thought starts a new
   hop. When a turn runs long, earlier thoughts and tools roll into an Earlier
@@ -237,6 +239,8 @@ transcript rather than as a path.
   four characters a token only when ACP sent no count — Composer and API stay
   two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
   Leftover rings, billed tokens, and retained context stay distinct meters.
+  This chat's billed total is on the chat meter, next to retained context. It
+  is not a stop.
 - **In** is fresh input — what the model read for the first time. **Cached** is
   context served back from cache, named apart so a long chat does not read as
   millions of new tokens. **Out** is what it wrote. The total is in + out.
@@ -261,15 +265,12 @@ transcript rather than as a path.
   (`seed: fresh`) and no parent conversation.
 - **Turn log** — a chat can reconstruct model history from its own turn and
   step log. The log is per chat. It is never shared across vendors.
-- **Subagents** — lifecycle records, runtime and token ceilings, cascading
+- **Subagents** — lifecycle records, runtime ceilings, cascading
   cancellation, changed-file review, and worktree isolation where the project
-  supports it. A token ceiling meters this slice’s new work, not leftover or
-  the size of the repo the worker read. One pass cannot spend the whole
-  mission. The last fifth is for verifying and handing off, not more producing.
-  The run is warned before it stops, and the stop report says what was left
-  unfinished. No ceiling means no limit. A reused worker starts a new count.
-  Workhorse reads the ceiling when the vendor reports usage, so it stops a run
-  at the next meter, not part-way through a turn: one long turn can pass it.
+  supports it. The desk does not stop a worker on a token ceiling. Billed
+  spend for that chat is on the meter, next to retained context. Runtime
+  timeout still ends a run as timed-out. A reused worker starts a new slice
+  count; billed usage for the chat is the lifetime total.
   If the parent then does the work itself, the run records that the parent took
   over instead of a fully Workhorse-owned completion.
   A worker gets a worker's context: the
@@ -387,7 +388,7 @@ transcript rather than as a path.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
 - **Workshop** — an optional, read-only rail on the right edge of the desk.
-  Add a pack from Settings → Skills → Workshop: paste a public GitHub repo URL
+  Add a pack from Settings → Workshop: paste a public GitHub repo URL
   (the highest tagged release is downloaded) or pick a folder. A pack is data
   only — one `pack.json` naming what it reads and how its cards look, plus an
   optional collector the operator installs on the remote box. Nothing from a
@@ -409,7 +410,7 @@ transcript rather than as a path.
 
 ## Settings
 
-Profile, connected LLMs, skills, routing, learning, usage, watch.
+Profile, connected LLMs, skills, workshop, routing, learning, usage, watch.
 
 The profile shows the Workhorse mark as tiny moving blobs of the bots you
 have called. Spend sets how many of each color; blobs merge in space without

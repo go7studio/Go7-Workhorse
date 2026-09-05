@@ -34,7 +34,7 @@ function writeView(view: RailView) {
 // The rail
 
 /**
- * Desk-attached Workshop rail: live watch when any pack is On. Settings → Skills stays
+ * Desk-attached Workshop rail: live watch when any pack is On. Settings → Workshop stays
  * install/grant only; the breakout remains an optional Detach. Collapsed: each pack's strip
  * (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the first.
  * Expanded: one module per pack, its cards in pack order.

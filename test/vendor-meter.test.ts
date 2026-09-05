@@ -6,6 +6,13 @@ import { test } from "node:test";
 import { cursorLanePlan, leftoverFetchKnown, leftoverForCard, leftoverMissingCopy, planWindowChip, weeklyPlanLeftover } from "../src/lib/usage";
 import { parseClaudePlanUsage } from "../electron/claude-plan";
 import { leftoverFromRemainingPercent, parseCustomPlanUsage } from "../electron/custom-plan";
+import {
+  fetchGrokPlanUsage,
+  GROK_BILLING_URL,
+  GROK_CLI_TOKEN_AUTH,
+  grokBillingHeaders,
+  sameHttpsOrigin,
+} from "../electron/grok-plan";
 import { CUSTOM_METERS } from "../src/lib/custom-meters";
 import { PROVIDER_PRESETS } from "../src/lib/provider-catalog";
 
@@ -220,4 +227,206 @@ test("custom leftover meters are a closed official list and catalog hosts stay c
   }
   assert.equal(ids.includes("openclaw"), false);
   assert.equal(ids.includes("hermes"), false);
+});
+
+const GROK_HOME = path.join(path.sep, "Users", "nobody");
+const GROK_AUTH = path.join(GROK_HOME, ".grok", "auth.json");
+
+function grokAuthFixture(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    "https://auth.x.ai::acct": {
+      key: "expired-grok-token",
+      user_id: "user-123",
+      refresh_token: "grok-refresh-token",
+      oidc_issuer: "https://auth.x.ai",
+      oidc_client_id: "grok-cli",
+      principal_type: "User",
+      principal_id: "user-123",
+      expires_at: "2026-08-30T00:00:00.000Z",
+      ...overrides,
+    },
+  });
+}
+
+function grokAuthInput(authJson: string, fetchImpl: typeof fetch, extra: Parameters<typeof fetchGrokPlanUsage>[0] = {}) {
+  return {
+    env: {},
+    homedir: GROK_HOME,
+    existsSync: (filePath: string) => filePath === GROK_AUTH,
+    readFile: (filePath: string) => {
+      if (filePath !== GROK_AUTH) throw new Error("must not read the machine");
+      return authJson;
+    },
+    writeFile: () => {
+      throw new Error("must not write auth unless the test expects it");
+    },
+    fetchImpl,
+    now: Date.parse("2026-09-02T15:00:00.000Z"),
+    ...extra,
+  };
+}
+
+test("fetchGrokPlanUsage stays unknown without a login and never hits the network", async () => {
+  const plan = await fetchGrokPlanUsage({
+    env: {},
+    homedir: GROK_HOME,
+    existsSync: () => false,
+    readFile: () => {
+      throw new Error("must not read the machine");
+    },
+    fetchImpl: async () => {
+      throw new Error("must not fetch without a token");
+    },
+  });
+  assert.equal(plan, undefined);
+});
+
+test("fetchGrokPlanUsage sends Grok CLI session headers and reads SuperGrok leftover", async () => {
+  assert.equal(sameHttpsOrigin("https://auth.x.ai", "https://auth.x.ai/oauth/token"), true);
+  assert.equal(sameHttpsOrigin("https://auth.x.ai", "http://auth.x.ai/oauth/token"), false);
+  assert.equal(sameHttpsOrigin("https://auth.x.ai", "https://evil.example/token"), false);
+  const headers = grokBillingHeaders("live-token", "user-123");
+  assert.equal(headers["X-XAI-Token-Auth"], GROK_CLI_TOKEN_AUTH);
+  assert.equal(headers["x-userid"], "user-123");
+  assert.equal(headers["x-grok-client-mode"], "headless");
+  assert.match(headers["User-Agent"] ?? "", /^Go7-Workhorse\//);
+  assert.doesNotMatch(headers["User-Agent"] ?? "", /grok-cli/i);
+
+  const seen: Array<{ url: string; auth: string | null; tokenAuth: string | null; userId: string | null }> = [];
+  const plan = await fetchGrokPlanUsage(
+    grokAuthInput(grokAuthFixture({ key: "live-token", expires_at: "2026-09-03T00:00:00.000Z" }), async (url, init) => {
+      const headerBag = new Headers(init?.headers);
+      seen.push({
+        url: String(url),
+        auth: headerBag.get("authorization"),
+        tokenAuth: headerBag.get("x-xai-token-auth"),
+        userId: headerBag.get("x-userid"),
+      });
+      assert.equal(String(url), GROK_BILLING_URL);
+      return new Response(
+        JSON.stringify({
+          config: {
+            currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-08T00:00:00Z" },
+            creditUsagePercent: 17,
+            productUsage: [{ product: "GrokBuild", usagePercent: 17 }],
+          },
+        }),
+        { status: 200 },
+      );
+    }),
+  );
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.auth, "Bearer live-token");
+  assert.equal(seen[0]?.tokenAuth, GROK_CLI_TOKEN_AUTH);
+  assert.equal(seen[0]?.userId, "user-123");
+  assert.equal(plan?.usedPercent, 17);
+  assert.equal(plan?.leftPercent, 83);
+  assert.equal(plan?.observedAt, "2026-09-02T15:00:00.000Z");
+});
+
+test("fetchGrokPlanUsage refreshes an expired OIDC token then reads leftover", async () => {
+  const written: string[] = [];
+  const urls: string[] = [];
+  const plan = await fetchGrokPlanUsage(
+    grokAuthInput(
+      grokAuthFixture(),
+      async (url, init) => {
+        urls.push(String(url));
+        const headerBag = new Headers(init?.headers);
+        if (String(url) === GROK_BILLING_URL) {
+          assert.equal(headerBag.get("authorization"), "Bearer fresh-grok-token");
+          assert.equal(headerBag.get("x-xai-token-auth"), GROK_CLI_TOKEN_AUTH);
+          return new Response(
+            JSON.stringify({
+              config: {
+                remainingPercent: 0,
+                productUsage: [{ product: "GrokBuild", remainingPercent: 0 }],
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected fetch ${String(url)}`);
+      },
+      {
+        writeFile: (filePath, contents) => {
+          assert.equal(filePath, GROK_AUTH);
+          written.push(contents);
+        },
+        refreshOauth: async (auth) => {
+          assert.equal(auth.refreshToken, "grok-refresh-token");
+          assert.equal(auth.issuer, "https://auth.x.ai");
+          assert.equal(auth.clientId, "grok-cli");
+          return {
+            accessToken: "fresh-grok-token",
+            refreshToken: "rotated-refresh",
+            expiresAt: "2026-09-09T15:00:00.000Z",
+          };
+        },
+      },
+    ),
+  );
+  assert.equal(written.length, 1);
+  assert.match(written[0] ?? "", /fresh-grok-token/);
+  assert.match(written[0] ?? "", /rotated-refresh/);
+  assert.deepEqual(urls, [GROK_BILLING_URL]);
+  assert.equal(plan?.usedPercent, 100);
+  assert.equal(plan?.leftPercent, 0);
+});
+
+test("fetchGrokPlanUsage retries billing once after a 401 by refreshing OIDC", async () => {
+  const auths: string[] = [];
+  let refreshed = 0;
+  const plan = await fetchGrokPlanUsage(
+    grokAuthInput(
+      grokAuthFixture({ key: "stale-grok-token", expires_at: "2026-09-03T00:00:00.000Z" }),
+      async (url, init) => {
+        const headerBag = new Headers(init?.headers);
+        auths.push(headerBag.get("authorization") ?? "");
+        assert.equal(String(url), GROK_BILLING_URL);
+        if (headerBag.get("authorization") === "Bearer stale-grok-token") {
+          return new Response(JSON.stringify({ error: "Invalid or expired credentials" }), { status: 401 });
+        }
+        return new Response(
+          JSON.stringify({
+            config: {
+              currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-08T00:00:00Z" },
+              creditUsagePercent: 41,
+            },
+          }),
+          { status: 200 },
+        );
+      },
+      {
+        writeFile: () => undefined,
+        refreshOauth: async () => {
+          refreshed += 1;
+          return { accessToken: "fresh-grok-token", expiresAt: "2026-09-09T15:00:00.000Z" };
+        },
+      },
+    ),
+  );
+  assert.equal(refreshed, 1);
+  assert.deepEqual(auths, ["Bearer stale-grok-token", "Bearer fresh-grok-token"]);
+  assert.equal(plan?.usedPercent, 41);
+  assert.equal(plan?.leftPercent, 59);
+});
+
+test("Grok OIDC refresh refuses a token endpoint off the issuer origin", async () => {
+  const urls: string[] = [];
+  const plan = await fetchGrokPlanUsage(
+    grokAuthInput(grokAuthFixture(), async (url) => {
+      urls.push(String(url));
+      if (String(url).endsWith("/.well-known/openid-configuration")) {
+        return new Response(JSON.stringify({ token_endpoint: "https://evil.example/token" }), { status: 200 });
+      }
+      if (String(url) === GROK_BILLING_URL) {
+        return new Response(JSON.stringify({ error: "expired" }), { status: 401 });
+      }
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }),
+  );
+  assert.equal(urls.includes("https://evil.example/token"), false);
+  assert.ok(urls.includes("https://auth.x.ai/.well-known/openid-configuration"));
+  assert.equal(plan, undefined);
 });

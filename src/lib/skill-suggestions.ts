@@ -81,19 +81,31 @@ function containsPhrase(haystack: string, needle: string): boolean {
   return needle.trim().length > 1 && haystack.includes(needle);
 }
 
-function relatedWord(promptWord: string, skillWord: string): boolean {
+function relatedWord(promptWord: string, skillWord: string, hyphenatedName: boolean): boolean {
   if (promptWord === skillWord) return true;
-  if (promptWord.length < 4 || skillWord.length < 4) return false;
+  if (promptWord.length < 5 || skillWord.length < 5) return false;
   const difference = Math.abs(promptWord.length - skillWord.length);
-  return difference <= 4 && (promptWord.startsWith(skillWord) || skillWord.startsWith(promptWord));
+  if (difference > 4) return false;
+  if (!(promptWord.startsWith(skillWord) || skillWord.startsWith(promptWord))) return false;
+  // Short prefixes may complete a single token (image → imagegen), not a
+  // hyphenated name that already has that word as its own token (figma-use).
+  if (promptWord.length < 6 && hyphenatedName) return false;
+  return true;
+}
+
+function scoringDescription(text: string): string {
+  return text
+    .replace(/use when the user selects or names[^.!]*/gi, " ")
+    .replace(/whenever the user wants to[^.!]*/gi, " ");
 }
 
 /**
  * Rank a few plausible installed workflows from natural task language.
- * This is intentionally conservative: one name hit or two descriptive hits
- * are required, so generic chat does not turn into a skill-loading ritual.
+ * This is intentionally conservative: a name phrase, two name tokens, one
+ * long distinctive name token, or three descriptive hits are required, so
+ * generic chat does not turn into a skill-loading ritual.
  */
-export function suggestDeskSkills(skills: DeskSkill[], prompt: string, limit = 3): DeskSkill[] {
+export function suggestDeskSkills(skills: DeskSkill[], prompt: string, limit = 2): DeskSkill[] {
   if (limit <= 0 || !prompt.trim() || skills.length === 0) return [];
   const promptPhrase = normalizedPhrase(prompt);
   const promptWords = new Set(words(prompt));
@@ -101,7 +113,7 @@ export function suggestDeskSkills(skills: DeskSkill[], prompt: string, limit = 3
 
   const cards = skills.map((skill) => {
     const nameWords = words(skill.name);
-    const descriptionWords = words(skill.description);
+    const descriptionWords = words(scoringDescription(skill.description));
     return { skill, nameWords, descriptionWords };
   });
   const frequency = new Map<string, number>();
@@ -117,9 +129,11 @@ export function suggestDeskSkills(skills: DeskSkill[], prompt: string, limit = 3
     const qualifiedPhrase = normalizedPhrase(`${card.skill.origin} ${card.skill.name}`);
     const qualified = containsPhrase(promptPhrase, qualifiedPhrase);
     const named = containsPhrase(promptPhrase, namePhrase);
-    const nameHits = card.nameWords.filter((term) => [...promptWords].some((promptWord) => relatedWord(promptWord, term)));
+    const hyphenated = card.skill.name.includes("-");
+    const nameHits = card.nameWords.filter((term) => [...promptWords].some((promptWord) => relatedWord(promptWord, term, hyphenated)));
     const descriptionHits = card.descriptionWords.filter((term) => promptWords.has(term));
-    if (!qualified && !named && nameHits.length === 0 && descriptionHits.length < 2) continue;
+    const longNameHit = nameHits.some((term) => term.length >= 8);
+    if (!qualified && !named && nameHits.length < 2 && !longNameHit && descriptionHits.length < 3) continue;
 
     const nameScore = nameHits.reduce((sum, term) => sum + 8 * weight(term), 0);
     const descriptionScore = descriptionHits.reduce((sum, term) => sum + weight(term), 0);
@@ -164,7 +178,7 @@ export function withSkillDiscoveryHint(text: string, userPrompt: string, skills:
       const description = shortDescription(skill.description);
       return `- ${skill.origin}:${skill.name}${description ? ` — ${description}` : ""}`;
     }),
-    "Before acting, call workhorse_list_skills and then workhorse_read_skill for each genuine match. Ignore false positives. Follow every matching SKILL.md fully.",
+    "These are candidates only. Call workhorse_list_skills then workhorse_read_skill only when the request is that workflow. Ignore weak keyword overlap and template packs.",
     "",
     text,
   ];

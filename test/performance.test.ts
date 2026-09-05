@@ -370,9 +370,10 @@ test("the context meter settles on turn boundaries instead of ticking per token"
     sameContextSession(talking, { ...talking, messages: [...talking.messages, message("u2", "user", "again", 3)] }),
     false,
   );
-  const desk = { session: talking, settings } as unknown as ContextDesk;
-  assert.equal(sameContextDesk(desk, { session: streamed(talking, "one two"), settings } as unknown as ContextDesk), true);
-  assert.equal(sameContextDesk(desk, { session: talking, settings: { ...settings } } as unknown as ContextDesk), false);
+  const desk = { session: talking, settings, usage: [] } as unknown as ContextDesk;
+  assert.equal(sameContextDesk(desk, { session: streamed(talking, "one two"), settings, usage: desk.usage } as unknown as ContextDesk), true);
+  assert.equal(sameContextDesk(desk, { session: talking, settings: { ...settings }, usage: desk.usage } as unknown as ContextDesk), false);
+  assert.equal(sameContextDesk(desk, { session: talking, settings, usage: [] } as unknown as ContextDesk), false);
 });
 
 test("a streamed chat cannot repaint the watch bar, but a usage write can", () => {

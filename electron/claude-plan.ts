@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { GrokPlanProduct, GrokPlanUsage } from "../src/lib/types";
 import { readClaudeDesktopOauth } from "./claude-desktop-auth";
+import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 
 export type ClaudePlanUsage = GrokPlanUsage;
@@ -27,6 +28,8 @@ export type ClaudePlanTokenInput = {
   writeKeychain?: (contents: string) => void;
   refreshOauth?: (refreshToken: string) => Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number } | undefined>;
   readDesktop?: () => { accessToken?: string } | null;
+  /** Workhorse's own Claude token. Injectable so tests never read the vault. */
+  storedToken?: () => string | null;
 };
 
 function numberVal(value: unknown): number {
@@ -178,9 +181,13 @@ function parseKeychainDump(dump: string | null): unknown {
   }
 }
 
-/** Claude Code login on this machine: env, macOS keychain, ~/.claude, then Desktop (Windows). */
+/** Claude Code login on this machine: vault, env, macOS keychain, ~/.claude, then Desktop (Windows). */
 export async function resolveClaudePlanToken(input: ClaudePlanTokenInput = {}): Promise<string> {
   const env = input.env ?? process.env;
+  // Workhorse's own token first, straight from the vault. It used to arrive
+  // through the environment, which handed it to every other vendor's child.
+  const fromVault = (input.storedToken ?? storedClaudeToken)();
+  if (fromVault) return fromVault;
   const fromEnv = env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
   if (fromEnv) return fromEnv;
   const platform = input.platform ?? process.platform;

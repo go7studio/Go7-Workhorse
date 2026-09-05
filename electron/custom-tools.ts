@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { withDeskToolEnv, withoutWorkhorsePrivateEnv } from "./desk-path";
 import { groupSpawnOptions, stopProcessGroup, trackProcessGroup } from "./process-registry";
 import { permissionPolicyAnswer, looksLikeWriteTool, autoAllowPermission, type PermissionAnswer } from "../src/lib/permissions";
 import {
@@ -688,6 +689,12 @@ export async function executeCustomTool(
         const child = spawn(command, {
           cwd: runCwd,
           shell: true,
+          // A custom bot writes this command, so the shell is the agent's. It
+          // gets the same environment a vendor child gets — the person's login
+          // and PATH, without the desk's bridge token, state paths or the
+          // vendor login in its vault. With no `env` at all it inherited the
+          // lot, and `printenv WORKHORSE_BRIDGE_TOKEN` was a valid command.
+          env: withDeskToolEnv(withoutWorkhorsePrivateEnv(process.env)),
           windowsHide: true,
           stdio: ["ignore", "pipe", "pipe"],
           ...groupSpawnOptions(),

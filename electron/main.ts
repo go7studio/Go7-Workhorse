@@ -16,6 +16,7 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
+import { setStoredClaudeTokenReader } from "./claude-stored-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
@@ -419,19 +420,14 @@ function credentialStore(): CredentialStore {
 }
 
 /**
- * Put Workhorse's own Claude token on the environment the vendor child
- * inherits. Detection counts it as a login and the launch spec prefers it, so
- * the desk stops depending on the shared Claude Code login entirely.
+ * Teach the Claude modules where Workhorse's own token lives. It stays in the
+ * vault: detection reads it there and the Claude launch spec puts it on its own
+ * env. It never goes on `process.env`, which every vendor child inherits — that
+ * is how a Codex, Cursor or Grok chat came to be able to print the user's
+ * Claude login, along with every MCP server and shell those agents started.
  */
-function applyStoredClaudeToken(): boolean {
-  try {
-    const token = credentialStore().get(CLAUDE_TOKEN_ID);
-    if (!token) return false;
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-    return true;
-  } catch {
-    return false;
-  }
+function useStoredClaudeToken(): void {
+  setStoredClaudeTokenReader(() => credentialStore().get(CLAUDE_TOKEN_ID) ?? null);
 }
 
 function folderAccessIo() {
@@ -919,7 +915,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") {
     app.setAppUserModelId(windowsAppUserModelId);
   }
-  applyStoredClaudeToken();
+  useStoredClaudeToken();
   debugStartup("credentials ready");
   try {
     ensureDeskRipgrep();
@@ -1844,7 +1840,8 @@ app.whenReady().then(async () => {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : "Could not store the token." };
     }
-    applyStoredClaudeToken();
+    // Nothing to apply: the reader registered at startup reads the vault live,
+    // so the next detect and the next Claude launch both see this token.
     return { ok: true };
   });
   ipcMain.handle("custom:detect", () => detectCustomLogin());

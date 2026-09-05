@@ -1,7 +1,7 @@
 import { primaryFolder } from "../lib/project";
 import { useEffect, useState } from "react";
 import { LINK_HOSTS, LINK_HOST_LABEL, linkHostConnectsByOneshot } from "../lib/workhorse-link";
-import { BOT_COLORS, customBotEnabled, customModelRoutingOverride } from "../lib/custom-bots";
+import { BOT_COLORS, customBotEnabled, customBotModels, customModelRoutingOverride } from "../lib/custom-bots";
 import { isGrokBotUrl } from "../lib/custom-http-identity";
 import { formatWindow, modelsFor } from "../lib/models";
 import { PROVIDERS } from "../lib/providers";
@@ -681,37 +681,45 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
   const [catalog, setCatalog] = useState<CustomCatalog | null | undefined>(undefined);
   const [tests, setTests] = useState<Record<string, CustomModelTestResult | "busy">>({});
   const { id: botId, baseUrl } = bot;
+  // A bot that is off is off. Opening its editor must not reach its host or
+  // spend its key, so the section reads back what it already offers and asks
+  // nothing. Turning the bot on is what asks.
+  const live = customBotEnabled(bot);
 
   useEffect(() => {
-    let live = true;
+    let alive = true;
     setCatalog(undefined);
-    if (!window.workhorse?.customBotCatalog) {
+    if (!live || !window.workhorse?.customBotCatalog) {
       setCatalog(null);
       return () => {
-        live = false;
+        alive = false;
       };
     }
     void window.workhorse
       .customBotCatalog(botId)
       .then((next) => {
-        if (!live) return;
+        if (!alive) return;
         setCatalog(next);
         // A window the host published beats the one saved on the bot, and the
         // chat picker reads it from the desk catalog rather than from here.
         if (next) store.refreshVendorModels();
       })
       .catch(() => {
-        if (live) setCatalog(null);
+        if (alive) setCatalog(null);
       });
     return () => {
-      live = false;
+      alive = false;
     };
-  }, [botId, baseUrl, store]);
+  }, [botId, baseUrl, live, store]);
 
   const primary = bot.model.trim();
   const approved = new Set(bot.models ?? []);
   const listed = catalog?.models ?? [];
-  const rows = [primary, ...listed.map((model) => model.id).filter((id) => id !== primary)].filter(Boolean);
+  // With no catalog to draw from, an off bot still shows what it already
+  // offers, so the person can see what turning it back on would put in play.
+  const rows = live
+    ? [primary, ...listed.map((model) => model.id).filter((id) => id !== primary)].filter(Boolean)
+    : customBotModels(bot);
   const byId = new Map(listed.map((model) => [model.id, model]));
 
   const toggle = (id: string) => {
@@ -750,7 +758,12 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
   return (
     <div className="field wide bot-offered">
       <span>Offered models</span>
-      {catalog === undefined ? (
+      {!live ? (
+        <p className="row-meta">
+          This bot is off, so its host is not asked and its models cannot be tested. Turn it on to pick and test what
+          it serves.
+        </p>
+      ) : catalog === undefined ? (
         <p className="row-meta">Asking the host what it serves…</p>
       ) : catalog === null ? (
         <p className="row-meta">
@@ -762,7 +775,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
           ticked model becomes a routing candidate.
         </p>
       )}
-      {catalog
+      {catalog || !live
         ? rows.map((id) => {
             const model = byId.get(id);
             const isPrimary = id === primary;
@@ -775,7 +788,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
                   <input
                     type="checkbox"
                     checked={on}
-                    disabled={isPrimary}
+                    disabled={isPrimary || !live}
                     title={isPrimary ? "The bot's own model is always offered" : id}
                     onChange={() => toggle(id)}
                   />
@@ -793,6 +806,7 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
                   <select
                     value={storedRole(bot.routingProfiles?.[id])}
                     aria-label={`Routing role for ${id}`}
+                    disabled={!live}
                     onChange={(event) => setRole(id, event.target.value)}
                   >
                     <option value="">Rated by family</option>
@@ -800,14 +814,16 @@ function OfferedModels({ bot }: { bot: import("../lib/types").CustomBot }) {
                     <option value="balanced">Balanced</option>
                     <option value="deep">Deep</option>
                   </select>
-                  <button
-                    className="tiny"
-                    type="button"
-                    disabled={result === "busy"}
-                    onClick={() => runTest(id)}
-                  >
-                    {result === "busy" ? "Testing…" : "Test"}
-                  </button>
+                  {live ? (
+                    <button
+                      className="tiny"
+                      type="button"
+                      disabled={result === "busy"}
+                      onClick={() => runTest(id)}
+                    >
+                      {result === "busy" ? "Testing…" : "Test"}
+                    </button>
+                  ) : null}
                 </div>
                 {result && result !== "busy" ? (
                   <p className={result.ok ? "row-meta bot-offered-ok" : "row-meta bot-offered-failed"}>

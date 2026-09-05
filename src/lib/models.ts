@@ -21,6 +21,14 @@ export type ModelInfo = {
    * guessing, and a guess must never outrank the window an owner saved.
    */
   hostListed?: boolean;
+  /**
+   * Which custom slot published it. Two bots may serve the same model id at
+   * different windows — a Synthetic key and a self-hosted box both answer
+   * `hf:moonshotai/Kimi-K3` — and neither may inherit the other's number.
+   * Context never pools across slots, so a window is only ever read back with
+   * the bot it came from.
+   */
+  customBotId?: string;
 };
 
 export type ModelChoice = {
@@ -190,6 +198,15 @@ export function modelsFor(provider: ProviderId): ModelInfo[] {
   const live = liveCatalog[provider];
   const rows = live?.length ? live : MODEL_CATALOG[provider];
   const filtered = rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+  if (provider === "custom") {
+    // The live custom list carries one row per slot per model, because a window
+    // belongs to the slot that published it. Everything that reads this as a
+    // catalog wants one row per id, so collapse it here and leave the per-slot
+    // rows where `contextWindowFor` can still find them.
+    const byId = new Map<string, ModelInfo>();
+    for (const model of filtered) if (!byId.has(model.id)) byId.set(model.id, model);
+    return [...byId.values()];
+  }
   if (provider !== "cursor") return filtered;
   return filtered.map((model) => {
     const name = cursorModelDisplayName(model.id, model.name);
@@ -470,22 +487,31 @@ export function advertisedCodexWindow(modelId: string, reported?: number): numbe
  * bot beats a guess. Neither beats the host saying what it actually serves, so
  * that answer, and only that answer, is preferred here.
  */
-function liveCustomWindow(modelId: string): number | undefined {
+function liveCustomWindow(modelId: string, customBotId?: string): number | undefined {
   const id = modelId.trim();
   if (!id) return undefined;
-  const row = liveCatalog.custom?.find(
-    (item) => item.hostListed === true && (item.id === id || item.aliases?.includes(id)),
+  const rows = (liveCatalog.custom ?? []).filter(
+    (item) => item.hostListed === true && item.contextWindow > 0 && (item.id === id || item.aliases?.includes(id)),
   );
-  return row && row.contextWindow > 0 ? row.contextWindow : undefined;
+  if (rows.length === 0) return undefined;
+  const bot = customBotId?.trim();
+  if (bot) return rows.find((item) => item.customBotId === bot)?.contextWindow;
+  // No slot named, so there is no way to tell whose window this is. One answer
+  // shared by every slot serving the id is still that id's window; two
+  // different answers are two different hosts, and picking either would hand
+  // one slot the other's context. Fall back to what the caller saved instead.
+  const windows = new Set(rows.map((item) => item.contextWindow));
+  return windows.size === 1 ? rows[0]!.contextWindow : undefined;
 }
 
 export function contextWindowFor(
   provider: ProviderId,
   modelId: string,
   customWindow?: number,
+  customBotId?: string,
 ): number {
   if (provider === "custom") {
-    const listed = liveCustomWindow(modelId);
+    const listed = liveCustomWindow(modelId, customBotId);
     if (listed) return listed;
     if (customWindow && customWindow > 0) return customWindow;
   }

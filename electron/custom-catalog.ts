@@ -214,7 +214,15 @@ export async function readCustomCatalog(input: {
   fetchImpl?: typeof fetch;
   now?: number;
   refresh?: boolean;
+  /**
+   * Whether the slot is on. A disabled bot is off the desk and must not spend
+   * its key: turning it off is how a person stops it costing them anything, and
+   * opening Settings is not consent to start again. Refused before the request,
+   * and without touching the cache, so turning the bot back on asks properly.
+   */
+  enabled?: boolean;
 }): Promise<CustomCatalog | undefined> {
+  if (input.enabled === false) return undefined;
   const now = input.now ?? Date.now();
   const key = cacheKey(input.botId, input.baseUrl);
   const held = cache.get(key);

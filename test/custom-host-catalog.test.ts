@@ -9,9 +9,9 @@ import {
   readCustomCatalog,
   type CustomCatalog,
 } from "../electron/custom-catalog";
-import { CUSTOM_MODEL_TEST_PROMPT, testCustomModel } from "../electron/custom-http";
+import { CUSTOM_MODEL_TEST_PROMPT, redactSecrets, testCustomModel } from "../electron/custom-http";
 import { customVendorRows } from "../electron/vendor-models";
-import { applyVendorCatalog, contextWindowFor, resetVendorCatalog } from "../src/lib/models";
+import { applyVendorCatalog, contextWindowFor, modelsFor, resetVendorCatalog } from "../src/lib/models";
 import { routingCandidatesForDesk } from "../src/lib/routing";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 import type { CustomBot } from "../src/lib/types";
@@ -373,4 +373,110 @@ test("a per-model override moves that model alone", () => {
   assert.equal(flash?.cost, 1);
   assert.equal(glm?.intelligence, 7, "the sibling keeps the family score");
   assert.equal(glm?.speed, 3);
+});
+
+test("a bot that is off never spends its key", async () => {
+  clearCustomCatalogCache();
+  let asked = 0;
+  const fetchImpl: typeof fetch = async () => {
+    asked += 1;
+    return jsonResponse(SYNTHETIC_MODELS);
+  };
+  const off = await readCustomCatalog({
+    botId: SYNTHETIC_BOT.id,
+    baseUrl: SYNTHETIC_BOT.baseUrl,
+    apiKey: "syn_key",
+    enabled: false,
+    fetchImpl,
+    now: 0,
+  });
+  assert.equal(off, undefined);
+  assert.equal(asked, 0, "a disabled slot is off the desk, so its host is not reached");
+
+  // And refusing did not poison the cache: turning the bot back on asks.
+  const on = await readCustomCatalog({
+    botId: SYNTHETIC_BOT.id,
+    baseUrl: SYNTHETIC_BOT.baseUrl,
+    apiKey: "syn_key",
+    enabled: true,
+    fetchImpl,
+    now: 1,
+  });
+  assert.equal(asked, 1);
+  assert.equal(on?.models.length, 4);
+  clearCustomCatalogCache();
+});
+
+test("two slots serving the same model id each keep their own window", () => {
+  resetVendorCatalog();
+  // One key on Synthetic, one box of your own. Both answer to the same id and
+  // they are not the same model; context must never pool across slots.
+  const local: CustomBot = {
+    ...SYNTHETIC_BOT,
+    id: "bot_box",
+    name: "Local box",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    models: ["hf:zai-org/GLM-5.2"],
+    model: "hf:zai-org/GLM-5.2",
+    contextWindow: 64_000,
+  };
+  const rows = customVendorRows([
+    { bot: SYNTHETIC_BOT, catalog: catalogOf(SYNTHETIC_MODELS) },
+    {
+      bot: local,
+      catalog: { models: [{ id: "hf:zai-org/GLM-5.2", contextWindow: 32_768 }], fetchedAt: 2 },
+    },
+  ]);
+  const glm = rows.filter((row) => row.id === "hf:zai-org/GLM-5.2");
+  assert.equal(glm.length, 2, "one row per slot, not one row per id");
+  assert.deepEqual(
+    glm.map((row) => [row.customBotId, row.contextWindow]).sort(),
+    [["bot_box", 32_768], ["bot_syn", 200_000]],
+  );
+
+  applyVendorCatalog({ custom: rows });
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 128_000, "bot_syn"), 200_000);
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 64_000, "bot_box"), 32_768);
+  // A slot with no published row for the id falls back to its own number, and
+  // never borrows another slot's.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000, "bot_absent"), 96_000);
+  // Named by nobody, two hosts disagreeing: the caller's own number stands.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.2", 96_000), 96_000);
+  // One host, no disagreement, so the id's window is still that id's window.
+  assert.equal(contextWindowFor("custom", "hf:zai-org/GLM-5.3-Flash", 96_000), 128_000);
+
+  // The plain catalog view stays one row per id, so nothing that reads it as a
+  // model list sees the same model twice.
+  assert.equal(modelsFor("custom").filter((row) => row.id === "hf:zai-org/GLM-5.2").length, 1);
+  resetVendorCatalog();
+});
+
+test("a host that quotes the key back never gets it to the renderer", async () => {
+  const echoed = await testCustomModel(
+    { baseUrl: "https://api.synthetic.new", apiKey: "syn_abcdef1234567890", model: "m", api: "openai-completions" },
+    async () =>
+      jsonResponse(
+        {
+          error: {
+            message:
+              'rejected header Authorization: Bearer syn_abcdef1234567890 for {"api_key": "sk-live-9f8e7d6c5b4a3210"}',
+          },
+        },
+        401,
+      ),
+    () => 0,
+  );
+  assert.equal(echoed.ok, false);
+  assert.doesNotMatch(echoed.message, /syn_abcdef1234567890/, "the bot's own key does not come back");
+  assert.doesNotMatch(echoed.message, /sk-live-9f8e7d6c5b4a3210/);
+  assert.match(echoed.message, /Bearer \[redacted\]/);
+  assert.match(echoed.message, /rejected the API key/, "the meaning survives the redaction");
+
+  // A model id is the same shape as a token and must come through whole, or the
+  // message stops naming what failed.
+  assert.equal(
+    redactSecrets("hf:zai-org/GLM-5.2 and hf:moonshotai/Kimi-K3 are fine"),
+    "hf:zai-org/GLM-5.2 and hf:moonshotai/Kimi-K3 are fine",
+  );
+  assert.equal(redactSecrets("token hf_ABCdef0123456789 here"), "token [redacted] here");
 });

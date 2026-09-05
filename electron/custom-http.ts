@@ -134,8 +134,34 @@ export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base
  * out loud and keeps the host's own words after it, because the host is still
  * the authority on its own failure.
  */
+/**
+ * The shapes a credential takes when a host quotes the request back at you.
+ *
+ * Hosts do this. A 401 body often repeats the Authorization header it rejected,
+ * and a gateway's validation error can name the field and its value. That text
+ * is carried into an error message the renderer shows, so the key would leave
+ * the main process by the one route that was never meant to carry it. Redaction
+ * happens before the message is built, so no caller can forget.
+ *
+ * Matched by the prefixes real keys carry, never by "this looks long": model ids
+ * such as `hf:moonshotai/Kimi-K3` are the same shape as a token and must survive
+ * intact, or the message stops naming what failed.
+ */
+const SECRET_SHAPES: [RegExp, string][] = [
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],
+  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9._~+/=-]{8,}/gi, "[redacted]"],
+  [/("(?:[a-z_-]*(?:api[_-]?key|authorization|token|secret)[a-z_-]*)"\s*:\s*")[^"]{8,}(")/gi, "$1[redacted]$2"],
+];
+
+/** Strip anything key-shaped out of a host's own words. */
+export function redactSecrets(text: string): string {
+  let next = text;
+  for (const [shape, mask] of SECRET_SHAPES) next = next.replace(shape, mask);
+  return next;
+}
+
 export function customHttpErrorMessage(status: number, detail = ""): string {
-  const said = detail.trim().replace(/\s+/g, " ").slice(0, 180);
+  const said = redactSecrets(detail.trim().replace(/\s+/g, " ")).slice(0, 180);
   const cause =
     status === 401 || status === 403
       ? "the endpoint rejected the API key"
@@ -1053,7 +1079,10 @@ export async function testCustomModel(
     } catch {
       parsed = null;
     }
-    const reply = sanitizeCustomReply(replyTextFromBody(parsed, api));
+    // A gateway that echoes the request into a 200 leaks by the same route a
+    // 401 does, and the prompt here is one fixed line, so nothing legitimate in
+    // this reply is ever key-shaped.
+    const reply = redactSecrets(sanitizeCustomReply(replyTextFromBody(parsed, api)));
     const usage = parseCustomUsage(parsed);
     if (!reply) {
       return {
@@ -1077,7 +1106,10 @@ export async function testCustomModel(
       ok: false,
       model,
       latencyMs: Math.max(0, Math.round(clock() - startedAt)),
-      message: grokBotShimDownMessage(baseUrl, error),
+      // A transport fault can name the URL it tried, and some hosts take the key
+      // in a query string. Same rule as a rejected body: nothing key-shaped
+      // leaves here.
+      message: redactSecrets(grokBotShimDownMessage(baseUrl, error)).slice(0, 200),
     };
   }
 }

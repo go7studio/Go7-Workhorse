@@ -96,7 +96,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
-import { customBotModels } from "../src/lib/custom-bots";
+import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
@@ -1895,6 +1895,12 @@ app.whenReady().then(async () => {
     return { bot, apiKey };
   };
 
+  /*
+   * Both handlers below reach a third-party host with a real credential, so
+   * both refuse a disabled slot. Turning a bot off is how a person stops it
+   * costing them anything, and opening Settings is not consent to spend on it
+   * again.
+   */
   ipcMain.handle("customBot:catalog", async (_event, payload: { botId?: unknown; refresh?: unknown }) => {
     const found = customBotCredential(payload?.botId);
     if (!found?.apiKey.trim()) return null;
@@ -1903,6 +1909,7 @@ app.whenReady().then(async () => {
         botId: found.bot.id,
         baseUrl: found.bot.baseUrl,
         apiKey: found.apiKey,
+        enabled: customBotEnabled(found.bot),
         refresh: payload?.refresh === true,
       })) ?? null
     );
@@ -1912,6 +1919,9 @@ app.whenReady().then(async () => {
     const model = typeof payload?.model === "string" ? payload.model.trim() : "";
     const found = customBotCredential(payload?.botId);
     if (!found) return { ok: false, model, message: "That bot is gone.", latencyMs: 0 };
+    if (!customBotEnabled(found.bot)) {
+      return { ok: false, model, message: "This bot is off. Turn it on to test its models.", latencyMs: 0 };
+    }
     if (!model) return { ok: false, model, message: "Name a model to test.", latencyMs: 0 };
     return testCustomModel({
       baseUrl: found.bot.baseUrl,

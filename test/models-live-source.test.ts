@@ -114,10 +114,26 @@ test("the advertised list flows from the session start to the desk cache and the
   const main = read("electron/main.ts");
   assert.match(main, /payload\.type === "vendor-models"\) rememberVendorModels\(app\.getPath\("userData"\), payload\.provider, payload\.models\)/);
   assert.doesNotMatch(main, /rememberVendorModels\(app\.getPath\("userData"\), "claude", \[input\.model\]\)/, "a finished turn is not the vendor accepting the model");
-  // The rule is that the desk's own userData reaches the list, so the picker
-  // reads what Claude advertised here. What else rides along — the custom
-  // hosts' catalogs, for one — is not this pin's business.
-  assert.match(main, /listVendorModels\(\{ userData: app\.getPath\("userData"\)(?:, [^}]*)? \}\)/);
+  // The custom half of the same list is checked by calling the shipped function
+  // rather than by reading main.ts: a catalog handed in comes back as the
+  // window on that bot's rows.
+  const withCatalog = listVendorModels({
+    env: {},
+    homedir: path.join(ROOT, "does-not-exist"),
+    existsSync: () => false,
+    readFile: () => "",
+    cursorModelsOutput: null,
+    customBots: [
+      {
+        bot: { id: "bot_syn", model: "hf:zai-org/GLM-5.2", models: ["hf:zai-org/GLM-5.2"] },
+        catalog: { models: [{ id: "hf:zai-org/GLM-5.2", contextWindow: 200_000 }], fetchedAt: 1 },
+      },
+    ],
+  });
+  const glm = withCatalog.custom.find((row) => row.id === "hf:zai-org/GLM-5.2");
+  assert.equal(glm?.contextWindow, 200_000, "the host's window reaches the desk catalog");
+  assert.equal(glm?.hostListed, true);
+  assert.equal(glm?.customBotId, "bot_syn", "and stays attached to the slot that published it");
   const store = read("src/lib/store.tsx");
   assert.match(store, /event\.type === "vendor-models"\) \{\s*refreshVendorModels\(\);/);
   const setup = read("src/ui/SessionSetup.tsx");

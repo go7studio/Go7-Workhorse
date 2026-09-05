@@ -294,30 +294,37 @@ export function parseGrokModelsCache(raw: string): ModelInfo[] {
  */
 export function customVendorRows(rows: CustomBotCatalog[] = []): ModelInfo[] {
   const models: ModelInfo[] = [];
+  // One row per slot per model. Two bots may serve the same id at different
+  // windows, and collapsing them here would hand whichever bot happened to be
+  // second the first one's context. `modelsFor` collapses by id for anything
+  // that wants a plain catalog; the window lookup reads these rows as they are.
   const seen = new Set<string>();
   for (const { bot, catalog } of rows) {
     if (!customBotEnabled(bot)) continue;
     const listed = new Map((catalog?.models ?? []).map((model) => [model.id, model]));
     for (const id of customBotModels(bot)) {
-      if (seen.has(id)) continue;
+      const key = `${bot.id}\n${id}`;
+      if (seen.has(key)) continue;
       const published = listed.get(id);
       const seed = MODEL_CATALOG.custom.find((item) => item.id === id);
       const contextWindow = published?.contextWindow ?? seed?.contextWindow ?? 0;
       if (!contextWindow) continue;
-      seen.add(id);
+      seen.add(key);
       models.push({
         id,
         name: seed?.name ?? id,
         effort: seed?.effort ?? false,
         contextWindow,
+        customBotId: bot.id,
         ...(seed?.reasoningLevels ? { reasoningLevels: seed.reasoningLevels } : {}),
         ...(published?.contextWindow ? { hostListed: true } : {}),
       });
     }
   }
+  const offered = new Set(models.map((model) => model.id));
   for (const seed of MODEL_CATALOG.custom) {
-    if (seen.has(seed.id)) continue;
-    seen.add(seed.id);
+    if (offered.has(seed.id)) continue;
+    offered.add(seed.id);
     models.push(seed);
   }
   return models;

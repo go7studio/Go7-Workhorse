@@ -811,8 +811,16 @@ test("adaptive mission continuation reconciles raw phase, inherits its folder an
         },
       },
     })) as { error?: { message?: string } };
-    assert.match(interrupted.error?.message ?? "", /resume the interrupted worker before continuing the mission/);
-    assert.equal(spawned, undefined, "an interrupted report cannot mint a continuation spawn");
+    // A worker that ended badly used to end the mission here, and the caller was
+    // told to resume it — something no Link tool can do. The pass now carries on
+    // and names what did not finish, so the work is picked up rather than stranded.
+    assert.equal(interrupted.error, undefined, interrupted.error?.message);
+    assert.ok(spawned, "an unfinished pass must not strand the mission");
+    assert.match(
+      String((spawned as { message?: unknown } | undefined)?.message ?? ""),
+      /DID NOT FINISH LAST PASS[\s\S]*worker_pass_1 ended interrupted/,
+      "and the next pass is told whose slice is still open",
+    );
   } finally {
     setWorkhorseDeskAsk(null);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

@@ -1211,7 +1211,7 @@ test("adaptive missions continue one terminal pass at a time", () => {
   });
   const runningDecision = nextMissionIteration([running!], "parent", ["worker_running"]);
   assert.equal(runningDecision.ok, false);
-  if (!runningDecision.ok) assert.match(runningDecision.error, /interrupted|running/);
+  if (!runningDecision.ok) assert.match(runningDecision.error, /did not finish/);
 
   const newer = normalizeSession({
     ...worker,
@@ -10208,7 +10208,12 @@ test("a nested helper's clamped runtime is said out loud, not swallowed", () => 
   // vendor grant. A note on only one of them is a note that goes missing
   // exactly when a vendor had to be asked twice.
   const mcp = readFileSync(path.join(ROOT, "electron", "workhorse-mcp.ts"), "utf8");
-  assert.match(mcp, /const clampNote = isNested \? nestedTimeoutNote\(input\.timeoutSeconds\) : "";/);
+  // Both nested clamps speak now, so this checks that each is wired rather than
+  // pinning one exact line: the timeout clamp always said so, the raised token
+  // budget did not, and that silence broke the one control for a runaway.
+  assert.match(mcp, /const clampNote = isNested/);
+  assert.match(mcp, /nestedTimeoutNote\(input\.timeoutSeconds\)/);
+  assert.match(mcp, /nestedHelperBudgetNote\(input\.tokenBudget/);
   assert.match(mcp, /return withSpawnNote\(recordSpawnAccess\(first\), clampNote\);/, "the plain spawn result carries the note");
   assert.match(
     mcp,

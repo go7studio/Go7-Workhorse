@@ -1842,11 +1842,66 @@ export function resolveMissionManifest(
   return { mission: first, coordinatorId: coordinator.id };
 }
 
+/**
+ * Every worker the desk seated in that mission pass: the caller's ids plus
+ * every sibling on the same parent carrying the same mission id and
+ * iteration. Phase, running and unfinished checks read the wave, so a caller
+ * cannot shape the verdict by choosing which workers to mention.
+ */
+export function missionWave(
+  sessions: Session[],
+  parentId: string,
+  ids: readonly string[],
+  mission: { id: string; iteration: number },
+): string[] {
+  const bearing = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      session.agentRun?.mission?.id === mission.id &&
+      session.agentRun?.mission?.iteration === mission.iteration,
+  );
+  // A supporting worker the parent ran during the pass may carry no mission
+  // metadata at all (a plain delegation beside the coordinator). It is still
+  // part of what the desk ran for that pass, so it counts from the moment the
+  // pass began. Anything that started before the pass belongs to an earlier
+  // one and is left out.
+  const passStart = bearing.reduce(
+    (min, session) => Math.min(min, session.agentRun?.startedAt ?? Number.POSITIVE_INFINITY),
+    Number.POSITIVE_INFINITY,
+  );
+  // The window closes when the next pass begins: the earliest start of any
+  // same-parent worker carrying this mission at a later iteration. A helper of
+  // a later pass must not make this one look unfinished or still running.
+  const passEnd = sessions.reduce((min, session) => {
+    const run = session.agentRun;
+    if (session.parentId !== parentId || run?.mission?.id !== mission.id) return min;
+    if ((run.mission?.iteration ?? 0) <= mission.iteration || typeof run.startedAt !== "number") return min;
+    return Math.min(min, run.startedAt);
+  }, Number.POSITIVE_INFINITY);
+  const plain = sessions.filter(
+    (session) =>
+      session.parentId === parentId &&
+      !session.agentRun?.mission &&
+      typeof session.agentRun?.startedAt === "number" &&
+      session.agentRun.startedAt >= passStart &&
+      session.agentRun.startedAt < passEnd,
+  );
+  return [...new Set([...ids, ...bearing.map((session) => session.id), ...plain.map((session) => session.id)])];
+}
+
 export function nextMissionIteration(
   sessions: Session[],
   parentId: string,
   previousWorkerIds: string[],
   previousIteration?: number,
+  /**
+   * A caller asking to CONTINUE may carry on past a worker that ended badly:
+   * one dead worker must not strand a mission's id, pass count and acceptance
+   * criteria forever. Phase derivation must not, because the desk holding a
+   * mission at a phase is what forgery rejection rests on — a pass nobody
+   * finished is not proof the desk reached the next one.
+   */
+  options?: { allowUnfinished?: boolean },
 ): MissionContinuationDecision {
   const ids = [...new Set(previousWorkerIds.map((id) => id.trim()).filter(Boolean))];
   if (ids.length === 0) return { ok: false, error: "previous worker ids are required" };
@@ -1856,25 +1911,44 @@ export function nextMissionIteration(
   if (ids.some((id) => !sessions.find((session) => session.id === id && session.parentId === parentId))) {
     return { ok: false, error: "unknown worker in this mission" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
+  if (missionWave(sessions, parentId, ids, first).some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "running")) {
     return { ok: false, error: "previous mission pass is still running" };
   }
-  if (ids.some((id) => sessions.find((session) => session.id === id)?.agentRun?.status === "interrupted")) {
-    return { ok: false, error: "resume the interrupted worker before continuing the mission" };
+  // A pass that ENDED badly is not a reason to end the mission. It used to be:
+  // an interrupted worker refused the continuation, and no tool could resume
+  // one, so the caller was told to do something it had no way to do. The
+  // mission's id, pass count and acceptance criteria were stranded with it.
+  // A continuation may carry on and inherit that work; deriving a phase may
+  // not, because the desk holding a mission at a phase is what stops a caller
+  // forging the build phase.
+  // Anything short of completed is unfinished: interrupted, failed, timed out,
+  // cancelled, over budget. Deriving a phase from any of them would let a
+  // caller claim a phase the desk never reached.
+  // The wave is the desk's own record of that pass, not the caller's list. A
+  // caller who names only the sibling that completed must not earn the next
+  // phase for a wave whose reviewer failed; the omitted worker still counts.
+  const wave = missionWave(sessions, parentId, ids, first);
+  const unfinished = wave.filter((id) => sessions.find((session) => session.id === id)?.agentRun?.status !== "completed");
+  if (!options?.allowUnfinished && unfinished.length > 0) {
+    return { ok: false, error: "that pass did not finish; continue the mission to pick its work up" };
   }
   const latest = sessions
     .filter((session) => session.parentId === parentId && session.agentRun?.mission?.id === first.id)
     .reduce((max, session) => Math.max(max, session.agentRun?.mission?.iteration ?? 0), 0);
   if (latest > first.iteration) return { ok: false, error: "this mission pass already continued" };
   if (first.iteration >= first.maxIterations) return { ok: false, error: "mission iteration limit reached" };
-  const phase = nextCampaignPhase(first.phase);
+  // A phase is earned by finishing it. A continuation that carries a dead
+  // worker's slice forward re-runs the SAME phase; only a pass every worker
+  // completed moves the mission on. Without this a failed approve pass rolled
+  // straight into build, which is the forgery the campaign gate exists to stop.
+  const phase = unfinished.length > 0 ? first.phase : nextCampaignPhase(first.phase);
   if (!phase) return { ok: false, error: "mission campaign phase is missing or invalid" };
   return {
     ok: true,
     mission: {
       ...first,
       iteration: first.iteration + 1,
-      previousWorkerIds: ids,
+      previousWorkerIds: wave,
       phase,
       clearance: undefined,
     },

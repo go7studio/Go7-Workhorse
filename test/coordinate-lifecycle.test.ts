@@ -206,15 +206,24 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
   assert.equal(restoredReviewerB?.agentRun?.status, "interrupted");
   assert.equal(childReportText(restoredReviewerB), "Partial review: auth.ts looks sound so far.");
   assert.equal(lineupIsTerminal(midFlight.find((session) => session.id === PARENT_ID)?.lineup), true);
-  const continueWhileInterrupted = nextMissionIteration(
+  // Deriving a phase from an unfinished pass is still refused — that is what
+  // stops a caller claiming a phase the desk never reached — but a caller that
+  // asks to CONTINUE may pick the dead worker's slice up.
+  const derivedWhileInterrupted = nextMissionIteration(
     midFlight,
     PARENT_ID,
     [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID],
   );
-  assert.equal(continueWhileInterrupted.ok, false);
-  if (!continueWhileInterrupted.ok) {
-    assert.match(continueWhileInterrupted.error, /resume the interrupted worker/);
-  }
+  assert.equal(derivedWhileInterrupted.ok, false);
+  if (!derivedWhileInterrupted.ok) assert.match(derivedWhileInterrupted.error, /did not finish/);
+  const continueWhileInterrupted = nextMissionIteration(
+    midFlight,
+    PARENT_ID,
+    [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID],
+    undefined,
+    { allowUnfinished: true },
+  );
+  assert.equal(continueWhileInterrupted.ok, true, "one dead worker must not strand the mission");
 
   // Live cancel of the still-running reviewer, then the other two finish.
   sessions = cancelWorker(sessions, REVIEWER_B_ID, 10);
@@ -278,14 +287,20 @@ test("one adaptive mission with a coordinator and two reviewers survives restart
     ["coordinator", "supporting-reviewer", "supporting-reviewer"],
   );
 
+  // Reviewer B was cancelled, so this wave did not finish. The mission still
+  // continues — that is the point — but through the continuation door, and it
+  // re-runs the phase rather than claiming one nobody earned.
   const nextPass = nextMissionIteration(
     healed,
     PARENT_ID,
     [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID],
+    undefined,
+    { allowUnfinished: true },
   );
   assert.equal(nextPass.ok, true);
   if (!nextPass.ok) return;
   assert.equal(nextPass.mission.iteration, 2);
+  assert.equal(nextPass.mission.phase, mission.phase, "a cancelled reviewer earns the wave no phase");
   assert.deepEqual(nextPass.mission.previousWorkerIds, [COORDINATOR_ID, REVIEWER_A_ID, REVIEWER_B_ID]);
 });
 

@@ -1,6 +1,6 @@
 import { isGrokBotModel, isGrokBotUrl } from "./custom-http-identity";
 import { uid } from "./id";
-import type { CustomBot, CustomLlm, ModelRoutingProfile } from "./types";
+import type { CustomBot, CustomLlm, ModelInputCapabilities, ModelRoutingProfile, StoredRoutingProfile } from "./types";
 
 export type RoutingScoreTriple = { intelligence: number; speed: number; cost: number };
 
@@ -42,7 +42,7 @@ const LEGACY_WRITTEN_TRIPLE: RoutingScoreTriple = { intelligence: 3, speed: 3, c
  */
 const UNRATED_FAMILY: RoutingScoreTriple = { intelligence: 6, speed: 3, cost: 3 };
 
-function sameTriple(profile: Partial<ModelRoutingProfile>, triple: RoutingScoreTriple): boolean {
+function sameTriple(profile: StoredRoutingProfile, triple: RoutingScoreTriple): boolean {
   return (
     profile.intelligence === triple.intelligence &&
     profile.speed === triple.speed &&
@@ -80,9 +80,9 @@ export function writeBackTripleFor(family: RoutingScoreTriple): RoutingScoreTrip
  * is theirs and stays. An absent number means the family default.
  */
 export function withoutMachineWrittenScores(
-  profile: Partial<ModelRoutingProfile> | undefined,
+  profile: StoredRoutingProfile | undefined,
   family?: RoutingScoreTriple,
-): Partial<ModelRoutingProfile> | undefined {
+): StoredRoutingProfile | undefined {
   if (!profile) return undefined;
   if (Object.values(ROUTING_ROLE_PRESETS).some((preset) => sameTriple(profile, preset))) return profile;
   const machineWritten =
@@ -103,9 +103,9 @@ export function withoutMachineWrittenScores(
  * keeps the rest, which is how a person takes a rating back off.
  */
 export function routingProfileEdit(
-  saved: Partial<ModelRoutingProfile> | undefined,
-  change: Partial<ModelRoutingProfile> | "family",
-): Partial<ModelRoutingProfile> | undefined {
+  saved: StoredRoutingProfile | undefined,
+  change: StoredRoutingProfile | "family",
+): StoredRoutingProfile | undefined {
   if (change === "family") {
     const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = saved ?? {};
     return Object.keys(rest).length > 0 ? rest : undefined;
@@ -113,7 +113,7 @@ export function routingProfileEdit(
   return { ...saved, ...change };
 }
 
-function normalizeRoutingProfile(raw: unknown): Partial<ModelRoutingProfile> | undefined {
+function normalizeRoutingProfile(raw: unknown): StoredRoutingProfile | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<ModelRoutingProfile>;
   const number = (value: unknown) => {
@@ -123,22 +123,29 @@ function normalizeRoutingProfile(raw: unknown): Partial<ModelRoutingProfile> | u
   const intelligence = number(record.intelligence);
   const speed = number(record.speed);
   const cost = number(record.cost);
+  // An absent modality means the family default, exactly as an absent number
+  // does. Filling the bag out here made every stored profile a complete
+  // override, so ticking Docs on an unrated bot authored the family's answer
+  // for images, audio and video too — the same fault as the ratings, one field
+  // over. `routingProfileForModel` already merges a partial bag over the
+  // family's, so only this had to stop inventing keys.
   const inputs = record.inputs && typeof record.inputs === "object"
-    ? {
-        text: record.inputs.text !== false,
-        images: record.inputs.images === true,
-        documents: record.inputs.documents === true,
-        audio: record.inputs.audio === true,
-        video: record.inputs.video === true,
-      }
+    ? (Object.fromEntries(
+        (["text", "images", "documents", "audio", "video"] as const)
+          .filter((key) => typeof record.inputs![key] === "boolean")
+          .map((key) => [key, record.inputs![key]]),
+      ) as Partial<ModelInputCapabilities>)
     : undefined;
-  return withoutMachineWrittenScores({
+  // Shape only. Repairing what an old pane wrote is migrateCustomBotRatings'
+  // job, once per bot, because doing it here would re-strip the same shape on
+  // every load and a person could never choose it deliberately afterwards.
+  return {
     ...(intelligence ? { intelligence } : {}),
     ...(speed ? { speed } : {}),
     ...(cost ? { cost } : {}),
     ...(typeof record.local === "boolean" ? { local: record.local } : {}),
     ...(inputs ? { inputs } : {}),
-  });
+  };
 }
 
 export function inferCustomApi(baseUrl: string): "anthropic-messages" | "openai-completions" {
@@ -210,12 +217,14 @@ export function normalizeCustomBot(raw: unknown): CustomBot | null {
     ...(discovered ? { discovered } : {}),
     ...(routingProfile ? { routingProfile } : {}),
     ...(routingProfiles ? { routingProfiles } : {}),
+    // Survives the round trip, so the one-time repair stays one-time.
+    ...(record.ratingsMigrated === true ? { ratingsMigrated: true } : {}),
   };
 }
 
-function normalizeRoutingProfiles(raw: unknown): Record<string, Partial<ModelRoutingProfile>> | undefined {
+function normalizeRoutingProfiles(raw: unknown): Record<string, StoredRoutingProfile> | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const next: Record<string, Partial<ModelRoutingProfile>> = {};
+  const next: Record<string, StoredRoutingProfile> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const id = key.trim();
     const profile = normalizeRoutingProfile(value);
@@ -229,7 +238,7 @@ function normalizeRoutingProfiles(raw: unknown): Record<string, Partial<ModelRou
 export function customModelRoutingOverride(
   bot: Pick<CustomBot, "model" | "routingProfile" | "routingProfiles">,
   modelId: string,
-): Partial<ModelRoutingProfile> | undefined {
+): StoredRoutingProfile | undefined {
   const id = modelId.trim();
   if (!id) return undefined;
   return bot.routingProfiles?.[id] ?? (id === bot.model.trim() ? bot.routingProfile : undefined);

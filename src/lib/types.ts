@@ -773,9 +773,27 @@ export type CustomBot = {
   createdAt: number;
   enabled?: boolean;
   /** Override for the bot's default `model` only. Other approved ids use the family table. */
-  routingProfile?: Partial<ModelRoutingProfile>;
+  routingProfile?: StoredRoutingProfile;
   /** Per-model overrides. Keyed by approved model id. */
-  routingProfiles?: Record<string, Partial<ModelRoutingProfile>>;
+  routingProfiles?: Record<string, StoredRoutingProfile>;
+  /**
+   * The write-back cleanup has run for this bot. Set once, never cleared.
+   *
+   * The cleanup recognises a rating by its shape, so leaving it armed would
+   * strip the same shape again if a person ever chose it deliberately. Marking
+   * the bot makes it what it was always meant to be: a one-time repair of what
+   * an old pane wrote, not a standing rule about which triples are allowed.
+   */
+  ratingsMigrated?: boolean;
+};
+
+/**
+ * A routing override as it is stored: every field optional, including each
+ * modality on its own. Absent means the family default, so ticking one box
+ * cannot author an answer for the others.
+ */
+export type StoredRoutingProfile = Partial<Omit<ModelRoutingProfile, "inputs">> & {
+  inputs?: Partial<ModelInputCapabilities>;
 };
 
 export type RoutingTaskTier = "quick" | "balanced" | "deep";

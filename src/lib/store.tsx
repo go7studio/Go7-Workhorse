@@ -345,6 +345,7 @@ import {
   normalizeWatch,
   normalizeWatchDayMarks,
   normalizeWatchPermits,
+  planAfterRefresh,
   pruneWatchPermits,
   shouldRefreshPlansForRouting,
   syncWatchDayMarks,
@@ -7984,16 +7985,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, threadWidth: clampPaneWidth(width, THREAD_PANE) }));
   }, []);
 
+  /**
+   * A refresh that fails must not spend the reading the desk already has.
+   *
+   * Every refresher used to write undefined into its plan on a rejection, and
+   * on an answer of nothing. That was survivable while plans were only fetched
+   * at boot and in the Usage pane. Routing now asks whenever a plan is over
+   * fifteen minutes old, so one flaky call in the middle of a spawn wave would
+   * have turned a known meter into an unknown one and pulled a vendor's
+   * capacity term out from under the ranking.
+   *
+   * Unknown still means unknown. A vendor that has never answered holds
+   * undefined already, so leaving the previous value alone keeps a first
+   * failure reading unknown and keeps a later failure reading what it last
+   * knew. Only an answer replaces an answer.
+   */
   const refreshGrokPlan = useCallback(() => {
     if (!window.workhorse?.grokPlanUsage) return;
     void window.workhorse
       .grokPlanUsage()
       .then((plan) => {
-        setGrokPlan(plan);
+        setGrokPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("grok");
       })
       .catch(() => {
-        setGrokPlan(undefined);
+        setGrokPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("grok");
       });
   }, [markVendorPlanKnown]);
@@ -8003,16 +8019,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .codexPlanUsage()
       .then((plan) => {
-        setCodexPlan(plan);
+        setCodexPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("codex");
       })
       .catch(() => {
-        setCodexPlan(undefined);
+        setCodexPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("codex");
       });
   }, [markVendorPlanKnown]);
 
   const refreshCursorPlan = useCallback(() => {
+    // No bridge method at all is not a failed reading, it is no meter.
     if (!window.workhorse?.cursorPlanUsage) {
       setCursorPlan(undefined);
       return;
@@ -8020,11 +8037,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .cursorPlanUsage()
       .then((plan) => {
-        setCursorPlan(plan ?? undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("cursor");
       })
       .catch(() => {
-        setCursorPlan(undefined);
+        setCursorPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("cursor");
       });
   }, [markVendorPlanKnown]);
@@ -8034,7 +8051,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void window.workhorse
       .claudePlanUsage()
       .then((plan) => {
-        setClaudePlan(plan);
+        setClaudePlan((previous) => planAfterRefresh(previous, plan));
         markVendorPlanKnown("claude");
         if (plan) {
           if (claudePlanRetry.current) window.clearTimeout(claudePlanRetry.current);
@@ -8050,7 +8067,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }, 90_000);
       })
       .catch(() => {
-        setClaudePlan(undefined);
+        setClaudePlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("claude");
       });
   }, [markVendorPlanKnown]);
@@ -8065,16 +8082,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           model: bot.model,
           credentialId: bot.credentialId || `custom-bot-${bot.id}`,
         })
+        // Same rule as the stock meters: an answer replaces an answer, and a
+        // failure leaves whatever was last known in place. Deleting the entry
+        // here is what would turn a live bot's meter into unknown mid-wave.
         .then((plan) => {
-          setCustomPlans((current) => ({ ...current, [bot.id]: plan ?? undefined }));
+          setCustomPlans((current) => ({ ...current, [bot.id]: planAfterRefresh(current[bot.id], plan) }));
           setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         })
         .catch(() => {
-          setCustomPlans((current) => {
-            const next = { ...current };
-            delete next[bot.id];
-            return next;
-          });
           setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
         });
     }

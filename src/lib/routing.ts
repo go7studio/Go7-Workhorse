@@ -11,6 +11,7 @@ import type {
   RoutingSettings,
   RoutingTaskTier,
   Settings,
+  StoredRoutingProfile,
   TaskDomain,
 } from "./types";
 import { isLocalEndpoint } from "./usage";
@@ -370,7 +371,8 @@ function profile(
  * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
  * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
  * gpt-5.4, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
- * glm-5.2 before glm-5 before glm, qwen3.8 before any later qwen.
+ * glm-5.3-flash and glm-4.7-flash before glm-5.2 before glm, qwen3.8 before
+ * any later qwen.
  *
  * The whole table is a standing judgement, not a measurement. It is meant to
  * be argued with and edited.
@@ -378,7 +380,7 @@ function profile(
 export function routingProfileForModel(
   provider: ProviderId,
   model: string,
-  override?: Partial<ModelRoutingProfile>,
+  override?: StoredRoutingProfile,
 ): ModelRoutingProfile {
   const slug = normalizeModelId(provider, model).toLowerCase();
   const lightMini = /(^|-)mini($|-)/.test(slug) || /(^|-)nano($|-)/.test(slug);
@@ -445,14 +447,18 @@ export function routingProfileForModel(
   } else if (slug.includes("kimi")) {
     // An older or unannounced Kimi is not automatically the flagship.
     base = profile(7, 3, 2, { strengths: CODE });
+  } else if (slug.includes("glm-5.3-flash")) {
+    // A 524k window and quick, but a Flash is not the flagship.
+    base = profile(7, 4, 2, { strengths: CODE });
+  } else if (slug.includes("glm-4.7-flash")) {
+    // Text only, in the 30B class.
+    base = profile(6, 4, 2, { inputs: { images: false } });
   } else if (slug.includes("glm-5.2")) {
     base = profile(8, 3, 2, { strengths: CODE, inputs: { images: false } });
-  } else if (slug.includes("glm-5")) {
-    // GLM 5.3 Flash: a 524k window and quick, but a Flash is not the flagship.
-    base = profile(7, 4, 2, { strengths: CODE });
   } else if (slug.includes("glm")) {
-    // GLM 4.7 Flash and older. Text only, in the 30B class.
-    base = profile(6, 4, 2, { inputs: { images: false } });
+    // An unannounced GLM sits with the family, not above it and not at the
+    // unrated mid-field.
+    base = profile(7, 3, 2, { strengths: CODE });
   } else if (slug.includes("qwen3.8")) {
     // Synthetic's syn:small:vision. The vendor calls it a small but capable
     // coding and vision model that drains rate limits slowly.
@@ -512,31 +518,36 @@ export function routingProfileForModel(
  * write-back for that model would have stored, and never when it matches a
  * role the person could have picked.
  */
-export function migrateCustomBotRatings<T extends Pick<CustomBot, "model" | "routingProfile" | "routingProfiles">>(
-  bots: T[],
-): T[] {
+export function migrateCustomBotRatings<
+  T extends Pick<CustomBot, "model" | "routingProfile" | "routingProfiles" | "ratingsMigrated">,
+>(bots: T[]): T[] {
   const familyFor = (model: string) => {
     const base = routingProfileForModel("custom", model);
     return { intelligence: base.intelligence, speed: base.speed, cost: base.cost };
   };
   return bots.map((bot) => {
+    // Once per bot, then never again. The repair recognises a rating by its
+    // shape, so leaving it armed would strip that shape a second time if the
+    // person ever chose it on purpose. This is a one-time repair of what an old
+    // pane wrote, not a standing rule about which triples are allowed.
+    if (bot.ratingsMigrated) return bot;
     const routingProfile = withoutMachineWrittenScores(bot.routingProfile, familyFor(bot.model));
     const profiles = bot.routingProfiles;
     let routingProfiles = profiles;
     if (profiles) {
-      const next: Record<string, Partial<ModelRoutingProfile>> = {};
+      const next: Record<string, StoredRoutingProfile> = {};
       for (const [model, profile] of Object.entries(profiles)) {
         const cleaned = withoutMachineWrittenScores(profile, familyFor(model));
         if (cleaned) next[model] = cleaned;
       }
       routingProfiles = Object.keys(next).length > 0 ? next : undefined;
     }
-    if (routingProfile === bot.routingProfile && routingProfiles === bot.routingProfiles) return bot;
     const { routingProfile: _profile, routingProfiles: _profiles, ...rest } = bot;
     return {
       ...(rest as T),
       ...(routingProfile ? { routingProfile } : {}),
       ...(routingProfiles ? { routingProfiles } : {}),
+      ratingsMigrated: true,
     };
   });
 }

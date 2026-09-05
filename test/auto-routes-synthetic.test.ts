@@ -28,7 +28,7 @@ import {
 } from "../src/lib/custom-bots";
 import { contextWindowFor } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
-import { shouldRefreshPlansForRouting } from "../src/lib/watch";
+import { planAfterRefresh, shouldRefreshPlansForRouting, watchVendorStatuses } from "../src/lib/watch";
 import type { GrokPlanUsage, RoutingSettings, Settings } from "../src/lib/types";
 import type { WatchPlans, WatchVendorStatus } from "../src/lib/watch";
 
@@ -143,17 +143,21 @@ test("an unlimited weekly is still scored on fit alone", () => {
 // B — the saved routing profile
 
 test("the exact triple the old editor wrote by itself is treated as unset", () => {
-  const saved = normalizeCustomBot(
-    syntheticBot({
-      routingProfile: {
-        intelligence: 3,
-        speed: 3,
-        cost: 3,
-        local: false,
-        inputs: { text: true, images: true, documents: true, audio: true, video: true },
-      },
-    }),
-  );
+  // normalizeCustomBot only normalizes shape now; the repair is the one-time
+  // pass, so that a triple chosen after it has run is never stripped again.
+  const [saved] = migrateCustomBotRatings([
+    normalizeCustomBot(
+      syntheticBot({
+        routingProfile: {
+          intelligence: 3,
+          speed: 3,
+          cost: 3,
+          local: false,
+          inputs: { text: true, images: true, documents: true, audio: true, video: true },
+        },
+      }),
+    )!,
+  ]);
   assert.equal(saved?.routingProfile?.intelligence, undefined, "no rating the person did not author");
   assert.equal(saved?.routingProfile?.speed, undefined);
   assert.equal(saved?.routingProfile?.cost, undefined);
@@ -272,9 +276,14 @@ test("the migration reaches a per-model override, and leaves an untouched bot al
   const [migrated] = migrateCustomBotRatings([bot]);
   assert.deepEqual(migrated?.routingProfile, { intelligence: 5, speed: 2, cost: 5 }, "Deep was chosen");
   assert.equal(migrated?.routingProfiles, undefined, "the GLM write-back is dropped");
-  // A bot that never had a profile is returned untouched, same object.
+  // A bot that never had a profile comes back with nothing invented, and marked
+  // so the repair does not look at it again.
   const plain = normalizeCustomBot(syntheticBot())!;
-  assert.equal(migrateCustomBotRatings([plain])[0], plain);
+  const [after] = migrateCustomBotRatings([plain]);
+  assert.equal(after?.routingProfile, undefined);
+  assert.equal(after?.routingProfiles, undefined);
+  assert.equal(after?.ratingsMigrated, true);
+  assert.deepEqual({ ...after, ratingsMigrated: undefined }, { ...plain, ratingsMigrated: undefined });
 });
 
 test("normalizeSettings runs the migration, so a loaded desk is already clean", () => {
@@ -288,6 +297,50 @@ test("normalizeSettings runs the migration, so a loaded desk is already clean", 
   // And the legacy triple is cleaned at the same seam.
   const legacy = deskWith([syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3, local: false } })]);
   assert.equal(kimiRow(legacy, plansWith())?.profile.intelligence, 8);
+});
+
+test("ticking one modality authors that modality and no other", () => {
+  // The ratings were fixed first and the input ticks were left writing the
+  // resolved bag, so ticking Docs on an unrated bot still authored the family's
+  // answer for images, audio and video. An absent modality now means the family
+  // default, exactly as an absent number does.
+  const bot = normalizeCustomBot(
+    syntheticBot({ routingProfile: routingProfileEdit(undefined, { inputs: { documents: true } }) }),
+  )!;
+  assert.deepEqual(bot.routingProfile, { inputs: { documents: true } }, "one key, not five");
+  // Kimi K3 reads images; ticking Docs must not take that away.
+  const resolved = routingProfileForModel("custom", bot.model, bot.routingProfile);
+  assert.equal(resolved.inputs.documents, true);
+  assert.equal(resolved.inputs.images, true, "the family still answers for images");
+  assert.equal(resolved.inputs.audio, false);
+  // A text-only family stays text-only through an unrelated tick.
+  const glm = normalizeCustomBot(
+    syntheticBot({ model: "hf:zai-org/GLM-5.2", routingProfile: { inputs: { audio: true } } }),
+  )!;
+  assert.equal(routingProfileForModel("custom", glm.model, glm.routingProfile).inputs.images, false);
+  assert.equal(routingProfileForModel("custom", glm.model, glm.routingProfile).inputs.audio, true);
+});
+
+test("the repair runs once per bot, so a rating chosen later is kept", () => {
+  // The signatures describe what an old pane wrote, not which triples a person
+  // is allowed. Once a bot has been repaired it is left alone for good.
+  const [first] = migrateCustomBotRatings([
+    normalizeCustomBot(syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3 } }))!,
+  ]);
+  assert.equal(first?.routingProfile, undefined, "repaired");
+  assert.equal(first?.ratingsMigrated, true, "and marked");
+  // A person types the same triple afterwards. It is theirs now.
+  const chosen = { ...first!, routingProfile: { intelligence: 3, speed: 3, cost: 3 } };
+  const [second] = migrateCustomBotRatings([chosen]);
+  assert.deepEqual(second?.routingProfile, { intelligence: 3, speed: 3, cost: 3 }, "kept, not stripped again");
+  assert.equal(second, chosen, "an already-repaired bot is returned untouched");
+  // The mark survives a save and reload.
+  assert.equal(normalizeCustomBot({ ...syntheticBot(), ratingsMigrated: true })?.ratingsMigrated, true);
+  // And a desk loaded twice does not repair twice.
+  const desk = deskWith([syntheticBot({ routingProfile: { intelligence: 3, speed: 3, cost: 3 } })]);
+  assert.equal(desk.customBots[0]?.ratingsMigrated, true);
+  const reloaded = normalizeSettings(desk) as Settings;
+  assert.equal(reloaded.customBots[0]?.ratingsMigrated, true);
 });
 
 test("a tick on an unrated bot leaves that bot on its family rating", () => {
@@ -531,6 +584,57 @@ test("a plan older than fifteen minutes asks the meters again, once per burst", 
     true,
     "past the debounce the next routing path may fetch",
   );
+});
+
+test("a failed refresh keeps the reading the desk already had", () => {
+  // Routing now asks for meters whenever one is over fifteen minutes old, so a
+  // single flaky call mid-spawn-wave used to blank a vendor and pull its
+  // capacity term out of the ranking. An answer replaces an answer; nothing
+  // else does.
+  assert.equal(planAfterRefresh(syntheticPlan, undefined), syntheticPlan, "a rejection keeps the figure");
+  assert.equal(planAfterRefresh(syntheticPlan, null), syntheticPlan, "and so does an answer of nothing");
+  const fresher: GrokPlanUsage = { ...syntheticPlan, usedPercent: 31 };
+  assert.equal(planAfterRefresh(syntheticPlan, fresher), fresher, "only an answer replaces one");
+  // A vendor that has never answered still reads unknown.
+  assert.equal(planAfterRefresh(undefined, undefined), undefined);
+  assert.equal(planAfterRefresh(undefined, null), undefined);
+
+  // And the effect that matters: the bot keeps its capacity term.
+  const settings = deskWith([syntheticBot()]);
+  const kept = planAfterRefresh(syntheticPlan, undefined);
+  const row = kimiRow(settings, { custom: { bot_wfd6ghzwhfa7: kept } });
+  assert.equal(row?.capacity?.usedPercent, 19.26, "a failed refresh must not make a known meter unknown");
+});
+
+test("a custom bot's watch row is derived from the same plan, so plan-first is never staler", () => {
+  // The gate asked for a freshness compare between the plan and the status row.
+  // There is nothing to compare: watchVendorStatuses builds a custom bot's
+  // usedPercent from these same plans, rounded to a tenth, and WatchVendorStatus
+  // carries no observedAt of its own. Preferring the plan is preferring the
+  // unrounded original of the very number the row would have offered.
+  const settings = deskWith([syntheticBot()]);
+  const plans = plansWith();
+  const statuses = watchVendorStatuses({
+    settings,
+    usage: [],
+    plans,
+    permits: {},
+    dayMarks: {},
+    now: NOW,
+  });
+  const row = statuses.find((item) => item.key === "bot:bot_wfd6ghzwhfa7");
+  assert.equal(row?.usedPercent, 19.3, "the row is the plan's 19.26, rounded");
+  assert.equal(kimiRow(settings, plans, statuses)?.capacity?.usedPercent, 19.26, "routing takes the original");
+  // Drop the plan and the row has nothing of its own to offer either.
+  const withoutPlan = watchVendorStatuses({
+    settings,
+    usage: [],
+    plans: {},
+    permits: {},
+    dayMarks: {},
+    now: NOW,
+  }).find((item) => item.key === "bot:bot_wfd6ghzwhfa7");
+  assert.equal(withoutPlan?.usedPercent, undefined, "no independent source exists to be fresher");
 });
 
 test("a plan the desk does not hold is unknown, not stale", () => {

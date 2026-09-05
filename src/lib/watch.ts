@@ -1076,6 +1076,26 @@ export const CAPACITY_SNAPSHOT_VERSION = 1 as const;
 /** Cached official-meter age past this is stale. Six hours. */
 export const CAPACITY_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * What a vendor's plan holds after a refresh comes back.
+ *
+ * An answer replaces an answer; anything else keeps what was already known.
+ * Every refresher used to write undefined on a rejection and on an answer of
+ * nothing, which was survivable while plans were fetched only at boot and in
+ * the Usage pane. Routing now asks whenever a reading is over fifteen minutes
+ * old, so one flaky call mid-spawn-wave would have turned a known meter into an
+ * unknown one and pulled that vendor's capacity term out of the ranking.
+ *
+ * A vendor that has never answered still reads unknown, because `previous` is
+ * undefined for it already. This only refuses to spend a reading the desk has.
+ */
+export function planAfterRefresh(
+  previous: GrokPlanUsage | undefined,
+  answer: GrokPlanUsage | null | undefined,
+): GrokPlanUsage | undefined {
+  return answer ?? previous;
+}
+
 /** A plan a spawn or an Auto turn is about to route on must be newer than this. */
 export const ROUTING_PLAN_STALE_AFTER_MS = 15 * 60_000;
 /** One fetch per burst. A wave of spawns must not become a wave of meter calls. */

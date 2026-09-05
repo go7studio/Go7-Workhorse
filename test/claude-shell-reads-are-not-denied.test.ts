@@ -294,6 +294,43 @@ test("a token only the shell can resolve is not judged here, and is not a search
   }
 });
 
+test("a variable glued to a path expands too, wherever it sits in the token", () => {
+  const ask = (command: string) =>
+    securityPolicyAnswer({
+      policy: { network: "allowed", root: "blocked" },
+      tool: DESK_TITLE,
+      detail: JSON.stringify({ command }),
+      roots: ["/repo/app"],
+      cwd: "/repo/app",
+    });
+  const search = (command: string) => looksLikeSearchOnly(DESK_TITLE, JSON.stringify({ command }));
+  // The quotes around the variable are not a pair wrapping the token, so
+  // nothing came off and the token simply did not begin with a `$`. Testing
+  // the front alone let both of these resolve to a folder under the cwd.
+  const glued: string[] = [
+    'cat "$HOME"/../etc/passwd',
+    'cat "$HOME"/etc/passwd',
+    'cat "${HOME}"/../etc/passwd',
+    'cat prefix"$HOME"/etc/passwd',
+  ];
+  for (const command of glued) {
+    assert.deepEqual(ask(command), { answer: "deny", boundary: "outside-workspace" }, command);
+    assert.equal(search(command), false, command);
+    assert.equal(
+      permissionPolicyAnswer({ mode: "plan", sandbox: "read-only", tool: DESK_TITLE, detail: JSON.stringify({ command }) }),
+      "deny",
+      command,
+    );
+  }
+  // Only single quotes stop the shell, and a `$` with nothing to name after it
+  // is a character. Both still read.
+  assert.deepEqual(ask("cat '/repo/app/with$dollar'"), { answer: null });
+  assert.equal(search("cat '/repo/app/with$dollar'"), true);
+  // Tilde expansion is a front-of-word thing, so a backup file keeps its name.
+  assert.deepEqual(ask("grep foo backup~"), { answer: null });
+  assert.equal(search("grep foo backup~"), true);
+});
+
 test("a vendor's read-sounding tool name does not make a write a read", () => {
   // The raw name now rides with the title, and it is the vendor's to choose.
   assert.equal(looksLikeWriteTool("Read file read", "rm -rf src"), true);

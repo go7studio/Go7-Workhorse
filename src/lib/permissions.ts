@@ -393,13 +393,38 @@ function climbsOut(value: string): boolean {
  * and `~/../etc` read here as folders named `$HOME` and `~` sitting under the
  * working folder, so both resolved to somewhere inside the root and were
  * allowed; the shell lands them on /etc. Where the token goes is unknowable
- * from this side, so it is judged as outside rather than guessed at. Single
- * quotes stop the shell expanding, so a literal '$HOME' really is a name.
+ * from this side, so it is judged as outside rather than guessed at.
+ *
+ * The whole token is walked, not just its front. Testing the front alone let
+ * `cat "$HOME"/../etc/passwd` through: the quotes around the variable are not
+ * a matching pair wrapping the token, so nothing came off and the token simply
+ * did not begin with a `$`. Single quotes are the only thing that stops the
+ * shell expanding, so `'$HOME'` really is a name; double quotes do not.
+ *
+ * A `$` only expands when something can follow it as a name, so the trailing
+ * `$` anchoring a grep pattern stays a pattern.
  */
 function expandsAtRuntime(raw: string): boolean {
-  if (raw.length > 1 && raw.startsWith("'") && raw.endsWith("'")) return false;
-  const value = unquote(raw);
-  return /^[$~]/.test(value) || value.includes("${") || value.includes("$(") || value.includes("`");
+  let single = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (char === "'") {
+      single = !single;
+      continue;
+    }
+    if (single) continue;
+    if (raw[index - 1] === "\\") continue;
+    if (char === "`") return true;
+    if (char === "$") {
+      const next = raw[index + 1] ?? "";
+      if (/[A-Za-z_{(?#@*!$0-9-]/.test(next)) return true;
+      continue;
+    }
+    // Tilde expansion only happens at the front of a word, or straight after
+    // the `=` or `:` of an assignment. A trailing `backup~` is a file name.
+    if (char === "~" && (index === 0 || raw[index - 1] === "=" || raw[index - 1] === ":")) return true;
+  }
+  return false;
 }
 
 /**
@@ -443,11 +468,13 @@ function commandTargets(command: string, cwd: string): { paths: string[]; unjudg
   for (const stage of walk.stages) {
     for (const token of [stage.program, ...stage.args]) {
       if (token.includes("://")) continue;
-      const afterFlag = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
-      if (expandsAtRuntime(afterFlag)) {
+      // The whole token is tested for expansion, so both paths agree; only the
+      // path test looks past a flag's `=`.
+      if (expandsAtRuntime(token)) {
         unjudgeable = true;
         continue;
       }
+      const afterFlag = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
       const value = unquote(afterFlag);
       if (!value) continue;
       if (climbsOut(value)) {

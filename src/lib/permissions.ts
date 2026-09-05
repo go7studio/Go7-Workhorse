@@ -85,8 +85,10 @@ const WRITE_WORDS =
 export function looksLikeWriteTool(tool: string, detail: string, filePath?: string): boolean {
   if (looksLikeDelegationTool(tool, detail)) return false;
   const shell = looksLikeShellTool(tool, detail);
-  // A tool that is not a shell is what its name says it is.
-  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return false;
+  // A tool that is not a shell is what its name says it is. The name is the
+  // vendor's, though, so it does not get to make `rm -rf src` a read: a
+  // read-named tool whose detail runs a program that writes is still a write.
+  if (!shell && toolKeyIn(tool, READ_TOOL_KEYS)) return detailRunsAWrite(detail, filePath);
   // A shell's name says nothing about what it runs, so it is judged by the
   // program it invokes. Everything else a shell does counts as a write.
   if (shell && looksLikeSearchOnly(tool, detail, filePath)) return false;
@@ -143,9 +145,27 @@ export function securityPolicyAnswer(input: {
   }
   const candidate = input.path?.trim();
   const roots = (input.roots ?? []).filter((root) => root.trim());
-  if (candidate && absolutePath(candidate) && roots.length > 0 && !roots.some((root) => inside(root, candidate))) {
+  const outside = (value: string) => absolutePath(value) && !roots.some((root) => inside(root, value));
+  if (candidate && roots.length > 0 && outside(candidate)) {
     if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
     if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
+  }
+  // A shell call carries no path of its own: the paths it touches are inside
+  // the command. `cat /etc/passwd` reached here with nothing to check, and now
+  // that a read runs on a clamped seat it would have run. The same root test
+  // is applied to every absolute path the command names. A sub-agent launch is
+  // exempt for the reason it always was: its detail is the brief, and a folder
+  // named in a brief is not this call's target.
+  if (
+    roots.length > 0 &&
+    looksLikeShellTool(input.tool, input.detail) &&
+    !looksLikeDelegationTool(input.tool, input.detail)
+  ) {
+    const command = shellCommandIn(input.detail) ?? input.detail;
+    if (absolutePathsIn(command).some(outside)) {
+      if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
+      if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
+    }
   }
   return { answer: null };
 }
@@ -240,16 +260,19 @@ const GIT_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 type CommandStage = { program: string; args: string[] };
+type CommandWalk = { stages: CommandStage[]; unsafe: boolean };
 
 /**
  * Split a command into pipeline stages, honouring quotes. Splitting the raw
  * text tore `grep "a\|b" test | head -40` apart at the pipe inside the pattern
- * and left a stage that started with nothing. Redirection, command
- * substitution and backgrounding end the walk: none of them can be judged by
- * the program at the front.
+ * and left a stage that started with nothing. Redirection and command
+ * substitution mark the walk unsafe: neither can be judged by the program at
+ * the front. The walk still finishes, because the paths a command names are
+ * read out of it whether or not it is allowed to run.
  */
-function shellStages(command: string): CommandStage[] | null {
+function shellWalk(command: string): CommandWalk {
   const stages: CommandStage[] = [];
+  let unsafe = false;
   let tokens: string[] = [];
   let token = "";
   let quote: '"' | "'" | null = null;
@@ -286,8 +309,16 @@ function shellStages(command: string): CommandStage[] | null {
       }
       continue;
     }
-    if (char === ">" || char === "<" || char === "`") return null;
-    if (char === "$" && command[index + 1] === "(") return null;
+    if (char === ">" || char === "<" || char === "`") {
+      unsafe = true;
+      endToken();
+      continue;
+    }
+    if (char === "$" && command[index + 1] === "(") {
+      unsafe = true;
+      endToken();
+      continue;
+    }
     if (char === "|" || char === ";" || char === "&" || char === "\n" || char === "\r") {
       endStage();
       continue;
@@ -298,9 +329,22 @@ function shellStages(command: string): CommandStage[] | null {
     }
     token += char;
   }
-  if (quote) return null;
+  if (quote) unsafe = true;
   endStage();
-  return stages;
+  return { stages, unsafe };
+}
+
+/** Absolute paths a command names, so a root boundary can be applied to them. */
+function absolutePathsIn(command: string): string[] {
+  const found: string[] = [];
+  for (const stage of shellWalk(command).stages) {
+    for (const token of [stage.program, ...stage.args]) {
+      if (token.includes("://")) continue;
+      const value = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+      if (value && absolutePath(value)) found.push(value);
+    }
+  }
+  return found;
 }
 
 function programName(raw: string): string {
@@ -315,15 +359,49 @@ function positionals(args: string[]): string[] {
   return args.filter((arg) => !arg.startsWith("-"));
 }
 
+/**
+ * A sed substitution with no `w` and no `e` flag: `s/a/b/`, `1,20s|x|y|g`. The
+ * delimiter is whatever follows the `s`, so it is captured and matched back.
+ */
+const SED_SUBSTITUTION = /^\d*(?:,\d*)?s(.)(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^\\])*\1[gpiImM0-9]*$/;
+/** An addressed print or delete: `p`, `1,20p`, `$d`, `/foo/p`. */
+const SED_PRINT = /^(?:\d+(?:,\d+)?|\$|\/(?:\\.|[^/\\])*\/)?[pdq=lnN]$/;
+
+/**
+ * sed and awk are the two programs on the read-only list that take a program
+ * of their own, and both can break out of it: awk through `system()`, a pipe
+ * to a command, or `print > "file"`; sed through the `e` command, a `w` write,
+ * and `-i` on either. `awk 'BEGIN{system("rm x")}'` and `sed 'e rm x'` were
+ * both read as searches and answered "once" on a read-only seat. Every other
+ * interpreter — perl, python, node, sh — is not on the list at all, so it
+ * never reaches here.
+ */
+function interpreterScriptReads(program: string, args: string[]): boolean {
+  if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return false;
+  const scripts = args.filter((arg) => !arg.startsWith("-"));
+  if (program === "sed") {
+    // -e and -f take the script as their own argument; -f names a file this
+    // side cannot read, so it is never a search.
+    if (args.some((arg) => /^(?:-f|--file)/.test(arg))) return false;
+    if (scripts.length === 0) return false;
+    const script = scripts[0] ?? "";
+    return script
+      .replace(/^["']|["']$/g, "")
+      .split(/[;\n]/)
+      .every((piece) => {
+        const text = piece.trim();
+        return text.length > 0 && (SED_SUBSTITUTION.test(text) || SED_PRINT.test(text));
+      });
+  }
+  if (args.some((arg) => /^(?:-f|--file|--source|-v)/.test(arg))) return false;
+  const program_text = scripts[0] ?? "";
+  return !/system|exec|ENVIRON|getline|close\s*\(|[|>]/.test(program_text);
+}
+
 /** Programs on the list that still hold a way to write, and the flag that does it. */
 function stageWrites(program: string, args: string[]): boolean {
   if (program === "sed" || program === "awk" || program === "gawk" || program === "mawk") {
-    // -i edits in place, awk's `print >` and sed's `w` write from inside the
-    // script, and the script arrives quoted so the redirection walk misses it.
-    if (args.some((arg) => /^-i/.test(arg) || arg === "--in-place")) return true;
-    if (args.some((arg) => arg.includes(">"))) return true;
-    if (program === "sed" && args.some((arg) => /(?:^|[;}])\s*w\s|\/w\s/.test(arg))) return true;
-    return false;
+    return !interpreterScriptReads(program === "sed" ? "sed" : "awk", args);
   }
   if (program === "find") {
     return args.some((arg) => /^-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)$/.test(arg));
@@ -348,10 +426,71 @@ function stageWrites(program: string, args: string[]): boolean {
 
 const POWERSHELL_WRAPPER = /^[^\n]*powershell(?:\.exe)?[^\n]*?(?:-command|-c)\s+/i;
 
+/** Programs that put something on disk, or run something that can. */
+const WRITE_PROGRAMS: ReadonlySet<string> = new Set([
+  "rm",
+  "rmdir",
+  "unlink",
+  "mv",
+  "cp",
+  "touch",
+  "mkdir",
+  "dd",
+  "chmod",
+  "chown",
+  "chgrp",
+  "ln",
+  "truncate",
+  "shred",
+  "install",
+  "tee",
+  "rsync",
+  "sh",
+  "bash",
+  "zsh",
+  "ksh",
+  "fish",
+  "powershell",
+  "pwsh",
+  "cmd",
+  "python",
+  "python3",
+  "node",
+  "perl",
+  "ruby",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "pip",
+  "pip3",
+  "make",
+  "xargs",
+  "eval",
+  "sudo",
+]);
+
+/**
+ * The detail names a program that writes, or redirects into a file. Only the
+ * program at the front of each stage is read: a search whose query happens to
+ * contain the word "delete" is still a search, which is why the read exemption
+ * keys on the name in the first place.
+ */
+function detailRunsAWrite(detail: string, filePath?: string): boolean {
+  const command = shellCommandIn(detail) ?? `${detail} ${filePath ?? ""}`.trim();
+  if (!command) return false;
+  const { stages, unsafe } = shellWalk(command);
+  if (unsafe) return true;
+  return stages.some((stage) => {
+    if (stage.program.includes("://")) return false;
+    return WRITE_PROGRAMS.has(programName(stage.program));
+  });
+}
+
 /** Every stage starts with a program that only reads, and nothing redirects. */
 function readOnlyPipeline(command: string): boolean {
-  const stages = shellStages(command);
-  if (!stages || stages.length === 0) return false;
+  const { stages, unsafe } = shellWalk(command);
+  if (unsafe || stages.length === 0) return false;
   return stages.every((stage) => {
     const program = programName(stage.program);
     if (!READ_ONLY_PROGRAMS.has(program)) return false;

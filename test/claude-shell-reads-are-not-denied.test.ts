@@ -13,6 +13,7 @@ import {
   shellCommandIn,
   type PermissionAnswer,
 } from "../src/lib/permissions";
+import { WRITE_LIMIT_HINT } from "../src/lib/workhorse-rules";
 import type { PermissionMode, SandboxProfile } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -105,6 +106,100 @@ test("a pipeline of read-only programs is a search, and anything that writes is 
   }
   // The word check no longer decides a shell. The program does.
   assert.equal(looksLikeSearchOnly("shell", "grep -rn 'remove the file' src"), true);
+});
+
+test("sed and awk are searches only for a program that cannot break out of itself", () => {
+  // Both take a program of their own, and both can run a command from inside
+  // it. Read as searches, they answered "once" on a read-only seat.
+  const escapes: string[] = [
+    String.raw`awk 'BEGIN{system("rm x")}'`,
+    String.raw`sed 'e rm x'`,
+    String.raw`awk 'BEGIN{print "x" > "/tmp/f"}'`,
+    String.raw`awk 'BEGIN{"rm x" | getline}'`,
+    String.raw`sed 's/a/b/w out.txt'`,
+    String.raw`sed -i 's/a/b/' f`,
+    String.raw`sed -f script.sed f`,
+    String.raw`awk -f script.awk f`,
+  ];
+  for (const command of escapes) {
+    assert.equal(looksLikeSearchOnly("shell", command), false, `${command} can run a program`);
+    assert.equal(
+      permissionPolicyAnswer({ mode: "plan", sandbox: "read-only", tool: "shell", detail: command }),
+      "deny",
+      `${command} is refused on a read-only seat`,
+    );
+  }
+  const plain: string[] = [
+    String.raw`awk '{print $1}'`,
+    String.raw`awk -F: '{print $1}' /etc/passwd`,
+    String.raw`sed 's/a/b/'`,
+    String.raw`sed -n '1,20p'`,
+    String.raw`sed '1,20d'`,
+    String.raw`cat notes.md | sed -n '1,20p'`,
+  ];
+  for (const command of plain) {
+    assert.equal(looksLikeSearchOnly("shell", command), true, `${command} only reads`);
+  }
+  // The live call's own sed script is a plain substitution and stays a search.
+  for (const detail of LIVE_DETAILS) {
+    assert.equal(looksLikeSearchOnly(DESK_TITLE, detail), true);
+  }
+});
+
+test("a shell command is held to the root boundary by the paths inside it", () => {
+  const roots = ["/repo"];
+  const ask = (command: string, root: "blocked" | "ask" | "allowed", where = roots) =>
+    securityPolicyAnswer({
+      policy: { network: "allowed", root },
+      tool: DESK_TITLE,
+      detail: JSON.stringify({ command }),
+      roots: where,
+    });
+  // A shell call carries no path of its own, so the root check had nothing to
+  // look at and a read outside the workspace went through.
+  assert.deepEqual(ask("cat /etc/passwd", "blocked"), { answer: "deny", boundary: "outside-workspace" });
+  assert.deepEqual(ask("cat /etc/passwd", "ask"), { answer: null, boundary: "outside-workspace" });
+  assert.deepEqual(ask("grep x /repo/src/a.ts", "blocked"), { answer: null }, "inside the root still reads");
+  assert.deepEqual(ask("grep -rn foo lib", "blocked"), { answer: null }, "a relative path is not judged here");
+  assert.deepEqual(ask("cat /etc/passwd", "blocked", []), { answer: null }, "no roots, no boundary");
+  for (const detail of LIVE_DETAILS) {
+    assert.deepEqual(
+      securityPolicyAnswer({ policy: { network: "allowed", root: "blocked" }, tool: DESK_TITLE, detail, roots }),
+      { answer: null },
+      "the live calls name no absolute path",
+    );
+  }
+  // A sub-agent launch keeps the exemption it always had: its detail is the
+  // brief it hands the helper, so a folder named in there is not the target.
+  const brief = JSON.stringify({ variant: "Task", prompt: "run bash checks over /elsewhere/repo and report" });
+  assert.deepEqual(
+    securityPolicyAnswer({ policy: { network: "allowed", root: "blocked" }, tool: "Task", detail: brief, roots }),
+    { answer: null },
+  );
+});
+
+test("a vendor's read-sounding tool name does not make a write a read", () => {
+  // The raw name now rides with the title, and it is the vendor's to choose.
+  assert.equal(looksLikeWriteTool("Read file read", "rm -rf src"), true);
+  assert.equal(
+    permissionPolicyAnswer({ mode: "ask", sandbox: "read-only", tool: "Read file read", detail: "rm -rf src" }),
+    "deny",
+  );
+  assert.equal(looksLikeWriteTool("Read", JSON.stringify({ command: "rm -rf src" })), true);
+  // The exemption still holds for what it was written for: the name decides,
+  // and a read's own payload is not a target.
+  assert.equal(looksLikeWriteTool("read_file", "src/delete-me.ts", "src/delete-me.ts"), false);
+  assert.equal(looksLikeWriteTool("read_file", "notes.md", "notes.md"), false);
+  assert.equal(looksLikeWriteTool("mcp__fs__read_file", "notes.md"), false);
+  assert.equal(looksLikeWriteTool("rg", "rg -n leftover src"), false);
+  assert.equal(looksLikeWriteTool("web_fetch", "https://example.com/rm"), false, "a URL is not the program rm");
+  assert.equal(looksLikeWriteTool("web_search", "how to rm -rf safely"), false, "a query is not a command");
+});
+
+test("the write-limit hint no longer tells a read-only chat that every command is blocked", () => {
+  assert.doesNotMatch(WRITE_LIMIT_HINT, /or run shell commands/);
+  assert.match(WRITE_LIMIT_HINT, /cannot write, edit, create, or delete/);
+  assert.match(WRITE_LIMIT_HINT, /only reads, such as grep, rg, cat, ls or git log, still runs/);
 });
 
 test("a search-only command answers once on a read-only seat, and a write still does not", () => {

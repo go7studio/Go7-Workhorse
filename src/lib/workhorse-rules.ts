@@ -353,7 +353,7 @@ export function withPermissionHint(text: string, role?: DeskRole): string {
 }
 
 export const WRITE_LIMIT_HINT =
-  "This chat cannot write, edit, create, delete, or run shell commands under the current desk limits. Call workhorse_request_permission to RAISE sandbox to off/workspace and/or permission to ask (or accept-edits / always-approve). A card appears above the composer — wait for Elevate or Deny. Do not offer to lower limits. Do not tell the user to open Settings.";
+  "This chat cannot write, edit, create, or delete under the current desk limits. A shell command that only reads, such as grep, rg, cat, ls or git log, still runs. Call workhorse_request_permission to RAISE sandbox to off/workspace and/or permission to ask (or accept-edits / always-approve). A card appears above the composer — wait for Elevate or Deny. Do not offer to lower limits. Do not tell the user to open Settings.";
 
 const WRITE_REQUEST =
   /\b(write|edit|implement|patch|refactor|fix (the |this )?|create (a |the )?file|add (a |the )?file|code write|change the code|delete|remove file|apply (the )?change)\b/i;

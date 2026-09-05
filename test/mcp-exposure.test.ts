@@ -55,7 +55,7 @@ test("spawn paths describe scope evidence instead of containment", () => {
   assert.doesNotMatch(paths?.description ?? "", /files this worker may change/i);
 });
 
-test("a nested helper defaults to its parent worktree and remains local, shared, and read-only", async () => {
+test("a nested helper defaults to its parent worktree and stays local and shared, at the seat it inherited", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wh-nested-cwd-"));
   const linked = path.join(dir, "linked");
   const workerTree = path.join(dir, "worker-tree");
@@ -98,7 +98,10 @@ test("a nested helper defaults to its parent worktree and remains local, shared,
     assert.equal(result.error, undefined, result.error?.message);
     assert.equal(seen?.folder, workerTree);
     assert.equal(seen?.isolation, "shared");
-    assert.equal(seen?.role, "helper");
+    // A plain nested spawn is no longer forced read-only, so it is not recorded
+    // as a helper either: the role and the clamp are the same fact. The desk
+    // default is the standing permission for work the system asked for.
+    assert.notEqual(seen?.role, "helper", "no clamp the call did not ask for");
     assert.equal(seen?.paths, undefined);
   } finally {
     setWorkhorseDeskAsk(null);

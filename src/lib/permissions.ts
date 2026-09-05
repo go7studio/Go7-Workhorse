@@ -691,6 +691,33 @@ export function promptOwner(need: ElevationNeed, lineage: DeskAccess): "person" 
 }
 
 /**
+ * The desk default is the standing permission for work the system starts.
+ *
+ * A hidden worker was seated by a call, not by a person: a subagent, a mission
+ * pass, a Link delegate, a CLI hand-off. When it hits a block that the desk
+ * default already covers, nothing is being raised past what the person set;
+ * the desk is only handing the worker the seat it could have been given at
+ * spawn. So the desk grants it silently: no card, no denial note, no second
+ * call to "fix". The answer is the part of the need still missing from the
+ * worker's own seat, or null when there is nothing the desk may hand over.
+ *
+ * Two cases stay as they were. A visible chat is the person's own seat, so a
+ * raise there is theirs to answer and still gets its card. A need that climbs
+ * past the desk default is past the ceiling; the desk cannot grant it and the
+ * caller reads why in its transcript.
+ */
+export function standingGrant(input: {
+  session: { hidden?: boolean; mode: PermissionMode; sandbox: SandboxProfile };
+  need: ElevationNeed;
+  deskAccess?: DeskAccess;
+}): ElevationNeed | null {
+  if (!input.session.hidden) return null;
+  const desk = input.deskAccess ?? DESK_ACCESS_FALLBACK;
+  if (elevationStillNeeded(desk, input.need)) return null;
+  return elevationStillNeeded({ mode: input.session.mode, sandbox: input.session.sandbox }, input.need);
+}
+
+/**
  * A subagent never asks the person. It is not in front of them, its chat is
  * hidden, and the card it raised named a setting on some other chat entirely —
  * the live complaint was a Claude helper asking to drop "Sandbox Read-only"
@@ -753,13 +780,24 @@ function accessOrigin(input: { session?: LineageChat; sessions?: readonly Lineag
  * make deskClampNote tell the person "helpers are read-only" about a chat that
  * is writing files. The access and the role move together or neither moves.
  */
+/**
+ * Whether a nested helper runs at the seat it inherited rather than read-only.
+ *
+ * It used to take an explicit sandbox on the call to release one, so a plain
+ * nested spawn under a desk whose default was always-approve / off was seated
+ * read-only anyway, blocked on its first write, and asked the person to
+ * elevate — for work another part of the system had asked for. The desk
+ * default is the person's standing decision. The desk must not add a clamp the
+ * call did not ask for: a helper is read-only only when the call says so.
+ */
 export function releasedHelper(input: { role?: string; requestedSandbox?: SandboxProfile }): boolean {
-  return input.role === "helper" && input.requestedSandbox !== undefined;
+  if (input.role !== "helper") return false;
+  return input.requestedSandbox !== "read-only" && input.requestedSandbox !== "strict";
 }
 
 /** The clamp, named, so a denial says what actually stopped the work. */
 export function deskClampNote(run: { role?: string; paths?: string[] } | undefined): string {
-  if (run?.role === "helper") return "Helpers are read-only by design; hand this write to your parent.";
+  if (run?.role === "helper") return "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.";
   if ((run?.paths?.length ?? 0) > 0) {
     return "This launch is path-owned; the desk answers its in-path writes from the access you granted.";
   }

@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   autoAllowPermission,
+  describeElevation,
   deskClampNote,
   elevationForBlock,
   enqueuePermission,
@@ -19,6 +20,7 @@ import {
   promptOwner,
   sandboxSourceNote,
   securityPolicyAnswer,
+  standingGrant,
   classifyElevationInput,
   type LineageChat,
   type PermissionAnswer,
@@ -166,16 +168,19 @@ function siteOne(input: {
         })
       : null;
   const lineage = lineageGrant({ session: owner, sessions: input.sessions, deskAccess: input.deskAccess });
-  // A hidden worker never reaches the person; the desk answers and names the
-  // source of the sandbox. Only a visible chat's own block still asks.
-  const deskClamp = blocked
+  // The desk default is the standing permission for work the system started:
+  // a hidden worker's need within it is granted here, no card and no note.
+  const standing = blocked ? standingGrant({ session: owner, need: blocked, deskAccess: input.deskAccess }) : null;
+  // Past it, a hidden worker never reaches the person; the desk answers and
+  // names the source of the sandbox. Only a visible chat's own block still asks.
+  const deskClamp = blocked && !standing
     ? owner.hidden
       ? sandboxSourceNote({ session: owner, sessions: input.sessions, deskAccess: input.deskAccess })
       : promptOwner(blocked, lineage) === "desk"
         ? deskClampNote(owner.agentRun)
         : null
     : null;
-  const need = deskClamp ? null : blocked;
+  const need = deskClamp || standing ? null : blocked;
   const request: PermissionRequest = {
     id: event.requestId,
     sessionId: owner.id,
@@ -195,6 +200,7 @@ function siteOne(input: {
     path: event.path,
   });
   const answered =
+    (standing ? ("once" as const) : null) ??
     forced ??
     granted ??
     autoAllowPermission({ tool: event.tool, detail: event.detail, path: event.path }) ??
@@ -216,7 +222,9 @@ function siteOne(input: {
       pending: pending.filter((item) => item.id !== event.requestId),
       ...(allowed === "deny"
         ? { line: `Denied by ${deniedBy}: ${event.tool} — ${event.detail}${deskNote ? ` · ${deskNote}` : ""}` }
-        : {}),
+        : standing
+          ? { line: `Granted from the desk default: ${describeElevation(owner, standing)}. ${event.tool} — ${event.detail}` }
+          : {}),
     };
   }
   return { answer: null, pending: enqueuePermission(pending, request) };
@@ -224,10 +232,13 @@ function siteOne(input: {
 
 const WRITE: EventInput = { requestId: "0", tool: "Write", detail: "src/app.ts", path: "src/app.ts" };
 
-test("a read-only helper under an always-approve root is answered by the desk", () => {
-  // The live complaint: five nested helpers held read-only by the desk, under a
-  // root the person set to Always, each one asking the person for "elevated
-  // permissions" the person had already granted.
+test("a read-only helper under an always-approve root is granted the seat by the desk", () => {
+  // The live complaint, twice over: five nested helpers held read-only by the
+  // desk, under a root the person set to Always, each one asking the person for
+  // "elevated permissions" the person had already granted; then, once the card
+  // was gone, each one denied and told to "fix the call". The desk default is
+  // the standing permission for work the system started, so the desk hands the
+  // seat over and the helper writes.
   const helper = helperUnder(alwaysRoot, ALWAYS);
   const standing: PermissionRequest[] = [
     { id: "other", sessionId: "elsewhere", provider: "claude", tool: "Read", detail: "notes.md" },
@@ -239,23 +250,34 @@ test("a read-only helper under an always-approve root is answered by the desk", 
     event: WRITE,
     pending: standing,
   });
-  assert.equal(outcome.answer, "deny", "the vendor gets its answer here, not the person");
+  assert.equal(outcome.answer, "once", "the vendor gets its answer here, not the person, and the answer is yes");
   assert.deepEqual(outcome.pending, standing, "the pending queue is untouched — nothing was enqueued");
-  assert.equal(
-    outcome.line,
-    "Denied by sandbox: Write — src/app.ts · Sandbox Read-only comes from chat “root”; ask for sandbox: off in the call, or raise that chat's Sandbox.",
-    "and the denial names the chat the sandbox came from",
-  );
+  assert.match(outcome.line ?? "", /^Granted from the desk default: .*Write — src\/app\.ts$/, "and the transcript says the desk granted it");
 });
 
-test("the same helper under a plan/read-only root is answered too, not carded", () => {
+test("the same helper under a plan/read-only root is granted too: the desk default is the standing permission", () => {
   // Lane 4 raised this one to the person, because the root IS a setting they
-  // made. Lane 5 does not: the helper is hidden, the person is not in that
-  // chat, and the sandbox they would be asked to move belongs to the root.
-  // Naming that root is the answer; the card was never answerable in place.
+  // made. Lane 5 denied it and named the root. Lane 13: the helper is hidden,
+  // the system seated it, and the desk default covers the write. Nothing is
+  // raised past what the person set on the desk, so the desk grants it.
   const helper = helperUnder(planRoot, PLAN);
   const outcome = siteOne({ owner: helper, sessions: [planRoot, helper], deskAccess: ALWAYS, event: WRITE });
   assert.deepEqual(outcome.pending, [], "a subagent never asks the person");
+  assert.equal(outcome.answer, "once");
+  assert.match(outcome.line ?? "", /^Granted from the desk default: /);
+});
+
+test("past the desk default the same helper is denied and told where the sandbox came from", () => {
+  // The desk itself is read-only. That is the ceiling; the desk cannot hand
+  // over what the person did not grant anywhere, so it names the source.
+  const helper = helperUnder(planRoot, PLAN);
+  const outcome = siteOne({
+    owner: helper,
+    sessions: [planRoot, helper],
+    deskAccess: { mode: "always-approve", sandbox: "read-only" },
+    event: WRITE,
+  });
+  assert.deepEqual(outcome.pending, [], "still never a card");
   assert.equal(outcome.answer, "deny");
   assert.match(outcome.line ?? "", /Sandbox Read-only comes from chat “root”/);
 });
@@ -271,12 +293,17 @@ test("the Ask clamp on a path-owned worker never turns into an elevate", () => {
   assert.equal(outcome.answer, "session", "the recorded grant answers it");
 });
 
-test("a person's read-only sandbox still stops a path-owned worker", () => {
+test("a desk-wide read-only sandbox still stops a path-owned worker", () => {
   // It still stops the write. What changed is who hears about it: the worker
   // is hidden, so the desk denies and names the root, instead of putting a
   // card in front of someone who is not in that chat.
   const worker = pathWorkerUnder(planRoot, PLAN);
-  const outcome = siteOne({ owner: worker, sessions: [planRoot, worker], deskAccess: ALWAYS, event: WRITE });
+  const outcome = siteOne({
+    owner: worker,
+    sessions: [planRoot, worker],
+    deskAccess: { mode: "always-approve", sandbox: "read-only" },
+    event: WRITE,
+  });
   assert.deepEqual(outcome.pending, []);
   assert.equal(outcome.answer, "deny", "the write is refused all the same");
   assert.match(outcome.line ?? "", /Sandbox Read-only comes from chat “root”/);
@@ -289,17 +316,17 @@ test("a person's own chat set to plan/read-only keeps its prompt", () => {
 });
 
 test("the clamp note says which clamp, and says nothing false when there is none", () => {
-  assert.equal(deskClampNote({ role: "helper" }), "Helpers are read-only by design; hand this write to your parent.");
+  assert.equal(deskClampNote({ role: "helper" }), "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.");
   assert.match(deskClampNote({ paths: ["src/app.ts"] }), /path-owned/);
   assert.match(deskClampNote(undefined), /The desk narrowed this launch itself/);
   assert.match(deskClampNote({ paths: [] }), /The desk narrowed this launch itself/);
 });
 
-test("a desk-owned elevate is answered here, never handed on as a plain prompt", () => {
-  // A custom host asks the desk to elevate. The lineage already grants it, so
-  // the desk owns the block — but nothing in the policy forced a deny, so the
-  // request used to fall past the elevate branch and land in the queue as an
-  // ordinary tool prompt. Same escalation, different shape.
+test("a desk-owned elevate is granted here, never handed on as a plain prompt", () => {
+  // A custom host asks the desk to elevate. The desk default already grants
+  // it, so the desk owns the block — but nothing in the policy forced a deny,
+  // so the request used to fall past the elevate branch and land in the queue
+  // as an ordinary tool prompt. Now the desk answers yes and raises the seat.
   const helper: LineageChat = {
     id: "helper",
     parentId: "root",
@@ -316,18 +343,20 @@ test("a desk-owned elevate is answered here, never handed on as a plain prompt",
   };
   const outcome = siteOne({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event });
   assert.deepEqual(outcome.pending, [], "nothing reaches the person by either door");
-  assert.equal(outcome.answer, "deny");
-  assert.equal(
-    outcome.line,
-    "Denied by the desk: Read — notes.md · Sandbox Read-only comes from chat “root”; ask for sandbox: off in the call, or raise that chat's Sandbox.",
-    "and it says the desk stopped it, not a sandbox that did not",
-  );
+  assert.equal(outcome.answer, "once", "and the answer is the grant, not a denial to fix later");
+  assert.match(outcome.line ?? "", /^Granted from the desk default: .*Read — notes\.md$/);
 });
 
 test("a real policy deny still names the sandbox, not the desk", () => {
   // The clamp note is an addition to the reason, never a replacement for it.
+  // A desk that is itself read-only cannot grant the write, so this one denies.
   const helper = helperUnder(alwaysRoot, ALWAYS);
-  const outcome = siteOne({ owner: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, event: WRITE });
+  const outcome = siteOne({
+    owner: helper,
+    sessions: [alwaysRoot, helper],
+    deskAccess: { mode: "always-approve", sandbox: "read-only" },
+    event: WRITE,
+  });
   assert.match(outcome.line ?? "", /^Denied by sandbox: /);
   const boundary = siteOne({
     owner: planRoot,
@@ -426,7 +455,7 @@ function siteTwo(input: {
   if (classified.kind !== "raise" || !classified.need) {
     const downgrade = classified.kind === "downgrade";
     if (!downgrade && from.agentRun?.role === "helper") {
-      return { reply: { ok: false, reason: "Helpers are read-only by design; the parent owns writes." }, prompted: false };
+      return { reply: { ok: false, reason: "This helper was asked to run read-only; the parent owns its writes." }, prompted: false };
     }
     if (!downgrade && (from.agentRun?.paths?.length ?? 0) > 0) {
       return {
@@ -450,6 +479,8 @@ function siteTwo(input: {
     };
   }
   if (from.hidden) {
+    const standing = standingGrant({ session: from, need: classified.need, deskAccess: input.deskAccess });
+    if (standing) return { reply: { ok: true, elevated: true, granted: standing }, prompted: false };
     return {
       reply: {
         ok: false,
@@ -472,7 +503,7 @@ test("a helper asking for sandbox off is turned back without a prompt", () => {
   assert.equal(outcome.prompted, false, "the seat is a clamp, not a setting the person made");
   assert.deepEqual(outcome.reply, {
     ok: false,
-    reason: "Helpers are read-only by design; the parent owns writes.",
+    reason: "This helper was asked to run read-only; the parent owns its writes.",
   });
   // Asking with nothing named lands in the same place.
   assert.equal(siteTwo({ from: helper, sessions: [alwaysRoot, helper], deskAccess: ALWAYS, ask: {} }).prompted, false);
@@ -494,12 +525,27 @@ test("a path-owned worker asking for always-approve is told it already has it", 
   });
 });
 
-test("beyond the lineage grant a hidden worker is told where to ask instead", () => {
+test("within the desk default a hidden worker is granted the seat, with no card and no note", () => {
+  // The person set the desk to always-approve/off. A worker the system seated
+  // lower asks for what the desk already allows: that is not a raise past
+  // anything the person set, so the desk hands it over and the worker goes on.
   const worker = pathWorkerUnder(planRoot, PLAN);
   const outcome = siteTwo({
     from: worker,
     sessions: [planRoot, worker],
     deskAccess: ALWAYS,
+    ask: { name: "always-approve", folder: "off" },
+  });
+  assert.equal(outcome.prompted, false, "a subagent's ask is never a card");
+  assert.deepEqual(outcome.reply, { ok: true, elevated: true, granted: { mode: "always-approve", sandbox: "off" } });
+});
+
+test("past the desk default a hidden worker is told where to ask instead", () => {
+  const worker = pathWorkerUnder(planRoot, PLAN);
+  const outcome = siteTwo({
+    from: worker,
+    sessions: [planRoot, worker],
+    deskAccess: { mode: "ask", sandbox: "read-only" },
     ask: { name: "always-approve", folder: "off" },
   });
   assert.equal(outcome.prompted, false, "a subagent's ask is never a card");
@@ -572,7 +618,7 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
   // Site 1 — the vendor permission event.
   assert.match(
     store,
-    /promptOwner\(blocked, lineage\) === "desk"\n\s*\? deskClampNote\(owner\.agentRun\)\n\s*: null\n\s*: null;\n\s*const need = deskClamp \? null : blocked;/,
+    /promptOwner\(blocked, lineage\) === "desk"\n\s*\? deskClampNote\(owner\.agentRun\)\n\s*: null\n\s*: null;\n\s*const need = deskClamp \|\| standing \? null : blocked;/,
     "a desk-owned block must never become a prompt",
   );
   // A custom host asking to elevate (electron/custom-host.ts) lands on the same
@@ -633,7 +679,7 @@ test("store.tsx routes both permission sites through the lineage grant", () => {
   // dead-code the branch — the words stayed in the file and the pin held.
   assert.match(
     store,
-    /if \(!downgrade && from\.agentRun\?\.role === "helper"\) \{[\s\S]{0,260}?reason: "Helpers are read-only by design; the parent owns writes\.",/,
+    /if \(!downgrade && from\.agentRun\?\.role === "helper"\) \{[\s\S]{0,260}?reason: "This helper was asked to run read-only; the parent owns its writes\.",/,
     "a helper's ask is answered from its own branch",
   );
   assert.match(

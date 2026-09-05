@@ -51,6 +51,7 @@ import {
   autoAllowPermission,
   deskClampNote,
   describeElevation,
+  standingGrant,
   elevationForBlock,
   enqueuePermission,
   grantedAccessLine,
@@ -280,6 +281,7 @@ import {
   parsePermissionMode,
   parseSandbox,
   vendorSessionForSend,
+  applySessionElevation,
 } from "./session";
 import { sessionExecutionCwd } from "./session-environment";
 import { parseScheduleCommand } from "./schedule";
@@ -4371,7 +4373,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   await replyAsk({
                     text: JSON.stringify({
                       ok: false,
-                      reason: "Helpers are read-only by design; the parent owns writes.",
+                      reason: "This helper was asked to run read-only; the parent owns its writes.",
                     }),
                   });
                   return;
@@ -4404,6 +4406,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // becomes a card. The person is not in that chat, and the seat it
               // wants moved belongs to a chat further up. Say which one.
               if (from.hidden) {
+                // Within the desk default the desk grants the seat itself: the
+                // worker was started by the system, and nothing is raised past
+                // what the person set. Past the ceiling, it is told the source.
+                const standing = standingGrant({ session: from, need: classified.need, deskAccess: latest.settings.access });
+                if (standing) {
+                  const raised = applySessionElevation(from, standing);
+                  setState((current) => ({
+                    ...current,
+                    sessions: current.sessions.map((item) =>
+                      item.id === from.id
+                        ? {
+                            ...applySessionElevation(item, standing),
+                            messages: [
+                              ...item.messages,
+                              {
+                                id: uid("msg"),
+                                role: "system" as const,
+                                text: `Granted from the desk default: ${describeElevation(item, standing)}.`,
+                                createdAt: Date.now(),
+                              },
+                            ],
+                          }
+                        : item,
+                    ),
+                  }));
+                  await replyAsk({
+                    text: JSON.stringify({
+                      ok: true,
+                      elevated: true,
+                      mode: raised.mode,
+                      sandbox: raised.sandbox,
+                      howToUse: "Granted from the desk default. Continue the work.",
+                    }),
+                  });
+                  return;
+                }
                 await replyAsk({
                   text: JSON.stringify({
                     ok: false,
@@ -5659,6 +5697,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sessionId: childId,
                 isolation,
                 role: spawnRole,
+                // The seat this worker will actually run under decides the write,
+                // not the label on its role.
+                sandbox: nestedPolicy.readOnly && !helperReleased ? "read-only" : callAccess.granted.sandbox,
                 files,
               });
               if (!claim.ok) {
@@ -6784,6 +6825,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 root,
                 currentFingerprint: fileContentsFingerprint(source?.text ?? ""),
                 role: owner.agentRun?.role,
+                sandbox: owner.sandbox,
               });
               if (!decision.ok) {
                 deny(decision.error);
@@ -6894,6 +6936,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           sessions: stateRef.current.sessions,
           deskAccess: stateRef.current.settings.access,
         });
+        // The desk default is the standing permission for work the system
+        // started. A hidden worker blocked by a seat the desk default already
+        // covers is handed that seat here: allowed, raised, and told so in its
+        // transcript. No card, no denial note, no second call to fix.
+        const standing =
+          blocked && owner
+            ? standingGrant({ session: owner, need: blocked, deskAccess: stateRef.current.settings.access })
+            : null;
         // A subagent never asks the person. Its chat is hidden, the person is
         // not in it, and the setting it wants moved lives on some other chat
         // entirely — so the card was unanswerable where it appeared. The desk
@@ -6902,7 +6952,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // A VISIBLE chat's own vendor session still gets its card: that is the
         // person asking to lift their own setting, in front of them.
         const deskClamp =
-          blocked && owner
+          blocked && owner && !standing
             ? owner.hidden
               ? sandboxSourceNote({
                   session: owner,
@@ -6913,7 +6963,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 ? deskClampNote(owner.agentRun)
                 : null
             : null;
-        const need = deskClamp ? null : blocked;
+        const need = deskClamp || standing ? null : blocked;
         if (need && owner) {
           setState((current) => ({
             ...current,
@@ -6953,6 +7003,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // prompt below would put the desk's narrowing in front of the person
         // again, which is the whole thing this lane removes.
         const answered =
+          (standing ? ("once" as const) : null) ??
           forced ??
           granted ??
           autoAllowPermission({
@@ -7006,6 +7057,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                       ),
                       agentRun: session.agentRun,
                     }),
+                    ...(standing ? applySessionElevation(session, standing) : {}),
                     messages:
                       allowed === "deny"
                         ? [
@@ -7017,7 +7069,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                               createdAt: Date.now(),
                             },
                           ]
-                        : session.messages,
+                        : standing
+                          ? [
+                              ...session.messages,
+                              {
+                                id: uid("msg"),
+                                role: "system" as const,
+                                text: `Granted from the desk default: ${describeElevation(session, standing)}. ${event.tool} — ${event.detail}`,
+                                createdAt: Date.now(),
+                              },
+                            ]
+                          : session.messages,
                   }
                 : session,
             ),

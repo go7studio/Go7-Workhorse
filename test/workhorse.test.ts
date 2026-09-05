@@ -487,7 +487,7 @@ test("applyPermissionAnswer updates the real pending queue and session", () => {
   assert.deepEqual(lineageGrant({ deskAccess: { mode: "ask", sandbox: "workspace" } }), { mode: "ask", sandbox: "workspace" });
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "always-approve", sandbox: "off" }), "desk");
   assert.equal(promptOwner({ sandbox: "off" }, { mode: "plan", sandbox: "read-only" }), "person");
-  assert.equal(deskClampNote({ role: "helper" }), "Helpers are read-only by design; hand this write to your parent.");
+  assert.equal(deskClampNote({ role: "helper" }), "This helper was asked to run read-only; hand this write to your parent, or spawn it with a sandbox that can write.");
   assert.equal(looksLikeSearchOnly("rg", "rg -n leftover src"), true);
   assert.equal(looksLikeSearchOnly("shell", "rg --files"), true);
   assert.equal(

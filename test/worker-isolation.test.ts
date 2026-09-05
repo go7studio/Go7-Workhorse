@@ -44,7 +44,10 @@ test("nested helpers stay shared even when a caller asks for a worktree", () => 
     mayReuse: false,
     mayOwnPaths: false,
   });
-  assert.equal(workerMayWrite(policy.role), false);
+  // The policy names the clamp; the seat decides. A released helper at its
+  // parent's seat writes, a helper the call asked to run read-only does not.
+  assert.equal(workerMayWrite(policy.role, "read-only"), false);
+  assert.equal(workerMayWrite(policy.role, "off"), true);
   assert.equal(nestedWorkerPolicy({
     nested: true,
     parentEnvironment: { kind: "local" },
@@ -52,13 +55,15 @@ test("nested helpers stay shared even when a caller asks for a worktree", () => 
   }).projectFolder, "/repo");
 });
 
-test("review-only auditors cannot take a write lease", () => {
-  assert.equal(workerMayWrite("auditor"), false);
-  assert.equal(workerMayWrite("worker"), true);
+test("a read-only seat cannot take a write lease, whatever the role", () => {
+  assert.equal(workerMayWrite("auditor", "read-only"), false);
+  assert.equal(workerMayWrite("worker", "read-only"), false);
+  assert.equal(workerMayWrite("auditor", "off"), true, "an auditor at sandbox off writes its own report");
   const denied = claimSharedFiles({
     leases: [],
     sessionId: "reviewer",
     role: "auditor",
+    sandbox: "read-only",
     isolation: "shared",
     files: [{ path: "src/lib/subagents.ts", fingerprint: fileContentsFingerprint("old") }],
   });

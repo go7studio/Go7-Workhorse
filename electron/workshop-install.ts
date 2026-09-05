@@ -30,7 +30,7 @@ const TAR_OUTPUT_BYTES = PACK_LIMITS.maxInstallBytes * 2 + 4 * 1024 * 1024;
 const GITHUB_HEADERS = { Accept: "application/vnd.github+json", "User-Agent": "Go7-Workhorse" };
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 
-export type InstallRecord = { kind: "folder" | "repo"; from: string; tag?: string; sha256: string; at: string };
+export type InstallRecord = { kind: "folder" | "repo" | "catalog"; from: string; tag?: string; sha256: string; at: string };
 export type UpdateCheck = { ok: boolean; current: string; latest?: string; reason?: string };
 export type UpdateResult = InstallResult & { sourcesChanged?: boolean };
 export type TarEntry = { path: string; type: "file" | "dir"; data: Buffer };
@@ -92,7 +92,7 @@ export function readInstallRecord(packDir: string): InstallRecord | undefined {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(packDir, INSTALL_RECORD), "utf8")) as Record<string, unknown>;
     if (!raw || typeof raw !== "object") return undefined;
-    if ((raw.kind !== "folder" && raw.kind !== "repo") || typeof raw.from !== "string") return undefined;
+    if ((raw.kind !== "folder" && raw.kind !== "repo" && raw.kind !== "catalog") || typeof raw.from !== "string") return undefined;
     if (typeof raw.sha256 !== "string" || typeof raw.at !== "string") return undefined;
     return {
       kind: raw.kind,
@@ -603,4 +603,107 @@ export async function updatePack(
     sourcesChanged: sourcesChangedIds.length > 0,
     ...(sourcesChangedIds.length ? { sourcesChangedIds } : {}),
   };
+}
+
+export type CatalogInstallRequest = {
+  id: string;
+  version: string;
+  source: string;
+  digest: string;
+};
+
+/**
+ * Available Install: fetch the exact immutable archive URL, bind digest before commit,
+ * refuse id/version mismatch, and install only the requested pack id from a multi-pack archive.
+ * Never resolves highest-semver. Refuse reasons are fixed chrome — never catalog prose.
+ */
+export async function installCatalogEntry(
+  request: CatalogInstallRequest,
+  root: string,
+  fetchImpl: typeof fetch = fetch,
+  options: InstallOptions = {},
+): Promise<InstallResult> {
+  if (!PACK_ID.test(request.id)) return { ok: false, reason: "Pack refused (id)" };
+  if (typeof request.version !== "string" || !request.version) return { ok: false, reason: "Pack refused (version)" };
+  if (typeof request.source !== "string" || !request.source.startsWith("https://")) {
+    return { ok: false, reason: "Pack refused (source)" };
+  }
+  if (typeof request.digest !== "string" || !/^[0-9a-f]{64}$/.test(request.digest)) {
+    return { ok: false, reason: "Pack refused (digest)" };
+  }
+  return withStaging(root, async (staging) => {
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        fetchImpl,
+        request.source,
+        {
+          method: "GET",
+          headers: { "User-Agent": "Go7-Workhorse", Accept: "application/octet-stream" },
+          redirect: "follow",
+        },
+        FETCH_TIMEOUT_MS,
+      );
+    } catch {
+      refuse("Pack refused (download)");
+    }
+    if (response.status !== 200) refuse("Pack refused (download)");
+    const tarball = await readBytesCapped(response, PACK_LIMITS.maxInstallBytes);
+    if (!tarball) refuse("Pack refused (size)");
+    const digest = sha256(tarball);
+    if (digest !== request.digest) refuse("Pack refused (digest)");
+    let tar: Buffer;
+    try {
+      tar = gunzipSync(tarball, { maxOutputLength: TAR_OUTPUT_BYTES });
+    } catch {
+      tar = tarball;
+    }
+    let entries: TarEntry[];
+    try {
+      entries = readTar(tar);
+    } catch (error) {
+      if (error instanceof Refusal) throw error;
+      refuse("Pack refused (archive)");
+    }
+    writeEntries(entries, staging);
+    keepOnlyRequestedPack(staging, request.id, request.version);
+    return commit(
+      staging,
+      root,
+      () => ({ kind: "catalog", from: request.source, sha256: digest, at: nowIso() }),
+      options,
+    );
+  });
+}
+
+/**
+ * Multi-pack archives may list several pack folders. Available Install keeps only the
+ * requested id; siblings are removed from staging before commit (no silent install).
+ */
+function keepOnlyRequestedPack(staging: string, id: string, version: string): void {
+  const found = findPackFolders(staging);
+  if (!found.length) refuse("Pack refused (missing)");
+  let match: { dir: string; folderName?: string } | null = null;
+  for (const item of found) {
+    const manifest = readPackJson(item.dir);
+    if (!manifest) continue;
+    const parsed = parseWorkshopPack(manifest.raw, item.folderName);
+    if (!parsed.ok) continue;
+    if (parsed.pack.id === id) {
+      match = item;
+      break;
+    }
+  }
+  if (!match) refuse("Pack refused (id)");
+  const manifest = readPackJson(match.dir);
+  if (!manifest) refuse("Pack refused (missing)");
+  const parsed = parseWorkshopPack(manifest.raw, match.folderName);
+  if (!parsed.ok) refuse("Pack refused (pack)");
+  if (parsed.pack.id !== id) refuse("Pack refused (id)");
+  if (parsed.pack.version !== version) refuse("Pack refused (version)");
+  for (const item of found) {
+    if (item.dir === match.dir) continue;
+    if (item.dir === staging) refuse("Pack refused (archive)");
+    fs.rmSync(item.dir, { recursive: true, force: true });
+  }
 }

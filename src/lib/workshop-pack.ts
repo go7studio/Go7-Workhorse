@@ -206,7 +206,7 @@ export type PackListing = {
   /** Confirmed source descriptors when the pack is On; used so sibling confirms keep bindings. */
   sourceFingerprints?: Record<string, string>;
   collector?: string;
-  installed?: { kind: "folder" | "repo"; from: string; tag?: string; sha256: string; at: string };
+  installed?: { kind: "folder" | "repo" | "catalog"; from: string; tag?: string; sha256: string; at: string };
   refused?: string;
 };
 

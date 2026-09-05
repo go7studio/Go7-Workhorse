@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://go7studio.com/schemas/workshop-catalog.schema.json",
+  "title": "Workshop Catalog",
+  "description": "First-party Workshop pack listing. Pack Refs bind immutable archive bytes. No legacy grant enums, host modules, or pack.json defaultOff.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "asOf", "packs"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "go7-workshop-catalog/v0"
+    },
+    "asOf": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this catalog document was published (ISO-8601)."
+    },
+    "maxAgeMs": {
+      "type": "integer",
+      "minimum": 60000,
+      "maximum": 2592000000,
+      "description": "Soft freshness window. Past maxAge the desk may browse but Install is disabled."
+    },
+    "packs": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/packRef" }
+    }
+  },
+  "$defs": {
+    "packRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "contract",
+        "source",
+        "digest",
+        "digestAlg",
+        "digestOf",
+        "tier",
+        "summary",
+        "rail"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 48
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+        },
+        "contract": {
+          "type": "integer",
+          "const": 1
+        },
+        "source": {
+          "type": "string",
+          "format": "uri",
+          "description": "Immutable archive URL (release asset or tag-pinned tar.gz). Not a floating branch tip."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "digestAlg": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "digestOf": {
+          "type": "string",
+          "const": "archive-bytes"
+        },
+        "tier": {
+          "type": "string",
+          "const": "first-party"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "rail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 512
+        },
+        "yanked": {
+          "type": "boolean",
+          "description": "Tombstone: refuse Install even from cache."
+        },
+        "sourcesPreview": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "maxLength": 160 }
+        }
+      }
+    }
+  }
+}

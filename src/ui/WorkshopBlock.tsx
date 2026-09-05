@@ -7,6 +7,7 @@ import {
   type PackSource,
   type WorkshopPackSetting,
 } from "../lib/workshop-pack";
+import type { CatalogViewState } from "../lib/workshop-catalog";
 import { useStore } from "../lib/store";
 
 /**
@@ -109,6 +110,7 @@ function provenance(pack: PackListing): string {
   const installed = pack.installed;
   if (!installed) return "";
   if (installed.kind === "folder") return "from folder";
+  if (installed.kind === "catalog") return "from catalog · this desk";
   const from = installed.from.replace(/^https?:\/\//, "").replace(/\/+$/, "");
   return installed.tag ? `from ${from} · ${vLabel(installed.tag)}` : `from ${from}`;
 }
@@ -123,14 +125,17 @@ export function WorkshopBlock() {
   const store = useStore();
   const hosts = store.settings.localCompute.hosts.filter((host) => host.enabled);
   const [packs, setPacks] = useState<PackListing[]>([]);
+  const [catalog, setCatalog] = useState<CatalogViewState | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [hostId, setHostId] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
   const [url, setUrl] = useState("");
   const [note, setNote] = useState("");
   const [installNote, setInstallNote] = useState("");
+  const [availableNote, setAvailableNote] = useState("");
   const [updates, setUpdates] = useState<Record<string, UpdateState>>({});
   const [busy, setBusy] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const reload = useCallback(() => {
     const run = window.workhorse?.workshopList;
@@ -141,9 +146,28 @@ export function WorkshopBlock() {
     void run().then(setPacks);
   }, []);
 
+  const reloadCatalog = useCallback(() => {
+    const run = window.workhorse?.workshopCatalog;
+    if (!run) {
+      setCatalog({
+        ok: false,
+        packs: [],
+        source: "none",
+        stale: false,
+        unreachable: true,
+        pinFailed: false,
+        reason: "Catalog unreachable",
+        installAllowed: false,
+      });
+      return;
+    }
+    void run().then(setCatalog);
+  }, []);
+
   useEffect(() => {
     reload();
-  }, [reload, store.settings.workshop]);
+    reloadCatalog();
+  }, [reload, reloadCatalog, store.settings.workshop]);
 
   // Main broadcasts workshop:changed after liveSettings.workshop saves — keep the
   // pack list in sync so a row cannot paint stale On after another turns off.
@@ -170,8 +194,6 @@ export function WorkshopBlock() {
 
   const turnOn = (pack: PackListing) =>
     run(async () => {
-      // Flush grants to main liveSettings. Live watch is the desk rail; Detach is optional —
-      // do not open the breakout on confirm.
       const sourceFingerprints = fingerprintsForSources(
         pack.id,
         pack.sources.map(asPackSource),
@@ -188,7 +210,6 @@ export function WorkshopBlock() {
     run(async () => {
       const next = nextPacks(packs, { id, on: false });
       await store.updateWorkshop({ packs: next });
-      // Pack on/off is updateWorkshop only. Close the breakout when nothing remains on.
       if (!next.some((row) => row.on)) await window.workhorse?.workshopCloseBreakout?.();
       reload();
     });
@@ -198,6 +219,23 @@ export function WorkshopBlock() {
     if (!ids.length) return;
     await store.updateWorkshop({ packs: nextPacksOff(packs, ids) });
   };
+
+  const installAvailable = (id: string) =>
+    run(async () => {
+      const install = window.workhorse?.workshopInstallCatalog;
+      if (!install) return;
+      setAvailableNote("");
+      const result = await install({ id });
+      // Fixed chrome only — never concatenate catalog summary into refuse copy.
+      const words = result.ok ? `Installed ${result.ids.join(", ")} on this desk (Off until you Turn on).` : result.reason;
+      if (result.ok && result.reconfirm) {
+        await applyReconfirm(result);
+        setAvailableNote("Sources changed. Turn on to review.");
+      } else {
+        setAvailableNote(words);
+      }
+      if (result.ok) reload();
+    });
 
   const addRepo = () =>
     run(async () => {
@@ -277,13 +315,15 @@ export function WorkshopBlock() {
     });
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
+  const installedIds = new Set(packs.map((pack) => pack.id));
+  const catalogState = catalog;
 
   return (
     <section className="workshop-settings" aria-label="Workshop">
       <div className="link-head">
         <div>
           <strong>Workshop</strong>
-          <p className="row-meta">Add a pack, pick the host it reads through, confirm what it reads. Live watch is the desk rail.</p>
+          <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
         </div>
         {packs.some((pack) => pack.on) ? (
           <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
@@ -292,28 +332,8 @@ export function WorkshopBlock() {
         ) : null}
       </div>
 
-      <div className="workshop-add">
-        <input
-          className="settings-search"
-          type="url"
-          value={url}
-          placeholder="https://github.com/owner/repo"
-          aria-label="Pack repo URL"
-          disabled={busy}
-          onChange={(event) => setUrl(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && url.trim()) void addRepo();
-          }}
-        />
-        <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
-          Add
-        </button>
-        <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()}>
-          From folder
-        </button>
-      </div>
-      {installNote ? <p className="row-meta">{installNote}</p> : null}
-
+      <h3 className="workshop-section-title">Installed</h3>
+      <p className="row-meta">On this desk only. Other desks keep their own Installed list.</p>
       {packs.length === 0 ? (
         <p className="row-meta">No packs on this desk yet.</p>
       ) : (
@@ -373,7 +393,7 @@ export function WorkshopBlock() {
                                 <input
                                   type="checkbox"
                                   checked={on}
-                                  onChange={() => setChecked((prev) => (on ? prev.filter((id) => id !== source.id) : [...prev, source.id]))}
+                                  onChange={() => setChecked((prev) => (on ? prev.filter((sid) => sid !== source.id) : [...prev, source.id]))}
                                 />
                                 <strong>{source.id}</strong>
                                 <span className="row-meta">
@@ -435,6 +455,93 @@ export function WorkshopBlock() {
           })}
         </ul>
       )}
+
+      <h3 className="workshop-section-title">Available</h3>
+      <p className="row-meta">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
+      {catalogState == null ? (
+        <p className="row-meta">Loading catalog…</p>
+      ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed ? (
+        <div className="workshop-catalog-empty">
+          <p className="row-meta">Catalog unreachable</p>
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
+            Retry
+          </button>
+        </div>
+      ) : catalogState.packs.length === 0 ? (
+        <div className="workshop-catalog-empty">
+          <p className="row-meta">No packs in catalog</p>
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
+          <ul className="skills-list">
+            {catalogState.packs.map((entry) => {
+              const already = installedIds.has(entry.id);
+              const disabled = busy || entry.installDisabled || already || !catalogState.installAllowed;
+              return (
+                <li key={entry.id} className="skill-row">
+                  <div className="workshop-pack">
+                    <strong>
+                      {entry.id} <span className="row-meta">{vLabel(entry.version)}</span>
+                    </strong>
+                    {/* Plain text only — never markdown/HTML from catalog fields. */}
+                    <span className="row-meta">{entry.summary}</span>
+                    <span className="row-meta">Rail · {entry.rail}</span>
+                    {entry.yanked ? <span className="row-meta">Yanked</span> : null}
+                    {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
+                    {already ? <span className="row-meta">Already on this desk</span> : null}
+                  </div>
+                  <span className="skill-row-side">
+                    <button className="tiny" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
+                      Install
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {availableNote ? <p className="row-meta">{availableNote}</p> : null}
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
+            Retry
+          </button>
+        </>
+      )}
+
+      <h3 className="workshop-section-title">
+        <button className="tiny" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
+          Local (Advanced) {advancedOpen ? "▾" : "▸"}
+        </button>
+      </h3>
+      {advancedOpen ? (
+        <div className="workshop-advanced">
+          <p className="row-meta">Unsigned folder copy, or install by public GitHub repo URL (highest semver). Not the catalog path.</p>
+          <div className="workshop-add">
+            <input
+              className="settings-search"
+              type="url"
+              value={url}
+              placeholder="https://github.com/owner/repo"
+              aria-label="Pack repo URL (advanced)"
+              disabled={busy}
+              onChange={(event) => setUrl(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && url.trim()) void addRepo();
+              }}
+            />
+            <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
+              Add
+            </button>
+            <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()}>
+              From folder
+            </button>
+          </div>
+          {installNote ? <p className="row-meta">{installNote}</p> : null}
+        </div>
+      ) : null}
+
       {note ? <p className="row-meta">{note}</p> : null}
     </section>
   );

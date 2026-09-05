@@ -9464,6 +9464,11 @@ html.pane-dragging * {
 .media-create-message { margin: 0; }
 
 .workshop-settings { margin-bottom: 8px; }
+.workshop-section-title { margin: 16px 0 6px; font-size: 13px; font-weight: 600; }
+.workshop-section-title .tiny { font-size: inherit; font-weight: 600; }
+.workshop-catalog-empty { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.workshop-advanced { margin-bottom: 12px; }
+
 
 /* Settings → Workshop: Add pack row, pack rows, the confirm panel and its source list. */
 .workshop-add { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }

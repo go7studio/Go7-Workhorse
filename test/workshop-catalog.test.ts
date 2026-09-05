@@ -15,6 +15,7 @@ import {
   catalogYankMatches,
   parseWorkshopCatalog,
   sanitizeCatalogText,
+  normalizeCatalogPinBytes,
   verifyCatalogBytes,
 } from "../src/lib/workshop-catalog";
 import { createCatalogService, loadSeedCatalog } from "../electron/workshop-catalog";
@@ -92,7 +93,8 @@ function githubTarball(prefix: string, files: Record<string, string | Buffer>): 
 
 test("seed catalog matches app pin and parses Pack Refs", () => {
   const bytes = fs.readFileSync(SEED);
-  assert.equal(sha256Hex(bytes), CATALOG_PIN_SHA256);
+  // Pin is over LF-normalized UTF-8 (Windows CRLF checkout must not diverge).
+  assert.equal(sha256Hex(normalizeCatalogPinBytes(bytes)), CATALOG_PIN_SHA256);
   const verified = verifyCatalogBytes(bytes, CATALOG_PIN_SHA256, sha256Hex);
   assert.equal(verified.ok, true);
   if (!verified.ok) return;
@@ -107,6 +109,15 @@ test("seed catalog matches app pin and parses Pack Refs", () => {
   assert.equal(loaded.ok, true);
 });
 
+
+test("CRLF seed bytes still match LF pin", () => {
+  const lf = normalizeCatalogPinBytes(fs.readFileSync(SEED));
+  const crlf = Buffer.from(new TextDecoder("utf-8").decode(lf).replace(/\n/g, "\r\n"), "utf8");
+  assert.notEqual(sha256Hex(crlf), CATALOG_PIN_SHA256);
+  assert.equal(sha256Hex(normalizeCatalogPinBytes(crlf)), CATALOG_PIN_SHA256);
+  const verified = verifyCatalogBytes(crlf, CATALOG_PIN_SHA256, sha256Hex);
+  assert.equal(verified.ok, true);
+});
 test("pin mismatch refuses Available paint", () => {
   const bytes = fs.readFileSync(SEED);
   const bad = verifyCatalogBytes(bytes, "0".repeat(64), sha256Hex);

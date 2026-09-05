@@ -15,7 +15,7 @@
 
 import { PACK_ID, SEMVER, WORKSHOP_CONTRACT } from "./workshop-pack";
 
-/** sha256 of workshop/catalog-seed.json (sorted-keys, 2-space indent, trailing newline). */
+/** sha256 of LF-normalized workshop/catalog-seed.json (sorted-keys, 2-space indent, trailing newline). */
 export const CATALOG_PIN_SHA256 = "bc9f717f70a75dc09143fa26bdabb6b07d5d3b9cf09f8f7a117679bfc516357c";
 
 export const CATALOG_SCHEMA = "go7-workshop-catalog/v0";
@@ -245,20 +245,48 @@ export function parseWorkshopCatalog(raw: unknown): CatalogParseResult {
   };
 }
 
+/**
+ * Normalize catalog JSON bytes for the app pin: CRLF/CR → LF, then UTF-8 round-trip.
+ * Windows checkouts (core.autocrlf) must hash the same as the LF-pinned constant.
+ */
+export function normalizeCatalogPinBytes(bytes: Uint8Array | string): Uint8Array {
+  const raw =
+    typeof bytes === "string"
+      ? new TextEncoder().encode(bytes)
+      : bytes instanceof Uint8Array
+        ? bytes
+        : new Uint8Array(bytes);
+  // Collapse CRLF and lone CR before hashing so pin is platform-stable.
+  const lf: number[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const b = raw[i]!;
+    if (b === 0x0d) {
+      if (i + 1 < raw.length && raw[i + 1] === 0x0a) i += 1;
+      lf.push(0x0a);
+      continue;
+    }
+    lf.push(b);
+  }
+  const asLf = Uint8Array.from(lf);
+  // Prefer UTF-8 text: reject/replace invalid sequences via TextDecoder, re-encode.
+  const text = new TextDecoder("utf-8").decode(asLf);
+  return new TextEncoder().encode(text);
+}
+
 /** Verify bytes against the app-pinned digest, then parse. Fail closed. */
 export function verifyCatalogBytes(
   bytes: Uint8Array | string,
   pin: string = CATALOG_PIN_SHA256,
   sha256Hex: (data: Uint8Array) => string,
 ): CatalogVerifyResult {
-  const data = typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes;
+  const data = normalizeCatalogPinBytes(bytes);
   const digest = sha256Hex(data);
   if (digest !== pin) {
     return { ok: false, reason: "catalog pin mismatch", digest };
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(typeof bytes === "string" ? bytes : new TextDecoder("utf-8").decode(data));
+    raw = JSON.parse(new TextDecoder("utf-8").decode(data));
   } catch {
     return { ok: false, reason: "catalog: not JSON", digest };
   }

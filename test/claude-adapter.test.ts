@@ -697,9 +697,11 @@ test("the desk mints its own token instead of taking over the shared login", () 
 
   const main = readFileSync(path.join(ROOT, "electron", "main.ts"), "utf8");
   assert.match(main, /claude:setup-token/);
-  // Stored in the desk's own vault and put on the env the child inherits.
+  // Stored in the desk's own vault, and read from there. It is never copied
+  // onto `process.env`, which every vendor child inherits.
   assert.match(main, /credentialStore\(\)\.put\(result\.token, CLAUDE_TOKEN_ID\)/);
-  assert.match(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN = token/);
+  assert.match(main, /setStoredClaudeTokenReader\(/);
+  assert.doesNotMatch(main, /process\.env\.CLAUDE_CODE_OAUTH_TOKEN\s*=/);
 
   assert.equal(findClaudeOauthToken("token: sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"), "sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345");
   assert.equal(findClaudeOauthToken("no token here"), null);

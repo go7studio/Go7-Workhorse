@@ -1487,9 +1487,17 @@ test("vendor children get ripgrep on PATH and rg is not a write", () => {
   assert.equal(env.Path, env.PATH);
   assert.equal(env.RIPGREP, fakeRg);
   assert.equal(env.GIT, fakeGit);
+  // The desk's private names go, and so does another vendor's login: a child
+  // launched for Codex, Cursor or Grok has no business reading Claude's token.
   assert.deepEqual(
-    withoutWorkhorsePrivateEnv({ PATH: "desk", WORKHORSE_BRIDGE_TOKEN: "secret", WORKHORSE_STATE_PATH: "state", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" }),
-    { PATH: "desk", CLAUDE_CODE_OAUTH_TOKEN: "vendor-login" },
+    withoutWorkhorsePrivateEnv({
+      PATH: "desk",
+      WORKHORSE_BRIDGE_TOKEN: "secret",
+      WORKHORSE_STATE_PATH: "state",
+      CLAUDE_CODE_OAUTH_TOKEN: "vendor-login",
+      ANTHROPIC_API_KEY: "vendor-key",
+    }),
+    { PATH: "desk" },
   );
 
   // A Mac machine: the same lookups take the bare name and never mirror Path.

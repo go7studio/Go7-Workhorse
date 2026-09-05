@@ -69,9 +69,11 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
   assert.equal(intelligence("claude", "claude-sonnet-4-6"), 8);
   assert.equal(intelligence("cursor", "composer-2.5"), 8);
   assert.equal(intelligence("codex", "gpt-5.5"), 8);
-  // Strong open models sit below the balanced band, not beside it
-  assert.equal(intelligence("custom", "MiniMax-M3"), 7);
-  assert.equal(intelligence("custom", "hf:moonshotai/Kimi-K3"), 7);
+  // The two open models with the coding record sit in the balanced band, so
+  // ordinary coding can reach them. The bar for balanced is still 8.
+  assert.equal(intelligence("custom", "MiniMax-M3"), 8);
+  assert.equal(intelligence("custom", "hf:moonshotai/Kimi-K3"), 8);
+  // GLM has not earned the same move and keeps the old rating.
   assert.equal(intelligence("custom", "hf:zai-org/GLM-5.2"), 7);
   // Light
   assert.equal(intelligence("claude", "claude-haiku-4-5"), 5);
@@ -91,8 +93,10 @@ test("slug order: the specific name wins before the generic one", () => {
   const intelligence = (model: string) => routingProfileForModel("custom", model).intelligence;
   assert.equal(intelligence("claude-sonnet-4-6"), 8, "sonnet-4-6 before sonnet");
   assert.equal(intelligence("claude-sonnet-5"), 9);
-  assert.equal(intelligence("MiniMax-M3"), 7, "minimax-m3 before minimax");
+  assert.equal(intelligence("MiniMax-M3"), 8, "minimax-m3 before minimax");
   assert.equal(intelligence("MiniMax-M2.7"), 6, "generic minimax is last gen");
+  assert.equal(intelligence("hf:moonshotai/Kimi-K3"), 8, "kimi before glm");
+  assert.equal(intelligence("hf:zai-org/GLM-5.2"), 7, "glm keeps the old rating");
   assert.equal(intelligence("grok-4.6"), 10, "grok-4.6 before grok-4.5");
   assert.equal(intelligence("grok-4.5"), 8);
   assert.equal(intelligence("gpt-5.4-mini"), 5, "mini before gpt-5.4");

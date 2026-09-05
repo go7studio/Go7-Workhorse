@@ -1076,6 +1076,49 @@ export const CAPACITY_SNAPSHOT_VERSION = 1 as const;
 /** Cached official-meter age past this is stale. Six hours. */
 export const CAPACITY_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/** A plan a spawn or an Auto turn is about to route on must be newer than this. */
+export const ROUTING_PLAN_STALE_AFTER_MS = 15 * 60_000;
+/** One fetch per burst. A wave of spawns must not become a wave of meter calls. */
+export const ROUTING_PLAN_REFRESH_DEBOUNCE_MS = 60_000;
+
+/**
+ * Whether routing should ask the vendors for their meters again before it picks.
+ *
+ * Nothing refreshed deskPlans except boot, the Usage pane and the setup sheet,
+ * so a desk left open all afternoon paced every spawn against a morning
+ * reading. This is the rule that fixes it, kept pure so it can be tested
+ * without a network.
+ *
+ * A plan the desk does not hold is not stale, it is unknown, and unknown stays
+ * unknown — refetching on its behalf would put a meter call on every send for a
+ * vendor that has never answered. Only plans the desk has are aged, and a plan
+ * with no observedAt is treated as old because nothing can say otherwise.
+ */
+export function shouldRefreshPlansForRouting(input: {
+  plans: WatchPlans;
+  now: number;
+  lastRefreshAt?: number;
+  staleAfterMs?: number;
+  debounceMs?: number;
+}): boolean {
+  const staleAfterMs = input.staleAfterMs ?? ROUTING_PLAN_STALE_AFTER_MS;
+  const debounceMs = input.debounceMs ?? ROUTING_PLAN_REFRESH_DEBOUNCE_MS;
+  if (input.lastRefreshAt !== undefined && input.now - input.lastRefreshAt < debounceMs) return false;
+  const held: Array<GrokPlanUsage | undefined> = [
+    input.plans.grok,
+    input.plans.codex,
+    input.plans.claude,
+    input.plans.cursor,
+    ...Object.values(input.plans.custom ?? {}),
+  ];
+  return held.some((plan) => {
+    if (!plan) return false;
+    const observed = plan.observedAt ? Date.parse(plan.observedAt) : NaN;
+    if (!Number.isFinite(observed)) return true;
+    return input.now - observed > staleAfterMs;
+  });
+}
+
 export type CapacityMeterStatus = "known" | "unknown" | "unmetered";
 export type CapacityFreshness = "fresh" | "stale" | "unknown";
 export type CapacityReasonCode = Exclude<DeskCallStatus, "ok">;

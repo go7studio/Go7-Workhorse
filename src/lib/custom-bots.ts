@@ -2,6 +2,58 @@ import { isGrokBotModel, isGrokBotUrl } from "./custom-http-identity";
 import { uid } from "./id";
 import type { CustomBot, CustomLlm, ModelRoutingProfile } from "./types";
 
+/**
+ * The triple the old bot editor wrote when nobody touched the sliders.
+ *
+ * Ticking Local, or Images, or Docs saved the whole resolved profile back,
+ * so the family default the person was only looking at became an override
+ * they never authored. Kimi K3 on this desk carried intelligence 3, which
+ * doubles to 6 and can never clear the balanced bar of 8 — Auto had a bot it
+ * was structurally unable to send ordinary coding work to, and nothing in
+ * Settings said so.
+ *
+ * No control writes this triple. The role select offers 3/5/1, 4/4/3 and
+ * 5/2/5, so 3/3/3 can only have come from the machine.
+ */
+const DEFAULT_WRITTEN_TRIPLE = { intelligence: 3, speed: 3, cost: 3 } as const;
+
+/**
+ * Drop the three numbers when they are exactly the triple the old editor wrote
+ * by itself. Anything the person really chose — Local, or which inputs the bot
+ * accepts — is theirs and stays. An absent number means the family default.
+ */
+export function withoutMachineWrittenScores(
+  profile: Partial<ModelRoutingProfile> | undefined,
+): Partial<ModelRoutingProfile> | undefined {
+  if (!profile) return undefined;
+  const machineWritten =
+    profile.intelligence === DEFAULT_WRITTEN_TRIPLE.intelligence &&
+    profile.speed === DEFAULT_WRITTEN_TRIPLE.speed &&
+    profile.cost === DEFAULT_WRITTEN_TRIPLE.cost;
+  if (!machineWritten) return profile;
+  const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = profile;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+/**
+ * What the bot editor stores when one of its controls moves.
+ *
+ * The whole point is what it does NOT store. The change is laid over whatever
+ * the person had already saved, never over the resolved profile, so ticking a
+ * checkbox cannot leave a rating behind. `"family"` drops the three numbers and
+ * keeps the rest, which is how a person takes a rating back off.
+ */
+export function routingProfileEdit(
+  saved: Partial<ModelRoutingProfile> | undefined,
+  change: Partial<ModelRoutingProfile> | "family",
+): Partial<ModelRoutingProfile> | undefined {
+  if (change === "family") {
+    const { intelligence: _intelligence, speed: _speed, cost: _cost, ...rest } = saved ?? {};
+    return Object.keys(rest).length > 0 ? rest : undefined;
+  }
+  return { ...saved, ...change };
+}
+
 function normalizeRoutingProfile(raw: unknown): Partial<ModelRoutingProfile> | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as Partial<ModelRoutingProfile>;
@@ -21,13 +73,13 @@ function normalizeRoutingProfile(raw: unknown): Partial<ModelRoutingProfile> | u
         video: record.inputs.video === true,
       }
     : undefined;
-  return {
+  return withoutMachineWrittenScores({
     ...(intelligence ? { intelligence } : {}),
     ...(speed ? { speed } : {}),
     ...(cost ? { cost } : {}),
     ...(typeof record.local === "boolean" ? { local: record.local } : {}),
     ...(inputs ? { inputs } : {}),
-  };
+  });
 }
 
 export function inferCustomApi(baseUrl: string): "anthropic-messages" | "openai-completions" {

@@ -1,6 +1,8 @@
 import type {
   ChatImage,
   EffortLevel,
+  GrokPlanProduct,
+  GrokPlanUsage,
   ModelInputCapabilities,
   ModelRoutingProfile,
   ProviderId,
@@ -282,18 +284,42 @@ export function routingCandidatesForDesk(
         // would hand it the same spare-capacity subsidy a dead gauge used to
         // get, and a 0%-used local bot already outscored a metered model that
         // fit better. No gauge means no gauge.
-        capacity:
-          paceUnmetered || profile.local
-            ? {}
-            : {
-                usedPercent: product?.usagePercent ?? capacity?.usedPercent,
-                resetsAt: product?.resetsAt ?? capacity?.resetsAt,
-                period: plan?.period ?? capacity?.period,
-              },
+        capacity: paceUnmetered || profile.local ? {} : customBotCapacity(product, plan, capacity),
       });
     }
   }
   return candidates;
+}
+
+/**
+ * A custom bot's meter, read from the closest thing to the model it serves.
+ *
+ * A stock vendor's product labels carry model slugs, so the product lookup
+ * above finds the right window and the meter lands. Synthetic labels its two
+ * products "5h" and "Weekly" — neither contains a model id — so the lookup
+ * found nothing and the whole capacity fell through to a Watch row routing is
+ * not always handed. Called with no statuses the Kimi K3 row came back as
+ * `{ period: "weekly" }`: no usedPercent, so weeklyDrawState returned nothing
+ * and a bot with over half its weekly allowance left scored with no capacity
+ * term at all. The plan the desk already holds knew the number the whole time.
+ *
+ * A source is taken whole. Splicing a product's percentage onto the plan's
+ * reset would pace a 5-hour pool against a weekly window.
+ */
+function customBotCapacity(
+  product: GrokPlanProduct | undefined,
+  plan: GrokPlanUsage | undefined,
+  status: WatchVendorStatus | undefined,
+): RoutingCapacity {
+  const period = plan?.period ?? status?.period;
+  if (product) {
+    return { usedPercent: product.usagePercent, resetsAt: product.resetsAt, period };
+  }
+  if (plan && Number.isFinite(plan.usedPercent)) {
+    return { usedPercent: plan.usedPercent, resetsAt: plan.resetsAt, period };
+  }
+  // Still no gauge anywhere: unknown stays unknown, never a guessed 0.
+  return { usedPercent: status?.usedPercent, resetsAt: status?.resetsAt, period };
 }
 
 const INPUTS: ModelInputCapabilities = {
@@ -385,7 +411,10 @@ export function routingProfileForModel(
   } else if (slug.includes("haiku")) {
     base = profile(5, 5, 1);
   } else if (slug.includes("minimax-m3")) {
-    base = profile(7, 4, 2, { strengths: CODE });
+    // Balanced band. Rated 7 it sat one point under the bar of 8, so no amount
+    // of spare capacity could put ordinary coding on it and every balanced pick
+    // went to a paid seat. The bar stays at 8; the rating is what was wrong.
+    base = profile(8, 4, 2, { strengths: CODE });
   } else if (slug.includes("local") || slug.includes("ollama") || slug.includes("lmstudio")) {
     base = profile(4, 4, 1, { local: true });
   } else if (slug.includes("minimax")) {
@@ -396,7 +425,12 @@ export function routingProfileForModel(
     base = profile(7, 5, 2);
   } else if (slug.includes("gemini")) {
     base = slug.includes("pro") ? profile(8, 4, 3) : profile(5, 5, 2);
-  } else if (slug.includes("kimi") || slug.includes("glm")) {
+  } else if (slug.includes("kimi")) {
+    // Balanced band, beside Terra and Sonnet 4.6, and cheaper than both. Kimi
+    // and GLM shared one row at 7 and both missed the bar of 8; only Kimi has
+    // the coding record to move, so GLM keeps the old rating below.
+    base = profile(8, 3, 2, { strengths: CODE });
+  } else if (slug.includes("glm")) {
     base = profile(7, 3, 2, { strengths: CODE });
   } else if (slug.includes("gpt-5.5") || slug.includes("gpt-5.4")) {
     base = profile(8, 4, 3, { strengths: CODE });
@@ -892,6 +926,41 @@ function outcomeTilt(tally: RoutingOutcomeTally | undefined): number {
   return clamp((tally.verifiedSuccesses - tally.verifiedFailures) * 1.5, -8, 8);
 }
 
+/** Why a candidate never reached scoring. Undefined means it did. */
+export type RoutingSkipReason =
+  | "not launchable"
+  | "holding"
+  | "local off"
+  | "inputs"
+  | "excluded"
+  | "grok-bot"
+  | "context";
+
+/**
+ * The one place a candidate is refused, so the ranker and the decision log can
+ * never drift about why. Order is the order the ranker applied.
+ */
+export function routingSkipReason(
+  candidate: RoutingCandidate,
+  request: RoutingRequest,
+  settings: RoutingSettings,
+  required: Partial<ModelInputCapabilities>,
+): RoutingSkipReason | undefined {
+  // Connected is not launchable. A vendor whose CLI is missing cannot be
+  // assigned work, however well it scores.
+  if (candidate.launchable === false) return "not launchable";
+  if (!candidate.connected) return "holding";
+  if (!settings.allowLocal && candidate.profile.local) return "local off";
+  if (!supports(candidate.profile, required)) return "inputs";
+  if (routingIdentityExcluded(candidate, request.exclude)) return "excluded";
+  if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) return "grok-bot";
+  // A model that cannot hold the conversation is not a worse pick, it is a
+  // failed send. Routing never knew the window before, so a 300k thread
+  // could rank onto a 128k bot and die on arrival.
+  if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) return "context";
+  return undefined;
+}
+
 export function rankRoutingCandidates(
   candidates: RoutingCandidate[],
   request: RoutingRequest,
@@ -920,16 +989,7 @@ export function rankRoutingCandidates(
     : 0;
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
-    // Connected is not launchable. A vendor whose CLI is missing cannot be
-    // assigned work, however well it scores.
-    if (candidate.launchable === false) continue;
-    if (!candidate.connected || (!settings.allowLocal && candidate.profile.local) || !supports(candidate.profile, required)) continue;
-    if (routingIdentityExcluded(candidate, request.exclude)) continue;
-    if (isGrokBotCandidate(candidate) && !grokBotAllowedOnRoute(request)) continue;
-    // A model that cannot hold the conversation is not a worse pick, it is a
-    // failed send. Routing never knew the window before, so a 300k thread
-    // could rank onto a 128k bot and die on arrival.
-    if (request.contextNeed && candidate.contextWindow && candidate.contextWindow < request.contextNeed) continue;
+    if (routingSkipReason(candidate, request, settings, required)) continue;
     const gap = candidate.profile.intelligence - minimum;
     // Falling below the bar is a quality failure and is charged by how far.
     const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
@@ -1004,6 +1064,91 @@ export function rankRoutingCandidates(
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+}
+
+/** provider/model, plus the bot id when a custom bot serves it. Identities only. */
+function routingIdentityLabel(
+  candidate: Pick<RoutingCandidate, "provider" | "model" | "customBotId">,
+): string {
+  return candidate.customBotId
+    ? `${candidate.provider}/${candidate.model}#${candidate.customBotId}`
+    : `${candidate.provider}/${candidate.model}`;
+}
+
+/** A log line has to end. Past this many names the rest are counted, not listed. */
+const ROUTING_LOG_MAX_NAMES = 12;
+
+function routingLogList(key: string, names: string[]): string[] {
+  if (names.length === 0) return [];
+  const shown = names.slice(0, ROUTING_LOG_MAX_NAMES);
+  const rest = names.length - shown.length;
+  return [`${key}=${shown.join(",")}${rest > 0 ? `+${rest}` : ""}`];
+}
+
+/**
+ * One `routing:decision` line per spawn or Auto turn.
+ *
+ * Finding out why Auto had never once sent balanced work to the Synthetic bot
+ * took a replay script against a copy of the desk state, because the desk wrote
+ * down what it picked and nothing about what it refused. This is the missing
+ * half: the tier and domain the request was read as, the winner and the runner
+ * up with the margin between them, how many candidates were eligible, and every
+ * candidate that was dropped with the reason it was dropped.
+ *
+ * Identities, tiers and numbers only. No prompt, no folder, no key — a brief in
+ * a log is a brief on disk forever.
+ */
+export function routingDecisionLogDetail(input: {
+  source: RoutingEvidenceSource;
+  candidates: RoutingCandidate[];
+  request: RoutingRequest;
+  settings: RoutingSettings;
+  selected?: Pick<RoutingCandidate, "provider" | "model" | "customBotId">;
+}): string {
+  const { candidates, request, settings } = input;
+  const tier =
+    request.tier ??
+    inferRoutingTier(request.prompt, request.attachments, { role: request.role, parentTier: request.parentTier });
+  const domain = request.taskDomain ?? inferTaskDomain(request.prompt, request.attachments);
+  const required = mergeInputRequirements(request.attachments, request.requirements);
+  const minimum = requiredIntelligence(tier);
+  const ranked = rankRoutingCandidates(candidates, { ...request, tier, taskDomain: domain }, settings);
+  const skipped: string[] = [];
+  for (const candidate of candidates) {
+    const reason = routingSkipReason(candidate, request, settings, required);
+    if (reason) skipped.push(`${routingIdentityLabel(candidate)}:${reason.replace(/ /g, "-")}`);
+  }
+  // Under the bar is not a refusal — the candidate is still scored, and charged
+  // for the gap. It is named here because it is the reason a bot that looks
+  // present never wins, which is exactly the question this line exists for.
+  const belowBar = ranked
+    .filter((row) => row.profile.intelligence < minimum)
+    .map((row) => routingIdentityLabel(row));
+  const reserved = ranked
+    .filter((row) => {
+      if (!settings.capacityAware) return false;
+      const draw = weeklyDrawState(row.capacity, request.now);
+      if (draw.usedPercent === undefined || draw.delta === undefined) return false;
+      return draw.usedPercent >= 100 - settings.reservePercent && reservePenaltyWeight(draw.resetMs) > 0;
+    })
+    .map((row) => routingIdentityLabel(row));
+  const winner = ranked[0];
+  const runnerUp = ranked[1];
+  const selected = input.selected ?? winner;
+  return [
+    `source=${input.source}`,
+    `tier=${tier}`,
+    `domain=${domain}`,
+    `bar=${minimum}`,
+    `selected=${selected ? routingIdentityLabel(selected) : "none"}`,
+    `runner_up=${runnerUp ? routingIdentityLabel(runnerUp) : "none"}`,
+    `margin=${winner && runnerUp ? Math.round((winner.score - runnerUp.score) * 10) / 10 : "none"}`,
+    `eligible=${ranked.length}`,
+    `considered=${candidates.length}`,
+    ...routingLogList("skipped", skipped),
+    ...routingLogList("below_bar", belowBar),
+    ...routingLogList("reserve", reserved),
+  ].join(" ");
 }
 
 export function chooseRoutingDecision(

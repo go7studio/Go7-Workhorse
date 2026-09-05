@@ -134,8 +134,62 @@ export const CUSTOM_NOT_CONFIGURED = "Custom model is not configured. Add a base
  * out loud and keeps the host's own words after it, because the host is still
  * the authority on its own failure.
  */
+/**
+ * The shapes a credential takes when a host quotes the request back at you.
+ *
+ * Hosts do this. A 401 body often repeats the Authorization header it rejected,
+ * and a gateway's validation error can name the field and its value. That text
+ * is carried into an error message the renderer shows, so the key would leave
+ * the main process by the one route that was never meant to carry it. Redaction
+ * happens before the message is built, so no caller can forget.
+ *
+ * Chasing vendor prefixes does not end: `sk-`, then `hf_`, then a Google key
+ * with no prefix at all, then the same key in a query string. So the last rule
+ * is not a prefix at all, it is a shape — a long opaque run, whatever issued it.
+ * The named rules above it stay because they catch shorter keys, and because a
+ * `Bearer` or a `token=` says "secret" no matter how short the value is.
+ *
+ * What every rule has to leave alone is a model id. `hf:moonshotai/Kimi-K3` is
+ * the same alphabet as a token, and a message that redacts the model it failed
+ * on has stopped being a message.
+ *
+ * Two thresholds carry that line:
+ *
+ * - A vendor prefix counts only ahead of twelve unbroken characters. That
+ *   clears `rate_limit`, which is ten, and no English phrase in an error body
+ *   runs further before its first space.
+ * - An unprefixed run counts at thirty-two characters, and only when twenty of
+ *   them are unbroken letters and digits. A hex blob is thirty-two unbroken. A
+ *   model name is words joined by hyphens, and the longest word in
+ *   `hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` — thirty-nine
+ *   characters, and a real row in Synthetic's catalog — is `Nemotron`, eight.
+ */
+const SECRET_SHAPES: [RegExp, string][] = [
+  // A parameter that names a credential. The value is secret at any length.
+  [/\b(?:api[_-]?key|access[_-]?token|authorization|token|key)=[^&\s"'#]+/gi, "[redacted]"],
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],
+  [/\bBasic\s+[A-Za-z0-9+/=_-]{16,}/gi, "Basic [redacted]"],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "[redacted]"],
+  [/\bAIza[0-9A-Za-z_-]{20,}/g, "[redacted]"],
+  [/\b(?:sk|hf|syn|pk|xai|gsk|ghp|api)[-_][A-Za-z0-9_-]{12,}[A-Za-z0-9._~+/=-]*/gi, "[redacted]"],
+  [/("(?:[a-z_-]*(?:api[_-]?key|authorization|token|secret)[a-z_-]*)"\s*:\s*")[^"]{8,}(")/gi, "$1[redacted]$2"],
+];
+
+/** A long run with no `:` or `/` in it, because those are what a model id has. */
+const OPAQUE_RUN = /\b[A-Za-z0-9_-]{32,}\b/g;
+
+/** Unbroken letters and digits inside that run. Not global: this one is only tested. */
+const DENSE_RUN = /[A-Za-z0-9]{20,}/;
+
+/** Strip anything key-shaped out of a host's own words. */
+export function redactSecrets(text: string): string {
+  let next = text;
+  for (const [shape, mask] of SECRET_SHAPES) next = next.replace(shape, mask);
+  return next.replace(OPAQUE_RUN, (run) => (DENSE_RUN.test(run) ? "[redacted]" : run));
+}
+
 export function customHttpErrorMessage(status: number, detail = ""): string {
-  const said = detail.trim().replace(/\s+/g, " ").slice(0, 180);
+  const said = redactSecrets(detail.trim().replace(/\s+/g, " ")).slice(0, 180);
   const cause =
     status === 401 || status === 403
       ? "the endpoint rejected the API key"
@@ -960,6 +1014,131 @@ async function fetchListedContext(
     return contextFromModelList(parsed, model);
   } catch {
     return undefined;
+  }
+}
+
+/** What a per-model test asks for. Exact enough that a wrong model is obvious. */
+export const CUSTOM_MODEL_TEST_PROMPT = "Reply with exactly: WORKHORSE-OK";
+
+export type CustomModelTestResult = {
+  ok: boolean;
+  model: string;
+  /** The host's own words on a failure; on success, what came back. */
+  message: string;
+  reply?: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+/** One non-streamed reply, in either dialect. Empty when the body carries none. */
+export function replyTextFromBody(raw: unknown, api: CustomApiKind): string {
+  const root = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (api !== "openai-completions") return textFromBlocks(root.content).text.trim();
+  const choices = Array.isArray(root.choices) ? root.choices : [];
+  const first = choices[0] && typeof choices[0] === "object" ? (choices[0] as Record<string, unknown>) : {};
+  const message = first.message && typeof first.message === "object" ? (first.message as Record<string, unknown>) : {};
+  const content = message.content ?? first.text;
+  if (typeof content === "string") return content.trim();
+  // Some OpenAI-compatible hosts answer with the parts array they accept.
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (part && typeof part === "object" ? (part as { text?: unknown }).text : part))
+    .filter((text): text is string => typeof text === "string")
+    .join("")
+    .trim();
+}
+
+/**
+ * Send one short completion through a bot at one named model.
+ *
+ * `probeCustomHttp` answers "is this connection alive" with a hand-written
+ * body. That was right for a connection and wrong for a model: a key can reach
+ * a host and still be unentitled to half of what the host lists, and the
+ * hand-written body is not the body a chat sends, so a dialect fault could pass
+ * here and fail in use. This goes through the same builder the chat path uses,
+ * so the headers, the api kind and the per-model sampling profile under test
+ * are the ones that will carry the real work.
+ *
+ * Two things are switched off for a one-word reply: the stream, because there
+ * is no progress to show, and the desk toolset, because a model weighing thirty
+ * tools before answering is a test of the tools.
+ */
+export async function testCustomModel(
+  config: CustomHttpConfig,
+  fetchImpl: typeof fetch = fetch,
+  clock: () => number = () => Date.now(),
+): Promise<CustomModelTestResult> {
+  const model = config.model.trim();
+  const baseUrl = config.baseUrl.trim();
+  const apiKey = grokBotDeskApiKey(baseUrl, config.apiKey.trim());
+  if (!apiKey || !model || !baseUrl) {
+    return { ok: false, model, message: CUSTOM_NOT_CONFIGURED, latencyMs: 0 };
+  }
+  const api = resolveCustomApi(config);
+  const url = customMessagesUrl(baseUrl, api);
+  const messages: CustomChatMessage[] = [{ role: "user", text: CUSTOM_MODEL_TEST_PROMPT }];
+  const body =
+    api === "openai-completions"
+      ? buildOpenAiBody({ model, messages, baseUrl, inputs: config.inputs })
+      : buildAnthropicBody({ model, messages, inputs: config.inputs });
+  body.stream = false;
+  delete body.stream_options;
+  delete body.tools;
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+    authorization: `Bearer ${apiKey}`,
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+    ...customHttpIdentityHeaders(baseUrl),
+  };
+  const startedAt = clock();
+  try {
+    const response = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) });
+    const text = await response.text();
+    const latencyMs = Math.max(0, Math.round(clock() - startedAt));
+    if (!response.ok) {
+      return { ok: false, model, latencyMs, message: customHttpErrorMessage(response.status, text) };
+    }
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    // A gateway that echoes the request into a 200 leaks by the same route a
+    // 401 does, and the prompt here is one fixed line, so nothing legitimate in
+    // this reply is ever key-shaped.
+    const reply = redactSecrets(sanitizeCustomReply(replyTextFromBody(parsed, api)));
+    const usage = parseCustomUsage(parsed);
+    if (!reply) {
+      return {
+        ok: false,
+        model,
+        latencyMs,
+        message: "The host answered without a reply.",
+        ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+      };
+    }
+    return {
+      ok: true,
+      model,
+      latencyMs,
+      reply,
+      message: reply,
+      ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      model,
+      latencyMs: Math.max(0, Math.round(clock() - startedAt)),
+      // A transport fault can name the URL it tried, and some hosts take the key
+      // in a query string. Same rule as a rejected body: nothing key-shaped
+      // leaves here.
+      message: redactSecrets(grokBotShimDownMessage(baseUrl, error)).slice(0, 200),
+    };
   }
 }
 

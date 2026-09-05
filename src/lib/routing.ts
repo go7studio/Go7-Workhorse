@@ -284,10 +284,12 @@ export function routingCandidatesForDesk(
         label: model === bot.model ? bot.name : `${bot.name} · ${model}`,
         customBotId: bot.id,
         connected: !capacity?.holding,
-        // Follow-up for lane 15 (PR #253): once contextWindowFor takes a fourth
-        // customBotId argument, pass bot.id here so a listed window belongs to
-        // this connection and never pools across two bots on the same model id.
-        contextWindow: contextWindowFor("custom", model, bot.contextWindow),
+        // The slot is named, so a window its host published belongs to this
+        // connection alone. Two bots can serve one model id — a Synthetic key
+        // and a box on this machine both answer hf:zai-org/GLM-5.2 — and
+        // without the id the wider of the two would be handed to both, sending
+        // the smaller one threads it cannot hold.
+        contextWindow: contextWindowFor("custom", model, bot.contextWindow, bot.id),
         profile,
         ...(paceUnmetered ? { paceUnmetered: true } : {}),
         // A box with no meter has no usedPercent to be ahead of. Reporting 0%

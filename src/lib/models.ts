@@ -15,6 +15,20 @@ export type ModelInfo = {
   reasoningLevels?: ReasoningLevel[];
   /** Other vendor ids that are this same family (effort/fast spellings). */
   aliases?: string[];
+  /**
+   * The host itself published this row, window included. Only a custom host
+   * sets it, and only its own `/models` answer can: a seeded row is Workhorse
+   * guessing, and a guess must never outrank the window an owner saved.
+   */
+  hostListed?: boolean;
+  /**
+   * Which custom slot published it. Two bots may serve the same model id at
+   * different windows — a Synthetic key and a self-hosted box both answer
+   * `hf:moonshotai/Kimi-K3` — and neither may inherit the other's number.
+   * Context never pools across slots, so a window is only ever read back with
+   * the bot it came from.
+   */
+  customBotId?: string;
 };
 
 export type ModelChoice = {
@@ -207,6 +221,15 @@ export function modelsFor(provider: ProviderId): ModelInfo[] {
   const live = liveCatalog[provider];
   const rows = live?.length ? live : MODEL_CATALOG[provider];
   const filtered = rows.filter((model) => model.id !== "custom" && model.name !== "Custom");
+  if (provider === "custom") {
+    // The live custom list carries one row per slot per model, because a window
+    // belongs to the slot that published it. Everything that reads this as a
+    // catalog wants one row per id, so collapse it here and leave the per-slot
+    // rows where `contextWindowFor` can still find them.
+    const byId = new Map<string, ModelInfo>();
+    for (const model of filtered) if (!byId.has(model.id)) byId.set(model.id, model);
+    return [...byId.values()];
+  }
   if (provider !== "cursor") return filtered;
   return filtered.map((model) => {
     const name = cursorModelDisplayName(model.id, model.name);
@@ -479,19 +502,60 @@ export function advertisedCodexWindow(modelId: string, reported?: number): numbe
   return Math.max(known, seen) || 272_000;
 }
 
+/**
+ * The window a live custom host published for this id.
+ *
+ * Only a row the host itself listed counts. `MODEL_CATALOG.custom` is a seed —
+ * Workhorse's guess about three ids — and the number an owner typed into the
+ * bot beats a guess. Neither beats the host saying what it actually serves, so
+ * that answer, and only that answer, is preferred here.
+ */
+/** The seeded figure for a custom id. Never a live row: those belong to one slot. */
+function seededCustomWindow(modelId: string): number {
+  const canonicalId = normalizeModelId("custom", modelId);
+  return MODEL_CATALOG.custom.find((item) => rowMatches(item, modelId, canonicalId))?.contextWindow ?? 0;
+}
+
+function liveCustomWindow(modelId: string, customBotId?: string): number | undefined {
+  const id = modelId.trim();
+  if (!id) return undefined;
+  const rows = (liveCatalog.custom ?? []).filter(
+    (item) => item.hostListed === true && item.contextWindow > 0 && (item.id === id || item.aliases?.includes(id)),
+  );
+  if (rows.length === 0) return undefined;
+  const bot = customBotId?.trim();
+  if (bot) return rows.find((item) => item.customBotId === bot)?.contextWindow;
+  // No slot named, so there is no way to tell whose window this is. One answer
+  // shared by every slot serving the id is still that id's window; two
+  // different answers are two different hosts, and picking either would hand
+  // one slot the other's context. Fall back to what the caller saved instead.
+  const windows = new Set(rows.map((item) => item.contextWindow));
+  return windows.size === 1 ? rows[0]!.contextWindow : undefined;
+}
+
 export function contextWindowFor(
   provider: ProviderId,
   modelId: string,
   customWindow?: number,
+  customBotId?: string,
 ): number {
   if (provider === "custom") {
-    // The bot's own number is whatever it was created with, and a connection
-    // saved before its model was catalogued carries the 128k default. Taking it
-    // on its own read a 524k Kimi K3 as 128k, and routing then skipped it on
-    // any thread wider than that. Widest wins, the same rule Claude uses above:
-    // the catalog is the vendor's published figure, the bot's is a default or a
-    // probe, and neither is allowed to shrink the other.
-    const known = findModel(provider, modelId)?.contextWindow ?? 0;
+    // What this slot's own host said, if it said anything. That answer outranks
+    // widest-wins below, and it is allowed to be narrower: a box on this machine
+    // serving a familiar id at 32k is not the hosted model of the same name, and
+    // widening it to the catalog's figure would send it threads it cannot hold.
+    const listed = liveCustomWindow(modelId, customBotId);
+    if (listed) return listed;
+    // Otherwise widest wins. The bot's own number is whatever it was created
+    // with, and a connection saved before its model was catalogued carries the
+    // 128k default. Taking it on its own read a 524k Kimi K3 as 128k, and
+    // routing then skipped it on any thread wider than that. The catalog is the
+    // vendor's published figure, the bot's is a default or a probe, and neither
+    // is allowed to shrink the other.
+    //
+    // The seed, never the live rows: those are per-slot, and reading one here
+    // would hand a slot that published nothing another slot's context.
+    const known = seededCustomWindow(modelId);
     const reported = customWindow && customWindow > 0 ? customWindow : 0;
     return Math.max(known, reported) || 128_000;
   }

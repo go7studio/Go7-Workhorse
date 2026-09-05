@@ -144,10 +144,14 @@ test("a non-2xx says which door closed, not just a number and a blob", async () 
 
   // Detail is bounded and the host's noise is flattened, but the meaning
   // survives ahead of it — the old blob put 400 characters of JSON first.
-  const long = customHttpErrorMessage(401, `${"x".repeat(400)}`);
+  //
+  // The noise is words, not one 400-character run: an unbroken run that long is
+  // a credential by any reading, and redaction now takes it before truncation
+  // ever gets the chance. Words are what a long error body is actually made of.
+  const long = customHttpErrorMessage(401, "overloaded ".repeat(40));
   assert.match(long, /rejected the API key/);
   assert.ok(long.length < 260, `the detail is trimmed, got ${long.length} characters`);
-  assert.equal((long.match(/x/g) ?? []).length, 180, "the first 180 characters of detail are kept");
+  assert.equal(long.slice(long.indexOf("— ") + 2).length, 180, "the first 180 characters of detail are kept");
   assert.equal(customHttpErrorMessage(500), "Custom model HTTP 500", "no detail means no dangling separator");
   assert.equal(customHttpErrorMessage(500, "   "), "Custom model HTTP 500");
 });

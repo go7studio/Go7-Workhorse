@@ -175,6 +175,15 @@ contextBridge.exposeInMainWorld("workhorse", {
   customModels: (config: { baseUrl: string; apiKey: string }) => ipcRenderer.invoke("custom:models", config),
   probeCustom: (config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) =>
     ipcRenderer.invoke("custom:probe", config),
+  /** What this bot's host lists, by bot id. The key is resolved in main and never crosses. */
+  customBotCatalog: (botId: string, refresh?: boolean) =>
+    ipcRenderer.invoke("customBot:catalog", { botId, refresh }) as Promise<
+      import("./custom-catalog").CustomCatalog | null
+    >,
+  testCustomBotModel: (botId: string, model: string) =>
+    ipcRenderer.invoke("customBot:test-model", { botId, model }) as Promise<
+      import("./custom-http").CustomModelTestResult
+    >,
   customPrompt: (input: import("./custom-host").CustomPromptInput) => ipcRenderer.invoke("custom:prompt", input),
   probeMcpServer: (serverName: string) =>
     ipcRenderer.invoke("mcp:probe", serverName) as Promise<import("../src/lib/types").McpProbeResult>,

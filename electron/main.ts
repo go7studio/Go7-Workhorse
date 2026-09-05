@@ -20,8 +20,9 @@ import { setStoredClaudeTokenReader } from "./claude-stored-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
-import { probeCustomHttp } from "./custom-http";
-import { listVendorModels, rememberVendorModels } from "./vendor-models";
+import { probeCustomHttp, testCustomModel } from "./custom-http";
+import { cachedCustomCatalog, readCustomCatalog } from "./custom-catalog";
+import { listVendorModels, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
@@ -95,7 +96,7 @@ import {
   rememberFolderBookmark,
 } from "./folder-access";
 import { normalizeSettings } from "../src/lib/settings";
-import { customBotModels } from "../src/lib/custom-bots";
+import { customBotEnabled, customBotModels } from "../src/lib/custom-bots";
 import { routingProfileForModel } from "../src/lib/routing";
 import type { AdaptiveCandidate } from "../src/lib/learning-policy";
 import { LearningService } from "./learning-service";
@@ -109,7 +110,7 @@ import { checkPackUpdate, installFromFolder, installFromRepo, removePack, update
 import { createWorkshopBreakoutWindow } from "./workshop-window";
 import { disablePacksForReconfirm, normalizeWorkshopSettings } from "../src/lib/workshop-pack";
 import { ephemeralCustomAuxiliary, providerAllowsEphemeralAuxiliary, resolveCompilerBotConfig } from "./learning-aux";
-import type { Settings } from "../src/lib/types";
+import type { CustomBot, Settings } from "../src/lib/types";
 import {
   WORKHORSE_APP_ID,
   WORKHORSE_BUILD_MARKER,
@@ -1871,6 +1872,71 @@ app.whenReady().then(async () => {
   ipcMain.handle("custom:probe", async (_event, config: { baseUrl: string; apiKey: string; model: string; api?: "anthropic-messages" | "openai-completions" }) => {
     return probeCustomHttp(config);
   });
+
+  /**
+   * A bot's live URL and key, resolved here and never handed back.
+   *
+   * The renderer asks by bot id alone, so the two handlers below take nothing
+   * secret in and return nothing secret out. Vault first, then the shell key an
+   * OpenClaw install already holds for that host.
+   */
+  const customBotCredential = (raw: unknown): { bot: CustomBot; apiKey: string } | undefined => {
+    const botId = typeof raw === "string" ? raw.trim() : "";
+    const bot = botId ? liveSettings.customBots.find((item) => item.id === botId) : undefined;
+    if (!bot) return undefined;
+    let apiKey = bot.apiKey?.trim() ?? "";
+    if (!apiKey && bot.credentialId) {
+      try {
+        apiKey = credentialStore().get(bot.credentialId);
+      } catch {
+        apiKey = "";
+      }
+    }
+    if (!apiKey && bot.baseUrl) {
+      try {
+        apiKey = openClawKeyForBaseUrl(bot.baseUrl);
+      } catch {
+        apiKey = "";
+      }
+    }
+    return { bot, apiKey };
+  };
+
+  /*
+   * Both handlers below reach a third-party host with a real credential, so
+   * both refuse a disabled slot. Turning a bot off is how a person stops it
+   * costing them anything, and opening Settings is not consent to spend on it
+   * again.
+   */
+  ipcMain.handle("customBot:catalog", async (_event, payload: { botId?: unknown; refresh?: unknown }) => {
+    const found = customBotCredential(payload?.botId);
+    if (!found?.apiKey.trim()) return null;
+    return (
+      (await readCustomCatalog({
+        botId: found.bot.id,
+        baseUrl: found.bot.baseUrl,
+        apiKey: found.apiKey,
+        enabled: customBotEnabled(found.bot),
+        refresh: payload?.refresh === true,
+      })) ?? null
+    );
+  });
+
+  ipcMain.handle("customBot:test-model", async (_event, payload: { botId?: unknown; model?: unknown }) => {
+    const model = typeof payload?.model === "string" ? payload.model.trim() : "";
+    const found = customBotCredential(payload?.botId);
+    if (!found) return { ok: false, model, message: "That bot is gone.", latencyMs: 0 };
+    if (!customBotEnabled(found.bot)) {
+      return { ok: false, model, message: "This bot is off. Turn it on to test its models.", latencyMs: 0 };
+    }
+    if (!model) return { ok: false, model, message: "Name a model to test.", latencyMs: 0 };
+    return testCustomModel({
+      baseUrl: found.bot.baseUrl,
+      apiKey: found.apiKey,
+      model,
+      api: found.bot.api,
+    });
+  });
   ipcMain.handle("mcp:probe", async (_event, serverName: unknown) => {
     const name = typeof serverName === "string" ? serverName.trim() : "";
     if (!name) return { ok: false, message: "Choose a saved MCP server.", tools: [] };
@@ -1878,7 +1944,31 @@ app.whenReady().then(async () => {
     if (!saved) return { ok: false, message: "Save this MCP server before testing it.", tools: [] };
     return probeMcpServer(saved);
   });
-  ipcMain.handle("models:list", () => listVendorModels({ userData: app.getPath("userData") }));
+  /**
+   * The custom half of the desk catalog, from what each enabled bot's host has
+   * already published. This reads the cache and never waits on a host: a model
+   * list must not be able to stall a boot.
+   *
+   * It does ask, in the background, for any bot whose answer has gone stale.
+   * The fifteen-minute cache is the bound — at most one GET per host per
+   * quarter hour, and only for a bot that is on and has a key — so the first
+   * read after a launch shows the window saved on the bot and the host's own
+   * number is there by the next refresh.
+   */
+  const customBotCatalogs = (): CustomBotCatalog[] => {
+    const rows: CustomBotCatalog[] = [];
+    for (const bot of liveSettings.customBots) {
+      if (bot.enabled === false) continue;
+      rows.push({ bot, catalog: cachedCustomCatalog(bot.id, bot.baseUrl) });
+      const found = customBotCredential(bot.id);
+      if (!found?.apiKey.trim()) continue;
+      void readCustomCatalog({ botId: bot.id, baseUrl: bot.baseUrl, apiKey: found.apiKey }).catch(() => undefined);
+    }
+    return rows;
+  };
+  ipcMain.handle("models:list", () =>
+    listVendorModels({ userData: app.getPath("userData"), customBots: customBotCatalogs() }),
+  );
   /** Seed rows plus what Claude last advertised. Anything else was typed. */
   const claudeModelListed = (model: string): boolean => {
     const raw = model.trim().toLowerCase();

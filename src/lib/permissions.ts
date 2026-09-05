@@ -6,7 +6,7 @@ import type { BotAccessDefaults, DeskAccess, PermissionGrant, PermissionMode, Pe
 
 export type PermissionAnswer = "once" | "session" | "deny";
 
-const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
+const DELEGATION_TOOLS = /^(?:task|agent|launch_agent|spawn_agent|spawn_subagent|delegate)$/;
 
 /**
  * A sub-agent launch carries the whole assignment as its detail, so the words
@@ -17,6 +17,12 @@ const DELEGATION_TOOLS = /^(?:spawn_agent|spawn_subagent|delegate)$/;
  */
 export function looksLikeDelegationTool(tool: string, detail: string): boolean {
   if (DELEGATION_TOOLS.test(toolNameKey(tool))) return true;
+  // Past this line the evidence is a field inside vendor-supplied text, and a
+  // shell must never be excused by its own envelope: a call named "Run a
+  // command" carrying {"variant":"Task","command":"rm -rf src"} is a command.
+  // The name is judged on its own, so a brief that merely mentions bash is
+  // still a brief.
+  if (shellByName(tool)) return false;
   const text = detail.trim();
   if (!text.startsWith("{")) return false;
   try {
@@ -105,10 +111,16 @@ export function looksLikeWriteTool(tool: string, detail: string, filePath?: stri
  * is still a brief.
  */
 const SHELL_TOOL_NAMES = /\b(run a command|execute|terminal|run_terminal_cmd|local_shell|shell_command)\b/i;
+const SHELL_WORDS = /\b(bash|shell|powershell|cmd\.exe|run command|run_command)\b/i;
+
+/** The NAME says shell, whatever the detail holds. */
+function shellByName(tool: string): boolean {
+  return SHELL_TOOL_NAMES.test(tool) || SHELL_WORDS.test(tool);
+}
 
 export function looksLikeShellTool(tool: string, detail: string): boolean {
-  if (SHELL_TOOL_NAMES.test(tool)) return true;
-  return /\b(bash|shell|powershell|cmd\.exe|run command|run_command)\b/i.test(`${tool} ${detail}`);
+  if (shellByName(tool)) return true;
+  return SHELL_WORDS.test(`${tool} ${detail}`);
 }
 
 export function looksLikeNetworkTool(tool: string, detail: string): boolean {
@@ -138,6 +150,8 @@ export function securityPolicyAnswer(input: {
   detail: string;
   path?: string;
   roots?: string[];
+  /** Where the command runs, so a `..` inside it is measured from the right place. */
+  cwd?: string;
 }): { answer: PermissionAnswer | null; boundary?: "network" | "outside-workspace" } {
   const policy = input.policy ?? { network: "allowed", root: "allowed" };
   if (policy.network === "blocked" && looksLikeNetworkTool(input.tool, input.detail)) {
@@ -162,7 +176,8 @@ export function securityPolicyAnswer(input: {
     !looksLikeDelegationTool(input.tool, input.detail)
   ) {
     const command = shellCommandIn(input.detail) ?? input.detail;
-    if (absolutePathsIn(command).some(outside)) {
+    const cwd = (input.cwd ?? "").trim() || (roots[0] ?? "");
+    if (commandPaths(command, cwd).some(outside)) {
       if (policy.root === "blocked") return { answer: "deny", boundary: "outside-workspace" };
       if (policy.root === "ask") return { answer: null, boundary: "outside-workspace" };
     }
@@ -293,8 +308,12 @@ function shellWalk(command: string): CommandWalk {
         index += 1;
         continue;
       }
+      // The closing quote is kept as well as the opening one, so a quoted
+      // token carries a matching pair. Keeping only the opening quote meant
+      // `cat "/etc/passwd"` never looked like a path and walked past the root
+      // check.
+      token += char;
       if (char === quote) quote = null;
-      else token += char;
       continue;
     }
     if (char === '"' || char === "'") {
@@ -334,14 +353,55 @@ function shellWalk(command: string): CommandWalk {
   return { stages, unsafe };
 }
 
-/** Absolute paths a command names, so a root boundary can be applied to them. */
-function absolutePathsIn(command: string): string[] {
+/** A matching pair of surrounding quotes comes off; a lone one does not. */
+function unquote(value: string): string {
+  const first = value[0];
+  if ((first === '"' || first === "'") && value.length > 1 && value.endsWith(first)) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+/** A token that walks out of its own folder. Nothing else can leave the cwd. */
+function climbsOut(value: string): boolean {
+  return /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+}
+
+/**
+ * Resolve a relative path against the folder the command runs in, so `..` is
+ * measured where it actually lands. `cat ../../etc/passwd` named no absolute
+ * path, so the root check had nothing to test and let it through.
+ */
+function resolveFrom(base: string, value: string): string {
+  const combined = absolutePath(value) ? value : `${base}/${value}`;
+  const parts = comparable(combined).split("/");
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part === ".") continue;
+    if (part === "..") {
+      if (out.length > 1) out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out.join("/") || "/";
+}
+
+/**
+ * The paths a command names, so a root boundary can be applied to them.
+ * Absolute paths stand as they are; a path that climbs out with `..` is
+ * resolved against the folder the command runs in.
+ */
+function commandPaths(command: string, cwd: string): string[] {
   const found: string[] = [];
   for (const stage of shellWalk(command).stages) {
     for (const token of [stage.program, ...stage.args]) {
       if (token.includes("://")) continue;
-      const value = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
-      if (value && absolutePath(value)) found.push(value);
+      const afterFlag = token.includes("=") ? token.slice(token.indexOf("=") + 1) : token;
+      const value = unquote(afterFlag);
+      if (!value) continue;
+      if (absolutePath(value)) found.push(value);
+      else if (cwd && climbsOut(value)) found.push(resolveFrom(cwd, value));
     }
   }
   return found;

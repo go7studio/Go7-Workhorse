@@ -6990,6 +6990,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               detail: event.detail,
               path: event.path,
               roots: ownerProject?.folders.map((folder) => folder.path) ?? [],
+              // Where this worker actually runs, so a `..` inside a command is
+              // measured from there. A worktree session is not its project
+              // folder, and resolving against the wrong one moves the boundary.
+              cwd: sessionExecutionCwd(owner.environment, primaryFolder(ownerProject, folderExists)?.path ?? ""),
             })
           : { answer: null };
         const forced = security.answer ?? (owner

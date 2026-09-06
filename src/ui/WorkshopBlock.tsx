@@ -123,13 +123,19 @@ function vLabel(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-/** Catalog rows have id + summary, not pack.json name — title-case the id for Available. */
+/** Catalog rows have id + summary, not pack.json name — title-case the id for Pending. */
 function catalogDisplayName(id: string): string {
   return id
     .split("-")
     .filter(Boolean)
     .map((part, i) => (i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))
     .join(" ");
+}
+
+/** Letter mark when packs have no logo asset — identity only on collapsed rows. */
+function packMark(title: string): string {
+  const ch = title.trim().charAt(0);
+  return ch ? ch.toUpperCase() : "?";
 }
 
 function provenance(pack: PackListing): string {
@@ -170,8 +176,10 @@ export function WorkshopBlock({
   const [busy, setBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [peerUrlOpen, setPeerUrlOpen] = useState(false);
-  const availableRef = useRef<HTMLHeadingElement>(null);
-  const installedRef = useRef<HTMLHeadingElement>(null);
+  /** Accordion: at most one Manage row expanded. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const pendingRef = useRef<HTMLHeadingElement>(null);
+  const activeRef = useRef<HTMLHeadingElement>(null);
   const peerUrlRef = useRef<HTMLInputElement>(null);
   const inSheet = surface === "sheet";
 
@@ -230,16 +238,16 @@ export function WorkshopBlock({
     return () => stop?.();
   }, [reload]);
 
-  // Add packs (zero installed) → Available-first; Manage / Turn on with any installed → Installed.
+  // Add packs (zero installed) → Pending-first; Manage / Turn on with any On → Active.
   useEffect(() => {
     if (!inSheet) return;
     const id = window.requestAnimationFrame(() => {
       if (focusAvailable) {
-        availableRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
-        availableRef.current?.focus();
+        pendingRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        pendingRef.current?.focus();
       } else {
-        installedRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
-        installedRef.current?.focus();
+        activeRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        activeRef.current?.focus();
       }
     });
     return () => window.cancelAnimationFrame(id);
@@ -257,9 +265,16 @@ export function WorkshopBlock({
 
   const openConfirm = (pack: PackListing) => {
     setRemoveConfirmId(null);
+    setExpandedId(pack.id);
     setConfirmId(pack.id);
     setHostId(hosts.some((host) => host.id === pack.hostId) ? (pack.hostId as string) : hosts[0]?.id ?? "");
     setChecked(pack.sources.map((source) => source.id));
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedId((cur) => (cur === id ? null : id));
+    setConfirmId(null);
+    setRemoveConfirmId(null);
   };
 
   const turnOn = (pack: PackListing) =>
@@ -407,6 +422,65 @@ export function WorkshopBlock({
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
   const catalogState = catalog;
+  const activePacks = packs.filter((pack) => pack.on);
+  const pendingInstalled = packs.filter((pack) => !pack.on);
+  const pendingCatalog =
+    catalogState && catalogState.ok && !catalogState.unreachable && !catalogState.pinFailed && !catalogState.expired
+      ? catalogState.packs.filter((entry) => {
+          const installed = packs.find((pack) => pack.id === entry.id);
+          // Hide same-version Installed; keep yanked + Update rows visible under Pending.
+          if (!installed) return true;
+          if (entry.yanked) return true;
+          return installed.version !== entry.version;
+        })
+      : [];
+
+  const confirmPanel = (pack: PackListing) => (
+    <div className="workshop-confirm">
+      {hosts.length === 0 ? (
+        <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
+      ) : (
+        <label className="row-meta">
+          Host
+          <select value={hostId} onChange={(event) => setHostId(event.target.value)} aria-label="Host">
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <p className="row-meta workshop-sources-label">Sources</p>
+      <ul className="workshop-sources" aria-label="Sources">
+        {pack.sources.map((source) => {
+          const host = hosts.find((item) => item.id === hostId);
+          const urls = host ? packSourceUrls(host.baseUrl, pack.id, asPackSource(source)) : [];
+          const on = checked.includes(source.id);
+          return (
+            <li key={source.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => setChecked((prev) => (on ? prev.filter((sid) => sid !== source.id) : [...prev, source.id]))}
+                />
+                <strong>{source.id}</strong>
+                <span className="row-meta">
+                  {[source.kind, cadence(source.pollMs), source.kind === "json" ? byteCap(source.maxBytes) : ""].filter(Boolean).join(" · ")}
+                </span>
+              </label>
+              {urls.map((line) => (
+                <code key={line} className="workshop-url" title={line}>
+                  GET {shortSourceUrl(line)}
+                </code>
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 
   return (
     <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
@@ -429,203 +503,233 @@ export function WorkshopBlock({
         </div>
       )}
 
-      <h3 ref={installedRef} id="workshop-installed" className="workshop-section-title" tabIndex={-1}>Installed</h3>
-      <p className="row-meta workshop-blurb">This desk only.</p>
-      {packs.length === 0 ? (
-        <p className="row-meta workshop-blurb workshop-installed-coachmark">
-          Nothing installed. Pick one under Available.
-        </p>
+      <h3 ref={activeRef} id="workshop-active" className="workshop-section-title" tabIndex={-1}>
+        Active
+      </h3>
+      {activePacks.length === 0 ? (
+        <p className="row-meta workshop-blurb workshop-active-empty">None on.</p>
       ) : (
         <ul className="pack-list">
-          {packs.map((pack) => {
+          {activePacks.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
-            const confirming = confirmId === pack.id && !pack.on && !pack.refused;
+            const expanded = expandedId === pack.id;
+            const summary = pack.description?.trim() || "";
             return (
-              <li key={pack.id} className="pack-row">
-                <div className="workshop-pack">
-                  <strong>
-                    {pack.name} <span className="row-meta">{vLabel(pack.version)}</span>
-                  </strong>
-                  {pack.description ? <em className="workshop-pack-desc" title={pack.description}>{pack.description}</em> : null}
-                  {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
-                  <span className="row-meta">
-                    {pack.refused
-                      ? `Refused: ${pack.refused}`
-                      : pack.on
-                        ? `On · ${hostLabel(pack.hostId)}${pack.granted.length ? ` · ${pack.granted.length} source${pack.granted.length === 1 ? "" : "s"}` : ""}`
-                        : "Off"}
+              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                <button
+                  type="button"
+                  className="workshop-row-hit"
+                  aria-expanded={expanded}
+                  onClick={() => toggleExpanded(pack.id)}
+                >
+                  <span className="workshop-pack-mark" aria-hidden="true">
+                    {packMark(pack.name)}
                   </span>
-                  {update?.note ? <span className="row-meta">{update.note}</span> : null}
-                  {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
-                  {update && !update.reason && !update.note && !latest ? <span className="row-meta">Up to date · {vLabel(update.current)}</span> : null}
-                  {pack.collector ? (
-                    <span className="row-meta workshop-collector">
-                      <button
-                        className="tiny"
-                        type="button"
-                        title="Collector · Reveal folder (Workhorse never runs it)"
-                        onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
-                      >
-                        Collector · Reveal
-                      </button>
+                  <strong className="workshop-row-title">{pack.name}</strong>
+                </button>
+                {expanded ? (
+                  <div className="workshop-row-detail">
+                    {summary ? <p className="row-meta workshop-pack-summary" title={summary}>{summary}</p> : null}
+                    <span className="row-meta">
+                      {pack.refused
+                        ? `Refused: ${pack.refused}`
+                        : `${hostLabel(pack.hostId)}${pack.granted.length ? ` · ${pack.granted.length} source${pack.granted.length === 1 ? "" : "s"}` : ""}`}
                     </span>
-                  ) : null}
-                  {confirming ? (
-                    <div className="workshop-confirm">
-                      {hosts.length === 0 ? (
-                        <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
-                      ) : (
-                        <label className="row-meta">
-                          Host
-                          <select value={hostId} onChange={(event) => setHostId(event.target.value)} aria-label="Host">
-                            {hosts.map((host) => (
-                              <option key={host.id} value={host.id}>
-                                {host.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                      <p className="row-meta workshop-sources-label">Sources</p>
-                      <ul className="workshop-sources" aria-label="Sources">
-                        {pack.sources.map((source) => {
-                          const host = hosts.find((item) => item.id === hostId);
-                          const urls = host ? packSourceUrls(host.baseUrl, pack.id, asPackSource(source)) : [];
-                          const on = checked.includes(source.id);
-                          return (
-                            <li key={source.id}>
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  checked={on}
-                                  onChange={() => setChecked((prev) => (on ? prev.filter((sid) => sid !== source.id) : [...prev, source.id]))}
-                                />
-                                <strong>{source.id}</strong>
-                                <span className="row-meta">
-                                  {[source.kind, cadence(source.pollMs), source.kind === "json" ? byteCap(source.maxBytes) : ""].filter(Boolean).join(" · ")}
-                                </span>
-                              </label>
-                              {urls.map((line) => (
-                                <code key={line} className="workshop-url" title={line}>
-                                  GET {shortSourceUrl(line)}
-                                </code>
-                              ))}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-                <span className="pack-row-side">
-                  {pack.refused ? (
-                    <span className="row-meta">Refused</span>
-                  ) : pack.on ? (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>
-                      Turn off
-                    </button>
-                  ) : confirming ? (
-                    <>
-                      {hosts.length > 0 ? (
-                        <button className="tiny primary" type="button" disabled={busy || !hostId || checked.length === 0} onClick={() => void turnOn(pack)}>
-                          Confirm
+                    {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
+                    {update?.note ? <span className="row-meta">{update.note}</span> : null}
+                    {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
+                    {update && !update.reason && !update.note && !latest ? (
+                      <span className="row-meta">Up to date · {vLabel(update.current)}</span>
+                    ) : null}
+                    {pack.collector ? (
+                      <span className="row-meta workshop-collector">
+                        <button
+                          className="tiny"
+                          type="button"
+                          title="Collector · Reveal folder (Workhorse never runs it)"
+                          onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                        >
+                          Collector · Reveal
                         </button>
+                      </span>
+                    ) : null}
+                    <span className="pack-row-side workshop-row-actions">
+                      {pack.refused ? (
+                        <span className="row-meta">Refused</span>
+                      ) : (
+                        <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>
+                          Turn off
+                        </button>
+                      )}
+                      {isRepo ? (
+                        latest ? (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
+                            {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
+                          </button>
+                        ) : (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
+                            Update
+                          </button>
+                        )
                       ) : null}
-                      <button className="tiny" type="button" disabled={busy} onClick={() => setConfirmId(null)}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
-                      Turn on
-                    </button>
-                  )}
-                  {isRepo ? (
-                    latest ? (
-                      <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
-                        {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
-                      </button>
-                    ) : (
-                      <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
-                        Update
-                      </button>
-                    )
-                  ) : null}
-                  {removeConfirmId === pack.id ? (
-                    <>
-                      <button
-                        className="tiny primary"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void remove(pack.id)}
-                      >
-                        Confirm remove
-                      </button>
-                      <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => { setConfirmId(null); setRemoveConfirmId(pack.id); }}>
-                      Remove
-                    </button>
-                  )}
-                </span>
+                      {removeConfirmId === pack.id ? (
+                        <>
+                          <button className="tiny primary" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
+                            Confirm remove
+                          </button>
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="tiny"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmId(null);
+                            setRemoveConfirmId(pack.id);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
       )}
 
-      <div className="workshop-available-head">
-        <h3 ref={availableRef} id="workshop-available" className="workshop-section-title" tabIndex={-1}>Available</h3>
-        <div className="workshop-peer-add">
-          <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()} title="Add a local pack folder">
-            Add local
-          </button>
-          <button
-            className="tiny"
-            type="button"
-            disabled={busy}
-            aria-expanded={peerUrlOpen}
-            title="Add a pack from a public GitHub URL"
-            onClick={() => {
-              setPeerUrlOpen((open) => {
-                const next = !open;
-                if (next) {
-                  requestAnimationFrame(() => peerUrlRef.current?.focus());
-                }
-                return next;
-              });
-            }}
-          >
-            Add from URL
-          </button>
-        </div>
-      </div>
-      <p className="row-meta workshop-blurb">Install lands Off. Turn on confirms what it reads.</p>
-      {peerUrlOpen ? (
-        <div className="workshop-add workshop-peer-url">
-          <input
-            ref={peerUrlRef}
-            className="settings-search"
-            type="url"
-            value={url}
-            placeholder="https://github.com/owner/repo"
-            aria-label="Pack repo URL"
-            disabled={busy}
-            onChange={(event) => setUrl(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && url.trim()) void addRepo();
-            }}
-          />
-          <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
-            Add
-          </button>
-        </div>
+      <h3 ref={pendingRef} id="workshop-pending" className="workshop-section-title" tabIndex={-1}>
+        Pending
+      </h3>
+      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok ? (
+        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing pending.</p>
       ) : null}
+
+      {pendingInstalled.length > 0 ? (
+        <ul className="pack-list">
+          {pendingInstalled.map((pack) => {
+            const update = updates[pack.id];
+            const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
+            const isRepo = pack.installed?.kind === "repo";
+            const expanded = expandedId === pack.id;
+            const confirming = confirmId === pack.id && !pack.refused;
+            const summary = pack.description?.trim() || "";
+            return (
+              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                <div className="workshop-row-chrome">
+                  <button
+                    type="button"
+                    className="workshop-row-hit"
+                    aria-expanded={expanded}
+                    onClick={() => toggleExpanded(pack.id)}
+                  >
+                    <span className="workshop-pack-mark" aria-hidden="true">
+                      {packMark(pack.name)}
+                    </span>
+                    <strong className="workshop-row-title">{pack.name}</strong>
+                  </button>
+                  {!expanded && !pack.refused ? (
+                    <button className="tiny" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                      Turn on
+                    </button>
+                  ) : null}
+                </div>
+                {expanded ? (
+                  <div className="workshop-row-detail">
+                    {summary ? <p className="row-meta workshop-pack-summary" title={summary}>{summary}</p> : null}
+                    {pack.refused ? <span className="row-meta">Refused: {pack.refused}</span> : null}
+                    {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
+                    {update?.note ? <span className="row-meta">{update.note}</span> : null}
+                    {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
+                    {update && !update.reason && !update.note && !latest ? (
+                      <span className="row-meta">Up to date · {vLabel(update.current)}</span>
+                    ) : null}
+                    {pack.collector ? (
+                      <span className="row-meta workshop-collector">
+                        <button
+                          className="tiny"
+                          type="button"
+                          title="Collector · Reveal folder (Workhorse never runs it)"
+                          onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                        >
+                          Collector · Reveal
+                        </button>
+                      </span>
+                    ) : null}
+                    {confirming ? confirmPanel(pack) : null}
+                    <span className="pack-row-side workshop-row-actions">
+                      {pack.refused ? (
+                        <span className="row-meta">Refused</span>
+                      ) : confirming ? (
+                        <>
+                          {hosts.length > 0 ? (
+                            <button
+                              className="tiny primary"
+                              type="button"
+                              disabled={busy || !hostId || checked.length === 0}
+                              onClick={() => void turnOn(pack)}
+                            >
+                              Confirm
+                            </button>
+                          ) : null}
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="tiny primary" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                          Turn on
+                        </button>
+                      )}
+                      {isRepo ? (
+                        latest ? (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
+                            {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
+                          </button>
+                        ) : (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
+                            Update
+                          </button>
+                        )
+                      ) : null}
+                      {removeConfirmId === pack.id ? (
+                        <>
+                          <button className="tiny primary" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
+                            Confirm remove
+                          </button>
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="tiny"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmId(null);
+                            setRemoveConfirmId(pack.id);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
       {catalogState == null ? (
         <p className="row-meta">Loading catalog…</p>
       ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed || catalogState.expired ? (
@@ -650,84 +754,133 @@ export function WorkshopBlock({
               Refresh
             </button>
           </div>
-          <ul className="pack-list">
-            {catalogState.packs
-              .filter((entry) => {
+          {pendingCatalog.length > 0 ? (
+            <ul className="pack-list">
+              {pendingCatalog.map((entry) => {
                 const installed = packs.find((pack) => pack.id === entry.id);
-                // Hide same-version Installed; keep yanked + Update rows visible.
-                if (!installed) return true;
-                if (entry.yanked) return true;
-                return installed.version !== entry.version;
-              })
-              .map((entry) => {
-              const installed = packs.find((pack) => pack.id === entry.id);
-              const sameVersion = installed?.version === entry.version;
-              const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
-              const disabled =
-                busy ||
-                entry.installDisabled ||
-                !catalogState.installAllowed ||
-                (Boolean(installed) && sameVersion);
-              return (
-                <li key={entry.id} className="pack-row">
-                  <div className="workshop-pack">
-                    <strong>
-                      {catalogDisplayName(entry.id)} <span className="row-meta">{vLabel(entry.version)}</span>
-                    </strong>
-                    <span className="row-meta">{entry.id}</span>
-                    {/* Plain text only — never markdown/HTML from catalog fields. */}
-                    <span className="row-meta workshop-pack-blurb">{entry.summary}</span>
-                    <span className="row-meta">Rail · {entry.rail}</span>
-                    {entry.yanked ? <span className="row-meta">Yanked</span> : null}
-                    {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
-                    {needsUpdate ? (
-                      <span className="row-meta">
-                        Installed {vLabel(installed!.version)} — Update drops to Off
-                      </span>
+                const sameVersion = installed?.version === entry.version;
+                const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
+                const disabled =
+                  busy ||
+                  entry.installDisabled ||
+                  !catalogState.installAllowed ||
+                  (Boolean(installed) && sameVersion);
+                const title = catalogDisplayName(entry.id);
+                const expanded = expandedId === `catalog:${entry.id}`;
+                const summary = entry.summary?.trim() || "";
+                return (
+                  <li key={entry.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                    <div className="workshop-row-chrome">
+                      <button
+                        type="button"
+                        className="workshop-row-hit"
+                        aria-expanded={expanded}
+                        onClick={() => toggleExpanded(`catalog:${entry.id}`)}
+                      >
+                        <span className="workshop-pack-mark" aria-hidden="true">
+                          {packMark(title)}
+                        </span>
+                        <strong className="workshop-row-title">{title}</strong>
+                      </button>
+                      {!expanded ? (
+                        <button
+                          className="tiny primary"
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => void installAvailable(entry.id)}
+                        >
+                          {needsUpdate ? "Update" : "Install"}
+                        </button>
+                      ) : null}
+                    </div>
+                    {expanded ? (
+                      <div className="workshop-row-detail">
+                        {summary ? (
+                          <p className="row-meta workshop-pack-summary workshop-pack-blurb" title={summary}>
+                            {summary}
+                          </p>
+                        ) : null}
+                        <span className="row-meta">{vLabel(entry.version)} · {entry.id}</span>
+                        {entry.yanked ? <span className="row-meta">Yanked</span> : null}
+                        {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
+                        {needsUpdate ? (
+                          <span className="row-meta">
+                            Installed {vLabel(installed!.version)} — Update drops to Off
+                          </span>
+                        ) : null}
+                        <span className="pack-row-side workshop-row-actions">
+                          <button
+                            className="tiny primary"
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => void installAvailable(entry.id)}
+                          >
+                            {needsUpdate ? "Update" : "Install"}
+                          </button>
+                        </span>
+                      </div>
                     ) : null}
-                  </div>
-                  <span className="pack-row-side">
-                    <button className="tiny primary" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
-                      {needsUpdate ? "Update" : "Install"}
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
           {availableNote ? <p className="row-meta">{availableNote}</p> : null}
         </>
       )}
 
-      <h3 className="workshop-section-title">
+      <h3 className="workshop-section-title workshop-advanced-title">
         <button className="tiny" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
           Local (Advanced) {advancedOpen ? "▾" : "▸"}
         </button>
       </h3>
       {advancedOpen ? (
         <div className="workshop-advanced">
-          <p className="row-meta">Unsigned folder copy, or install by public GitHub repo URL (highest semver). Not the catalog path.</p>
-          <div className="workshop-add">
-            <input
-              className="settings-search"
-              type="url"
-              value={url}
-              placeholder="https://github.com/owner/repo"
-              aria-label="Pack repo URL (advanced)"
-              disabled={busy}
-              onChange={(event) => setUrl(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && url.trim()) void addRepo();
-              }}
-            />
-            <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
-              Add
+          <p className="row-meta">Unsigned folder or public GitHub URL. Not the catalog path.</p>
+          <div className="workshop-peer-add">
+            <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()} title="Add a local pack folder">
+              Add local
             </button>
-            <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()}>
-              From folder
+            <button
+              className="tiny"
+              type="button"
+              disabled={busy}
+              aria-expanded={peerUrlOpen}
+              title="Add a pack from a public GitHub URL"
+              onClick={() => {
+                setPeerUrlOpen((open) => {
+                  const next = !open;
+                  if (next) {
+                    requestAnimationFrame(() => peerUrlRef.current?.focus());
+                  }
+                  return next;
+                });
+              }}
+            >
+              Add from URL
             </button>
           </div>
-          {installNote && advancedOpen ? <p className="row-meta">{installNote}</p> : null}
+          {peerUrlOpen ? (
+            <div className="workshop-add workshop-peer-url">
+              <input
+                ref={peerUrlRef}
+                className="settings-search"
+                type="url"
+                value={url}
+                placeholder="https://github.com/owner/repo"
+                aria-label="Pack repo URL"
+                disabled={busy}
+                onChange={(event) => setUrl(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && url.trim()) void addRepo();
+                }}
+              />
+              <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
+                Add
+              </button>
+            </div>
+          ) : null}
+          {installNote ? <p className="row-meta">{installNote}</p> : null}
         </div>
       ) : null}
 

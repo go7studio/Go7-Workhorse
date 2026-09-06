@@ -414,23 +414,29 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(css, /backdrop-filter:\s*none/);
   assert.match(css, /\.workshop-manage-sheet\s*\{[^}]*pointer-events:\s*auto/s);
   assert.match(css, /workshop-blurb/);
-  assert.match(css, /workshop-pack-blurb/);
-  assert.match(css, /workshop-installed-coachmark/);
+  assert.match(css, /workshop-pack-summary/);
+  assert.match(css, /workshop-pack-mark/);
+  assert.match(css, /workshop-row-hit/);
   assert.match(css, /\.pack-list/);
   assert.match(css, /\.pack-row/);
   assert.match(css, /workshop-sources-label/);
 });
 
-test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failure; peer Add local/URL", () => {
+test("WorkshopBlock sheet hides link-head; Active/Pending accordion; Retry only on failure; Advanced peer Add", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   // surface=sheet skips link-head / Workshop title (Manage packs is the one title).
   assert.match(block, /inSheet \? \(/);
   assert.match(block, /link-head/);
-  assert.match(block, /workshop-installed-coachmark/);
   assert.match(block, /Install a pack, then Turn on\./);
-  assert.match(block, /Nothing installed\. Pick one under Available\./);
-  assert.match(block, /Install lands Off\. Turn on confirms what it reads\./);
-  assert.match(block, /workshop-installed|installedRef/);
+  assert.match(block, /id="workshop-active"/);
+  assert.match(block, /id="workshop-pending"/);
+  assert.match(block, />\s*Active\s*</);
+  assert.match(block, />\s*Pending\s*</);
+  assert.match(block, /expandedId/);
+  assert.match(block, /toggleExpanded/);
+  assert.match(block, /workshop-row-hit/);
+  assert.match(block, /workshop-pack-mark/);
+  assert.match(block, /activeRef|pendingRef/);
   assert.match(block, /className="tiny primary"/);
   assert.match(block, /needsUpdate \? "Update" : "Install"/);
   assert.match(block, /Add local/);
@@ -442,7 +448,7 @@ test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failur
   assert.equal(retryLabels.length, 1, `expected one Retry label, saw ${retryLabels.length}`);
   assert.match(block, /Catalog unreachable[\s\S]*Retry/);
   assert.doesNotMatch(block, /No packs in catalog[\s\S]{0,160}Retry/);
-  assert.match(block, /workshop-pack-blurb/);
+  assert.match(block, /workshop-pack-summary/);
 });
 
 test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
@@ -459,9 +465,9 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
   assert.match(block, /removeConfirmId/);
   assert.match(block, /Confirm remove/);
   assert.match(block, /setRemoveConfirmId\(pack\.id\)/);
-  // C: Available shows catalogDisplayName; id is meta.
+  // C: Pending catalog shows catalogDisplayName; id only in expanded meta.
   assert.match(block, /catalogDisplayName\(entry\.id\)/);
-  assert.match(block, /<span className="row-meta">\{entry\.id\}<\/span>/);
+  assert.match(block, /vLabel\(entry\.version\)\} · \{entry\.id\}/);
   // D: Detach only in settings link-head (hidden when surface=sheet).
   assert.match(block, /surface="sheet"|inSheet/);
   assert.match(block, /Detach is Settings \/ live-rail only/);
@@ -474,18 +480,24 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
   assert.match(block, /workshop-catalog-toolbar[\s\S]*Refresh/);
 });
 
-test("residual density: clamp desc, Collector·Reveal, hide Installed Available, URL title, Detach while Manage, null-feed clamp", () => {
+test("simple rows: Active/Pending accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
-  // 1: Installed description clamped to one line.
-  assert.match(block, /workshop-pack-desc/);
-  assert.match(css, /\.workshop-pack-desc[^{]*\{[^}]*line-clamp:\s*1/s);
-  // 2: Collector essay collapsed to Collector · Reveal control.
+  // 1: Collapsed Active/Pending = mark + title; summary only in expand.
+  assert.match(block, /workshop-pack-mark/);
+  assert.match(block, /workshop-row-title/);
+  assert.match(block, /workshop-pack-summary/);
+  assert.match(block, /expandedId/);
+  assert.doesNotMatch(block, /workshop-pack-desc/);
+  assert.doesNotMatch(block, />Installed</);
+  assert.doesNotMatch(block, />Available</);
+  // 2: Collector · Reveal only as control (no essay); lives in expand detail.
   assert.match(block, /Collector · Reveal/);
   assert.doesNotMatch(block, /Collector: installed by the operator on the remote box/);
-  // 3: Available hides same-version Installed (Update/yanked still shown).
+  assert.match(block, /workshop-row-detail[\s\S]*Collector · Reveal/);
+  // 3: Pending hides same-version Installed (Update/yanked still shown).
   assert.match(block, /Hide same-version Installed/);
   assert.match(block, /installed\.version !== entry\.version/);
   assert.doesNotMatch(block, /Already on this desk/);
@@ -495,7 +507,7 @@ test("residual density: clamp desc, Collector·Reveal, hide Installed Available,
   // 5: Rail Detach hidden while Manage sheet open.
   assert.match(railSrc, /!manageOpen/);
   assert.match(railSrc, /Hide Detach while Manage is open/);
-  // 6: Expanded null-feed note softens to one line (full text in title).
+  // 6: Expanded null-feed note softens to one line (full text in title) — rail soak unchanged.
   assert.match(css, /\.workshop-rail \.workshop-law[^{]*\{[^}]*line-clamp:\s*1/s);
   assert.match(paint, /className="row-meta workshop-law" title=\{widget\.value\}/);
 });

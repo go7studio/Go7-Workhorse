@@ -9595,7 +9595,9 @@ html.pane-dragging * {
 
 .workshop-blurb,
 .workshop-pack-blurb,
-.workshop-installed-coachmark {
+.workshop-pack-summary,
+.workshop-active-empty,
+.workshop-pending-empty {
   white-space: normal;
   overflow: visible;
   text-overflow: unset;
@@ -9611,32 +9613,25 @@ html.pane-dragging * {
   margin: 0 0 8px;
 }
 
-
-.workshop-installed-coachmark {
+.workshop-active-empty,
+.workshop-pending-empty {
   margin: 0 0 8px;
-}
-
-.workshop-available-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.workshop-available-head .workshop-section-title {
-  margin: 16px 0 6px;
 }
 
 .workshop-peer-add {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 16px 0 6px;
+  margin: 8px 0 6px;
 }
 
 .workshop-peer-url {
   margin-bottom: 10px;
+}
+
+.workshop-advanced-title {
+  margin-top: 20px;
+  opacity: 0.85;
 }
 
 .workshop-settings .skill-row-side .tiny.primary,
@@ -9666,9 +9661,82 @@ html.pane-dragging * {
 .workshop-pack { flex: 1 1 auto; min-width: 0; }
 .workshop-pack > .row-meta { display: block; }
 .workshop-pack strong .row-meta { display: inline; margin: 0 0 0 4px; font-weight: 400; }
-.workshop-collector .tiny { margin-left: 8px; }
-/* Installed row: one-line description; full text in title / pack.json. */
-.workshop-pack-desc {
+.workshop-collector .tiny { margin-left: 0; }
+.workshop-collector {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Manage simple rows: collapsed = mark + title; detail only when expanded. */
+.workshop-settings .pack-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 8px 10px;
+}
+.workshop-settings .pack-row.is-expanded {
+  gap: 8px;
+}
+.workshop-row-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.workshop-row-hit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workshop-row-hit:hover .workshop-row-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workshop-pack-mark {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  background: var(--bg, rgba(127, 127, 127, 0.18));
+  color: inherit;
+}
+.workshop-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.workshop-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 2px 38px;
+}
+.workshop-row-detail > .row-meta,
+.workshop-row-detail > .workshop-pack-summary {
+  display: block;
+  margin: 0;
+}
+.workshop-pack-summary {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
@@ -9678,10 +9746,13 @@ html.pane-dragging * {
   white-space: normal;
   max-width: 100%;
 }
-.workshop-collector {
-  display: flex;
+.workshop-row-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 2px;
 }
 /* Expanded rail: soften long null-feed pack notes to one status line. */
 .workshop-rail .workshop-law {

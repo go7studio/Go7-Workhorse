@@ -3,6 +3,7 @@ import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
 import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
+import { routingModelFamily, spawnModelFamilyKey } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
 import { sessionExecutionCwd } from "./session-environment";
 import type {
@@ -575,18 +576,30 @@ export function shouldAutoRouteSpawn(input: {
     return false;
   }
   if (!input.routingEnabled) return false;
-  if (namedSpawnPick(input.model) || namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  if (namedSpawnPick(input.chat) || namedSpawnPick(input.customBotId)) return false;
+  if (namedSpawnPick(input.model)) {
+    const family = spawnModelFamilyKey(input.model);
+    const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
+    // grok-4.6 without a vendor is a family, not a Grok Build lock. Cursor
+    // Grok and ACP Grok still compete on leftover. A named vendor keeps
+    // Auto inside that login.
+    if (family && !provider) return true;
+    return false;
+  }
   return true;
 }
 
-/** Keep Auto inside a named vendor; unnamed spawn still ranks the whole desk. */
+/** Keep Auto inside a named vendor; a family name without a vendor ranks those vendors. */
 export function constrainRouteCandidatesForSpawn(
   candidates: RoutingCandidate[],
-  input: { provider?: unknown },
+  input: { provider?: unknown; model?: unknown },
 ): RoutingCandidate[] {
   const provider = parseProviderId(typeof input.provider === "string" ? input.provider : undefined);
-  if (!provider) return candidates;
-  return candidates.filter((row) => row.provider === provider);
+  const family = spawnModelFamilyKey(input.model);
+  let rows = candidates;
+  if (provider) rows = rows.filter((row) => row.provider === provider);
+  else if (family) rows = rows.filter((row) => routingModelFamily(row) === family);
+  return rows;
 }
 
 export function spawnExclusions(

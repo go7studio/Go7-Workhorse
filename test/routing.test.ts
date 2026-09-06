@@ -21,12 +21,14 @@ import {
   shouldShadowRouteSessionTurn,
   spawnEffortFor,
   weeklyDrawState,
+  routingModelFamily,
+  spawnModelFamilyKey,
   type RoutingCandidate,
 } from "../src/lib/routing";
-import { applyVendorCatalog, modelsFor, resetVendorCatalog } from "../src/lib/models";
+import { applyVendorCatalog, modelsFor, parseEffortFromText, resetVendorCatalog } from "../src/lib/models";
 import { normalizeSettings } from "../src/lib/settings";
 import type { RoutingSettings } from "../src/lib/types";
-import { listedChatFollowThrough, resolveSpawnSpec } from "../src/lib/subagents";
+import { constrainRouteCandidatesForSpawn, listedChatFollowThrough, resolveSpawnSpec, shouldAutoRouteSpawn } from "../src/lib/subagents";
 import { customBotModels } from "../src/lib/custom-bots";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -111,6 +113,120 @@ test("a second orchestrate of the same bot keeps thinking unless effort was aske
     "high",
     "an explicit change of thinking level still takes",
   );
+  assert.equal(
+    spawnEffortFor({
+      provider: "grok",
+      model: "grok-4.6",
+      tier: "balanced",
+      routed: "medium",
+      inherited: "high",
+    }),
+    "high",
+    "parent high is an assignment Auto must not overwrite with a balanced slice",
+  );
+  assert.equal(
+    spawnEffortFor({
+      provider: "grok",
+      model: "grok-4.6",
+      tier: "deep",
+      routed: "high",
+      inherited: "medium",
+    }),
+    "high",
+    "parent medium is the desk default, so Auto may still pick high for deep work",
+  );
+  assert.equal(parseEffortFromText("spawn workers on high"), "high");
+  assert.equal(parseEffortFromText("use high effort for this review"), "high");
+  assert.equal(parseEffortFromText("fix the high-priority login bug"), null);
+});
+
+test("Grok 4.6 on Grok Build and Cursor is one leftover family", () => {
+  const now = Date.parse("2026-08-13T00:00:00Z");
+  const grokReset = "2026-08-16T12:00:00.000Z";
+  const cursorReset = "2026-08-28T00:00:00.000Z";
+  const grok46 = (usedPercent?: number, patch: Partial<RoutingCandidate> = {}): RoutingCandidate => ({
+    provider: "grok",
+    model: "grok-4.6",
+    label: "Grok 4.6",
+    connected: true,
+    profile: routingProfileForModel("grok", "grok-4.6"),
+    capacity:
+      usedPercent === undefined
+        ? {}
+        : { usedPercent, resetsAt: grokReset, period: "weekly" },
+    ...patch,
+  });
+  const cursor46 = (usedPercent?: number, patch: Partial<RoutingCandidate> = {}): RoutingCandidate => ({
+    provider: "cursor",
+    model: "cursor-grok-4.6",
+    label: "Cursor Grok 4.6",
+    connected: true,
+    profile: routingProfileForModel("cursor", "cursor-grok-4.6"),
+    capacity:
+      usedPercent === undefined
+        ? {}
+        : { usedPercent, resetsAt: cursorReset, period: "monthly" },
+    ...patch,
+  });
+  assert.equal(routingModelFamily(grok46(20)), "grok-4.6");
+  assert.equal(routingModelFamily(cursor46(20)), "grok-4.6");
+  assert.equal(spawnModelFamilyKey("grok-4.6"), "grok-4.6");
+  assert.equal(spawnModelFamilyKey("Grok 4.6"), "grok-4.6");
+  assert.equal(spawnModelFamilyKey("cursor-grok-4.6"), null);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.6" }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "grok", model: "grok-4.6" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "cursor-grok-4.6" }), false);
+
+  const family = constrainRouteCandidatesForSpawn(
+    [
+      grok46(20),
+      cursor46(20),
+      candidate("gpt-5.6-sol"),
+      {
+        provider: "custom",
+        model: "grok-bot",
+        label: "Grok Bot",
+        connected: true,
+        profile: routingProfileForModel("custom", "grok-bot"),
+        customBotId: "bot_grok",
+      },
+    ],
+    { model: "grok-4.6" },
+  );
+  assert.deepEqual(family.map((row) => row.provider).sort(), ["cursor", "grok"]);
+
+  const cursorHasLeftover = rankRoutingCandidates(
+    [grok46(80), cursor46(20)],
+    { prompt: "Implement this production migration", tier: "deep", now },
+    settings,
+  );
+  assert.equal(cursorHasLeftover[0]?.provider, "cursor");
+
+  const grokHasLeftover = rankRoutingCandidates(
+    [grok46(20), cursor46(85)],
+    { prompt: "Implement this production migration", tier: "deep", now },
+    settings,
+  );
+  assert.equal(grokHasLeftover[0]?.provider, "grok");
+
+  const unknownGrok = rankRoutingCandidates(
+    [grok46(undefined), cursor46(20)],
+    { prompt: "Implement this production migration", tier: "deep", now },
+    settings,
+  );
+  assert.equal(unknownGrok[0]?.provider, "cursor", "unknown leftover must not beat a known spare pool");
+
+  const sticky = rankRoutingCandidates(
+    [grok46(80), cursor46(20)],
+    {
+      prompt: "Implement this production migration",
+      tier: "deep",
+      now,
+      current: { provider: "grok", model: "grok-4.6" },
+    },
+    settings,
+  );
+  assert.equal(sticky[0]?.provider, "cursor", "same-brain leftover beats stickiness");
 });
 
 test("automatic routing applies only to a person's visible turn", () => {
@@ -604,6 +720,7 @@ test("Auto chat turns and unnamed spawn call the same ranker; no new Settings ta
   assert.match(store, /outcomesFromLearningEvents/);
   assert.match(store, /shouldAutoRouteSpawn/);
   assert.match(store, /constrainRouteCandidatesForSpawn/);
+  assert.match(store, /model: payload\.model/);
   const spawnRoleAt = store.indexOf("const spawnRole =");
   assert.ok(spawnRoleAt >= 0);
   const spawnRole = store.slice(spawnRoleAt, spawnRoleAt + 220);

@@ -9006,6 +9006,8 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.6" }), true);
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "grok", model: "grok-4.6" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false);
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false);
@@ -9335,11 +9337,12 @@ test("desk-enforced orchestrator vs worker lineup", async () => {
   assert.match(WORKHORSE_SESSION_RULES, /One bounded assignment is one workhorse_spawn_agent/);
   assert.match(WORKHORSE_SESSION_RULES, /A second spawn only to independently check that worker's output/);
   assert.match(WORKHORSE_SESSION_RULES, /Leave model unset so Auto ranks the slice/);
-  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(WORKHORSE_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not spawn grok-bot as a worker, builder, or auditor/);
   assert.match(WORKHORSE_SESSION_RULES, /Grok Bot may call, analyze, and dispatch only/);
-  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok, not Grok Bot/);
-  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok, not Grok Bot/);
+  assert.match(WORKHORSE_SESSION_RULES, /Naming grok-4.6 with no vendor lets the desk pick by leftover/);
+  assert.match(CUSTOM_HTTP_SESSION_RULES, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
+  assert.match(SPAWN_TURN_HINT, /Grok 4.6 is ACP Grok or Cursor Grok, never Grok Bot/);
   assert.match(readFileSync(path.join(ROOT, "skills", "desk", "SKILL.md"), "utf8"), /Do not spawn `grok-bot` as a worker/);
   assert.match(WORKHORSE_SESSION_RULES, /a named vendor without a model still Auto-ranks that vendor's models/);
   assert.match(WORKHORSE_SESSION_RULES, /Do not pick a model because it is first in the list/);

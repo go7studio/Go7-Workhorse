@@ -100,6 +100,7 @@ import {
   findChoice,
   normalizeModelId,
   parseEffort,
+  parseEffortFromText,
   withEffort,
 } from "./models";
 import { mergeStreamedText } from "./markdown";
@@ -5432,7 +5433,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const routeCandidates = routeSpawn
               ? constrainRouteCandidatesForSpawn(
                   routingCandidatesForDesk(latest.settings, routeStatuses, latest.deskPlans ?? plansRef.current),
-                  { provider: payload.provider },
+                  { provider: payload.provider, model: payload.model },
                 )
               : [];
             const routeDecision = routeSpawn
@@ -5461,7 +5462,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               inferRoutingTier(payload.message, payload.attachments, {
                 role: routingRole,
               });
-            const requestedEffort = parseEffort(String(payload.effort ?? ""));
+            const requestedEffort = parseEffort(String(payload.effort ?? ""))
+              ?? parseEffortFromText(lastUserMessage(caller)?.text ?? "")
+              ?? parseEffortFromText(String(payload.message ?? ""));
             const spawnTimeoutSeconds = isNested
               ? Math.min(120, Math.max(30, payload.timeoutSeconds ?? 120))
               : payload.timeoutSeconds;

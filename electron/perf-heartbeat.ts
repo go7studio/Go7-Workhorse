@@ -74,14 +74,21 @@ export function setPerfCause(cause: string, bytes?: number): void {
   currentBytes = typeof bytes === "number" && Number.isFinite(bytes) && bytes >= 0 ? Math.round(bytes) : undefined;
 }
 
-export function clearPerfCause(): void {
+/**
+ * `atMs` is when the work finished, and it defaults to now, which is what every
+ * production caller passes. A test names the instant instead of measuring it:
+ * whether a cause is innocent turns on which side of the tick's due time it
+ * cleared, and a test that reads the wall clock for both is asking a loaded
+ * runner to hold an ordering it cannot hold.
+ */
+export function clearPerfCause(atMs: number = Date.now()): void {
   // Remember what just finished. A synchronous block ends, its finally clears
   // the cause, and only then does the starved tick get to run — so the tick
   // must be able to name work that cleared moments before it fired.
   if (currentCause) {
     lastClearedCause = currentCause;
     lastClearedBytes = currentBytes;
-    lastClearedAt = Date.now();
+    lastClearedAt = atMs;
   }
   currentCause = "";
   currentBytes = undefined;
@@ -127,6 +134,34 @@ export function appendHeartbeatEntry(file: string, entry: HeartbeatEntry, maxByt
   }
 }
 
+/**
+ * One tick of the recorder, told the instants rather than reading a clock.
+ *
+ * Everything the trace is judged on lives here — the gap, the threshold, and
+ * which window gets to name a cause — so the loop below is left holding only
+ * `setInterval` and `Date.now`, and a test can step the recorder through a
+ * stall with instants it chose. Returns the new `lastAt`.
+ */
+export function recordHeartbeatTick(
+  file: string,
+  lastAt: number,
+  now: number,
+  intervalMs: number,
+  thresholdMs: number,
+): number {
+  const gapMs = heartbeatGap(lastAt, now, intervalMs);
+  if (gapMs >= thresholdMs) {
+    // now - gapMs is when the tick was DUE — the true start of the stall.
+    // Subtracting the interval as well widened the judged window to lastAt,
+    // and a cause that set and cleared in that leading 50ms — before the
+    // stall began — took full blame for it. Review proved the misattribution
+    // with an innocent state:read blamed for an untagged block after it.
+    const dueAt = now - gapMs;
+    appendHeartbeatEntry(file, { t: now, gapMs, cause: causeForGap(dueAt), bytes: bytesForGap(dueAt) });
+  }
+  return now;
+}
+
 export function startPerfHeartbeat(
   userData: string,
   options: { intervalMs?: number; thresholdMs?: number } = {},
@@ -139,22 +174,7 @@ export function startPerfHeartbeat(
   const file = perfTracePath(userData);
   let lastAt = Date.now();
   const timer = setInterval(() => {
-    const now = Date.now();
-    const gapMs = heartbeatGap(lastAt, now, intervalMs);
-    lastAt = now;
-    if (gapMs >= thresholdMs) {
-      // now - gapMs is when the tick was DUE — the true start of the stall.
-      // Subtracting the interval as well widened the judged window to lastAt,
-      // and a cause that set and cleared in that leading 50ms — before the
-      // stall began — took full blame for it. Review proved the misattribution
-      // with an innocent state:read blamed for an untagged block after it.
-      appendHeartbeatEntry(file, {
-        t: now,
-        gapMs,
-        cause: causeForGap(now - gapMs),
-        bytes: bytesForGap(now - gapMs),
-      });
-    }
+    lastAt = recordHeartbeatTick(file, lastAt, Date.now(), intervalMs, thresholdMs);
   }, intervalMs);
   timer.unref?.();
   return () => clearInterval(timer);

@@ -12,8 +12,8 @@ import { useStore } from "../lib/store";
 
 /**
  * Workshop install/grant/catalog block. Settings → Workshop (surface=settings) or the rail
- * Manage sheet (surface=sheet). Add a pack, pick the Local Compute host it reads through,
- * confirm the exact URLs. Live watch is the desk rail; this block never paints it.
+ * Manage sheet (surface=sheet). Install a pack, then Turn on (Host / Sources / Confirm).
+ * Live watch is the desk rail; this block never paints it.
  * Nothing here starts, stops, routes, or leases anything.
  */
 
@@ -155,6 +155,7 @@ export function WorkshopBlock({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [peerUrlOpen, setPeerUrlOpen] = useState(false);
   const availableRef = useRef<HTMLHeadingElement>(null);
+  const installedRef = useRef<HTMLHeadingElement>(null);
   const peerUrlRef = useRef<HTMLInputElement>(null);
   const inSheet = surface === "sheet";
 
@@ -213,15 +214,20 @@ export function WorkshopBlock({
     return () => stop?.();
   }, [reload]);
 
-  // Empty-rail CTA opens the Manage sheet Available-first; Advanced stays collapsed.
+  // Add packs (zero installed) → Available-first; Manage / Turn on with any installed → Installed.
   useEffect(() => {
-    if (!focusAvailable) return;
+    if (!inSheet) return;
     const id = window.requestAnimationFrame(() => {
-      availableRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
-      availableRef.current?.focus();
+      if (focusAvailable) {
+        availableRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        availableRef.current?.focus();
+      } else {
+        installedRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        installedRef.current?.focus();
+      }
     });
     return () => window.cancelAnimationFrame(id);
-  }, [focusAvailable, catalog]);
+  }, [focusAvailable, inSheet, catalog]);
 
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
@@ -290,14 +296,14 @@ export function WorkshopBlock({
       setAvailableNote("");
       const result = await install({ id });
       // Fixed chrome only — never concatenate catalog summary into refuse copy.
-      const words = result.ok ? `Installed ${result.ids.join(", ")} on this desk (Off until you Turn on).` : result.reason;
+      const words = result.ok ? "Installed · Off — Turn on when ready." : result.reason;
       if (result.ok && (result.reconfirm || result.versionChangedIds?.length)) {
         await applyReconfirm(
           result.reconfirm
             ? result
             : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds },
         );
-        setAvailableNote("Updated — Off until you Turn on.");
+        setAvailableNote("Updated · Off.");
       } else {
         setAvailableNote(words);
       }
@@ -377,7 +383,7 @@ export function WorkshopBlock({
       // Version change drops to Off + fresh confirm (no grant carry), even if sources match.
       if (result.reconfirm || (result.versionChangedIds && result.versionChangedIds.length > 0)) {
         await applyReconfirm(result.reconfirm ? result : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds });
-        words = "Updated — Off until you Turn on.";
+        words = "Updated · Off.";
       }
       setUpdates((prev) => ({ ...prev, [id]: { current: prev[id]?.latest ?? prev[id]?.current ?? "", note: words } }));
       reload();
@@ -390,13 +396,13 @@ export function WorkshopBlock({
     <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
       {inSheet ? (
         <p className="row-meta workshop-blurb workshop-sheet-intro">
-          Packs and modules on this desk. Install from Available, then Turn on and confirm exact URLs.
+          Install a pack, then Turn on.
         </p>
       ) : (
         <div className="link-head">
           <div>
             <strong>Workshop</strong>
-            <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
+            <p className="row-meta">Install a pack, then Turn on.</p>
           </div>
           {/* Detach is Settings / live-rail only — hidden when surface="sheet" (Manage). */}
           {packs.some((pack) => pack.on) ? (
@@ -407,21 +413,21 @@ export function WorkshopBlock({
         </div>
       )}
 
-      <h3 className="workshop-section-title">Installed</h3>
-      <p className="row-meta workshop-blurb">On this desk only. Other desks keep their own Installed list.</p>
+      <h3 ref={installedRef} id="workshop-installed" className="workshop-section-title" tabIndex={-1}>Installed</h3>
+      <p className="row-meta workshop-blurb">This desk only.</p>
       {packs.length === 0 ? (
         <p className="row-meta workshop-blurb workshop-installed-coachmark">
-          No packs on this desk yet. Install from Available → stays Off → Turn on confirms exact URLs.
+          Nothing installed. Pick one under Available.
         </p>
       ) : (
-        <ul className="skills-list">
+        <ul className="pack-list">
           {packs.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
             const confirming = confirmId === pack.id && !pack.on && !pack.refused;
             return (
-              <li key={pack.id} className="skill-row">
+              <li key={pack.id} className="pack-row">
                 <div className="workshop-pack">
                   <strong>
                     {pack.name} <span className="row-meta">{vLabel(pack.version)}</span>
@@ -429,8 +435,11 @@ export function WorkshopBlock({
                   {pack.description ? <em>{pack.description}</em> : null}
                   {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
                   <span className="row-meta">
-                    {pack.refused ? `Refused: ${pack.refused}` : pack.on ? "On · rail watches" : "Off"}
-                    {pack.on ? ` · reads through ${hostLabel(pack.hostId)} · ${pack.granted.join(", ")}` : ""}
+                    {pack.refused
+                      ? `Refused: ${pack.refused}`
+                      : pack.on
+                        ? `On · ${hostLabel(pack.hostId)}${pack.granted.length ? ` · ${pack.granted.length} source${pack.granted.length === 1 ? "" : "s"}` : ""}`
+                        : "Off"}
                   </span>
                   {update?.note ? <span className="row-meta">{update.note}</span> : null}
                   {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
@@ -449,8 +458,8 @@ export function WorkshopBlock({
                         <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
                       ) : (
                         <label className="row-meta">
-                          Reads through
-                          <select value={hostId} onChange={(event) => setHostId(event.target.value)}>
+                          Host
+                          <select value={hostId} onChange={(event) => setHostId(event.target.value)} aria-label="Host">
                             {hosts.map((host) => (
                               <option key={host.id} value={host.id}>
                                 {host.label}
@@ -459,7 +468,8 @@ export function WorkshopBlock({
                           </select>
                         </label>
                       )}
-                      <ul className="workshop-sources">
+                      <p className="row-meta workshop-sources-label">Sources</p>
+                      <ul className="workshop-sources" aria-label="Sources">
                         {pack.sources.map((source) => {
                           const host = hosts.find((item) => item.id === hostId);
                           const urls = host ? packSourceUrls(host.baseUrl, pack.id, asPackSource(source)) : [];
@@ -489,7 +499,7 @@ export function WorkshopBlock({
                     </div>
                   ) : null}
                 </div>
-                <span className="skill-row-side">
+                <span className="pack-row-side">
                   {pack.refused ? (
                     <span className="row-meta">Refused</span>
                   ) : pack.on ? (
@@ -575,7 +585,7 @@ export function WorkshopBlock({
           </button>
         </div>
       </div>
-      <p className="row-meta workshop-blurb">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
+      <p className="row-meta workshop-blurb">Install lands Off. Turn on confirms what it reads.</p>
       {peerUrlOpen ? (
         <div className="workshop-add workshop-peer-url">
           <input
@@ -620,7 +630,7 @@ export function WorkshopBlock({
               Refresh
             </button>
           </div>
-          <ul className="skills-list">
+          <ul className="pack-list">
             {catalogState.packs.map((entry) => {
               const installed = packs.find((pack) => pack.id === entry.id);
               const sameVersion = installed?.version === entry.version;
@@ -631,7 +641,7 @@ export function WorkshopBlock({
                 !catalogState.installAllowed ||
                 (Boolean(installed) && sameVersion);
               return (
-                <li key={entry.id} className="skill-row">
+                <li key={entry.id} className="pack-row">
                   <div className="workshop-pack">
                     <strong>
                       {catalogDisplayName(entry.id)} <span className="row-meta">{vLabel(entry.version)}</span>
@@ -649,7 +659,7 @@ export function WorkshopBlock({
                       </span>
                     ) : null}
                   </div>
-                  <span className="skill-row-side">
+                  <span className="pack-row-side">
                     <button className="tiny primary" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
                       {needsUpdate ? "Update" : "Install"}
                     </button>

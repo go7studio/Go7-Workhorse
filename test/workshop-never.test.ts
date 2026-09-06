@@ -56,7 +56,7 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   const rail = read("src/ui/WorkshopRail.tsx");
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /Add packs/);
-  assert.match(rail, /Turn packs on/);
+  assert.match(rail, /"Turn on"/);
   assert.match(rail, /surface="sheet"/);
   assert.match(rail, /aria-label="Manage packs"/);
   assert.match(rail, /workshop-manage-sheet/);
@@ -160,7 +160,7 @@ test("Workshop manage/rail copy uses packs/modules only — no user-visible skil
   const rail = read("src/ui/WorkshopRail.tsx");
   const block = read("src/ui/WorkshopBlock.tsx");
   for (const [name, text] of [["WorkshopRail", rail], ["WorkshopBlock", block]] as const) {
-    // Strip className=... tokens so legacy skills-list / skill-row class names do not count.
+    // Strip className=... tokens so class names do not count as user-visible copy.
     const visible = text.replace(/className="[^"]*"/g, "");
     assert.doesNotMatch(visible, /\b[Ss]kill\b/, `${name}: user-visible skill copy`);
   }
@@ -169,4 +169,21 @@ test("Workshop manage/rail copy uses packs/modules only — no user-visible skil
   assert.match(block, /surface = "settings"/);
   assert.match(block, /focusAvailable/);
   assert.match(block, /workshop-available/);
+  assert.match(block, /workshop-installed/);
+  assert.match(block, /pack-list/);
+  assert.match(block, /pack-row/);
+  assert.doesNotMatch(block, /skills-list|skill-row/);
+  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /This desk only\./);
+  assert.match(block, /Nothing installed\. Pick one under Available\./);
+  assert.match(block, /Install lands Off\. Turn on confirms what it reads\./);
+  assert.match(block, /Installed · Off — Turn on when ready\./);
+  assert.match(block, /Updated · Off\./);
+  assert.match(block, /Host\s*<select/s);
+  assert.match(block, /aria-label="Host"/);
+  assert.match(block, /workshop-sources-label">Sources</);
+  assert.match(block, />\s*Confirm\s*</);
+  assert.doesNotMatch(block, /On · rail watches|reads through \$\{hostLabel|granted\.join/);
+  assert.doesNotMatch(block, /exact URLs from pack\.json|Packs and modules|→ stays Off/);
+  assert.doesNotMatch(block, /Turn packs on/);
 });

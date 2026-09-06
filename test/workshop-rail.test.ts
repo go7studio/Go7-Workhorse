@@ -382,7 +382,7 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(rail, /is-empty/);
   assert.match(rail, /Add packs/);
   assert.match(rail, /workshop-rail-add-packs/);
-  assert.match(rail, /Turn packs on/);
+  assert.match(rail, /"Turn on"/);
   assert.match(rail, /workshop-rail-turn-on/);
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /ManageSheet/);
@@ -416,6 +416,9 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(css, /workshop-blurb/);
   assert.match(css, /workshop-pack-blurb/);
   assert.match(css, /workshop-installed-coachmark/);
+  assert.match(css, /\.pack-list/);
+  assert.match(css, /\.pack-row/);
+  assert.match(css, /workshop-sources-label/);
 });
 
 test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failure; peer Add local/URL", () => {
@@ -424,7 +427,10 @@ test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failur
   assert.match(block, /inSheet \? \(/);
   assert.match(block, /link-head/);
   assert.match(block, /workshop-installed-coachmark/);
-  assert.match(block, /Install from Available/);
+  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /Nothing installed\. Pick one under Available\./);
+  assert.match(block, /Install lands Off\. Turn on confirms what it reads\./);
+  assert.match(block, /workshop-installed|installedRef/);
   assert.match(block, /className="tiny primary"/);
   assert.match(block, /needsUpdate \? "Update" : "Install"/);
   assert.match(block, /Add local/);
@@ -442,8 +448,9 @@ test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failur
 test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
-  // A: zero installed → Add packs; installed all-Off → Turn packs on (not Install).
-  assert.match(rail, /Turn packs on/);
+  // A: zero installed → Add packs; installed all-Off → Turn on (not Install).
+  assert.match(rail, /"Turn on"/);
+  assert.match(rail, /availableFirst: zeroInstalled/);
   assert.match(rail, /workshop-rail-turn-on/);
   assert.match(rail, /workshopList/);
   assert.match(rail, /zeroInstalled/);

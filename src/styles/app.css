@@ -5207,7 +5207,8 @@ html.pane-dragging * {
   margin-bottom: 12px;
 }
 
-.skills-list {
+.skills-list,
+.pack-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -5216,7 +5217,8 @@ html.pane-dragging * {
   gap: 8px;
 }
 
-.skill-row {
+.skill-row,
+.pack-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -5241,7 +5243,8 @@ html.pane-dragging * {
   text-underline-offset: 3px;
 }
 
-.skill-row-side {
+.skill-row-side,
+.pack-row-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -5280,13 +5283,15 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
-.skill-row strong {
+.skill-row strong,
+.pack-row strong {
   display: block;
   font-size: 13px;
   font-weight: 560;
 }
 
-.skill-row em {
+.skill-row em,
+.pack-row em {
   display: block;
   margin-top: 2px;
   font-style: normal;
@@ -5294,7 +5299,8 @@ html.pane-dragging * {
   color: var(--text-secondary);
 }
 
-.skill-row .row-meta {
+.skill-row .row-meta,
+.pack-row .row-meta {
   margin-top: 4px;
   white-space: normal;
   overflow: visible;
@@ -9633,7 +9639,8 @@ html.pane-dragging * {
   margin-bottom: 10px;
 }
 
-.workshop-settings .skill-row-side .tiny.primary {
+.workshop-settings .skill-row-side .tiny.primary,
+.workshop-settings .pack-row-side .tiny.primary {
   min-width: 4.5rem;
 }
 
@@ -9671,7 +9678,8 @@ html.pane-dragging * {
   font: inherit;
   font-size: 12px;
 }
-.workshop-sources { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.workshop-sources-label { margin: 8px 0 0; }
+.workshop-sources { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .workshop-sources label { display: flex; align-items: baseline; gap: 8px; }
 .workshop-sources strong { display: inline; font-size: 12px; }
 .workshop-sources .row-meta { margin: 0; }

@@ -131,7 +131,7 @@ function ManageButton({
 
 /**
  * Desk-attached Workshop rail: live watch when any pack is On, thin hairline stub when none
- * are (Add packs if zero installed; Turn packs on if installed but all Off). Manage opens a
+ * are (Add packs if zero installed; Turn on if installed but all Off). Manage opens a
  * sheet hosting WorkshopBlock (same install/grant/catalog as Settings → Workshop). Breakout
  * remains an optional Detach on the live rail. Collapsed: each pack's
  * strip (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the
@@ -142,7 +142,7 @@ export function WorkshopRail() {
   const [view, setView] = useState<RailView>(readView);
   const [manageOpen, setManageOpen] = useState(false);
   const [availableFirst, setAvailableFirst] = useState(false);
-  // workshopView is On-only; empty strip uses disk list so all-Off can CTA Turn packs on.
+  // workshopView is On-only; empty strip uses disk list so all-Off can CTA Turn on.
   const [installedCount, setInstalledCount] = useState(0);
   const manageOpenerRef = useRef<HTMLButtonElement | null>(null);
   const openManage = useCallback((opts?: { availableFirst?: boolean }) => {
@@ -183,10 +183,10 @@ export function WorkshopRail() {
   );
 
   // Cold desk / all-Off: thin hairline stub — one CTA. Zero installed → Add packs
-  // (Available-first). Installed but all Off → Turn packs on / Manage (not Install).
+  // (Available-first). Installed but all Off → Turn on / Manage (not Install).
   if (on.length === 0) {
     const zeroInstalled = installedCount === 0;
-    const ctaLabel = zeroInstalled ? "Add packs" : "Turn packs on";
+    const ctaLabel = zeroInstalled ? "Add packs" : "Turn on";
     const ctaClass = zeroInstalled ? "tiny workshop-rail-add-packs" : "tiny workshop-rail-turn-on";
     return (
       <>

@@ -22,7 +22,7 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 
 ### Rail behavior
 
-- **Empty / all-Off:** thin hairline stub (~56–64px) with a **single** CTA — **Add packs** when zero packs installed (Available-first sheet); **Turn packs on** when packs are installed but all Off (Manage, not Install). No meters, no Install hero on all-Off. Cold desk reaches catalog in ≤2 clicks without Settings or Skills.
+- **Empty / all-Off:** thin hairline stub (~56–64px) with a **single** CTA — **Add packs** when zero packs installed (Available-first sheet); **Turn on** when packs are installed but all Off (Manage, not Install). No meters, no Install hero on all-Off. Cold desk reaches catalog in ≤2 clicks without Settings or Skills.
 - **Manage:** on collapsed and expanded headers; sheet title / aria-label **Manage packs**; hosts one `WorkshopBlock` (`surface="sheet"`). Focus trap while open; restore focus to opener on Escape / Close / backdrop.
 - **Collapsed strip** (when any pack On): `GPU% · watts · writer · models one-liner` (Box monitor). Job log collapsed = short “log live” / off hint.
 - **Expand**: full denser cards — Box / Models / Infer / Router / Job / Feed (same host grants; richer labels from existing feed/soak).

@@ -33,6 +33,7 @@ import {
   modelsForProvider,
   heatLevel,
   heatmapPeak,
+  heatmapTotal,
   cellDotBackground,
   stretchHeatmap,
   type HeatCell,
@@ -107,6 +108,7 @@ function Stretch({
   const rangeRef = useRef(range);
   const box = useRef<HTMLDivElement>(null);
   const peak = heatmapPeak(shown);
+  const total = heatmapTotal(shown);
   const max = peak?.tokens ?? 1;
   const [tip, setTip] = useState<{ cell: HeatCell; left: number; top: number; place: "above" | "below" } | null>(
     null,
@@ -180,16 +182,17 @@ function Stretch({
         <div className="section-label" style={{ margin: 0 }}>
           This stretch
         </div>
-        {peak && (
+        {total > 0 ? (
           <span className="usage-stretch-peak">
-            Peak {peak.label} · {formatTokens(peak.tokens)}
+            {formatTokens(total)} billed
+            {peak && peak.tokens < total ? ` · Peak ${peak.label} ${formatTokens(peak.tokens)}` : ""}
           </span>
-        )}
+        ) : null}
       </div>
       <div
         className={`usage-dots${shown.rows === 1 ? " flat" : ""}${shown.columns.length <= 7 && shown.rows === 1 ? " week" : ""}${shown.columns.length > 12 ? " dense" : ""}`}
         role="img"
-        aria-label="Usage over this stretch"
+        aria-label={total > 0 ? `Usage over this stretch · ${formatTokens(total)} billed` : "Usage over this stretch"}
       >
         {shown.columns.map((column, index) => (
           <div
@@ -242,9 +245,7 @@ function Stretch({
         <div className={`usage-tip ${tip.place}`} style={{ left: tip.left, top: tip.top }}>
           <strong>{tip.cell.label}</strong>
           <span>{formatTokens(tip.cell.tokens)} tokens</span>
-          <span>
-            {formatTokens(tip.cell.inputTokens)} in · {formatTokens(tip.cell.outputTokens)} out
-          </span>
+          <span>{formatIoLine({ ...tip.cell, events: 1 })}</span>
           {!hideBots && tip.cell.bots.length > 0 ? (
             <ul>
               {tip.cell.bots.map((bot) => (
@@ -259,7 +260,7 @@ function Stretch({
                   <em>
                     {formatTokens(bot.tokens)}
                     <small>
-                      {formatTokens(bot.inputTokens)} in · {formatTokens(bot.outputTokens)} out
+                      {formatIoLine({ ...bot, events: 1 })}
                     </small>
                   </em>
                 </li>

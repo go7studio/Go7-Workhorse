@@ -9,6 +9,7 @@ import { talkingToSummary } from "../lib/tool-labels";
 import { LINEUP_FINISHED_NOTICE } from "../lib/lineup";
 import {
   createTranscriptGrouper,
+  crewNamesFromTitles,
   isDeskNotice,
   lastReplyIndex,
   recentTranscriptText,
@@ -63,7 +64,13 @@ export function crewDoneKind(text: string): "ok" | "bad" | null {
   return null;
 }
 
-const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<TranscriptBlock, { type: "system" }> }) {
+const SystemTurn = memo(function SystemTurn({
+  block,
+  crewNames,
+}: {
+  block: Extract<TranscriptBlock, { type: "system" }>;
+  crewNames?: string;
+}) {
   if (isDeskNotice(block.message)) return null;
   const crew = crewDoneKind(block.message.text);
   if (crew) {
@@ -75,6 +82,7 @@ const SystemTurn = memo(function SystemTurn({ block }: { block: Extract<Transcri
       >
         <div className="crew-done-card">
           <strong>{block.message.text}</strong>
+          {crewNames ? <span>{crewNames}</span> : null}
         </div>
       </article>
     );
@@ -365,6 +373,7 @@ export function SessionPane() {
   }, [session?.id]);
 
   if (!session) return null;
+  const crewNames = crewNamesFromTitles((session.lineup?.rows ?? []).map((row) => row.title));
   const closeFilePane = () => {
     if (!open || fileOut) return;
     if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -514,7 +523,7 @@ export function SessionPane() {
           if (block.type === "user") {
             return <UserTurn key={block.message.id} message={block.message} />;
           }
-          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} />;
+          if (block.type === "system") return <SystemTurn key={block.message.id} block={block} crewNames={crewNames} />;
           const live = working && index === liveIndex;
           return (
             <AssistantTurn

@@ -13,6 +13,7 @@ import {
 import { peelPlanningPreamble, stripOutputFromThought } from "./markdown";
 import { isSessionIntro } from "./session";
 import { describePeerTool, prettyToolTitle } from "./tool-labels";
+import { workerNameFromTitle } from "./subagents";
 import type { ChatMessage } from "./types";
 
 export type WorkStepType = "thought" | "tool" | "compact" | "subagent";
@@ -405,6 +406,26 @@ export type NamedToolAction = {
 /** Closed work line: `Read GOAL.md` while a call is in flight, `Read · Grep` when it is done. */
 export const WORK_SUMMARY_NAME_CAP = 4;
 
+export type CrewSummaryWorker = {
+  name: string;
+  live?: boolean;
+  failed?: boolean;
+};
+
+export type WorkPopState = "working" | "done" | "failed";
+
+export function isGenericWorkName(name: string): boolean {
+  return name.trim().toLowerCase() === "tool";
+}
+
+function joinCappedNames(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length <= WORK_SUMMARY_NAME_CAP) return names.join(" · ");
+  const keep = WORK_SUMMARY_NAME_CAP - 1;
+  const rest = names.length - keep;
+  return `${names.slice(0, keep).join(" · ")} · ${rest} more`;
+}
+
 export function namedToolAction(message: ChatMessage): NamedToolAction {
   const line = splitToolLine(collapseToolText(message.text, message.toolStatus));
   const info = describePeerTool(line.title, line.detail);
@@ -433,20 +454,60 @@ export function namedWorkSummary(
       const tool = tools[index];
       if (!tool) continue;
       const action = namedToolAction(tool);
-      if (action.live) return formatNamedToolAction(action);
+      if (action.live && !isGenericWorkName(action.name)) return formatNamedToolAction(action);
     }
   }
   const names: string[] = [];
   for (const tool of tools) {
     const name = namedToolAction(tool).name;
-    if (!name || names.includes(name)) continue;
+    if (!name || isGenericWorkName(name) || names.includes(name)) continue;
     names.push(name);
   }
   if (names.length === 0) return live && input.allowThinking !== false ? "Thinking" : "";
-  if (names.length <= WORK_SUMMARY_NAME_CAP) return names.join(" · ");
-  const keep = WORK_SUMMARY_NAME_CAP - 1;
-  const rest = names.length - keep;
-  return `${names.slice(0, keep).join(" · ")} · ${rest} more`;
+  return joinCappedNames(names);
+}
+
+/** Closed work line names the crew, not a count. Live still lists everyone. */
+export function namedCrewSummary(
+  workers: CrewSummaryWorker[],
+  input: { live?: boolean } = {},
+): string {
+  const ordered = input.live
+    ? [...workers.filter((worker) => worker.live), ...workers.filter((worker) => !worker.live)]
+    : workers;
+  const names: string[] = [];
+  for (const worker of ordered) {
+    const name = worker.name.trim();
+    if (!name || isGenericWorkName(name) || names.includes(name)) continue;
+    names.push(name);
+  }
+  return joinCappedNames(names);
+}
+
+/** Crew names replace the tool list and the `N subagents` count. Talking stays. */
+export function closedWorkSummary(parts: {
+  label: string;
+  talking?: string;
+  tools?: string;
+  crew?: string;
+}): string {
+  const crew = parts.crew?.trim() ?? "";
+  return [parts.label, parts.talking, crew || parts.tools].filter(Boolean).join(" · ");
+}
+
+export function workPopState(input: { live: boolean; failed: boolean }): WorkPopState {
+  if (input.live) return "working";
+  if (input.failed) return "failed";
+  return "done";
+}
+
+/** First names under the stored finish notice. Does not rewrite the notice. */
+export function crewNamesFromTitles(titles: string[]): string {
+  return namedCrewSummary(
+    titles.map((title) => ({
+      name: workerNameFromTitle(title) || title.split("·", 1)[0]?.trim() || "",
+    })),
+  );
 }
 
 export function earlierWorkLabel(rows: GroupedWorkRow[]): string {

@@ -946,7 +946,9 @@ test("chat spend is this session's billed in plus out", () => {
 });
 
 test("This stretch bills the range total, including events with no clock", () => {
-  const now = Date.parse("2026-09-05T20:00:00-04:00");
+  // Local 8pm, not a fixed UTC instant — CI is UTC, where 20:00 EDT is midnight
+  // and a 3-hour-old event falls into yesterday.
+  const now = new Date(2026, 8, 5, 20, 0, 0).getTime();
   const undated = {
     id: "zero",
     at: 0,

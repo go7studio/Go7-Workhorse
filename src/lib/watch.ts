@@ -1052,7 +1052,7 @@ export function formatDeskRoster(rows: DeskCallRow[]): string {
   }
   if (callable.length > 0) {
     lines.push(
-      `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Grok 4.6 on Grok Build and Cursor is one family — leave the vendor unset and the desk picks by leftover. Use a named row only for an explicit user assignment or requested full lineup.`,
+      `Callable now: ${callable.map((row) => row.name).join(", ")}. For ordinary work, leave provider, model, and effort unset so the desk routes by task fit and capacity. Grok 4.6 on Grok and Cursor is one family — leave the vendor unset and the desk picks by leftover. Use a named row only for an explicit user assignment or requested full lineup.`,
     );
   } else {
     lines.push("Nothing is callable right now.");

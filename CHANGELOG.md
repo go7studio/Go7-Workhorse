@@ -8,6 +8,17 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.62](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.61...v0.6.62) (2026-09-06)
+
+
+### Bug Fixes
+
+* **custom:** a deleted or switched-off custom bot drops its slot everywhere ([bda6f37](https://github.com/go7studio/Go7-Workhorse/commit/bda6f37947ea6dd44b41d504b5582e7fa7a17601))
+* keep slice titles off the finished-crew banner ([4c6b7a0](https://github.com/go7studio/Go7-Workhorse/commit/4c6b7a08fff330bd25f3a3d44bdb4cce61a43e7e))
+* keep slice titles off the finished-crew banner ([ad286cf](https://github.com/go7studio/Go7-Workhorse/commit/ad286cf1674aa6d744eb742c0270b5d0cb46a3c5))
+* **workshop:** catalog Install skips monorepo siblings and root docs ([09aa950](https://github.com/go7studio/Go7-Workhorse/commit/09aa950f3be3ba28b0c0c6b812b597ec2e5632e7))
+* **workshop:** catalog Install skips monorepo siblings and root docs ([3d3cf03](https://github.com/go7studio/Go7-Workhorse/commit/3d3cf03ad3b7aa059a901d02b253056adf15eaad))
+
 ## [0.6.61](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.60...v0.6.61) (2026-09-06)
 
 

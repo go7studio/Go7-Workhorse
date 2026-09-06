@@ -9667,6 +9667,32 @@ html.pane-dragging * {
 .workshop-pack > .row-meta { display: block; }
 .workshop-pack strong .row-meta { display: inline; margin: 0 0 0 4px; font-weight: 400; }
 .workshop-collector .tiny { margin-left: 8px; }
+/* Installed row: one-line description; full text in title / pack.json. */
+.workshop-pack-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+}
+.workshop-collector {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+/* Expanded rail: soften long null-feed pack notes to one status line. */
+.workshop-rail .workshop-law {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
 .workshop-confirm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .workshop-confirm select {
   margin-left: 8px;
@@ -9689,7 +9715,10 @@ html.pane-dragging * {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 24px);
 }
 
 

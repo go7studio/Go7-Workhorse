@@ -103,6 +103,22 @@ function byteCap(maxBytes: number | undefined): string {
   return maxBytes >= 1024 ? `${Math.round(maxBytes / 1024)} KiB cap` : `${maxBytes} B cap`;
 }
 
+
+/** Path (or host+path) for Turn-on URL rows; full URL stays in title tooltip. */
+function shortSourceUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname}${parsed.search}`;
+    if (path && path !== "/") {
+      const hostPath = `${parsed.host}${path}`;
+      return hostPath.length > 56 ? `${hostPath.slice(0, 53)}…` : hostPath;
+    }
+    return parsed.host || url;
+  } catch {
+    return url.length > 56 ? `${url.slice(0, 53)}…` : url;
+  }
+}
+
 function vLabel(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
@@ -432,7 +448,7 @@ export function WorkshopBlock({
                   <strong>
                     {pack.name} <span className="row-meta">{vLabel(pack.version)}</span>
                   </strong>
-                  {pack.description ? <em>{pack.description}</em> : null}
+                  {pack.description ? <em className="workshop-pack-desc" title={pack.description}>{pack.description}</em> : null}
                   {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
                   <span className="row-meta">
                     {pack.refused
@@ -446,9 +462,13 @@ export function WorkshopBlock({
                   {update && !update.reason && !update.note && !latest ? <span className="row-meta">Up to date · {vLabel(update.current)}</span> : null}
                   {pack.collector ? (
                     <span className="row-meta workshop-collector">
-                      Collector: installed by the operator on the remote box. Workhorse never runs it.
-                      <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}>
-                        Reveal
+                      <button
+                        className="tiny"
+                        type="button"
+                        title="Collector · Reveal folder (Workhorse never runs it)"
+                        onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                      >
+                        Collector · Reveal
                       </button>
                     </span>
                   ) : null}
@@ -488,8 +508,8 @@ export function WorkshopBlock({
                                 </span>
                               </label>
                               {urls.map((line) => (
-                                <code key={line} className="workshop-url">
-                                  GET {line}
+                                <code key={line} className="workshop-url" title={line}>
+                                  GET {shortSourceUrl(line)}
                                 </code>
                               ))}
                             </li>
@@ -631,7 +651,15 @@ export function WorkshopBlock({
             </button>
           </div>
           <ul className="pack-list">
-            {catalogState.packs.map((entry) => {
+            {catalogState.packs
+              .filter((entry) => {
+                const installed = packs.find((pack) => pack.id === entry.id);
+                // Hide same-version Installed; keep yanked + Update rows visible.
+                if (!installed) return true;
+                if (entry.yanked) return true;
+                return installed.version !== entry.version;
+              })
+              .map((entry) => {
               const installed = packs.find((pack) => pack.id === entry.id);
               const sameVersion = installed?.version === entry.version;
               const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
@@ -652,7 +680,6 @@ export function WorkshopBlock({
                     <span className="row-meta">Rail · {entry.rail}</span>
                     {entry.yanked ? <span className="row-meta">Yanked</span> : null}
                     {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
-                    {installed && sameVersion ? <span className="row-meta">Already on this desk</span> : null}
                     {needsUpdate ? (
                       <span className="row-meta">
                         Installed {vLabel(installed!.version)} — Update drops to Off

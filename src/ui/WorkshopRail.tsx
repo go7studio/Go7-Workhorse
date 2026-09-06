@@ -292,11 +292,14 @@ export function WorkshopRail() {
           ))}
         </div>
 
-        <div className="workshop-rail-foot">
-          <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
-            Detach
-          </button>
-        </div>
+        {/* Hide Detach while Manage is open so foot chrome does not fight the sheet. */}
+        {!manageOpen ? (
+          <div className="workshop-rail-foot">
+            <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
+              Detach
+            </button>
+          </div>
+        ) : null}
       </aside>
       {sheet}
     </>

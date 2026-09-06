@@ -473,3 +473,30 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
   assert.match(block, /No packs in catalog[\s\S]{0,200}Refresh/);
   assert.match(block, /workshop-catalog-toolbar[\s\S]*Refresh/);
 });
+
+test("residual density: clamp desc, Collector·Reveal, hide Installed Available, URL title, Detach while Manage, null-feed clamp", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
+  // 1: Installed description clamped to one line.
+  assert.match(block, /workshop-pack-desc/);
+  assert.match(css, /\.workshop-pack-desc[^{]*\{[^}]*line-clamp:\s*1/s);
+  // 2: Collector essay collapsed to Collector · Reveal control.
+  assert.match(block, /Collector · Reveal/);
+  assert.doesNotMatch(block, /Collector: installed by the operator on the remote box/);
+  // 3: Available hides same-version Installed (Update/yanked still shown).
+  assert.match(block, /Hide same-version Installed/);
+  assert.match(block, /installed\.version !== entry\.version/);
+  assert.doesNotMatch(block, /Already on this desk/);
+  // 4: Turn-on URL truncated; full URL in title.
+  assert.match(block, /shortSourceUrl\(line\)/);
+  assert.match(block, /title=\{line\}/);
+  // 5: Rail Detach hidden while Manage sheet open.
+  assert.match(railSrc, /!manageOpen/);
+  assert.match(railSrc, /Hide Detach while Manage is open/);
+  // 6: Expanded null-feed note softens to one line (full text in title).
+  assert.match(css, /\.workshop-rail \.workshop-law[^{]*\{[^}]*line-clamp:\s*1/s);
+  assert.match(paint, /className="row-meta workshop-law" title=\{widget\.value\}/);
+});
+

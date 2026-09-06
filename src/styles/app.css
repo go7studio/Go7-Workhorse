@@ -9520,16 +9520,32 @@ html.pane-dragging * {
 .media-create-message { margin: 0; }
 
 
-/* Manage sheet: Workhorse chrome hosting WorkshopBlock — not a full Settings page. */
-.workshop-manage-backdrop {
+/* Manage packs: non-blocking right drawer — chat/composer stay usable (no full-window modal blur). */
+.workshop-manage-drawer {
+  position: fixed;
+  inset: 0;
   z-index: 24;
+  display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  padding: 24px 24px 24px 40px;
+  padding: 24px 24px 24px 0;
+  pointer-events: none;
+  background: transparent;
+  /* Explicitly no full-window dim/blur — desk stays sharp and clickable. */
+  backdrop-filter: none;
+}
+
+.workshop-manage-rail-dim {
+  /* Optional rail-adjacent wash only; does not cover chat/composer. */
+  width: 76px;
+  flex: 0 0 76px;
+  margin-right: auto;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-solid) 55%, transparent);
 }
 
 .workshop-manage-sheet {
-  width: min(520px, calc(100% - 48px));
+  width: min(520px, calc(100% - 100px));
   max-height: calc(100% - 48px);
   margin: auto 0;
   padding: 0;
@@ -9537,6 +9553,8 @@ html.pane-dragging * {
   flex-direction: column;
   overflow: hidden;
   border-radius: 16px;
+  pointer-events: auto;
+  box-shadow: var(--shadow);
 }
 
 .workshop-manage-sheet-head {
@@ -9567,6 +9585,47 @@ html.pane-dragging * {
 
 .workshop-sheet-intro {
   margin: 0 0 10px;
+}
+
+.workshop-blurb,
+.workshop-pack-blurb,
+.workshop-installed-coachmark {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.workshop-installed-coachmark {
+  margin: 0 0 8px;
+}
+
+.workshop-available-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.workshop-available-head .workshop-section-title {
+  margin: 16px 0 6px;
+}
+
+.workshop-peer-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 16px 0 6px;
+}
+
+.workshop-peer-url {
+  margin-bottom: 10px;
+}
+
+.workshop-settings .skill-row-side .tiny.primary {
+  min-width: 4.5rem;
 }
 
 .workshop-section-title:focus {

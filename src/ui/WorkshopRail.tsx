@@ -56,37 +56,18 @@ function ManageSheet({
 
   useEffect(() => {
     if (!open) return;
-    const sheet = sheetRef.current;
     const previouslyFocused = (document.activeElement as HTMLElement | null) ?? openerRef.current;
     // Prefer Close as the initial focus so Tab lands in the sheet chrome, not deep in Available.
     requestAnimationFrame(() => {
       closeRef.current?.focus();
+      // Non-blocking drawer: confirm focusables exist, but do not trap Tab away from chat.
+      if (sheetRef.current) void focusables(sheetRef.current);
     });
 
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || !sheet) return;
-      const nodes = focusables(sheet);
-      if (nodes.length === 0) {
-        event.preventDefault();
-        return;
-      }
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (event.shiftKey) {
-        if (active === first || !sheet.contains(active)) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else if (active === last || !sheet.contains(active)) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
     };
     document.addEventListener("keydown", onKey, true);
     return () => {
@@ -101,17 +82,13 @@ function ManageSheet({
   if (!open) return null;
 
   return (
-    <div
-      className="sheet-backdrop workshop-manage-backdrop"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="workshop-manage-drawer">
+      <div className="workshop-manage-rail-dim" aria-hidden="true" />
       <div
         ref={sheetRef}
         className="sheet workshop-manage-sheet"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-label="Manage packs"
       >
         <div className="workshop-manage-sheet-head">

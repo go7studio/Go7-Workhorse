@@ -59,6 +59,8 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   assert.match(rail, /surface="sheet"/);
   assert.match(rail, /aria-label="Manage packs"/);
   assert.match(rail, /workshop-manage-sheet/);
+  assert.match(rail, /workshop-manage-drawer/);
+  assert.match(rail, /aria-modal="false"/);
   assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
 });
 

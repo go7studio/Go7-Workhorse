@@ -143,7 +143,9 @@ export function WorkshopBlock({
   const [updates, setUpdates] = useState<Record<string, UpdateState>>({});
   const [busy, setBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [peerUrlOpen, setPeerUrlOpen] = useState(false);
   const availableRef = useRef<HTMLHeadingElement>(null);
+  const peerUrlRef = useRef<HTMLInputElement>(null);
   const inSheet = surface === "sheet";
 
   const reload = useCallback(() => {
@@ -375,7 +377,7 @@ export function WorkshopBlock({
   return (
     <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
       {inSheet ? (
-        <p className="row-meta workshop-sheet-intro">
+        <p className="row-meta workshop-blurb workshop-sheet-intro">
           Packs and modules on this desk. Install from Available, then Turn on and confirm exact URLs.
         </p>
       ) : (
@@ -393,9 +395,11 @@ export function WorkshopBlock({
       )}
 
       <h3 className="workshop-section-title">Installed</h3>
-      <p className="row-meta">On this desk only. Other desks keep their own Installed list.</p>
+      <p className="row-meta workshop-blurb">On this desk only. Other desks keep their own Installed list.</p>
       {packs.length === 0 ? (
-        <p className="row-meta">No packs on this desk yet.</p>
+        <p className="row-meta workshop-blurb workshop-installed-coachmark">
+          No packs on this desk yet. Install from Available → stays Off → Turn on confirms exact URLs.
+        </p>
       ) : (
         <ul className="skills-list">
           {packs.map((pack) => {
@@ -516,8 +520,53 @@ export function WorkshopBlock({
         </ul>
       )}
 
-      <h3 ref={availableRef} id="workshop-available" className="workshop-section-title" tabIndex={-1}>Available</h3>
-      <p className="row-meta">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
+      <div className="workshop-available-head">
+        <h3 ref={availableRef} id="workshop-available" className="workshop-section-title" tabIndex={-1}>Available</h3>
+        <div className="workshop-peer-add">
+          <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()} title="Add a local pack folder">
+            Add local
+          </button>
+          <button
+            className="tiny"
+            type="button"
+            disabled={busy}
+            aria-expanded={peerUrlOpen}
+            title="Add a pack from a public GitHub URL"
+            onClick={() => {
+              setPeerUrlOpen((open) => {
+                const next = !open;
+                if (next) {
+                  requestAnimationFrame(() => peerUrlRef.current?.focus());
+                }
+                return next;
+              });
+            }}
+          >
+            Add from URL
+          </button>
+        </div>
+      </div>
+      <p className="row-meta workshop-blurb">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
+      {peerUrlOpen ? (
+        <div className="workshop-add workshop-peer-url">
+          <input
+            ref={peerUrlRef}
+            className="settings-search"
+            type="url"
+            value={url}
+            placeholder="https://github.com/owner/repo"
+            aria-label="Pack repo URL"
+            disabled={busy}
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && url.trim()) void addRepo();
+            }}
+          />
+          <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
+            Add
+          </button>
+        </div>
+      ) : null}
       {catalogState == null ? (
         <p className="row-meta">Loading catalog…</p>
       ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed || catalogState.expired ? (
@@ -530,9 +579,6 @@ export function WorkshopBlock({
       ) : catalogState.packs.length === 0 ? (
         <div className="workshop-catalog-empty">
           <p className="row-meta">No packs in catalog</p>
-          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
-            Retry
-          </button>
         </div>
       ) : (
         <>
@@ -554,7 +600,7 @@ export function WorkshopBlock({
                       {entry.id} <span className="row-meta">{vLabel(entry.version)}</span>
                     </strong>
                     {/* Plain text only — never markdown/HTML from catalog fields. */}
-                    <span className="row-meta">{entry.summary}</span>
+                    <span className="row-meta workshop-pack-blurb">{entry.summary}</span>
                     <span className="row-meta">Rail · {entry.rail}</span>
                     {entry.yanked ? <span className="row-meta">Yanked</span> : null}
                     {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
@@ -566,7 +612,7 @@ export function WorkshopBlock({
                     ) : null}
                   </div>
                   <span className="skill-row-side">
-                    <button className="tiny" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
+                    <button className="tiny primary" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
                       {needsUpdate ? "Update" : "Install"}
                     </button>
                   </span>
@@ -575,9 +621,6 @@ export function WorkshopBlock({
             })}
           </ul>
           {availableNote ? <p className="row-meta">{availableNote}</p> : null}
-          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
-            Retry
-          </button>
         </>
       )}
 
@@ -609,10 +652,11 @@ export function WorkshopBlock({
               From folder
             </button>
           </div>
-          {installNote ? <p className="row-meta">{installNote}</p> : null}
+          {installNote && advancedOpen ? <p className="row-meta">{installNote}</p> : null}
         </div>
       ) : null}
 
+      {installNote && !advancedOpen ? <p className="row-meta">{installNote}</p> : null}
       {note ? <p className="row-meta">{note}</p> : null}
     </section>
   );

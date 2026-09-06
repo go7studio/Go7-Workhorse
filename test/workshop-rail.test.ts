@@ -389,9 +389,14 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(rail, /aria-label="Manage packs"/);
   assert.match(rail, />Manage packs</);
   assert.match(rail, /workshop-manage-sheet/);
+  assert.match(rail, /workshop-manage-drawer/);
+  assert.match(rail, /aria-modal="false"/);
+  assert.doesNotMatch(rail, /aria-modal="true"/);
+  assert.doesNotMatch(rail, /sheet-backdrop workshop-manage-backdrop/);
   assert.match(rail, /Escape/);
   assert.match(rail, /FOCUSABLE|focusables/);
   assert.match(rail, /restore\.focus|openerRef/);
+  assert.match(rail, /do not trap Tab away from chat/);
   assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
   assert.doesNotMatch(rail, /Install a pack/);
   // ManageButton on collapsed + expanded (+ def); empty path uses Add packs instead.
@@ -403,4 +408,31 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(css, /min-height:\s*56px/);
   assert.match(css, /max-height:\s*64px/);
   assert.doesNotMatch(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*96px/s);
+  assert.match(css, /\.workshop-manage-drawer\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(css, /backdrop-filter:\s*none/);
+  assert.match(css, /\.workshop-manage-sheet\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(css, /workshop-blurb/);
+  assert.match(css, /workshop-pack-blurb/);
+  assert.match(css, /workshop-installed-coachmark/);
+});
+
+test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failure; peer Add local/URL", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  // surface=sheet skips link-head / Workshop title (Manage packs is the one title).
+  assert.match(block, /inSheet \? \(/);
+  assert.match(block, /link-head/);
+  assert.match(block, /workshop-installed-coachmark/);
+  assert.match(block, /Install from Available/);
+  assert.match(block, /className="tiny primary"/);
+  assert.match(block, /needsUpdate \? "Update" : "Install"/);
+  assert.match(block, /Add local/);
+  assert.match(block, /Add from URL/);
+  assert.match(block, /workshop-peer-add/);
+  assert.match(block, /Local \(Advanced\)/);
+  // Exactly one Retry button label — only in the real catalog failure branch.
+  const retryLabels = block.match(/>\s*Retry\s*</g) ?? [];
+  assert.equal(retryLabels.length, 1, `expected one Retry label, saw ${retryLabels.length}`);
+  assert.match(block, /Catalog unreachable[\s\S]*Retry/);
+  assert.doesNotMatch(block, /No packs in catalog[\s\S]{0,160}Retry/);
+  assert.match(block, /workshop-pack-blurb/);
 });

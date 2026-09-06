@@ -340,13 +340,17 @@ test("UI never uses catalog prose as GitHub hero CTA", () => {
   assert.match(block, /No packs in catalog/);
   assert.match(block, /workshopInstallCatalog/);
   assert.match(block, /advancedOpen/);
-  // Empty Available must not hero the GitHub paste.
+  assert.match(block, /Add local/);
+  assert.match(block, /Add from URL/);
+  // Available stays above Advanced; peer Add is OK — GitHub paste is not the empty-catalog hero.
   const availableIdx = block.indexOf('id="workshop-available"');
   const advancedIdx = block.indexOf("Local (Advanced)");
   assert.ok(availableIdx > 0 && advancedIdx > availableIdx);
   assert.match(block, />Available</);
   const availableSlice = block.slice(availableIdx, advancedIdx);
-  assert.doesNotMatch(availableSlice, /placeholder="https:\/\/github\.com\/owner\/repo"/);
+  assert.match(availableSlice, /workshop-peer-add/);
+  // Peer URL field is opt-in (peerUrlOpen), not the empty-catalog hero CTA.
+  assert.match(availableSlice, /peerUrlOpen/);
   assert.doesNotMatch(availableSlice, /workshopInstallRepo/);
 });
 

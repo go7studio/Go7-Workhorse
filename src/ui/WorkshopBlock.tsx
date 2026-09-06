@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fingerprintsForSources,
   packSourceUrls,
@@ -11,7 +11,8 @@ import type { CatalogViewState } from "../lib/workshop-catalog";
 import { useStore } from "../lib/store";
 
 /**
- * Settings → Workshop. Add a pack, pick the Local Compute host it reads through,
+ * Workshop install/grant/catalog block. Settings → Workshop (surface=settings) or the rail
+ * Manage sheet (surface=sheet). Add a pack, pick the Local Compute host it reads through,
  * confirm the exact URLs. Live watch is the desk rail; this block never paints it.
  * Nothing here starts, stops, routes, or leases anything.
  */
@@ -121,7 +122,13 @@ function installWords(result: InstallResult): string {
 
 type UpdateState = { current: string; latest?: string; reason?: string; note?: string };
 
-export function WorkshopBlock() {
+export function WorkshopBlock({
+  surface = "settings",
+  focusAvailable = false,
+}: {
+  surface?: "settings" | "sheet";
+  focusAvailable?: boolean;
+} = {}) {
   const store = useStore();
   const hosts = store.settings.localCompute.hosts.filter((host) => host.enabled);
   const [packs, setPacks] = useState<PackListing[]>([]);
@@ -136,6 +143,8 @@ export function WorkshopBlock() {
   const [updates, setUpdates] = useState<Record<string, UpdateState>>({});
   const [busy, setBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const availableRef = useRef<HTMLHeadingElement>(null);
+  const inSheet = surface === "sheet";
 
   const reload = useCallback(() => {
     const run = window.workhorse?.workshopList;
@@ -191,6 +200,16 @@ export function WorkshopBlock() {
     const stop = window.workhorse?.onWorkshopChanged?.(reload);
     return () => stop?.();
   }, [reload]);
+
+  // Empty-rail CTA opens the Manage sheet Available-first; Advanced stays collapsed.
+  useEffect(() => {
+    if (!focusAvailable) return;
+    const id = window.requestAnimationFrame(() => {
+      availableRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+      availableRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [focusAvailable, catalog]);
 
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
@@ -354,18 +373,24 @@ export function WorkshopBlock() {
   const catalogState = catalog;
 
   return (
-    <section className="workshop-settings" aria-label="Workshop">
-      <div className="link-head">
-        <div>
-          <strong>Workshop</strong>
-          <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
+    <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
+      {inSheet ? (
+        <p className="row-meta workshop-sheet-intro">
+          Packs and modules on this desk. Install from Available, then Turn on and confirm exact URLs.
+        </p>
+      ) : (
+        <div className="link-head">
+          <div>
+            <strong>Workshop</strong>
+            <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
+          </div>
+          {packs.some((pack) => pack.on) ? (
+            <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
+              Detach
+            </button>
+          ) : null}
         </div>
-        {packs.some((pack) => pack.on) ? (
-          <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
-            Detach
-          </button>
-        ) : null}
-      </div>
+      )}
 
       <h3 className="workshop-section-title">Installed</h3>
       <p className="row-meta">On this desk only. Other desks keep their own Installed list.</p>
@@ -491,7 +516,7 @@ export function WorkshopBlock() {
         </ul>
       )}
 
-      <h3 className="workshop-section-title">Available</h3>
+      <h3 ref={availableRef} id="workshop-available" className="workshop-section-title" tabIndex={-1}>Available</h3>
       <p className="row-meta">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
       {catalogState == null ? (
         <p className="row-meta">Loading catalog…</p>

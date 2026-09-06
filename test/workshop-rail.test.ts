@@ -365,27 +365,42 @@ test("gallery paints kind chip, label, and path actions", () => {
   assert.match(html, /No local path/);
 });
 
-test("empty / all-Off rail paints Manage chrome and Install CTA (cold desk)", () => {
+test("empty / all-Off rail paints thin stub with single Add packs CTA (cold desk)", () => {
   const html = render(createElement(WorkshopRail));
   assert.match(html, /aria-label="Workshop rail"/);
-  assert.match(html, /is-empty|workshop-rail-empty/);
-  assert.match(html, />Manage</);
-  assert.match(html, /Install a pack/);
+  assert.match(html, /is-empty|workshop-rail-empty-stub/);
+  assert.match(html, /Add packs/);
+  assert.match(html, /aria-label="Add packs"/);
+  assert.doesNotMatch(html, /Install a pack/);
+  // Single empty CTA only — no Manage + Install duplicate on the stub.
+  assert.doesNotMatch(html, />Manage</);
   assert.doesNotMatch(html, /workshop-manage-sheet/);
 });
 
-test("rail source always exposes Manage on empty, collapsed, and expanded paths; Manage sheet hosts WorkshopBlock", () => {
+test("rail source always exposes Manage on collapsed/expanded; empty uses Add packs; sheet is Manage packs", () => {
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   assert.match(rail, /is-empty/);
-  assert.match(rail, /Install a pack/);
+  assert.match(rail, /Add packs/);
+  assert.match(rail, /workshop-rail-add-packs/);
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /ManageSheet/);
-  assert.match(rail, /<WorkshopBlock \/>/);
+  assert.match(rail, /surface="sheet"/);
+  assert.match(rail, /focusAvailable=\{availableFirst\}/);
+  assert.match(rail, /aria-label="Manage packs"/);
+  assert.match(rail, />Manage packs</);
   assert.match(rail, /workshop-manage-sheet/);
   assert.match(rail, /Escape/);
+  assert.match(rail, /FOCUSABLE|focusables/);
+  assert.match(rail, /restore\.focus|openerRef/);
   assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
-  // Manage appears in both header branches (collapsed + expanded), not only expanded.
+  assert.doesNotMatch(rail, /Install a pack/);
+  // ManageButton on collapsed + expanded (+ def); empty path uses Add packs instead.
   const manageHits = rail.split("ManageButton").length - 1;
-  assert.ok(manageHits >= 4, `expected ManageButton on empty + collapsed + expanded (+ def), saw ${manageHits}`);
+  assert.ok(manageHits >= 3, `expected ManageButton on collapsed + expanded (+ def), saw ${manageHits}`);
   assert.doesNotMatch(rail, /UsagePane|WatchPane|setSettingsSection\("workshop"\)/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*60px/s);
+  assert.match(css, /min-height:\s*56px/);
+  assert.match(css, /max-height:\s*64px/);
+  assert.doesNotMatch(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*96px/s);
 });

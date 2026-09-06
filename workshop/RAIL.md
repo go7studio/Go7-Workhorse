@@ -22,8 +22,8 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 
 ### Rail behavior
 
-- **Empty / all-Off:** always-visible stub rail with **Manage** and an **Install a pack** CTA (opens the Manage sheet). No meters required. Cold desk reaches manage in ≤2 clicks without Settings or Skills.
-- **Manage:** on collapsed and expanded headers; opens the desk sheet hosting one `WorkshopBlock`. Escape / Close dismisses.
+- **Empty / all-Off:** thin hairline stub (~56–64px) with a **single** **Add packs** CTA (opens Manage packs sheet Available-first). No meters, no Manage+Install duplicate. Cold desk reaches catalog in ≤2 clicks without Settings or Skills.
+- **Manage:** on collapsed and expanded headers; sheet title / aria-label **Manage packs**; hosts one `WorkshopBlock` (`surface="sheet"`). Focus trap while open; restore focus to opener on Escape / Close / backdrop.
 - **Collapsed strip** (when any pack On): `GPU% · watts · writer · models one-liner` (Box monitor). Job log collapsed = short “log live” / off hint.
 - **Expand**: full denser cards — Box / Models / Infer / Router / Job / Feed (same host grants; richer labels from existing feed/soak).
 - **Multi-pack**: rail **stacks modules** when each is On (Box monitor, Job log, future packs) — not one monolithic page.

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { WORKSHOP_UNKNOWN } from "../lib/workshop-pack";
 import { feedAge, feedTone, primaryStatus, useWorkshopLive } from "./workshop-live";
 import { Chip, Module, PaintWidget, PackCards } from "./workshop-paint";
@@ -31,15 +31,72 @@ function writeView(view: RailView) {
   }
 }
 
-function ManageSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+const FOCUSABLE =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function focusables(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true",
+  );
+}
+
+function ManageSheet({
+  open,
+  onClose,
+  availableFirst,
+  openerRef,
+}: {
+  open: boolean;
+  onClose: () => void;
+  availableFirst: boolean;
+  openerRef: RefObject<HTMLElement | null>;
+}) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    const sheet = sheetRef.current;
+    const previouslyFocused = (document.activeElement as HTMLElement | null) ?? openerRef.current;
+    // Prefer Close as the initial focus so Tab lands in the sheet chrome, not deep in Available.
+    requestAnimationFrame(() => {
+      closeRef.current?.focus();
+    });
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !sheet) return;
+      const nodes = focusables(sheet);
+      if (nodes.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (active === first || !sheet.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !sheet.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      const restore = openerRef.current ?? previouslyFocused;
+      if (restore && document.contains(restore)) {
+        restore.focus();
+      }
+    };
+  }, [open, onClose, openerRef]);
 
   if (!open) return null;
 
@@ -50,24 +107,43 @@ function ManageSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="sheet workshop-manage-sheet" role="dialog" aria-modal="true" aria-label="Workshop">
+      <div
+        ref={sheetRef}
+        className="sheet workshop-manage-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Manage packs"
+      >
         <div className="workshop-manage-sheet-head">
-          <h3>Workshop</h3>
-          <button className="tiny" type="button" onClick={onClose}>
+          <h3>Manage packs</h3>
+          <button ref={closeRef} className="tiny" type="button" onClick={onClose}>
             Close
           </button>
         </div>
         <div className="workshop-manage-sheet-body">
-          <WorkshopBlock />
+          <WorkshopBlock surface="sheet" focusAvailable={availableFirst} />
         </div>
       </div>
     </div>
   );
 }
 
-function ManageButton({ onClick }: { onClick: () => void }) {
+function ManageButton({
+  onClick,
+  buttonRef,
+}: {
+  onClick: () => void;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+}) {
   return (
-    <button className="tiny workshop-rail-manage" type="button" title="Manage Workshop packs" onClick={onClick}>
+    <button
+      ref={buttonRef}
+      className="tiny workshop-rail-manage"
+      type="button"
+      title="Manage packs"
+      aria-label="Manage packs"
+      onClick={onClick}
+    >
       Manage
     </button>
   );
@@ -77,17 +153,22 @@ function ManageButton({ onClick }: { onClick: () => void }) {
 // The rail
 
 /**
- * Desk-attached Workshop rail: live watch when any pack is On, always-visible Manage chrome
- * when none are. Manage opens a sheet hosting WorkshopBlock (same install/grant/catalog as
- * Settings → Workshop). Breakout remains an optional Detach. Collapsed: each pack's strip
- * (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the first.
- * Expanded: one module per pack, its cards in pack order.
+ * Desk-attached Workshop rail: live watch when any pack is On, thin hairline stub + Add packs
+ * when none are. Manage / Add packs opens a sheet hosting WorkshopBlock (same install/grant/
+ * catalog as Settings → Workshop). Breakout remains an optional Detach. Collapsed: each pack's
+ * strip (GPU% · watts · writer · models one-liner for Box monitor) with the feed age under the
+ * first. Expanded: one module per pack, its cards in pack order.
  */
 export function WorkshopRail() {
   const { packs } = useWorkshopLive();
   const [view, setView] = useState<RailView>(readView);
   const [manageOpen, setManageOpen] = useState(false);
-  const openManage = useCallback(() => setManageOpen(true), []);
+  const [availableFirst, setAvailableFirst] = useState(false);
+  const manageOpenerRef = useRef<HTMLButtonElement | null>(null);
+  const openManage = useCallback((opts?: { availableFirst?: boolean }) => {
+    setAvailableFirst(opts?.availableFirst === true);
+    setManageOpen(true);
+  }, []);
   const closeManage = useCallback(() => setManageOpen(false), []);
   const update = useCallback((next: Partial<RailView>) => {
     setView((prev) => {
@@ -98,21 +179,26 @@ export function WorkshopRail() {
   }, []);
 
   const on = packs.filter((pack) => pack.on);
-  const sheet = <ManageSheet open={manageOpen} onClose={closeManage} />;
+  const sheet = (
+    <ManageSheet open={manageOpen} onClose={closeManage} availableFirst={availableFirst} openerRef={manageOpenerRef} />
+  );
 
-  // Cold desk / all-Off: always-visible stub so Manage is ≤2 clicks without Settings.
+  // Cold desk / all-Off: thin hairline stub — label + one Add packs CTA (Available-first sheet).
   if (on.length === 0) {
     return (
       <>
         <aside className="workshop-rail is-collapsed is-empty" aria-label="Workshop rail">
-          <div className="workshop-rail-head">
+          <div className="workshop-rail-head workshop-rail-empty-stub">
             <span className="section-label">Workshop</span>
-            <ManageButton onClick={openManage} />
-          </div>
-          <div className="workshop-rail-empty">
-            <p className="row-meta">No packs On</p>
-            <button className="tiny workshop-rail-install" type="button" onClick={openManage}>
-              Install a pack
+            <button
+              ref={manageOpenerRef}
+              className="tiny workshop-rail-add-packs"
+              type="button"
+              title="Add packs"
+              aria-label="Add packs"
+              onClick={() => openManage({ availableFirst: true })}
+            >
+              Add packs
             </button>
           </div>
         </aside>
@@ -147,7 +233,7 @@ export function WorkshopRail() {
             >
               <span className="section-label">Workshop</span>
             </button>
-            <ManageButton onClick={openManage} />
+            <ManageButton buttonRef={manageOpenerRef} onClick={() => openManage()} />
           </div>
           <button className="workshop-rail-strip" type="button" title={on.map((pack) => pack.name).join(" · ")} onClick={() => update({ expanded: true })}>
             {shown.map((pack, i) => (
@@ -181,7 +267,7 @@ export function WorkshopRail() {
             <Chip tone={tone} title={status?.asOf ?? status?.reason}>
               {ageLabel}
             </Chip>
-            <ManageButton onClick={openManage} />
+            <ManageButton buttonRef={manageOpenerRef} onClick={() => openManage()} />
             <button
               className="tiny workshop-rail-toggle"
               type="button"

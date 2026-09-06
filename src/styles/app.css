@@ -8998,35 +8998,32 @@ html.pane-dragging * {
   max-width: 68px;
 }
 
+/* Quiet empty chrome: thin hairline stub (~56–64px), not a tall empty card. */
 .workshop-rail.is-empty {
-  width: 96px;
+  width: 60px;
+  align-self: stretch;
 }
 
-.workshop-rail-empty {
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-  padding: 12px 8px;
-  display: flex;
+.workshop-rail.is-empty .workshop-rail-empty-stub {
+  flex: 0 0 auto;
+  min-height: 56px;
+  max-height: 64px;
+  height: 60px;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
-  text-align: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
 }
 
-.workshop-rail-empty .row-meta {
-  margin: 0;
-  font-size: 10px;
-  line-height: 1.3;
-}
-
-.workshop-rail-install {
+.workshop-rail-add-packs {
   width: 100%;
-  max-width: 80px;
-  min-height: 40px;
-  padding: 6px 6px;
+  max-width: 56px;
+  min-height: 28px;
+  padding: 4px 4px;
   white-space: normal;
-  line-height: 1.25;
+  line-height: 1.2;
   font-size: 10px;
 }
 
@@ -9566,6 +9563,19 @@ html.pane-dragging * {
 
 .workshop-manage-sheet-body .workshop-settings {
   margin-bottom: 0;
+}
+
+.workshop-sheet-intro {
+  margin: 0 0 10px;
+}
+
+.workshop-section-title:focus {
+  outline: none;
+}
+
+.workshop-section-title:focus-visible {
+  outline: 2px solid var(--accent, var(--line));
+  outline-offset: 2px;
 }
 
 .workshop-settings { margin-bottom: 8px; }

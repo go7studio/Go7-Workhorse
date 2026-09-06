@@ -341,9 +341,10 @@ test("UI never uses catalog prose as GitHub hero CTA", () => {
   assert.match(block, /workshopInstallCatalog/);
   assert.match(block, /advancedOpen/);
   // Empty Available must not hero the GitHub paste.
-  const availableIdx = block.indexOf(">Available<");
+  const availableIdx = block.indexOf('id="workshop-available"');
   const advancedIdx = block.indexOf("Local (Advanced)");
   assert.ok(availableIdx > 0 && advancedIdx > availableIdx);
+  assert.match(block, />Available</);
   const availableSlice = block.slice(availableIdx, advancedIdx);
   assert.doesNotMatch(availableSlice, /placeholder="https:\/\/github\.com\/owner\/repo"/);
   assert.doesNotMatch(availableSlice, /workshopInstallRepo/);

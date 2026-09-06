@@ -4,12 +4,22 @@
  * everywhere at once, and no renderer tooling can see it. These tests pin the
  * three properties that make the trace trustworthy — the arithmetic, the
  * bounded file, and a record that carries timings only.
+ *
+ * Every instant below is a chosen number. The recorder is judged on which side
+ * of a tick's due time a cause cleared, and the earlier version of this file
+ * asked `setTimeout` and `Date.now` to hold that ordering: on a loaded runner
+ * the settling sleep overshot, an innocent cause landed inside the window, the
+ * recorder named it correctly and the test failed for a reason that was never
+ * in the code. Three windows-latest runs in one day, two release cuts blocked.
+ * So the ticks are stepped by hand and the assertions are arithmetic. No sleep,
+ * no busy-wait, no wall clock.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   appendHeartbeatEntry,
   causeForGap,
@@ -17,9 +27,14 @@ import {
   heartbeatGap,
   perfTraceEnabled,
   perfTracePath,
+  recordHeartbeatTick,
   setPerfCause,
-  startPerfHeartbeat,
 } from "../electron/perf-heartbeat";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** A fixed origin for every clock in this file. Any constant would do; this one reads as a date. */
+const T0 = 1_700_000_000_000;
 
 test("a stall is the lateness of the tick, never negative", () => {
   assert.equal(heartbeatGap(1000, 1050, 50), 0, "on time is no gap");
@@ -55,77 +70,105 @@ test("entries carry timings and a cause word only, and the file rotates at its c
   }
 });
 
-test("a running heartbeat records a real block with its cause", async () => {
+test("a running heartbeat records a real block with its cause", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-perf-live."));
-  const stop = startPerfHeartbeat(root, { intervalMs: 10, thresholdMs: 40 });
+  const file = perfTracePath(root);
+  const intervalMs = 10;
+  const thresholdMs = 40;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Two ticks arriving on time: a loop that is keeping up writes nothing.
+    let lastAt = recordHeartbeatTick(file, T0, T0 + 10, intervalMs, thresholdMs);
+    lastAt = recordHeartbeatTick(file, lastAt, T0 + 20, intervalMs, thresholdMs);
+    assert.equal(existsSync(file), false, "a healthy loop leaves no trace");
+
+    // Then a save holds the loop, the way a synchronous save does. Its finally
+    // clears the tag at T0+105, and only then does the tick that was due at
+    // T0+30 get to run — 75ms late, and able to name the work that starved it.
     setPerfCause("state:save");
-    const until = Date.now() + 80;
-    while (Date.now() < until) {
-      /* hold the loop, the way a synchronous save does */
-    }
-    clearPerfCause();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const rows = readFileSync(perfTracePath(root), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    // Gap AND cause together: on a loaded runner the settling sleep can itself
-    // stall past the threshold as "unknown", and picking the first row over
-    // the threshold made that innocent row fail the test.
-    assert.ok(
-      rows.some((row) => row.gapMs >= 40 && row.cause === "state:save"),
+    clearPerfCause(T0 + 105);
+    recordHeartbeatTick(file, lastAt, T0 + 105, intervalMs, thresholdMs);
+
+    const rows = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(rows.length, 1, "one block, one row");
+    assert.deepEqual(
+      rows[0],
+      { t: T0 + 105, gapMs: 75, cause: "state:save" },
       "the held loop was recorded and names what held it",
     );
   } finally {
-    stop();
     clearPerfCause();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("blame starts when the tick was due, not when the last one ran", async () => {
+test("blame starts when the tick was due, not when the last one ran", () => {
   /*
    * The two-word fix this file exists to hold. causeForGap was handed lastAt
-   * instead of the due time, and the extra 50ms let a cause that set and
+   * instead of the due time, and the extra 25ms let a cause that set and
    * cleared BEFORE the stall began take full blame for it. The final verify
    * proved the buggy algebra passes every other test in this file identically
    * — so this one drives the recorder end to end through both cases and pins
    * the boundary itself.
    */
   const root = mkdtempSync(path.join(os.tmpdir(), "workhorse-perf-blame."));
-  const stop = startPerfHeartbeat(root, { intervalMs: 25, thresholdMs: 60 });
-  try {
-    // An innocent cause, set and cleared before the next tick is due...
-    await new Promise((resolve) => setTimeout(resolve, 40));
+  const intervalMs = 25;
+  const thresholdMs = 60;
+  const RAN_AT = T0 + 25; // the last tick that arrived on time
+  const DUE_AT = RAN_AT + intervalMs; // T0+50: when the next tick was due
+  const RAN_LATE_AT = DUE_AT + 91; // T0+141: the 91ms stall from the failing runs, now chosen
+
+  /** One starved tick, with a cause that finished at `clearedAt`. Returns the row it wrote. */
+  function blameFor(clearedAt: number, name: string) {
+    const file = perfTracePath(path.join(root, name));
     setPerfCause("state:read");
-    clearPerfCause();
-    // ...then an untagged block that starves that tick.
-    const until = Date.now() + 90;
-    while (Date.now() < until) {
-      /* untagged stall */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    const rows = readFileSync(perfTracePath(root), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    const stall = rows.filter((row) => row.gapMs >= 60);
-    assert.ok(stall.length > 0, "the untagged block was recorded");
-    assert.ok(
-      stall.every((row) => row.cause !== "state:read"),
-      `an innocent cause that finished before the stall began must not be blamed: ${JSON.stringify(stall)}`,
+    clearPerfCause(clearedAt);
+    recordHeartbeatTick(file, RAN_AT, RAN_LATE_AT, intervalMs, thresholdMs);
+    return JSON.parse(readFileSync(file, "utf8").trim());
+  }
+
+  try {
+    // An innocent cause, set and cleared before the next tick is due, and then
+    // an untagged block that starves that tick.
+    const innocent = blameFor(DUE_AT - 10, "innocent");
+    assert.equal(innocent.gapMs, 91, "the untagged block was recorded");
+    assert.notEqual(
+      innocent.cause,
+      "state:read",
+      `an innocent cause that finished before the stall began must not be blamed: ${JSON.stringify(innocent)}`,
     );
+    assert.equal(innocent.cause, "unknown", "an untagged block stays untagged");
+
+    // The boundary itself, to the millisecond. Handing causeForGap lastAt
+    // instead of the due time moves this line a whole interval earlier, and
+    // both of these rows then read state:read.
+    assert.equal(blameFor(DUE_AT - 1, "just-before").cause, "unknown", "one ms before the due time is not the cause");
+    assert.equal(blameFor(DUE_AT, "at-the-due-time").cause, "state:read", "a cause alive at the due time is named");
   } finally {
-    stop();
     clearPerfCause();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
+/**
+ * The two tests above step `recordHeartbeatTick` by hand, because a test that
+ * waits on a real `setInterval` is a test about the runner's load. That leaves
+ * one thing uncovered: the loop must hand the tick the same file and carry the
+ * same running `lastAt`, or the arithmetic pinned above judges nothing that
+ * ships. This holds the wiring; the timer itself is Node's.
+ */
+test("the running loop is that same tick, on a timer", () => {
+  const source = readFileSync(path.join(ROOT, "electron", "perf-heartbeat.ts"), "utf8");
+  assert.match(source, /const file = perfTracePath\(userData\);/);
+  assert.match(source, /lastAt = recordHeartbeatTick\(file, lastAt, Date\.now\(\), intervalMs, thresholdMs\);/);
+});
+
 test("causeForGap: cleared before the due time is unknown; alive at the due time is named", () => {
-  clearPerfCause();
+  const clearedAt = T0;
   setPerfCause("state:read");
-  clearPerfCause();
-  const clearedAt = Date.now();
+  clearPerfCause(clearedAt);
   assert.equal(causeForGap(clearedAt + 10), "unknown", "a cause that ended before the window is not the cause");
   assert.equal(causeForGap(clearedAt - 10), "state:read", "a cause alive inside the window is named");
   setPerfCause("state:save");
-  assert.equal(causeForGap(Date.now() + 1000), "state:save", "a cause still set always wins");
+  assert.equal(causeForGap(clearedAt + 1000), "state:save", "a cause still set always wins");
   clearPerfCause();
 });

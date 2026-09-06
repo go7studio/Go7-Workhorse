@@ -8904,9 +8904,10 @@ html.pane-dragging * {
 }
 
 
-/* Workshop — a read-only add-on rail on the desk. Skills stays install/grant;
-   the breakout window is an optional detach of the same cards. Hairlines are
-   --line so the rail takes the desk theme; the accent is the one colour. */
+/* Workshop — a read-only add-on rail on the desk. Manage opens a sheet for
+   install/grant/catalog (Settings → Workshop is secondary). Breakout remains
+   an optional detach of the same cards. Hairlines are --line so the rail takes
+   the desk theme; the accent is the one colour. */
 .workshop-rail {
   min-width: 0;
   min-height: 0;
@@ -8958,9 +8959,12 @@ html.pane-dragging * {
   line-height: 1;
 }
 
-/* Collapsed: the head is the expand button; the strip below is too. */
+/* Collapsed: label + Manage in the head; the strip below expands. */
 .workshop-rail.is-collapsed .workshop-rail-head {
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
+  gap: 4px;
   padding: 8px 4px 6px;
   border-radius: 0;
   width: 100%;
@@ -8969,6 +8973,61 @@ html.pane-dragging * {
 .workshop-rail.is-collapsed .workshop-rail-head .section-label {
   font-size: 9px;
   letter-spacing: 0.02em;
+}
+
+.workshop-rail-head-expand {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  justify-content: center;
+}
+
+.workshop-rail-manage {
+  min-height: 22px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.workshop-rail.is-collapsed .workshop-rail-manage {
+  width: 100%;
+  max-width: 68px;
+}
+
+.workshop-rail.is-empty {
+  width: 96px;
+}
+
+.workshop-rail-empty {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.workshop-rail-empty .row-meta {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.workshop-rail-install {
+  width: 100%;
+  max-width: 80px;
+  min-height: 40px;
+  padding: 6px 6px;
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 10px;
 }
 
 .workshop-rail-strip {
@@ -9462,6 +9521,52 @@ html.pane-dragging * {
   color: var(--warn, var(--muted));
 }
 .media-create-message { margin: 0; }
+
+
+/* Manage sheet: Workhorse chrome hosting WorkshopBlock — not a full Settings page. */
+.workshop-manage-backdrop {
+  z-index: 24;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 24px 24px 24px 40px;
+}
+
+.workshop-manage-sheet {
+  width: min(520px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  margin: auto 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.workshop-manage-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.workshop-manage-sheet-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.workshop-manage-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 18px;
+}
+
+.workshop-manage-sheet-body .workshop-settings {
+  margin-bottom: 0;
+}
 
 .workshop-settings { margin-bottom: 8px; }
 .workshop-section-title { margin: 16px 0 6px; font-size: 13px; font-weight: 600; }

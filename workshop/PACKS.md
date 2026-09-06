@@ -130,7 +130,7 @@ folder and the row.
 
 ## 5. Install — archive or folder, no git
 
-Settings → Workshop → **Add pack**:
+Rail **Manage** (or Settings → Workshop) → **Add pack**:
 
 - Paste an `https` repo URL. The host resolves the highest semver tag and
   downloads that tag's archive (GitHub/GitLab archive URL) with Electron's

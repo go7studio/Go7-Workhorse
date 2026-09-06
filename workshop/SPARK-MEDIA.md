@@ -28,7 +28,7 @@ not embed box vendor words; workshop HTTP is **GET only**.
 | Surface | Role |
 | --- | --- |
 | Pack repo `workshop-pack-spark-media` | `packs/spark-media/pack.json` + collector notes — **not** bundled in Go7-Workhorse |
-| Settings → Workshop | Install / grant pack (folder or tag archive) |
+| Rail Manage sheet (or Settings → Workshop) | Install / grant pack (folder or tag archive) |
 | Desk Workshop **rail** module | Primary: collapsed = queue/last output; expand = gallery + create form |
 | Optional breakout | Detach gallery / create |
 | Comfy web UI on Spark | Advanced escape hatch link from feed — not the only UX |

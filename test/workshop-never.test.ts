@@ -32,7 +32,7 @@ test("Workhorse ships no pack: no bundled packs folder, no extraResources for on
   }
 });
 
-test("Workshop is a Settings tab for install/grant, not a dock item or Work popout", () => {
+test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, Skills home, or Usage/Watch fold", () => {
   const settings = read("src/ui/Settings.tsx");
   assert.match(settings, /id: "profile"/);
   assert.match(settings, /id: "watch"/);
@@ -44,9 +44,21 @@ test("Workshop is a Settings tab for install/grant, not a dock item or Work popo
   const skills = read("src/ui/SkillsPane.tsx");
   assert.doesNotMatch(skills, /WorkshopBlock/);
   assert.doesNotMatch(skills, /WorkPopout/);
+  assert.doesNotMatch(skills, /Install a pack|workshop-rail-manage/i);
   assert.doesNotMatch(read("src/ui/WorkPopout.tsx"), /workshop/i);
   const sidebar = read("src/ui/Sidebar.tsx");
   assert.doesNotMatch(sidebar, /setSettingsSection\("workshop"\)/);
+  assert.doesNotMatch(sidebar, /WorkshopBlock|workshop-rail-manage/);
+  const usage = read("src/ui/UsagePane.tsx");
+  const watch = read("src/ui/WatchPane.tsx");
+  assert.doesNotMatch(usage, /WorkshopBlock|workshop-rail/i);
+  assert.doesNotMatch(watch, /WorkshopBlock|workshop-rail/i);
+  const rail = read("src/ui/WorkshopRail.tsx");
+  assert.match(rail, /workshop-rail-manage/);
+  assert.match(rail, /Install a pack/);
+  assert.match(rail, /<WorkshopBlock \/>/);
+  assert.match(rail, /workshop-manage-sheet/);
+  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
 });
 
 test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {
@@ -131,4 +143,11 @@ test("Settings shows the exact URLs at confirm time, flushes settings, and never
   assert.match(method, /Does not/);
   assert.match(method, /workshop:install-repo/);
   assert.doesNotMatch(method, /workshopOptin|workshop:optin/);
+  assert.match(method, /Manage/);
+  assert.match(method, /Settings → Workshop/);
+  assert.doesNotMatch(method, /Settings → Skills → Workshop/);
+  const railDoc = read("workshop/RAIL.md");
+  assert.match(railDoc, /Manage/);
+  assert.match(railDoc, /empty \/ all-Off|Install a pack/i);
+  assert.doesNotMatch(railDoc, /Settings → Skills → Workshop/);
 });

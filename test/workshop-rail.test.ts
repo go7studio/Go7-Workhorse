@@ -17,6 +17,7 @@ import {
   type Widget,
 } from "../src/lib/workshop-pack";
 import { PaintCard, PaintWidget } from "../src/ui/workshop-paint";
+import { WorkshopRail } from "../src/ui/WorkshopRail";
 import { clipLog, feedAge, feedTone, flagWords, joinParts, primaryStatus, probeRows } from "../src/ui/workshop-live";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -362,4 +363,29 @@ test("gallery paints kind chip, label, and path actions", () => {
   assert.match(html, />Open</);
   assert.match(html, />Reveal</);
   assert.match(html, /No local path/);
+});
+
+test("empty / all-Off rail paints Manage chrome and Install CTA (cold desk)", () => {
+  const html = render(createElement(WorkshopRail));
+  assert.match(html, /aria-label="Workshop rail"/);
+  assert.match(html, /is-empty|workshop-rail-empty/);
+  assert.match(html, />Manage</);
+  assert.match(html, /Install a pack/);
+  assert.doesNotMatch(html, /workshop-manage-sheet/);
+});
+
+test("rail source always exposes Manage on empty, collapsed, and expanded paths; Manage sheet hosts WorkshopBlock", () => {
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  assert.match(rail, /is-empty/);
+  assert.match(rail, /Install a pack/);
+  assert.match(rail, /workshop-rail-manage/);
+  assert.match(rail, /ManageSheet/);
+  assert.match(rail, /<WorkshopBlock \/>/);
+  assert.match(rail, /workshop-manage-sheet/);
+  assert.match(rail, /Escape/);
+  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
+  // Manage appears in both header branches (collapsed + expanded), not only expanded.
+  const manageHits = rail.split("ManageButton").length - 1;
+  assert.ok(manageHits >= 4, `expected ManageButton on empty + collapsed + expanded (+ def), saw ${manageHits}`);
+  assert.doesNotMatch(rail, /UsagePane|WatchPane|setSettingsSection\("workshop"\)/);
 });

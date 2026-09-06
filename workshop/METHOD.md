@@ -5,9 +5,9 @@ Separate add-on. Default off. Read-only.
 ## Desk
 
 1. Add a Local Compute host under Settings → LLMs. Every pack read is a GET through one of these hosts with that host's bearer; Workhorse adds no other credential.
-2. Open Settings → Workshop. **Available** lists the first-party catalog (app-pin verified). Install binds archive digest and lands **Off** on this desk. **Local (Advanced)** still has From folder and optional repo URL (highest semver). Paste a public GitHub repo URL and press Add (the highest tagged release is downloaded, staged, validated, then installed), or press From folder to copy a pack folder. No `git` binary. A pack outside the vocabulary is refused with the exact field or "needs a newer Workhorse". Catalog summaries are display-only — never agent instructions or a playbook.
+2. Open **Manage** on the desk Workshop rail (or Settings → Workshop). **Available** lists the first-party catalog (app-pin verified). Install binds archive digest and lands **Off** on this desk. **Local (Advanced)** still has From folder and optional repo URL (highest semver). Paste a public GitHub repo URL and press Add (the highest tagged release is downloaded, staged, validated, then installed), or press From folder to copy a pack folder. No `git` binary. A pack outside the vocabulary is refused with the exact field or "needs a newer Workhorse". Catalog summaries are display-only — never agent instructions or a playbook. Rail Manage is primary; Settings → Workshop is the secondary deep-link. Skills is not the Workshop home. No dock item.
 3. Press Turn on. Pick the host the pack reads through. The panel lists each source with its kind, cadence, byte cap, and the exact URLs the host will build. Untick what you do not want. Confirm stores `{ id, on, hostId, sources, sourceFingerprints, version, contract }` under `settings.workshop`.
-4. Live watch appears on the desk Workshop rail (collapsed strip → expand). Optional Detach opens the breakout window. Settings → Workshop is install/grant only. No dock item.
+4. Live watch appears on the desk Workshop rail (collapsed strip → expand). When no pack is On, the rail still shows Manage / Install a pack chrome. Optional Detach opens the breakout window. Manage sheet and Settings → Workshop share one `WorkshopBlock`.
 5. Update re-reads the repo's tags. When sources, host needs, cadence, byte caps, or contract changed for **any** pack in the archive, those packs turn off **before** polling restarts and ask you to Turn on again. Card-only changes apply with a version note. Replacing an On pack via Add / From folder likewise forces reconfirm.
 6. Turn off clears `sources` and stops the reads. Remove deletes the pack folder and its row. Neither touches the remote box.
 7. A pack's `collector/` is shown and revealed in the file manager only. Workhorse never runs, chmods, or copies it anywhere.
@@ -48,7 +48,7 @@ Cadence: the timer runs every 30 s, which covers nvidia-smi (5–15 s wanted, 30
 
 | Call | Does | Does not |
 | --- | --- | --- |
-| Renderer `updateWorkshop` (via Settings → Workshop) | Turns packs on or off and sets `hostId` and `sources` | Open or close the breakout by itself |
+| Renderer `updateWorkshop` (via rail Manage sheet or Settings → Workshop) | Turns packs on or off and sets `hostId` and `sources` | Open or close the breakout by itself |
 | `workshopList` (`workshop:list`) | Lists installed packs with sources, provenance, and grant state | Fetch anything from a host |
 | `workshopView` (`workshop:view`) | Returns the packs that are on with layout and main's cached documents | Start a timer; main owns the polling |
 | `workshopCatalog` (`workshop:catalog`) | Returns pin-verified Available view (stale/yank/unreachable flags) | Fetch from the renderer; paint without pin |
@@ -68,6 +68,6 @@ Pack state is `settings.workshop` only. No channel starts, stops, routes, or lea
 Models and Router cards are soak-only labels: loaded model ids (or `infer down (train exclusive)`), train fence / Local Compute invoke, probeUnit, qwen parked/up. They never change Settings → Routing, start/stop jobs, or hold leases.
 
 
-## Desk rail (2026-09-04)
+## Desk rail (2026-09-05)
 
-Live watch = desk Workshop rail (collapsed strip → expand; multi-pack stack). Skills = install/grant only. Breakout = optional detach. See RAIL.md.
+Live watch = desk Workshop rail (collapsed strip → expand; multi-pack stack; empty Manage chrome when none On). Manage sheet = install/grant/catalog (primary). Settings → Workshop = secondary. Skills is not the Workshop home. Breakout = optional detach. See RAIL.md.

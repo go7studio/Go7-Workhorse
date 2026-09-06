@@ -9578,6 +9578,13 @@ html.pane-dragging * {
   font-size: 18px;
 }
 
+.workshop-manage-sheet-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .workshop-manage-sheet-body {
   flex: 1;
   min-height: 0;
@@ -9605,12 +9612,12 @@ html.pane-dragging * {
   line-clamp: unset;
 }
 
-.workshop-catalog-toolbar {
+.workshop-manage-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
 }
 
 .workshop-active-empty,
@@ -9629,9 +9636,21 @@ html.pane-dragging * {
   margin-bottom: 10px;
 }
 
+/* Advanced: whisper — no competing weight with Pending section-label. */
 .workshop-advanced-title {
-  margin-top: 20px;
-  opacity: 0.85;
+  margin: 22px 0 0;
+  font-size: inherit;
+  font-weight: inherit;
+  opacity: 0.55;
+}
+
+.workshop-advanced-toggle {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--text-tertiary);
+  opacity: 0.9;
 }
 
 .workshop-settings .skill-row-side .tiny.primary,
@@ -9649,8 +9668,16 @@ html.pane-dragging * {
 }
 
 .workshop-settings { margin-bottom: 8px; }
-.workshop-section-title { margin: 16px 0 6px; font-size: 13px; font-weight: 600; }
-.workshop-section-title .tiny { font-size: inherit; font-weight: 600; }
+/* Active/Pending: rail section-label weight, not Settings h3. */
+.workshop-settings .workshop-section-title.section-label,
+.workshop-section-title.section-label {
+  margin: 12px 0 4px;
+  font-size: 10px;
+  font-weight: 590;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
 .workshop-catalog-empty { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .workshop-advanced { margin-bottom: 12px; }
 
@@ -9673,10 +9700,10 @@ html.pane-dragging * {
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  padding: 8px 10px;
+  padding: 5px 8px;
 }
 .workshop-settings .pack-row.is-expanded {
-  gap: 8px;
+  gap: 6px;
 }
 .workshop-row-chrome {
   display: flex;
@@ -9685,10 +9712,31 @@ html.pane-dragging * {
   gap: 10px;
   width: 100%;
 }
+.workshop-row-action-slot {
+  flex: 0 0 4.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 22px;
+}
+.workshop-row-action-slot .tiny.primary {
+  min-width: 4.5rem;
+}
+.workshop-turn-on-quiet {
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+.workshop-turn-on-quiet:hover:not(:disabled) {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .workshop-row-hit {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
@@ -9703,19 +9751,20 @@ html.pane-dragging * {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* Letter marks: small muted circle — identity, not error badge. */
 .workshop-pack-mark {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: 0;
-  background: var(--bg, rgba(127, 127, 127, 0.18));
-  color: inherit;
+  background: color-mix(in srgb, var(--text-tertiary, rgba(127, 127, 127, 0.55)) 16%, transparent);
+  color: var(--text-tertiary, var(--muted));
 }
 .workshop-row-title {
   flex: 1 1 auto;
@@ -9728,8 +9777,8 @@ html.pane-dragging * {
 .workshop-row-detail {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 0 2px 38px;
+  gap: 5px;
+  padding: 0 0 2px 28px;
 }
 .workshop-row-detail > .row-meta,
 .workshop-row-detail > .workshop-pack-summary {
@@ -9753,6 +9802,21 @@ html.pane-dragging * {
   justify-content: flex-start;
   gap: 8px;
   margin-top: 2px;
+}
+.workshop-row-more {
+  margin: 2px 0 0;
+}
+.workshop-row-more > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.workshop-row-more > summary::-webkit-details-marker {
+  display: none;
+}
+.workshop-row-more[open] > summary {
+  margin-bottom: 4px;
 }
 /* Expanded rail: soften long null-feed pack notes to one status line. */
 .workshop-rail .workshop-law {

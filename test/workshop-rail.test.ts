@@ -473,11 +473,15 @@ test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach h
   assert.match(block, /Detach is Settings \/ live-rail only/);
   const detachHits = block.match(/>\s*Detach\s*</g) ?? [];
   assert.equal(detachHits.length, 1, `expected one Detach label in settings path, saw ${detachHits.length}`);
-  // F: Refresh on healthy catalog; Retry only on failure.
+  // F: Refresh on healthy catalog (settings toolbar / empty CTA); Retry only on failure.
+  // Sheet head Refresh is in WorkshopRail — never between Pending rows.
   const refreshLabels = block.match(/>\s*Refresh\s*</g) ?? [];
   assert.ok(refreshLabels.length >= 1, "expected Refresh when catalog healthy");
   assert.match(block, /No packs in catalog[\s\S]{0,200}Refresh/);
-  assert.match(block, /workshop-catalog-toolbar[\s\S]*Refresh/);
+  assert.match(block, /workshop-manage-toolbar[\s\S]*Refresh/);
+  assert.doesNotMatch(block, /workshop-catalog-toolbar/);
+  assert.match(rail, /workshop-manage-sheet-head-actions[\s\S]*Refresh/);
+  assert.match(rail, /catalogRefreshNonce/);
 });
 
 test("simple rows: Active/Pending accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
@@ -485,7 +489,7 @@ test("simple rows: Active/Pending accordion, no default essays, hide same-versio
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
-  // 1: Collapsed Active/Pending = mark + title; summary only in expand.
+  // 1: Collapsed Active/Pending = mark + title; catalog summary only in expand (Active drops essay).
   assert.match(block, /workshop-pack-mark/);
   assert.match(block, /workshop-row-title/);
   assert.match(block, /workshop-pack-summary/);
@@ -493,10 +497,12 @@ test("simple rows: Active/Pending accordion, no default essays, hide same-versio
   assert.doesNotMatch(block, /workshop-pack-desc/);
   assert.doesNotMatch(block, />Installed</);
   assert.doesNotMatch(block, />Available</);
-  // 2: Collector · Reveal only as control (no essay); lives in expand detail.
+  assert.match(block, /Packs on this desk/);
+  // 2: Collector · Reveal only under quiet More (not default expand essay).
   assert.match(block, /Collector · Reveal/);
   assert.doesNotMatch(block, /Collector: installed by the operator on the remote box/);
-  assert.match(block, /workshop-row-detail[\s\S]*Collector · Reveal/);
+  assert.match(block, /workshop-row-more[\s\S]*Collector · Reveal/);
+  assert.match(block, />More</);
   // 3: Pending hides same-version Installed (Update/yanked still shown).
   assert.match(block, /Hide same-version Installed/);
   assert.match(block, /installed\.version !== entry\.version/);
@@ -510,5 +516,34 @@ test("simple rows: Active/Pending accordion, no default essays, hide same-versio
   // 6: Expanded null-feed note softens to one line (full text in title) — rail soak unchanged.
   assert.match(css, /\.workshop-rail \.workshop-law[^{]*\{[^}]*line-clamp:\s*1/s);
   assert.match(paint, /className="row-meta workshop-law" title=\{widget\.value\}/);
+});
+
+test("feel pass: quiet marks/headers, Refresh not between rows, Pending action align, Advanced whisper", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  // Active expand: host · sources + actions; no default summary / provenance essay.
+  assert.doesNotMatch(block, /from folder/);
+  assert.doesNotMatch(block, /from catalog · this desk/);
+  // Refresh: sheet head + settings toolbar; never catalog-toolbar between Pending rows.
+  assert.match(railSrc, /workshop-manage-sheet-head-actions/);
+  assert.match(railSrc, /catalogRefreshNonce/);
+  assert.match(block, /workshop-manage-toolbar/);
+  assert.doesNotMatch(block, /workshop-catalog-toolbar/);
+  assert.doesNotMatch(css, /workshop-catalog-toolbar/);
+  // Quieter letter marks (small muted circle).
+  assert.match(css, /\.workshop-pack-mark\s*\{[^}]*border-radius:\s*50%/s);
+  assert.match(css, /\.workshop-pack-mark\s*\{[^}]*width:\s*20px/s);
+  // Section-label Active/Pending headers.
+  assert.match(block, /workshop-section-title section-label/);
+  assert.match(css, /workshop-section-title\.section-label/);
+  // Pending action column alignment; Install primary; Turn on quiet.
+  assert.match(css, /workshop-row-action-slot/);
+  assert.match(block, /workshop-turn-on-quiet/);
+  assert.match(block, /className="tiny primary"/);
+  // Advanced whisper.
+  assert.match(css, /workshop-advanced-toggle/);
+  assert.match(block, /workshop-advanced-toggle/);
+  assert.doesNotMatch(block, /workshop-section-title workshop-advanced-title/);
 });
 

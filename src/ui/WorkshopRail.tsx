@@ -53,6 +53,7 @@ function ManageSheet({
 }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [catalogRefreshNonce, setCatalogRefreshNonce] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -93,12 +94,26 @@ function ManageSheet({
       >
         <div className="workshop-manage-sheet-head">
           <h3>Manage packs</h3>
-          <button ref={closeRef} className="tiny" type="button" onClick={onClose}>
-            Close
-          </button>
+          <div className="workshop-manage-sheet-head-actions">
+            <button
+              className="tiny"
+              type="button"
+              title="Refresh catalog"
+              onClick={() => setCatalogRefreshNonce((n) => n + 1)}
+            >
+              Refresh
+            </button>
+            <button ref={closeRef} className="tiny" type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
         <div className="workshop-manage-sheet-body">
-          <WorkshopBlock surface="sheet" focusAvailable={availableFirst} />
+          <WorkshopBlock
+            surface="sheet"
+            focusAvailable={availableFirst}
+            catalogRefreshNonce={catalogRefreshNonce}
+          />
         </div>
       </div>
     </div>

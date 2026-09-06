@@ -138,15 +138,6 @@ function packMark(title: string): string {
   return ch ? ch.toUpperCase() : "?";
 }
 
-function provenance(pack: PackListing): string {
-  const installed = pack.installed;
-  if (!installed) return "";
-  if (installed.kind === "folder") return "from folder";
-  if (installed.kind === "catalog") return "from catalog · this desk";
-  const from = installed.from.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  return installed.tag ? `from ${from} · ${vLabel(installed.tag)}` : `from ${from}`;
-}
-
 function installWords(result: InstallResult): string {
   return result.ok ? `Installed ${result.ids.join(", ")}` : result.reason;
 }
@@ -156,9 +147,12 @@ type UpdateState = { current: string; latest?: string; reason?: string; note?: s
 export function WorkshopBlock({
   surface = "settings",
   focusAvailable = false,
+  catalogRefreshNonce = 0,
 }: {
   surface?: "settings" | "sheet";
   focusAvailable?: boolean;
+  /** Bump from Manage sheet head Refresh to re-fetch catalog (never between rows). */
+  catalogRefreshNonce?: number;
 } = {}) {
   const store = useStore();
   const hosts = store.settings.localCompute.hosts.filter((host) => host.enabled);
@@ -237,6 +231,12 @@ export function WorkshopBlock({
     const stop = window.workhorse?.onWorkshopChanged?.(reload);
     return () => stop?.();
   }, [reload]);
+
+  // Sheet-head Refresh bumps nonce; never place Refresh between Pending rows.
+  useEffect(() => {
+    if (!catalogRefreshNonce) return;
+    reloadCatalog();
+  }, [catalogRefreshNonce, reloadCatalog]);
 
   // Add packs (zero installed) → Pending-first; Manage / Turn on with any On → Active.
   useEffect(() => {
@@ -482,17 +482,24 @@ export function WorkshopBlock({
     </div>
   );
 
+  const sheetIntro =
+    activePacks.length === 0 ? "Install a pack, then Turn on." : "Packs on this desk";
+  const showCatalogRefresh =
+    catalogState != null &&
+    catalogState.ok &&
+    !catalogState.unreachable &&
+    !catalogState.pinFailed &&
+    !catalogState.expired;
+
   return (
     <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
       {inSheet ? (
-        <p className="row-meta workshop-blurb workshop-sheet-intro">
-          Install a pack, then Turn on.
-        </p>
+        <p className="row-meta workshop-blurb workshop-sheet-intro">{sheetIntro}</p>
       ) : (
         <div className="link-head">
           <div>
             <strong>Workshop</strong>
-            <p className="row-meta">Install a pack, then Turn on.</p>
+            <p className="row-meta">{sheetIntro}</p>
           </div>
           {/* Detach is Settings / live-rail only — hidden when surface="sheet" (Manage). */}
           {packs.some((pack) => pack.on) ? (
@@ -503,7 +510,20 @@ export function WorkshopBlock({
         </div>
       )}
 
-      <h3 ref={activeRef} id="workshop-active" className="workshop-section-title" tabIndex={-1}>
+      {/* Settings: Refresh under intro. Sheet: Refresh lives in Manage sheet head (never between rows). */}
+      {!inSheet && showCatalogRefresh ? (
+        <div className="workshop-manage-toolbar">
+          {catalogState?.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()} title="Refresh catalog">
+            Refresh
+          </button>
+        </div>
+      ) : null}
+      {inSheet && showCatalogRefresh && catalogState?.stale ? (
+        <p className="row-meta workshop-sheet-intro">Catalog stale — Install disabled until refresh.</p>
+      ) : null}
+
+      <h3 ref={activeRef} id="workshop-active" className="workshop-section-title section-label" tabIndex={-1}>
         Active
       </h3>
       {activePacks.length === 0 ? (
@@ -515,7 +535,6 @@ export function WorkshopBlock({
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
             const expanded = expandedId === pack.id;
-            const summary = pack.description?.trim() || "";
             return (
               <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
                 <button
@@ -531,29 +550,15 @@ export function WorkshopBlock({
                 </button>
                 {expanded ? (
                   <div className="workshop-row-detail">
-                    {summary ? <p className="row-meta workshop-pack-summary" title={summary}>{summary}</p> : null}
                     <span className="row-meta">
                       {pack.refused
                         ? `Refused: ${pack.refused}`
                         : `${hostLabel(pack.hostId)}${pack.granted.length ? ` · ${pack.granted.length} source${pack.granted.length === 1 ? "" : "s"}` : ""}`}
                     </span>
-                    {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
                     {update?.note ? <span className="row-meta">{update.note}</span> : null}
                     {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
                     {update && !update.reason && !update.note && !latest ? (
                       <span className="row-meta">Up to date · {vLabel(update.current)}</span>
-                    ) : null}
-                    {pack.collector ? (
-                      <span className="row-meta workshop-collector">
-                        <button
-                          className="tiny"
-                          type="button"
-                          title="Collector · Reveal folder (Workhorse never runs it)"
-                          onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
-                        >
-                          Collector · Reveal
-                        </button>
-                      </span>
                     ) : null}
                     <span className="pack-row-side workshop-row-actions">
                       {pack.refused ? (
@@ -597,6 +602,21 @@ export function WorkshopBlock({
                         </button>
                       )}
                     </span>
+                    {pack.collector ? (
+                      <details className="workshop-row-more">
+                        <summary className="row-meta">More</summary>
+                        <span className="row-meta workshop-collector">
+                          <button
+                            className="tiny"
+                            type="button"
+                            title="Collector · Reveal folder (Workhorse never runs it)"
+                            onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                          >
+                            Collector · Reveal
+                          </button>
+                        </span>
+                      </details>
+                    ) : null}
                   </div>
                 ) : null}
               </li>
@@ -605,7 +625,7 @@ export function WorkshopBlock({
         </ul>
       )}
 
-      <h3 ref={pendingRef} id="workshop-pending" className="workshop-section-title" tabIndex={-1}>
+      <h3 ref={pendingRef} id="workshop-pending" className="workshop-section-title section-label" tabIndex={-1}>
         Pending
       </h3>
       {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok ? (
@@ -620,7 +640,6 @@ export function WorkshopBlock({
             const isRepo = pack.installed?.kind === "repo";
             const expanded = expandedId === pack.id;
             const confirming = confirmId === pack.id && !pack.refused;
-            const summary = pack.description?.trim() || "";
             return (
               <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
                 <div className="workshop-row-chrome">
@@ -635,33 +654,21 @@ export function WorkshopBlock({
                     </span>
                     <strong className="workshop-row-title">{pack.name}</strong>
                   </button>
-                  {!expanded && !pack.refused ? (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
-                      Turn on
-                    </button>
-                  ) : null}
+                  <span className="workshop-row-action-slot">
+                    {!expanded && !pack.refused ? (
+                      <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                        Turn on
+                      </button>
+                    ) : null}
+                  </span>
                 </div>
                 {expanded ? (
                   <div className="workshop-row-detail">
-                    {summary ? <p className="row-meta workshop-pack-summary" title={summary}>{summary}</p> : null}
                     {pack.refused ? <span className="row-meta">Refused: {pack.refused}</span> : null}
-                    {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
                     {update?.note ? <span className="row-meta">{update.note}</span> : null}
                     {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
                     {update && !update.reason && !update.note && !latest ? (
                       <span className="row-meta">Up to date · {vLabel(update.current)}</span>
-                    ) : null}
-                    {pack.collector ? (
-                      <span className="row-meta workshop-collector">
-                        <button
-                          className="tiny"
-                          type="button"
-                          title="Collector · Reveal folder (Workhorse never runs it)"
-                          onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
-                        >
-                          Collector · Reveal
-                        </button>
-                      </span>
                     ) : null}
                     {confirming ? confirmPanel(pack) : null}
                     <span className="pack-row-side workshop-row-actions">
@@ -684,7 +691,7 @@ export function WorkshopBlock({
                           </button>
                         </>
                       ) : (
-                        <button className="tiny primary" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                        <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
                           Turn on
                         </button>
                       )}
@@ -722,6 +729,21 @@ export function WorkshopBlock({
                         </button>
                       )}
                     </span>
+                    {pack.collector ? (
+                      <details className="workshop-row-more">
+                        <summary className="row-meta">More</summary>
+                        <span className="row-meta workshop-collector">
+                          <button
+                            className="tiny"
+                            type="button"
+                            title="Collector · Reveal folder (Workhorse never runs it)"
+                            onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                          >
+                            Collector · Reveal
+                          </button>
+                        </span>
+                      </details>
+                    ) : null}
                   </div>
                 ) : null}
               </li>
@@ -748,12 +770,6 @@ export function WorkshopBlock({
         </div>
       ) : (
         <>
-          <div className="workshop-catalog-toolbar">
-            {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
-            <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()} title="Refresh catalog">
-              Refresh
-            </button>
-          </div>
           {pendingCatalog.length > 0 ? (
             <ul className="pack-list">
               {pendingCatalog.map((entry) => {
@@ -782,16 +798,18 @@ export function WorkshopBlock({
                         </span>
                         <strong className="workshop-row-title">{title}</strong>
                       </button>
-                      {!expanded ? (
-                        <button
-                          className="tiny primary"
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => void installAvailable(entry.id)}
-                        >
-                          {needsUpdate ? "Update" : "Install"}
-                        </button>
-                      ) : null}
+                      <span className="workshop-row-action-slot">
+                        {!expanded ? (
+                          <button
+                            className="tiny primary"
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => void installAvailable(entry.id)}
+                          >
+                            {needsUpdate ? "Update" : "Install"}
+                          </button>
+                        ) : null}
+                      </span>
                     </div>
                     {expanded ? (
                       <div className="workshop-row-detail">
@@ -829,8 +847,8 @@ export function WorkshopBlock({
         </>
       )}
 
-      <h3 className="workshop-section-title workshop-advanced-title">
-        <button className="tiny" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
+      <h3 className="workshop-advanced-title">
+        <button className="tiny workshop-advanced-toggle" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
           Local (Advanced) {advancedOpen ? "▾" : "▸"}
         </button>
       </h3>

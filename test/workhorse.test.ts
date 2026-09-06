@@ -208,9 +208,12 @@ import {
   resetMediaPaint,
 } from "../src/lib/media-paint";
 import {
+  closedWorkSummary,
+  crewNamesFromTitles,
   displayWorkSteps,
   earlierWorkLabel,
   formatWorked,
+  namedCrewSummary,
   namedWorkSummary,
   groupTranscript,
   groupWorkRows,
@@ -226,6 +229,7 @@ import {
   transcriptPaintStart,
   resolveWorkedMs,
   thoughtForReply,
+  workPopState,
   workStepKinds,
   type WorkStreamEvent,
 } from "../src/lib/turns";
@@ -6361,6 +6365,55 @@ test("transcript groups tools and thoughts above the final reply", () => {
     ),
     "Read · Grep · Edit · 2 more",
   );
+  const genericTool: ChatMessage = {
+    id: "tg",
+    role: "system",
+    kind: "tool",
+    toolCallId: "g",
+    text: "tool · completed",
+    toolStatus: "completed",
+    createdAt: 5,
+  };
+  const genericLive: ChatMessage = { ...genericTool, text: "tool · running", toolStatus: "running" };
+  assert.equal(namedWorkSummary([genericTool]), "");
+  assert.equal(namedWorkSummary([genericTool], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([genericLive], { live: true }), "Thinking");
+  assert.equal(namedWorkSummary([readDone, genericTool]), "Read");
+  assert.equal(namedCrewSummary([{ name: "Hazel" }]), "Hazel");
+  assert.equal(
+    namedCrewSummary([
+      { name: "Hazel" },
+      { name: "Piper" },
+      { name: "Dexter" },
+      { name: "Otis" },
+      { name: "Marlow" },
+    ]),
+    "Hazel · Piper · Dexter · 2 more",
+  );
+  assert.equal(
+    namedCrewSummary(
+      [
+        { name: "Hazel", live: false },
+        { name: "Piper", live: true },
+      ],
+      { live: true },
+    ),
+    "Piper · Hazel",
+  );
+  assert.equal(namedCrewSummary([]), "");
+  assert.equal(namedCrewSummary([{ name: " " }, { name: "tool" }]), "");
+  assert.equal(
+    closedWorkSummary({ label: "Worked 38s", tools: "Read · Grep", crew: "Hazel · Piper" }),
+    "Worked 38s · Hazel · Piper",
+  );
+  assert.equal(
+    closedWorkSummary({ label: "Worked 19s", talking: "Asking Test", tools: "Read" }),
+    "Worked 19s · Asking Test · Read",
+  );
+  assert.equal(workPopState({ live: true, failed: true }), "working");
+  assert.equal(workPopState({ live: false, failed: true }), "failed");
+  assert.equal(workPopState({ live: false, failed: false }), "done");
+  assert.equal(crewNamesFromTitles(["Hazel · Replace shop", "Piper · Pin labels"]), "Hazel · Piper");
 
   const messages: ChatMessage[] = [
     { id: "u", role: "user", text: "hi", createdAt: 1 },
@@ -6429,15 +6482,22 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.match(popout, /useStartOpen/);
   assert.match(popout, /fold\.current\.open = true/);
   assert.match(popout, /foldOpen/);
-  assert.match(popout, /<details className="work-pop" onToggle=\{onBodyToggle\}>/);
+  assert.match(popout, /<details className="work-pop" data-state=\{state\} onToggle=\{onBodyToggle\}>/);
   assert.doesNotMatch(popout, /<details className="work-pop" open=\{live\}>/);
   assert.match(popout, /bodyOpen && hasInner/);
   assert.match(popout, /earlierOpen \?/);
   assert.match(popout, /namedWorkSummary\(otherTools/);
+  assert.match(popout, /namedCrewSummary\(crewWorkers/);
+  assert.match(popout, /closedWorkSummary/);
+  assert.doesNotMatch(popout, /1 \? "subagent" : "subagents"/);
   assert.doesNotMatch(popout, /1 \? "tool" : "tools"/);
   assert.match(
     readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
     /Working · 19s · Read GOAL\.md/,
+  );
+  assert.match(
+    readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"),
+    /Worked 38s · Hazel · Piper/,
   );
   assert.match(popout, /packWorkRows/);
   assert.match(popout, /earlierWorkLabel/);
@@ -8561,7 +8621,7 @@ test("switching This-chat vendor drops the previous vendor session", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium",
+    "GPT-5.6-Terra · Medium · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -9692,6 +9752,8 @@ test("desk builds one named join prompt and syncs idle children", () => {
     "each lineup announces its own finish",
   );
   assert.match(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /Join them now/);
+  assert.match(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /Start with blockers/);
+  assert.doesNotMatch(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /worst first/);
   assert.doesNotMatch(formatAwaitAgentsSnapshot({ lineup: handedParent?.lineup, wait: true }), /desk will send the join/);
   const again = maybeEnqueueLineupJoin(joinedAfter, "orch", 13);
   assert.equal(again.find((item) => item.id === "orch")?.queue?.length, afterParent?.queue?.length);

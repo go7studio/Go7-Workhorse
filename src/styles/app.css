@@ -1955,9 +1955,18 @@ html.pane-dragging * {
   font-size: 12px;
   font-weight: 560;
   letter-spacing: 0.01em;
-  color: var(--text-secondary);
+  color: var(--text);
   text-align: center;
   white-space: nowrap;
+}
+
+.crew-done-card span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 510;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .crew-done.failed .crew-done-card strong {
@@ -1998,6 +2007,15 @@ html.pane-dragging * {
   font-weight: 560;
   color: var(--text-secondary);
   list-style: none;
+  transition: color 180ms var(--ease);
+}
+
+.work-pop[data-state="done"] > summary {
+  color: var(--text);
+}
+
+.work-pop[data-state="failed"] > summary {
+  color: var(--danger);
 }
 
 .work-pop > summary::-webkit-details-marker {
@@ -7271,6 +7289,7 @@ html.pane-dragging * {
     animation: none;
   }
 
+  .work-pop > summary,
   .work-pop > summary::before {
     transition: none;
   }

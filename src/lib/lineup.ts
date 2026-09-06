@@ -249,7 +249,8 @@ export function lineupJoinPrompt(
   } else {
     lines.push(
       "Answer the user in your own words as this chat’s bot. Write one combined review of what the crew found.",
-      "Rank the structured findings by severity before using the prose reports for context.",
+      "Start with blockers, then the rest. Name which worker found each item.",
+      "Use the structured findings, then the prose reports for context.",
       "Do not paste worker notes, file checklists, “let me check” narration, or raw slice dumps into this chat.",
       "Cite which slice a fact came from. Failed or empty slices: one line on what is missing. Do not ask 1/2/3.",
     );
@@ -306,7 +307,7 @@ export function formatAwaitAgentsSnapshot(input: {
         running.length === 0
           ? input.reports?.some((row) => row.executionOwner === "parent")
             ? "Workers finished, but the parent took over. Do not claim a fully Workhorse-owned completion. Join the reports and say who did the finishing work."
-            : "All workers finished and their reports are above. Join them now, in your own words: one list, worst first, naming which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
+            : "All workers finished and their reports are above. Join them now for the user. Start with blockers, then the rest, and name which worker found each item. The desk will not send a separate join. Do not ask the user to pick 1/2/3."
           : "Workers are still running. Keep talking to the user. Do not ask them to pick. Do not sit on this tool.",
     },
     null,

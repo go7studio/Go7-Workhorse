@@ -38,7 +38,9 @@ export function workerSidebarLabel(session: Session, botName?: string): string {
   const name = botName?.trim() || modelName(session.provider, session.model);
   const effort = effortLabel(session.effort ?? null);
   const cancelled = session.agentRun?.status === "cancelled" ? "Cancelled" : "";
-  return [name, effort, cancelled].filter(Boolean).join(" · ");
+  const done =
+    session.agentRun?.status === "completed" && session.agentRun.executionOwner !== "parent" ? "Done" : "";
+  return [name, effort, cancelled, done].filter(Boolean).join(" · ");
 }
 
 export type ChatRowDesk = {

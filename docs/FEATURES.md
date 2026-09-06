@@ -179,8 +179,9 @@ transcript rather than as a path.
 - User and assistant turns in the transcript use the same clock.
 - A turn’s work stays on one compact line while it runs, named for the live
   action (`Working · 19s · Read GOAL.md`). When the turn ends it lists the
-  tools that ran (`Worked 19s · Read · Grep`). Open it when you want the
-  ordered detail: think, tools, think. Consecutive tool calls share
+  tools that ran (`Worked 19s · Read · Grep`), or the workers if it had a crew
+  (`Worked 38s · Hazel · Piper`). That line is primary ink when the turn has
+  ended. Open it when you want the ordered detail: think, tools, think. Consecutive tool calls share
   one fold labelled "3 tools"; expand it to see the calls listed underneath, not
   a row of "1 tool". A single call shows its name. A later thought starts a new
   hop. When a turn runs long, earlier thoughts and tools roll into an Earlier

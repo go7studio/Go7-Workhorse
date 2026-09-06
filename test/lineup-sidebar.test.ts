@@ -58,7 +58,7 @@ test("both sidebar lists share the one rule", () => {
   assert.doesNotMatch(loose.slice(0, 400), /isHiddenSession/);
 });
 
-test("a nested worker subtitle is model and effort only", () => {
+test("a nested worker subtitle names a clean finish as Done", () => {
   assert.equal(
     workerSidebarLabel({
       id: "worker_terra",
@@ -75,7 +75,7 @@ test("a nested worker subtitle is model and effort only", () => {
       messages: [],
       agentRun: { status: "completed", startedAt: 1, isolation: "worktree" },
     }),
-    "GPT-5.6-Terra · Medium",
+    "GPT-5.6-Terra · Medium · Done",
   );
   assert.equal(
     workerSidebarLabel({
@@ -113,6 +113,7 @@ test("a nested worker subtitle is model and effort only", () => {
     }),
     "Composer 2.5 · High · Cancelled",
   );
+  assert.match(read("src/ui/ChatRow.tsx"), /status === "completed" && session\.agentRun\.executionOwner !== "parent"/);
 });
 
 test("a running chat keeps model and effort on the row, not Working…", () => {

@@ -273,6 +273,7 @@ import {
   cellDotBackground,
   stretchBuckets,
   stretchHeatmap,
+  heatmapTotal,
   weekDays,
 } from "../src/lib/usage";
 import { colorFromWheel, hexToHsv, hsvToHex, parseHex } from "../src/lib/color";
@@ -5573,6 +5574,7 @@ test("stretchBuckets follows today week month and all", () => {
     ["12 AM", "6 AM", "12 PM", "6 PM"],
   );
   assert.equal(todayDots.columns[12][0].tokens, 160);
+  assert.equal(heatmapTotal(todayDots), 160);
   assert.equal(todayDots.columns[12][0].inputTokens, 140);
   assert.equal(todayDots.columns[12][0].outputTokens, 20);
   assert.equal(todayDots.columns[12][0].bots.length, 2);
@@ -5711,6 +5713,9 @@ test("UsagePane ships the Figma fuel-ring overview, not the old token line", asy
   assert.equal(sameFuelTarget(undefined, 0.95), false);
   assert.match(css, /@keyframes fuel-in/);
   assert.match(pane, /This stretch/);
+  assert.match(pane, /heatmapTotal/);
+  assert.match(pane, /billed/);
+  assert.doesNotMatch(pane, /Peak \{peak\.label\} · \{formatTokens\(peak\.tokens\)\}/);
   assert.match(pane, /usage-dots/);
   assert.match(pane, /usage-tip/);
   assert.match(pane, /cellSummary/);

@@ -19,13 +19,18 @@ import {
   estimateFromSessionTurn,
   finalizeTurnUsage,
   formatIoLine,
+  heatmapPeak,
+  heatmapTotal,
   leftoverForCard,
   deskPulseLines,
+  inRange,
   normalizeUsage,
   occupancyFromUsage,
   repairSummedPromptTurn,
   settleTurnUsage,
+  stretchHeatmap,
   sumRequestBills,
+  usageTimestamp,
   visibleUsageEvents,
   usageFocusFacts,
 } from "../src/lib/usage";
@@ -891,6 +896,7 @@ test("Spend docs keep leftover, billed tokens, and retained context distinct", (
   assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);
   assert.match(features, /Retained context is this chat's window occupancy, never the[\s\S]*leftover ring/);
   assert.match(features, /billed total is on the chat meter/);
+  assert.match(features, /This stretch shows billed in/);
 });
 
 test("chat spend is this session's billed in plus out", () => {
@@ -937,4 +943,44 @@ test("chat spend is this session's billed in plus out", () => {
   assert.equal(spend.events, 2);
   assert.equal(chatSpend(events, "missing").events, 0);
   assert.equal(chatSpend(events, undefined).events, 0);
+});
+
+test("This stretch bills the range total, including events with no clock", () => {
+  const now = Date.parse("2026-09-05T20:00:00-04:00");
+  const undated = {
+    id: "zero",
+    at: 0,
+    provider: "cursor" as const,
+    model: "grok-4.6",
+    sessionId: "chat-1",
+    inputTokens: 3_100_000,
+    outputTokens: 146_000,
+    cacheReadTokens: 25_700_000,
+    cacheWriteTokens: 0,
+  };
+  const earlier = {
+    ...undated,
+    id: "hour",
+    at: now - 3 * 60 * 60 * 1000,
+    inputTokens: 27_000,
+    outputTokens: 25_000,
+    cacheReadTokens: 0,
+  };
+  assert.equal(inRange(undated, "today", now), true);
+  assert.equal(inRange(undated, "month", now), true);
+  assert.equal(eventTotal(undated), 3_246_000);
+  assert.equal(usageTimestamp(Math.floor(now / 1000), now), now);
+
+  const today = stretchHeatmap([undated, earlier], "today", now);
+  const total = heatmapTotal(today);
+  const peak = heatmapPeak(today);
+  assert.equal(total, 3_246_000 + 52_000);
+  assert.equal(chatSpend([undated, earlier], "chat-1").totalTokens, total);
+  assert.ok(peak);
+  assert.equal(peak.tokens, 3_246_000);
+  assert.ok(total > peak.tokens);
+
+  const repaired = normalizeUsage([undated]);
+  assert.equal(repaired.length, 1);
+  assert.ok(repaired[0]!.at > 1e12);
 });

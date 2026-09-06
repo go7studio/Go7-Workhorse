@@ -250,7 +250,9 @@ transcript rather than as a path.
   leftover ring.
 - Budgets per vendor.
 - A weekly pace that tells you when you are ahead of it, before the bill does.
-- A usage view by day, week, month, or all time.
+- A usage view by day, week, month, or all time. This stretch shows billed in +
+  out for the selected range — the same total as the chat meter — not only the
+  peak cell. Events missing a clock still count on today.
 
 ## Work that outlives a turn
 

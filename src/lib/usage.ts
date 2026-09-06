@@ -373,8 +373,23 @@ export function rangeStart(range: UsageRange, now = Date.now()): number {
   return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
 }
 
+/**
+ * Clock for Usage buckets. `at: 0` and unix-seconds survived on disk, so the
+ * chat meter counted them and This Stretch dropped them. Missing clocks land
+ * on `now` (today). Seconds from 2020 onward become milliseconds.
+ */
+export function usageTimestamp(at: unknown, now = Date.now()): number {
+  if (typeof at !== "number" || !Number.isFinite(at) || at <= 0) return now;
+  if (at < 1e12) {
+    const asMs = Math.round(at * 1000);
+    const earliest = Date.UTC(2020, 0, 1);
+    if (asMs >= earliest && asMs <= now + 24 * 60 * 60 * 1000) return asMs;
+  }
+  return at;
+}
+
 export function inRange(event: UsageEvent, range: UsageRange, now = Date.now()): boolean {
-  return event.at >= rangeStart(range, now);
+  return usageTimestamp(event.at, now) >= rangeStart(range, now);
 }
 
 function add(base: UsageTotals, event: UsageEvent): UsageTotals {
@@ -1001,7 +1016,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       return {
         key: part.key,
         letter: part.letter,
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       };
     });
   }
@@ -1018,7 +1036,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       days.push({
         key: `${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`,
         letter: DAY_NAMES[day.getDay()] ?? "Monday",
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       });
     }
     return days;
@@ -1036,7 +1057,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
       weeks.push({
         key: `${first.getFullYear()}-${first.getMonth() + 1}-w${startDate}`,
         letter: `${startDate}–${endDate}`,
-        totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+        totalTokens: rollup(events.filter((event) => {
+          const at = usageTimestamp(event.at, now);
+          return at >= from && at < to;
+        })).totalTokens,
       });
     }
     return weeks;
@@ -1053,7 +1077,10 @@ export function stretchBuckets(events: UsageEvent[], range: UsageRange, now = Da
     months.push({
       key: `${stamp.getFullYear()}-${stamp.getMonth() + 1}`,
       letter: MONTH_LETTERS[stamp.getMonth()] ?? "J",
-      totalTokens: rollup(events.filter((event) => event.at >= from && event.at < to)).totalTokens,
+      totalTokens: rollup(events.filter((event) => {
+        const at = usageTimestamp(event.at, now);
+        return at >= from && at < to;
+      })).totalTokens,
     });
   }
   return months;
@@ -1067,6 +1094,7 @@ export type HeatBot = {
   tokens: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
 };
 
 type HeatBotHint = Pick<CustomBot, "id" | "name" | "model" | "color">;
@@ -1096,6 +1124,7 @@ export function heatCellBots(
     const tokens = (current?.tokens ?? 0) + eventTotal(event);
     const inputTokens = (current?.inputTokens ?? 0) + event.inputTokens;
     const outputTokens = (current?.outputTokens ?? 0) + event.outputTokens;
+    const cacheReadTokens = (current?.cacheReadTokens ?? 0) + (event.cacheReadTokens ?? 0);
     rows.set(key, {
       provider,
       key: bot?.id ?? current?.key,
@@ -1104,6 +1133,7 @@ export function heatCellBots(
       tokens,
       inputTokens,
       outputTokens,
+      cacheReadTokens,
     });
   }
   return [...rows.values()].filter((row) => row.tokens > 0);
@@ -1310,6 +1340,7 @@ export type HeatCell = {
   tokens: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
   bots: HeatBot[];
   label: string;
   pad?: boolean;
@@ -1352,17 +1383,22 @@ function sliceCell(
   pad = false,
   customBots: HeatBotHint[] = [],
   looks: VendorLooks = {},
+  now = Date.now(),
 ): HeatCell {
   if (pad) {
-    return { key, tokens: 0, inputTokens: 0, outputTokens: 0, bots: [], label, pad: true };
+    return { key, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, bots: [], label, pad: true };
   }
-  const slice = events.filter((event) => event.at >= from && event.at < to);
+  const slice = events.filter((event) => {
+    const at = usageTimestamp(event.at, now);
+    return at >= from && at < to;
+  });
   const totals = rollup(slice);
   return {
     key,
     tokens: totals.totalTokens,
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
+    cacheReadTokens: totals.cacheReadTokens,
     bots: heatCellBots(slice, customBots, looks),
     label,
     pad: false,
@@ -1375,6 +1411,7 @@ function weekGrid(
   to: Date,
   customBots: HeatBotHint[] = [],
   looks: VendorLooks = {},
+  now = Date.now(),
 ): StretchHeatmap {
   const columns: HeatCell[][] = [];
   const labels: { text: string; column: number }[] = [];
@@ -1400,6 +1437,7 @@ function weekGrid(
           pad,
           customBots,
           looks,
+          now,
         ),
       );
     }
@@ -1430,7 +1468,7 @@ export function stretchHeatmap(
       const from = start.getTime() + hour * 60 * 60 * 1000;
       const clock = hour % 12 === 0 ? 12 : hour % 12;
       const stamp = `${clock} ${hour < 12 ? "AM" : "PM"}`;
-      columns.push([sliceCell(events, from, from + 60 * 60 * 1000, `h${hour}`, stamp, false, customBots, looks)]);
+      columns.push([sliceCell(events, from, from + 60 * 60 * 1000, `h${hour}`, stamp, false, customBots, looks, now)]);
       if (hour % 6 === 0) labels.push({ text: stamp, column: hour });
     }
     return { rows: 1, columns, labels };
@@ -1455,6 +1493,7 @@ export function stretchHeatmap(
           false,
           customBots,
           looks,
+          now,
         ),
       ]);
       labels.push({ text: name, column: index });
@@ -1482,6 +1521,7 @@ export function stretchHeatmap(
           false,
           customBots,
           looks,
+          now,
         ),
       ]);
       if (index === 0 || day.getDate() === 1 || index % 5 === 0) {
@@ -1499,7 +1539,7 @@ export function stretchHeatmap(
   start.setMonth(start.getMonth() - 11);
   const end = startOfDay(now);
   end.setDate(end.getDate() + 1);
-  return weekGrid(events, start, end, customBots, looks);
+  return weekGrid(events, start, end, customBots, looks, now);
 }
 
 export function heatmapPeak(map: StretchHeatmap): HeatCell | null {
@@ -1511,6 +1551,18 @@ export function heatmapPeak(map: StretchHeatmap): HeatCell | null {
     }
   }
   return peak && peak.tokens > 0 ? peak : null;
+}
+
+/** Billed in + out across every live cell. Same total as the chat meter for events in this range. */
+export function heatmapTotal(map: StretchHeatmap): number {
+  let tokens = 0;
+  for (const column of map.columns) {
+    for (const cell of column) {
+      if (cell.pad) continue;
+      tokens += cell.tokens;
+    }
+  }
+  return tokens;
 }
 
 export function heatLevel(tokens: number, peak: number): 0 | 1 | 2 | 3 | 4 {
@@ -2076,7 +2128,7 @@ export function normalizeUsage(raw: unknown): UsageEvent[] {
       record.provider === "cursor" ? asCursorLane(record.lane) ?? cursorUsageLane(model) : undefined;
     events.push({
       id: typeof record.id === "string" ? record.id : `use_${events.length}`,
-      at: typeof record.at === "number" && Number.isFinite(record.at) ? record.at : Date.now(),
+      at: usageTimestamp(record.at),
       provider: record.provider,
       model,
       projectId: typeof record.projectId === "string" ? record.projectId : undefined,

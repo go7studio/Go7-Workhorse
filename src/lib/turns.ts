@@ -501,11 +501,11 @@ export function workPopState(input: { live: boolean; failed: boolean }): WorkPop
   return "done";
 }
 
-/** First names under the stored finish notice. Does not rewrite the notice. */
+/** Worker first names under the stored finish notice. A slice title is not a name. */
 export function crewNamesFromTitles(titles: string[]): string {
   return namedCrewSummary(
     titles.map((title) => ({
-      name: workerNameFromTitle(title) || title.split("·", 1)[0]?.trim() || "",
+      name: workerNameFromTitle(title) ?? "",
     })),
   );
 }

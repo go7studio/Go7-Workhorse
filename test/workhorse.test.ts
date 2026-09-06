@@ -6414,6 +6414,9 @@ test("transcript groups tools and thoughts above the final reply", () => {
   assert.equal(workPopState({ live: false, failed: true }), "failed");
   assert.equal(workPopState({ live: false, failed: false }), "done");
   assert.equal(crewNamesFromTitles(["Hazel · Replace shop", "Piper · Pin labels"]), "Hazel · Piper");
+  assert.equal(crewNamesFromTitles(["Language pass player copy"]), "");
+  assert.equal(crewNamesFromTitles(["Milo · Language pass player copy"]), "Milo");
+  assert.equal(crewNamesFromTitles(["Language pass player copy", "Hazel · Replace shop"]), "Hazel");
 
   const messages: ChatMessage[] = [
     { id: "u", role: "user", text: "hi", createdAt: 1 },

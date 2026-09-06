@@ -98,7 +98,12 @@ test("seed catalog matches app pin and parses Pack Refs", () => {
   const verified = verifyCatalogBytes(bytes, CATALOG_PIN_SHA256, sha256Hex);
   assert.equal(verified.ok, true);
   if (!verified.ok) return;
-  assert.ok(verified.catalog.packs.length >= 3);
+  // spark-media yanked from live seed until a real installable archive exists
+  assert.equal(verified.catalog.packs.length, 2);
+  assert.deepEqual(
+    verified.catalog.packs.map((pack) => pack.id).sort(),
+    ["box-monitor", "job-log"],
+  );
   for (const pack of verified.catalog.packs) {
     assert.equal(pack.digestAlg, "sha256");
     assert.equal(pack.digestOf, "archive-bytes");

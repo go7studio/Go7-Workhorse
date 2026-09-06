@@ -16,7 +16,7 @@
 import { PACK_ID, SEMVER, WORKSHOP_CONTRACT } from "./workshop-pack";
 
 /** sha256 of LF-normalized workshop/catalog-seed.json (sorted-keys, 2-space indent, trailing newline).
- * Matches go7studio/workshop-catalog release asset v0.1.1 (spark-media yanked). */
+ * Matches go7studio/workshop-catalog release asset v0.1.1. */
 export const CATALOG_PIN_SHA256 = "2984037a0663b660cd09276e0079ad81df6aa4bbcb77df171a114e510ca7254c";
 
 export const CATALOG_SCHEMA = "go7-workshop-catalog/v0";

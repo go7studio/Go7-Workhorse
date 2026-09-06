@@ -1139,6 +1139,148 @@ export function shouldRefreshPlansForRouting(input: {
   });
 }
 
+/** Doubling backoff for a meter that keeps not answering, capped at an hour. */
+export const CUSTOM_METER_BACKOFF_BASE_MS = 60_000;
+export const CUSTOM_METER_BACKOFF_MAX_MS = 60 * 60_000;
+
+/** What the desk remembers about a custom bot's meter between beats. */
+export type CustomMeterHealth = { misses: number; lastTriedAt: number };
+
+/**
+ * Which bots this beat may ask for a leftover reading.
+ *
+ * The refresh loop walked every saved bot on every beat. Two things were wrong
+ * with that. A bot the person switched off is off the desk — turning it off is
+ * how they stop it costing them anything, and a background timer is not consent
+ * to keep spending its key. And a host that rejects the key, or has no meter
+ * behind that path at all, answers nothing just as fast the two-hundredth time:
+ * the desk went on asking every beat forever and the ring never moved.
+ *
+ * So: only bots that are on and hold a key, and a bot whose meter has missed
+ * backs off — a minute, two, four, capped at an hour — until it answers once.
+ * Any answer clears the count, so a blip costs one delayed reading, not a
+ * permanently dark ring. A person switching the bot on, or saving a new key,
+ * clears it too, because that is somebody asking for it to be tried now.
+ *
+ * Kept pure and beside the other "should we ask again" rule so both can be
+ * tested without a network or a mounted store.
+ */
+export function customMeterBackoffMs(misses: number): number {
+  if (misses <= 0) return 0;
+  return Math.min(CUSTOM_METER_BACKOFF_BASE_MS * 2 ** (misses - 1), CUSTOM_METER_BACKOFF_MAX_MS);
+}
+
+export function customBotsToMeter<T extends Pick<CustomBot, "id" | "baseUrl" | "apiKey" | "credentialId" | "enabled">>(
+  bots: T[],
+  health: Record<string, CustomMeterHealth | undefined>,
+  now: number,
+): T[] {
+  return bots.filter((bot) => {
+    if (!customBotEnabled(bot)) return false;
+    if (!customBotAttached(bot)) return false;
+    const held = health[bot.id];
+    if (!held || held.misses <= 0) return true;
+    return now - held.lastTriedAt >= customMeterBackoffMs(held.misses);
+  });
+}
+
+/** Fold one meter round's answer into what the desk remembers about that bot. */
+export function customMeterHealthAfter(
+  held: CustomMeterHealth | undefined,
+  answered: boolean,
+  now: number,
+): CustomMeterHealth {
+  return answered ? { misses: 0, lastTriedAt: now } : { misses: (held?.misses ?? 0) + 1, lastTriedAt: now };
+}
+
+/** Drop everything keyed by a bot that is no longer on the desk. */
+export function prunedByBotId<T>(record: Record<string, T>, liveIds: Iterable<string>): Record<string, T> {
+  const keep = new Set(liveIds);
+  const next: Record<string, T> = {};
+  for (const [id, value] of Object.entries(record)) if (keep.has(id)) next[id] = value;
+  return next;
+}
+
+/** Drop one bot's entry, keeping the same object when there is nothing to drop. */
+export function dropBotEntry<T>(record: Record<string, T>, id: string): Record<string, T> {
+  if (!(id in record)) return record;
+  const next = { ...record };
+  delete next[id];
+  return next;
+}
+
+/**
+ * May a leftover answer that has just landed still be written to this slot?
+ *
+ * A meter call is a round trip. Somebody can delete the connection, or switch
+ * it off, while the request is in the air — and the answer, when it arrives,
+ * carries a bot id that no longer belongs to anything the person can see. The
+ * loop wrote it anyway: the reading went back into `customPlans`, the effect
+ * that mirrors those readings into `deskPlans` picked it up, and the next save
+ * put a deleted bot's figure back on disk. Delete has to survive a slow host.
+ *
+ * So the answer is written against the slot as it stands now, not as it stood
+ * when the question was asked.
+ */
+export function customSlotTakesAnswer(bots: { id: string; enabled?: boolean }[], id: string): boolean {
+  const bot = bots.find((item) => item.id === id);
+  return Boolean(bot && customBotEnabled(bot));
+}
+
+/** A new key or a new host is somebody asking for this bot to be tried now. */
+export function customEditRetriesMeter(patch: Partial<CustomBot>): boolean {
+  return patch.apiKey !== undefined || patch.baseUrl !== undefined || patch.credentialId !== undefined;
+}
+
+/** What one beat of the custom leftover loop needs from the desk. */
+export type CustomMeterBeat<T> = {
+  /** Every saved connection, as they stand when the beat starts. */
+  bots: T[];
+  /** What the desk remembers about each meter when the beat starts. */
+  health: Record<string, CustomMeterHealth | undefined>;
+  now: number;
+  /** Ask one host. Resolves to the reading, or to nothing for no answer. */
+  ask: (bot: T) => Promise<GrokPlanUsage | undefined>;
+  /** The connections as they stand when an answer lands. Read, never closed over. */
+  liveBots: () => { id: string; enabled?: boolean }[];
+  writePlan: (id: string, plan: GrokPlanUsage | undefined) => void;
+  markKnown: (id: string) => void;
+  writeHealth: (id: string, answered: boolean) => void;
+};
+
+/**
+ * One beat of the leftover loop, from picking who to ask to filing the answer.
+ *
+ * The store owns the four writes and nothing else, so both gates that decide
+ * whether a bot costs anything — who is asked, and whose answer is kept — live
+ * here where a test can drive them without a mounted store or a network.
+ */
+export async function runCustomMeterBeat<
+  T extends Pick<CustomBot, "id" | "baseUrl" | "apiKey" | "credentialId" | "enabled">,
+>(beat: CustomMeterBeat<T>): Promise<void> {
+  await Promise.all(
+    customBotsToMeter(beat.bots, beat.health, beat.now).map(async (bot) => {
+      let plan: GrokPlanUsage | undefined;
+      let answered = false;
+      let replied = false;
+      try {
+        plan = await beat.ask(bot);
+        answered = Boolean(plan);
+        replied = true;
+      } catch {
+        // A thrown call is a miss, same as a host that answered nothing.
+      }
+      if (!customSlotTakesAnswer(beat.liveBots(), bot.id)) return;
+      // Same rule as the stock meters: an answer replaces an answer, and a
+      // failure leaves whatever was last known in place. Writing here on a
+      // throw is what would turn a live bot's meter into unknown mid-wave.
+      if (replied) beat.writePlan(bot.id, plan);
+      beat.markKnown(bot.id);
+      beat.writeHealth(bot.id, answered);
+    }),
+  );
+}
+
 export type CapacityMeterStatus = "known" | "unknown" | "unmetered";
 export type CapacityFreshness = "fresh" | "stale" | "unknown";
 export type CapacityReasonCode = Exclude<DeskCallStatus, "ok">;

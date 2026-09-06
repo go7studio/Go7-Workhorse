@@ -21,7 +21,7 @@ import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp, testCustomModel } from "./custom-http";
-import { cachedCustomCatalog, readCustomCatalog } from "./custom-catalog";
+import { cachedCustomCatalog, forgetCustomCatalogsExcept, readCustomCatalog } from "./custom-catalog";
 import { listVendorModels, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
@@ -1639,6 +1639,8 @@ app.whenReady().then(async () => {
       const nextSettings = normalizeSettings((state as { settings?: unknown }).settings);
       const workshopChanged = JSON.stringify(liveSettings.workshop) !== JSON.stringify(nextSettings.workshop);
       liveSettings = nextSettings;
+      // A deleted connection leaves nothing behind in this process either.
+      forgetCustomCatalogsExcept(nextSettings.customBots.map((bot) => bot.id));
       if (workshopChanged) {
         workshopHost.refresh();
         broadcastWorkshopChanged();

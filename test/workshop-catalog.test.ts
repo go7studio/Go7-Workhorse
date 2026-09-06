@@ -244,8 +244,8 @@ test("installCatalogEntry refuses id/version mismatch", async () => {
     root,
     fetchImpl,
   );
-  // Archive members are under packs/sample-box/, outside packs/other-pack/ ⇒ abort.
-  assert.deepEqual(wrongId, { ok: false, reason: "Pack refused (archive)" });
+  // packs/other-pack/ entirely missing ⇒ refuse missing (outsiders skipped, not aborted).
+  assert.deepEqual(wrongId, { ok: false, reason: "Pack refused (missing)" });
   const wrongVer = await installCatalogEntry(
     { id: "sample-box", version: "9.9.9", source: "https://example.test/good.tar.gz", digest },
     root,
@@ -254,7 +254,7 @@ test("installCatalogEntry refuses id/version mismatch", async () => {
   assert.deepEqual(wrongVer, { ok: false, reason: "Pack refused (version)" });
 });
 
-test("multi-pack archive aborts when members escape packs/<id>/", async () => {
+test("monorepo archive installs only requested pack; skips siblings and LICENSE", async () => {
   const root = tempRoot();
   const box = fixturePack();
   const sibling = {
@@ -267,7 +267,10 @@ test("multi-pack archive aborts when members escape packs/<id>/", async () => {
     strip: [{ w: "note", value: "log" }],
     cards: [{ title: "Log", rows: [{ w: "note", value: "log" }] }],
   };
+  // Whole-repo tag shape: LICENSE + packs/a + packs/b — digest binds the full archive.
   const tarball = githubTarball("fixture-1.0.0", {
+    "LICENSE": "MIT\n",
+    "README.md": "monorepo\n",
     "packs/sample-box/pack.json": JSON.stringify(box),
     "packs/sample-box/collector/README.md": "notes\n",
     "packs/job-log/pack.json": JSON.stringify(sibling),
@@ -279,9 +282,14 @@ test("multi-pack archive aborts when members escape packs/<id>/", async () => {
     root,
     fetchImpl,
   );
-  assert.deepEqual(result, { ok: false, reason: "Pack refused (archive)" });
-  assert.equal(fs.existsSync(path.join(root, "sample-box")), false);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.ids, ["sample-box"]);
+  assert.ok(fs.existsSync(path.join(root, "sample-box", "pack.json")));
   assert.equal(fs.existsSync(path.join(root, "job-log")), false, "sibling must never be written");
+  assert.equal(fs.existsSync(path.join(root, "LICENSE")), false, "root docs must never land");
+  assert.equal(readInstallRecord(path.join(root, "sample-box"))?.kind, "catalog");
+  assert.equal(readInstallRecord(path.join(root, "sample-box"))?.sha256, digest);
 });
 
 test("catalog install accepts archive scoped to packs/<id>/ only", async () => {

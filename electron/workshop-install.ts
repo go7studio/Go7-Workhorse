@@ -673,7 +673,7 @@ export async function installCatalogEntry(
       if (error instanceof Refusal) throw error;
       refuse("Pack refused (archive)");
     }
-    // Abort (do not skip): every archive member must live under packs/<id>/.
+    // Monorepo tags may contain sibling packs + root docs; extract only packs/<id>/.
     const scoped = entriesUnderPackId(entries, request.id);
     writeEntries(scoped, staging);
     keepOnlyRequestedPack(staging, request.id, request.version);
@@ -687,8 +687,10 @@ export async function installCatalogEntry(
 }
 
 /**
- * Catalog Install extracts exactly packs/<id>/. Any member outside that folder
- * aborts the install — never write sibling pack ids, never skip-and-continue.
+ * Catalog Install extracts only packs/<id>/. Members outside that folder (sibling
+ * packs, LICENSE, README, …) are skipped — monorepo tags may ship several packs
+ * in one archive. Still refuse when packs/<id>/ has no files (missing).
+ * keepOnlyRequestedPack remains belt-and-suspenders so siblings never commit.
  */
 function entriesUnderPackId(entries: TarEntry[], id: string): TarEntry[] {
   const prefix = `packs/${id}/`;
@@ -696,13 +698,14 @@ function entriesUnderPackId(entries: TarEntry[], id: string): TarEntry[] {
   const scoped: TarEntry[] = [];
   for (const entry of entries) {
     const rel = entry.path.replace(/\/+$/, "");
-    // Allow the packs/ parent directory itself; everything else must be under packs/<id>/.
+    // Allow the packs/ parent directory itself; skip everything else outside packs/<id>/.
     if (rel === "packs" && entry.type === "dir") continue;
     if (rel === dirExact || rel.startsWith(prefix)) {
       scoped.push(entry);
       continue;
     }
-    refuse("Pack refused (archive)");
+    // Sibling packs / root docs: ignore (do not refuse).
+    continue;
   }
   if (!scoped.some((entry) => entry.type === "file")) refuse("Pack refused (missing)");
   return scoped;
@@ -710,7 +713,7 @@ function entriesUnderPackId(entries: TarEntry[], id: string): TarEntry[] {
 
 /**
  * Belt-and-suspenders after entriesUnderPackId: keep only the requested id.
- * Siblings should already have aborted; if any remain, remove before commit.
+ * Siblings are skipped above; if any remain on disk, remove before commit.
  */
 function keepOnlyRequestedPack(staging: string, id: string, version: string): void {
   const found = findPackFolders(staging);

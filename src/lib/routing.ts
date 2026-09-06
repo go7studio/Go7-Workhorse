@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import { isLocalEndpoint } from "./usage";
 import {
+  customBotAttached,
   customBotEnabled,
   customBotModels,
   customModelRoutingOverride,
@@ -247,7 +248,12 @@ export function routingCandidatesForDesk(
       });
     }
   }
-  for (const bot of settings.customBots.filter((item) => customBotEnabled(item))) {
+  // On, and holding a key the desk can actually present. A slot whose secret
+  // the vault could not decrypt, or that was saved before its key was entered,
+  // cannot complete a single call — offering it to Auto only buys a failed send
+  // in place of a worse-but-working pick. Watch has always drawn the row this
+  // way (`connected: customBotAttached(bot)`); the ranker was not asking.
+  for (const bot of settings.customBots.filter((item) => customBotEnabled(item) && customBotAttached(item))) {
     const capacity = status.get(`bot:${bot.id}`) ?? status.get(bot.id);
     const plan = plans.custom?.[bot.id];
     for (const model of customBotModels(bot)) {

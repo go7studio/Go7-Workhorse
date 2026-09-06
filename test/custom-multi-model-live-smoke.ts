@@ -1,10 +1,18 @@
 import { fetchCustomModels } from "../electron/custom-models";
 
+/*
+ * Every target is named by the operator, never by this file.
+ *
+ * The host used to default to a live vendor URL, so running the smoke without
+ * setting anything pointed real requests at a host nobody had chosen in this
+ * run. The key already failed closed; the host and the models now do too, and
+ * the desk's own presets stay the only place a vendor URL is written down.
+ */
 const baseUrl = (
   process.env.WORKHORSE_EVAL_MULTI_MODEL_BASE_URL
   || process.env.WORKHORSE_EVAL_SYNTHETIC_BASE_URL
-  || "https://api.synthetic.new/openai/v1"
-).replace(/\/+$/, "");
+  || ""
+).trim().replace(/\/+$/, "");
 const apiKey = (
   process.env.WORKHORSE_EVAL_MULTI_MODEL_API_KEY
   || process.env.WORKHORSE_EVAL_SYNTHETIC_API_KEY
@@ -13,13 +21,15 @@ const apiKey = (
 const models = (
   process.env.WORKHORSE_EVAL_MULTI_MODEL_MODELS
   || process.env.WORKHORSE_EVAL_SYNTHETIC_MODELS
-  || "syn:large:text,syn:large:vision"
+  || ""
 )
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
 
+if (!baseUrl) throw new Error("WORKHORSE_EVAL_MULTI_MODEL_BASE_URL is required; no live call was made.");
 if (!apiKey) throw new Error("WORKHORSE_EVAL_MULTI_MODEL_API_KEY is required; no live call was made.");
+if (models.length === 0) throw new Error("WORKHORSE_EVAL_MULTI_MODEL_MODELS is required; no live call was made.");
 if (models.length !== 2 || models[0] === models[1]) throw new Error("Choose two distinct models on the same key.");
 
 const boundedFetch: typeof fetch = (input, init = {}) =>

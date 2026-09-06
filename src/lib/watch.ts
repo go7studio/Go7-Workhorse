@@ -1139,6 +1139,68 @@ export function shouldRefreshPlansForRouting(input: {
   });
 }
 
+/** Doubling backoff for a meter that keeps not answering, capped at an hour. */
+export const CUSTOM_METER_BACKOFF_BASE_MS = 60_000;
+export const CUSTOM_METER_BACKOFF_MAX_MS = 60 * 60_000;
+
+/** What the desk remembers about a custom bot's meter between beats. */
+export type CustomMeterHealth = { misses: number; lastTriedAt: number };
+
+/**
+ * Which bots this beat may ask for a leftover reading.
+ *
+ * The refresh loop walked every saved bot on every beat. Two things were wrong
+ * with that. A bot the person switched off is off the desk — turning it off is
+ * how they stop it costing them anything, and a background timer is not consent
+ * to keep spending its key. And a host that rejects the key, or has no meter
+ * behind that path at all, answers nothing just as fast the two-hundredth time:
+ * the desk went on asking every beat forever and the ring never moved.
+ *
+ * So: only bots that are on and hold a key, and a bot whose meter has missed
+ * backs off — a minute, two, four, capped at an hour — until it answers once.
+ * Any answer clears the count, so a blip costs one delayed reading, not a
+ * permanently dark ring. A person switching the bot on, or saving a new key,
+ * clears it too, because that is somebody asking for it to be tried now.
+ *
+ * Kept pure and beside the other "should we ask again" rule so both can be
+ * tested without a network or a mounted store.
+ */
+export function customMeterBackoffMs(misses: number): number {
+  if (misses <= 0) return 0;
+  return Math.min(CUSTOM_METER_BACKOFF_BASE_MS * 2 ** (misses - 1), CUSTOM_METER_BACKOFF_MAX_MS);
+}
+
+export function customBotsToMeter<T extends Pick<CustomBot, "id" | "baseUrl" | "apiKey" | "credentialId" | "enabled">>(
+  bots: T[],
+  health: Record<string, CustomMeterHealth | undefined>,
+  now: number,
+): T[] {
+  return bots.filter((bot) => {
+    if (!customBotEnabled(bot)) return false;
+    if (!customBotAttached(bot)) return false;
+    const held = health[bot.id];
+    if (!held || held.misses <= 0) return true;
+    return now - held.lastTriedAt >= customMeterBackoffMs(held.misses);
+  });
+}
+
+/** Fold one meter round's answer into what the desk remembers about that bot. */
+export function customMeterHealthAfter(
+  held: CustomMeterHealth | undefined,
+  answered: boolean,
+  now: number,
+): CustomMeterHealth {
+  return answered ? { misses: 0, lastTriedAt: now } : { misses: (held?.misses ?? 0) + 1, lastTriedAt: now };
+}
+
+/** Drop everything keyed by a bot that is no longer on the desk. */
+export function prunedByBotId<T>(record: Record<string, T>, liveIds: Iterable<string>): Record<string, T> {
+  const keep = new Set(liveIds);
+  const next: Record<string, T> = {};
+  for (const [id, value] of Object.entries(record)) if (keep.has(id)) next[id] = value;
+  return next;
+}
+
 export type CapacityMeterStatus = "known" | "unknown" | "unmetered";
 export type CapacityFreshness = "fresh" | "stale" | "unknown";
 export type CapacityReasonCode = Exclude<DeskCallStatus, "ok">;

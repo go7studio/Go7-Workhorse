@@ -200,6 +200,25 @@ export function clearCustomCatalogCache(): void {
 }
 
 /**
+ * Forget every catalog belonging to a bot that is no longer on the desk.
+ *
+ * The cache is keyed by bot and URL and was only ever added to, so a deleted
+ * connection's model list — ids, windows and prices the host published for a
+ * key nobody holds any more — stayed in the main process until quit. Nothing
+ * reads it once the bot is gone, which is exactly why it went unnoticed.
+ */
+export function forgetCustomCatalogsExcept(liveBotIds: Iterable<string>): number {
+  const keep = new Set(liveBotIds);
+  let dropped = 0;
+  for (const key of [...cache.keys()]) {
+    if (keep.has(key.slice(0, key.indexOf("\n")))) continue;
+    cache.delete(key);
+    dropped += 1;
+  }
+  return dropped;
+}
+
+/**
  * One host's catalog, at most once every fifteen minutes per bot.
  *
  * A miss is cached with the same life as a hit. A host that publishes no list

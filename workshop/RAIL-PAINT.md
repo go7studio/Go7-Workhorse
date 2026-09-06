@@ -236,13 +236,13 @@ the word (`Models · 2`, `Job · Bloom soak`) so the pin holds.
 
 | Never | Rail |
 | --- | --- |
-| Live watch in Settings | None. Settings → Workshop stays install/grant. |
+| Live watch in Settings / Manage sheet | None. Rail Manage sheet and Settings → Workshop stay install/grant/catalog only. |
 | Leftover ring, Usage, Watch fold-in | None. No token counts, no plan slot, no notice. |
 | Start / stop / SSH / route / lease | No control paints one. Router card is labels + the read-only line. |
 | Vendor | No vendor name, no brain picker. Grok Bot and ACP Grok do not appear. |
 | Second NVIDIA Dashboard | One ring, no gradient gauge, no GB/GiB toggle, no chart area. |
 | Invented history | No sparkline; no time series store. Ring and dot are the current snapshot. |
-| Pack On/Off from the rail | Not in v1. The lock puts Off in Settings → Workshop. A later rail toggle is a `RAIL.md` change first. |
+| Pack On/Off from the rail meters | Not in v1. Off lives in the Manage sheet / Settings → Workshop. A later rail toggle is a `RAIL.md` change first. |
 
 Controls that exist: expand, collapse, fold a module, Detach. All four are
 view-only.

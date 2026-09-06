@@ -321,7 +321,11 @@ export function PaintWidget({ widget, documents, now, variant }: PaintProps): Re
     }
 
     case "note":
-      return <p className="row-meta workshop-law">{widget.value}</p>;
+      return (
+        <p className="row-meta workshop-law" title={widget.value}>
+          {widget.value}
+        </p>
+      );
 
     case "chips": {
       const raw = resolveBinding(widget.of, documents);

@@ -17,6 +17,7 @@ import {
   type Widget,
 } from "../src/lib/workshop-pack";
 import { PaintCard, PaintWidget } from "../src/ui/workshop-paint";
+import { WorkshopRail } from "../src/ui/WorkshopRail";
 import { clipLog, feedAge, feedTone, flagWords, joinParts, primaryStatus, probeRows } from "../src/ui/workshop-live";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -363,3 +364,196 @@ test("gallery paints kind chip, label, and path actions", () => {
   assert.match(html, />Reveal</);
   assert.match(html, /No local path/);
 });
+
+test("empty / all-Off rail paints thin stub with single Add packs CTA (cold desk)", () => {
+  const html = render(createElement(WorkshopRail));
+  assert.match(html, /aria-label="Workshop rail"/);
+  assert.match(html, /is-empty|workshop-rail-empty-stub/);
+  assert.match(html, /Add packs/);
+  assert.match(html, /aria-label="Add packs"/);
+  assert.doesNotMatch(html, /Install a pack/);
+  // Single empty CTA only — no Manage + Install duplicate on the stub.
+  assert.doesNotMatch(html, />Manage</);
+  assert.doesNotMatch(html, /workshop-manage-sheet/);
+});
+
+test("rail source always exposes Manage on collapsed/expanded; empty uses Add packs; sheet is Manage packs", () => {
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  assert.match(rail, /is-empty/);
+  assert.match(rail, /Add packs/);
+  assert.match(rail, /workshop-rail-add-packs/);
+  assert.match(rail, /"Turn on"/);
+  assert.match(rail, /workshop-rail-turn-on/);
+  assert.match(rail, /workshop-rail-manage/);
+  assert.match(rail, /ManageSheet/);
+  assert.match(rail, /surface="sheet"/);
+  assert.match(rail, /focusAvailable=\{availableFirst\}/);
+  assert.match(rail, /aria-label="Manage packs"/);
+  assert.match(rail, />Manage packs</);
+  assert.match(rail, /workshop-manage-sheet/);
+  assert.match(rail, /workshop-manage-drawer/);
+  assert.match(rail, /aria-modal="false"/);
+  assert.doesNotMatch(rail, /aria-modal="true"/);
+  assert.doesNotMatch(rail, /sheet-backdrop workshop-manage-backdrop/);
+  assert.match(rail, /Escape/);
+  assert.match(rail, /FOCUSABLE|focusables/);
+  assert.match(rail, /restore\.focus|openerRef/);
+  assert.match(rail, /do not trap Tab away from chat/);
+  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
+  assert.doesNotMatch(rail, /Install a pack/);
+  // ManageButton on collapsed + expanded (+ def); empty path uses Add packs instead.
+  const manageHits = rail.split("ManageButton").length - 1;
+  assert.ok(manageHits >= 3, `expected ManageButton on collapsed + expanded (+ def), saw ${manageHits}`);
+  assert.doesNotMatch(rail, /UsagePane|WatchPane|setSettingsSection\("workshop"\)/);
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  assert.match(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*60px/s);
+  assert.match(css, /min-height:\s*56px/);
+  assert.match(css, /max-height:\s*64px/);
+  assert.doesNotMatch(css, /\.workshop-rail\.is-empty\s*\{[^}]*width:\s*96px/s);
+  assert.match(css, /\.workshop-manage-drawer\s*\{[^}]*pointer-events:\s*none/s);
+  assert.match(css, /backdrop-filter:\s*none/);
+  assert.match(css, /\.workshop-manage-sheet\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(css, /workshop-blurb/);
+  assert.match(css, /workshop-row-one-liner/);
+  assert.match(css, /workshop-pack-mark/);
+  assert.match(css, /workshop-row-hit/);
+  assert.match(css, /\.pack-list/);
+  assert.match(css, /\.pack-row/);
+  assert.match(css, /workshop-sources-label/);
+});
+
+test("WorkshopBlock sheet hides link-head; Active/Pending accordion; Retry only on failure; Advanced peer Add", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  // surface=sheet skips link-head / Workshop title (Manage packs is the one title).
+  assert.match(block, /inSheet \? \(/);
+  assert.match(block, /link-head/);
+  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /id="workshop-active"/);
+  assert.match(block, /id="workshop-pending"/);
+  assert.match(block, />\s*Active\s*</);
+  assert.match(block, />\s*Pending\s*</);
+  assert.match(block, /expandedId/);
+  assert.match(block, /toggleExpanded/);
+  assert.match(block, /workshop-row-hit/);
+  assert.match(block, /workshop-pack-mark/);
+  assert.match(block, /activeRef|pendingRef/);
+  assert.match(block, /className="tiny primary"/);
+  assert.match(block, /needsUpdate \? "Update" : "Install"/);
+  assert.match(block, /Add local/);
+  assert.match(block, /Add from URL/);
+  assert.match(block, /workshop-peer-add/);
+  assert.match(block, /Local \(Advanced\)/);
+  // Exactly one Retry button label — only in the real catalog failure branch.
+  const retryLabels = block.match(/>\s*Retry\s*</g) ?? [];
+  assert.equal(retryLabels.length, 1, `expected one Retry label, saw ${retryLabels.length}`);
+  assert.match(block, /Catalog unreachable[\s\S]*Retry/);
+  assert.doesNotMatch(block, /No packs in catalog[\s\S]{0,160}Retry/);
+  assert.match(block, /workshop-row-one-liner/);
+  assert.match(block, /clampRowOneLiner|ROW_ONE_LINER_MAX/);
+});
+
+test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  // A: zero installed → Add packs; installed all-Off → Turn on (not Install).
+  assert.match(rail, /"Turn on"/);
+  assert.match(rail, /availableFirst: zeroInstalled/);
+  assert.match(rail, /workshop-rail-turn-on/);
+  assert.match(rail, /workshopList/);
+  assert.match(rail, /zeroInstalled/);
+  assert.doesNotMatch(rail, /Install a pack/);
+  // B: Remove requires confirm step.
+  assert.match(block, /removeConfirmId/);
+  assert.match(block, /Confirm remove/);
+  assert.match(block, /setRemoveConfirmId\(pack\.id\)/);
+  // C: Pending catalog shows catalogDisplayName; id only in expanded meta.
+  assert.match(block, /catalogDisplayName\(entry\.id\)/);
+  assert.match(block, /vLabel\(entry\.version\)\} · \{entry\.id\}/);
+  // D: Detach only in settings link-head (hidden when surface=sheet).
+  assert.match(block, /surface="sheet"|inSheet/);
+  assert.match(block, /Detach is Settings \/ live-rail only/);
+  const detachHits = block.match(/>\s*Detach\s*</g) ?? [];
+  assert.equal(detachHits.length, 1, `expected one Detach label in settings path, saw ${detachHits.length}`);
+  // F: Refresh on healthy catalog (settings toolbar / empty CTA); Retry only on failure.
+  // Sheet head Refresh is in WorkshopRail — never between Pending rows.
+  const refreshLabels = block.match(/>\s*Refresh\s*</g) ?? [];
+  assert.ok(refreshLabels.length >= 1, "expected Refresh when catalog healthy");
+  assert.match(block, /No packs in catalog[\s\S]{0,200}Refresh/);
+  assert.match(block, /workshop-manage-toolbar[\s\S]*Refresh/);
+  assert.doesNotMatch(block, /workshop-catalog-toolbar/);
+  assert.match(rail, /workshop-manage-sheet-head-actions[\s\S]*Refresh/);
+  assert.match(rail, /catalogRefreshNonce/);
+});
+
+test("simple rows: Active/Pending accordion, no default essays, hide same-version, URL title, Detach while Manage, rail clamp", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
+  // 1: Collapsed Active/Pending = mark + title + one-liner (catalog summary / pack.description, clamped).
+  assert.match(block, /workshop-pack-mark/);
+  assert.match(block, /workshop-row-title/);
+  assert.match(block, /workshop-row-one-liner/);
+  assert.match(block, /workshop-row-copy/);
+  assert.match(block, /packCollapsedOneLiner/);
+  assert.match(block, /clampRowOneLiner/);
+  assert.match(block, /ROW_ONE_LINER_MAX/);
+  assert.match(block, /expandedId/);
+  assert.doesNotMatch(block, /workshop-pack-desc/);
+  assert.doesNotMatch(block, />Installed</);
+  assert.doesNotMatch(block, />Available</);
+  assert.match(block, /Packs on this desk/);
+  // Expand stays host · sources + actions — no essay dump of summary/description.
+  assert.doesNotMatch(block, /workshop-pack-summary workshop-pack-blurb/);
+  // 2: Collector · Reveal only under quiet More (not default expand essay).
+  assert.match(block, /Collector · Reveal/);
+  assert.doesNotMatch(block, /Collector: installed by the operator on the remote box/);
+  assert.match(block, /workshop-row-more[\s\S]*Collector · Reveal/);
+  assert.match(block, />More</);
+  // 3: Pending hides same-version Installed (Update/yanked still shown).
+  assert.match(block, /Hide same-version Installed/);
+  assert.match(block, /installed\.version !== entry\.version/);
+  assert.doesNotMatch(block, /Already on this desk/);
+  // 4: Turn-on URL truncated; full URL in title.
+  assert.match(block, /shortSourceUrl\(line\)/);
+  assert.match(block, /title=\{line\}/);
+  // 5: Rail Detach hidden while Manage sheet open.
+  assert.match(railSrc, /!manageOpen/);
+  assert.match(railSrc, /Hide Detach while Manage is open/);
+  // 6: Expanded null-feed note softens to one line (full text in title) — rail soak unchanged.
+  assert.match(css, /\.workshop-rail \.workshop-law[^{]*\{[^}]*line-clamp:\s*1/s);
+  assert.match(paint, /className="row-meta workshop-law" title=\{widget\.value\}/);
+});
+
+test("feel pass: quiet marks/headers, Refresh not between rows, Pending action align, Advanced whisper", () => {
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
+  // Active expand: host · sources + actions; no default summary / provenance essay.
+  assert.doesNotMatch(block, /from folder/);
+  assert.doesNotMatch(block, /from catalog · this desk/);
+  // Collapsed one-liner clamp (JS ~90 + CSS line-clamp 1).
+  assert.match(css, /\.workshop-row-one-liner[^{]*\{[^}]*line-clamp:\s*1/s);
+  assert.match(block, /ROW_ONE_LINER_MAX = 90/);
+  // Refresh: sheet head + settings toolbar; never catalog-toolbar between Pending rows.
+  assert.match(railSrc, /workshop-manage-sheet-head-actions/);
+  assert.match(railSrc, /catalogRefreshNonce/);
+  assert.match(block, /workshop-manage-toolbar/);
+  assert.doesNotMatch(block, /workshop-catalog-toolbar/);
+  assert.doesNotMatch(css, /workshop-catalog-toolbar/);
+  // Quieter letter marks (small muted circle).
+  assert.match(css, /\.workshop-pack-mark\s*\{[^}]*border-radius:\s*50%/s);
+  assert.match(css, /\.workshop-pack-mark\s*\{[^}]*width:\s*20px/s);
+  // Section-label Active/Pending headers.
+  assert.match(block, /workshop-section-title section-label/);
+  assert.match(css, /workshop-section-title\.section-label/);
+  // Pending action column alignment; Install primary; Turn on quiet.
+  assert.match(css, /workshop-row-action-slot/);
+  assert.match(block, /workshop-turn-on-quiet/);
+  assert.match(block, /className="tiny primary"/);
+  // Advanced whisper.
+  assert.match(css, /workshop-advanced-toggle/);
+  assert.match(block, /workshop-advanced-toggle/);
+  assert.doesNotMatch(block, /workshop-section-title workshop-advanced-title/);
+});
+

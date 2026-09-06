@@ -68,6 +68,8 @@ test("workshop settings are a Settings section; legacy grants rows come back off
 test("the block shows the exact URLs main will fetch and never a token", () => {
   assert.match(block, /packSourceUrls\(host\.baseUrl, pack\.id/);
   assert.match(block, /className="workshop-url"/);
+  assert.match(block, /shortSourceUrl/);
+  assert.match(block, /title=\{line\}/);
   assert.doesNotMatch(block, /token/i);
   assert.doesNotMatch(block, /bearer/i);
 });
@@ -79,6 +81,7 @@ test("the block never says git and paints no start or stop control", () => {
   assert.doesNotMatch(block, /workshop(Start|Stop|Kill|Route|Lease)/);
   // Nothing from a pack executes: the collector is only revealed.
   assert.match(block, /workshopRevealCollector/);
+  assert.match(block, /Collector · Reveal/);
   assert.match(block, /Workhorse never runs it/);
   assert.doesNotMatch(block, /child_process|execFile|spawn\(/);
 });

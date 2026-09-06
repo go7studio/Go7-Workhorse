@@ -32,7 +32,7 @@ test("Workhorse ships no pack: no bundled packs folder, no extraResources for on
   }
 });
 
-test("Workshop is a Settings tab for install/grant, not a dock item or Work popout", () => {
+test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, Skills home, or Usage/Watch fold", () => {
   const settings = read("src/ui/Settings.tsx");
   assert.match(settings, /id: "profile"/);
   assert.match(settings, /id: "watch"/);
@@ -44,9 +44,25 @@ test("Workshop is a Settings tab for install/grant, not a dock item or Work popo
   const skills = read("src/ui/SkillsPane.tsx");
   assert.doesNotMatch(skills, /WorkshopBlock/);
   assert.doesNotMatch(skills, /WorkPopout/);
+  assert.doesNotMatch(skills, /Add packs|Install a pack|workshop-rail-manage|workshop-rail-add-packs/i);
   assert.doesNotMatch(read("src/ui/WorkPopout.tsx"), /workshop/i);
   const sidebar = read("src/ui/Sidebar.tsx");
   assert.doesNotMatch(sidebar, /setSettingsSection\("workshop"\)/);
+  assert.doesNotMatch(sidebar, /WorkshopBlock|workshop-rail-manage/);
+  const usage = read("src/ui/UsagePane.tsx");
+  const watch = read("src/ui/WatchPane.tsx");
+  assert.doesNotMatch(usage, /WorkshopBlock|workshop-rail/i);
+  assert.doesNotMatch(watch, /WorkshopBlock|workshop-rail/i);
+  const rail = read("src/ui/WorkshopRail.tsx");
+  assert.match(rail, /workshop-rail-manage/);
+  assert.match(rail, /Add packs/);
+  assert.match(rail, /"Turn on"/);
+  assert.match(rail, /surface="sheet"/);
+  assert.match(rail, /aria-label="Manage packs"/);
+  assert.match(rail, /workshop-manage-sheet/);
+  assert.match(rail, /workshop-manage-drawer/);
+  assert.match(rail, /aria-modal="false"/);
+  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
 });
 
 test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {
@@ -131,4 +147,44 @@ test("Settings shows the exact URLs at confirm time, flushes settings, and never
   assert.match(method, /Does not/);
   assert.match(method, /workshop:install-repo/);
   assert.doesNotMatch(method, /workshopOptin|workshop:optin/);
+  assert.match(method, /Manage/);
+  assert.match(method, /Settings → Workshop/);
+  assert.doesNotMatch(method, /Settings → Skills → Workshop/);
+  const railDoc = read("workshop/RAIL.md");
+  assert.match(railDoc, /Manage/);
+  assert.match(railDoc, /empty \/ all-Off|Add packs/i);
+  assert.doesNotMatch(railDoc, /Settings → Skills → Workshop/);
+});
+
+test("Workshop manage/rail copy uses packs/modules only — no user-visible skill strings", () => {
+  const rail = read("src/ui/WorkshopRail.tsx");
+  const block = read("src/ui/WorkshopBlock.tsx");
+  for (const [name, text] of [["WorkshopRail", rail], ["WorkshopBlock", block]] as const) {
+    // Strip className=... tokens so class names do not count as user-visible copy.
+    const visible = text.replace(/className="[^"]*"/g, "");
+    assert.doesNotMatch(visible, /\b[Ss]kill\b/, `${name}: user-visible skill copy`);
+  }
+  assert.match(rail, /Manage packs/);
+  assert.match(rail, /Add packs/);
+  assert.match(block, /surface = "settings"/);
+  assert.match(block, /focusAvailable/);
+  assert.match(block, /workshop-pending/);
+  assert.match(block, /workshop-active/);
+  assert.match(block, /pack-list/);
+  assert.match(block, /pack-row/);
+  assert.doesNotMatch(block, /skills-list|skill-row/);
+  assert.match(block, /Install a pack, then Turn on\./);
+  assert.match(block, /None on\./);
+  assert.match(block, /Installed · Off — Turn on when ready\./);
+  assert.match(block, /Updated · Off\./);
+  assert.match(block, /expandedId/);
+  assert.doesNotMatch(block, />Installed</);
+  assert.doesNotMatch(block, />Available</);
+  assert.match(block, /Host\s*<select/s);
+  assert.match(block, /aria-label="Host"/);
+  assert.match(block, /workshop-sources-label">Sources</);
+  assert.match(block, />\s*Confirm\s*</);
+  assert.doesNotMatch(block, /On · rail watches|reads through \$\{hostLabel|granted\.join/);
+  assert.doesNotMatch(block, /exact URLs from pack\.json|Packs and modules|→ stays Off/);
+  assert.doesNotMatch(block, /Turn packs on/);
 });

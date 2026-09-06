@@ -5207,7 +5207,8 @@ html.pane-dragging * {
   margin-bottom: 12px;
 }
 
-.skills-list {
+.skills-list,
+.pack-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -5216,7 +5217,8 @@ html.pane-dragging * {
   gap: 8px;
 }
 
-.skill-row {
+.skill-row,
+.pack-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -5241,7 +5243,8 @@ html.pane-dragging * {
   text-underline-offset: 3px;
 }
 
-.skill-row-side {
+.skill-row-side,
+.pack-row-side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -5280,13 +5283,15 @@ html.pane-dragging * {
   background: var(--bg-hover);
 }
 
-.skill-row strong {
+.skill-row strong,
+.pack-row strong {
   display: block;
   font-size: 13px;
   font-weight: 560;
 }
 
-.skill-row em {
+.skill-row em,
+.pack-row em {
   display: block;
   margin-top: 2px;
   font-style: normal;
@@ -5294,7 +5299,8 @@ html.pane-dragging * {
   color: var(--text-secondary);
 }
 
-.skill-row .row-meta {
+.skill-row .row-meta,
+.pack-row .row-meta {
   margin-top: 4px;
   white-space: normal;
   overflow: visible;
@@ -8904,9 +8910,10 @@ html.pane-dragging * {
 }
 
 
-/* Workshop — a read-only add-on rail on the desk. Skills stays install/grant;
-   the breakout window is an optional detach of the same cards. Hairlines are
-   --line so the rail takes the desk theme; the accent is the one colour. */
+/* Workshop — a read-only add-on rail on the desk. Manage opens a sheet for
+   install/grant/catalog (Settings → Workshop is secondary). Breakout remains
+   an optional detach of the same cards. Hairlines are --line so the rail takes
+   the desk theme; the accent is the one colour. */
 .workshop-rail {
   min-width: 0;
   min-height: 0;
@@ -8958,9 +8965,12 @@ html.pane-dragging * {
   line-height: 1;
 }
 
-/* Collapsed: the head is the expand button; the strip below is too. */
+/* Collapsed: label + Manage in the head; the strip below expands. */
 .workshop-rail.is-collapsed .workshop-rail-head {
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
+  gap: 4px;
   padding: 8px 4px 6px;
   border-radius: 0;
   width: 100%;
@@ -8969,6 +8979,58 @@ html.pane-dragging * {
 .workshop-rail.is-collapsed .workshop-rail-head .section-label {
   font-size: 9px;
   letter-spacing: 0.02em;
+}
+
+.workshop-rail-head-expand {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  justify-content: center;
+}
+
+.workshop-rail-manage {
+  min-height: 22px;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.workshop-rail.is-collapsed .workshop-rail-manage {
+  width: 100%;
+  max-width: 68px;
+}
+
+/* Quiet empty chrome: thin hairline stub (~56–64px), not a tall empty card. */
+.workshop-rail.is-empty {
+  width: 60px;
+  align-self: stretch;
+}
+
+.workshop-rail.is-empty .workshop-rail-empty-stub {
+  flex: 0 0 auto;
+  min-height: 56px;
+  max-height: 64px;
+  height: 60px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workshop-rail-add-packs {
+  width: 100%;
+  max-width: 56px;
+  min-height: 28px;
+  padding: 4px 4px;
+  white-space: normal;
+  line-height: 1.2;
+  font-size: 10px;
 }
 
 .workshop-rail-strip {
@@ -9463,9 +9525,159 @@ html.pane-dragging * {
 }
 .media-create-message { margin: 0; }
 
+
+/* Manage packs: non-blocking right drawer — chat/composer stay usable (no full-window modal blur). */
+.workshop-manage-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 24px 24px 24px 0;
+  pointer-events: none;
+  background: transparent;
+  /* Explicitly no full-window dim/blur — desk stays sharp and clickable. */
+  backdrop-filter: none;
+}
+
+.workshop-manage-rail-dim {
+  /* Optional rail-adjacent wash only; does not cover chat/composer. */
+  width: 76px;
+  flex: 0 0 76px;
+  margin-right: auto;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-solid) 55%, transparent);
+}
+
+.workshop-manage-sheet {
+  width: min(520px, calc(100% - 100px));
+  max-height: calc(100% - 48px);
+  margin: auto 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  pointer-events: auto;
+  box-shadow: var(--shadow);
+}
+
+.workshop-manage-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.workshop-manage-sheet-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.workshop-manage-sheet-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.workshop-manage-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 18px;
+}
+
+.workshop-manage-sheet-body .workshop-settings {
+  margin-bottom: 0;
+}
+
+.workshop-sheet-intro {
+  margin: 0 0 10px;
+}
+
+.workshop-blurb,
+.workshop-pack-blurb,
+.workshop-pack-summary,
+.workshop-active-empty,
+.workshop-pending-empty {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.workshop-manage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.workshop-active-empty,
+.workshop-pending-empty {
+  margin: 0 0 8px;
+}
+
+.workshop-peer-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+
+.workshop-peer-url {
+  margin-bottom: 10px;
+}
+
+/* Advanced: whisper — no competing weight with Pending section-label. */
+.workshop-advanced-title {
+  margin: 22px 0 0;
+  font-size: inherit;
+  font-weight: inherit;
+  opacity: 0.55;
+}
+
+.workshop-advanced-toggle {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--text-tertiary);
+  opacity: 0.9;
+}
+
+.workshop-settings .skill-row-side .tiny.primary,
+.workshop-settings .pack-row-side .tiny.primary {
+  min-width: 4.5rem;
+}
+
+.workshop-section-title:focus {
+  outline: none;
+}
+
+.workshop-section-title:focus-visible {
+  outline: 2px solid var(--accent, var(--line));
+  outline-offset: 2px;
+}
+
 .workshop-settings { margin-bottom: 8px; }
-.workshop-section-title { margin: 16px 0 6px; font-size: 13px; font-weight: 600; }
-.workshop-section-title .tiny { font-size: inherit; font-weight: 600; }
+/* Active/Pending: rail section-label weight, not Settings h3. */
+.workshop-settings .workshop-section-title.section-label,
+.workshop-section-title.section-label {
+  margin: 12px 0 4px;
+  font-size: 10px;
+  font-weight: 590;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
 .workshop-catalog-empty { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .workshop-advanced { margin-bottom: 12px; }
 
@@ -9476,7 +9688,169 @@ html.pane-dragging * {
 .workshop-pack { flex: 1 1 auto; min-width: 0; }
 .workshop-pack > .row-meta { display: block; }
 .workshop-pack strong .row-meta { display: inline; margin: 0 0 0 4px; font-weight: 400; }
-.workshop-collector .tiny { margin-left: 8px; }
+.workshop-collector .tiny { margin-left: 0; }
+.workshop-collector {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Manage simple rows: collapsed = mark + title + one-liner; detail only when expanded. */
+.workshop-settings .pack-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 5px 8px;
+}
+.workshop-settings .pack-row.is-expanded {
+  gap: 6px;
+}
+.workshop-row-chrome {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.workshop-row-action-slot {
+  flex: 0 0 4.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 22px;
+  padding-top: 2px;
+}
+.workshop-row-action-slot .tiny.primary {
+  min-width: 4.5rem;
+}
+.workshop-turn-on-quiet {
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+.workshop-turn-on-quiet:hover:not(:disabled) {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.workshop-row-hit {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workshop-row-hit .workshop-pack-mark {
+  margin-top: 1px;
+}
+.workshop-row-hit:hover .workshop-row-title {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Letter marks: small muted circle — identity, not error badge. */
+.workshop-pack-mark {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--text-tertiary, rgba(127, 127, 127, 0.55)) 16%, transparent);
+  color: var(--text-tertiary, var(--muted));
+}
+.workshop-row-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: stretch;
+}
+.workshop-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+/* Structured one-liner under title — JS clamps ~90 chars; CSS line-clamp 1 is backup. */
+.workshop-row-one-liner {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+  margin: 0;
+}
+.workshop-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 0 2px 28px;
+}
+.workshop-row-detail > .row-meta,
+.workshop-row-detail > .workshop-pack-summary {
+  display: block;
+  margin: 0;
+}
+.workshop-pack-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+}
+.workshop-row-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 2px;
+}
+.workshop-row-more {
+  margin: 2px 0 0;
+}
+.workshop-row-more > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.workshop-row-more > summary::-webkit-details-marker {
+  display: none;
+}
+.workshop-row-more[open] > summary {
+  margin-bottom: 4px;
+}
+/* Expanded rail: soften long null-feed pack notes to one status line. */
+.workshop-rail .workshop-law {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
 .workshop-confirm { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .workshop-confirm select {
   margin-left: 8px;
@@ -9488,7 +9862,8 @@ html.pane-dragging * {
   font: inherit;
   font-size: 12px;
 }
-.workshop-sources { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.workshop-sources-label { margin: 8px 0 0; }
+.workshop-sources { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .workshop-sources label { display: flex; align-items: baseline; gap: 8px; }
 .workshop-sources strong { display: inline; font-size: 12px; }
 .workshop-sources .row-meta { margin: 0; }
@@ -9498,7 +9873,10 @@ html.pane-dragging * {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 24px);
 }
 
 

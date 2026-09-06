@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fingerprintsForSources,
   packSourceUrls,
@@ -11,8 +11,9 @@ import type { CatalogViewState } from "../lib/workshop-catalog";
 import { useStore } from "../lib/store";
 
 /**
- * Settings → Workshop. Add a pack, pick the Local Compute host it reads through,
- * confirm the exact URLs. Live watch is the desk rail; this block never paints it.
+ * Workshop install/grant/catalog block. Settings → Workshop (surface=settings) or the rail
+ * Manage sheet (surface=sheet). Install a pack, then Turn on (Host / Sources / Confirm).
+ * Live watch is the desk rail; this block never paints it.
  * Nothing here starts, stops, routes, or leases anything.
  */
 
@@ -102,17 +103,63 @@ function byteCap(maxBytes: number | undefined): string {
   return maxBytes >= 1024 ? `${Math.round(maxBytes / 1024)} KiB cap` : `${maxBytes} B cap`;
 }
 
+
+/** Path (or host+path) for Turn-on URL rows; full URL stays in title tooltip. */
+function shortSourceUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname}${parsed.search}`;
+    if (path && path !== "/") {
+      const hostPath = `${parsed.host}${path}`;
+      return hostPath.length > 56 ? `${hostPath.slice(0, 53)}…` : hostPath;
+    }
+    return parsed.host || url;
+  } catch {
+    return url.length > 56 ? `${url.slice(0, 53)}…` : url;
+  }
+}
+
 function vLabel(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-function provenance(pack: PackListing): string {
-  const installed = pack.installed;
-  if (!installed) return "";
-  if (installed.kind === "folder") return "from folder";
-  if (installed.kind === "catalog") return "from catalog · this desk";
-  const from = installed.from.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  return installed.tag ? `from ${from} · ${vLabel(installed.tag)}` : `from ${from}`;
+/** Catalog rows have id + summary, not pack.json name — title-case the id for Pending. */
+function catalogDisplayName(id: string): string {
+  return id
+    .split("-")
+    .filter(Boolean)
+    .map((part, i) => (i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
+/** Letter mark when packs have no logo asset — identity only on collapsed rows. */
+function packMark(title: string): string {
+  const ch = title.trim().charAt(0);
+  return ch ? ch.toUpperCase() : "?";
+}
+
+/** Collapsed Active/Pending blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
+const ROW_ONE_LINER_MAX = 90;
+
+function clampRowOneLiner(raw: string, max = ROW_ONE_LINER_MAX): string {
+  const text = raw.trim().replace(/\s+/g, " ");
+  if (!text) return "";
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max - 1);
+  const cut = slice.lastIndexOf(" ");
+  const base = cut >= Math.floor(max * 0.55) ? slice.slice(0, cut) : slice;
+  return `${base.replace(/[\s.,;:!-]+$/, "")}…`;
+}
+
+/** Prefer catalog summary/blurb; else pack.description. Empty → no one-liner. */
+function packCollapsedOneLiner(
+  pack: { id: string; description?: string },
+  catalogPacks: { id: string; summary?: string }[] | undefined,
+): { line: string; full: string } | null {
+  const fromCatalog = catalogPacks?.find((entry) => entry.id === pack.id)?.summary?.trim() || "";
+  const full = fromCatalog || pack.description?.trim() || "";
+  if (!full) return null;
+  return { line: clampRowOneLiner(full), full };
 }
 
 function installWords(result: InstallResult): string {
@@ -121,12 +168,22 @@ function installWords(result: InstallResult): string {
 
 type UpdateState = { current: string; latest?: string; reason?: string; note?: string };
 
-export function WorkshopBlock() {
+export function WorkshopBlock({
+  surface = "settings",
+  focusAvailable = false,
+  catalogRefreshNonce = 0,
+}: {
+  surface?: "settings" | "sheet";
+  focusAvailable?: boolean;
+  /** Bump from Manage sheet head Refresh to re-fetch catalog (never between rows). */
+  catalogRefreshNonce?: number;
+} = {}) {
   const store = useStore();
   const hosts = store.settings.localCompute.hosts.filter((host) => host.enabled);
   const [packs, setPacks] = useState<PackListing[]>([]);
   const [catalog, setCatalog] = useState<CatalogViewState | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [hostId, setHostId] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
   const [url, setUrl] = useState("");
@@ -136,6 +193,13 @@ export function WorkshopBlock() {
   const [updates, setUpdates] = useState<Record<string, UpdateState>>({});
   const [busy, setBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [peerUrlOpen, setPeerUrlOpen] = useState(false);
+  /** Accordion: at most one Manage row expanded. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const pendingRef = useRef<HTMLHeadingElement>(null);
+  const activeRef = useRef<HTMLHeadingElement>(null);
+  const peerUrlRef = useRef<HTMLInputElement>(null);
+  const inSheet = surface === "sheet";
 
   const reload = useCallback(() => {
     const run = window.workhorse?.workshopList;
@@ -192,6 +256,27 @@ export function WorkshopBlock() {
     return () => stop?.();
   }, [reload]);
 
+  // Sheet-head Refresh bumps nonce; never place Refresh between Pending rows.
+  useEffect(() => {
+    if (!catalogRefreshNonce) return;
+    reloadCatalog();
+  }, [catalogRefreshNonce, reloadCatalog]);
+
+  // Add packs (zero installed) → Pending-first; Manage / Turn on with any On → Active.
+  useEffect(() => {
+    if (!inSheet) return;
+    const id = window.requestAnimationFrame(() => {
+      if (focusAvailable) {
+        pendingRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        pendingRef.current?.focus();
+      } else {
+        activeRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+        activeRef.current?.focus();
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [focusAvailable, inSheet, catalog]);
+
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -203,9 +288,17 @@ export function WorkshopBlock() {
   };
 
   const openConfirm = (pack: PackListing) => {
+    setRemoveConfirmId(null);
+    setExpandedId(pack.id);
     setConfirmId(pack.id);
     setHostId(hosts.some((host) => host.id === pack.hostId) ? (pack.hostId as string) : hosts[0]?.id ?? "");
     setChecked(pack.sources.map((source) => source.id));
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedId((cur) => (cur === id ? null : id));
+    setConfirmId(null);
+    setRemoveConfirmId(null);
   };
 
   const turnOn = (pack: PackListing) =>
@@ -258,14 +351,14 @@ export function WorkshopBlock() {
       setAvailableNote("");
       const result = await install({ id });
       // Fixed chrome only — never concatenate catalog summary into refuse copy.
-      const words = result.ok ? `Installed ${result.ids.join(", ")} on this desk (Off until you Turn on).` : result.reason;
+      const words = result.ok ? "Installed · Off — Turn on when ready." : result.reason;
       if (result.ok && (result.reconfirm || result.versionChangedIds?.length)) {
         await applyReconfirm(
           result.reconfirm
             ? result
             : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds },
         );
-        setAvailableNote("Updated — Off until you Turn on.");
+        setAvailableNote("Updated · Off.");
       } else {
         setAvailableNote(words);
       }
@@ -314,6 +407,7 @@ export function WorkshopBlock() {
       await store.updateWorkshop({ packs: next });
       if (!next.some((row) => row.on)) await window.workhorse?.workshopCloseBreakout?.();
       if (confirmId === id) setConfirmId(null);
+      if (removeConfirmId === id) setRemoveConfirmId(null);
       setUpdates((prev) => {
         const copy = { ...prev };
         delete copy[id];
@@ -344,7 +438,7 @@ export function WorkshopBlock() {
       // Version change drops to Off + fresh confirm (no grant carry), even if sources match.
       if (result.reconfirm || (result.versionChangedIds && result.versionChangedIds.length > 0)) {
         await applyReconfirm(result.reconfirm ? result : { ...result, reconfirm: true, reconfirmIds: result.versionChangedIds });
-        words = "Updated — Off until you Turn on.";
+        words = "Updated · Off.";
       }
       setUpdates((prev) => ({ ...prev, [id]: { current: prev[id]?.latest ?? prev[id]?.current ?? "", note: words } }));
       reload();
@@ -352,147 +446,352 @@ export function WorkshopBlock() {
 
   const hostLabel = (id: string | undefined) => store.settings.localCompute.hosts.find((host) => host.id === id)?.label ?? id ?? "";
   const catalogState = catalog;
+  const activePacks = packs.filter((pack) => pack.on);
+  const pendingInstalled = packs.filter((pack) => !pack.on);
+  const pendingCatalog =
+    catalogState && catalogState.ok && !catalogState.unreachable && !catalogState.pinFailed && !catalogState.expired
+      ? catalogState.packs.filter((entry) => {
+          const installed = packs.find((pack) => pack.id === entry.id);
+          // Hide same-version Installed; keep yanked + Update rows visible under Pending.
+          if (!installed) return true;
+          if (entry.yanked) return true;
+          return installed.version !== entry.version;
+        })
+      : [];
+
+  const confirmPanel = (pack: PackListing) => (
+    <div className="workshop-confirm">
+      {hosts.length === 0 ? (
+        <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
+      ) : (
+        <label className="row-meta">
+          Host
+          <select value={hostId} onChange={(event) => setHostId(event.target.value)} aria-label="Host">
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <p className="row-meta workshop-sources-label">Sources</p>
+      <ul className="workshop-sources" aria-label="Sources">
+        {pack.sources.map((source) => {
+          const host = hosts.find((item) => item.id === hostId);
+          const urls = host ? packSourceUrls(host.baseUrl, pack.id, asPackSource(source)) : [];
+          const on = checked.includes(source.id);
+          return (
+            <li key={source.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => setChecked((prev) => (on ? prev.filter((sid) => sid !== source.id) : [...prev, source.id]))}
+                />
+                <strong>{source.id}</strong>
+                <span className="row-meta">
+                  {[source.kind, cadence(source.pollMs), source.kind === "json" ? byteCap(source.maxBytes) : ""].filter(Boolean).join(" · ")}
+                </span>
+              </label>
+              {urls.map((line) => (
+                <code key={line} className="workshop-url" title={line}>
+                  GET {shortSourceUrl(line)}
+                </code>
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+
+  const sheetIntro =
+    activePacks.length === 0 ? "Install a pack, then Turn on." : "Packs on this desk";
+  const showCatalogRefresh =
+    catalogState != null &&
+    catalogState.ok &&
+    !catalogState.unreachable &&
+    !catalogState.pinFailed &&
+    !catalogState.expired;
 
   return (
-    <section className="workshop-settings" aria-label="Workshop">
-      <div className="link-head">
-        <div>
-          <strong>Workshop</strong>
-          <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
-        </div>
-        {packs.some((pack) => pack.on) ? (
-          <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
-            Detach
-          </button>
-        ) : null}
-      </div>
-
-      <h3 className="workshop-section-title">Installed</h3>
-      <p className="row-meta">On this desk only. Other desks keep their own Installed list.</p>
-      {packs.length === 0 ? (
-        <p className="row-meta">No packs on this desk yet.</p>
+    <section className="workshop-settings" aria-label={inSheet ? "Manage packs" : "Workshop"}>
+      {inSheet ? (
+        <p className="row-meta workshop-blurb workshop-sheet-intro">{sheetIntro}</p>
       ) : (
-        <ul className="skills-list">
-          {packs.map((pack) => {
+        <div className="link-head">
+          <div>
+            <strong>Workshop</strong>
+            <p className="row-meta">{sheetIntro}</p>
+          </div>
+          {/* Detach is Settings / live-rail only — hidden when surface="sheet" (Manage). */}
+          {packs.some((pack) => pack.on) ? (
+            <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
+              Detach
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      {/* Settings: Refresh under intro. Sheet: Refresh lives in Manage sheet head (never between rows). */}
+      {!inSheet && showCatalogRefresh ? (
+        <div className="workshop-manage-toolbar">
+          {catalogState?.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()} title="Refresh catalog">
+            Refresh
+          </button>
+        </div>
+      ) : null}
+      {inSheet && showCatalogRefresh && catalogState?.stale ? (
+        <p className="row-meta workshop-sheet-intro">Catalog stale — Install disabled until refresh.</p>
+      ) : null}
+
+      <h3 ref={activeRef} id="workshop-active" className="workshop-section-title section-label" tabIndex={-1}>
+        Active
+      </h3>
+      {activePacks.length === 0 ? (
+        <p className="row-meta workshop-blurb workshop-active-empty">None on.</p>
+      ) : (
+        <ul className="pack-list">
+          {activePacks.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
-            const confirming = confirmId === pack.id && !pack.on && !pack.refused;
+            const expanded = expandedId === pack.id;
+            const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
             return (
-              <li key={pack.id} className="skill-row">
-                <div className="workshop-pack">
-                  <strong>
-                    {pack.name} <span className="row-meta">{vLabel(pack.version)}</span>
-                  </strong>
-                  {pack.description ? <em>{pack.description}</em> : null}
-                  {provenance(pack) ? <span className="row-meta">{provenance(pack)}</span> : null}
-                  <span className="row-meta">
-                    {pack.refused ? `Refused: ${pack.refused}` : pack.on ? "On · rail watches" : "Off"}
-                    {pack.on ? ` · reads through ${hostLabel(pack.hostId)} · ${pack.granted.join(", ")}` : ""}
+              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                <button
+                  type="button"
+                  className="workshop-row-hit"
+                  aria-expanded={expanded}
+                  onClick={() => toggleExpanded(pack.id)}
+                >
+                  <span className="workshop-pack-mark" aria-hidden="true">
+                    {packMark(pack.name)}
                   </span>
-                  {update?.note ? <span className="row-meta">{update.note}</span> : null}
-                  {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
-                  {update && !update.reason && !update.note && !latest ? <span className="row-meta">Up to date · {vLabel(update.current)}</span> : null}
-                  {pack.collector ? (
-                    <span className="row-meta workshop-collector">
-                      Collector: installed by the operator on the remote box. Workhorse never runs it.
-                      <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}>
-                        Reveal
-                      </button>
+                  <span className="workshop-row-copy">
+                    <strong className="workshop-row-title">{pack.name}</strong>
+                    {one ? (
+                      <span className="row-meta workshop-row-one-liner" title={one.full}>
+                        {one.line}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+                {expanded ? (
+                  <div className="workshop-row-detail">
+                    <span className="row-meta">
+                      {pack.refused
+                        ? `Refused: ${pack.refused}`
+                        : `${hostLabel(pack.hostId)}${pack.granted.length ? ` · ${pack.granted.length} source${pack.granted.length === 1 ? "" : "s"}` : ""}`}
                     </span>
-                  ) : null}
-                  {confirming ? (
-                    <div className="workshop-confirm">
-                      {hosts.length === 0 ? (
-                        <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
+                    {update?.note ? <span className="row-meta">{update.note}</span> : null}
+                    {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
+                    {update && !update.reason && !update.note && !latest ? (
+                      <span className="row-meta">Up to date · {vLabel(update.current)}</span>
+                    ) : null}
+                    <span className="pack-row-side workshop-row-actions">
+                      {pack.refused ? (
+                        <span className="row-meta">Refused</span>
                       ) : (
-                        <label className="row-meta">
-                          Reads through
-                          <select value={hostId} onChange={(event) => setHostId(event.target.value)}>
-                            {hosts.map((host) => (
-                              <option key={host.id} value={host.id}>
-                                {host.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                      <ul className="workshop-sources">
-                        {pack.sources.map((source) => {
-                          const host = hosts.find((item) => item.id === hostId);
-                          const urls = host ? packSourceUrls(host.baseUrl, pack.id, asPackSource(source)) : [];
-                          const on = checked.includes(source.id);
-                          return (
-                            <li key={source.id}>
-                              <label>
-                                <input
-                                  type="checkbox"
-                                  checked={on}
-                                  onChange={() => setChecked((prev) => (on ? prev.filter((sid) => sid !== source.id) : [...prev, source.id]))}
-                                />
-                                <strong>{source.id}</strong>
-                                <span className="row-meta">
-                                  {[source.kind, cadence(source.pollMs), source.kind === "json" ? byteCap(source.maxBytes) : ""].filter(Boolean).join(" · ")}
-                                </span>
-                              </label>
-                              {urls.map((line) => (
-                                <code key={line} className="workshop-url">
-                                  GET {line}
-                                </code>
-                              ))}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-                <span className="skill-row-side">
-                  {pack.refused ? (
-                    <span className="row-meta">Refused</span>
-                  ) : pack.on ? (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>
-                      Turn off
-                    </button>
-                  ) : confirming ? (
-                    <>
-                      {hosts.length > 0 ? (
-                        <button className="tiny primary" type="button" disabled={busy || !hostId || checked.length === 0} onClick={() => void turnOn(pack)}>
-                          Confirm
+                        <button className="tiny" type="button" disabled={busy} onClick={() => void turnOff(pack.id)}>
+                          Turn off
                         </button>
+                      )}
+                      {isRepo ? (
+                        latest ? (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
+                            {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
+                          </button>
+                        ) : (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
+                            Update
+                          </button>
+                        )
                       ) : null}
-                      <button className="tiny" type="button" disabled={busy} onClick={() => setConfirmId(null)}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button className="tiny" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
-                      Turn on
-                    </button>
-                  )}
-                  {isRepo ? (
-                    latest ? (
-                      <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
-                        {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
-                      </button>
-                    ) : (
-                      <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
-                        Update
-                      </button>
-                    )
-                  ) : null}
-                  <button className="tiny" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
-                    Remove
-                  </button>
-                </span>
+                      {removeConfirmId === pack.id ? (
+                        <>
+                          <button className="tiny primary" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
+                            Confirm remove
+                          </button>
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="tiny"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmId(null);
+                            setRemoveConfirmId(pack.id);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                    {pack.collector ? (
+                      <details className="workshop-row-more">
+                        <summary className="row-meta">More</summary>
+                        <span className="row-meta workshop-collector">
+                          <button
+                            className="tiny"
+                            type="button"
+                            title="Collector · Reveal folder (Workhorse never runs it)"
+                            onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                          >
+                            Collector · Reveal
+                          </button>
+                        </span>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
       )}
 
-      <h3 className="workshop-section-title">Available</h3>
-      <p className="row-meta">First-party catalog. Install lands Off on this desk; Turn on still confirms exact URLs from pack.json.</p>
+      <h3 ref={pendingRef} id="workshop-pending" className="workshop-section-title section-label" tabIndex={-1}>
+        Pending
+      </h3>
+      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok ? (
+        <p className="row-meta workshop-blurb workshop-pending-empty">Nothing pending.</p>
+      ) : null}
+
+      {pendingInstalled.length > 0 ? (
+        <ul className="pack-list">
+          {pendingInstalled.map((pack) => {
+            const update = updates[pack.id];
+            const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
+            const isRepo = pack.installed?.kind === "repo";
+            const expanded = expandedId === pack.id;
+            const confirming = confirmId === pack.id && !pack.refused;
+            const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
+            return (
+              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                <div className="workshop-row-chrome">
+                  <button
+                    type="button"
+                    className="workshop-row-hit"
+                    aria-expanded={expanded}
+                    onClick={() => toggleExpanded(pack.id)}
+                  >
+                    <span className="workshop-pack-mark" aria-hidden="true">
+                      {packMark(pack.name)}
+                    </span>
+                    <span className="workshop-row-copy">
+                      <strong className="workshop-row-title">{pack.name}</strong>
+                      {one ? (
+                        <span className="row-meta workshop-row-one-liner" title={one.full}>
+                          {one.line}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                  <span className="workshop-row-action-slot">
+                    {!expanded && !pack.refused ? (
+                      <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                        Turn on
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                {expanded ? (
+                  <div className="workshop-row-detail">
+                    {pack.refused ? <span className="row-meta">Refused: {pack.refused}</span> : null}
+                    {update?.note ? <span className="row-meta">{update.note}</span> : null}
+                    {update?.reason ? <span className="row-meta">{update.reason}</span> : null}
+                    {update && !update.reason && !update.note && !latest ? (
+                      <span className="row-meta">Up to date · {vLabel(update.current)}</span>
+                    ) : null}
+                    {confirming ? confirmPanel(pack) : null}
+                    <span className="pack-row-side workshop-row-actions">
+                      {pack.refused ? (
+                        <span className="row-meta">Refused</span>
+                      ) : confirming ? (
+                        <>
+                          {hosts.length > 0 ? (
+                            <button
+                              className="tiny primary"
+                              type="button"
+                              disabled={busy || !hostId || checked.length === 0}
+                              onClick={() => void turnOn(pack)}
+                            >
+                              Confirm
+                            </button>
+                          ) : null}
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                          Turn on
+                        </button>
+                      )}
+                      {isRepo ? (
+                        latest ? (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void applyUpdate(pack.id)}>
+                            {vLabel(update?.current ?? "")} → {vLabel(latest)} · Update
+                          </button>
+                        ) : (
+                          <button className="tiny" type="button" disabled={busy} onClick={() => void checkUpdate(pack.id)}>
+                            Update
+                          </button>
+                        )
+                      ) : null}
+                      {removeConfirmId === pack.id ? (
+                        <>
+                          <button className="tiny primary" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
+                            Confirm remove
+                          </button>
+                          <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="tiny"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmId(null);
+                            setRemoveConfirmId(pack.id);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                    {pack.collector ? (
+                      <details className="workshop-row-more">
+                        <summary className="row-meta">More</summary>
+                        <span className="row-meta workshop-collector">
+                          <button
+                            className="tiny"
+                            type="button"
+                            title="Collector · Reveal folder (Workhorse never runs it)"
+                            onClick={() => void window.workhorse?.workshopRevealCollector?.({ id: pack.id })}
+                          >
+                            Collector · Reveal
+                          </button>
+                        </span>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
       {catalogState == null ? (
         <p className="row-meta">Loading catalog…</p>
       ) : !catalogState.ok || catalogState.unreachable || catalogState.pinFailed || catalogState.expired ? (
@@ -506,88 +805,147 @@ export function WorkshopBlock() {
         <div className="workshop-catalog-empty">
           <p className="row-meta">No packs in catalog</p>
           <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
-            Retry
+            Refresh
           </button>
         </div>
       ) : (
         <>
-          {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
-          <ul className="skills-list">
-            {catalogState.packs.map((entry) => {
-              const installed = packs.find((pack) => pack.id === entry.id);
-              const sameVersion = installed?.version === entry.version;
-              const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
-              const disabled =
-                busy ||
-                entry.installDisabled ||
-                !catalogState.installAllowed ||
-                (Boolean(installed) && sameVersion);
-              return (
-                <li key={entry.id} className="skill-row">
-                  <div className="workshop-pack">
-                    <strong>
-                      {entry.id} <span className="row-meta">{vLabel(entry.version)}</span>
-                    </strong>
-                    {/* Plain text only — never markdown/HTML from catalog fields. */}
-                    <span className="row-meta">{entry.summary}</span>
-                    <span className="row-meta">Rail · {entry.rail}</span>
-                    {entry.yanked ? <span className="row-meta">Yanked</span> : null}
-                    {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
-                    {installed && sameVersion ? <span className="row-meta">Already on this desk</span> : null}
-                    {needsUpdate ? (
-                      <span className="row-meta">
-                        Installed {vLabel(installed!.version)} — Update drops to Off
+          {pendingCatalog.length > 0 ? (
+            <ul className="pack-list">
+              {pendingCatalog.map((entry) => {
+                const installed = packs.find((pack) => pack.id === entry.id);
+                const sameVersion = installed?.version === entry.version;
+                const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
+                const disabled =
+                  busy ||
+                  entry.installDisabled ||
+                  !catalogState.installAllowed ||
+                  (Boolean(installed) && sameVersion);
+                const title = catalogDisplayName(entry.id);
+                const expanded = expandedId === `catalog:${entry.id}`;
+                const summaryFull = entry.summary?.trim() || "";
+                const summaryLine = summaryFull ? clampRowOneLiner(summaryFull) : "";
+                return (
+                  <li key={entry.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                    <div className="workshop-row-chrome">
+                      <button
+                        type="button"
+                        className="workshop-row-hit"
+                        aria-expanded={expanded}
+                        onClick={() => toggleExpanded(`catalog:${entry.id}`)}
+                      >
+                        <span className="workshop-pack-mark" aria-hidden="true">
+                          {packMark(title)}
+                        </span>
+                        <span className="workshop-row-copy">
+                          <strong className="workshop-row-title">{title}</strong>
+                          {summaryLine ? (
+                            <span className="row-meta workshop-row-one-liner" title={summaryFull}>
+                              {summaryLine}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                      <span className="workshop-row-action-slot">
+                        {!expanded ? (
+                          <button
+                            className="tiny primary"
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => void installAvailable(entry.id)}
+                          >
+                            {needsUpdate ? "Update" : "Install"}
+                          </button>
+                        ) : null}
                       </span>
+                    </div>
+                    {expanded ? (
+                      <div className="workshop-row-detail">
+                        <span className="row-meta">{vLabel(entry.version)} · {entry.id}</span>
+                        {entry.yanked ? <span className="row-meta">Yanked</span> : null}
+                        {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}
+                        {needsUpdate ? (
+                          <span className="row-meta">
+                            Installed {vLabel(installed!.version)} — Update drops to Off
+                          </span>
+                        ) : null}
+                        <span className="pack-row-side workshop-row-actions">
+                          <button
+                            className="tiny primary"
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => void installAvailable(entry.id)}
+                          >
+                            {needsUpdate ? "Update" : "Install"}
+                          </button>
+                        </span>
+                      </div>
                     ) : null}
-                  </div>
-                  <span className="skill-row-side">
-                    <button className="tiny" type="button" disabled={disabled} onClick={() => void installAvailable(entry.id)}>
-                      {needsUpdate ? "Update" : "Install"}
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
           {availableNote ? <p className="row-meta">{availableNote}</p> : null}
-          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
-            Retry
-          </button>
         </>
       )}
 
-      <h3 className="workshop-section-title">
-        <button className="tiny" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
+      <h3 className="workshop-advanced-title">
+        <button className="tiny workshop-advanced-toggle" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
           Local (Advanced) {advancedOpen ? "▾" : "▸"}
         </button>
       </h3>
       {advancedOpen ? (
         <div className="workshop-advanced">
-          <p className="row-meta">Unsigned folder copy, or install by public GitHub repo URL (highest semver). Not the catalog path.</p>
-          <div className="workshop-add">
-            <input
-              className="settings-search"
-              type="url"
-              value={url}
-              placeholder="https://github.com/owner/repo"
-              aria-label="Pack repo URL (advanced)"
-              disabled={busy}
-              onChange={(event) => setUrl(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && url.trim()) void addRepo();
-              }}
-            />
-            <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
-              Add
+          <p className="row-meta">Unsigned folder or public GitHub URL. Not the catalog path.</p>
+          <div className="workshop-peer-add">
+            <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()} title="Add a local pack folder">
+              Add local
             </button>
-            <button className="tiny" type="button" disabled={busy} onClick={() => void addFolder()}>
-              From folder
+            <button
+              className="tiny"
+              type="button"
+              disabled={busy}
+              aria-expanded={peerUrlOpen}
+              title="Add a pack from a public GitHub URL"
+              onClick={() => {
+                setPeerUrlOpen((open) => {
+                  const next = !open;
+                  if (next) {
+                    requestAnimationFrame(() => peerUrlRef.current?.focus());
+                  }
+                  return next;
+                });
+              }}
+            >
+              Add from URL
             </button>
           </div>
+          {peerUrlOpen ? (
+            <div className="workshop-add workshop-peer-url">
+              <input
+                ref={peerUrlRef}
+                className="settings-search"
+                type="url"
+                value={url}
+                placeholder="https://github.com/owner/repo"
+                aria-label="Pack repo URL"
+                disabled={busy}
+                onChange={(event) => setUrl(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && url.trim()) void addRepo();
+                }}
+              />
+              <button className="tiny" type="button" disabled={busy || !url.trim()} onClick={() => void addRepo()}>
+                Add
+              </button>
+            </div>
+          ) : null}
           {installNote ? <p className="row-meta">{installNote}</p> : null}
         </div>
       ) : null}
 
+      {installNote && !advancedOpen ? <p className="row-meta">{installNote}</p> : null}
       {note ? <p className="row-meta">{note}</p> : null}
     </section>
   );

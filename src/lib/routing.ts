@@ -25,7 +25,7 @@ import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { cursorFamilyId, isCursorAutoModel } from "./cursor-catalog";
 import { cursorWatchLane } from "./cursor-lane";
 import { outcomeVerification } from "./learning-policy";
-import { modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
+import { isAssignedEffort, modelsFor, normalizeModelId, withEffort, contextWindowFor } from "./models";
 import type { WatchPlans, WatchVendorStatus } from "./watch";
 
 export type RoutingCapacity = {
@@ -744,9 +744,11 @@ export function effortForRoutingTier(
  *
  * Explicit effort wins. A reused worker keeps the level it already has unless
  * the caller asked to change it — otherwise a second orchestrate of the same
- * bot would re-infer "review" as deep and bump medium to high. Auto-route
- * still picks from task depth for a new worker. A named bot with no effort
- * inherits the parent instead of re-deriving from the slice prose.
+ * bot would re-infer "review" as deep and bump medium to high. Parent high
+ * (or extra) is an assignment and is not overwritten by Auto's inferred
+ * tier. Auto still picks from task depth when nobody assigned a level. A
+ * named bot with no effort inherits the parent instead of re-deriving from
+ * the slice prose.
  */
 export function spawnEffortFor(input: {
   provider: ProviderId;
@@ -757,12 +759,43 @@ export function spawnEffortFor(input: {
   reused?: EffortLevel | null;
   inherited?: EffortLevel | null;
 }): EffortLevel | null {
+  const assigned = input.requested ?? input.reused ?? (isAssignedEffort(input.inherited) ? input.inherited : undefined);
   return effortForRoutingTier(
     input.provider,
     input.model,
     input.tier,
-    input.requested ?? input.reused ?? input.routed ?? input.inherited,
+    assigned ?? input.routed ?? input.inherited,
   );
+}
+
+/**
+ * Same advertised brain across vendors. Cursor Grok 4.6 and Grok Build
+ * Grok 4.6 share leftover competition. Grok Bot is custom and is not this
+ * family. A Cursor-prefixed id is still the same brain as ACP Grok 4.6.
+ */
+export function routingModelFamily(
+  candidate: Pick<RoutingCandidate, "provider" | "model">,
+): string {
+  if (candidate.provider === "custom") return `custom:${candidate.model.toLowerCase()}`;
+  const slug = normalizeModelId(candidate.provider, candidate.model).toLowerCase();
+  const base = candidate.provider === "cursor" ? cursorFamilyId(slug) : slug;
+  const name = base.replace(/^cursor-/, "");
+  const grok = name.match(/^grok-(\d+(?:\.\d+)?)/);
+  if (grok) return `grok-${grok[1]}`;
+  return `${candidate.provider}:${base}`;
+}
+
+/**
+ * A model name without a vendor that exists on more than one login.
+ * `grok-4.6` and "Grok 4.6" qualify. `cursor-grok-4.6` is a Cursor lock.
+ */
+export function spawnModelFamilyKey(model: unknown): string | null {
+  if (typeof model !== "string") return null;
+  const raw = model.trim().toLowerCase();
+  if (!raw || raw.startsWith("cursor-") || raw.startsWith("composer")) return null;
+  const compact = raw.replace(/\s+/g, "-").replace(/^grok-build-/, "grok-");
+  const grok = compact.match(/^grok-(\d+(?:\.\d+)?)$/);
+  return grok ? `grok-${grok[1]}` : null;
 }
 
 /** Time horizon the vendor's allowance actually resets over, in ms. */
@@ -1089,9 +1122,18 @@ export function rankRoutingCandidates(
   const barCost = eligible.length
     ? Math.min(...eligible.map((candidate) => candidate.profile.cost))
     : 0;
+  const scorable = candidates.filter((candidate) => !routingSkipReason(candidate, request, settings, required));
   const ranked: RankedRoutingCandidate[] = [];
   for (const candidate of candidates) {
     if (routingSkipReason(candidate, request, settings, required)) continue;
+    const family = routingModelFamily(candidate);
+    const familyRivals = scorable.filter(
+      (row) => row !== candidate && row.provider !== candidate.provider && routingModelFamily(row) === family,
+    );
+    const familySplit = familyRivals.length > 0;
+    const familyRivalMetered = familyRivals.some(
+      (row) => row.capacity?.usedPercent !== undefined && Number.isFinite(row.capacity.usedPercent),
+    );
     const gap = candidate.profile.intelligence - minimum;
     // Falling below the bar is a quality failure and is charged by how far.
     const underfitPenalty = tier === "deep" ? 20 : tier === "balanced" ? 15 : 12;
@@ -1136,7 +1178,9 @@ export function rankRoutingCandidates(
     // Stickiness is for continuity, not loyalty: an incumbent whose verified
     // record has gone negative does not keep its +4, or one dead bot gets
     // re-picked every send while a healthy rival sits one point behind.
-    if (request.current && sameRoutingIdentity(request.current, candidate) && tilt >= 0) {
+    // Same advertised brain on two vendors (Grok 4.6 vs Cursor Grok 4.6)
+    // must split on leftover, not on whichever chat ran last.
+    if (!familySplit && request.current && sameRoutingIdentity(request.current, candidate) && tilt >= 0) {
       score += 4;
     }
     score += tilt;
@@ -1144,8 +1188,10 @@ export function rankRoutingCandidates(
     if (settings.capacityAware && draw.usedPercent !== undefined && draw.delta !== undefined) {
       // Cap the capacity term so it does not outvote fit on deep work where
       // intelligence is what matters. Quick work still benefits from spare
-      // capacity being worth more, balanced sits in between.
-      const capacityWeight = tier === "deep" ? 0.25 : tier === "quick" ? 0.9 : 0.7;
+      // capacity being worth more, balanced sits in between. Two vendors
+      // offering the same brain are a leftover choice, so leftover must be
+      // able to flip the winner even on deep work.
+      const capacityWeight = familySplit ? 1 : tier === "deep" ? 0.25 : tier === "quick" ? 0.9 : 0.7;
       if (settings.preferExcess) score += clamp(draw.delta, -50, 50) * 0.8 * capacityWeight;
       else if (draw.delta < 0) score += clamp(draw.delta, -50, 0) * 0.45 * capacityWeight;
       // Hoarding a quota that resets within hours is waste. The flat -70
@@ -1156,6 +1202,9 @@ export function rankRoutingCandidates(
         const weight = reservePenaltyWeight(draw.resetMs);
         if (weight > 0) score -= 70 * weight;
       }
+    } else if (familySplit && settings.capacityAware && familyRivalMetered) {
+      // Unknown leftover must not beat a known spare pool of the same brain.
+      score -= 12;
     }
     ranked.push({
       ...candidate,

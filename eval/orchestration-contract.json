@@ -120,7 +120,7 @@
   "semantics": {
     "attachContext": "Read or summarize a prior chat into the current agent without waking or modifying the source chat.",
     "messageExistingChat": "Deliver a peer turn to one existing live Workhorse chat, preserve sender and target identities, run that chat's assigned provider/model, and return its real reply.",
-    "spawnAgent": "Dispatch a bounded child task; when the user did not explicitly assign provider, model, effort, or worker, leave them unset so Workhorse selects from task fit and capacity. Resume a compatible named or idle worker only when reuse rules allow it.",
+    "spawnAgent": "Dispatch a bounded child task; when the user did not explicitly assign a vendor, effort, or worker, leave them unset so Workhorse selects from task fit and capacity. A model that exists on more than one vendor is a family: Workhorse ranks those leftover pools. Resume a compatible named or idle worker only when reuse rules allow it.",
     "orchestrateGoal": "Keep one parent responsible for an active goal, choose useful next work, delegate where justified, reconcile child evidence, and stop only at a real terminal state.",
     "identityRule": "Visible titles are convenient selectors; immutable Workhorse session IDs are the durable address and must be copyable, linkable, and never guessed.",
     "truthRule": "A context attachment is not a message, a resumed child is not a new agent, and a catalog or requested model is not runtime proof.",
@@ -175,7 +175,7 @@
     "selfRoutingRule": "A plan task may choose its agent only after recording required capabilities, candidates, Watch state, cost, concurrency, isolation, and a short rationale.",
     "watchRule": "A Watch-held provider receives no request. An approved capable fallback may run with the hold and substitution recorded.",
     "visualRule": "Tasks tagged visual, UI, UX, image, or computer-use require the configured Kimi K3 visual profile unless the user overrides or accepts unavailability. Kimi is audit-only and hands implementation to a coding worker.",
-    "effortRule": "Choose the lowest sufficient supported reasoning effort for the task and record the rationale. Do not default every worker to high; explicit effort wins. A reused worker keeps its current effort unless the user assigned a new one.",
+    "effortRule": "Choose the lowest sufficient supported reasoning effort for the task and record the rationale. Do not default every worker to high. Explicit effort wins, including the parent chat's high picker and on-high in the ask. Auto infers effort only when nobody assigned one. A reused worker keeps its current effort unless the user assigned a new one.",
     "skillRule": "Critical installed skill identity, path, and required instructions survive context compaction.",
     "recoveryRule": "On restart, reconcile orphaned running work to an explicit interrupted state, preserve elapsed time, release capacity, and continue eligible plan waves.",
     "reuseRule": "Stable worker names are addressable. Compatible idle work can resume the same worker; busy, visible, archived, cross-parent, cross-project, or configuration-mismatched work cannot be silently reused."

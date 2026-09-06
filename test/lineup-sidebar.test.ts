@@ -245,6 +245,8 @@ test("the desk routes a spawn unless the orchestrator names a bot, and picks eff
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "claude" }), true, "a named vendor still ranks its models");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "custom" }), true, "a named vendor is not a named model");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "MiniMax-M3" }), false, "a named model wins");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, model: "grok-4.6" }), true, "Grok 4.6 is a family across vendors");
+  assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, provider: "grok", model: "grok-4.6" }), false, "naming Grok locks that login");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, chat: "Kimi" }), false, "a named chat wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: true, customBotId: "bot_kimi" }), false, "a named custom bot wins");
   assert.equal(shouldAutoRouteSpawn({ routingEnabled: false }), false, "off: the worker takes its parent's bot");

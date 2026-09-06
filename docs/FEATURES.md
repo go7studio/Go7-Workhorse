@@ -329,8 +329,12 @@ transcript rather than as a path.
   an image, Auto prefers Grok (`/imagine`) over text models that only accept
   image *input*. The desk routes the work it hands out on its own: when a chat
   spawns a worker without naming a model, the desk ranks the slice and picks
-  bot and effort. A named model or bot is used as named. A named vendor without
-  a model still ranks that vendor’s models. One assignment is one worker; a
+  bot and effort. A named model or bot is used as named, except a model that
+  exists on more than one vendor (Grok 4.6 on Grok Build and on Cursor) still
+  ranks those vendors by leftover. Naming the vendor locks that login. A named
+  vendor without a model still ranks that vendor’s models. Composer high on the
+  parent, spawn `effort`, or “on high” in the ask is kept on the worker; Auto
+  infers effort only when nobody assigned one. One assignment is one worker; a
   second only to check that output, unless you asked for every vendor, all
   bots, several independent reviews, or a named list. Equal-intelligence picks
   go to the cheaper slot. A model with its own extra pool is kept for visual,

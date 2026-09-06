@@ -403,6 +403,28 @@ export function parseEffort(value: string): EffortLevel | null {
   return null;
 }
 
+const ASSIGNED_EFFORTS = new Set<EffortLevel>(["high", "xhigh", "max", "ultra"]);
+
+/** High (and above) is an assignment. Medium is the desk default Auto may still replace. */
+export function isAssignedEffort(effort?: EffortLevel | null): boolean {
+  return Boolean(effort && ASSIGNED_EFFORTS.has(effort));
+}
+
+/**
+ * Thinking level named in prose. Requires "on high", "high effort", or
+ * "effort: high" — a lone "high" in "high-priority" is not an assignment.
+ */
+export function parseEffortFromText(text: string): EffortLevel | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  const match =
+    t.match(/\bon\s+(low|medium|high|xhigh|extra|max)\b/) ||
+    t.match(/\b(?:effort|brain|thinking)\s*[:=]\s*(low|medium|high|xhigh|extra|max)\b/) ||
+    t.match(/\b(low|medium|high|xhigh|extra|max)\s+effort\b/);
+  if (!match?.[1]) return null;
+  return parseEffort(match[1]);
+}
+
 /**
  * A model the desk has never heard of is still a choice when its id names a
  * vendor's family. A release should not be the gate on a model the vendor

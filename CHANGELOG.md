@@ -8,6 +8,24 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.60](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.59...v0.6.60) (2026-09-06)
+
+
+### Features
+
+* **workshop:** first-party catalog with pin verify and digest Install ([5782785](https://github.com/go7studio/Go7-Workhorse/commit/57827854012992a14ffae9c70cdb9ac284147513))
+* **workshop:** rail Manage sheet as Workshop home ([#261](https://github.com/go7studio/Go7-Workhorse/issues/261)) ([b3b783d](https://github.com/go7studio/Go7-Workhorse/commit/b3b783d3b9c9810ba19076e8addd86d8f02b65e9))
+* **workshop:** Workshop Catalog — pin verify + digest Install ([fc94690](https://github.com/go7studio/Go7-Workhorse/commit/fc946906b4b196bc684746dfebf5c23f9f8b8370))
+
+
+### Bug Fixes
+
+* **routing:** keep Grok Build out of Cursor session rules ([5d2dace](https://github.com/go7studio/Go7-Workhorse/commit/5d2dace00e5f3e03c492d63d5e5d5847140023ec))
+* **routing:** pick Grok 4.6 by leftover and keep assigned effort ([801683f](https://github.com/go7studio/Go7-Workhorse/commit/801683f3a49c250c3e766501d00840f8d68caec1))
+* **routing:** pick Grok 4.6 by leftover and keep assigned effort ([1c67a1d](https://github.com/go7studio/Go7-Workhorse/commit/1c67a1d324f6ec6f1b15b5f5f9956b836e353e8e))
+* **workshop:** LF-normalize catalog seed before pin sha256 ([30128b1](https://github.com/go7studio/Go7-Workhorse/commit/30128b12b7bb10edbdb86deaf82e19ca66ad49f1))
+* **workshop:** Opus catalog SEC — Update Off, yank at Turn-on, archive fence ([d4b3f00](https://github.com/go7studio/Go7-Workhorse/commit/d4b3f001d690d22edc0e409e1f2155dcdfd95458))
+
 ## [0.6.59](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.58...v0.6.59) (2026-09-05)
 
 

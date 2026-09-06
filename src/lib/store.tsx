@@ -92,6 +92,7 @@ import {
   EMPTY_CUSTOM_DRAFT,
   normalizeCustomModelList,
 } from "./custom-bots";
+import { customSlotDrops, deskAfterCustomBotDeleted, deskAfterCustomBotEnabled } from "./custom-slot";
 import {
   DEFAULT_CHOICE,
   applyVendorCatalog,
@@ -341,11 +342,12 @@ import {
   normalizeWatch,
   normalizeWatchDayMarks,
   normalizeWatchPermits,
-  customBotsToMeter,
+  customEditRetriesMeter,
   customMeterHealthAfter,
+  dropBotEntry,
   planAfterRefresh,
-  prunedByBotId,
   pruneWatchPermits,
+  runCustomMeterBeat,
   shouldRefreshPlansForRouting,
   syncWatchDayMarks,
   watchVendorStatuses,
@@ -7784,6 +7786,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Everything the desk holds for one slot outside `settings.customBots`.
+   *
+   * Three records keyed by bot id, dropped together, so a slot that has gone or
+   * gone quiet cannot leave a reading in one of them. Delete and Off both come
+   * through here rather than each writing their own three setters.
+   */
+  const forgetCustomSlotRecords = useCallback((id: string, keepPlan = false) => {
+    const drops = customSlotDrops(id, keepPlan);
+    setCustomPlans(drops.plans);
+    setCustomPlanKnown(drops.known);
+    setCustomMeterHealth(drops.health);
+  }, []);
+
+  /**
    * Remove a connection, and every trace of the slot with it.
    *
    * The row leaving `settings.customBots` is what stops the leftover ping, the
@@ -7793,36 +7809,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * in `deskPlans.custom` for the life of the desk and was saved to disk with
    * it. A meter for a bot nobody can see is a number nobody can check.
    */
-  const deleteCustomBot = useCallback((id: string) => {
-    setState((current) => {
-      const customBots = current.settings.customBots.filter((bot) => bot.id !== id);
-      const liveIds = customBots.map((bot) => bot.id);
-      return {
-        ...current,
-        settings: { ...current.settings, customBots },
-        lastModel:
-          current.lastModel.customBotId === id
-            ? { ...DEFAULT_CHOICE }
-            : current.lastModel,
-        sessions: current.sessions.map((session) =>
-          session.customBotId === id ? { ...session, customBotId: undefined } : session,
-        ),
-        // The saved copy goes in the same beat, so a reload cannot bring it back.
-        ...(current.deskPlans
-          ? { deskPlans: { ...current.deskPlans, custom: prunedByBotId(current.deskPlans.custom ?? {}, liveIds) } }
-          : {}),
-      };
-    });
-    const drop = (current: Record<string, unknown>) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    };
-    setCustomPlans((current) => drop(current) as typeof current);
-    setCustomPlanKnown((current) => drop(current) as typeof current);
-    setCustomMeterHealth((current) => drop(current) as typeof current);
-  }, []);
+  const deleteCustomBot = useCallback(
+    (id: string) => {
+      setState((current) => deskAfterCustomBotDeleted(current, id));
+      forgetCustomSlotRecords(id);
+    },
+    [forgetCustomSlotRecords],
+  );
 
   const updateCustomBot = useCallback((id: string, patch: Partial<CustomBot>) => {
     setState((current) => {
@@ -7844,14 +7837,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // A new key or a new host is somebody asking for this bot to be tried now.
     // Waiting out a backoff earned by the credentials they just replaced would
     // leave the ring dark for up to an hour after the fix.
-    if (patch.apiKey !== undefined || patch.baseUrl !== undefined || patch.credentialId !== undefined) {
-      setCustomMeterHealth((current) => {
-        if (!(id in current)) return current;
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
-    }
+    if (customEditRetriesMeter(patch)) setCustomMeterHealth((current) => dropBotEntry(current, id));
   }, []);
 
   const probeCustomBot = useCallback(async (id: string) => {
@@ -7896,24 +7882,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * switch. On is somebody asking for it to be tried now, so any backoff the
    * meter had built up is cleared rather than waited out.
    */
-  const setCustomBotEnabled = useCallback((id: string, enabled: boolean) => {
-    setState((current) => ({
-      ...current,
-      settings: {
-        ...current.settings,
-        customBots: current.settings.customBots.map((bot) => (bot.id === id ? { ...bot, enabled } : bot)),
-      },
-    }));
-    const drop = (current: Record<string, unknown>) => {
-      if (!(id in current)) return current;
-      const next = { ...current };
-      delete next[id];
-      return next;
-    };
-    if (!enabled) setCustomPlans((current) => drop(current) as typeof current);
-    setCustomPlanKnown((current) => drop(current) as typeof current);
-    setCustomMeterHealth((current) => drop(current) as typeof current);
-  }, []);
+  const setCustomBotEnabled = useCallback(
+    (id: string, enabled: boolean) => {
+      setState((current) => deskAfterCustomBotEnabled(current, id, enabled));
+      // Off drops all three. On keeps the reading the ring is showing and drops
+      // the backoff, which is what "try it now" means.
+      forgetCustomSlotRecords(id, enabled);
+    },
+    [forgetCustomSlotRecords],
+  );
 
   const refreshCustomLogin = useCallback(() => {
     void (async () => {
@@ -8061,34 +8038,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [markVendorPlanKnown]);
 
   const refreshCustomPlans = useCallback(() => {
-    if (!window.workhorse?.customPlanUsage) return;
+    const askHost = window.workhorse?.customPlanUsage;
+    if (!askHost) return;
     const now = Date.now();
-    // Only bots that are on, hold a key, and are not backing off after a run of
-    // silent rounds. A switched-off bot must cost nothing, and a host that
-    // answers nothing answers nothing just as fast on the next beat.
-    for (const bot of customBotsToMeter(stateRef.current.settings.customBots, meterHealthRef.current, now)) {
-      const answered = (ok: boolean) =>
-        setCustomMeterHealth((current) => ({ ...current, [bot.id]: customMeterHealthAfter(current[bot.id], ok, now) }));
-      void window.workhorse
-        .customPlanUsage({
+    // Who is asked, and whose answer is kept, are both `runCustomMeterBeat`'s
+    // call: only bots that are on, hold a key, and are not backing off after a
+    // run of silent rounds, and only slots still on the desk when the answer
+    // lands. The store owns the four writes and the clock, nothing else.
+    void runCustomMeterBeat({
+      bots: stateRef.current.settings.customBots,
+      health: meterHealthRef.current,
+      now,
+      ask: (bot) =>
+        askHost({
           baseUrl: bot.baseUrl,
           apiKey: bot.apiKey,
           model: bot.model,
           credentialId: bot.credentialId || `custom-bot-${bot.id}`,
-        })
-        // Same rule as the stock meters: an answer replaces an answer, and a
-        // failure leaves whatever was last known in place. Deleting the entry
-        // here is what would turn a live bot's meter into unknown mid-wave.
-        .then((plan) => {
-          setCustomPlans((current) => ({ ...current, [bot.id]: planAfterRefresh(current[bot.id], plan) }));
-          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
-          answered(Boolean(plan));
-        })
-        .catch(() => {
-          setCustomPlanKnown((current) => ({ ...current, [bot.id]: true }));
-          answered(false);
-        });
-    }
+        }),
+      // Read at the moment the answer lands, not closed over at the moment the
+      // question was asked: a delete or a switch-off in the gap wins.
+      liveBots: () => stateRef.current.settings.customBots,
+      writePlan: (id, plan) =>
+        setCustomPlans((current) => ({ ...current, [id]: planAfterRefresh(current[id], plan) })),
+      markKnown: (id) => setCustomPlanKnown((current) => ({ ...current, [id]: true })),
+      writeHealth: (id, answered) =>
+        setCustomMeterHealth((current) => ({ ...current, [id]: customMeterHealthAfter(current[id], answered, now) })),
+    });
   }, []);
 
   const refreshAllPlans = useCallback(() => {

@@ -414,7 +414,7 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(css, /backdrop-filter:\s*none/);
   assert.match(css, /\.workshop-manage-sheet\s*\{[^}]*pointer-events:\s*auto/s);
   assert.match(css, /workshop-blurb/);
-  assert.match(css, /workshop-pack-summary/);
+  assert.match(css, /workshop-row-one-liner/);
   assert.match(css, /workshop-pack-mark/);
   assert.match(css, /workshop-row-hit/);
   assert.match(css, /\.pack-list/);
@@ -448,7 +448,8 @@ test("WorkshopBlock sheet hides link-head; Active/Pending accordion; Retry only 
   assert.equal(retryLabels.length, 1, `expected one Retry label, saw ${retryLabels.length}`);
   assert.match(block, /Catalog unreachable[\s\S]*Retry/);
   assert.doesNotMatch(block, /No packs in catalog[\s\S]{0,160}Retry/);
-  assert.match(block, /workshop-pack-summary/);
+  assert.match(block, /workshop-row-one-liner/);
+  assert.match(block, /clampRowOneLiner|ROW_ONE_LINER_MAX/);
 });
 
 test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
@@ -489,15 +490,21 @@ test("simple rows: Active/Pending accordion, no default essays, hide same-versio
   const railSrc = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const css = readFileSync(path.join(ROOT, "src", "styles", "app.css"), "utf8");
   const paint = readFileSync(path.join(ROOT, "src", "ui", "workshop-paint.tsx"), "utf8");
-  // 1: Collapsed Active/Pending = mark + title; catalog summary only in expand (Active drops essay).
+  // 1: Collapsed Active/Pending = mark + title + one-liner (catalog summary / pack.description, clamped).
   assert.match(block, /workshop-pack-mark/);
   assert.match(block, /workshop-row-title/);
-  assert.match(block, /workshop-pack-summary/);
+  assert.match(block, /workshop-row-one-liner/);
+  assert.match(block, /workshop-row-copy/);
+  assert.match(block, /packCollapsedOneLiner/);
+  assert.match(block, /clampRowOneLiner/);
+  assert.match(block, /ROW_ONE_LINER_MAX/);
   assert.match(block, /expandedId/);
   assert.doesNotMatch(block, /workshop-pack-desc/);
   assert.doesNotMatch(block, />Installed</);
   assert.doesNotMatch(block, />Available</);
   assert.match(block, /Packs on this desk/);
+  // Expand stays host · sources + actions — no essay dump of summary/description.
+  assert.doesNotMatch(block, /workshop-pack-summary workshop-pack-blurb/);
   // 2: Collector · Reveal only under quiet More (not default expand essay).
   assert.match(block, /Collector · Reveal/);
   assert.doesNotMatch(block, /Collector: installed by the operator on the remote box/);
@@ -525,6 +532,9 @@ test("feel pass: quiet marks/headers, Refresh not between rows, Pending action a
   // Active expand: host · sources + actions; no default summary / provenance essay.
   assert.doesNotMatch(block, /from folder/);
   assert.doesNotMatch(block, /from catalog · this desk/);
+  // Collapsed one-liner clamp (JS ~90 + CSS line-clamp 1).
+  assert.match(css, /\.workshop-row-one-liner[^{]*\{[^}]*line-clamp:\s*1/s);
+  assert.match(block, /ROW_ONE_LINER_MAX = 90/);
   // Refresh: sheet head + settings toolbar; never catalog-toolbar between Pending rows.
   assert.match(railSrc, /workshop-manage-sheet-head-actions/);
   assert.match(railSrc, /catalogRefreshNonce/);

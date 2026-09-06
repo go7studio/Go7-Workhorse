@@ -9695,7 +9695,7 @@ html.pane-dragging * {
   gap: 0;
 }
 
-/* Manage simple rows: collapsed = mark + title; detail only when expanded. */
+/* Manage simple rows: collapsed = mark + title + one-liner; detail only when expanded. */
 .workshop-settings .pack-row {
   flex-direction: column;
   align-items: stretch;
@@ -9707,7 +9707,7 @@ html.pane-dragging * {
 }
 .workshop-row-chrome {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   width: 100%;
@@ -9718,6 +9718,7 @@ html.pane-dragging * {
   align-items: center;
   justify-content: flex-end;
   min-height: 22px;
+  padding-top: 2px;
 }
 .workshop-row-action-slot .tiny.primary {
   min-width: 4.5rem;
@@ -9735,7 +9736,7 @@ html.pane-dragging * {
 }
 .workshop-row-hit {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
@@ -9746,6 +9747,9 @@ html.pane-dragging * {
   color: inherit;
   text-align: left;
   cursor: pointer;
+}
+.workshop-row-hit .workshop-pack-mark {
+  margin-top: 1px;
 }
 .workshop-row-hit:hover .workshop-row-title {
   text-decoration: underline;
@@ -9766,13 +9770,32 @@ html.pane-dragging * {
   background: color-mix(in srgb, var(--text-tertiary, rgba(127, 127, 127, 0.55)) 16%, transparent);
   color: var(--text-tertiary, var(--muted));
 }
-.workshop-row-title {
+.workshop-row-copy {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: stretch;
+}
+.workshop-row-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+}
+/* Structured one-liner under title — JS clamps ~90 chars; CSS line-clamp 1 is backup. */
+.workshop-row-one-liner {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  max-width: 100%;
+  margin: 0;
 }
 .workshop-row-detail {
   display: flex;

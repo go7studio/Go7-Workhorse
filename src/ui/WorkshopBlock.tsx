@@ -138,6 +138,30 @@ function packMark(title: string): string {
   return ch ? ch.toUpperCase() : "?";
 }
 
+/** Collapsed Active/Pending blurb — ~80–100 chars; CSS line-clamp 1 is backup. */
+const ROW_ONE_LINER_MAX = 90;
+
+function clampRowOneLiner(raw: string, max = ROW_ONE_LINER_MAX): string {
+  const text = raw.trim().replace(/\s+/g, " ");
+  if (!text) return "";
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max - 1);
+  const cut = slice.lastIndexOf(" ");
+  const base = cut >= Math.floor(max * 0.55) ? slice.slice(0, cut) : slice;
+  return `${base.replace(/[\s.,;:!-]+$/, "")}…`;
+}
+
+/** Prefer catalog summary/blurb; else pack.description. Empty → no one-liner. */
+function packCollapsedOneLiner(
+  pack: { id: string; description?: string },
+  catalogPacks: { id: string; summary?: string }[] | undefined,
+): { line: string; full: string } | null {
+  const fromCatalog = catalogPacks?.find((entry) => entry.id === pack.id)?.summary?.trim() || "";
+  const full = fromCatalog || pack.description?.trim() || "";
+  if (!full) return null;
+  return { line: clampRowOneLiner(full), full };
+}
+
 function installWords(result: InstallResult): string {
   return result.ok ? `Installed ${result.ids.join(", ")}` : result.reason;
 }
@@ -535,6 +559,7 @@ export function WorkshopBlock({
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
             const expanded = expandedId === pack.id;
+            const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
             return (
               <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
                 <button
@@ -546,7 +571,14 @@ export function WorkshopBlock({
                   <span className="workshop-pack-mark" aria-hidden="true">
                     {packMark(pack.name)}
                   </span>
-                  <strong className="workshop-row-title">{pack.name}</strong>
+                  <span className="workshop-row-copy">
+                    <strong className="workshop-row-title">{pack.name}</strong>
+                    {one ? (
+                      <span className="row-meta workshop-row-one-liner" title={one.full}>
+                        {one.line}
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
                 {expanded ? (
                   <div className="workshop-row-detail">
@@ -640,6 +672,7 @@ export function WorkshopBlock({
             const isRepo = pack.installed?.kind === "repo";
             const expanded = expandedId === pack.id;
             const confirming = confirmId === pack.id && !pack.refused;
+            const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
             return (
               <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
                 <div className="workshop-row-chrome">
@@ -652,7 +685,14 @@ export function WorkshopBlock({
                     <span className="workshop-pack-mark" aria-hidden="true">
                       {packMark(pack.name)}
                     </span>
-                    <strong className="workshop-row-title">{pack.name}</strong>
+                    <span className="workshop-row-copy">
+                      <strong className="workshop-row-title">{pack.name}</strong>
+                      {one ? (
+                        <span className="row-meta workshop-row-one-liner" title={one.full}>
+                          {one.line}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                   <span className="workshop-row-action-slot">
                     {!expanded && !pack.refused ? (
@@ -783,7 +823,8 @@ export function WorkshopBlock({
                   (Boolean(installed) && sameVersion);
                 const title = catalogDisplayName(entry.id);
                 const expanded = expandedId === `catalog:${entry.id}`;
-                const summary = entry.summary?.trim() || "";
+                const summaryFull = entry.summary?.trim() || "";
+                const summaryLine = summaryFull ? clampRowOneLiner(summaryFull) : "";
                 return (
                   <li key={entry.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
                     <div className="workshop-row-chrome">
@@ -796,7 +837,14 @@ export function WorkshopBlock({
                         <span className="workshop-pack-mark" aria-hidden="true">
                           {packMark(title)}
                         </span>
-                        <strong className="workshop-row-title">{title}</strong>
+                        <span className="workshop-row-copy">
+                          <strong className="workshop-row-title">{title}</strong>
+                          {summaryLine ? (
+                            <span className="row-meta workshop-row-one-liner" title={summaryFull}>
+                              {summaryLine}
+                            </span>
+                          ) : null}
+                        </span>
                       </button>
                       <span className="workshop-row-action-slot">
                         {!expanded ? (
@@ -813,11 +861,6 @@ export function WorkshopBlock({
                     </div>
                     {expanded ? (
                       <div className="workshop-row-detail">
-                        {summary ? (
-                          <p className="row-meta workshop-pack-summary workshop-pack-blurb" title={summary}>
-                            {summary}
-                          </p>
-                        ) : null}
                         <span className="row-meta">{vLabel(entry.version)} · {entry.id}</span>
                         {entry.yanked ? <span className="row-meta">Yanked</span> : null}
                         {entry.installDisabledReason ? <span className="row-meta">{entry.installDisabledReason}</span> : null}

@@ -107,6 +107,15 @@ function vLabel(version: string): string {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
+/** Catalog rows have id + summary, not pack.json name — title-case the id for Available. */
+function catalogDisplayName(id: string): string {
+  return id
+    .split("-")
+    .filter(Boolean)
+    .map((part, i) => (i === 0 ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
 function provenance(pack: PackListing): string {
   const installed = pack.installed;
   if (!installed) return "";
@@ -134,6 +143,7 @@ export function WorkshopBlock({
   const [packs, setPacks] = useState<PackListing[]>([]);
   const [catalog, setCatalog] = useState<CatalogViewState | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [hostId, setHostId] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
   const [url, setUrl] = useState("");
@@ -224,6 +234,7 @@ export function WorkshopBlock({
   };
 
   const openConfirm = (pack: PackListing) => {
+    setRemoveConfirmId(null);
     setConfirmId(pack.id);
     setHostId(hosts.some((host) => host.id === pack.hostId) ? (pack.hostId as string) : hosts[0]?.id ?? "");
     setChecked(pack.sources.map((source) => source.id));
@@ -335,6 +346,7 @@ export function WorkshopBlock({
       await store.updateWorkshop({ packs: next });
       if (!next.some((row) => row.on)) await window.workhorse?.workshopCloseBreakout?.();
       if (confirmId === id) setConfirmId(null);
+      if (removeConfirmId === id) setRemoveConfirmId(null);
       setUpdates((prev) => {
         const copy = { ...prev };
         delete copy[id];
@@ -386,6 +398,7 @@ export function WorkshopBlock({
             <strong>Workshop</strong>
             <p className="row-meta">Packs on this desk. Add from the catalog, then Turn on and confirm what each pack reads.</p>
           </div>
+          {/* Detach is Settings / live-rail only — hidden when surface="sheet" (Manage). */}
           {packs.some((pack) => pack.on) ? (
             <button className="tiny" type="button" onClick={() => void window.workhorse?.workshopOpenBreakout?.()}>
               Detach
@@ -510,9 +523,25 @@ export function WorkshopBlock({
                       </button>
                     )
                   ) : null}
-                  <button className="tiny" type="button" disabled={busy} onClick={() => void remove(pack.id)}>
-                    Remove
-                  </button>
+                  {removeConfirmId === pack.id ? (
+                    <>
+                      <button
+                        className="tiny primary"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void remove(pack.id)}
+                      >
+                        Confirm remove
+                      </button>
+                      <button className="tiny" type="button" disabled={busy} onClick={() => setRemoveConfirmId(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button className="tiny" type="button" disabled={busy} onClick={() => { setConfirmId(null); setRemoveConfirmId(pack.id); }}>
+                      Remove
+                    </button>
+                  )}
                 </span>
               </li>
             );
@@ -579,10 +608,18 @@ export function WorkshopBlock({
       ) : catalogState.packs.length === 0 ? (
         <div className="workshop-catalog-empty">
           <p className="row-meta">No packs in catalog</p>
+          <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()}>
+            Refresh
+          </button>
         </div>
       ) : (
         <>
-          {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
+          <div className="workshop-catalog-toolbar">
+            {catalogState.stale ? <p className="row-meta">Catalog stale — Install disabled until refresh.</p> : null}
+            <button className="tiny" type="button" disabled={busy} onClick={() => reloadCatalog()} title="Refresh catalog">
+              Refresh
+            </button>
+          </div>
           <ul className="skills-list">
             {catalogState.packs.map((entry) => {
               const installed = packs.find((pack) => pack.id === entry.id);
@@ -597,8 +634,9 @@ export function WorkshopBlock({
                 <li key={entry.id} className="skill-row">
                   <div className="workshop-pack">
                     <strong>
-                      {entry.id} <span className="row-meta">{vLabel(entry.version)}</span>
+                      {catalogDisplayName(entry.id)} <span className="row-meta">{vLabel(entry.version)}</span>
                     </strong>
+                    <span className="row-meta">{entry.id}</span>
                     {/* Plain text only — never markdown/HTML from catalog fields. */}
                     <span className="row-meta workshop-pack-blurb">{entry.summary}</span>
                     <span className="row-meta">Rail · {entry.rail}</span>

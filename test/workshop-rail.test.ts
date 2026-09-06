@@ -382,6 +382,8 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(rail, /is-empty/);
   assert.match(rail, /Add packs/);
   assert.match(rail, /workshop-rail-add-packs/);
+  assert.match(rail, /Turn packs on/);
+  assert.match(rail, /workshop-rail-turn-on/);
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /ManageSheet/);
   assert.match(rail, /surface="sheet"/);
@@ -435,4 +437,32 @@ test("WorkshopBlock sheet hides link-head; Install primary; Retry only on failur
   assert.match(block, /Catalog unreachable[\s\S]*Retry/);
   assert.doesNotMatch(block, /No packs in catalog[\s\S]{0,160}Retry/);
   assert.match(block, /workshop-pack-blurb/);
+});
+
+test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
+  const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
+  const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
+  // A: zero installed → Add packs; installed all-Off → Turn packs on (not Install).
+  assert.match(rail, /Turn packs on/);
+  assert.match(rail, /workshop-rail-turn-on/);
+  assert.match(rail, /workshopList/);
+  assert.match(rail, /zeroInstalled/);
+  assert.doesNotMatch(rail, /Install a pack/);
+  // B: Remove requires confirm step.
+  assert.match(block, /removeConfirmId/);
+  assert.match(block, /Confirm remove/);
+  assert.match(block, /setRemoveConfirmId\(pack\.id\)/);
+  // C: Available shows catalogDisplayName; id is meta.
+  assert.match(block, /catalogDisplayName\(entry\.id\)/);
+  assert.match(block, /<span className="row-meta">\{entry\.id\}<\/span>/);
+  // D: Detach only in settings link-head (hidden when surface=sheet).
+  assert.match(block, /surface="sheet"|inSheet/);
+  assert.match(block, /Detach is Settings \/ live-rail only/);
+  const detachHits = block.match(/>\s*Detach\s*</g) ?? [];
+  assert.equal(detachHits.length, 1, `expected one Detach label in settings path, saw ${detachHits.length}`);
+  // F: Refresh on healthy catalog; Retry only on failure.
+  const refreshLabels = block.match(/>\s*Refresh\s*</g) ?? [];
+  assert.ok(refreshLabels.length >= 1, "expected Refresh when catalog healthy");
+  assert.match(block, /No packs in catalog[\s\S]{0,200}Refresh/);
+  assert.match(block, /workshop-catalog-toolbar[\s\S]*Refresh/);
 });

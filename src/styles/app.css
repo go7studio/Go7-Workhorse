@@ -9597,6 +9597,15 @@ html.pane-dragging * {
   line-clamp: unset;
 }
 
+.workshop-catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+
 .workshop-installed-coachmark {
   margin: 0 0 8px;
 }

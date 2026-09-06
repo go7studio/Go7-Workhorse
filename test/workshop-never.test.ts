@@ -56,6 +56,7 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   const rail = read("src/ui/WorkshopRail.tsx");
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /Add packs/);
+  assert.match(rail, /Turn packs on/);
   assert.match(rail, /surface="sheet"/);
   assert.match(rail, /aria-label="Manage packs"/);
   assert.match(rail, /workshop-manage-sheet/);

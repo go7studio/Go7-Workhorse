@@ -8,6 +8,20 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.61](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.60...v0.6.61) (2026-09-06)
+
+
+### Features
+
+* name finished workers on the work line ([2bbeddb](https://github.com/go7studio/Go7-Workhorse/commit/2bbeddb87c295a7b2366eaf7791c02618ec32707))
+* name finished workers on the work line ([2b73055](https://github.com/go7studio/Go7-Workhorse/commit/2b730555721c98a79070d45e6ea727f189ae9163))
+
+
+### Bug Fixes
+
+* This stretch shows billed in+out, not only the peak cell ([efa8e56](https://github.com/go7studio/Go7-Workhorse/commit/efa8e5695a856a056b21d170c2094fe0c0701588))
+* This stretch total still counts today on UTC CI ([f899eed](https://github.com/go7studio/Go7-Workhorse/commit/f899eedb05661c41c582af9ddae767840302d4b0))
+
 ## [0.6.60](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.59...v0.6.60) (2026-09-06)
 
 

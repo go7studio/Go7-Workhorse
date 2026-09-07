@@ -8,6 +8,7 @@ import { readClaudeDesktopOauth } from "./claude-desktop-auth";
 import { storedClaudeToken } from "./claude-stored-token";
 import { oauthNotExpired, resolveClaudeCliBinary } from "./claude-login";
 import { deskHelperEnv } from "./desk-path";
+import { markClaudeTokenRejected } from "./claude-stored-token";
 
 /**
  * `security` is the desk asking macOS for one keychain item. It is not a
@@ -405,6 +406,14 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
     if (cachedPlan && Date.now() - cachedPlan.at < CACHE_MS) return cachedPlan.plan;
     const { status, json } = await nodeGetJson("https://api.anthropic.com/api/oauth/usage", headers);
     if (status === 429 && cachedPlan?.plan) return cachedPlan.plan;
+    // The desk already asks Anthropic for the usage ring on its own beat, with
+    // the same login every chat uses. A refusal here is the earliest the desk
+    // can know the login is dead — hours before the person clicks anything —
+    // so it is recorded rather than thrown away with every other bad status.
+    if (status === 401 || status === 403) {
+      markClaudeTokenRejected(`Anthropic refused the desk's login (${status}).`);
+      return undefined;
+    }
     if (status < 200 || status >= 300) return undefined;
     const plan = parseClaudePlanUsage(json);
     cachedPlan = { at: Date.now(), plan };

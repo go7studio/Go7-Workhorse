@@ -16,7 +16,7 @@ import { detectCodexLogin } from "./codex-login";
 import { archiveWorkhorseWorkerThreads, detectCodexRuntime, listCodexNativeThreads } from "./codex-app-server";
 import { codexCapabilitySummary } from "./codex-capabilities";
 import { detectClaudeLogin, resolveClaudeCliBinary } from "./claude-login";
-import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader } from "./claude-stored-token";
+import { forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setClaudeRefusalStore, setStoredClaudeTokenReader } from "./claude-stored-token";
 import { claudeTokenComplaint, looksLikeClaudeToken } from "../src/lib/claude-token";
 import { detectCursorLogin } from "./cursor-login";
 import { runClaudeSetupToken } from "./claude-auth";
@@ -436,6 +436,27 @@ function credentialStore(): CredentialStore {
  */
 function useStoredClaudeToken(): void {
   setStoredClaudeTokenReader(() => credentialStore().get(CLAUDE_TOKEN_ID) ?? null);
+  // A refused login is worth remembering across restarts: without this the
+  // card reads On again on every start, and the person is told nothing until a
+  // chat fails. The file holds a hash of the refused token, never the token.
+  const file = path.join(app.getPath("userData"), "claude-login-refusal.json");
+  setClaudeRefusalStore({
+    read: () => {
+      try {
+        return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+      } catch {
+        return null;
+      }
+    },
+    write: (text) => {
+      try {
+        if (text) fs.writeFileSync(file, text);
+        else fs.rmSync(file, { force: true });
+      } catch {
+        /* the desk still knows within this run */
+      }
+    },
+  });
 }
 
 function folderAccessIo() {

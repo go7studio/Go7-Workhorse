@@ -2163,7 +2163,6 @@ async function spawnAgent(
       }
     : {
         ...inheritedInput,
-        timeoutSeconds: undefined,
         tokenBudget: undefined,
         isolation: resolveWorkerIsolation({ isolation: input.isolation }),
       };

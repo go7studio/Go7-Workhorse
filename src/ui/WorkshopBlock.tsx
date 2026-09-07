@@ -65,6 +65,28 @@ export function nextPacks(current: PackListing[], change: PackChange): WorkshopP
   return rows.map((item, i) => (i === index ? row : item));
 }
 
+export const WORKSHOP_MISSING_HOST = "Add a Local Compute host under Settings → LLMs first.";
+export const WORKSHOP_ENABLE_HOST = "Enable a Local Compute host under Settings → LLMs first.";
+
+/** Catalog search: empty query keeps every row; otherwise match name/id/summary. */
+export function availableSearchMatch(query: string, haystack: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return haystack.toLowerCase().includes(q);
+}
+
+/** Why a Turn-on change would stay Off. Empty host or sources is the usual live miss. */
+export function turnOnRefuseReason(change: PackChange): string | null {
+  if (!change.on) return null;
+  const sources = Array.from(new Set(change.sources ?? []));
+  if (!change.hostId?.trim()) return WORKSHOP_MISSING_HOST;
+  if (sources.length === 0) return "Choose at least one source.";
+  if (!change.sourceFingerprints || sources.some((id) => !change.sourceFingerprints?.[id])) {
+    return "Could not bind sources. Try Turn on again.";
+  }
+  return null;
+}
+
 /** Turn several packs off (after install/update reconfirm) without dropping the others. */
 export function nextPacksOff(current: PackListing[], ids: string[]): WorkshopPackSetting[] {
   const want = new Set(ids);
@@ -179,10 +201,14 @@ export function WorkshopBlock({
   catalogRefreshNonce?: number;
 } = {}) {
   const store = useStore();
-  const hosts = store.settings.localCompute.hosts.filter((host) => host.enabled);
+  const configuredHosts = store.settings.localCompute.hosts;
+  const hosts = configuredHosts.filter((host) => host.enabled);
+  const missingHostCopy = configuredHosts.length === 0 ? WORKSHOP_MISSING_HOST : hosts.length === 0 ? WORKSHOP_ENABLE_HOST : null;
   const [packs, setPacks] = useState<PackListing[]>([]);
   const [catalog, setCatalog] = useState<CatalogViewState | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [grantRefuseId, setGrantRefuseId] = useState<string | null>(null);
+  const [catalogQuery, setCatalogQuery] = useState("");
   const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null);
   const [hostId, setHostId] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
@@ -262,7 +288,7 @@ export function WorkshopBlock({
     reloadCatalog();
   }, [catalogRefreshNonce, reloadCatalog]);
 
-  // Add packs (zero installed) → Available-first; Manage / Turn on with any On → On this desk.
+  // Sheet: Available-first when opened that way; otherwise On this desk.
   useEffect(() => {
     if (!inSheet) return;
     const id = window.requestAnimationFrame(() => {
@@ -301,7 +327,7 @@ export function WorkshopBlock({
     setRemoveConfirmId(null);
   };
 
-  const turnOn = (pack: PackListing) =>
+  const turnOnWith = (pack: PackListing, grantHostId: string, grantSources: string[]) =>
     run(async () => {
       // Yank bites at Turn-on — install-time check alone is insufficient.
       const yanked = catalog?.packs.find((entry) => entry.id === pack.id && entry.version === pack.version && entry.yanked);
@@ -316,14 +342,58 @@ export function WorkshopBlock({
       const sourceFingerprints = fingerprintsForSources(
         pack.id,
         pack.sources.map(asPackSource),
-        checked,
+        grantSources,
       );
-      const next = nextPacks(packs, { id: pack.id, on: true, hostId, sources: checked, sourceFingerprints });
-      if (!next.some((row) => row.id === pack.id && row.on)) return;
+      const change: PackChange = {
+        id: pack.id,
+        on: true,
+        hostId: grantHostId,
+        sources: grantSources,
+        sourceFingerprints,
+      };
+      const refused = turnOnRefuseReason(change);
+      const next = nextPacks(packs, change);
+      if (!next.some((row) => row.id === pack.id && row.on)) {
+        setGrantRefuseId(pack.id);
+        setNote(refused ?? `Could not turn on. ${WORKSHOP_MISSING_HOST}`);
+        return;
+      }
       await store.updateWorkshop({ packs: next });
+      setPacks((current) =>
+        current.map((row) =>
+          row.id === pack.id
+            ? { ...row, on: true, hostId: grantHostId, granted: grantSources, sourceFingerprints }
+            : row,
+        ),
+      );
+      setGrantRefuseId(null);
       setConfirmId(null);
+      setExpandedId(null);
       reload();
     });
+
+  const turnOn = (pack: PackListing) => turnOnWith(pack, hostId, checked);
+
+  /** Collapsed Turn on: grant now when a host is ready. Name a missing host — never a silent no-op. */
+  const beginTurnOn = (pack: PackListing) => {
+    if (pack.refused) return;
+    const chosenHost = hosts.some((host) => host.id === pack.hostId) ? (pack.hostId as string) : hosts[0]?.id ?? "";
+    const chosenSources = pack.sources.map((source) => source.id);
+    if (!chosenHost || hosts.length === 0) {
+      setGrantRefuseId(pack.id);
+      setConfirmId(null);
+      setNote(missingHostCopy ?? WORKSHOP_MISSING_HOST);
+      return;
+    }
+    if (chosenSources.length === 0) {
+      setGrantRefuseId(pack.id);
+      openConfirm(pack);
+      setNote("This pack has no sources to grant.");
+      return;
+    }
+    setGrantRefuseId(null);
+    void turnOnWith(pack, chosenHost, chosenSources);
+  };
 
   const turnOff = (id: string) =>
     run(async () => {
@@ -462,7 +532,12 @@ export function WorkshopBlock({
   const confirmPanel = (pack: PackListing) => (
     <div className="workshop-confirm">
       {hosts.length === 0 ? (
-        <p className="row-meta">Add a Local Compute host under Settings → LLMs first.</p>
+        <div className="workshop-grant-refuse">
+          <p className="row-meta">{missingHostCopy ?? WORKSHOP_MISSING_HOST}</p>
+          <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+            Open LLMs
+          </button>
+        </div>
       ) : (
         <label className="row-meta">
           Host
@@ -508,7 +583,24 @@ export function WorkshopBlock({
 
   const sheetIntro =
     activePacks.length === 0 ? "Install a pack, then Turn on." : "Packs on this desk";
-  const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local.";
+  const settingsIntro = "Add-ons for this desk. Catalog is shared; installs stay local. Live rail for box health, job meters, and more.";
+  const emptyOnCopy =
+    hosts.length === 0
+      ? "None on. Add a Local Compute host under LLMs, then Turn on an add-on to watch it from the desk rail."
+      : "None on. Install writes a pack Off on this machine. Turn on watches it from the desk rail.";
+  const visibleInstalled = pendingInstalled.filter((pack) =>
+    availableSearchMatch(
+      catalogQuery,
+      [pack.name, pack.id, pack.description, catalogState?.ok ? catalogState.packs.find((entry) => entry.id === pack.id)?.summary : ""]
+        .filter(Boolean)
+        .join(" "),
+    ),
+  );
+  const visibleCatalog = pendingCatalog.filter((entry) =>
+    availableSearchMatch(catalogQuery, [catalogDisplayName(entry.id), entry.id, entry.summary].filter(Boolean).join(" ")),
+  );
+  const catalogNoMatch =
+    Boolean(catalogQuery.trim()) && visibleInstalled.length === 0 && visibleCatalog.length === 0 && (pendingInstalled.length > 0 || pendingCatalog.length > 0);
   const showCatalogRefresh =
     catalogState != null &&
     catalogState.ok &&
@@ -521,7 +613,7 @@ export function WorkshopBlock({
       {inSheet ? (
         <p className="row-meta workshop-blurb workshop-sheet-intro">{sheetIntro}</p>
       ) : (
-        <div className="link-head">
+        <div className="link-head workshop-invite-head">
           <div>
             <strong>Workshop</strong>
             <p className="row-meta">{settingsIntro}</p>
@@ -552,9 +644,16 @@ export function WorkshopBlock({
         On this desk
       </h3>
       {activePacks.length === 0 ? (
-        <p className="row-meta workshop-blurb workshop-active-empty">None on.</p>
+        <div className="workshop-empty-on">
+          <p className="row-meta workshop-blurb workshop-active-empty">{emptyOnCopy}</p>
+          {hosts.length === 0 ? (
+            <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+              Open LLMs
+            </button>
+          ) : null}
+        </div>
       ) : (
-        <ul className="pack-list">
+        <ul className="pack-list pack-card-grid">
           {activePacks.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
@@ -562,7 +661,7 @@ export function WorkshopBlock({
             const expanded = expandedId === pack.id;
             const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
             return (
-              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+              <li key={pack.id} className={`pack-row pack-card${expanded ? " is-expanded" : ""}`}>
                 <button
                   type="button"
                   className="workshop-row-hit"
@@ -574,6 +673,7 @@ export function WorkshopBlock({
                   </span>
                   <span className="workshop-row-copy">
                     <strong className="workshop-row-title">{pack.name}</strong>
+                    <span className="row-meta workshop-pack-status">On</span>
                     {one ? (
                       <span className="row-meta workshop-row-one-liner" title={one.full}>
                         {one.line}
@@ -661,13 +761,26 @@ export function WorkshopBlock({
       <h3 ref={pendingRef} id="workshop-available" className="workshop-section-title section-label" tabIndex={-1}>
         Available
       </h3>
-      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok ? (
+      {pendingInstalled.length > 0 || pendingCatalog.length > 0 || catalogQuery.trim() ? (
+        <input
+          className="settings-search workshop-catalog-search"
+          type="search"
+          value={catalogQuery}
+          placeholder="Search catalog"
+          aria-label="Search catalog"
+          onChange={(event) => setCatalogQuery(event.target.value)}
+        />
+      ) : null}
+      {packs.length === 0 && pendingCatalog.length === 0 && catalogState != null && catalogState.ok && !catalogQuery.trim() ? (
         <p className="row-meta workshop-blurb workshop-pending-empty">Nothing available.</p>
       ) : null}
+      {catalogNoMatch ? (
+        <p className="row-meta workshop-blurb workshop-catalog-no-match">No packs match.</p>
+      ) : null}
 
-      {pendingInstalled.length > 0 ? (
-        <ul className="pack-list">
-          {pendingInstalled.map((pack) => {
+      {visibleInstalled.length > 0 ? (
+        <ul className="pack-list pack-card-grid">
+          {visibleInstalled.map((pack) => {
             const update = updates[pack.id];
             const latest = update?.latest && update.latest.replace(/^v/, "") !== update.current.replace(/^v/, "") ? update.latest : undefined;
             const isRepo = pack.installed?.kind === "repo";
@@ -675,7 +788,7 @@ export function WorkshopBlock({
             const confirming = confirmId === pack.id && !pack.refused;
             const one = packCollapsedOneLiner(pack, catalogState?.ok ? catalogState.packs : undefined);
             return (
-              <li key={pack.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+              <li key={pack.id} className={`pack-row pack-card${expanded ? " is-expanded" : ""}`}>
                 <div className="workshop-row-chrome">
                   <button
                     type="button"
@@ -688,21 +801,30 @@ export function WorkshopBlock({
                     </span>
                     <span className="workshop-row-copy">
                       <strong className="workshop-row-title">{pack.name}</strong>
+                      <span className="row-meta workshop-pack-status">Off</span>
                       {one ? (
                         <span className="row-meta workshop-row-one-liner" title={one.full}>
-                          {one.line}
+                          {one.full}
                         </span>
                       ) : null}
                     </span>
                   </button>
                   <span className="workshop-row-action-slot">
                     {!expanded && !pack.refused ? (
-                      <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                      <button className="tiny primary" type="button" disabled={busy} onClick={() => beginTurnOn(pack)}>
                         Turn on
                       </button>
                     ) : null}
                   </span>
                 </div>
+                {grantRefuseId === pack.id && missingHostCopy ? (
+                  <div className="workshop-grant-refuse">
+                    <p className="row-meta">{missingHostCopy}</p>
+                    <button className="tiny" type="button" onClick={() => store.setSettingsSection("llms")}>
+                      Open LLMs
+                    </button>
+                  </div>
+                ) : null}
                 {expanded ? (
                   <div className="workshop-row-detail">
                     {pack.refused ? <span className="row-meta">Refused: {pack.refused}</span> : null}
@@ -732,7 +854,7 @@ export function WorkshopBlock({
                           </button>
                         </>
                       ) : (
-                        <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => openConfirm(pack)}>
+                        <button className="tiny workshop-turn-on-quiet" type="button" disabled={busy} onClick={() => beginTurnOn(pack)}>
                           Turn on
                         </button>
                       )}
@@ -811,9 +933,9 @@ export function WorkshopBlock({
         </div>
       ) : (
         <>
-          {pendingCatalog.length > 0 ? (
-            <ul className="pack-list">
-              {pendingCatalog.map((entry) => {
+          {visibleCatalog.length > 0 ? (
+            <ul className="pack-list pack-card-grid">
+              {visibleCatalog.map((entry) => {
                 const installed = packs.find((pack) => pack.id === entry.id);
                 const sameVersion = installed?.version === entry.version;
                 const needsUpdate = Boolean(installed && !sameVersion && !entry.yanked);
@@ -827,7 +949,7 @@ export function WorkshopBlock({
                 const summaryFull = entry.summary?.trim() || "";
                 const summaryLine = summaryFull ? clampRowOneLiner(summaryFull) : "";
                 return (
-                  <li key={entry.id} className={`pack-row${expanded ? " is-expanded" : ""}`}>
+                  <li key={entry.id} className={`pack-row pack-card${expanded ? " is-expanded" : ""}`}>
                     <div className="workshop-row-chrome">
                       <button
                         type="button"
@@ -840,7 +962,11 @@ export function WorkshopBlock({
                         </span>
                         <span className="workshop-row-copy">
                           <strong className="workshop-row-title">{title}</strong>
-                          {summaryLine ? (
+                          {summaryFull ? (
+                            <span className="row-meta workshop-row-one-liner" title={summaryFull}>
+                              {summaryFull}
+                            </span>
+                          ) : summaryLine ? (
                             <span className="row-meta workshop-row-one-liner" title={summaryFull}>
                               {summaryLine}
                             </span>

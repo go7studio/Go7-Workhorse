@@ -10011,6 +10011,65 @@ html.pane-dragging * {
   max-width: calc(100% - 24px);
 }
 
+.workshop-settings { margin-bottom: 8px; }
+.workshop-invite-head { margin-bottom: 4px; }
+.workshop-empty-on {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-solid);
+}
+.workshop-empty-on .workshop-active-empty { margin: 0; flex: 1 1 16rem; }
+.workshop-settings .pack-row.pack-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-solid);
+  margin: 0 0 8px;
+  gap: 6px;
+}
+.workshop-settings .pack-row.pack-card.is-expanded { gap: 8px; }
+.workshop-settings .pack-row.pack-card .workshop-row-one-liner {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  color: var(--text-secondary);
+}
+.workshop-catalog-search {
+  width: 100%;
+  max-width: 22rem;
+  margin: 0 0 10px;
+}
+.workshop-settings .pack-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.workshop-settings .pack-card-grid > .pack-row.pack-card {
+  margin: 0;
+  min-height: 9.5rem;
+  height: 100%;
+}
+.workshop-pack-status {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+}
+.workshop-grant-refuse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 2px 0 4px;
+}
+.workshop-grant-refuse .row-meta { margin: 0; flex: 1 1 12rem; }
+.workshop-catalog-no-match { margin: 0 0 10px; }
+
 
 /* Offered models on a multi-model host. One row per model the host publishes:
    what it costs, what Auto thinks of it, and a test that proves the key really

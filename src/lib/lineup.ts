@@ -182,6 +182,30 @@ export function lineupIsTerminal(lineup: DeskLineup | undefined): boolean {
   return lineup.rows.every((row) => row.status !== "queued" && row.status !== "running");
 }
 
+/** Parent is still on a turn — a join would steal the composer and dump reports. */
+export function lineupJoinParentIsLive(status?: string | null): boolean {
+  return status === "running" || status === "needs-input";
+}
+
+/**
+ * A wave that only stopped (cancel / interrupt) is not a join. The parent
+ * already chose that stop; injecting the cancelled transcript is a dump.
+ */
+export function lineupJoinHasActionableRow(lineup: DeskLineup | undefined): boolean {
+  return Boolean(
+    lineup?.rows.some(
+      (row) => row.status === "completed" || row.status === "failed" || row.status === "timed-out",
+    ),
+  );
+}
+
+/** Cancelling one worker must not synthesize the wave or wake the parent. */
+export function shouldJoinAfterChildSettle(
+  status: Exclude<DeskLineupRowStatus, "queued" | "running">,
+): boolean {
+  return status !== "cancelled";
+}
+
 export function lineupSnapshot(lineup: DeskLineup | undefined): {
   id?: string;
   folder?: string;
@@ -614,6 +638,7 @@ export function applyJoinRateLimitRetry(
 export function maybeEnqueueLineupJoin(sessions: Session[], parentId: string, now = Date.now()): Session[] {
   const parent = sessions.find((session) => session.id === parentId);
   if (!parent?.lineup || parent.lineup.notifiedAt || !lineupIsTerminal(parent.lineup)) return sessions;
+  if (lineupJoinParentIsLive(parent.status) || !lineupJoinHasActionableRow(parent.lineup)) return sessions;
   if (parent.lineup.joinOwner === "external-runtime") {
     return handOverLineup(sessions, parentId, now);
   }
@@ -755,7 +780,7 @@ export type MissionState = {
   tone?: "danger" | "quiet";
 };
 
-function missionRowStatus(
+export function missionRowStatus(
   row: DeskLineupRow,
   child: Pick<Session, "id" | "status" | "agentRun"> | undefined,
 ): DeskLineupRowStatus {

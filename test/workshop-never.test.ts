@@ -55,14 +55,15 @@ test("Workshop manage: Settings tab secondary, rail Manage primary; not a dock, 
   assert.doesNotMatch(watch, /WorkshopBlock|workshop-rail/i);
   const rail = read("src/ui/WorkshopRail.tsx");
   assert.match(rail, /workshop-rail-manage/);
-  assert.match(rail, /Add packs/);
-  assert.match(rail, /"Turn on"/);
+  assert.match(rail, /if \(on\.length === 0\) return null/);
+  assert.doesNotMatch(rail, /workshop-rail-add-packs/);
+  assert.doesNotMatch(rail, /workshop-rail-turn-on/);
+  assert.doesNotMatch(rail, /Add packs/);
   assert.match(rail, /surface="sheet"/);
   assert.match(rail, /aria-label="Manage packs"/);
   assert.match(rail, /workshop-manage-sheet/);
   assert.match(rail, /workshop-manage-drawer/);
   assert.match(rail, /aria-modal="false"/);
-  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
 });
 
 test("preload exposes the pack surface and nothing that acts on a box; the HTTP bridge stays out of it", () => {
@@ -152,7 +153,7 @@ test("Settings shows the exact URLs at confirm time, flushes settings, and never
   assert.doesNotMatch(method, /Settings → Skills → Workshop/);
   const railDoc = read("workshop/RAIL.md");
   assert.match(railDoc, /Manage/);
-  assert.match(railDoc, /empty \/ all-Off|Add packs/i);
+  assert.match(railDoc, /Hidden when no pack is On|rail is hidden/i);
   assert.doesNotMatch(railDoc, /Settings → Skills → Workshop/);
 });
 
@@ -165,7 +166,7 @@ test("Workshop manage/rail copy uses packs/modules only — no user-visible skil
     assert.doesNotMatch(visible, /\b[Ss]kill\b/, `${name}: user-visible skill copy`);
   }
   assert.match(rail, /Manage packs/);
-  assert.match(rail, /Add packs/);
+  assert.doesNotMatch(rail, /Add packs/);
   assert.match(block, /surface = "settings"/);
   assert.match(block, /focusAvailable/);
   assert.match(block, /workshop-available/);
@@ -175,8 +176,11 @@ test("Workshop manage/rail copy uses packs/modules only — no user-visible skil
   assert.doesNotMatch(block, /skills-list|skill-row/);
   assert.match(block, /Install a pack, then Turn on\./);
   assert.match(block, /Add-ons for this desk\. Catalog is shared; installs stay local\./);
-  assert.match(block, /None on\./);
+  assert.match(block, /None on/);
   assert.match(block, /Installed · Off — Turn on when ready\./);
+  assert.match(block, /workshop-pack-status">Off</);
+  assert.match(block, /aria-label="Search catalog"/);
+  assert.match(block, /pack-card-grid/);
   assert.match(block, /Updated · Off\./);
   assert.match(block, /expandedId/);
   assert.doesNotMatch(block, />Installed</);

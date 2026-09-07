@@ -365,25 +365,21 @@ test("gallery paints kind chip, label, and path actions", () => {
   assert.match(html, /No local path/);
 });
 
-test("empty / all-Off rail paints thin stub with single Add packs CTA (cold desk)", () => {
+test("empty / all-Off rail is hidden until a pack is On", () => {
   const html = render(createElement(WorkshopRail));
-  assert.match(html, /aria-label="Workshop rail"/);
-  assert.match(html, /is-empty|workshop-rail-empty-stub/);
-  assert.match(html, /Add packs/);
-  assert.match(html, /aria-label="Add packs"/);
-  assert.doesNotMatch(html, /Install a pack/);
-  // Single empty CTA only — no Manage + Install duplicate on the stub.
-  assert.doesNotMatch(html, />Manage</);
+  assert.equal(html, "");
+  assert.doesNotMatch(html, /Workshop rail/);
+  assert.doesNotMatch(html, /Turn on/);
+  assert.doesNotMatch(html, /Add packs/);
   assert.doesNotMatch(html, /workshop-manage-sheet/);
 });
 
-test("rail source always exposes Manage on collapsed/expanded; empty uses Add packs; sheet is Manage packs", () => {
+test("rail source exposes Manage on collapsed/expanded; empty hides the rail; sheet is Manage packs", () => {
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
-  assert.match(rail, /is-empty/);
-  assert.match(rail, /Add packs/);
-  assert.match(rail, /workshop-rail-add-packs/);
-  assert.match(rail, /"Turn on"/);
-  assert.match(rail, /workshop-rail-turn-on/);
+  assert.match(rail, /if \(on\.length === 0\) return null/);
+  assert.doesNotMatch(rail, /workshop-rail-add-packs/);
+  assert.doesNotMatch(rail, /workshop-rail-turn-on/);
+  assert.doesNotMatch(rail, /Add packs/);
   assert.match(rail, /workshop-rail-manage/);
   assert.match(rail, /ManageSheet/);
   assert.match(rail, /surface="sheet"/);
@@ -399,9 +395,8 @@ test("rail source always exposes Manage on collapsed/expanded; empty uses Add pa
   assert.match(rail, /FOCUSABLE|focusables/);
   assert.match(rail, /restore\.focus|openerRef/);
   assert.match(rail, /do not trap Tab away from chat/);
-  assert.doesNotMatch(rail, /if \(on\.length === 0\) return null/);
   assert.doesNotMatch(rail, /Install a pack/);
-  // ManageButton on collapsed + expanded (+ def); empty path uses Add packs instead.
+  // ManageButton on collapsed + expanded (+ def); empty path returns null.
   const manageHits = rail.split("ManageButton").length - 1;
   assert.ok(manageHits >= 3, `expected ManageButton on collapsed + expanded (+ def), saw ${manageHits}`);
   assert.doesNotMatch(rail, /UsagePane|WatchPane|setSettingsSection\("workshop"\)/);
@@ -455,12 +450,11 @@ test("WorkshopBlock sheet hides link-head; On this desk/Available accordion; Ret
 test("ADV A–F: all-Off honesty, Remove confirm, Available name, sheet Detach hide, Refresh when healthy", () => {
   const rail = readFileSync(path.join(ROOT, "src", "ui", "WorkshopRail.tsx"), "utf8");
   const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
-  // A: zero installed → Add packs; installed all-Off → Turn on (not Install).
-  assert.match(rail, /"Turn on"/);
-  assert.match(rail, /availableFirst: zeroInstalled/);
-  assert.match(rail, /workshop-rail-turn-on/);
-  assert.match(rail, /workshopList/);
-  assert.match(rail, /zeroInstalled/);
+  // A: nothing On → rail hidden; Install / Turn on live in Settings → Workshop.
+  assert.match(rail, /if \(on\.length === 0\) return null/);
+  assert.doesNotMatch(rail, /workshop-rail-turn-on/);
+  assert.doesNotMatch(rail, /workshopList/);
+  assert.doesNotMatch(rail, /zeroInstalled/);
   assert.doesNotMatch(rail, /Install a pack/);
   // B: Remove requires confirm step.
   assert.match(block, /removeConfirmId/);
@@ -552,8 +546,10 @@ test("feel pass: quiet marks/headers, Refresh not between rows, Available action
   assert.match(css, /workshop-section-title\.section-label/);
   // Available action column alignment; Install primary; Turn on quiet.
   assert.match(css, /workshop-row-action-slot/);
+  assert.match(css, /pack-card-grid/);
   assert.match(block, /workshop-turn-on-quiet/);
   assert.match(block, /className="tiny primary"/);
+  assert.match(block, /aria-label="Search catalog"/);
   // Advanced whisper.
   assert.match(css, /workshop-advanced-toggle/);
   assert.match(block, /workshop-advanced-toggle/);

@@ -190,6 +190,28 @@ export function isAcpSessionUpdateMethod(method: string | undefined): boolean {
   );
 }
 
+/** A JSON-RPC result/error for a request we sent. Not a notification or an incoming request. */
+export function isAcpRpcReply(message: { id?: number | string; method?: string }): boolean {
+  return message.id !== undefined && !message.method;
+}
+
+/**
+ * Session updates in the same stdout flush as `session/prompt`'s result must
+ * land before the promise resolves. Otherwise the desk idles, then more
+ * thinking arrives on a turn that already says it finished.
+ */
+export function partitionAcpBatch<T extends { id?: number | string; method?: string }>(
+  messages: T[],
+): { live: T[]; replies: T[] } {
+  const live: T[] = [];
+  const replies: T[] = [];
+  for (const message of messages) {
+    if (isAcpRpcReply(message)) replies.push(message);
+    else live.push(message);
+  }
+  return { live, replies };
+}
+
 export type ClassifiedAcpUpdate =
   | { kind: "message"; text: string }
   | { kind: "thought"; text: string }
@@ -1138,7 +1160,9 @@ export class GrokAgent {
       this.buffer += chunk;
       const { messages, rest } = consumeAcpMessages(this.buffer);
       this.buffer = rest;
-      for (const message of messages) this.onMessage(message);
+      const { live, replies } = partitionAcpBatch(messages);
+      for (const message of live) this.onMessage(message);
+      for (const message of replies) this.onMessage(message);
     } catch (error) {
       debugAcp({ stdoutError: error instanceof Error ? error.message : String(error) });
     }

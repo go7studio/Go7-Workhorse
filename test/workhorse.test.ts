@@ -17,7 +17,9 @@ import {
   extractSessionTitle,
   extractToolEvent,
   extractUpdateText,
+  isAcpRpcReply,
   isAcpSessionUpdateMethod,
+  partitionAcpBatch,
   parseGrokUsage,
   parseRewindPoints,
   pickPermissionOptionId,
@@ -1682,6 +1684,21 @@ test("ACP text extractors walk nested content and update kinds", () => {
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session/update"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/session_notification"), true);
   assert.equal(isAcpSessionUpdateMethod("_x.ai/queue/changed"), false);
+});
+
+test("ACP prompt replies wait until session updates in the same flush have landed", () => {
+  const thought = { jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk" } } };
+  const reply = { jsonrpc: "2.0", id: 7, result: { stopReason: "end_turn" } };
+  const later = { jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk" } } };
+  const { live, replies } = partitionAcpBatch([thought, reply, later]);
+  assert.equal(isAcpRpcReply(reply), true);
+  assert.equal(isAcpRpcReply(thought), false);
+  assert.deepEqual(live, [thought, later]);
+  assert.deepEqual(replies, [reply]);
+  const grokAgent = readFileSync(path.join(ROOT, "electron", "grok-agent.ts"), "utf8");
+  assert.match(grokAgent, /partitionAcpBatch\(messages\)/);
+  assert.match(grokAgent, /for \(const message of live\) this\.onMessage\(message\)/);
+  assert.match(grokAgent, /for \(const message of replies\) this\.onMessage\(message\)/);
 });
 
 test("consumeAcpMessages reads NDJSON and Content-Length frames", () => {
@@ -8782,8 +8799,11 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(orchestrated, /Review this folder and ship the report/);
   const missioned = withCrewModeHint(review, "mission");
   assert.ok(missioned.startsWith(MISSION_MODE_HINT));
+  assert.match(MISSION_MODE_HINT, /not a request to spawn or summon agents/);
   assert.match(missioned, /workhorse_continue_mission/);
-  assert.match(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(missioned, new RegExp(SPAWN_TURN_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(missioned, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(missioned, /Call workhorse_list_bots now/);
   const both = withCrewModeHint(review, ["orchestrate", "mission"]);
   assert.ok(both.startsWith(ORCHESTRATE_MODE_HINT));
   assert.match(both, new RegExp(MISSION_MODE_HINT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -8800,6 +8820,21 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(composed, /canCall/);
   const composedMission = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
   assert.match(composedMission, /workhorse_continue_mission/);
+  assert.doesNotMatch(composedMission, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(composedMission, /Call workhorse_list_bots now/);
+  const craft = "Brother you just put some weird wings on it, please make this unique different using the other crafts as references to create your perfect craft";
+  assert.equal(looksLikeSpawnRequest(craft), false);
+  const composedCraft = composeVendorPrompt(craft, WORKHORSE_SESSION_RULES, "session/load", { crewMode: "mission" });
+  assert.match(composedCraft, /The user selected Mission on this chat/);
+  assert.doesNotMatch(composedCraft, /The user asked you to spawn or summon agents/);
+  assert.doesNotMatch(composedCraft, /Call workhorse_list_bots now/);
+  const composedSpawnMission = composeVendorPrompt(
+    "please spawn subagents to review this",
+    WORKHORSE_SESSION_RULES,
+    "session/load",
+    { crewMode: "mission" },
+  );
+  assert.match(composedSpawnMission, /The user asked you to spawn or summon agents/);
   const composedBoth = composeVendorPrompt(review, WORKHORSE_SESSION_RULES, "session/load", {
     crewMode: ["orchestrate", "mission"],
   });
@@ -8868,6 +8903,7 @@ test("composer + pins Orchestrate and Mission and those modes inject the bible",
   assert.match(readFileSync(path.join(ROOT, "electron", "cursor-host.ts"), "utf8"), /crewMode: input\.crewModes/);
   assert.match(readFileSync(path.join(ROOT, "electron", "custom-host.ts"), "utf8"), /withCrewModeHint/);
   assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /Composer \+ menu/);
+  assert.match(readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8"), /not a spawn request/);
 });
 
 test("desk-enforced orchestrator vs worker lineup", async () => {

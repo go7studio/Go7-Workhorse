@@ -12,7 +12,7 @@ import { StoreContext, StoreRuntimeContext, useStore } from "./store-context";
 export { useStore, useStoreReader, useStoreSelector } from "./store-context";
 import { commandContinuesToVendor, commandsForSession, matchCommand } from "./commands";
 import { isWorkhorseGoalControl, isWorkhorseGoalIntent, parseGoalInput, parseGrokGoalLine } from "./goal";
-import { nextGoalForSend, planHaltForward, prepareVendorSend, vendorTerminalAction } from "./vendor-send";
+import { nextGoalForSend, planHaltForward, prepareVendorSend, shouldIgnoreRedirectedCancel, vendorTerminalAction } from "./vendor-send";
 import { customChatHistory } from "./custom-history";
 import { uid } from "./id";
 import {
@@ -116,6 +116,7 @@ import {
   applyDeleteProject,
   applyProjectChatFate,
   applyRenameDeskProject,
+  applyReorderProjects,
   renameTookOnDesk,
   visibleProjectNames,
   emptyProject,
@@ -125,7 +126,6 @@ import {
   primaryFolder,
   projectFolderPaths,
   projectForSpawn,
-  applyReorderProjects,
 } from "./project";
 import { isParentTakeoverTool, isWriteToolTitle, projectEdits, writePathFromToolEvent } from "./project-edits";
 import { isProviderId, providerById } from "./providers";
@@ -228,7 +228,9 @@ import {
   JOIN_MAX_ATTEMPTS,
   looksLikeJoinPrompt,
   handOverLineup,
+  maybeEnqueueLineupJoin,
   queueWakeDelayMs,
+  shouldJoinAfterChildSettle,
   reconcileIdleChildren,
   reconcilePersistedLineups,
   setLineupRowStatus,
@@ -335,7 +337,12 @@ import { clampPaneWidth, SIDEBAR_PANE, THREAD_PANE } from "./pane";
 import {
   assistantHasVisibleReply,
   isVendorRateLimitError,
+  isDeskAssistantNotice,
+  keepStreamedAssistantText,
+  shouldReviveIdleTurn,
   settleEmptyAssistantText,
+  TURN_IDLE_AFTER_DONE_MS,
+  TURN_IDLE_AFTER_TRAILING_MS,
   turnEndedWithoutProse,
   turnWorkedAfterAssistant,
   vendorFailedMessage,
@@ -1172,6 +1179,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
+  const turnIdleTimer = useRef<Record<string, number>>({});
+  const turnIdleStopReason = useRef<Record<string, string | undefined>>({});
+  const pendingIdleClose = useRef<Record<string, () => void>>({});
+  const redirectedAssistant = useRef<Record<string, string>>({});
   const ingestCursorLedgerRef = useRef<() => void>(() => undefined);
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
@@ -1594,6 +1605,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const reorderProjects = useCallback((fromId: string, toId: string, place: "before" | "after") => {
+    setState((current) => {
+      const projects = applyReorderProjects(current.projects, fromId, toId, place);
+      if (!projects) return current;
+      return { ...current, projects };
+    });
+  }, []);
+
   const deleteProject = useCallback((id: string, chats: "keep" | "remove") => {
     setState((current) => {
       const projects = applyDeleteProject(current.projects, id);
@@ -1614,14 +1633,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         activeProjectId: current.activeProjectId === id ? null : current.activeProjectId,
         activeSessionId: current.activeSessionId && gone.has(current.activeSessionId) ? null : current.activeSessionId,
       };
-    });
-  }, []);
-
-  const reorderProjects = useCallback((fromId: string, toId: string, place: "before" | "after") => {
-    setState((current) => {
-      const projects = applyReorderProjects(current.projects, fromId, toId, place);
-      if (!projects) return current;
-      return { ...current, projects };
     });
   }, []);
 
@@ -2305,7 +2316,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Vendor slash commands must remain the first bytes of the prompt. The
     // radar is for natural language; explicit commands already chose a route.
     if (!originalText.startsWith("/")) {
-      const policy = stateRef.current.settings.skills;
+      const policy = stateRef.current.settings.skills ?? DEFAULT_SETTINGS.skills;
       const catalog = policy.suggestFromWording === false ? [] : skillsForAutoLoad(deskSkillsRef.current, policy);
       vendorText = withSkillDiscoveryHint(vendorText, originalText, catalog);
     }
@@ -2409,10 +2420,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (liveSession?.status === "running" && options?.steer) {
-      if (liveSession.provider === "codex") void window.workhorse?.codexCancel?.(liveSession.id);
-      else if (liveSession.provider === "claude") void window.workhorse?.claudeCancel?.(liveSession.id);
-      else if (liveSession.provider === "custom") void window.workhorse?.customCancel?.(liveSession.id);
-      else void window.workhorse?.grokCancel(liveSession.id);
+      const currentAssistant = grokAssistantId.current[liveSession.id];
+      if (currentAssistant) redirectedAssistant.current[liveSession.id] = currentAssistant;
+      cancelVendorSession(liveSession);
     }
 
     if (!goalInput && originalText.startsWith("/")) {
@@ -2887,11 +2897,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       working = next;
       keepBefore = next.filter((message) => message.role === "user").length - 2;
       if (session.status === "running") {
-        if (session.provider === "codex") void window.workhorse?.codexCancel?.(session.id);
-        else if (session.provider === "claude") void window.workhorse?.claudeCancel?.(session.id);
-        else if (session.provider === "cursor") void window.workhorse?.cursorCancel?.(session.id);
-        else if (session.provider === "custom") void window.workhorse?.customCancel?.(session.id);
-        else void window.workhorse?.grokCancel(session.id);
+        const currentAssistant = grokAssistantId.current[session.id];
+        if (currentAssistant) redirectedAssistant.current[session.id] = currentAssistant;
+        cancelVendorSession(session);
       }
       setEditMessageId(null);
     }
@@ -2899,7 +2907,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (live !== "preview") {
       const previousAssistantId = grokAssistantId.current[session.id];
       const assistantId = uid("msg");
+      if (previousAssistantId && (options?.steer || options?.replaceUserId)) {
+        redirectedAssistant.current[session.id] = previousAssistantId;
+      }
       grokAssistantId.current[session.id] = assistantId;
+      const idleHandle = turnIdleTimer.current[session.id];
+      if (idleHandle) window.clearTimeout(idleHandle);
+      delete turnIdleTimer.current[session.id];
+      delete turnIdleStopReason.current[session.id];
+      delete pendingIdleClose.current[session.id];
       const leftover = grokUsagePending.current[session.id];
       if (leftover?.length) {
         const leftoverSettled = settleTurnUsage({
@@ -3106,22 +3122,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "custom",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3146,23 +3154,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "claude",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3183,23 +3183,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "cursor",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3231,23 +3223,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...latest,
             sessions: latest.sessions.map((item) =>
               item.id === session.id
-                ? applyVendorTurnIdle({
+                ? {
                     ...item,
                     vendorSessionId,
                     messages: item.messages.map((entry) =>
-                      entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                        ? {
-                            ...entry,
-                            text: settleEmptyAssistantText({
-                              provider: "codex",
-                              reply,
-                              existingText: entry.text,
-                              worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                            }),
-                          }
+                      entry.id === assistantId
+                        ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                         : entry,
                     ),
-                  }, { assistantId })
+                  }
                 : item,
             ),
           }));
@@ -3273,23 +3257,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...latest,
           sessions: latest.sessions.map((item) =>
             item.id === session.id
-              ? applyVendorTurnIdle({
+              ? {
                   ...item,
                   vendorSessionId,
                   messages: item.messages.map((entry) =>
-                    entry.id === assistantId && !assistantHasVisibleReply(entry.text)
-                      ? {
-                          ...entry,
-                          text: settleEmptyAssistantText({
-                            provider: "grok",
-                            reply,
-                            existingText: entry.text,
-                            worked: turnWorkedAfterAssistant(item.messages, assistantId),
-                          }),
-                        }
+                    entry.id === assistantId
+                      ? { ...entry, text: keepStreamedAssistantText({ reply, existingText: entry.text }) }
                       : entry,
                   ),
-                }, { assistantId })
+                }
               : item,
           ),
         }));
@@ -6130,7 +6106,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     correlationId: childCorrelationId,
                   });
                   sessions = settlePlanAssignment(sessions, parent.id, childId, "failed", terminalStatus);
-                  const admitted = joinAdmit(sessions, parent.id, current, plansRef.current);
+                  const admitted = shouldJoinAfterChildSettle(rowStatus)
+                    ? joinAdmit(sessions, parent.id, current, plansRef.current)
+                    : { sessions };
                   queueMicrotask(() => {
                     if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
                   });
@@ -6580,7 +6558,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       const parentId = child?.parentId;
       if (parentId) sessions = settlePlanAssignment(sessions, parentId, childSessionId, "failed", reason);
-      const admitted = parentId ? joinAdmit(sessions, parentId, current, plansRef.current) : { sessions };
+      const admitted =
+        parentId && shouldJoinAfterChildSettle(rowStatus)
+          ? joinAdmit(sessions, parentId, current, plansRef.current)
+          : { sessions };
       queueMicrotask(() => {
         if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
       });
@@ -6619,8 +6600,64 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       frame: (run) => requestAnimationFrame(run),
       cancelFrame: (handle) => cancelAnimationFrame(handle),
     });
+    const armTurnIdle = (sessionId: string, delayMs: number) => {
+      const handle = turnIdleTimer.current[sessionId];
+      if (handle) window.clearTimeout(handle);
+      turnIdleTimer.current[sessionId] = window.setTimeout(() => {
+        delete turnIdleTimer.current[sessionId];
+        pendingIdleClose.current[sessionId]?.();
+      }, delayMs);
+    };
+    const noteTrailingTurnActivity = (sessionId: string) => {
+      const session = stateRef.current.sessions.find((item) => item.id === sessionId);
+      const assistantId = grokAssistantId.current[sessionId];
+      const canRevive = Boolean(
+        session &&
+          shouldReviveIdleTurn({
+            status: session.status,
+            assistantId,
+            messages: session.messages,
+          }),
+      );
+      if (canRevive) {
+        setState((current) => ({
+          ...current,
+          sessions: current.sessions.map((item) => {
+            if (item.id !== sessionId) return item;
+            return {
+              ...item,
+              status: "running" as const,
+              messages: item.messages.map((message) =>
+                assistantId && message.id === assistantId && isDeskAssistantNotice(message.text)
+                  ? { ...message, text: "" }
+                  : message,
+              ),
+            };
+          }),
+        }));
+        if (turnIdleStopReason.current[sessionId] === undefined) {
+          turnIdleStopReason.current[sessionId] = "end_turn";
+        }
+      }
+      if (!pendingIdleClose.current[sessionId] && !canRevive) return;
+      armTurnIdle(sessionId, TURN_IDLE_AFTER_TRAILING_MS);
+    };
     const apply = (event: GrokBridgeEvent) => {
       try {
+      const redirectedId = redirectedAssistant.current[event.sessionId];
+      if (
+        shouldIgnoreRedirectedCancel({
+          eventType: event.type,
+          stopReason: event.type === "done" ? event.stopReason : undefined,
+          redirectedAssistantId: redirectedId,
+        })
+      ) {
+        delete redirectedAssistant.current[event.sessionId];
+        return;
+      }
+      if (event.type === "done" || event.type === "error") {
+        delete redirectedAssistant.current[event.sessionId];
+      }
       const goalHalted = goalHaltedSessions.current.has(event.sessionId);
       const terminal = vendorTerminalAction({
         halted: goalHalted,
@@ -6669,6 +6706,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           grokChunkQueue.current[event.sessionId] ?? "",
           event.text,
         );
+        noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
       }
@@ -6676,6 +6714,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!event.text) return;
         grokThoughtQueue.current[event.sessionId] =
           (grokThoughtQueue.current[event.sessionId] ?? "") + event.text;
+        noteTrailingTurnActivity(event.sessionId);
         streamCommits.request();
         return;
       }
@@ -6717,6 +6756,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event.type === "tool") {
+        noteTrailingTurnActivity(event.sessionId);
         const owner = stateRef.current.sessions.find((item) => item.id === event.sessionId);
         const turn = learningTurns.current[event.sessionId];
         if (turn && event.toolCallId && !turn.toolIds.includes(event.toolCallId)) turn.toolIds.push(event.toolCallId);
@@ -7348,6 +7388,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(() => markVendorPlanKnown("cursor"));
           ingestCursorLedgerRef.current();
         }
+        const closeTurn = () => {
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
           delete grokChunkQueue.current[event.sessionId];
@@ -7410,25 +7451,52 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
-            sessions = applyChildIdleSync(sessions, event.sessionId, failed ? "failed" : "completed", {
+            const childSettleStatus =
+              event.stopReason === "cancelled" ? ("cancelled" as const) : failed ? ("failed" as const) : ("completed" as const);
+            sessions = applyChildIdleSync(sessions, event.sessionId, childSettleStatus, {
               report: childReportText(finished),
               ...(safetyPaused
                 ? { error: "Agent paused before completing its goal." }
                 : reportedBlocked
                   ? { error: "Worker reported blocked." }
-                  : {}),
+                  : event.stopReason === "cancelled"
+                    ? { error: "Subagent was cancelled." }
+                    : {}),
             });
-            const admitted = joinAdmit(sessions, finished.parentId, current, plansRef.current);
+            const admitted = shouldJoinAfterChildSettle(childSettleStatus)
+              ? joinAdmit(sessions, finished.parentId, current, plansRef.current)
+              : { sessions };
             queueMicrotask(() => {
               if (admitted.auditor) sendRef.current(admitted.auditor.brief, { sessionId: admitted.auditor.id, hideUser: true });
             });
             sessions = admitted.sessions;
+          } else if (finished && !finished.parentId && finished.lineup) {
+            sessions = maybeEnqueueLineupJoin(sessions, finished.id);
           }
           return { ...current, sessions };
         });
+        };
+        const stopReason = event.stopReason;
+        if (stopReason === "cancelled" || stopReason === "safety_pause") {
+          const handle = turnIdleTimer.current[event.sessionId];
+          if (handle) window.clearTimeout(handle);
+          delete turnIdleTimer.current[event.sessionId];
+          delete turnIdleStopReason.current[event.sessionId];
+          delete pendingIdleClose.current[event.sessionId];
+          closeTurn();
+          return;
+        }
+        turnIdleStopReason.current[event.sessionId] = stopReason;
+        pendingIdleClose.current[event.sessionId] = closeTurn;
+        armTurnIdle(event.sessionId, TURN_IDLE_AFTER_DONE_MS);
         return;
       }
       if (event.type === "error") {
+        const idleHandle = turnIdleTimer.current[event.sessionId];
+        if (idleHandle) window.clearTimeout(idleHandle);
+        delete turnIdleTimer.current[event.sessionId];
+        delete turnIdleStopReason.current[event.sessionId];
+        delete pendingIdleClose.current[event.sessionId];
         const pending = grokUsagePending.current[event.sessionId];
         delete grokUsagePending.current[event.sessionId];
         const failedSession = stateRef.current.sessions.find((item) => item.id === event.sessionId);
@@ -7537,6 +7605,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const offCustom = window.workhorse?.onCustomEvent?.(apply);
     return () => {
       streamCommits.stop();
+      for (const handle of Object.values(turnIdleTimer.current)) window.clearTimeout(handle);
+      turnIdleTimer.current = {};
+      pendingIdleClose.current = {};
+      turnIdleStopReason.current = {};
       offGrok?.();
       offCodex?.();
       offClaude?.();

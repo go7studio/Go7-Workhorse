@@ -283,6 +283,7 @@ import {
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
+  resolveAgentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
   continueWorkerRun,
@@ -4966,25 +4967,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
             if (action === "agent-status") {
               const id = (payload.name || payload.message || "").trim();
-              const worker = latest.sessions.find((session) => session.id === id && Boolean(session.parentId));
-              if (worker) {
-                const parentId = payload.fromSessionId?.trim() || "";
-                const allowed = !parentId || descendantSessionIds(latest.sessions, parentId).includes(worker.id);
-                if (!allowed) {
-                  await replyAsk({ error: "unknown" });
-                  return;
-                }
-                await replyAsk({
-                  text: JSON.stringify(workerStatusSnapshot(worker), null, 2),
-                });
-                return;
-              }
-              const task = normalizeTaskStore(latest.externalTasks).byId[id];
-              if (!task) {
+              const resolved = resolveAgentStatus({
+                id,
+                fromSessionId: payload.fromSessionId,
+                sessions: latest.sessions,
+                externalTask: normalizeTaskStore(latest.externalTasks).byId[id],
+              });
+              if (!resolved.ok) {
                 await replyAsk({ error: "unknown" });
                 return;
               }
-              await replyAsk({ text: JSON.stringify({ ...task, status: task.status }, null, 2) });
+              await replyAsk({
+                text: JSON.stringify(resolved.snapshot, null, 2),
+              });
               return;
             }
             if (action === "cancel-agent") {

@@ -1072,6 +1072,142 @@ test("Link iteration: assign a mission loop, then status carries the report", as
   }
 });
 
+test("agent_status follows an asked existing parent through running then terminal, and keeps worker/unknown paths", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-status-"));
+  const statePath = path.join(dir, "state.json");
+  const orch = "sess_orch";
+  const target = "sess_target";
+  const workerId = "sess_worker";
+  const writeState = (running: boolean, workerRunning = true) => {
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          {
+            id: orch,
+            title: "Coordinator",
+            provider: "grok",
+            projectId: null,
+            messages: [{ role: "user", text: "coordinate", createdAt: 1 }],
+          },
+          {
+            id: target,
+            title: "Existing parent",
+            provider: "grok",
+            projectId: null,
+            status: running ? "running" : "idle",
+            messages: [
+              { id: "old_a", role: "assistant", text: "Old parent report.", createdAt: 1 },
+              {
+                id: "peer_1",
+                role: "user",
+                kind: "peer",
+                peerFromSessionId: orch,
+                correlationId: "corr_ask",
+                text: "Continue the existing work.",
+                createdAt: 2,
+              },
+              {
+                id: "new_a",
+                role: "assistant",
+                text: running ? "" : "Asked turn finished.",
+                createdAt: 3,
+                correlationId: "corr_ask",
+              },
+            ],
+          },
+          {
+            id: workerId,
+            title: "Marlow · slice",
+            workerName: "Marlow",
+            parentId: orch,
+            provider: "grok",
+            projectId: null,
+            status: workerRunning ? "running" : "idle",
+            agentRun: { status: workerRunning ? "running" : "completed", startedAt: 1, isolation: "worktree" },
+            messages: [
+              { id: "w1", role: "user", kind: "peer", text: "slice", createdAt: 1 },
+              { id: "w2", role: "assistant", text: workerRunning ? "" : "Worker slice done.", createdAt: 2 },
+            ],
+          },
+        ],
+      }),
+    );
+  };
+  writeState(true);
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  setWorkhorseDeskAsk(async () => ({ error: "unknown" }));
+  try {
+    const running = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { code?: number; message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(running.error, undefined, running.error?.message);
+    const waitBody = JSON.parse(running.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      status?: string;
+      report?: string;
+      partialReport?: string;
+    };
+    assert.equal(waitBody.next, "wait");
+    assert.equal(waitBody.status, "running");
+    assert.equal(waitBody.report, undefined);
+    assert.doesNotMatch(waitBody.partialReport ?? "", /Old parent report/);
+
+    writeState(false, true);
+    const done = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const doneBody = JSON.parse(done.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    assert.equal(doneBody.next, "done");
+    assert.equal(doneBody.report, "Asked turn finished.");
+    assert.doesNotMatch(doneBody.report ?? "", /Old parent report/);
+
+    const worker = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: workerId, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const workerBody = JSON.parse(worker.result?.content?.[0]?.text ?? "{}") as { next?: string; status?: string };
+    assert.equal(workerBody.next, "wait");
+    assert.equal(workerBody.status, "running");
+
+    const missing = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: "sess_missing", fromSessionId: orch } },
+    })) as { error?: { code?: number; message?: string } };
+    assert.equal(missing.error?.code, -32000);
+    assert.equal(missing.error?.message, "unknown");
+
+    const outsider = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: "sess_other" } },
+    })) as { error?: { code?: number; message?: string } };
+    assert.equal(outsider.error?.code, -32000);
+    assert.equal(outsider.error?.message, "unknown");
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the live Link iteration smoke is opt-in and covers goal, loop, mission, and status", () => {
   const smoke = readFileSync(new URL("./link-iteration-live-smoke.ts", import.meta.url), "utf8");
   assert.match(smoke, /WORKHORSE_LINK_ITERATION/);

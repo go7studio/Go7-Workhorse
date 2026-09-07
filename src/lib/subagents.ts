@@ -975,6 +975,147 @@ export function withFollowThrough<T extends Record<string, unknown>>(payload: T)
   return { ...payload, next: follow.next, how: follow.how };
 }
 
+const ASKED_WAIT_HOW =
+  "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.";
+const ASKED_DONE_HOW = "The report is in this payload. workhorse_ask_chat to talk to this chat.";
+const ASKED_FAIL_HOW =
+  "This chat did not finish the asked turn. Do not treat an older report as the new response.";
+
+type StatusSession = Pick<
+  Session,
+  | "id"
+  | "parentId"
+  | "status"
+  | "title"
+  | "workerName"
+  | "provider"
+  | "model"
+  | "effort"
+  | "agentRun"
+  | "routingMode"
+  | "routingDecision"
+  | "messages"
+>;
+
+function isPeerAsk(message: ChatMessage, fromSessionId?: string): boolean {
+  if (message.kind !== "peer" || message.role !== "user") return false;
+  const from = fromSessionId?.trim();
+  if (!from) return true;
+  return message.peerFromSessionId === from;
+}
+
+function latestPeerAsk(messages: ChatMessage[] | undefined, fromSessionId?: string): ChatMessage | undefined {
+  return [...(messages ?? [])].reverse().find((message) => isPeerAsk(message, fromSessionId));
+}
+
+function replyToPeer(messages: ChatMessage[] | undefined, peer: ChatMessage): ChatMessage | undefined {
+  const list = messages ?? [];
+  const start = list.findIndex((message) => message.id === peer.id);
+  const slice = start >= 0 ? list.slice(start + 1) : list.filter((message) => message.createdAt >= peer.createdAt);
+  return slice.find((message) => {
+    if (message.role !== "assistant" || message.kind === "tool" || message.kind === "thought") return false;
+    if (peer.correlationId && message.correlationId && message.correlationId !== peer.correlationId) return false;
+    return true;
+  });
+}
+
+export function askedChatAllows(session: Pick<Session, "messages">, fromSessionId?: string): boolean {
+  return Boolean(latestPeerAsk(session.messages, fromSessionId));
+}
+
+function askedRunFailed(status: string | undefined): boolean {
+  return (
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "timed-out" ||
+    status === "budget-exceeded" ||
+    status === "interrupted"
+  );
+}
+
+/** Status of the latest asked turn only. Older assistant text is never the new report. */
+export function askedChatStatusSnapshot(
+  session: StatusSession,
+  fromSessionId?: string,
+): Record<string, unknown> | null {
+  const peer = latestPeerAsk(session.messages, fromSessionId);
+  if (!peer) return null;
+  const reply = replyToPeer(session.messages, peer);
+  const replyText = reply?.text.trim() ?? "";
+  const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
+  const run = session.agentRun?.status;
+  const live = session.status === "running" || run === "running" || run === "queued";
+  const failed = askedRunFailed(run);
+  let next: WorkerFollowNext;
+  let how: string;
+  let status: string;
+  if (failed) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = run ?? "failed";
+  } else if (live) {
+    next = "wait";
+    how = ASKED_WAIT_HOW;
+    status = run === "queued" ? "queued" : "running";
+  } else if (!replyText) {
+    next = "failed";
+    how = ASKED_FAIL_HOW;
+    status = "failed";
+  } else {
+    next = "done";
+    how = ASKED_DONE_HOW;
+    status = "completed";
+  }
+  return {
+    id: session.id,
+    title: session.title,
+    ...(session.workerName ? { worker: session.workerName } : {}),
+    ...(session.parentId ? { parentId: session.parentId } : {}),
+    status,
+    next,
+    how,
+    provider: session.provider,
+    model: session.model,
+    effort: session.effort,
+    ...(next === "wait" && bounded ? { partialReport: bounded.report } : {}),
+    ...(next !== "wait" && bounded ? { report: bounded.report } : {}),
+  };
+}
+
+export type AgentStatusLookup = {
+  id: string;
+  fromSessionId?: string;
+  sessions: StatusSession[];
+  externalTask?: (Record<string, unknown> & { id: string; status: string }) | null;
+};
+
+export type AgentStatusResult =
+  | { ok: true; snapshot: Record<string, unknown> }
+  | { ok: false; error: "unknown" };
+
+/**
+ * Follow-through for delegated workers, asked chats, and external tasks.
+ * `fromSessionId` is the parent that spawned or asked; it never broadens access.
+ */
+export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult {
+  const id = input.id.trim();
+  if (!id) return { ok: false, error: "unknown" };
+  const from = input.fromSessionId?.trim() || "";
+  const session = input.sessions.find((row) => row.id === id);
+  if (session) {
+    const isWorker = Boolean(session.parentId);
+    const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
+    if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session) };
+    const asked = askedChatStatusSnapshot(session, from || undefined);
+    if (asked) return { ok: true, snapshot: asked };
+    return { ok: false, error: "unknown" };
+  }
+  if (input.externalTask && input.externalTask.id === id) {
+    return { ok: true, snapshot: { ...input.externalTask, status: input.externalTask.status } };
+  }
+  return { ok: false, error: "unknown" };
+}
+
 export function workerStatusSnapshot(
   worker: Pick<Session, "id" | "title" | "workerName" | "parentId" | "status" | "provider" | "model" | "effort" | "agentRun" | "routingMode" | "routingDecision" | "messages">,
 ): Record<string, unknown> {

@@ -43,8 +43,9 @@ covers the rest. Every app gets the same versioned Link contract:
 eight core collaboration tools for capabilities, list/read/ask chats, query leftover and availability,
 delegation, continuation, and worker status, plus typed local
 capability tools when a host is configured. The first call,
-`workhorse_capabilities`, names follow-through: new slice, named worker, later
-status. Status says wait, done, or failed. List chats is compact by default (id,
+`workhorse_capabilities`, names follow-through: new slice, named worker or live
+chat, later status. Status follows workers and asked chats: wait, done, or
+failed. The done report is that turn's reply. List chats is compact by default (id,
 title, worker, parentId, status, next, project) so a host output cap does not clip
 the roster; `parents` omits workers and `full` adds preview. Duplicate worker
 names need that row’s `id`. Link never waits on a long worker.

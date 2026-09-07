@@ -10,10 +10,11 @@ import type { Store } from "../lib/store";
 import type { ChatLink } from "../lib/tool-labels";
 import type { Project, Session, Settings } from "../lib/types";
 import { TimeStamp } from "./TimeStamp";
+import { HorseStatus } from "./HorseStatus";
 
 export type CrewDotKind = "working" | "failed" | "stopped" | "needs-you" | "idle";
 
-/** Working pulses. Failed rings red. Cancelled and the other stops are a hollow vendor ring. Needs-you pulses amber. Done is a still solid. */
+/** Shared run-state mapping; the sidebar expresses each state with the mascot. */
 export function crewDotKind(
   session: Pick<Session, "status" | "agentRun">,
   waveRunning = false,
@@ -223,16 +224,7 @@ export function ChatRow({
             setRenaming(true);
           }}
         >
-          <span
-            className={`dot ${session.provider}${crewDotClass(dotKind)}`}
-            style={
-              ink && dotKind !== "stopped"
-                ? { background: ink, color: ink }
-                : ink
-                  ? { color: ink }
-                  : undefined
-            }
-          />
+          <HorseStatus kind={dotKind} ink={ink || `var(--${session.provider})`} />
           <span>
             <span className="row-title" title="Double-click to rename">
               {/* A chat's title is the person's word for it and is kept. A wave

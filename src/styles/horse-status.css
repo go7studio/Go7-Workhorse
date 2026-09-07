@@ -1,0 +1,96 @@
+.horse-status {
+  --horse-image: url("../../assets/app-icons/go7-workhorse-transparent.png");
+  position: relative; display: inline-block; flex: 0 0 24px; width: 24px; height: 27px;
+  align-self: center; color: var(--text); isolation: isolate; perspective: 100px;
+}
+/* Sidebar chats: a little smaller than the 24px mascot, not the header mark. */
+.chat-row .horse-status {
+  zoom: 0.75;
+}
+.horse-cube {
+  position: absolute; left: calc(var(--col) * 8px); top: calc(var(--row) * 8px);
+  width: 8px; height: 8px; transition: transform 480ms var(--ease), opacity 240ms;
+}
+.horse-fragment {
+  display: block; width: 100%; height: 100%; background-image: var(--horse-image);
+  background-size: 24px 24px; background-position: calc(var(--col) * -8px) calc(var(--row) * -8px);
+  background-repeat: no-repeat; filter: brightness(0); clip-path: inset(.15px);
+}
+[data-theme="dark"] .horse-fragment { filter: brightness(0) invert(1); }
+[data-theme="workhorse"] .horse-fragment { filter: none; }
+.horse-solid {
+  position: absolute; inset: 0 auto auto 0; width: 24px; height: 24px;
+  background-position: 0 0; clip-path: none; opacity: 0;
+  transition: opacity 160ms ease-out; pointer-events: none;
+}
+.horse-status:is(.is-idle, .is-needs-you) .horse-solid { opacity: 1; }
+.horse-status:is(.is-idle, .is-needs-you) .horse-cube { opacity: 0; }
+.horse-status.is-working { animation: horse-stride 2600ms ease-in-out 160ms infinite both; }
+.horse-status.is-working .horse-cube {
+  animation: horse-cube-work 2600ms cubic-bezier(.45, 0, .25, 1) infinite both;
+  animation-delay: var(--wake-delay);
+}
+/* Each piece turns inside its own cell; shrink before moving, then reassemble. */
+@keyframes horse-cube-work {
+  0%, 100% { transform: translate(0, 0) rotate(0) scale(1); }
+  12%, 88% { transform: translate(0, 0) rotate(0) scale(.68); }
+  32% { transform: translate(.35px, -.35px) rotate(-18deg) scale(.68); }
+  54% { transform: translate(-.35px, .35px) rotate(18deg) scale(.68); }
+  72% { transform: translate(.2px, -.35px) rotate(-10deg) scale(.68); }
+}
+@keyframes horse-stride {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  25% { transform: translate(1px, -2px) rotate(-5deg); }
+  55% { transform: translate(-1px, 0) rotate(4deg); }
+  80% { transform: translate(0, -1px); }
+}
+.horse-status.is-idle { animation: horse-rest 6800ms ease-in-out infinite; animation-delay: var(--horse-phase, 0ms); }
+@keyframes horse-rest {
+  0%, 65%, 100% { transform: translateY(0); }
+  78% { transform: translateY(-.6px); }
+  88% { transform: translateY(.3px); }
+}
+/* Fall with weight, bounce into a loose pile, then gather back into the mascot. */
+.horse-status.is-failed .horse-cube {
+  background: transparent;
+  box-shadow: none;
+  z-index: var(--pile-layer);
+  transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78);
+  animation: horse-cube-fall 6200ms var(--fall-delay) linear infinite both;
+}
+@keyframes horse-cube-fall {
+  0%, 8%, 94%, 100% { transform: translate(0, 0) rotate(0) scale(1); }
+  12% { transform: translate(var(--push-x), -2px) rotate(-8deg) scale(.9); animation-timing-function: cubic-bezier(.55, .05, .85, .5); }
+  25% { transform: translate(var(--fall-x), calc(var(--fall-y) + .6px)) rotate(calc(var(--fall-angle) + 8deg)) scale(.78); animation-timing-function: ease-out; }
+  29% { transform: translate(var(--fall-x), calc(var(--fall-y) - 2px)) rotate(calc(var(--fall-angle) - 5deg)) scale(.78); animation-timing-function: ease-in; }
+  34%, 49%, 56%, 70% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78); }
+  51% { transform: translate(calc(var(--fall-x) + .2px), calc(var(--fall-y) - .35px)) rotate(calc(var(--fall-angle) + 2deg)) scale(.78); }
+  53% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle) - 1deg) scale(.78); }
+  74% { transform: translate(var(--fall-x), var(--fall-y)) rotate(var(--fall-angle)) scale(.78); animation-timing-function: cubic-bezier(.4, 0, .2, 1); }
+  90% { transform: translate(0, -.7px) rotate(0) scale(1); animation-timing-function: ease-in-out; }
+}
+/* An intact horse leans in, holds a questioning tilt, then gives two small nods. */
+.horse-status.is-needs-you { transform-origin: 50% 80%; animation: horse-listen 4600ms ease-in-out infinite; }
+@keyframes horse-listen {
+  0%, 8%, 90%, 100% { transform: translate(0, 0) rotate(0); }
+  22%, 46% { transform: translate(1px, -1px) rotate(13deg); }
+  53%, 65% { transform: translate(1px, .6px) rotate(5deg); }
+  59%, 72% { transform: translate(1px, -1px) rotate(13deg); }
+}
+/* A stopped mechanism: brief opposing vibrations, then suspended pieces. */
+.horse-status.is-stopped .horse-cube {
+  opacity: .72;
+  transform: translate(0, 0) rotate(var(--stop-angle)) scale(.68);
+  animation: horse-brake 3200ms ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+@keyframes horse-brake {
+  0%, 18%, 100% { transform: translate(0, 0) rotate(var(--stop-angle)) scale(.68); }
+  3%, 9%, 15% { transform: translate(-.5px, 0) rotate(calc(var(--stop-angle) - 4deg)) scale(.68); }
+  6%, 12% { transform: translate(.5px, -.25px) rotate(calc(var(--stop-angle) + 4deg)) scale(.68); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .horse-status, .horse-status .horse-cube, .horse-solid { animation: none !important; transition: none; }
+  .horse-status.is-working .horse-cube { transform: translate(var(--push-x), var(--push-y)); }
+  .horse-status.is-needs-you .horse-cube { transform: translateY(-1px); }
+}

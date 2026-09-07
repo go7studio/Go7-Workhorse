@@ -1,7 +1,8 @@
 import { isExternalAgentAddress } from "./agent-runtime";
 import { isGrokBotModel, isGrokBotName } from "./custom-http-identity";
 import { uid } from "./id";
-import { defaultModel, findChoice, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
+import { cursorUsageLane } from "./cursor-lane";
+import { defaultModel, findChoice, findChoiceOnProvider, modelsFor, normalizeModelId, parseEffort, withEffort } from "./models";
 import type { RoutingCandidate } from "./routing";
 import { routingModelFamily, spawnModelFamilyKey } from "./routing";
 import { findSession, type SessionSnapshot } from "./session-bridge";
@@ -1618,6 +1619,16 @@ function exactCustomBot(bots: CustomBotHint[] | undefined, query: string): Custo
   );
 }
 
+/**
+ * Cursor · API is the other leftover pool on the Cursor login. Fable, Opus,
+ * GPT, and Gemini keep their Claude/Codex ids there; that is not a vendor
+ * mismatch the way grok-4.6 on Codex is. A custom-bot id is a different login.
+ */
+function cursorHostsForeignModel(hint: { provider: ProviderId; model: string }): boolean {
+  if (hint.provider === "custom" || hint.provider === "grok") return false;
+  return cursorUsageLane(hint.model) === "other-models";
+}
+
 /** Resolve only an explicit model value; surrounding task copy must not influence identity. */
 function explicitModelHint(
   rawModel: string,
@@ -1628,10 +1639,18 @@ function explicitModelHint(
   if (provider) {
     const canonical = normalizeModelId(provider, raw);
     if (canonical !== raw) return { provider, model: canonical };
-  } else {
-    const legacyGrok = normalizeModelId("grok", raw);
-    if (legacyGrok !== raw) return { provider: "grok", model: legacyGrok };
+    const onVendor = findChoiceOnProvider(provider, raw);
+    if (onVendor) return { provider, model: onVendor.model };
+    const exact = findChoice(raw);
+    if (exact && provider === "cursor" && cursorHostsForeignModel(exact)) {
+      const listed = findChoiceOnProvider("cursor", exact.model);
+      return { provider: "cursor", model: listed?.model ?? exact.model };
+    }
+    if (exact) return { provider: exact.provider, model: exact.model };
+    return isBareVendorOrModel(raw) ? resolveModelHint(raw) : null;
   }
+  const legacyGrok = normalizeModelId("grok", raw);
+  if (legacyGrok !== raw) return { provider: "grok", model: legacyGrok };
   const exact = findChoice(raw);
   if (exact) return { provider: exact.provider, model: exact.model };
   return isBareVendorOrModel(raw) ? resolveModelHint(raw) : null;
@@ -1683,7 +1702,15 @@ export function resolveSpawnSpec(
     };
   }
   const modelHint = explicitModelHint(rawModel, explicit);
-  if (explicit && explicit !== "custom" && modelHint && modelHint.provider !== explicit) {
+  if (
+    explicit &&
+    explicit !== "custom" &&
+    modelHint &&
+    modelHint.provider !== explicit &&
+    !(explicit === "cursor" && cursorHostsForeignModel(modelHint)) &&
+    !findChoiceOnProvider(explicit, rawModel) &&
+    !findChoiceOnProvider(explicit, modelHint.model)
+  ) {
     throw new Error(`Model ${rawModel} belongs to ${modelHint.provider}, not ${explicit}.`);
   }
   const chatHint = chat && isBareVendorOrModel(chat) ? resolveModelHint(chat) : null;

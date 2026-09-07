@@ -25,6 +25,7 @@ import { useStoreSelector } from "../lib/store";
 import { sameSessionPaneDesk, selectSessionPaneDesk } from "../lib/store-select";
 import { Composer } from "./Composer";
 import { GoalBar } from "./GoalBar";
+import { CrewTray } from "./CrewTray";
 import { WatchBanners } from "./WatchNotices";
 import { ChatSpend } from "./ChatSpend";
 import { ContextMeter } from "./ContextMeter";
@@ -575,6 +576,7 @@ export function SessionPane() {
         </div>
       ) : null}
       <div className="session-notices">
+        <CrewTray key={session.id} />
         <GoalBar />
         <WatchBanners onSwitchModel={openSetup} setupOpen={setupOpen} />
       </div>

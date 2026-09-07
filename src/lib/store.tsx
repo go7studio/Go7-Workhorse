@@ -24,6 +24,8 @@ import {
   deleteWorkerChats,
   dropQueuedPrompt,
   enqueuePrompt,
+  canFlushQueuedHead,
+  shouldEnqueueInsteadOfLiveSend,
   forkChat,
   lastUserMessage,
   applyDeleteDeskChat,
@@ -488,7 +490,7 @@ export type Store = AppState & {
   forkFrom: (messageId: string, sessionId?: string) => void;
   send: (
     text: string,
-    options?: { replaceUserId?: string; images?: import("./types").ChatImage[]; steer?: boolean; permit?: boolean },
+    options?: { replaceUserId?: string; images?: import("./types").ChatImage[]; steer?: boolean; permit?: boolean; sessionId?: string },
   ) => boolean | void;
   dropQueued: (id: string) => void;
   steerQueued: (id: string) => void;
@@ -497,7 +499,7 @@ export type Store = AppState & {
   requestEditMessage: (messageId: string) => void;
   requestEditLastPrompt: (sessionId?: string) => void;
   clearEditMessage: () => void;
-  cancelRun: () => void;
+  cancelRun: (sessionId?: string) => void;
   setMode: (mode: PermissionMode) => void;
   setDeskAccess: (patch: Partial<DeskAccess>) => void;
   setSandbox: (sandbox: SandboxProfile) => void;
@@ -1175,6 +1177,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const workerNameReservations = useRef<WorkerNameReservation[]>([]);
   const deskSkillsRef = useRef<DeskSkill[]>([]);
   const grokAssistantId = useRef<Record<string, string>>({});
+  /** Live vendor turn started, React has not committed `running` yet. */
+  const liveTurnPending = useRef(new Set<string>());
   const grokChunkQueue = useRef<Record<string, string>>({});
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
@@ -2407,7 +2411,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       goalHaltedSessions.current.delete(liveSession.id);
     }
     const skipQueue = haltPlan === "defer-until-cancelled-done";
-    if (liveSession?.status === "running" && !skipQueue && !options?.afterGoalHalt && !options?.steer && !options?.replaceUserId) {
+    if (
+      liveSession &&
+      shouldEnqueueInsteadOfLiveSend({
+        status: liveSession.status,
+        liveTurnPending: liveTurnPending.current.has(liveSession.id),
+        skipQueue,
+        afterGoalHalt: options?.afterGoalHalt,
+        steer: options?.steer,
+        replaceUserId: options?.replaceUserId,
+      })
+    ) {
       setState((current) => {
         const sessions = enqueuePrompt(current.sessions, liveSession.id, {
           text: originalText,
@@ -2911,6 +2925,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         redirectedAssistant.current[session.id] = previousAssistantId;
       }
       grokAssistantId.current[session.id] = assistantId;
+      liveTurnPending.current.add(session.id);
       const idleHandle = turnIdleTimer.current[session.id];
       if (idleHandle) window.clearTimeout(idleHandle);
       delete turnIdleTimer.current[session.id];
@@ -3357,7 +3372,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ),
         }));
       });
-      return;
+      return true;
     }
     const where = project && project.folders.length > 0
       ? project.folders.map((folder) => folder.path).join("\n")
@@ -3475,17 +3490,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (watchHold) return;
     for (const session of state.sessions) {
-      if (session.status !== "idle" || !session.queue?.length || flushing.current.has(session.id)) continue;
-      if (session.goal?.status === "paused") continue;
+      if (session.status === "running" || session.status === "needs-input") {
+        flushing.current.delete(session.id);
+        liveTurnPending.current.delete(session.id);
+        continue;
+      }
+      if (session.status !== "idle" || session.goal?.status === "paused") continue;
+      if (!session.queue?.length) {
+        flushing.current.delete(session.id);
+        continue;
+      }
+      if (flushing.current.has(session.id) || !canFlushQueuedHead(session)) continue;
       const item = session.queue[0];
-      if (item.notBefore && Date.now() < item.notBefore) continue;
+      if (!item) continue;
       flushing.current.add(session.id);
+      // Hold the lock until send starts a live turn (or bails). Releasing it
+      // in this microtask before React commits `running` flushed every queued
+      // user turn when a worker-finish render saw the parent still idle.
       setState((current) => {
         const shifted = shiftQueuedPrompt(current.sessions, session.id);
         return shifted ? { ...current, sessions: shifted.sessions } : current;
       });
       queueMicrotask(() => {
-        flushing.current.delete(session.id);
         if (item.scheduledRunId) {
           setState((current) => ({
             ...current,
@@ -3501,13 +3527,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
           }));
         }
-        sendRef.current(item.text, {
-          images: item.images,
-          sessionId: session.id,
-          joinAttempt: item.joinAttempt,
-          hideUser: item.hideUser === true,
-          scheduledRunId: item.scheduledRunId,
-        });
+        try {
+          const started = sendRef.current(item.text, {
+            images: item.images,
+            sessionId: session.id,
+            joinAttempt: item.joinAttempt,
+            hideUser: item.hideUser === true,
+            scheduledRunId: item.scheduledRunId,
+          });
+          if (started !== true) flushing.current.delete(session.id);
+        } catch {
+          flushing.current.delete(session.id);
+        }
       });
     }
     const wait = queueWakeDelayMs(state.sessions);
@@ -8495,16 +8526,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [state.watchPermits, state.watchDayMarks, watchStatuses]);
 
-  const cancelRun = useCallback(() => {
+  const cancelRun = useCallback((sessionId?: string) => {
     setState((current) => {
-      const id = current.activeSessionId;
+      const id = sessionId ?? current.activeSessionId;
       const targets = id ? new Set([id, ...descendantSessionIds(current.sessions, id)]) : new Set<string>();
       const now = Date.now();
+      const active = (session: Session) => session.status === "running" || session.status === "needs-input" || session.agentRun?.status === "running";
       for (const child of current.sessions) {
-        if (targets.has(child.id) && child.status === "running") cancelVendorSession(child);
+        if (targets.has(child.id) && active(child)) cancelVendorSession(child);
       }
       let sessions = current.sessions.map((session) => {
-        if (!targets.has(session.id) || session.status !== "running") return session;
+        if (!targets.has(session.id) || !active(session)) return session;
         return {
           ...session,
           status: "idle" as const,
@@ -8518,7 +8550,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       for (const session of current.sessions) {
         if (!targets.has(session.id) || !session.parentId) continue;
-        if (session.status !== "running" && session.agentRun?.status !== "running") continue;
+        if (!active(session)) continue;
         sessions = applyChildIdleSync(sessions, session.id, "cancelled", { now });
       }
       return { ...current, sessions };

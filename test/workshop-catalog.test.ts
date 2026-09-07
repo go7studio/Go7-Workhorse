@@ -346,8 +346,8 @@ test("catalog service entryForInstall blocks stale and yanked", async () => {
 
 test("UI never uses catalog prose as GitHub hero CTA", () => {
   const block = fs.readFileSync(path.join(ROOT, "src/ui/WorkshopBlock.tsx"), "utf8");
-  assert.match(block, /Active/);
-  assert.match(block, /Pending/);
+  assert.match(block, /On this desk/);
+  assert.match(block, /Available/);
   assert.match(block, /Local \(Advanced\)/);
   assert.match(block, /Catalog unreachable/);
   assert.match(block, /No packs in catalog/);
@@ -355,16 +355,16 @@ test("UI never uses catalog prose as GitHub hero CTA", () => {
   assert.match(block, /advancedOpen/);
   assert.match(block, /Add local/);
   assert.match(block, /Add from URL/);
-  // Pending stays above Advanced; peer Add is demoted into Advanced — not a catalog hero.
-  const pendingIdx = block.indexOf('id="workshop-pending"');
+  // Available stays above Advanced; peer Add is demoted into Advanced — not a catalog hero.
+  const availableIdx = block.indexOf('id="workshop-available"');
   const advancedIdx = block.indexOf("Local (Advanced)");
-  assert.ok(pendingIdx > 0 && advancedIdx > pendingIdx);
-  assert.match(block, />\s*Pending\s*</);
+  assert.ok(availableIdx > 0 && advancedIdx > availableIdx);
+  assert.match(block, />\s*Available\s*</);
   const advancedSlice = block.slice(advancedIdx);
   assert.match(advancedSlice, /workshop-peer-add/);
   // Peer URL field is opt-in (peerUrlOpen), not the empty-catalog hero CTA.
   assert.match(advancedSlice, /peerUrlOpen/);
-  assert.doesNotMatch(block.slice(pendingIdx, advancedIdx), /workshopInstallRepo/);
+  assert.doesNotMatch(block.slice(availableIdx, advancedIdx), /workshopInstallRepo/);
 });
 
 test("bad charset / overlong summary rows are dropped, not sanitized-and-shown", () => {

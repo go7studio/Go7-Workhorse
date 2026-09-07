@@ -233,6 +233,110 @@ export function backfillCursorUsage(
   return extras;
 }
 
+export type CursorLedgerJoinRow = {
+  eventId: string;
+  at: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd?: number;
+};
+
+export type CursorLedgerSession = {
+  id: string;
+  vendorSessionId?: string;
+  model: string;
+  projectId?: string | null;
+};
+
+export function cursorLedgerUsageId(at: number, eventId: string): string {
+  const safe = eventId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `use_cursor_ledger_${Math.round(at)}_${safe}`;
+}
+
+function cursorLedgerFingerprint(
+  event: Pick<UsageEvent, "sessionId" | "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
+): string {
+  return `${event.sessionId ?? ""}:${event.inputTokens}:${event.outputTokens}:${event.cacheReadTokens}:${event.cacheWriteTokens}`;
+}
+
+/** Keep a dashboard row only when its id is this desk's Cursor ACP session id. */
+export function joinCursorLedgerEvents(input: {
+  events: CursorLedgerJoinRow[];
+  sessions: CursorLedgerSession[];
+}): UsageEvent[] {
+  const byVendor = new Map<string, CursorLedgerSession>();
+  for (const session of input.sessions) {
+    const vendorId = session.vendorSessionId?.trim();
+    if (!vendorId) continue;
+    byVendor.set(vendorId, session);
+  }
+  const booked: UsageEvent[] = [];
+  const seen = new Set<string>();
+  for (const event of input.events) {
+    const session = byVendor.get(event.eventId);
+    if (!session) continue;
+    if (!usageHasBilledTokens(event)) continue;
+    const id = cursorLedgerUsageId(event.at, event.eventId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    booked.push({
+      id,
+      at: event.at > 0 ? event.at : Date.now(),
+      provider: "cursor",
+      model: session.model,
+      projectId: session.projectId ?? undefined,
+      sessionId: session.id,
+      lane: cursorUsageLane(session.model),
+      inputTokens: event.inputTokens,
+      outputTokens: event.outputTokens,
+      cacheReadTokens: event.cacheReadTokens,
+      cacheWriteTokens: event.cacheWriteTokens,
+      costUsd: event.costUsd,
+      source: "request",
+    });
+  }
+  return booked;
+}
+
+/**
+ * Append joined ledger rows. Drop already-stored ids, ACP bills with the same
+ * token fingerprint, and one Cursor estimate per new ledger row (oldest first).
+ */
+export function applyCursorLedger(existing: UsageEvent[], incoming: UsageEvent[]): UsageEvent[] {
+  const ids = new Set(existing.map((event) => event.id));
+  const fingerprints = new Set(
+    existing
+      .filter((event) => event.provider === "cursor" && event.source !== "estimate" && event.source !== "gauge")
+      .map(cursorLedgerFingerprint),
+  );
+  const accepted: UsageEvent[] = [];
+  for (const event of incoming) {
+    if (ids.has(event.id)) continue;
+    const fingerprint = cursorLedgerFingerprint(event);
+    if (fingerprints.has(fingerprint)) continue;
+    accepted.push(event);
+    ids.add(event.id);
+    fingerprints.add(fingerprint);
+  }
+  if (accepted.length === 0) return existing;
+  const dropCount = new Map<string, number>();
+  for (const event of accepted) {
+    if (!event.sessionId) continue;
+    dropCount.set(event.sessionId, (dropCount.get(event.sessionId) ?? 0) + 1);
+  }
+  const dropIds = new Set<string>();
+  for (const [sessionId, count] of dropCount) {
+    const estimates = existing
+      .filter((event) => event.provider === "cursor" && event.source === "estimate" && event.sessionId === sessionId)
+      .sort((left, right) => left.at - right.at);
+    for (const event of estimates.slice(0, count)) dropIds.add(event.id);
+  }
+  const kept = existing.filter((event) => !dropIds.has(event.id));
+  return [...accepted.sort((left, right) => right.at - left.at), ...kept];
+}
+
 function cursorLaneFromRecord(record: Record<string, unknown>, model: string): CursorUsageLane {
   const lane = record.lane;
   if (

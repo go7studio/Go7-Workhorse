@@ -236,9 +236,10 @@ transcript rather than as a path.
 ## Spend
 
 - Usage recorded per vendor and per chat, from each vendor's own count: the
-  ACP turn total, or the HTTP response's usage block. Cursor is estimated at
-  four characters a token only when ACP sent no count — Composer and API stay
-  two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
+  ACP turn total, or the HTTP response's usage block. Cursor is billed from
+  Cursor's dashboard event log, joined to this desk's ACP session id — not the
+  whole Cursor account. A four-characters-per-token estimate is used only until
+  that join covers the turn. Composer and API stay two separate pools. Grok, Claude, and Codex stay unknown if they omit a bill.
   Leftover rings, billed tokens, and retained context stay distinct meters.
   This chat's billed total is on the chat meter, next to retained context. It
   is not a stop.

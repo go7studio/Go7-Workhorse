@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld("workhorse", {
     ipcRenderer.invoke("cursor:answer-permission", { requestId, answer }),
   cursorCancel: (sessionId: string) => ipcRenderer.invoke("cursor:cancel", sessionId),
   cursorPlanUsage: () => ipcRenderer.invoke("cursor:plan-usage") as Promise<import("../src/lib/types").GrokPlanUsage | null>,
+  cursorLedgerEvents: (input?: { startDate?: number; endDate?: number }) =>
+    ipcRenderer.invoke("cursor:ledger-events", input) as Promise<import("../src/lib/usage").CursorLedgerJoinRow[] | null>,
   onCursorEvent: (handler: (event: GrokIpcEvent) => void) => {
     const listener = (_event: IpcRendererEvent, payload: GrokIpcEvent) => handler(payload);
     ipcRenderer.on("cursor:event", listener);

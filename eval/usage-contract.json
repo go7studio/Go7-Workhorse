@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "unknownUsagePolicy": "A completed, failed, canceled, or restarted turn without an authoritative provider usage event creates no token row for Grok, Claude, or Codex. Workhorse never estimates or invents token counts for those vendors. Cursor is estimated at four characters a token only when ACP omits a bill; Composer and API pools stay separate. Leftover rings stay official and unknown when official JSON is missing.",
+  "unknownUsagePolicy": "A completed, failed, canceled, or restarted turn without an authoritative provider usage event creates no token row for Grok, Claude, or Codex. Workhorse never estimates or invents token counts for those vendors. Cursor is billed from the official dashboard event log joined to this desk's ACP session id; a four-characters-per-token estimate is used only when that join has not yet covered the turn. Composer and API pools stay separate. Leftover rings stay official and unknown when official JSON is missing.",
   "presentationInvariants": [
     "A connected model with no authoritative usage event says No token data instead of displaying measured zeroes.",
     "Provider-supplied weekly and monthly periods stay accurate in Usage, Watch, and bot-roster copy.",
@@ -45,8 +45,8 @@
     {
       "id": "cursor-acp",
       "provider": "cursor",
-      "tokenSource": "ACP request or authoritative turn usage when supplied; otherwise a Cursor-only four-characters-per-token estimate",
-      "tokenBoundary": "electron/grok-agent.ts",
+      "tokenSource": "Official Cursor dashboard event log joined to this desk's ACP session id; ACP usage when supplied; otherwise a Cursor-only four-characters-per-token estimate until the join covers the turn",
+      "tokenBoundary": "electron/cursor-plan.ts",
       "leftoverBoundary": "electron/cursor-plan.ts",
       "pools": ["cursor:cursor-models", "cursor:other-models"],
       "direct": true,
@@ -95,13 +95,15 @@
     "src/lib/models.ts",
     "src/lib/grok-events.ts",
     "electron/workhorse-mcp.ts",
+    "electron/cursor-plan.ts",
     "src/ui/UsagePane.tsx",
     "src/ui/WatchPane.tsx",
     "test/usage-metering.test.ts",
+    "test/cursor-ledger.test.ts",
     "test/subagent-usage.test.ts",
     "test/custom-multi-model.test.ts",
     "test/custom-http.test.ts",
     "test/vendor-meter.test.ts"
   ],
-  "verificationCommands": ["eval:validate", "eval:smoke", "verify"]
+  "verificationCommands": ["eval:validate", "eval:smoke", "eval:cursor-ledger", "verify"]
 }

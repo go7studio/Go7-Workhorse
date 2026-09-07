@@ -197,6 +197,7 @@ type WorkhorseBridge = {
   cursorCancel?: (sessionId: string) => Promise<void>;
   onCursorEvent?: (handler: (event: GrokBridgeEvent) => void) => () => void;
   cursorPlanUsage?: () => Promise<import("./lib/types").GrokPlanUsage | null | undefined>;
+  cursorLedgerEvents?: (input?: { startDate?: number; endDate?: number }) => Promise<import("./lib/usage").CursorLedgerJoinRow[] | null | undefined>;
   detectCustomLogin: () => Promise<{
     connected: boolean;
     source: "openclaw" | "env" | "none";

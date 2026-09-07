@@ -890,7 +890,8 @@ test("disabled LLMs stay out of the usage view until they are turned back on", (
 
 test("Spend docs keep leftover, billed tokens, and retained context distinct", () => {
   const features = readFileSync(path.join(ROOT, "docs", "FEATURES.md"), "utf8");
-  assert.match(features, /four characters a token only when ACP sent no count/);
+  assert.match(features, /joined to this desk's ACP session id/);
+  assert.match(features, /four-characters-per-token estimate is used only until/);
   assert.match(features, /Composer and API stay[\s\S]*two separate pools/);
   assert.match(features, /Grok, Claude, and Codex stay unknown/);
   assert.match(features, /Leftover rings, billed tokens, and retained context stay distinct/);

@@ -26,7 +26,7 @@ import { listVendorModels, rememberVendorModels, type CustomBotCatalog } from ".
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
-import { fetchCursorPlanUsage } from "./cursor-plan";
+import { fetchCursorPlanUsage, fetchCursorLedgerEvents } from "./cursor-plan";
 import { fetchCustomPlanUsage, grokBotLeftoverPath } from "./custom-plan";
 import { fetchCustomModels } from "./custom-models";
 import type { PermissionAnswer } from "../src/lib/permissions";
@@ -2090,6 +2090,19 @@ app.whenReady().then(async () => {
   ipcMain.handle("cursor:plan-usage", async () => {
     try {
       return (await fetchCursorPlanUsage()) ?? null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.removeHandler("cursor:ledger-events");
+  ipcMain.handle("cursor:ledger-events", async (_event, raw?: { startDate?: number; endDate?: number }) => {
+    try {
+      return (
+        (await fetchCursorLedgerEvents({
+          startDate: typeof raw?.startDate === "number" ? raw.startDate : undefined,
+          endDate: typeof raw?.endDate === "number" ? raw.endDate : undefined,
+        })) ?? null
+      );
     } catch {
       return null;
     }

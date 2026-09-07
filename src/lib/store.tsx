@@ -310,11 +310,14 @@ import { estimateMessageTokens } from "./context-stats";
 import { buildSessionPreface } from "./context-preface";
 import {
   applyCompactOutcome,
+  applyCursorLedger,
   applyUsageContext,
   backfillCursorUsage,
   estimateFromSessionTurn,
+  joinCursorLedgerEvents,
   normalizeUsage,
   occupancyFromUsage,
+  rangeStart,
   rehomeCustomUsage,
   settleTurnUsage,
   usageHasBilledTokens,
@@ -1166,6 +1169,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const grokThoughtQueue = useRef<Record<string, string>>({});
   const grokUsagePending = useRef<Record<string, UsageDraft[]>>({});
   const grokContextSeen = useRef<Record<string, number>>({});
+  const ingestCursorLedgerRef = useRef<() => void>(() => undefined);
   const learningTurns = useRef<Record<string, LearningTurnLink>>({});
   const agentCatalogRef = useRef<import("./external-catalog").ExternalAgent[]>([]);
   const agentRuntimesRef = useRef<import("./external-catalog").AgentRuntimeStatus[]>([]);
@@ -3200,6 +3204,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
+          ingestCursorLedgerRef.current();
           return;
         }
         if (live === "codex") {
@@ -7325,6 +7330,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               markVendorPlanKnown("cursor");
             })
             .catch(() => markVendorPlanKnown("cursor"));
+          ingestCursorLedgerRef.current();
         }
         setState((current) => {
           const queued = grokChunkQueue.current[event.sessionId] ?? "";
@@ -8030,6 +8036,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
   }, [markVendorPlanKnown]);
 
+  const ingestCursorLedger = useCallback(() => {
+    if (!window.workhorse?.cursorLedgerEvents) return;
+    void window.workhorse
+      .cursorLedgerEvents({ startDate: rangeStart("today"), endDate: Date.now() })
+      .then((events) => {
+        if (!events?.length) return;
+        setState((current) => {
+          const joined = joinCursorLedgerEvents({
+            events,
+            sessions: current.sessions
+              .filter((session) => session.provider === "cursor")
+              .map((session) => ({
+                id: session.id,
+                vendorSessionId: session.vendorSessionId,
+                model: session.model,
+                projectId: session.projectId,
+              })),
+          });
+          if (!joined.length) return current;
+          const usage = applyCursorLedger(current.usage, joined);
+          if (usage === current.usage) return current;
+          return { ...current, usage };
+        });
+      })
+      .catch(() => undefined);
+  }, []);
+  ingestCursorLedgerRef.current = ingestCursorLedger;
+
   const refreshCursorPlan = useCallback(() => {
     // No bridge method at all is not a failed reading, it is no meter.
     if (!window.workhorse?.cursorPlanUsage) {
@@ -8046,7 +8080,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setCursorPlan((previous) => planAfterRefresh(previous, undefined));
         markVendorPlanKnown("cursor");
       });
-  }, [markVendorPlanKnown]);
+    ingestCursorLedger();
+  }, [ingestCursorLedger, markVendorPlanKnown]);
 
   const refreshClaudePlan = useCallback(() => {
     if (!window.workhorse?.claudePlanUsage) return;

@@ -19,8 +19,11 @@ import {
   extractUpdateText,
   isAcpRpcReply,
   isAcpSessionUpdateMethod,
+  isVendorRefusalEnvelope,
   isVendorRefusalResult,
+  parseVendorErrorEnvelope,
   partitionAcpBatch,
+  redactVendorRefusal,
   parseGrokUsage,
   parseRewindPoints,
   pickPermissionOptionId,
@@ -8066,6 +8069,78 @@ test("isVendorRefusalResult fires only on stopReason 'error' / 'refusal' or an e
   assert.equal(isVendorRefusalResult({ error: {} }), false);
 });
 
+test("parseVendorErrorEnvelope recognises the real Codex / ACP diagnostic shape, not just a stopReason", () => {
+  // The Codex / ACP adapter streams a JSON envelope to stderr when it
+  // refuses a request, and then returns a normal end_turn. The reply the
+  // chat saw was the envelope, not the stop reason. The exact shape from
+  // today\'s desk capture when a worker was launched on a model Codex does
+  // not serve (`gpt-6-astra`), reproduced verbatim:
+  const realEnvelope =
+    'Warning: Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n' +
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6-astra\' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again."}}';
+  const parsed = parseVendorErrorEnvelope(realEnvelope);
+  assert.ok(parsed, "the real envelope must parse");
+  assert.equal(parsed?.status, 400);
+  assert.equal(parsed?.error.type, "invalid_request_error");
+  assert.match(parsed?.error.message ?? "", /newer version of Codex/);
+  assert.equal(isVendorRefusalEnvelope(realEnvelope), true);
+  // And the predicate with the visible reply alone, no error field, no
+  // stop reason — the shape the desk actually saw on the run that was
+  // wrongly recorded completed.
+  assert.equal(isVendorRefusalResult({ stopReason: "end_turn" }, realEnvelope), true);
+  // A reply that is just prose with the word "error" in it does NOT match.
+  assert.equal(isVendorRefusalEnvelope("There was an error in my last plan."), false);
+  assert.equal(
+    isVendorRefusalResult({ stopReason: "end_turn" }, "There was an error in my last plan."),
+    false,
+  );
+  // Garbage input does not panic.
+  assert.equal(isVendorRefusalEnvelope(""), false);
+  assert.equal(parseVendorErrorEnvelope("not json"), undefined);
+  assert.equal(isVendorRefusalEnvelope("{\"type\":\"something\"}"), false);
+});
+
+test("isVendorRefusalResult lets a recognised stop reason beat a stray top-level error field", () => {
+  // FINDING 2: a generic `error` field used to override `end_turn` and
+  // `cancelled`, so a cancelled turn or a permission outcome was recorded
+  // as a failure. The vendor\'s own words about why it stopped must win.
+  assert.equal(isVendorRefusalResult({ stopReason: "end_turn", error: "stray" }), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "tool_use", error: "stray" }), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "cancelled", error: "stray" }), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "stop", error: "stray" }), false);
+  assert.equal(isVendorRefusalResult({ stopReason: "max_tokens", error: "stray" }), false);
+  // A bare `error` field with no recognised stop reason is still a refusal.
+  assert.equal(isVendorRefusalResult({ error: "stray" }), true);
+  // `error` and `refusal` stop reasons still fire when present.
+  assert.equal(isVendorRefusalResult({ stopReason: "error" }), true);
+  assert.equal(isVendorRefusalResult({ stopReason: "refusal" }), true);
+});
+
+test("redactVendorRefusal produces a short, bounded, structured reason from the real envelope", () => {
+  // FINDING 3: the whole reply used to be thrown and stored in worker error
+  // metadata with no bound and no redaction. The redacted reason keeps the
+  // status and the vendor\'s own message but is bounded; the raw reply
+  // stays in the transcript where the stream handler already placed it.
+  const realEnvelope =
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6-astra\' model requires a newer version of Codex."}}';
+  const redacted = redactVendorRefusal(realEnvelope, "gpt-6-astra");
+  assert.match(redacted, /^vendor refusal gpt-6-astra: 400 invalid_request_error —/);
+  assert.match(redacted, /newer version of Codex/);
+  assert.ok(redacted.length < 200, `redacted must be bounded; got ${redacted.length}`);
+  // No raw envelope JSON escapes into the redacted reason.
+  assert.doesNotMatch(redacted, /"type":"error"/);
+  // The model id is optional — a refused run without a model still redacts.
+  const withoutModel = redactVendorRefusal(realEnvelope);
+  assert.match(withoutModel, /^vendor refusal 400 invalid_request_error —/);
+  // An empty reply still produces a structured reason (no `undefined`).
+  const empty = redactVendorRefusal("", "gpt-6-astra");
+  assert.match(empty, /^vendor refusal gpt-6-astra — empty reply$/);
+  // A non-envelope reply is bounded too.
+  const prose = "x".repeat(5_000);
+  const bounded = redactVendorRefusal(prose, "grok");
+  assert.ok(bounded.length < 280, `prose redaction must be bounded; got ${bounded.length}`);
+});
+
 test("a vendor refusal on the first turn fails the run with the vendor\'s own words, never records it completed", async () => {
   /*
    * The bug, repeated twice today: a Codex run was given a model id the
@@ -8103,7 +8178,15 @@ test("a vendor refusal on the first turn fails the run with the vendor\'s own wo
   }
   host.disposeAll();
   assert.ok(caught, "vendor refusal must reject the host promise");
-  assert.equal(caught?.message, refusalText, "the error carries the vendor\'s own words");
+  // The raw reply is preserved in the transcript where the stream handler
+  // already placed it; what the host throws (and the store persists as
+  // error metadata) is the short, redacted, structured reason.
+  assert.match(caught?.message ?? "", /vendor refusal gpt-6-astra/);
+  assert.match(caught?.message ?? "", /newer version of Codex/);
+  assert.ok(
+    (caught?.message ?? "").length < 200,
+    `error metadata must be bounded; got ${caught?.message?.length ?? 0}`,
+  );
   // The host must not have reported a clean `done` after a refusal: any `done`
   // would mean the downstream store has nothing to drive the run to `failed`.
   assert.ok(
@@ -8115,7 +8198,62 @@ test("a vendor refusal on the first turn fails the run with the vendor\'s own wo
   assert.ok(methods.includes("session/prompt"));
 });
 
-test("a stopReason 'error' with no body still fails the run, not silently completes", async () => {
+test("a vendor refusal whose only signal is a stderr envelope on a normal end_turn fails the run", async () => {
+  /*
+   * The bug repeated on the desk: codex-acp 1.2.0 streams its diagnostic to
+   * stderr and then returns a normal `end_turn`. The diagnostic reaches the
+   * chat as the assistant\'s only visible output, and the run was recorded
+   * `completed`. The host must treat the envelope in the visible reply as a
+   * refusal and surface it as a failure with a short, redacted, structured
+   * reason — not the raw envelope — stored as the error metadata.
+   */
+  const realEnvelope =
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6-astra\' model requires a newer version of Codex."}}';
+  const methods: string[] = [];
+  const host = new GrokSessionHost(() =>
+    fakeAcp({
+      methods,
+      nextId: "fresh-1",
+      promptResult: { stopReason: "end_turn", content: [{ type: "text", text: realEnvelope }] },
+    }),
+  );
+  const events: string[] = [];
+  let caught: Error | undefined;
+  try {
+    await host.prompt(
+      {
+        sessionId: "work-1",
+        text: "hello",
+        model: "gpt-6-astra",
+        effort: "medium",
+        mode: "ask",
+        cwd: ROOT,
+      },
+      (event) => events.push(event.type),
+    );
+  } catch (error) {
+    caught = error as Error;
+  }
+  host.disposeAll();
+  assert.ok(caught, "an envelope-only refusal must reject the host promise");
+  // The raw envelope must NOT be the throw message — it would be persisted
+  // into worker error metadata and would leak the vendor\'s diagnostic
+  // unredacted.
+  assert.doesNotMatch(caught?.message ?? "", /"type":"error"/);
+  assert.match(caught?.message ?? "", /vendor refusal gpt-6-astra: 400 invalid_request_error/);
+  assert.match(caught?.message ?? "", /newer version of Codex/);
+  // The host must not have reported a clean `done` after a refusal: any
+  // `done` would mean the downstream store has nothing to drive the run to
+  // `failed`.
+  assert.ok(
+    !events.includes("done") || events.indexOf("error") >= 0,
+    `refusal must emit error before done; got ${events.join(",")}`,
+  );
+  assert.ok(events.includes("error"), `error event must be emitted; got ${events.join(",")}`);
+  assert.ok(methods.includes("session/prompt"));
+});
+
+test("a stopReason \'error\' with no body still fails the run, not silently completes", async () => {
   // Some vendors return stopReason "error" with no readable body at all.
   // The desk must still mark the run failed; recording it completed would
   // leave the lineup one short and the chat showing a phantom success.
@@ -8145,7 +8283,7 @@ test("a stopReason 'error' with no body still fails the run, not silently comple
   }
   host.disposeAll();
   assert.ok(caught, "bare error stopReason must reject the host promise");
-  assert.match(caught?.message ?? "", /refused|error/i);
+  assert.match(caught?.message ?? "", /refus/i, `expected a refusal signal in the error message; got "${caught?.message}"`);
 });
 
 test("a legitimate answer that mentions the word 'error' still completes normally", async () => {

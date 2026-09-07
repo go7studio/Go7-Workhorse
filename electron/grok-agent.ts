@@ -100,16 +100,175 @@ export function modelNotOffered(agentLabel: string | undefined, model: string): 
  * Deliberately not based on text content: a chat may legitimately answer with
  * prose that mentions the word "error" without the run itself failing.
  */
-export function isVendorRefusalResult(result: unknown): boolean {
+/**
+ * stopReason values that mean the vendor finished its turn the way the desk
+ * expects — not a refusal. They win over a top-level `error` field that some
+ * adapters set for incidental reasons (a cancelled turn, a permission outcome
+ * that returned a synthetic envelope, an empty assistant turn). The vendor's
+ * own words about why it stopped are what matter; a stray error field does
+ * not override them.
+ */
+const VENDOR_RECOGNISED_STOP_REASONS = new Set([
+  "end_turn",
+  "tool_use",
+  "tool_result",
+  "cancelled",
+  "canceled",
+  "stop",
+  "stop_sequence",
+  "max_tokens",
+  "max_tokens_reached",
+  "complete",
+  "completed",
+]);
+
+export type VendorErrorEnvelope = {
+  type: string;
+  status?: number;
+  error: { type?: string; message: string };
+};
+
+/**
+ * Walk a string to find a vendor error envelope — the JSON object that
+ * Codex / ACP streams to stderr as a diagnostic when the request was rejected
+ * (model unknown, quota exceeded, schema invalid). The shape is
+ * `{"type":"error","status":400,"error":{"type":"invalid_request_error",
+ * "message":"..."}}`, but the surrounding text is whatever the adapter wrote
+ * around it, so a parser must walk braces rather than trust a regex.
+ */
+export function parseVendorErrorEnvelope(text: string): VendorErrorEnvelope | undefined {
+  if (typeof text !== "string" || !text) return undefined;
+  const needle = '"type":"error"';
+  let from = 0;
+  while (true) {
+    const idx = text.indexOf(needle, from);
+    if (idx < 0) return undefined;
+    const open = text.lastIndexOf("{", idx);
+    if (open < 0) return undefined;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          close = i + 1;
+          break;
+        }
+      }
+    }
+    if (close < 0) return undefined;
+    const candidate = text.slice(open, close);
+    try {
+      const obj = JSON.parse(candidate) as Record<string, unknown>;
+      if (
+        obj &&
+        obj.type === "error" &&
+        obj.error &&
+        typeof obj.error === "object" &&
+        typeof (obj.error as Record<string, unknown>).message === "string" &&
+        ((obj.error as Record<string, unknown>).message as string).trim()
+      ) {
+        const err = obj.error as Record<string, unknown>;
+        return {
+          type: "error",
+          status: typeof obj.status === "number" ? obj.status : undefined,
+          error: {
+            type: typeof err.type === "string" ? err.type : undefined,
+            message: (err.message as string).trim(),
+          },
+        };
+      }
+    } catch {
+      // not the envelope; keep scanning past this match in case the vendor
+      // emitted more than one diagnostic in the same stream.
+    }
+    from = idx + needle.length;
+  }
+}
+
+/** The visible reply is, in its entirety, the vendor's error diagnostic. */
+export function isVendorRefusalEnvelope(text: string): boolean {
+  return parseVendorErrorEnvelope(text) !== undefined;
+}
+
+/**
+ * A short, redacted, structured reason for the host to throw and the desk
+ * to persist as `error` metadata. The raw reply stays in the chat transcript
+ * where the streaming handler already put it; this string is the one the
+ * adapter surfaces, and it must be bounded and free of anything the model
+ * was reading.
+ */
+export function redactVendorRefusal(reply: string, model?: string): string {
+  const envelope = parseVendorErrorEnvelope(reply);
+  const modelLabel = model?.trim() ? `${model.trim()}: ` : "";
+  if (envelope) {
+    const status = typeof envelope.status === "number" ? String(envelope.status) : "?";
+    const errType = envelope.error.type ?? "error";
+    const message = envelope.error.message;
+    return `vendor refusal ${modelLabel}${status} ${errType} — ${truncateForReason(message, 240)}`;
+  }
+  const trimmed = (reply ?? "").trim();
+  if (!trimmed) {
+    return model?.trim()
+      ? `vendor refusal ${model.trim()} — empty reply`
+      : "vendor refusal — empty reply";
+  }
+  return `vendor refusal ${modelLabel}— ${truncateForReason(trimmed, 240)}`;
+}
+
+function truncateForReason(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
+/**
+ * Did the vendor refuse the run instead of answering?
+ *
+ * Codex / ACP stream a diagnostic to stderr (`{"type":"error",...}`) and
+ * then return a normal end_turn; the diagnostic reaches us as the assistant's
+ * visible reply text. So a check on the final stop reason misses it. The rule
+ * is built on three signals, in order of strength:
+ *
+ *   1. The vendor emitted a recognised stop reason — `end_turn`, `tool_use`,
+ *      `cancelled`, etc. Those win over any top-level `error` field. A generic
+ *      error field cannot override what the vendor said about why it stopped.
+ *   2. The stop reason is itself a refusal signal — `error` or `refusal` — or
+ *      the top-level `error` field carries a message.
+ *   3. The visible reply is, in its entirety, a vendor error envelope. The
+ *      `reply` argument carries the streamed text for this check; without it
+ *      the predicate still answers (3) by looking at `record.content` /
+ *      `record.text` so unit tests stay honest without threading the reply.
+ */
+export function isVendorRefusalResult(result: unknown, reply?: string): boolean {
   const record = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
   const stopReason = typeof record.stopReason === "string" ? record.stopReason.toLowerCase() : "";
+  // An envelope in the visible reply is a refusal regardless of stop reason
+  // — Codex / ACP stream their diagnostic to stderr and then return a
+  // normal `end_turn`. The diagnostic IS the refusal signal.
+  const replyText = reply ?? extractReplyFromRecord(record);
+  if (replyText && isVendorRefusalEnvelope(replyText)) return true;
+  // With no envelope, a recognised stop reason wins over a stray `error`
+  // field — a cancelled turn or a permission outcome carries an incidental
+  // error envelope in the adapter that is not a refusal.
+  if (VENDOR_RECOGNISED_STOP_REASONS.has(stopReason)) return false;
   if (stopReason === "error" || stopReason === "refusal") return true;
   if (typeof record.error === "string" && record.error.trim()) return true;
   if (record.error && typeof record.error === "object") {
-    const message = (record.error as Record<string, unknown>).message;
+    const err = record.error as Record<string, unknown>;
+    const message = err.message;
     if (typeof message === "string" && message.trim()) return true;
   }
   return false;
+}
+
+/** Pull the visible reply from a prompt response when one was not given. */
+function extractReplyFromRecord(record: Record<string, unknown>): string | undefined {
+  if (typeof record.text === "string" && record.text.trim()) return record.text;
+  const message = record.message;
+  if (typeof message === "string" && message.trim()) return message;
+  return undefined;
 }
 
 export type GrokStartResult = {
@@ -1004,11 +1163,14 @@ export class GrokAgent {
       message: result.message ?? asRecord(result._meta).message,
     });
     const reply = collected || fromResult;
-    if (isVendorRefusalResult(result)) {
-      // Throw before the chunk lands so an empty assistant bubble is filled
-      // by the upstream error handler with the vendor's own words — not the
-      // raw refusal sitting next to a status that says "completed".
-      throw new Error(reply.trim() || "The vendor refused this run.");
+    if (isVendorRefusalResult(result, reply)) {
+      // Throw before the chunk lands so the upstream error handler fills the
+      // bubble with a short, redacted, structured reason — not the raw reply,
+      // which the transcript already has because the stream handler emitted
+      // every chunk into the chat above. The full reply is preserved where it
+      // already lives (the chat transcript); only a bounded reason is carried
+      // into worker error metadata and into the assistant's error bubble.
+      throw new Error(redactVendorRefusal(reply, this.spec.model));
     }
     if (!collected && fromResult) handlers.onChunk?.(fromResult);
     debugAcp({

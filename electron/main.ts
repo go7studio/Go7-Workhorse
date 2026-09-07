@@ -22,7 +22,7 @@ import { runClaudeSetupToken } from "./claude-auth";
 import { detectCustomLogin, fillEmptyCustomBotKeys, hydrateDetectedCustomCredentials, openClawKeyForBaseUrl } from "./custom-login";
 import { probeCustomHttp, testCustomModel } from "./custom-http";
 import { cachedCustomCatalog, forgetCustomCatalogsExcept, readCustomCatalog } from "./custom-catalog";
-import { listVendorModels, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
+import { listVendorModels, rememberDeskCatalog, rememberVendorModels, type CustomBotCatalog } from "./vendor-models";
 import { fetchGrokPlanUsage } from "./grok-plan";
 import { fetchCodexPlanUsage } from "./codex-plan";
 import { fetchClaudePlanUsage } from "./claude-plan";
@@ -2041,9 +2041,14 @@ app.whenReady().then(async () => {
     }
     return rows;
   };
-  ipcMain.handle("models:list", () =>
-    listVendorModels({ userData: app.getPath("userData"), customBots: customBotCatalogs() }),
-  );
+  ipcMain.handle("models:list", () => {
+    const lists = listVendorModels({ userData: app.getPath("userData"), customBots: customBotCatalogs() });
+    // What the picker is served, Link lists too: the helper reads this file
+    // instead of the vendor homes, so a model Codex or Claude added shows up
+    // for a harness the same day it shows up here.
+    rememberDeskCatalog(app.getPath("userData"), lists);
+    return lists;
+  });
   /** Seed rows plus what Claude last advertised. Anything else was typed. */
   const claudeModelListed = (model: string): boolean => {
     const raw = model.trim().toLowerCase();

@@ -14,6 +14,7 @@ import {
 } from "../src/lib/bot-setup";
 import { applyCreateWorkhorseProject, normalizeProject } from "../src/lib/project";
 import { normalizeSettings } from "../src/lib/settings";
+import { applyVendorCatalog, resetVendorCatalog } from "../src/lib/models";
 import { passGrantedAccess, releasedHelper } from "../src/lib/permissions";
 import type { AttachmentKind, ChatImage, CustomLlm, MissionIteration, Session, SessionEnvironment, UsageEvent, WatchDayMarks, WatchPermits, SandboxProfile } from "../src/lib/types";
 import {
@@ -54,6 +55,7 @@ import { normalizeSession } from "../src/lib/session";
 import { sessionExecutionCwd } from "../src/lib/session-environment";
 import { uid } from "../src/lib/id";
 import { deskToolEnv } from "./desk-path";
+import { readDeskCatalog } from "./vendor-models";
 import { detectCustomLogin } from "./custom-login";
 import { probeCustomHttp } from "./custom-http";
 import { GROK_BOT_LEFTOVER_FILE, parseGrokBotPlanUsage } from "./custom-plan";
@@ -1549,7 +1551,29 @@ async function createDeskBot(draft: CustomLlm): Promise<PublicBotCard> {
   return parsed.bot;
 }
 
+/**
+ * Link lists what the desk lists. This helper has no renderer to load the
+ * vendors' live lists and does not read vendor homes itself; before any
+ * roster or capacity read it overlays the seed with the stock lists the desk
+ * last served its own picker. A model Codex or Claude added this week is
+ * callable by name from a harness the same day the desk shows it.
+ */
+function refreshLinkVendorCatalog(): void {
+  try {
+    const userData = spawnUserDataDir();
+    const lists = userData ? readDeskCatalog(userData) : undefined;
+    // A missing or torn file is the seed, not the last good read: this helper
+    // lives for the desk's whole session, and a row the desk dropped must not
+    // stay listed here because a later write was cut short.
+    if (lists) applyVendorCatalog(lists);
+    else resetVendorCatalog();
+  } catch {
+    /* the seed still lists the stock rows */
+  }
+}
+
 function deskRoster() {
+  refreshLinkVendorCatalog();
   const raw = readState();
   return deskCallCatalog({
     settings: normalizeSettings(raw.settings),
@@ -1599,6 +1623,7 @@ function capacityPlans(raw: ReturnType<typeof readState>, settings: ReturnType<t
 }
 
 function queryCapacity(args: Record<string, unknown>): string {
+  refreshLinkVendorCatalog();
   const raw = readState();
   const settings = normalizeSettings(raw.settings);
   const plans = capacityPlans(raw, settings);

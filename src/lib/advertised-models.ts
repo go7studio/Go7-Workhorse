@@ -54,6 +54,25 @@ export function sameVendorModelCache(left: VendorModelCache | undefined, right: 
 
 const CLAUDE_FAMILIES = ["fable", "mythos", "opus", "sonnet", "haiku"] as const;
 
+/** A bracketed window tag on the end of an id, such as "[1m]". The launcher drops it. */
+export const WINDOW_TAG = /\[[^\]]+\]$/;
+
+/**
+ * One key per model. Claude Code advertises the same model more than one way
+ * ("claude-fable-5-1[1m]", "claude-fable-5.1", "fable-5-1"): the window tag
+ * is dropped before launch anyway, a dotted version names the dashed id, and
+ * the bare family form is the same id without the vendor word. The key is
+ * for matching only; the row keeps the vendor's own spelling minus the tag.
+ * A foreign prefix ("us.anthropic.") stays: that is a different launchable id.
+ */
+export function advertisedModelKey(id: string): string {
+  const slug = id.trim().toLowerCase().replace(WINDOW_TAG, "").replace(/^claude-/, "");
+  const family = claudeFamily(slug);
+  if (!family) return slug;
+  const at = slug.indexOf(family) + family.length;
+  return slug.slice(0, at) + slug.slice(at).replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
 function claudeFamily(id: string): string | undefined {
   const slug = id.toLowerCase();
   return CLAUDE_FAMILIES.find((family) => slug.includes(family));
@@ -64,7 +83,7 @@ export function claudeModelDisplayName(id: string): string {
   const family = claudeFamily(id);
   if (!family) return id;
   const label = family.charAt(0).toUpperCase() + family.slice(1);
-  const tail = id.toLowerCase().replace(/\[1m\]$/, "").split(family)[1] ?? "";
+  const tail = id.toLowerCase().replace(WINDOW_TAG, "").split(family)[1] ?? "";
   const digits = tail.match(/\d+/g);
   if (!digits) return label;
   const version = digits.slice(0, 2).join(".");
@@ -80,16 +99,16 @@ export function claudeModelDisplayName(id: string): string {
  */
 export function claudeAdvertisedRows(seed: ModelInfo[], advertised: string[]): ModelInfo[] {
   const rows = [...seed];
-  const known = new Set(seed.map((row) => row.id.toLowerCase()));
+  const known = new Set(seed.map((row) => advertisedModelKey(row.id)));
   for (const id of advertised) {
-    const slug = id.trim();
-    const lower = slug.toLowerCase();
+    const slug = id.trim().replace(WINDOW_TAG, "");
+    const lower = advertisedModelKey(slug);
     if (!lower || known.has(lower)) continue;
     // A bare family word, with or without [1m], is Claude Code's alias for
     // whatever that family's latest is; the seed already lists the family.
     // Anything else that names a family is a model id and earns a row,
     // whether or not it starts with "claude-".
-    if (/^(fable|mythos|opus|sonnet|haiku)(\[1m\])?$/.test(lower)) continue;
+    if (/^(fable|mythos|opus|sonnet|haiku)$/.test(lower)) continue;
     if (!claudeFamily(lower)) continue;
     known.add(lower);
     const family = claudeFamily(slug);

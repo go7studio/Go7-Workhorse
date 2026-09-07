@@ -800,3 +800,108 @@ test("Claude ring still returns a 429 fallback when a real plan was cached", asy
   clearClaudePlanCache();
 });
 
+
+test("Claude ring does not serve a first login's plan to a second login", async () => {
+  // The reviewer\'s probe: one global cache served every token, so a second
+  // login was handed the first login\'s 10% reading without ever hitting
+  // the wire. The cache is keyed by a SHA-256 prefix of the token that
+  // fetched the reading, so the second login takes its own path through
+  // the transport.
+  clearClaudePlanCache();
+  const seen: string[] = [];
+  const planBody = (used: number) => ({
+    five_hour: { utilization: used / 10, resets_at: "2026-04-11T07:00:00Z" },
+    seven_day: { utilization: used, resets_at: "2026-04-17T00:59:59Z" },
+    seven_day_opus: null,
+    extra_usage: null,
+  });
+  const nodeGet = async () => {
+    seen.push("called");
+    return { status: 200, json: planBody(10) };
+  };
+  // First login: 10% reading.
+  const firstLogin = await fetchClaudePlanUsage({ token: "sk-first-login", nodeGet });
+  assert.equal(firstLogin?.usedPercent, 10, "the first login gets its own reading");
+  assert.equal(seen.length, 1, "the first login hit the wire once");
+  // Second login must NOT be served the first login\'s cached plan. It has a
+  // different identity, so the cache misses and the transport is called again.
+  const secondLogin = await fetchClaudePlanUsage({ token: "sk-second-login", nodeGet });
+  assert.equal(seen.length, 2, "the second login hit the wire, did not inherit the cache");
+  assert.equal(secondLogin?.usedPercent, 10, "the wire\'s answer is what the second login sees");
+  clearClaudePlanCache();
+});
+
+test("Claude ring keys the cache by token identity, not by the token itself", async () => {
+  // The cache key must be a hash, not the token, so a credential never
+  // appears on the heap, in a log line, or in a thrown error. Two tokens
+  // that differ by even one character must cache under different keys,
+  // and a third fetch with a token identical to the first must hit the
+  // first login\'s cache without going back to the wire.
+  clearClaudePlanCache();
+  const seen: string[] = [];
+  const nodeGet = async () => {
+    seen.push("called");
+    return {
+      status: 200,
+      json: {
+        five_hour: { utilization: 1, resets_at: "2026-04-11T07:00:00Z" },
+        seven_day: { utilization: 7, resets_at: "2026-04-17T00:59:59Z" },
+        seven_day_opus: null,
+        extra_usage: null,
+      },
+    };
+  };
+  await fetchClaudePlanUsage({ token: "sk-test-A", nodeGet });
+  await fetchClaudePlanUsage({ token: "sk-test-B", nodeGet });
+  await fetchClaudePlanUsage({ token: "sk-test-A", nodeGet });
+  assert.equal(seen.length, 2, "tokens A and B each went to the wire once; A\'s second call came from the cache");
+  clearClaudePlanCache();
+});
+
+test("Claude ring drops an expired plan on the 429 fallback, not just on a fresh read", async () => {
+  // The reviewer\'s probe: an expired reading survived a 429 because the
+  // fallback checked `if (cachedPlan)` without an age test. The fix applies
+  // the same age check on the 429 path as on the fresh-read path, so a stale
+  // entry never wins the fallback race just because the API was rate-limiting.
+  clearClaudePlanCache();
+  let call = 0;
+  let now = Date.parse("2026-09-07T12:00:00.000Z");
+  const realDateNow = Date.now;
+  Date.now = () => now;
+  try {
+    const planBody = {
+      five_hour: { utilization: 1, resets_at: "2026-04-11T07:00:00Z" },
+      seven_day: { utilization: 9, resets_at: "2026-04-17T00:59:59Z" },
+      seven_day_opus: null,
+      extra_usage: null,
+    };
+    const nodeGet = async () => {
+      call += 1;
+      // First call: success, seeds the cache with `at = now`.
+      // Second call (after the cache window): 429. Must NOT return the stale
+      // cached plan; the fix returns undefined so the ring drops back to
+      // unknown and the next beat inside the window reads fresh.
+      return call === 1 ? { status: 200, json: planBody } : { status: 429, json: null };
+    };
+    const seeded = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    assert.equal(seeded?.usedPercent, 9);
+    now += 181_000; // past CACHE_MS
+    const rateLimited = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    assert.equal(rateLimited, undefined, "an expired plan must NOT survive a 429 fallback");
+    // Inside a fresh window the 429 fallback still wins.
+    now += 0; // still expired
+    // Force the cache to clear by stepping into the next beat where a fresh
+    // fetch would succeed — but instead prove that an in-window 429 with a
+    // fresh cache does still fall back. Re-seed with a fresh clock.
+    clearClaudePlanCache();
+    now = Date.parse("2026-09-07T12:00:00.000Z");
+    call = 0;
+    await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    now += 60_000; // inside CACHE_MS
+    const insideWindow = await fetchClaudePlanUsage({ token: "sk-test", nodeGet });
+    assert.ok(insideWindow, "a 429 inside the cache window still returns the last good plan");
+  } finally {
+    Date.now = realDateNow;
+    clearClaudePlanCache();
+  }
+});

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import https from "node:https";
@@ -380,12 +381,27 @@ function nodeGetJson(url: string, headers: Record<string, string>): Promise<{ st
   });
 }
 
-let cachedPlan: { at: number; plan: ClaudePlanUsage } | null = null;
+/**
+ * Per-credential cache of the last successful plan. Keyed by a SHA-256
+ * prefix of the token that fetched it, never by the token itself: the key
+ * distinguishes one login from another without putting the credential on
+ * the heap or in a thrown error. A 429 fallback and a successful fetch
+ * both pass through the same age check, so a stale entry never survives
+ * the cache window even when the API is rate-limiting.
+ */
+type CachedClaudePlan = { at: number; plan: ClaudePlanUsage };
+let cachedPlans: Record<string, CachedClaudePlan> = {};
 const CACHE_MS = 180_000;
+
+function claudePlanCacheKey(token: string): string {
+  // A SHA-256 prefix is enough to distinguish one login from another; the
+  // token itself never appears in the cache, in logs, or in thrown errors.
+  return createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
 
 /** Tests reset the cache between cases so a real fetch never leaks across runs. */
 export function clearClaudePlanCache(): void {
-  cachedPlan = null;
+  cachedPlans = {};
 }
 
 /**
@@ -431,14 +447,22 @@ export async function fetchClaudePlanUsage(input?: ClaudePlanTokenInput & {
     }
     // A real fetch with a cached undefined from a previous call would silently
     // shadow every retry for 180s and strand the ring on "unknown" while the
-    // login behind it still works. Cache only what we can actually answer with.
-    if (cachedPlan && Date.now() - cachedPlan.at < CACHE_MS) return cachedPlan.plan;
+    // login behind it still works. Cache only what we can actually answer with,
+    // keyed by the login that fetched it, so a second Claude login does not
+    // get served the first login's reading.
+    const cacheKey = claudePlanCacheKey(token);
+    const now = Date.now();
+    const cached = cachedPlans[cacheKey];
+    if (cached && now - cached.at < CACHE_MS) return cached.plan;
     const { status, json } = await (input?.nodeGet ?? nodeGetJson)("https://api.anthropic.com/api/oauth/usage", headers);
-    if (status === 429 && cachedPlan) return cachedPlan.plan;
+    // Apply the same age check to the 429 fallback as to a fresh read: a
+    // stale cached plan must not survive a rate-limit just because the
+    // request itself returned 429 instead of going to the wire.
+    if (status === 429 && cached && now - cached.at < CACHE_MS) return cached.plan;
     judgeClaudeRingStatus(status, token);
     if (status < 200 || status >= 300) return undefined;
     const plan = parseClaudePlanUsage(json);
-    if (plan) cachedPlan = { at: Date.now(), plan };
+    if (plan) cachedPlans[cacheKey] = { at: now, plan };
     return plan;
   } catch {
     return undefined;

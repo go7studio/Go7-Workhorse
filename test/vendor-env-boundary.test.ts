@@ -8,7 +8,7 @@ import { detectClaudeLogin } from "../electron/claude-login";
 import { claudeTokenProblem, forgetClaudeRefusalWithoutToken, markClaudeTokenRejected, resetClaudeTokenRejection, setStoredClaudeTokenReader, storedClaudeToken } from "../electron/claude-stored-token";
 import { claudeAuthFailure } from "../src/lib/claude-auth-failure";
 import { normalizeSettings, vendorLaunchGate } from "../src/lib/settings";
-import { deskCallCatalog, formatDeskRoster } from "../src/lib/watch";
+import { deskCallCatalog, formatDeskRoster, spawnIsNoGo } from "../src/lib/watch";
 import { routingCandidatesForDesk } from "../src/lib/routing";
 import { codexSpawnArgs } from "../electron/codex-launch";
 import { cursorSpawnArgs } from "../electron/cursor-launch";
@@ -285,6 +285,8 @@ test("a vendor with no usable login is not callable, and Recheck clears a refusa
   const roster = formatDeskRoster(rows);
   assert.match(roster, /- Claude — .*login was refused: OAuth session expired and could not be refreshed\. Sign in again/);
   assert.doesNotMatch(roster.split("\n").find((line) => line.startsWith("- Claude")) ?? "", /you can call this/);
+  // A refused spawn tells the harness to skip, not to ask for Allow.
+  assert.match(spawnIsNoGo(claude) ?? "", /login was refused: .* Sign in again Skip it\. Do not ask the user to Allow\./);
   // The card copy for every unsigned state names the way in, and never says Install.
   const { llmDetailCopy } = await import("../src/lib/llm-copy");
   const unsigned = { connected: true, enabled: true, available: false, needsAuth: true, launchable: false, launchBlocker: "Not signed in. Sign in, then Recheck" };

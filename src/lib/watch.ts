@@ -984,7 +984,6 @@ export function spawnIsNoGo(row: DeskCallRow | undefined): string | null {
   if (!row) return "That vendor is not on this desk. Skip it.";
   if (row.canCall) return null;
   if (row.status === "disabled") return "That vendor is not on this desk. Skip it.";
-  if (row.status === "cannot_start") return row.reason || "That vendor cannot start on this desk. Skip it.";
   if (row.status === "day_bank") {
     return `${row.name} is a no-go — daily bank spent. Skip it. Do not ask the user to Allow.`;
   }

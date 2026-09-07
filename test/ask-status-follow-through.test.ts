@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { applyFailedPeerAsk } from "../src/lib/grok-events";
 import { normalizeSession } from "../src/lib/session";
-import { resolveAgentStatus } from "../src/lib/subagents";
+import { resolveAgentStatus, withFinishedTurnSubagentStatus } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -638,4 +638,58 @@ test("unknown id and a parent that never asked stay closed", () => {
     }).ok,
     false,
   );
+});
+
+
+test("generic vendor outcomes leave earlier asked outcomes intact on ordinary user turns", () => {
+  for (const [askOutcome, ordinaryOutcome] of [["failed", "completed"], ["completed", "failed"]] as const) {
+    const parent = coordinator(askOutcome, askOutcome === "failed" ? "Ask failed" : NEW_REPORT);
+    parent.messages[0].correlationId = "corr_ask";
+    const target = askedParent({ status: "idle", messages: [
+      { id: "peer", role: "user", kind: "peer", peerFromSessionId: ORCH, correlationId: "corr_ask", text: "Ask", createdAt: 2 },
+      { id: "asked_answer", role: "assistant", correlationId: "corr_ask", text: askOutcome === "failed" ? STARTED : NEW_REPORT, createdAt: 3 },
+      { id: "ordinary", role: "user", correlationId: "ordinary_turn", text: "An unrelated request", createdAt: 4 },
+      { id: "ordinary_answer", role: "assistant", correlationId: "ordinary_turn", text: "Another response", createdAt: 5 },
+    ] });
+    const before = resolveAgentStatus({ id: TARGET, fromSessionId: ORCH, sessions: [parent, target] });
+    const sessions = withFinishedTurnSubagentStatus([parent, target], TARGET, ordinaryOutcome, "ordinary_answer");
+    assert.deepEqual(resolveAgentStatus({ id: TARGET, fromSessionId: ORCH, sessions }), before);
+    assert.equal(sessions[0].messages[0].toolStatus, askOutcome);
+  }
+});
+
+test("generic vendor outcomes settle the assistant's actual ask for the same or another caller", () => {
+  for (const sameCaller of [true, false]) {
+    for (const outcome of ["failed", "completed"] as const) {
+      const otherCaller = sameCaller ? ORCH : "sess_other";
+      const first = { ...coordinator("completed").messages[0], id: "first_chip", correlationId: "first" };
+      const second = { ...first, id: "second_chip", correlationId: "second", toolStatus: "running" };
+      const parent = chat({ id: ORCH, messages: sameCaller ? [first, second] : [first] });
+      const other = chat({ id: otherCaller, messages: [second] });
+      const target = askedParent({ messages: [
+        { id: "peer1", role: "user", kind: "peer", peerFromSessionId: ORCH, correlationId: "first", text: "First ask", createdAt: 1 },
+        { id: "answer1", role: "assistant", correlationId: "first", text: NEW_REPORT, createdAt: 2 },
+        { id: "peer2", role: "user", kind: "peer", peerFromSessionId: otherCaller, correlationId: "second", text: "Second ask", createdAt: 3 },
+        { id: "answer2", role: "assistant", correlationId: "second", text: STARTED, createdAt: 4 },
+        { id: "later_user", role: "user", correlationId: "later", text: "Later turn already journalled", createdAt: 5 },
+      ] });
+      const sessions = withFinishedTurnSubagentStatus(sameCaller ? [parent, target] : [parent, other, target], TARGET, outcome, "answer2");
+      assert.equal(sessions.find(row => row.id === ORCH)?.messages[0].toolStatus, "completed");
+      assert.equal(sessions.find(row => row.id === otherCaller)?.messages.find(row => row.id === "second_chip")?.toolStatus, outcome);
+    }
+  }
+});
+
+test("generic vendor outcomes retain delegated worker parent settlement", () => {
+  const parent = coordinator("running");
+  const worker = askedParent({ parentId: ORCH, messages: [
+    { id: "worker_user", role: "user", text: "Worker task", createdAt: 1 },
+    { id: "worker_answer", role: "assistant", text: NEW_REPORT, createdAt: 2 },
+  ] });
+  assert.equal(withFinishedTurnSubagentStatus([parent, worker], TARGET, "completed", "worker_answer")[0].messages[0].toolStatus, "completed");
+});
+
+test("both generic vendor event handlers use assistant-owned ask settlement", () => {
+  assert.equal((STORE.match(/withFinishedTurnSubagentStatus\(/g) ?? []).length, 2);
+  assert.doesNotMatch(STORE, /(?:askedTurn|failedPeer)\s*=.*messages/);
 });

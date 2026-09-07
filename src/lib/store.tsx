@@ -283,6 +283,7 @@ import {
   spawnExclusions,
   spawnWaitsForReply,
   withSubagentStatus,
+  withFinishedTurnSubagentStatus,
   resolveAgentStatus,
   workerStatusSnapshot,
   workerTaskTitle,
@@ -7401,12 +7402,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const finishedTurn = sessions.find((session) => session.id === event.sessionId);
           const reportedBlocked = Boolean(finishedTurn?.parentId) && workerReportedBlocked(childReportText(finishedTurn));
           const failed = safetyPaused || reportedBlocked;
-          const askedTurn = [...(finishedTurn?.messages ?? [])].reverse().find((message) => message.kind === "peer");
-          sessions = withSubagentStatus(
+          sessions = withFinishedTurnSubagentStatus(
             sessions,
             event.sessionId,
             holdForHandoff ? "running" : failed ? "failed" : "completed",
-            askedTurn?.correlationId ? { correlationId: askedTurn.correlationId } : undefined,
+            assistantId,
           );
           const finished = sessions.find((session) => session.id === event.sessionId);
           if (finished?.parentId && !holdForHandoff) {
@@ -7482,10 +7482,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           delete learningTurns.current[event.sessionId];
         }
         setState((current) => {
-          const failedPeer = [...(current.sessions.find((session) => session.id === event.sessionId)?.messages ?? [])]
-            .reverse()
-            .find((message) => message.kind === "peer");
-          let sessions = withSubagentStatus(
+          let sessions = withFinishedTurnSubagentStatus(
             current.sessions.map((session) =>
               session.id === event.sessionId
                 ? applyVendorTurnIdle({
@@ -7512,7 +7509,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ),
             event.sessionId,
             "failed",
-            failedPeer?.correlationId ? { correlationId: failedPeer.correlationId } : undefined,
+            assistantId,
           );
           const failed = sessions.find((session) => session.id === event.sessionId);
           if (failed?.parentId) {

@@ -1787,6 +1787,26 @@ export function formatSubagentPrompt(fromTitle: string, text: string, folder = "
   return formatWorkerPrompt({ fromTitle, text, folder });
 }
 
+/** Settle the ask that owns this assistant, never a historical peer from another turn. */
+export function withFinishedTurnSubagentStatus(
+  sessions: Session[],
+  childId: string,
+  status: string,
+  assistantId: string | undefined,
+): Session[] {
+  const child = sessions.find((session) => session.id === childId);
+  const assistantIndex = child?.messages.findIndex((message) => message.id === assistantId) ?? -1;
+  const user = assistantIndex >= 0
+    ? [...child!.messages.slice(0, assistantIndex)].reverse().find((message) => message.role === "user")
+    : undefined;
+  if (user?.kind === "peer") {
+    return withSubagentStatus(sessions, childId, status,
+      user.correlationId ? { correlationId: user.correlationId } : undefined);
+  }
+  // Delegated workers still settle their parent link on ordinary worker turns.
+  return child?.parentId ? withSubagentStatus(sessions, childId, status) : sessions;
+}
+
 export function withSubagentStatus(
   sessions: Session[],
   childId: string,

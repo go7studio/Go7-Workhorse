@@ -381,7 +381,7 @@ function profile(
  *
  * Order is load-bearing: fable before opus, sonnet-4-6 before sonnet,
  * minimax-m3 before minimax, grok-4.6 before grok-4.5, mini/nano before
- * gpt-5.4, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
+ * gpt-5.4, gpt-6 before the 5.6 rows, sol/terra/luna before any bare gpt-5.6, kimi-k3 before kimi,
  * glm-5.3-flash and glm-4.7-flash before glm-5.2 before glm, qwen3.8 before
  * any later qwen.
  *
@@ -401,6 +401,9 @@ export function routingProfileForModel(
   const FABLE = ["coding", "writing", "visual"] as const;
   if (lightMini) {
     base = profile(5, 5, 1);
+  } else if (/gpt-6(?:$|[-.])/.test(slug)) {
+    // GPT-6 Astra: Codex's newest flagship, rated with Sol until someone rates it.
+    base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-sol")) {
     base = profile(10, 2, 5, { strengths: CODE });
   } else if (slug.includes("5.6-terra")) {

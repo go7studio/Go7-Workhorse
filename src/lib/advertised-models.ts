@@ -54,6 +54,20 @@ export function sameVendorModelCache(left: VendorModelCache | undefined, right: 
 
 const CLAUDE_FAMILIES = ["fable", "mythos", "opus", "sonnet", "haiku"] as const;
 
+/**
+ * One key per model. Claude Code advertises the same model more than one way
+ * ("claude-fable-5-1[1m]", "claude-fable-5.1"): the window tag is dropped
+ * before launch anyway, and a dotted version names the dashed id. The key is
+ * for matching only; the row keeps the vendor's own spelling minus the tag.
+ */
+export function advertisedModelKey(id: string): string {
+  const slug = id.trim().toLowerCase().replace(/\[1m\]$/, "");
+  const family = claudeFamily(slug);
+  if (!family) return slug;
+  const at = slug.indexOf(family) + family.length;
+  return slug.slice(0, at) + slug.slice(at).replace(/(\d)\.(\d)/g, "$1-$2");
+}
+
 function claudeFamily(id: string): string | undefined {
   const slug = id.toLowerCase();
   return CLAUDE_FAMILIES.find((family) => slug.includes(family));
@@ -80,10 +94,10 @@ export function claudeModelDisplayName(id: string): string {
  */
 export function claudeAdvertisedRows(seed: ModelInfo[], advertised: string[]): ModelInfo[] {
   const rows = [...seed];
-  const known = new Set(seed.map((row) => row.id.toLowerCase()));
+  const known = new Set(seed.map((row) => advertisedModelKey(row.id)));
   for (const id of advertised) {
-    const slug = id.trim();
-    const lower = slug.toLowerCase();
+    const slug = id.trim().replace(/\[1m\]$/i, "");
+    const lower = advertisedModelKey(slug);
     if (!lower || known.has(lower)) continue;
     // A bare family word, with or without [1m], is Claude Code's alias for
     // whatever that family's latest is; the seed already lists the family.

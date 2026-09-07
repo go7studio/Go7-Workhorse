@@ -172,6 +172,10 @@ test("buildClaudeLaunchSpec never spawns grok and maps permission modes", () => 
     assert.equal(resolveClaudeModel("fable"), "claude-fable-5");
     assert.equal(resolveClaudeModel("claude-fable-5"), "claude-fable-5");
     assert.equal(resolveClaudeModel("claude-fable-5[1m]"), "claude-fable-5");
+    assert.equal(resolveClaudeModel("Fable 5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("fable-5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("claude-fable-5.1"), "claude-fable-5-1");
+    assert.equal(resolveClaudeModel("claude-fable-5-1[1m]"), "claude-fable-5-1");
     assert.notEqual(resolveClaudeModel("Fable 5"), "claude-opus-5");
     assert.notEqual(resolveClaudeModel("Fable 5"), "claude-sonnet-5");
     assert.equal(resolveClaudeEffort("extra"), "xhigh");

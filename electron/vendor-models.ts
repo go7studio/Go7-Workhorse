@@ -330,6 +330,79 @@ export function customVendorRows(rows: CustomBotCatalog[] = []): ModelInfo[] {
   return models;
 }
 
+export type DeskCatalog = Pick<VendorModelLists, "grok" | "claude" | "codex" | "cursor">;
+const DESK_CATALOG_VENDORS = ["grok", "claude", "codex", "cursor"] as const;
+
+/** Where the desk keeps the stock lists it last served its picker: userData/vendor-models/desk.json */
+export function deskCatalogPath(userData: string): string {
+  return path.join(userData, "vendor-models", "desk.json");
+}
+
+/**
+ * The desk is the one reader of vendor homes. What it serves the picker it
+ * also saves, so a process with no renderer — the Link helper — lists the
+ * same rows without reading `~/.codex` or `~/.grok` on its own. Custom slots
+ * stay out: the desk alone knows them and their keys. Never throws.
+ */
+export function rememberDeskCatalog(userData: string, lists: VendorModelLists): boolean {
+  if (!userData) return false;
+  const next: DeskCatalog = { grok: lists.grok, claude: lists.claude, codex: lists.codex, cursor: lists.cursor };
+  const text = JSON.stringify(next, null, 2);
+  const file = deskCatalogPath(userData);
+  try {
+    if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === text) return false;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function deskCatalogRows(raw: unknown): ModelInfo[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const rows: ModelInfo[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Partial<ModelInfo>;
+    if (typeof item.id !== "string" || !item.id.trim() || typeof item.name !== "string") continue;
+    if (typeof item.contextWindow !== "number" || !Number.isFinite(item.contextWindow) || item.contextWindow <= 0) continue;
+    rows.push({
+      id: item.id,
+      name: item.name,
+      effort: item.effort !== false,
+      contextWindow: item.contextWindow,
+      ...(Array.isArray(item.reasoningLevels) ? { reasoningLevels: parseReasoningLevels(item.reasoningLevels.map((level) => ({ effort: level?.id, description: level?.hint }))) ?? [] } : {}),
+      ...(Array.isArray(item.aliases) ? { aliases: item.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),
+    });
+  }
+  return rows.length > 0 ? rows : undefined;
+}
+
+/** The stock lists the desk last served, or nothing when it has not served any. */
+export function readDeskCatalog(
+  userData: string,
+  existsSync: (filePath: string) => boolean = (filePath) => fs.existsSync(filePath),
+  readFile: (filePath: string) => string = (filePath) => fs.readFileSync(filePath, "utf8"),
+): Partial<DeskCatalog> | undefined {
+  if (!userData) return undefined;
+  const raw = readText(deskCatalogPath(userData), existsSync, readFile);
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const lists: Partial<DeskCatalog> = {};
+  for (const vendor of DESK_CATALOG_VENDORS) {
+    const rows = deskCatalogRows((parsed as Record<string, unknown>)[vendor]);
+    if (rows) lists[vendor] = rows;
+  }
+  return Object.keys(lists).length > 0 ? lists : undefined;
+}
+
 export function listVendorModels(input: VendorModelListInput = {}): VendorModelLists {
   const env = input.env ?? process.env;
   const homedir = input.homedir ?? os.homedir();

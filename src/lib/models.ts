@@ -96,6 +96,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
   ],
   claude: [
     { id: "claude-fable-5", name: "Fable 5", effort: true, contextWindow: 1_000_000 },
+    { id: "claude-fable-5-1", name: "Fable 5.1", effort: true, contextWindow: 1_000_000 },
     { id: "claude-opus-5", name: "Opus 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-sonnet-5", name: "Sonnet 5", effort: true, contextWindow: 1_000_000 },
     { id: "claude-haiku-4-5", name: "Haiku 4.5", effort: true, contextWindow: 200_000 },
@@ -106,6 +107,7 @@ export const MODEL_CATALOG: Record<ProviderId, ModelInfo[]> = {
     { id: "gpt-5.6-sol", name: "GPT-5.6-Sol", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-terra", name: "GPT-5.6-Terra", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.6-luna", name: "GPT-5.6-Luna", effort: true, contextWindow: 1_050_000 },
+    { id: "gpt-6-astra", name: "GPT-6-Astra", effort: true, contextWindow: 872_000 },
     { id: "gpt-5.5", name: "GPT-5.5", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4", name: "GPT-5.4", effort: true, contextWindow: 1_050_000 },
     { id: "gpt-5.4-mini", name: "GPT-5.4-Mini", effort: true, contextWindow: 400_000 },
@@ -447,15 +449,24 @@ export function unlistedChoice(query: string): ModelChoice | null {
   return { provider, model: id, effort: "medium", sandbox: "off", unlisted: true };
 }
 
+/**
+ * Names fold spaces and underscores to hyphens on both sides, so the way a
+ * harness writes a model ("GPT-6 Astra", "Fable 5.1") meets the way the
+ * catalog spells it ("GPT-6-Astra", "gpt-6-astra"). Dots stay: 5.6 is not 56.
+ */
+export function foldModelName(text: string): string {
+  return text.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
 export function findChoice(query: string): ModelChoice | null {
-  const q = query.trim().toLowerCase();
+  const q = foldModelName(query);
   if (!q) return null;
   for (const provider of Object.keys(MODEL_CATALOG) as ProviderId[]) {
     const seen = new Set<string>();
     for (const model of [...modelsFor(provider), ...MODEL_CATALOG[provider]]) {
       if (seen.has(model.id)) continue;
       seen.add(model.id);
-      if (model.id === q || model.name.toLowerCase() === q) {
+      if (foldModelName(model.id) === q || foldModelName(model.name) === q) {
         return {
           provider,
           model: model.id,
@@ -482,7 +493,9 @@ export function effortLabel(effort: EffortLevel | null): string {
 /** Official Claude API windows. Live caches overlay but cannot shrink below these. */
 const CLAUDE_MODEL_WINDOWS: Record<string, number> = {
   "claude-fable-5": 1_000_000,
+  "claude-fable-5-1": 1_000_000,
   "claude-mythos-5": 1_000_000,
+  "claude-mythos-5-1": 1_000_000,
   "claude-opus-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,
@@ -509,6 +522,9 @@ export function advertisedClaudeWindow(modelId: string, reported?: number): numb
 
 /** Official model windows. Codex CLI caches a smaller session cap (272k); do not use that as Sol's size. */
 const CODEX_MODEL_WINDOWS: Record<string, number> = {
+  // GPT-6 Astra: the max_context_window Codex's own model cache reports (2026-09-07).
+  // No official figure is published yet; a larger live reading still wins.
+  "gpt-6-astra": 872_000,
   "gpt-5.6-sol": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,

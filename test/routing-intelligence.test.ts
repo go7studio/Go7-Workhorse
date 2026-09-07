@@ -58,8 +58,10 @@ test("the 1-10 table orders the mid-field the 1-5 scale collapsed", () => {
     routingProfileForModel(provider, model).intelligence;
   // Frontier intelligence. Opus 5 is as capable as Fable 5; cost assigns.
   assert.equal(intelligence("claude", "claude-fable-5"), 10);
+  assert.equal(intelligence("claude", "claude-fable-5-1"), 10);
   assert.equal(intelligence("claude", "claude-opus-5"), 10);
   assert.equal(intelligence("codex", "gpt-5.6-sol"), 10);
+  assert.equal(intelligence("codex", "gpt-6-astra"), 10, "GPT-6 Astra sits with Sol, ahead of the 5.6 rows it would otherwise miss");
   assert.equal(intelligence("grok", "grok-4.6"), 10);
   assert.equal(intelligence("cursor", "cursor-grok-4.6-high"), 10);
   // The understudy

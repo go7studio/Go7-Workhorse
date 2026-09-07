@@ -6,13 +6,15 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
   advertisedModelIds,
+  advertisedModelKey,
   claudeAdvertisedRows,
   claudeModelDisplayName,
   sameVendorModelCache,
   vendorModelCacheFrom,
 } from "../src/lib/advertised-models";
-import { findChoice, MODEL_CATALOG, unlistedChoice } from "../src/lib/models";
-import { deskVendorCachePath, listVendorModels, rememberVendorModels } from "../electron/vendor-models";
+import { applyVendorCatalog, findChoice, MODEL_CATALOG, resetVendorCatalog, unlistedChoice } from "../src/lib/models";
+import { deskCallCatalog } from "../src/lib/watch";
+import { deskVendorCachePath, listVendorModels, readDeskCatalog, rememberDeskCatalog, rememberVendorModels } from "../electron/vendor-models";
 import { modelNotOffered } from "../electron/grok-agent";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,14 +31,14 @@ const SESSION_NEW = {
     {
       id: "model",
       currentValue: "claude-fable-5-1",
-      options: [{ value: "default" }, { value: "opus[1m]" }, { value: "claude-fable-5-1" }, { value: "sonnet" }, { value: "haiku" }],
+      options: [{ value: "default" }, { value: "opus[1m]" }, { value: "claude-fable-5-2" }, { value: "sonnet" }, { value: "haiku" }],
     },
     { id: "effort", currentValue: "default", options: [{ value: "low" }, { value: "high" }] },
   ],
 };
 
 test("the model list Claude advertises at session start is read, minus the agent's own default", () => {
-  assert.deepEqual(advertisedModelIds(SESSION_NEW), ["opus[1m]", "claude-fable-5-1", "sonnet", "haiku"]);
+  assert.deepEqual(advertisedModelIds(SESSION_NEW), ["opus[1m]", "claude-fable-5-2", "sonnet", "haiku"]);
   assert.deepEqual(advertisedModelIds({ sessionId: "x" }), []);
   assert.deepEqual(advertisedModelIds(null), []);
   assert.deepEqual(advertisedModelIds({ configOptions: [{ id: "model", options: ["sonnet", { value: "" }, 7] }] }), ["sonnet"]);
@@ -45,19 +47,95 @@ test("the model list Claude advertises at session start is read, minus the agent
 test("a full id the seed never listed becomes a row of its own; an alias adds nothing", () => {
   const rows = claudeAdvertisedRows(MODEL_CATALOG.claude, advertisedModelIds(SESSION_NEW));
   // An alias is a bare family word; any other id that names a family is a model.
-  const bedrock = claudeAdvertisedRows(MODEL_CATALOG.claude, ["us.anthropic.claude-fable-5-1", "fable-5-2", "opus", "haiku[1m]", "gpt-9"]);
+  const bedrock = claudeAdvertisedRows(MODEL_CATALOG.claude, ["us.anthropic.claude-fable-5-2", "fable-5-2", "opus", "haiku[1m]", "gpt-9"]);
   assert.deepEqual(
     bedrock.filter((row) => !MODEL_CATALOG.claude.some((seed) => seed.id === row.id)).map((row) => row.id),
-    ["us.anthropic.claude-fable-5-1", "fable-5-2"],
+    ["us.anthropic.claude-fable-5-2", "fable-5-2"],
     "ids without the claude- prefix still earn rows; bare aliases and foreign ids do not",
   );
   const added = rows.filter((row) => !MODEL_CATALOG.claude.some((seed) => seed.id === row.id));
-  assert.deepEqual(added.map((row) => row.id), ["claude-fable-5-1"], "only the id the seed lacks is new");
-  assert.equal(added[0]?.name, "Fable 5.1");
+  assert.deepEqual(added.map((row) => row.id), ["claude-fable-5-2"], "only the id the seed lacks is new");
+  assert.equal(added[0]?.name, "Fable 5.2");
   assert.equal(added[0]?.contextWindow, 1_000_000, "sized from its family");
   assert.equal(added[0]?.effort, true);
   assert.equal(rows.length, MODEL_CATALOG.claude.length + 1);
   assert.deepEqual(claudeAdvertisedRows(MODEL_CATALOG.claude, ["claude-opus-5"]).length, MODEL_CATALOG.claude.length, "a seed id is not doubled");
+});
+
+test("the same model advertised with a window tag or a dotted version is one row, not three", () => {
+  // Captured from the desk's own cache on 2026-09-07: Claude Code listed
+  // "claude-fable-5-1[1m]" and "claude-fable-5.1" side by side.
+  const seeded = claudeAdvertisedRows(MODEL_CATALOG.claude, ["claude-fable-5-1[1m]", "claude-fable-5.1", "claude-fable-5-1"]);
+  assert.equal(seeded.length, MODEL_CATALOG.claude.length, "the seed already lists Fable 5.1 once");
+  assert.equal(seeded.filter((row) => row.name === "Fable 5.1").length, 1);
+  const fresh = claudeAdvertisedRows(MODEL_CATALOG.claude, ["claude-fable-5-2[1m]", "claude-fable-5.2"]);
+  const added = fresh.filter((row) => !MODEL_CATALOG.claude.some((seed) => seed.id === row.id));
+  assert.deepEqual(added.map((row) => row.id), ["claude-fable-5-2"], "one row, spelled without the tag the launcher drops anyway");
+  assert.equal(advertisedModelKey("Claude-Fable-5.1[1m]"), "claude-fable-5-1");
+  assert.equal(advertisedModelKey("us.anthropic.claude-fable-5-1"), "us.anthropic.claude-fable-5-1", "a foreign prefix stays its own key");
+});
+
+test("a harness may name a model the way people write it", () => {
+  assert.deepEqual(findChoice("Fable 5.1"), { provider: "claude", model: "claude-fable-5-1", effort: "medium", sandbox: "off" });
+  assert.deepEqual(findChoice("GPT-6 Astra"), { provider: "codex", model: "gpt-6-astra", effort: "medium", sandbox: "off" });
+  assert.equal(findChoice("gpt_6_astra")?.model, "gpt-6-astra");
+  assert.equal(findChoice("GPT-5.6 Sol")?.model, "gpt-5.6-sol", "a space where the catalog has a hyphen still matches");
+  assert.notEqual(findChoice("gpt-56-sol")?.model, "gpt-5.6-sol", "dots are not folded: 5.6 is not 56");
+  assert.equal(findChoice("gpt-56-sol")?.unlisted, true, "so it goes to the vendor as its own id, and the vendor's refusal is the gate");
+});
+
+test("the Link helper lists what the desk lists: the desk saves what it serves, the helper reads that", () => {
+  const codexCache = JSON.stringify({
+    models: [
+      { slug: "gpt-6-astra", display_name: "GPT-6-Astra", visibility: "list", context_window: 272_000, max_context_window: 872_000, supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }, { effort: "max" }, { effort: "ultra" }] },
+      { slug: "gpt-reserve", display_name: "GPT-Reserve", visibility: "hide" },
+      { slug: "gpt-5.6-sol", display_name: "GPT-5.6-Sol", visibility: "list", context_window: 272_000, max_context_window: 872_000 },
+    ],
+  });
+  const home = path.join(ROOT, "does-not-exist");
+  const served = listVendorModels({
+    env: { CODEX_HOME: path.join(home, ".codex") },
+    homedir: home,
+    existsSync: (file) => file === path.join(home, ".codex", "models_cache.json"),
+    readFile: (file) => (file === path.join(home, ".codex", "models_cache.json") ? codexCache : ""),
+    cursorModelsOutput: null,
+  });
+  assert.deepEqual(served.codex.map((row) => row.id), ["gpt-6-astra", "gpt-5.6-sol"], "listed rows in the vendor's order; hidden rows stay hidden");
+  const userData = mkdtempSync(path.join(os.tmpdir(), "wh-desk-catalog-"));
+  try {
+    assert.equal(readDeskCatalog(userData), undefined, "nothing served yet, nothing to read");
+    assert.equal(rememberDeskCatalog(userData, served), true);
+    assert.equal(rememberDeskCatalog(userData, served), false, "the same lists write nothing");
+    const lists = readDeskCatalog(userData);
+    assert.deepEqual(lists?.codex?.map((row) => row.id), ["gpt-6-astra", "gpt-5.6-sol"]);
+    assert.equal(lists?.codex?.[0]?.contextWindow, 872_000, "the vendor's max window, not the session cap");
+    assert.deepEqual(lists?.codex?.[0]?.reasoningLevels?.map((level) => level.id), ["low", "medium", "high", "xhigh", "max", "ultra"]);
+    assert.equal(Object.keys(lists ?? {}).sort().join(","), "claude,codex,cursor,grok", "custom slots stay with the desk");
+    assert.ok(lists?.cursor?.some((row) => row.id === "composer-2.5"), "Cursor keeps its stock rows without a CLI call");
+    try {
+      applyVendorCatalog(lists ?? {});
+      const rows = deskCallCatalog({
+        settings: { usageBudgets: {}, llms: { codex: { connected: true, enabled: true } } as never, customBots: [] },
+        usage: [],
+        plans: {},
+        permits: {},
+      });
+      const codex = rows.find((row) => row.provider === "codex");
+      assert.deepEqual(codex?.models?.map((model) => model.id), ["gpt-6-astra", "gpt-5.6-sol"], "capacity and roster rows carry the live list");
+      assert.equal(findChoice("GPT-6 Astra")?.model, "gpt-6-astra");
+    } finally {
+      resetVendorCatalog();
+    }
+    assert.equal(readDeskCatalog(userData, () => true, () => "{not json"), undefined, "a torn file is no list");
+  } finally {
+    rmSync(userData, { recursive: true, force: true });
+  }
+  const helper = read("electron/workhorse-mcp.ts");
+  assert.match(helper, /function queryCapacity\(args: Record<string, unknown>\): string \{\n  refreshLinkVendorCatalog\(\);/, "capacity reads overlay first");
+  assert.match(helper, /function deskRoster\(\) \{\n  refreshLinkVendorCatalog\(\);/, "roster reads overlay first");
+  assert.doesNotMatch(helper, /listVendorModels|models_cache/, "the helper never reads a vendor home itself");
+  const main = read("electron/main.ts");
+  assert.match(main, /rememberDeskCatalog\(app\.getPath\("userData"\), lists\);/, "the desk saves what it serves");
 });
 
 test("a display name comes from the id, not from a release", () => {
@@ -97,13 +175,14 @@ test("passing userData no longer silences the Cursor listing", () => {
 });
 
 test("a typed id the list does not know is a choice when it names a vendor", () => {
-  assert.deepEqual(unlistedChoice("claude-fable-5-1"), { provider: "claude", model: "claude-fable-5-1", effort: "medium", sandbox: "off", unlisted: true });
+  assert.deepEqual(unlistedChoice("claude-fable-5-2"), { provider: "claude", model: "claude-fable-5-2", effort: "medium", sandbox: "off", unlisted: true });
   assert.equal(unlistedChoice("gpt-5.7-sol")?.provider, "codex");
   assert.equal(unlistedChoice("grok-4.7")?.provider, "grok");
   assert.equal(unlistedChoice("composer-3")?.provider, "cursor");
   assert.equal(unlistedChoice("mystery-9"), null, "no family, no vendor, no choice");
   assert.equal(unlistedChoice("claude fable"), null);
-  assert.equal(findChoice("claude-fable-5-1")?.unlisted, true, "/model falls through to the vendor's word");
+  assert.equal(findChoice("claude-fable-5-2")?.unlisted, true, "/model falls through to the vendor's word");
+  assert.equal(findChoice("claude-fable-5-1")?.unlisted, undefined, "Fable 5.1 is a seed row now");
   assert.equal(findChoice("Fable 5")?.unlisted, undefined, "a listed name still resolves to its row");
 });
 

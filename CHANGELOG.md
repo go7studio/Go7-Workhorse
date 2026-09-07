@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.68](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.67...v0.6.68) (2026-09-07)
+
+
+### Bug Fixes
+
+* **llms:** the Claude sign-in button completes, and says what it is doing ([ea3c801](https://github.com/go7studio/Go7-Workhorse/commit/ea3c801811612263178be2a434d6c367c4f584a3))
+
 ## [0.6.67](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.66...v0.6.67) (2026-09-07)
 
 

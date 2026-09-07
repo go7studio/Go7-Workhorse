@@ -53,17 +53,65 @@ export function vendorEmptyReply(provider: ProviderId): string {
   return `${vendorAgentLabel(provider)} finished without a visible reply.`;
 }
 
+/** Placeholder the desk wrote because the vendor returned no prose. Not a reply. */
+export function isVendorEmptyReply(text: string | undefined | null): boolean {
+  return /^(?:Grok|Codex|Claude|Cursor|Custom) finished without a visible reply\.$/.test((text ?? "").trim());
+}
+
+/** Desk notice for a real user stop. Not model prose — stream must replace it. */
+export function isStoppedReply(text: string | undefined | null): boolean {
+  return /^(?:\*\*)?Stopped\.(?:\*\*)?$/.test((text ?? "").trim());
+}
+
+export function isDeskAssistantNotice(text: string | undefined | null): boolean {
+  return isVendorEmptyReply(text) || isStoppedReply(text);
+}
+
 /** Markdown image embeds (e.g. GenerateImage) count as a visible reply on their own. */
 const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\([^)]+\)/;
 
 /**
  * Whether assistant text already shows something — prose or an image embed.
  * Promise-path finish writers must not overwrite either with vendorEmptyReply.
+ * The empty-reply placeholder itself is not visible: a later finish that sees
+ * thoughts or tools must be allowed to replace it.
  */
 export function assistantHasVisibleReply(text: string | undefined | null): boolean {
   const value = (text ?? "").trim();
-  if (!value) return false;
+  if (!value || isDeskAssistantNotice(value)) return false;
   return MARKDOWN_IMAGE_RE.test(value) || value.length > 0;
+}
+
+/**
+ * `*Prompt` can return while thought chunks are still in the pipe. Keep what
+ * already streamed; do not invent "finished without a visible reply" here.
+ * The `done` event writes that notice after trailing work has had a chance.
+ */
+export function keepStreamedAssistantText(input: {
+  reply?: string | null;
+  existingText?: string | null;
+}): string {
+  if (assistantHasVisibleReply(input.existingText)) return (input.existingText ?? "").trim();
+  if (assistantHasVisibleReply(input.reply)) return (input.reply ?? "").trim();
+  return "";
+}
+
+/** How long to keep a turn live after the vendor says it is done, waiting for trailing thought. */
+export const TURN_IDLE_AFTER_DONE_MS = 150;
+/** Quiet window after a thought/chunk that arrived once the vendor had already returned. */
+export const TURN_IDLE_AFTER_TRAILING_MS = 800;
+
+export function shouldReviveIdleTurn(input: {
+  status: string;
+  assistantId?: string;
+  messages: ReadonlyArray<{ id: string; role?: string; kind?: string }>;
+}): boolean {
+  if (input.status === "running" || input.status === "needs-input") return false;
+  const assistantId = input.assistantId?.trim() ?? "";
+  if (!assistantId) return false;
+  const at = input.messages.findIndex((message) => message.id === assistantId);
+  if (at < 0) return false;
+  return !input.messages.slice(at + 1).some((message) => message.role === "user" && !message.kind);
 }
 
 /**

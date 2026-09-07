@@ -162,8 +162,12 @@ transcript rather than as a path.
   folder — the same isolation subagents use.
 - Rewind to an earlier turn.
 - While a turn is running, Enter queues the next prompt. It stays on Next
-  until this turn ends and is not a chat line yet. Steer interrupts and
-  sends now.
+  until this turn ends and is not a chat line yet. Steer interrupts the
+  in-flight prompt and sends now — a redirect, not a stop. The chat stays
+  working and does not say Stopped.
+- Cancelling one worker stops that worker only. The desk does not prompt
+  the parent with that worker's report, and it does not say the wave
+  finished while the parent or other workers are still going.
 - A long transcript opens on the latest turns. Scrolling up pages in the next older window without jumping.
 - A portable transcript follows a chat when its vendor changes.
 - Search runs over chat titles and message text across every project.
@@ -331,8 +335,9 @@ transcript rather than as a path.
   still starts clear-headed. Auto ranks, fan-out only when asked). A gear on that chip, or a
   right-click, opens a this-chat list of which connected bots it may spawn.
   All bots is the default; a subset stays on this chat until you clear it, and
-  a new chat starts at all again. Left-click still clears the pin. Mission is the adaptive loop:
-  spawn the first wave, then continue remaining work with
+  a new chat starts at all again. Left-click still clears the pin. Mission is
+  mission-board tracking for an adaptive loop, not a spawn request. When the
+  work needs desk workers, spawn a wave, then continue remaining work with
   `workhorse_continue_mission`. With both on, the chat spawns as orchestrator
   and then continues unmet work as a mission.
 - **Routing** — your own chat keeps the model you picked until you set it to
@@ -407,18 +412,18 @@ transcript rather than as a path.
   Dev shells keep a pasted key on the bot itself, because their credential
   vault is memory-only and used to drop leftover tracking on restart.
 - **Workshop** — an optional, read-only rail on the right edge of the desk.
-  **Manage** on the rail opens a sheet to install, grant, and catalog packs
-  (Settings → Workshop is the same panel as a secondary deep-link; Skills is
-  not the Workshop home; no dock row). Add a pack from that sheet: catalog
+  Settings → Workshop is the install/grant home. **Manage** on the live rail
+  opens the same panel (Skills is not the Workshop home; no dock row). Add a
+  pack from that sheet: catalog
   Install, paste a public GitHub repo URL (the highest tagged release is
   downloaded), or pick a folder. A pack is data only — one `pack.json` naming
   what it reads and how its cards look, plus an optional collector the
   operator installs on the remote box. Nothing from a pack runs in Workhorse.
   Turn a pack on, pick the Local Compute host it reads through, and confirm
   the exact URLs, cadence, and byte cap it will GET; the rail paints its cards
-  collapsed to a 76px strip and expanded. With no packs On the rail still
-  shows Manage / Install a pack chrome. Packs stack as modules and fold on
-  their own. Update re-reads the repo's tags; when any pack's sources in that
+  collapsed to a 76px strip and expanded. With no packs On the rail is hidden
+  — Install and Turn on live in Settings → Workshop only. Packs stack as
+  modules and fold on their own. Update re-reads the repo's tags; when any pack's sources in that
   archive change, those packs turn off before polling restarts and you confirm
   again (grants are bound to source fingerprints). Everything is the current
   snapshot — no history is kept — and nothing on the rail starts, stops,

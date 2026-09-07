@@ -131,3 +131,19 @@ export function vendorTerminalAction(input: {
   }
   return "apply";
 }
+
+/**
+ * Steer / rewind cancel the in-flight prompt so a new one can start. The vendor
+ * reports `cancelled`; that is a handoff, not a user stop. Ignore that terminal
+ * so the replacement turn is not painted Stopped / Worked.
+ */
+export function shouldIgnoreRedirectedCancel(input: {
+  eventType: string;
+  stopReason?: string;
+  redirectedAssistantId?: string;
+}): boolean {
+  if (!input.redirectedAssistantId?.trim()) return false;
+  if (input.eventType === "error") return true;
+  if (input.eventType !== "done") return false;
+  return input.stopReason === "cancelled" || input.stopReason === "safety_pause";
+}

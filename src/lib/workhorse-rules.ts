@@ -214,7 +214,7 @@ export const ORCHESTRATE_MODE_HINT =
   "The user selected Orchestrate on this chat. You are the orchestrator this turn. Do not do the assigned work yourself. Spawn desk workers for it.";
 
 export const MISSION_MODE_HINT =
-  "The user selected Mission on this chat. Ordinary delegation is one wave. This is an adaptive sequential mission. Spawn the first wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route. Do not sit on workhorse_await_agents. The desk joins reports later.";
+  "The user selected Mission on this chat. That is adaptive sequential mission-board tracking, not a request to spawn or summon agents. Do the user's actual request. Ordinary one-shot delegation is one wave; this chat continues unmet work across passes. When this work needs desk workers, spawn a wave with workhorse_spawn_agent. After workers report, assess remaining work and call workhorse_continue_mission with previousWorkerIds, previousPass, remainingWork, and fromSessionId (this chat). Preserve acceptance criteria and exclusions. Enable loop. A terminal incomplete pass may continue; each new pass keeps this pass's coordinating vendor, model, and effort unless you set initialBrain or route. Do not sit on workhorse_await_agents. The desk joins reports later.";
 
 export function crewModeLabel(mode: CrewMode): string {
   return mode === "mission" ? "Mission" : "Orchestrate";
@@ -247,7 +247,7 @@ function withSpawnBible(text: string): string {
   return text.startsWith(SPAWN_TURN_HINT) ? text : `${SPAWN_TURN_HINT}\n\n${text}`;
 }
 
-/** Pinned Orchestrate and/or Mission chips always inject the bible, even without spawn verbs. */
+/** Orchestrate injects the spawn bible even without spawn verbs. Mission injects mission-board copy only. */
 export function withCrewModeHint(
   text: string,
   crewMode?: CrewMode | CrewMode[],
@@ -256,7 +256,7 @@ export function withCrewModeHint(
 ): string {
   const modes = normalizeCrewModes(crewMode);
   if (role === "worker" || role === "auditor" || role === "helper" || looksLikeWorkerBrief(text) || modes.length === 0) return text;
-  let next = withSpawnBible(text);
+  let next = modes.includes("orchestrate") ? withSpawnBible(text) : text;
   if (modes.includes("mission") && !next.startsWith(MISSION_MODE_HINT)) {
     next = `${MISSION_MODE_HINT}\n\n${next}`;
   }

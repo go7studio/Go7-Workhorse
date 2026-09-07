@@ -4,7 +4,14 @@ import path from "node:path";
 import test from "node:test";
 import { isSettingsSection, normalizeSettings } from "../src/lib/settings";
 import { DEFAULT_WORKSHOP_SETTINGS, fingerprintsForSources, type PackListing, type PackSource } from "../src/lib/workshop-pack";
-import { nextPacks, nextPacksOff, packSettings } from "../src/ui/WorkshopBlock";
+import {
+  availableSearchMatch,
+  nextPacks,
+  nextPacksOff,
+  packSettings,
+  turnOnRefuseReason,
+  WORKSHOP_MISSING_HOST,
+} from "../src/ui/WorkshopBlock";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const block = readFileSync(path.join(ROOT, "src", "ui", "WorkshopBlock.tsx"), "utf8");
@@ -99,7 +106,7 @@ test("the block installs, removes, and updates through the workshop bridge", () 
 
 test("the block persists through updateWorkshop with sources, and Detach never opens on confirm", () => {
   assert.match(block, /await store\.updateWorkshop\(\{ packs: next \}\)/);
-  assert.match(block, /sources: checked/);
+  assert.match(block, /sources: grantSources/);
   assert.match(block, />\s*Detach\s*</);
   const turnOn = block.slice(block.indexOf("const turnOn"), block.indexOf("const turnOff"));
   assert.doesNotMatch(turnOn, /workshopOpenBreakout/);
@@ -137,6 +144,43 @@ test("nextPacks refuses a confirm with no checked source, no host, or no fingerp
   assert.deepEqual(nextPacks([box, log], { id: "job-log", on: true, hostId: "", sources: ["feed"] }), before);
   assert.deepEqual(nextPacks([box, log], { id: "job-log", on: true, sources: ["feed"] }), before);
   assert.deepEqual(nextPacks([box, log], { id: "job-log", on: true, hostId: "spark", sources: ["feed"] }), before);
+});
+
+test("Turn on names the refuse instead of staying silently Off", () => {
+  assert.equal(turnOnRefuseReason({ id: "box-monitor", on: true, sources: ["feed"] }), WORKSHOP_MISSING_HOST);
+  assert.match(turnOnRefuseReason({ id: "box-monitor", on: true, hostId: "spark", sources: [] }) ?? "", /source/);
+  assert.equal(
+    turnOnRefuseReason({
+      id: "box-monitor",
+      on: true,
+      hostId: "spark",
+      sources: ["feed"],
+      sourceFingerprints: boxFingerprints,
+    }),
+    null,
+  );
+  assert.match(block, /beginTurnOn/);
+  assert.match(block, /turnOnWith/);
+  assert.match(block, /Could not turn on/);
+  assert.match(block, /grantRefuseId/);
+  assert.match(block, /workshop-grant-refuse/);
+  assert.match(block, /setSettingsSection\("llms"\)/);
+  assert.match(block, />\s*Open LLMs\s*</);
+  assert.doesNotMatch(block.slice(block.indexOf("const beginTurnOn"), block.indexOf("const turnOff")), /openConfirm\(pack\);\s*setNote\(missingHostCopy/);
+});
+
+test("catalog search matches name and summary; empty query keeps every pack", () => {
+  assert.equal(availableSearchMatch("", "Box monitor health watts"), true);
+  assert.equal(availableSearchMatch("  ", "Box monitor"), true);
+  assert.equal(availableSearchMatch("box", "Box monitor health and load"), true);
+  assert.equal(availableSearchMatch("watts", "Box monitor health and load"), false);
+  assert.equal(availableSearchMatch("JOB", "Job log read-only tail"), true);
+  assert.match(block, /aria-label="Search catalog"/);
+  assert.match(block, /workshop-catalog-search/);
+  assert.match(block, /No packs match/);
+  assert.match(block, /pack-card-grid/);
+  assert.match(block, /workshop-pack-status">Off</);
+  assert.match(block, /Installed · Off — Turn on when ready\./);
 });
 
 test("a reconfirm after update turns every affected pack off", () => {

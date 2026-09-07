@@ -7,7 +7,14 @@ import { dispatchSummary, shouldEndDispatchTurn, spawnDispatchStarted } from "..
 import { buildPolicyContext, machineLine } from "../src/lib/context-preface";
 import {
   assistantHasVisibleReply,
+  isDeskAssistantNotice,
+  isStoppedReply,
+  isVendorEmptyReply,
+  keepStreamedAssistantText,
   settleEmptyAssistantText,
+  shouldReviveIdleTurn,
+  TURN_IDLE_AFTER_DONE_MS,
+  TURN_IDLE_AFTER_TRAILING_MS,
   turnEndedWithoutProse,
   turnWorkedAfterAssistant,
   vendorEmptyReply,
@@ -53,6 +60,8 @@ test("markdown image embeds count as a visible reply", () => {
   assert.equal(assistantHasVisibleReply("   "), false);
   assert.equal(assistantHasVisibleReply("![A scene](https://example.com/out.png)"), true);
   assert.equal(assistantHasVisibleReply("Here you go.\n\n![jelly](images/1.jpg)"), true);
+  assert.equal(assistantHasVisibleReply(vendorEmptyReply("grok")), false);
+  assert.equal(isVendorEmptyReply(vendorEmptyReply("grok")), true);
   assert.equal(
     settleEmptyAssistantText({
       provider: "codex",
@@ -67,6 +76,17 @@ test("markdown image embeds count as a visible reply", () => {
       provider: "codex",
       reply: "",
       existingText: "",
+      worked: true,
+    }),
+    "",
+  );
+  // An early promise finish used to stick this notice on, then refuse to
+  // replace it once thoughts and tools had landed.
+  assert.equal(
+    settleEmptyAssistantText({
+      provider: "grok",
+      reply: "",
+      existingText: vendorEmptyReply("grok"),
       worked: true,
     }),
     "",
@@ -103,23 +123,61 @@ test("the store asks the transcript, because ChatMessage.thought is never writte
   assert.deepEqual(assigns, [], "something now writes .thought — the transcript check may be redundant");
 });
 
-test("promise-path finish writers are worked-aware, not bare vendorEmptyReply", () => {
+test("promise-path finish writers keep streamed text and do not mark the turn idle", () => {
   const store = read("src/lib/store.tsx");
-  // Critical smoking-gun sites: *Prompt completion used to fill empty bubbles with
-  // vendorEmptyReply even after tools ran (image gen → "Codex finished without…").
+  // session/prompt can return while thought chunks are still arriving. Writing
+  // vendorEmptyReply and idling here painted "Worked" / "finished without a
+  // visible reply" while Grok was still thinking.
   assert.doesNotMatch(store, /reply \|\| vendorEmptyReply\(/);
   assert.doesNotMatch(store, /reply \|\| EMPTY_GROK_REPLY/);
+  assert.match(store, /keepStreamedAssistantText/);
   for (const provider of ["custom", "claude", "cursor", "codex", "grok"] as const) {
-    assert.match(
+    assert.doesNotMatch(
       store,
-      new RegExp(
-        String.raw`settleEmptyAssistantText\(\{\s*provider:\s*"${provider}"[\s\S]*?worked:\s*turnWorkedAfterAssistant`,
-      ),
+      new RegExp(String.raw`settleEmptyAssistantText\(\{\s*provider:\s*"${provider}"`),
     );
   }
-  // Spawn / peer fallbacks use the same helper — not bare vendorEmptyReply.
+  // Spawn / peer fallbacks still use the helper — not bare vendorEmptyReply.
   assert.match(store, /settleEmptyAssistantText\(\{\s*provider:\s*spec\.provider/);
   assert.match(store, /settleEmptyAssistantText\(\{\s*provider:\s*target\.provider/);
+  assert.match(store, /TURN_IDLE_AFTER_DONE_MS/);
+  assert.match(store, /TURN_IDLE_AFTER_TRAILING_MS/);
+  assert.match(store, /shouldReviveIdleTurn/);
+  assert.match(store, /noteTrailingTurnActivity/);
+  assert.match(store, /armTurnIdle\(event\.sessionId, TURN_IDLE_AFTER_DONE_MS\)/);
+  assert.match(store, /shouldIgnoreRedirectedCancel/);
+  assert.match(store, /redirectedAssistant/);
+  assert.match(store, /isDeskAssistantNotice/);
+});
+
+test("an idle turn with the same assistant still running thinking is revived", () => {
+  const messages = [
+    { id: "u1", role: "user" as const },
+    { id: "a1", role: "assistant" as const },
+    { id: "t1", role: "system" as const, kind: "thought" as const },
+  ];
+  assert.equal(shouldReviveIdleTurn({ status: "idle", assistantId: "a1", messages }), true);
+  assert.equal(shouldReviveIdleTurn({ status: "running", assistantId: "a1", messages }), false);
+  assert.equal(
+    shouldReviveIdleTurn({
+      status: "idle",
+      assistantId: "a1",
+      messages: [...messages, { id: "u2", role: "user" }],
+    }),
+    false,
+  );
+  assert.ok(TURN_IDLE_AFTER_TRAILING_MS > TURN_IDLE_AFTER_DONE_MS);
+  assert.equal(keepStreamedAssistantText({ reply: "", existingText: "" }), "");
+  assert.equal(keepStreamedAssistantText({ reply: "", existingText: vendorEmptyReply("grok") }), "");
+  assert.equal(keepStreamedAssistantText({ reply: "Hi.", existingText: "" }), "Hi.");
+  assert.equal(isStoppedReply("Stopped."), true);
+  assert.equal(isStoppedReply("**Stopped.**"), true);
+  assert.equal(isDeskAssistantNotice("Stopped."), true);
+  assert.equal(assistantHasVisibleReply("Stopped."), false);
+  assert.equal(
+    keepStreamedAssistantText({ reply: "The miner built and exported.", existingText: "Stopped." }),
+    "The miner built and exported.",
+  );
 });
 
 test("a dispatch turn names the workers it started", () => {

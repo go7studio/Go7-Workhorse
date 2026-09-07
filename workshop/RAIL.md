@@ -15,14 +15,14 @@ Steve UX redirect. Host / grants / read-only law unchanged. **Paint surface chan
 | --- | --- |
 | Desk rail **Manage** sheet | **INSTALL / GRANT / CATALOG** — primary manage home. Same `WorkshopBlock` (On this desk / Available / Local). |
 | Settings → Workshop | **Secondary deep-link** — same install/grant/catalog. Not the live watch surface. |
-| Desk **Workshop rail** | **Live watch** — primary soak. Always-visible Manage chrome (including empty / all-Off). Collapsed strip + expand when packs On. |
+| Desk **Workshop rail** | **Live watch** — primary soak. Hidden when no pack is On. Collapsed strip + expand when packs On. |
 | Breakout window | **Secondary detach** — same cards, optional. |
 | Skills | **Not** the Workshop home. |
 | Sidebar dock | **No** Workshop dock row. |
 
 ### Rail behavior
 
-- **Empty / all-Off:** thin hairline stub (~56–64px) with a **single** CTA — **Add packs** when zero packs installed (Available-first sheet); **Turn on** when packs are installed but all Off (Manage, not Install). No meters, no Install hero on all-Off. Cold desk reaches catalog in ≤2 clicks without Settings or Skills.
+- **Empty / all-Off:** rail is hidden. Install and Turn on live in Settings → Workshop only. No stub Turn on, no Add packs chrome on the desk.
 - **Manage:** on collapsed and expanded headers; sheet title / aria-label **Manage packs**; hosts one `WorkshopBlock` (`surface="sheet"`). Focus trap while open; restore focus to opener on Escape / Close / backdrop.
 - **Collapsed strip** (when any pack On): `GPU% · watts · writer · models one-liner` (Box monitor). Job log collapsed = short “log live” / off hint.
 - **Expand**: full denser cards — Box / Models / Infer / Router / Job / Feed (same host grants; richer labels from existing feed/soak).

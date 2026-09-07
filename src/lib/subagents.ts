@@ -977,6 +977,8 @@ export function withFollowThrough<T extends Record<string, unknown>>(payload: T)
 
 const ASKED_WAIT_HOW =
   "Call workhorse_agent_status with this id later. Do not spawn another worker for the same slice.";
+const ASKED_PERMISSION_HOW =
+  "This chat is waiting on permission. Call workhorse_agent_status with this id later. Do not treat partial text as the answer.";
 const ASKED_DONE_HOW = "The report is in this payload. workhorse_ask_chat to talk to this chat.";
 const ASKED_FAIL_HOW =
   "This chat did not finish the asked turn. Do not treat an older report as the new response.";
@@ -1058,10 +1060,35 @@ function askedRunForPeer(run: Session["agentRun"], peer: ChatMessage): Session["
   return run;
 }
 
+function askedFollowChip(
+  sessions: StatusSession[],
+  fromSessionId: string | undefined,
+  targetId: string,
+): ChatMessage | undefined {
+  const from = fromSessionId?.trim();
+  if (!from || from === targetId) return undefined;
+  const parent = sessions.find((row) => row.id === from);
+  if (!parent) return undefined;
+  return [...(parent.messages ?? [])]
+    .reverse()
+    .find((message) => message.kind === "subagent" && message.subagentSessionId === targetId);
+}
+
+function chipFailed(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "failed" || value === "error" || value === "cancelled" || value === "canceled" || value === "denied";
+}
+
+function chipRunning(status?: string): boolean {
+  const value = (status ?? "").toLowerCase();
+  return value === "running" || value === "queued" || value === "working";
+}
+
 /** Status of the latest asked turn only. Older assistant text is never the new report. */
 export function askedChatStatusSnapshot(
   session: StatusSession,
   fromSessionId?: string,
+  sessions: StatusSession[] = [],
 ): Record<string, unknown> | null {
   const peer = latestPeerAsk(session.messages, fromSessionId);
   if (!peer) return null;
@@ -1070,8 +1097,12 @@ export function askedChatStatusSnapshot(
   const replyText = reply?.text.trim() ?? "";
   const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
   const run = askedRunForPeer(session.agentRun, peer);
-  const live = !closedByLaterUser && (session.status === "running" || run?.status === "running");
-  const failed = askedRunFailed(run?.status);
+  const chip = askedFollowChip(sessions, fromSessionId, session.id);
+  const failed = askedRunFailed(run?.status) || chipFailed(chip?.toolStatus);
+  const waitingOnPermission = !closedByLaterUser && session.status === "needs-input";
+  const live =
+    !closedByLaterUser &&
+    (session.status === "running" || run?.status === "running" || chipRunning(chip?.toolStatus));
   let next: WorkerFollowNext;
   let how: string;
   let status: string;
@@ -1079,6 +1110,10 @@ export function askedChatStatusSnapshot(
     next = "failed";
     how = ASKED_FAIL_HOW;
     status = run?.status ?? "failed";
+  } else if (waitingOnPermission) {
+    next = "wait";
+    how = ASKED_PERMISSION_HOW;
+    status = "needs-input";
   } else if (live) {
     next = "wait";
     how = ASKED_WAIT_HOW;
@@ -1092,6 +1127,8 @@ export function askedChatStatusSnapshot(
     how = ASKED_DONE_HOW;
     status = "completed";
   }
+  const failText = failed ? (chip?.text.trim() || "") : "";
+  const failBounded = failText && failText !== replyText ? boundWorkerReport(failText, { workerId: session.id }) : null;
   return {
     id: session.id,
     title: session.title,
@@ -1104,7 +1141,8 @@ export function askedChatStatusSnapshot(
     model: session.model,
     effort: session.effort,
     ...(next === "wait" && bounded ? { partialReport: bounded.report } : {}),
-    ...(next !== "wait" && bounded ? { report: bounded.report } : {}),
+    ...(next === "failed" && failBounded ? { report: failBounded.report } : {}),
+    ...(next === "done" && bounded ? { report: bounded.report } : {}),
   };
 }
 
@@ -1132,7 +1170,7 @@ export function resolveAgentStatus(input: AgentStatusLookup): AgentStatusResult 
     const isWorker = Boolean(session.parentId);
     const descendantOk = isWorker && (!from || descendantSessionIds(input.sessions, from).includes(session.id));
     if (descendantOk) return { ok: true, snapshot: workerStatusSnapshot(session) };
-    const asked = askedChatStatusSnapshot(session, from || undefined);
+    const asked = askedChatStatusSnapshot(session, from || undefined, input.sessions);
     if (asked) return { ok: true, snapshot: asked };
     return { ok: false, error: "unknown" };
   }

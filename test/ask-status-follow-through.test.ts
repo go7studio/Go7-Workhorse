@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { applyFailedPeerAsk } from "../src/lib/grok-events";
+import { normalizeSession } from "../src/lib/session";
 import { resolveAgentStatus } from "../src/lib/subagents";
 import type { Session } from "../src/lib/types";
 
@@ -31,6 +33,28 @@ const ORCH = "sess_orch";
 const TARGET = "sess_target";
 const OLD_REPORT = "Prior parent answer that must not become the new report.";
 const NEW_REPORT = "Asked turn finished.";
+
+const STARTED = "I have started the work.";
+
+function coordinator(chipStatus: string, chipText?: string): Session {
+  return chat({
+    id: ORCH,
+    title: "Coordinator",
+    messages: [
+      {
+        id: "chip",
+        role: "system",
+        kind: "subagent",
+        fromTitle: "Existing parent",
+        subagentSessionId: TARGET,
+        toolCallId: "ask_1",
+        toolStatus: chipStatus,
+        text: chipText ?? "Existing parent",
+        createdAt: 2,
+      },
+    ],
+  });
+}
 
 function askedParent(overrides: Partial<Session> = {}): Session {
   return chat({
@@ -341,6 +365,159 @@ test("a stale previous agentRun failure does not fail the current asked turn", (
   assert.equal(done.snapshot.next, "done");
   assert.equal(done.snapshot.report, NEW_REPORT);
   assert.equal(done.snapshot.status, "completed");
+});
+
+test("applyFailedPeerAsk idle partial text is failed, not done", () => {
+  const sessions = applyFailedPeerAsk(
+    [
+      coordinator("running"),
+      askedParent({
+        status: "running",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "new_a", role: "assistant", text: STARTED, createdAt: 3, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+    { parentId: ORCH, childId: TARGET, targetTitle: "Existing parent", error: "vendor exploded" },
+  );
+  const target = sessions.find((session) => session.id === TARGET);
+  assert.equal(target?.status, "idle");
+  assert.equal(target?.messages.find((message) => message.id === "new_a")?.text, STARTED);
+  assert.equal(target?.agentRun, undefined);
+  const result = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.snapshot.next, "failed");
+  assert.equal(result.snapshot.status, "failed");
+  assert.notEqual(result.snapshot.report, STARTED);
+  assert.doesNotMatch(String(result.snapshot.report ?? ""), /I have started the work/);
+});
+
+test("normalizeSession of an interrupted running ask is not success", () => {
+  const parent = normalizeSession({
+    id: ORCH,
+    title: "Coordinator",
+    provider: "grok",
+    model: "grok-4.6",
+    status: "idle",
+    messages: [
+      {
+        id: "chip",
+        role: "system",
+        kind: "subagent",
+        fromTitle: "Existing parent",
+        subagentSessionId: TARGET,
+        toolStatus: "running",
+        text: "Existing parent",
+        createdAt: 2,
+      },
+    ],
+  });
+  const restored = normalizeSession({
+    id: TARGET,
+    title: "Existing parent",
+    provider: "grok",
+    model: "grok-4.6",
+    status: "running",
+    messages: [
+      {
+        id: "peer_1",
+        role: "user",
+        kind: "peer",
+        peerFromSessionId: ORCH,
+        correlationId: "corr_ask",
+        text: "Please continue the existing work.",
+        createdAt: 2,
+      },
+      { id: "new_a", role: "assistant", text: STARTED, createdAt: 3, correlationId: "corr_ask" },
+    ],
+  });
+  assert.equal(restored?.status, "idle");
+  assert.equal(restored?.agentRun, undefined);
+  const result = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [parent!, restored!],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.notEqual(result.snapshot.next, "done");
+  assert.equal(result.snapshot.next, "wait");
+  assert.equal(result.snapshot.report, undefined);
+  assert.equal(result.snapshot.partialReport, STARTED);
+});
+
+test("needs-input asked chat waits on permission and does not finalize partial text", () => {
+  const paused = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      coordinator("running"),
+      askedParent({
+        status: "needs-input",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "new_a", role: "assistant", text: STARTED, createdAt: 3, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+  });
+  assert.equal(paused.ok, true);
+  if (!paused.ok) return;
+  assert.equal(paused.snapshot.next, "wait");
+  assert.equal(paused.snapshot.status, "needs-input");
+  assert.equal(paused.snapshot.report, undefined);
+  assert.equal(paused.snapshot.partialReport, STARTED);
+  assert.match(String(paused.snapshot.how), /permission/);
+
+  const empty = resolveAgentStatus({
+    id: TARGET,
+    fromSessionId: ORCH,
+    sessions: [
+      coordinator("running"),
+      askedParent({
+        status: "needs-input",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "new_a", role: "assistant", text: "", createdAt: 3, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+  });
+  assert.equal(empty.ok, true);
+  if (!empty.ok) return;
+  assert.equal(empty.snapshot.next, "wait");
+  assert.equal(empty.snapshot.status, "needs-input");
+  assert.equal(empty.snapshot.report, undefined);
 });
 
 test("unknown id and a parent that never asked stay closed", () => {

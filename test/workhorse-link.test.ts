@@ -24,6 +24,8 @@ import {
   linkWorkerIdFromReply,
 } from "../src/lib/workhorse-link";
 import { EXTERNAL_RUNTIME_ALLOW, LINK_COMPAT_TOOLS, isMcpToolAllowed, mcpExposureProfile } from "../electron/mcp-exposure";
+import { applyFailedPeerAsk } from "../src/lib/grok-events";
+import { normalizeSession } from "../src/lib/session";
 import { handleWorkhorseRpc, linkCliCall, setInboundLearningSink, setLocalCapabilityHostClient, setWorkhorseDeskAsk } from "../electron/workhorse-mcp";
 import type { LocalCapabilityHostClient } from "../electron/local-capability-host";
 import type { InboundLearningDraft } from "../src/lib/learning-inbound";
@@ -1253,6 +1255,141 @@ test("agent_status follows an asked existing parent through running then termina
     assert.equal(boundedBody.status, "completed");
     assert.equal(boundedBody.report, "Asked turn finished.");
     assert.doesNotMatch(boundedBody.report ?? "", /On it|Unrelated later answer|Old parent report/);
+  } finally {
+    setWorkhorseDeskAsk(null as never);
+    if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;
+    else process.env.WORKHORSE_MCP_PROFILE = previous.profile;
+    if (previous.state === undefined) delete process.env.WORKHORSE_STATE_PATH;
+    else process.env.WORKHORSE_STATE_PATH = previous.state;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, and waits on needs-input", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wh-link-ask-fail-"));
+  const statePath = path.join(dir, "state.json");
+  const orch = "sess_orch";
+  const target = "sess_target";
+  const started = "I have started the work.";
+  const parent = {
+    id: orch,
+    title: "Coordinator",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    projectId: null,
+    status: "idle" as const,
+    messages: [
+      {
+        id: "chip",
+        role: "system" as const,
+        kind: "subagent" as const,
+        fromTitle: "Existing parent",
+        subagentSessionId: target,
+        toolStatus: "running",
+        text: "Existing parent",
+        createdAt: 2,
+      },
+    ],
+  };
+  const child = {
+    id: target,
+    title: "Existing parent",
+    provider: "grok" as const,
+    model: "grok-4.6",
+    projectId: null,
+    status: "running" as const,
+    messages: [
+      {
+        id: "peer_1",
+        role: "user" as const,
+        kind: "peer" as const,
+        peerFromSessionId: orch,
+        correlationId: "corr_ask",
+        text: "Continue the existing work.",
+        createdAt: 2,
+      },
+      { id: "new_a", role: "assistant" as const, text: started, createdAt: 3, correlationId: "corr_ask" },
+    ],
+  };
+  const failed = applyFailedPeerAsk([parent as never, child as never], {
+    parentId: orch,
+    childId: target,
+    targetTitle: "Existing parent",
+    error: "vendor exploded",
+  });
+  const restored = [
+    normalizeSession({ ...parent, status: "idle" }),
+    normalizeSession({ ...child, status: "running" }),
+  ];
+  const previous = { profile: process.env.WORKHORSE_MCP_PROFILE, state: process.env.WORKHORSE_STATE_PATH };
+  process.env.WORKHORSE_MCP_PROFILE = "link";
+  process.env.WORKHORSE_STATE_PATH = statePath;
+  setWorkhorseDeskAsk(async () => ({ error: "unknown" }));
+  try {
+    writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: failed }));
+    const failReply = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { error?: { message?: string }; result?: { content?: Array<{ text?: string }> } };
+    assert.equal(failReply.error, undefined, failReply.error?.message);
+    const failBody = JSON.parse(failReply.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+    };
+    assert.equal(failBody.next, "failed");
+    assert.doesNotMatch(failBody.report ?? "", /I have started the work/);
+
+    writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: restored }));
+    const restartReply = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const restartBody = JSON.parse(restartReply.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      report?: string;
+      partialReport?: string;
+    };
+    assert.equal(restartBody.next, "wait");
+    assert.equal(restartBody.report, undefined);
+    assert.equal(restartBody.partialReport, started);
+
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        settings: {},
+        sessions: [
+          parent,
+          {
+            ...child,
+            status: "needs-input",
+            messages: [
+              child.messages[0],
+              { id: "new_a", role: "assistant", text: started, createdAt: 3, correlationId: "corr_ask" },
+            ],
+          },
+        ],
+      }),
+    );
+    const paused = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target, fromSessionId: orch } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const pausedBody = JSON.parse(paused.result?.content?.[0]?.text ?? "{}") as {
+      next?: string;
+      status?: string;
+      report?: string;
+      how?: string;
+    };
+    assert.equal(pausedBody.next, "wait");
+    assert.equal(pausedBody.status, "needs-input");
+    assert.equal(pausedBody.report, undefined);
+    assert.match(pausedBody.how ?? "", /permission/);
   } finally {
     setWorkhorseDeskAsk(null as never);
     if (previous.profile === undefined) delete process.env.WORKHORSE_MCP_PROFILE;

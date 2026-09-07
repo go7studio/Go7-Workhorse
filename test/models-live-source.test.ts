@@ -18,7 +18,9 @@ import { deskVendorCachePath, listVendorModels, readDeskCatalog, rememberDeskCat
 import { modelNotOffered } from "../electron/grok-agent";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
+// Source pins normalise line endings: a Windows checkout reads CRLF, and a pin
+// that spans a line break must not depend on how git checked the file out.
+const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 
 // Captured from @agentclientprotocol/claude-agent-acp 0.66.0 on 2026-09-02:
 // session/new answers with configOptions, and the model option lists what

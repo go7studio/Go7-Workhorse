@@ -8,6 +8,13 @@ release are on the [releases page](https://github.com/go7studio/Go7-Workhorse/re
 `Go7-Workhorse-Setup-<version>.exe` for Windows and
 `Go7-Workhorse-<version>-mac-arm64.dmg` or `-mac-x64.dmg` for macOS.
 
+## [0.6.66](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.65...v0.6.66) (2026-09-07)
+
+
+### Bug Fixes
+
+* follow through on asked chats with agent_status ([#279](https://github.com/go7studio/Go7-Workhorse/issues/279)) ([2076744](https://github.com/go7studio/Go7-Workhorse/commit/2076744eef60f554b9804c4844ab4be77936f0ae))
+
 ## [0.6.65](https://github.com/go7studio/Go7-Workhorse/compare/v0.6.64...v0.6.65) (2026-09-07)
 
 

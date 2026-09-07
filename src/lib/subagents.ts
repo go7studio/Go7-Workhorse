@@ -982,6 +982,8 @@ const ASKED_PERMISSION_HOW =
 const ASKED_DONE_HOW = "The report is in this payload. workhorse_ask_chat to talk to this chat.";
 const ASKED_FAIL_HOW =
   "This chat did not finish the asked turn. Do not treat an older report as the new response.";
+const ASKED_INTERRUPTED_HOW =
+  "This ask was interrupted. workhorse_ask_chat on this chat to continue. Do not treat partial text as the answer.";
 
 type StatusSession = Pick<
   Session,
@@ -1062,16 +1064,22 @@ function askedRunForPeer(run: Session["agentRun"], peer: ChatMessage): Session["
 
 function askedFollowChip(
   sessions: StatusSession[],
-  fromSessionId: string | undefined,
+  callerId: string | undefined,
   targetId: string,
+  peer?: ChatMessage,
 ): ChatMessage | undefined {
-  const from = fromSessionId?.trim();
+  const from = callerId?.trim();
   if (!from || from === targetId) return undefined;
   const parent = sessions.find((row) => row.id === from);
   if (!parent) return undefined;
-  return [...(parent.messages ?? [])]
-    .reverse()
-    .find((message) => message.kind === "subagent" && message.subagentSessionId === targetId);
+  const chips = (parent.messages ?? []).filter(
+    (message) => message.kind === "subagent" && message.subagentSessionId === targetId,
+  );
+  if (peer?.correlationId) {
+    const matched = chips.filter((chip) => !chip.correlationId || chip.correlationId === peer.correlationId);
+    if (matched.length) return matched.at(-1);
+  }
+  return chips.at(-1);
 }
 
 function chipFailed(status?: string): boolean {
@@ -1097,12 +1105,13 @@ export function askedChatStatusSnapshot(
   const replyText = reply?.text.trim() ?? "";
   const bounded = replyText ? boundWorkerReport(replyText, { workerId: session.id }) : null;
   const run = askedRunForPeer(session.agentRun, peer);
-  const chip = askedFollowChip(sessions, fromSessionId, session.id);
+  const callerId = fromSessionId?.trim() || peer.peerFromSessionId;
+  const chip = askedFollowChip(sessions, callerId, session.id, peer);
   const failed = askedRunFailed(run?.status) || chipFailed(chip?.toolStatus);
   const waitingOnPermission = !closedByLaterUser && session.status === "needs-input";
-  const live =
-    !closedByLaterUser &&
-    (session.status === "running" || run?.status === "running" || chipRunning(chip?.toolStatus));
+  const sessionLive = session.status === "running" || session.status === "needs-input";
+  const live = !closedByLaterUser && sessionLive;
+  const interrupted = !closedByLaterUser && !sessionLive && chipRunning(chip?.toolStatus);
   let next: WorkerFollowNext;
   let how: string;
   let status: string;
@@ -1118,6 +1127,10 @@ export function askedChatStatusSnapshot(
     next = "wait";
     how = ASKED_WAIT_HOW;
     status = "running";
+  } else if (interrupted) {
+    next = "failed";
+    how = ASKED_INTERRUPTED_HOW;
+    status = "interrupted";
   } else if (!replyText) {
     next = "failed";
     how = ASKED_FAIL_HOW;
@@ -1141,7 +1154,8 @@ export function askedChatStatusSnapshot(
     model: session.model,
     effort: session.effort,
     ...(next === "wait" && bounded ? { partialReport: bounded.report } : {}),
-    ...(next === "failed" && failBounded ? { report: failBounded.report } : {}),
+    ...(status === "interrupted" && bounded ? { partialReport: bounded.report } : {}),
+    ...(next === "failed" && status !== "interrupted" && failBounded ? { report: failBounded.report } : {}),
     ...(next === "done" && bounded ? { report: bounded.report } : {}),
   };
 }
@@ -1777,18 +1791,22 @@ export function withSubagentStatus(
   sessions: Session[],
   childId: string,
   status: string,
+  match?: { correlationId?: string; toolCallId?: string },
 ): Session[] {
+  const correlationId = match?.correlationId?.trim() ?? "";
+  const toolCallId = match?.toolCallId?.trim() ?? "";
   return sessions.map((session) => {
     if (!session.messages.some((message) => message.kind === "subagent" && message.subagentSessionId === childId)) {
       return session;
     }
     return {
       ...session,
-      messages: session.messages.map((message) =>
-        message.kind === "subagent" && message.subagentSessionId === childId
-          ? { ...message, toolStatus: status }
-          : message,
-      ),
+      messages: session.messages.map((message) => {
+        if (message.kind !== "subagent" || message.subagentSessionId !== childId) return message;
+        if (correlationId && message.correlationId && message.correlationId !== correlationId) return message;
+        if (toolCallId && message.toolCallId && message.toolCallId !== toolCallId) return message;
+        return { ...message, toolStatus: status };
+      }),
     };
   });
 }

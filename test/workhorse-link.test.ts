@@ -1288,6 +1288,7 @@ test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, a
         toolStatus: "running",
         text: "Existing parent",
         createdAt: 2,
+        correlationId: "corr_ask",
       },
     ],
   };
@@ -1316,6 +1317,7 @@ test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, a
     childId: target,
     targetTitle: "Existing parent",
     error: "vendor exploded",
+    correlationId: "corr_ask",
   });
   const restored = [
     normalizeSession({ ...parent, status: "idle" }),
@@ -1341,6 +1343,16 @@ test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, a
     assert.equal(failBody.next, "failed");
     assert.doesNotMatch(failBody.report ?? "", /I have started the work/);
 
+    const failAnon = (await handleWorkhorseRpc({
+      jsonrpc: "2.0",
+      id: 11,
+      method: "tools/call",
+      params: { name: "workhorse_agent_status", arguments: { id: target } },
+    })) as { result?: { content?: Array<{ text?: string }> } };
+    const failAnonBody = JSON.parse(failAnon.result?.content?.[0]?.text ?? "{}") as { next?: string; report?: string };
+    assert.equal(failAnonBody.next, "failed");
+    assert.doesNotMatch(failAnonBody.report ?? "", /I have started the work/);
+
     writeFileSync(statePath, JSON.stringify({ settings: {}, sessions: restored }));
     const restartReply = (await handleWorkhorseRpc({
       jsonrpc: "2.0",
@@ -1350,12 +1362,16 @@ test("Link agent_status uses applyFailedPeerAsk and normalizeSession journals, a
     })) as { result?: { content?: Array<{ text?: string }> } };
     const restartBody = JSON.parse(restartReply.result?.content?.[0]?.text ?? "{}") as {
       next?: string;
+      status?: string;
       report?: string;
       partialReport?: string;
+      how?: string;
     };
-    assert.equal(restartBody.next, "wait");
+    assert.equal(restartBody.next, "failed");
+    assert.equal(restartBody.status, "interrupted");
     assert.equal(restartBody.report, undefined);
     assert.equal(restartBody.partialReport, started);
+    assert.match(restartBody.how ?? "", /workhorse_ask_chat/);
 
     writeFileSync(
       statePath,

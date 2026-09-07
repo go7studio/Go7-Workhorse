@@ -36,21 +36,26 @@ const NEW_REPORT = "Asked turn finished.";
 
 const STARTED = "I have started the work.";
 
-function coordinator(chipStatus: string, chipText?: string): Session {
+function coordinator(
+  chipStatus: string,
+  chipText?: string,
+  extras: { id?: string; correlationId?: string; chipId?: string } = {},
+): Session {
   return chat({
-    id: ORCH,
+    id: extras.id ?? ORCH,
     title: "Coordinator",
     messages: [
       {
-        id: "chip",
+        id: extras.chipId ?? "chip",
         role: "system",
         kind: "subagent",
         fromTitle: "Existing parent",
         subagentSessionId: TARGET,
-        toolCallId: "ask_1",
+        toolCallId: extras.chipId ?? "ask_1",
         toolStatus: chipStatus,
         text: chipText ?? "Existing parent",
         createdAt: 2,
+        correlationId: extras.correlationId ?? "corr_ask",
       },
     ],
   });
@@ -455,9 +460,96 @@ test("normalizeSession of an interrupted running ask is not success", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.notEqual(result.snapshot.next, "done");
-  assert.equal(result.snapshot.next, "wait");
+  assert.notEqual(result.snapshot.next, "wait");
+  assert.equal(result.snapshot.next, "failed");
+  assert.equal(result.snapshot.status, "interrupted");
   assert.equal(result.snapshot.report, undefined);
   assert.equal(result.snapshot.partialReport, STARTED);
+  assert.match(String(result.snapshot.how), /workhorse_ask_chat/);
+});
+
+test("failed ask without fromSessionId still uses the peer's recorded caller", () => {
+  const sessions = applyFailedPeerAsk(
+    [
+      coordinator("running"),
+      askedParent({
+        status: "running",
+        messages: [
+          {
+            id: "peer_1",
+            role: "user",
+            kind: "peer",
+            peerFromSessionId: ORCH,
+            correlationId: "corr_ask",
+            text: "Please continue the existing work.",
+            createdAt: 2,
+          },
+          { id: "new_a", role: "assistant", text: STARTED, createdAt: 3, correlationId: "corr_ask" },
+        ],
+      }),
+    ],
+    { parentId: ORCH, childId: TARGET, targetTitle: "Existing parent", error: "vendor exploded", correlationId: "corr_ask" },
+  );
+  const result = resolveAgentStatus({
+    id: TARGET,
+    sessions,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.snapshot.next, "failed");
+  assert.doesNotMatch(String(result.snapshot.report ?? ""), /I have started the work/);
+});
+
+test("a later failed ask does not rewrite an earlier caller's completed turn", () => {
+  const callerP = coordinator("completed", "Existing parent", { id: "sess_p", correlationId: "corr_p", chipId: "chip_p" });
+  const callerQ = coordinator("running", "Existing parent", { id: "sess_q", correlationId: "corr_q", chipId: "chip_q" });
+  const target = askedParent({
+    status: "running",
+    messages: [
+      { id: "old_a", role: "assistant", text: OLD_REPORT, createdAt: 1 },
+      {
+        id: "peer_p",
+        role: "user",
+        kind: "peer",
+        peerFromSessionId: "sess_p",
+        correlationId: "corr_p",
+        text: "P's request.",
+        createdAt: 2,
+      },
+      { id: "ans_p", role: "assistant", text: NEW_REPORT, createdAt: 3, correlationId: "corr_p" },
+      {
+        id: "peer_q",
+        role: "user",
+        kind: "peer",
+        peerFromSessionId: "sess_q",
+        correlationId: "corr_q",
+        text: "Q's request.",
+        createdAt: 4,
+      },
+      { id: "ans_q", role: "assistant", text: STARTED, createdAt: 5, correlationId: "corr_q" },
+    ],
+  });
+  const sessions = applyFailedPeerAsk([callerP, callerQ, target], {
+    parentId: "sess_q",
+    childId: TARGET,
+    targetTitle: "Existing parent",
+    error: "Q exploded",
+    correlationId: "corr_q",
+  });
+  const pChip = sessions.find((session) => session.id === "sess_p")?.messages.find((message) => message.id === "chip_p");
+  const qChip = sessions.find((session) => session.id === "sess_q")?.messages.find((message) => message.id === "chip_q");
+  assert.equal(pChip?.toolStatus, "completed");
+  assert.equal(qChip?.toolStatus, "failed");
+  const forP = resolveAgentStatus({ id: TARGET, fromSessionId: "sess_p", sessions });
+  assert.equal(forP.ok, true);
+  if (!forP.ok) return;
+  assert.equal(forP.snapshot.next, "done");
+  assert.equal(forP.snapshot.report, NEW_REPORT);
+  const forQ = resolveAgentStatus({ id: TARGET, fromSessionId: "sess_q", sessions });
+  assert.equal(forQ.ok, true);
+  if (!forQ.ok) return;
+  assert.equal(forQ.snapshot.next, "failed");
+  assert.notEqual(forQ.snapshot.report, NEW_REPORT);
 });
 
 test("needs-input asked chat waits on permission and does not finalize partial text", () => {

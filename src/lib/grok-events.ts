@@ -115,19 +115,33 @@ export function finishOpenToolMessages(
   });
 }
 
+function chipMatchesAskTurn(
+  message: ChatMessage,
+  input: { childId?: string; correlationId?: string; toolCallId?: string },
+): boolean {
+  const childId = input.childId?.trim() ?? "";
+  if (!childId || message.subagentSessionId !== childId) return false;
+  const correlationId = input.correlationId?.trim() ?? "";
+  if (correlationId && message.correlationId && message.correlationId !== correlationId) return false;
+  const toolCallId = input.toolCallId?.trim() ?? "";
+  if (toolCallId && message.toolCallId && message.toolCallId !== toolCallId) return false;
+  return true;
+}
+
 export function failPeerAskMessages(
   messages: ChatMessage[],
-  input: { childId?: string; targetTitle?: string; error: string },
+  input: { childId?: string; targetTitle?: string; error: string; correlationId?: string; toolCallId?: string },
 ): ChatMessage[] {
   const target = (input.targetTitle ?? "").trim().toLowerCase();
   const childId = input.childId?.trim() ?? "";
   return messages.map((message) => {
     if (message.kind === "subagent") {
-      const matchesChild = Boolean(childId && message.subagentSessionId === childId);
+      if (toolIsFinished(message.toolStatus)) return message;
+      const matchesChild = chipMatchesAskTurn(message, input);
       const matchesTitle =
         Boolean(target) &&
         `${message.fromTitle ?? ""} ${message.text ?? ""}`.toLowerCase().includes(target);
-      if (matchesChild || (!toolIsFinished(message.toolStatus) && matchesTitle)) {
+      if (matchesChild || matchesTitle) {
         return { ...message, toolStatus: "failed", text: input.error };
       }
       return message;
@@ -151,6 +165,8 @@ export function applyFailedPeerAsk(
     targetTitle?: string;
     error: string;
     addMarker?: boolean;
+    correlationId?: string;
+    toolCallId?: string;
   },
 ): Session[] {
   const childId = input.childId?.trim() || "";
@@ -159,20 +175,13 @@ export function applyFailedPeerAsk(
   return sessions.map((session) => {
     const isParent = Boolean(parentId && session.id === parentId);
     const isChild = Boolean(childId && session.id === childId);
-    const hasMarker = session.messages.some(
-      (message) =>
-        message.kind === "subagent" &&
-        ((childId && message.subagentSessionId === childId) ||
-          (targetTitle && (message.fromTitle || "").toLowerCase() === targetTitle.toLowerCase())),
-    );
-    if (!isParent && !isChild && !hasMarker) return session;
+    if (!isParent && !isChild) return session;
     let messages = failPeerAskMessages(session.messages, input);
     const marked = messages.some(
       (message) =>
         message.kind === "subagent" &&
         message.toolStatus === "failed" &&
-        ((childId && message.subagentSessionId === childId) ||
-          (targetTitle && (message.fromTitle || "").toLowerCase() === targetTitle.toLowerCase())),
+        chipMatchesAskTurn(message, input),
     );
     if (isParent && input.addMarker !== false && !marked) {
       messages = [
@@ -186,6 +195,8 @@ export function applyFailedPeerAsk(
           toolStatus: "failed",
           text: input.error,
           createdAt: Date.now(),
+          ...(input.correlationId?.trim() ? { correlationId: input.correlationId.trim() } : {}),
+          ...(input.toolCallId?.trim() ? { toolCallId: input.toolCallId.trim() } : {}),
         },
       ];
     }
